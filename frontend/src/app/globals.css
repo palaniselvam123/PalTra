@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Theming.
+
+   The app was written dark-only: six custom colours plus ~390 hardcoded
+   `slate-*` utilities spread across every component. Rewriting all of those
+   into semantic tokens would touch nearly every file for a purely visual
+   change, so instead the custom colours became CSS variables (below) and the
+   slate scale is remapped under `[data-theme="light"]`.
+
+   The slate remap is deliberately an INVERSION, not a tint: in dark mode
+   `text-slate-200` is near-white primary text, so in light mode it has to
+   become near-black to stay primary text. Keeping the same hue would make the
+   most important text the faintest thing on the page.
+--------------------------------------------------------------------------- */
+
+:root,
+[data-theme="dark"] {
+  /* Space-separated RGB channels so Tailwind's <alpha-value> works and
+     existing classes like `bg-bot/20` keep functioning. */
+  --c-base: 11 15 25;
+  --c-surface: 17 24 39;
+  --c-border: 30 41 59;
+  --c-profit: 16 185 129;
+  --c-loss: 244 63 94;
+  --c-bot: 6 182 212;
+
+  --c-body-text: 226 232 240;
+  --c-scrollbar: 30 41 59;
+  --c-hover: 255 255 255;      /* white tint over dark surfaces */
+  --hover-strong: 0.06;
+  --hover-soft: 0.03;
+}
+
+[data-theme="light"] {
+  --c-base: 246 248 251;
+  --c-surface: 255 255 255;
+  --c-border: 219 226 236;
+  /* Green and red are darkened for contrast against white — the dark-mode
+     values are tuned for a near-black background and fail legibility here. */
+  --c-profit: 4 132 94;
+  --c-loss: 206 25 61;
+  --c-bot: 8 132 163;
+
+  --c-body-text: 15 23 42;
+  --c-scrollbar: 203 213 225;
+  --c-hover: 15 23 42;         /* dark tint over light surfaces */
+  --hover-strong: 0.07;
+  --hover-soft: 0.04;
+}
+
+body {
+  background-color: rgb(var(--c-base));
+  color: rgb(var(--c-body-text));
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-scrollbar));
+  border-radius: 4px;
+}
+
+/* --- slate scale inversion for light mode -------------------------------- */
+
+[data-theme="light"] .text-slate-100 { color: #0f172a; }
+[data-theme="light"] .text-slate-200 { color: #17233b; }
+[data-theme="light"] .text-slate-300 { color: #334155; }
+[data-theme="light"] .text-slate-400 { color: #475569; }
+[data-theme="light"] .text-slate-500 { color: #5b6b80; }
+[data-theme="light"] .text-slate-600 { color: #74839a; }
+[data-theme="light"] .text-slate-900 { color: #f8fafc; }
+
+[data-theme="light"] .bg-slate-500 { background-color: #cbd5e1; }
+[data-theme="light"] .bg-slate-600 { background-color: #dbe2ec; }
+[data-theme="light"] .bg-slate-700 { background-color: #e6ebf2; }
+[data-theme="light"] .bg-slate-700\/40 { background-color: rgb(203 213 225 / 0.5); }
+[data-theme="light"] .hover\:bg-slate-600:hover { background-color: #cbd5e1; }
+
+/* Hover washes were written as white tints for a dark background; on white
+   they are invisible, so light mode uses a dark tint of the same weight. */
+[data-theme="light"] .hover\:bg-white\/5:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.03\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.02\]:hover {
+  background-color: rgb(15 23 42 / 0.05);
+}
+[data-theme="light"] .bg-white\/5,
+[data-theme="light"] .bg-white\/\[0\.04\],
+[data-theme="light"] .bg-white\/\[0\.03\] {
+  background-color: rgb(15 23 42 / 0.05);
+}
+
+/* Amber warning banners read as muddy on white without a lift. */
+[data-theme="light"] .text-amber-300 { color: #92610a; }
+[data-theme="light"] .text-amber-400 { color: #a16207; }
+[data-theme="light"] .text-violet-300 { color: #6d28d9; }
+
+/* The chart library paints its own canvas; it is told the theme separately
+   via props, so nothing to override here. */
+
+@keyframes flash-green {
+  0% { color: rgb(var(--c-profit)); }
+  100% { color: inherit; }
+}
+@keyframes flash-red {
+  0% { color: rgb(var(--c-loss)); }
+  100% { color: inherit; }
+}
+.flash-up { animation: flash-green 0.6s ease-out; }
+.flash-down { animation: flash-red 0.6s ease-out; }
