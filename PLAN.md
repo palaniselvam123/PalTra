@@ -635,3 +635,251 @@ defined here — not that it is safe to trade.
 If H003 fails it is recorded REJECTED with its numbers, and the next independent
 hypothesis begins. No filters will be added to make it pass; a changed rule is
 H003 v2, registered separately, with v1's verdict intact.
+
+---
+
+## Step 5b — H003 v1 pre-registration, revised after design review
+
+Revised while still `PROPOSED` and before any data was touched, so this is
+pre-registration being done properly rather than a rule being edited to fit a
+result. Once the status moves to `DEFINED`, any change becomes v2.
+
+### Fix 1 — the ordered-swing contamination was real
+
+The review is correct, and the failure mode is worse than imprecision. With
+
+```
+H0 = max(high[t-L..t]),  L0 = min(low[t-L..t])
+```
+
+the two extremes are found independently, so `L0` may occur *after* `H0` — in
+which case `L0` is the pullback's own low. The denominator
+`R = H0 - L0` then measures the pullback, and
+
+```
+retrace = (H0 - low[t]) / (H0 - L0)
+```
+
+has the pullback on both sides of the division. It lands near 1.0 when the
+current bar is the pullback low, and drifts through the 0.20-0.65 band as the
+pullback bounces — so a directionless zig-zag can satisfy the depth condition
+by construction. That is not a weak filter; it is a broken measurement.
+
+#### Ordered impulse identification (causal, no look-ahead)
+
+Anchor on the high first, then search for the low only in the bars *preceding*
+it. The ordering is then structural rather than something to check afterwards.
+
+```
+For a LONG candidate at bar t, using only bars <= t:
+
+  1. h_idx = argmax(high[i])  for i in [t-L, t-1]
+             ties -> earliest index (deterministic)
+             t excluded: the impulse high must already be behind us
+
+  2. l_idx = argmin(low[i])   for i in [t-L, h_idx]
+             search bounded ABOVE by h_idx, so l_idx <= h_idx by construction
+
+  3. require l_idx < h_idx                       at least one bar of advance
+
+  4. impulse_low  = low[l_idx]
+     impulse_high = high[h_idx]
+     R            = impulse_high - impulse_low
+     impulse_bars = h_idx - l_idx
+
+  5. pullback window = bars (h_idx, t]
+     p_bars = t - h_idx
+```
+
+SHORT mirrors exactly: `l_idx = argmin(low[i])` over `[t-L, t-1]`, then
+`h_idx = argmax(high[i])` over `[t-L, l_idx]`, requiring `h_idx < l_idx`.
+
+Every index and value comes from bars at or before t. The identified swing pair
+may *change* as t advances — a new higher high replaces the old one — and that
+is correct behaviour, not instability: each bar's evaluation is independent and
+uses only its own past. The truncation test
+(`test_no_lookahead_truncating_future_bars_changes_nothing`) will pin it.
+
+### Fix 2 — parameter rationale, including one that was wrong
+
+**K = 1.0 ATR was badly wrong and is withdrawn.**
+
+ATR(14) on 5-minute bars is the average *5-minute* true range. Requiring an
+impulse of 1 ATR therefore asked for a move the size of one ordinary bar —
+roughly 0.1% on these symbols, against a median 12-bar MFE of 0.33%. It would
+have admitted almost everything and the "impulse" stage would have been
+decorative. Caught by doing the arithmetic the review asked for.
+
+A principled replacement: under a driftless random walk, net displacement over
+N bars has standard deviation `sigma * sqrt(N)`. With N=12 that is `3.46*sigma`,
+and ATR exceeds per-bar sigma by roughly 1.2x, so 12-bar displacement has
+SD ~= 2.9 ATR. Setting **K = 2.5 ATR** puts the threshold at about 0.85 SD,
+selecting roughly the top fifth of 12-bar moves by directional displacement —
+selective enough to mean something, loose enough to clear Gate 0.
+
+| Param | Value | Market behaviour | Basis |
+|---|---|---|---|
+| **L** | 12 bars (1h) | the window a complete impulse-plus-pullback must fit inside | **Partly derived.** Floor is structural: impulse needs >= 2 bars and the pullback >= 1, so L must exceed their sum with margin. Ceiling is that a structure taking over an hour leaves little session to resolve in. 12 sits above the floor; 10 or 15 would also be defensible. **Exploratory within a derived range.** |
+| **K** | 2.5 ATR | "this move is larger than a random walk usually produces over this window" | **Reasoned, not fitted.** ~0.85 SD of 12-bar displacement under a driftless random walk. Approximate: the ATR-to-sigma factor is taken as ~1.2 rather than measured. |
+| **depth band** | 0.20-0.40 / 0.40-0.65 | shallow vs medium retracement | **Exploratory, and the variant axis.** Conventional retracement zones. Held apart deliberately because they describe different behaviours. |
+| **ATR period** | 14 | — | **Inherited convention** — the project default everywhere. Not independently justified here. |
+| ~~E = 0.50~~ | **removed** | — | see below |
+| ~~P_max = 6~~ | **replaced** | — | see below |
+
+**E (efficiency ratio) is removed from v1.** It had a real justification — a
+driftless random walk's expected efficiency over N bars is exactly `1/sqrt(N)`,
+so 0.29 at N=12, and 0.50 is about 1.7x that. But it constrains the *same*
+thing K does: both ask "is this impulse real". Keeping both means a failure
+cannot be attributed and a pass cannot be decomposed, which is exactly the
+review's objection. With K now set at a defensible level, E is redundant.
+Recorded as a candidate for v2 if v1 shows the impulse stage matters but is
+noisy.
+
+**P_max = 6 is replaced by a relationship, removing a free parameter.**
+A fixed 30-minute cap was the weakest number in the original set — genuinely
+arbitrary. Instead:
+
+```
+p_bars <= impulse_bars
+```
+
+The pause must not outlast the move that produced it. This is the actual
+structural claim ("a pullback is an interruption of a move, not a new range"),
+it needs no chosen constant, and L=12 bounds both terms automatically since
+they share one window.
+
+### Fix 3 — simplified to four stages, six conditions, three parameters
+
+Down from eight conditions and five parameters.
+
+#### LONG rule
+
+```
+Parameters: L = 12, K = 2.5, (depth_min, depth_max) per variant
+
+STAGE A — ordered directional impulse
+  A1  h_idx = argmax(high[i]), i in [t-L, t-1]
+      l_idx = argmin(low[i]),  i in [t-L, h_idx]
+      require l_idx < h_idx
+  A2  (impulse_high - impulse_low) / ATR(14)[t] >= K
+
+      R = impulse_high - impulse_low
+      impulse_bars = h_idx - l_idx
+
+STAGE B — defined pullback
+  B1  p_bars = t - h_idx,   1 <= p_bars <= impulse_bars
+  B2  retrace[t] = (impulse_high - low[t]) / R
+      depth_min <= retrace[t] <= depth_max
+
+STAGE C — pullback still structurally valid
+  C1  min(low[i]) for i in (h_idx, t]  >  impulse_low
+
+STAGE D — continuation trigger
+  D1  close[t] > high[t-1]
+
+  -> BUY at bar t
+```
+
+#### SHORT rule (exact mirror)
+
+```
+STAGE A
+  A1  l_idx = argmin(low[i]),  i in [t-L, t-1]
+      h_idx = argmax(high[i]), i in [t-L, l_idx]
+      require h_idx < l_idx
+  A2  (impulse_high - impulse_low) / ATR(14)[t] >= K
+
+      R = impulse_high - impulse_low
+      impulse_bars = l_idx - h_idx
+
+STAGE B
+  B1  p_bars = t - l_idx,   1 <= p_bars <= impulse_bars
+  B2  retrace[t] = (high[t] - impulse_low) / R
+      depth_min <= retrace[t] <= depth_max
+
+STAGE C
+  C1  max(high[i]) for i in (l_idx, t]  <  impulse_high
+
+STAGE D
+  D1  close[t] < low[t-1]
+
+  -> SELL at bar t
+```
+
+**On Stage C being redundant.** With `depth_max <= 0.65`, B2 already implies the
+pullback stayed above the impulse low. It is stated anyway, as the review asked:
+it documents the structural intent, and it stops a future widening of the depth
+band from silently admitting broken impulses. Redundant-but-explicit is the
+right trade here.
+
+**What was removed:** the efficiency condition (redundant with K), the fixed
+`P_max` (replaced by `p_bars <= impulse_bars`), and the separate "max retrace
+over the pullback" check (subsumed by Stage C). No moving average, RSI, MACD,
+ADX, Supertrend or volume condition appears anywhere.
+
+### Fix 4 — Control C, stated precisely
+
+| | Held constant | Randomised |
+|---|---|---|
+| **Control A** | bar, symbol, day | direction |
+| **Control B** | day, symbol, direction | bar (any bar in the session) |
+| **Control C** | day, symbol, direction, **Stage A passing** | bar (any bar that same day where Stage A passes), and therefore Stages B, C and D |
+
+Control C draws from bars where the ordered-impulse test passes but the
+pullback depth, the pullback duration and the continuation trigger are **not**
+required. It answers precisely: does the pullback-and-resumption structure add
+information beyond having selected a stock that has just made a directional
+move?
+
+Two implementation notes fixed now rather than improvised later:
+
+* If a signal's day has fewer than 2 other Stage-A bars, that signal
+  contributes no Control C observation and is **skipped**, not substituted from
+  another day — substituting would break the day-level pairing the block
+  permutation depends on.
+* The Stage-A pool is computed per (symbol, day) once, before sampling, so the
+  control population does not depend on which signals fired.
+
+### Fix 5 — Gate 5 reworded, and demoted
+
+Accepted without reservation. MFE is a best-case excursion measured with
+perfect hindsight about where the favourable extreme fell; no real exit
+captures it. Treating `MFE > cost floor` as evidence of tradeability would
+reintroduce exactly the flattery the backtester was built to avoid.
+
+Gate 5 is therefore no longer a gate. It becomes a **label**:
+
+> **Movement sufficiency (label, not a gate).** If mean MFE at a qualifying
+> horizon exceeds the 0.183% round-trip cost floor, record
+> `movement potentially sufficient for further economic testing`. This is a
+> statement about available range, not about profitability. Economic viability
+> is a separate question requiring an explicit entry, exit, stop, slippage and
+> charge model — the existing `backtester.py`, run only if the directional
+> gates pass first.
+
+### Revised gates
+
+| Gate | Criterion | Failure |
+|---|---|---|
+| **0 — power** | >= 300 signals and >= 25 distinct signal-days in development | `UNDERPOWERED` — untested, not refuted |
+| **1 — direction** | `net_move_pct` edge over Control A > 0 at >= 2 of 3 horizons, block-permutation p < 0.05 at >= 1 | REJECTED |
+| **2 — structure** | edge over Control C > 0 at the horizons that passed Gate 1 | REJECTED — information is in impulse selection, not the pullback |
+| **3 — validation** | sign of the edge preserved in validation at those horizons | REJECTED |
+| **4 — hold-out** | sign preserved and edge >= 0 in the hold-out | REJECTED. A reversal is a rejection |
+| **5 — reporting** | both variants reported whatever the outcome; "SIGNIFICANT" only at p < 0.05/6 = 0.008 | — |
+| **label** | mean MFE > 0.183% -> "movement potentially sufficient for further economic testing" | not a gate |
+
+Unchanged: horizons 6/12/24; `net_move_pct` primary with MFE/MAE secondary;
+day-level block permutation with the trading day as the unit of dependence;
+60/20/20 chronological split by day (dev 37 days, validation 12, hold-out 14),
+hold-out unread until gates 1-3 are decided.
+
+### One open question for review
+
+K = 2.5 rests on an approximation (ATR ~ 1.2x per-bar sigma). It can be set
+exactly instead, by measuring the distribution of the impulse statistic across
+the development period and choosing K at a stated percentile — **using only the
+predictor's own distribution, never forward returns**. That is calibration on
+inputs, not selection on outcomes, so it cannot bias the test; it would replace
+an approximation with a measurement. Not done unilaterally, since it changes a
+pre-registered value.
