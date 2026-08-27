@@ -74,24 +74,92 @@ def _ist_date(ts: int) -> dt.date:
     return dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).astimezone(IST).date()
 
 
+def observe(
+    symbol: str,
+    candles: list[OHLCV],
+    i: int,
+    side: str,
+    horizon_bars: int = HORIZON_BARS,
+    ctx: dict | None = None,
+) -> Observation | None:
+    """Build one Observation for an entry at bar `i` on `side`.
+
+    Separated from any particular strategy so every hypothesis — and every
+    control baseline it is measured against — is scored by identical code.
+    A baseline computed differently from the signal is not a baseline.
+    """
+    entry = candles[i].close
+    if entry <= 0:
+        return None
+
+    ctx = ctx if ctx is not None else context_series(candles, 9, 21)
+    fwd = measure_forward(
+        candles,
+        i,
+        side,
+        entry,
+        risk_per_share=entry * 0.003,
+        bar_seconds=(candles[1].ts - candles[0].ts) if len(candles) > 1 else 300,
+        horizon_bars=horizon_bars,
+    )
+    if fwd.mfe == 0 and fwd.mae == 0:
+        return None  # no forward data (end of series / session)
+
+    day = _ist_date(candles[i].ts)
+    back = candles[max(0, i - 9)].close
+    prior = ((entry - back) if side == "BUY" else (back - entry)) / entry * 100
+
+    today_bars = [c for c in candles[max(0, i - 80) : i + 1] if _ist_date(c.ts) == day]
+    hi = max((c.high for c in today_bars), default=entry)
+    lo = min((c.low for c in today_bars), default=entry)
+
+    vol_window = [c.volume for c in candles[max(0, i - 20) : i]]
+    avg_vol = statistics.fmean(vol_window) if vol_window else 0
+    f, s = ctx["fast"][i], ctx["slow"][i]
+    vw = ctx["vwap"][i]
+
+    return Observation(
+        symbol=symbol,
+        side=side,
+        ts=candles[i].ts,
+        entry_price=entry,
+        forward=fwd,
+        adx=ctx["adx"][i],
+        vwap_distance_pct=round((entry - vw) / entry * 100, 3) if vw else None,
+        rvol=round(candles[i].volume / avg_vol, 2) if avg_vol > 0 else None,
+        ema_gap_pct=round(abs(f - s) / entry * 100, 4) if (f and s) else None,
+        prior_move_pct=round(prior, 3),
+        room_to_high_pct=round((hi - entry) / entry * 100, 3),
+        room_to_low_pct=round((entry - lo) / entry * 100, 3),
+        crossover_index=0,
+        time_bucket=_time_bucket(candles[i].ts),
+    )
+
+
+def context_series(candles: list[OHLCV], fast: int, slow: int) -> dict:
+    """Indicator series used to describe an entry's context, computed once."""
+    return {
+        "adx": adx(candles, 14)["adx"],
+        "vwap": vwap(candles),
+        "fast": ema(candles, fast),
+        "slow": ema(candles, slow),
+    }
+
+
 def collect(
     symbol: str,
     candles: list[OHLCV],
     params: StrategyParams,
     horizon_bars: int = HORIZON_BARS,
 ) -> list[Observation]:
-    """Every signal this strategy would have produced, with context attached."""
+    """Every signal the EMA crossover strategy would have produced."""
     engine = StrategyEngine(params)
-    ctx = engine.precompute(candles)
+    ectx = engine.precompute(candles)
     warmup = max(params.warmup_bars(), 30)
     if len(candles) < warmup + horizon_bars:
         return []
 
-    adx_series = adx(candles, 14)["adx"]
-    vwap_series = vwap(candles)
-    fast_series = ema(candles, params.fast_period)
-    slow_series = ema(candles, params.slow_period)
-
+    ctx = context_series(candles, params.fast_period, params.slow_period)
     out: list[Observation] = []
     crossings_today = 0
     current_day = _ist_date(candles[warmup].ts)
@@ -101,60 +169,15 @@ def collect(
         if day != current_day:
             current_day, crossings_today = day, 0
 
-        signal = engine.evaluate_at(symbol, "diag", candles, i, ctx)
+        signal = engine.evaluate_at(symbol, "diag", candles, i, ectx)
         if signal is None:
             continue
         crossings_today += 1
 
-        entry = candles[i].close
-        if entry <= 0:
-            continue
-
-        fwd = measure_forward(
-            candles,
-            i,
-            signal.side,
-            entry,
-            risk_per_share=entry * 0.003,
-            bar_seconds=(candles[1].ts - candles[0].ts) if len(candles) > 1 else 300,
-            horizon_bars=horizon_bars,
-        )
-        if fwd.mfe == 0 and fwd.mae == 0:
-            continue  # no forward data (end of series / session)
-
-        back = candles[max(0, i - 9)].close
-        prior = ((entry - back) if signal.side == "BUY" else (back - entry)) / entry * 100
-
-        # Session extremes so far — "room" is measured against what price has
-        # already proved it can reach today, not an arbitrary lookback.
-        today_bars = [c for c in candles[max(0, i - 80) : i + 1] if _ist_date(c.ts) == day]
-        hi = max((c.high for c in today_bars), default=entry)
-        lo = min((c.low for c in today_bars), default=entry)
-
-        vol_window = [c.volume for c in candles[max(0, i - 20) : i]]
-        avg_vol = statistics.fmean(vol_window) if vol_window else 0
-        f, s = fast_series[i], slow_series[i]
-
-        out.append(
-            Observation(
-                symbol=symbol,
-                side=signal.side,
-                ts=candles[i].ts,
-                entry_price=entry,
-                forward=fwd,
-                adx=adx_series[i],
-                vwap_distance_pct=round((entry - vwap_series[i]) / entry * 100, 3)
-                if vwap_series[i]
-                else None,
-                rvol=round(candles[i].volume / avg_vol, 2) if avg_vol > 0 else None,
-                ema_gap_pct=round(abs(f - s) / entry * 100, 4) if (f and s) else None,
-                prior_move_pct=round(prior, 3),
-                room_to_high_pct=round((hi - entry) / entry * 100, 3),
-                room_to_low_pct=round((entry - lo) / entry * 100, 3),
-                crossover_index=crossings_today,
-                time_bucket=_time_bucket(candles[i].ts),
-            )
-        )
+        o = observe(symbol, candles, i, signal.side, horizon_bars, ctx)
+        if o is not None:
+            o.crossover_index = crossings_today
+            out.append(o)
     return out
 
 

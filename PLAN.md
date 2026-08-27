@@ -222,3 +222,79 @@ coin flips.
 Next work should replace the entry hypothesis rather than decorate it, and
 `entry_diagnostics.collect()` is now the harness that grades whatever replaces
 it — any candidate must beat the random baseline before it earns a place.
+
+---
+
+## Step 3.6 — Hypothesis 1: Opening Range Breakout — **REJECTED**
+
+Reused the diagnostics harness; the EMA strategy was not modified. New:
+`services/orb_hypothesis.py` (replays the live ORB entry rule over history)
+and `services/hypothesis_lab.py` (matched controls, significance, OOS split).
+
+### Matched controls
+
+An unmatched random baseline is easy to beat for the wrong reason — signals
+fire on volatile bars, so comparing them to bars drawn from the whole session
+compares volatility, not skill. Two matched controls instead:
+
+* **same bar, random side** — identical instant and volatility; isolates
+  whether the rule knows *which way* price goes.
+* **same day, random bar, same side** — identical session and direction;
+  isolates whether it knows *when* to act.
+
+### Result — first breakout of the day, 18 symbols, 132 signals
+
+| Horizon | Signal | Same-bar control | Same-day control |
+|---|---|---|---|
+| 6 bars | **0.66** | 0.91 | 1.10 |
+| 12 bars | **0.81** | 0.97 | 1.07 |
+| 24 bars | **0.94** | 1.05 | 1.09 |
+
+ORB loses to both controls at every horizon. Taking all breakouts rather than
+the first (4,817 signals) does not rescue it: 0.95 / 1.00 / 0.96 against a
+same-day control of 1.14 / 1.24 / 1.31, with p<0.001 in the wrong direction.
+
+Long breakouts are the weaker half throughout (0.59 / 0.62 / 0.68).
+
+### Two confounds checked before concluding
+
+**Market drift.** Signals ran 92 short to 40 long, which would flatter shorts
+for reasons unrelated to ORB. The window fell on 6 of 8 days (−0.23% average,
+90 of 144 symbol-days down), so the skew is drift, not selection. Shorts did
+score better than longs — and ORB still lost to its controls anyway.
+
+**Independence.** 132 signals came from 8 days, and signals inside one day move
+together, so the effective sample is closer to 8 than 132. Per-day MFE/MAE
+ranged 0.44 to 1.55 (stdev 0.35) — the day-to-day swing is larger than any
+effect measured. Re-running the permutation at the day level (shuffling whole
+days, which both preserves within-day correlation and pairs signal against
+control on the same day) gives **p = 0.040 for ORB being worse than a coin
+flip**, versus p = 0.228 treating signals as independent.
+
+### Verdict
+
+The decision gate says reject, so ORB does not proceed to backtest. It is not
+merely absent of edge — on this sample it is measurably worse than random
+entry at the same instant.
+
+**Confidence is limited by the window, not the method.** 8 trading days is thin
+for a rule that fires once per symbol per day. This rejects ORB *as configured
+on this sample*; it is not proof the pattern never works.
+
+### The binding constraint is now data
+
+`candle_store.MAX_BARS = 1500` and `BACKFILL_DAYS["5m"] = 10` cap 5-minute
+history at ~20 trading days, and only 8 are currently stored. Both are
+self-imposed — `GrowwClient.get_candles(days=...)` takes any window. Hypotheses
+2 (Pullback Continuation) and 3 (Consolidation Breakout) are day-structure
+rules that will hit exactly the same ceiling, so **extending history should
+come before testing them**. Raising `MAX_BARS` also raises live memory for
+every symbol and interval, so a separate research dataset on disk is the
+cleaner option and does not touch the live path.
+
+### Harness status
+
+`hypothesis_lab.evaluate(data, generator)` now grades any hypothesis exposing
+`generator(symbol, candles) -> [(bar_index, side)]`. 15 tests cover ORB range
+construction, the per-day reset, the entry cutoff, the cost floor and the
+permutation test. Suite: 46 passing.
