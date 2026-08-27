@@ -298,3 +298,134 @@ cleaner option and does not touch the live path.
 `generator(symbol, candles) -> [(bar_index, side)]`. 15 tests cover ORB range
 construction, the per-day reset, the entry cutoff, the cost floor and the
 permutation test. Suite: 46 passing.
+
+---
+
+## Step 4 — Historical Research Data Store
+
+### What actually limited history
+
+Three limits, only one of them the API's:
+
+| Limit | Value | Whose | Effect |
+|---|---|---|---|
+| `candle_store` is **in-memory** | — | app | The real cause. Running under `--reload`, every code edit erased all history |
+| `candle_store.MAX_BARS` | 1500 | app | ~20 trading days at 5m, per symbol/interval/source |
+| `BACKFILL_DAYS["5m"]` | 10 | app | Fetch window for the chart's backfill |
+| Groww max request window | **15 days** at 5m | **API** | 20-day windows are refused: "Invalid interval value" |
+| Groww history depth | **starts 2026-06-01** | **API** | ~3 months rolling. Windows placed earlier return zero rows |
+
+The store being in-memory was the binding constraint, and raising the other two
+would not have fixed it. Measured, not assumed: `probe_max_history` walks
+widening windows and then slides a known-legal window backwards, because "how
+wide may one request be" and "how far back does data exist" are different
+questions that produce the same error.
+
+`GrowwClient.get_candles(days=...)` measures back from *now*, so old windows
+were unreachable at any width. Added `get_candles_window(start, end)`;
+`get_candles` now delegates to the same parser and behaves identically.
+
+### Architecture
+
+```
+                         Groww API
+                             |
+              +--------------+--------------+
+              |                             |
+        LIVE PIPELINE                RESEARCH INGESTION
+        tick loop, backfill          research/ingestion.py
+              |                             |
+        candle_store (RAM)           research.db (SQLite, disk)
+        1500 bars, ephemeral         unbounded, durable
+              |                             |
+        SCANNER / CHART              HYPOTHESIS LAB
+```
+
+Isolation is enforced, not just intended: `research.db` is a separate file from
+`trading.db`, the research package imports no live trading module (a test
+asserts this), and tests pin `MAX_BARS == 1500` and `BACKFILL_DAYS["5m"] == 10`
+so a future change cannot quietly "fix" research by growing the live process.
+
+### Storage: SQLite, not Parquet
+
+- `pyarrow` is not installed; `sqlite3` is stdlib and already this project's DB.
+- Incremental append is the core requirement; Parquet files are immutable, so
+  adding a day means rewriting a partition and hand-rolling dedupe. A primary
+  key on `(symbol, interval, source, ts)` gives exact duplicate prevention.
+- ~900k rows at full scale is trivial for SQLite.
+- WAL mode is transactional; a partial Parquet rewrite on Windows is not.
+- `read()` returns the live `OHLCV` type, so `entry_diagnostics`,
+  `hypothesis_lab` and the backtester consume it with no adapter.
+
+`research_coverage` records per-day fetch status, which is what makes a
+backfill resumable and distinguishes *not fetched* from *fetched and genuinely
+empty*. Without that distinction a holiday is indistinguishable from a gap and
+gets re-requested forever.
+
+### Dataset `research_5m_v1`
+
+```
+DATASET QUALITY REPORT
+  Symbols:              39          Duplicate candles:    0
+  Period:  2026-06-01 -> 2026-08-27 Missing intervals:    0
+  Interval:             5m          Invalid OHLC rows:    0
+  Trading days:         63          Invalid volume rows:  0
+  Total candles:        184,261     Timestamp issues:     0
+                                    Holidays detected:    1  (2026-06-26)
+  STATUS: READY
+```
+
+63 trading days against the 8 previously available. TATAMOTORS returned no
+data and is excluded rather than substituted. The holiday was inferred from the
+cross-section — a weekday on which every symbol is absent — because the app has
+no NSE holiday calendar and a hardcoded one would go stale silently.
+
+### Re-test: both hypotheses still rejected, now decisively
+
+Three-way chronological split by day: in-sample 2026-06-01..07-22 (37 days),
+validation 07-23..08-07 (12), hold-out 08-10..08-27 (14). Significance by
+day-level block permutation, which treats the trading day as the unit of
+independence.
+
+**EMA 9/21 crossover — 8,166 signals**
+
+| Horizon | Signal | Same-bar control | Edge | p |
+|---|---|---|---|---|
+| 6 bars | 0.83 | 0.99 | −0.161 | 0.000 |
+| 12 bars | 0.89 | 1.00 | −0.111 | 0.000 |
+| 24 bars | 0.93 | 1.00 | −0.070 | 0.000 |
+
+**ORB first breakout — 2,296 signals**
+
+| Horizon | Signal | Same-bar control | Edge | p |
+|---|---|---|---|---|
+| 6 bars | 0.74 | 0.98 | −0.241 | 0.000 |
+| 12 bars | 0.83 | 1.02 | −0.198 | 0.000 |
+| 24 bars | 0.88 | 1.00 | −0.117 | 0.000 |
+
+Hold-out edges: EMA −0.07 / −0.01 / +0.02; ORB −0.30 / −0.18 / −0.13. ORB stays
+clearly negative out of sample; EMA converges towards the control without ever
+beating it.
+
+Two things the larger sample corrected:
+
+* **The long/short asymmetry was drift, not structure.** The 8-day sample ran
+  92 short to 40 long and shorts scored better. Balanced here (4,074 long,
+  4,092 short) the two are identical — EMA 0.82 vs 0.84, ORB 0.76 vs 0.72.
+* **The direction of the result is consistent and significant**, where before
+  it was borderline. Both rules score *below* a same-bar coin flip at every
+  horizon on 63 days.
+
+That both are reliably worse than random is a fact about this dataset, not a
+recipe: the inverse of a bad entry rule is not automatically a good one, since
+MFE/MAE does not invert and the 0.183% cost floor applies either way. It is a
+hypothesis to test properly, not a conclusion to trade.
+
+### Is the dataset sufficient?
+
+For these two rules, yes — the verdict is stable across all three splits at
+p=0.000. For future work, partly: the unit of independence is the trading day,
+so 63 days is enough to detect a large effect and thin for a small one. Groww's
+~3-month rolling window means the dataset can only grow forward, about one day
+per day, via `update()`. Testing anything needing a year of history, or several
+market regimes, requires a different data source — not proposed here.
