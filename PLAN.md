@@ -429,3 +429,209 @@ so 63 days is enough to detect a large effect and thin for a small one. Groww's
 ~3-month rolling window means the dataset can only grow forward, about one day
 per day, via `update()`. Testing anything needing a year of history, or several
 market regimes, requires a different data source — not proposed here.
+
+---
+
+## Step 5 — Hypothesis Registry + H003 pre-registration
+
+### Harness audit — the interface a new hypothesis must implement
+
+| Component | Interface | Reuse for H003 |
+|---|---|---|
+| Generator | `generate(symbol, candles, params) -> [(bar_index, side)]` | implement exactly this |
+| Scoring | `entry_diagnostics.observe(symbol, candles, i, side, horizon, ctx)` | unchanged |
+| Context | `entry_diagnostics.context_series(candles, fast, slow)` | unchanged |
+| Controls | `hypothesis_lab.build_controls(...) -> (same_bar, same_day)` | **needs one addition, see below** |
+| Aggregation | `hypothesis_lab.Stats.of(observations)` | **needs one metric added** |
+| Significance | `hypothesis_lab.block_permutation_p(sig_by_day, ctrl_by_day)` | unchanged |
+| Split | `hypothesis_lab.split_days(days, (0.6, 0.2, 0.2))` | unchanged |
+| Data | `research.store.read_many(symbols, "5m", "live")` -> `list[OHLCV]` | unchanged |
+
+**One defect found.** `hypothesis_lab.evaluate()` still uses the per-signal
+`permutation_p` and a two-way `split=0.7`. The EMA/ORB re-test did not go
+through it — it used `block_permutation_p` and the three-way split directly.
+Anyone calling `evaluate()` would get the weaker test we already showed
+understates dependence. It should be aligned before H003 runs. Left in place
+for now rather than changed mid-task.
+
+### H003 v1 — Pullback Continuation
+
+**Market behaviour claimed.** When a stock makes a clean directional move, some
+participants take profit and some fade it, producing a counter-move. If the
+original move was driven by real demand rather than noise, that demand should
+still be present once the counter-move exhausts. The claim is that the moment
+demand reasserts itself — after the pullback, not during it — is a better
+located entry than an arbitrary moment in the same session.
+
+The claim is specific and falsifiable: it says the *pullback structure* carries
+information over and above simply being in a stock that is already trending.
+
+**Why this is not EMA crossover with filters.** A crossover compares two
+smoothed averages of price. Nothing in H003 uses a moving average or a crossing.
+The impulse is measured as raw displacement normalised by ATR, and its quality
+by the efficiency ratio — path-based measures with no smoothing. The trigger is
+a break of a specific prior bar's high, a price-structure event rather than a
+state comparison. A crossover fires when two averages change relative order;
+H003 fires when price exceeds a level a specific earlier bar established. In a
+sustained trend the crossover fires once, while H003 can fire repeatedly.
+
+#### Long rule
+
+```
+Let L = 12 bars, K = 1.0, E = 0.50, P_max = 6 bars
+All quantities computed from bars <= t only.
+
+IMPULSE
+  C1  H0 = max(high[t-L .. t]),  L0 = min(low[t-L .. t])
+  C2  (close[idx(H0)] - close[t-L]) / ATR(14)[t] >= K       impulse >= 1 ATR
+  C3  efficiency = |close[t] - close[t-L]|
+                   / sum(|close[i] - close[i-1]|, i in t-L+1..t)  >= E
+  C4  idx(H0) != t                              the high is already behind us
+
+PULLBACK
+  R = H0 - L0                                               impulse range
+  C5  p_bars = t - idx(H0),   1 <= p_bars <= P_max
+  C6  retrace[t] = (H0 - low[t]) / R,   depth_min <= retrace[t] <= depth_max
+  C7  max(retrace[i]) for i in (idx(H0), t] <= depth_max
+        the pullback never exceeded the band; deeper is a reversal
+
+TRIGGER
+  C8  close[t] > high[t-1]
+
+  Signal: BUY at bar t.
+```
+
+#### Short rule (mirrored)
+
+```
+IMPULSE
+  C1  L0 = min(low[t-L .. t]),  H0 = max(high[t-L .. t])
+  C2  (close[t-L] - close[idx(L0)]) / ATR(14)[t] >= K
+  C3  efficiency >= E                                       (same formula)
+  C4  idx(L0) != t
+
+PULLBACK
+  R = H0 - L0
+  C5  p_bars = t - idx(L0),   1 <= p_bars <= P_max
+  C6  retrace[t] = (high[t] - L0) / R,   depth_min <= retrace[t] <= depth_max
+  C7  max(retrace[i]) for i in (idx(L0), t] <= depth_max
+
+TRIGGER
+  C8  close[t] < low[t-1]
+
+  Signal: SELL at bar t.
+```
+
+**Why each condition exists**
+
+| | Purpose | Behaviour represented |
+|---|---|---|
+| C2 | size the move against the instrument's own volatility | a move large enough to reflect intent, comparable across a Rs 100 and a Rs 3000 stock |
+| C3 | require the move be directional, not a round trip | the efficiency ratio separates a trend from chop that happened to end higher; ADX approximates this, efficiency measures it directly from price |
+| C4 | the impulse must be complete | without it the "pullback" could still be forming |
+| C5 | bound the pause | beyond ~30 minutes the move has stopped being a pullback and become a new range |
+| C6 | define depth explicitly | shallow and deep retracements are different behaviours, tested separately |
+| C7 | reject broken impulses | a retrace that went too deep and recovered is a reversal, not a continuation |
+| C8 | require resumption, observable at the close of t | the entry event itself |
+
+**No look-ahead.** Every term reads bars with index <= t: `H0`/`L0` from the
+window ending at t, ATR and efficiency from closes up to t, `high[t-1]` from the
+previous bar, `close[t]` from the signal bar's own close — the convention H001
+and H002 used. The forward window begins after t. To be pinned by the same
+truncation test already applied to the EMA engine
+(`test_no_lookahead_truncating_future_bars_changes_nothing`): evaluating bar t
+with all future bars removed must give an identical answer.
+
+**Fixed parameters, chosen before testing and not searched**
+
+| Param | Value | Reason chosen a priori |
+|---|---|---|
+| L | 12 bars | one hour at 5m — long enough to contain a move, short enough to stay intraday |
+| K | 1.0 ATR | one average day-range unit; the natural scale-free "this move is real" threshold |
+| E | 0.50 | half of all movement was net directional — the midpoint of the ratio's range, not a tuned value |
+| P_max | 6 bars | 30 minutes; beyond this the pause is a range |
+| ATR period | 14 | already the project default everywhere |
+
+### Pre-registered variants — two, not three
+
+| Variant | depth_min | depth_max | Behaviour |
+|---|---|---|---|
+| **H003-A** | 0.20 | 0.40 | shallow. Trend so strong buyers barely let go; continuation is the base case |
+| **H003-B** | 0.40 | 0.65 | medium. Textbook two-way pullback: real profit-taking, then demand returns |
+
+Depth is the single parameter varied, because it is the only one where two
+genuinely distinct market behaviours exist rather than two settings of the same
+behaviour. A shallow retrace and a medium retrace say different things about who
+is in control.
+
+**Why no third variant.** A deep band (0.65–0.85) is not a pullback hypothesis —
+at that depth the impulse is nearly erased and the setup is closer to a
+reversal, a separate claim deserving its own hypothesis ID rather than a slot
+here. Adding it would also raise the comparison count from 6 to 9 and make an
+accidental pass more likely. Every other parameter is fixed at one value, so the
+total pre-registered comparison count is 2 variants × 3 horizons = **6**.
+
+### Evaluation plan
+
+**Horizons** — 6, 12, 24 bars, unchanged from H001/H002 so results stay directly
+comparable.
+
+**Metrics**
+
+| Metric | Role |
+|---|---|
+| `net_move_pct` = mean of `(close[t+h] - close[t]) * dir / close[t] * 100` | **primary.** Directly answers "did price move further in the predicted direction than against it" |
+| MFE, MAE, MFE/MAE | secondary, for comparability with H001/H002 |
+| `favourable_pct` (MFE > MAE) | secondary |
+| `clears_cost_pct` (MFE > cost floor) | economic context, not a first gate |
+
+`net_move_pct` is promoted to primary because MFE/MAE proved to be a property of
+the entry *and the measurement window* — it moved from 0.83 to 1.08 on one
+unchanged signal set purely by widening the horizon. Net displacement has no
+such failure mode. This adds one field to `Stats`; no existing metric is removed.
+
+**Controls**
+
+| Control | Definition | Question |
+|---|---|---|
+| **A** same bar, random side | unchanged | does it know *which direction*? |
+| **B** same day, random bar, same side | unchanged | does it know *when*? |
+| **C** same day, same side, random bar **drawn only from bars passing C1–C4** | new | does the *pullback structure* add anything beyond being in a trending stock? |
+
+Control C is the addition H003 needs and H001/H002 did not. H003 is a compound
+claim — impulse selection plus pullback structure — and A and B together cannot
+separate them. Without C, a pass could mean nothing more than "trending stocks
+drift", which is a known effect and not this hypothesis. C holds the impulse
+condition constant and varies only the pullback and the trigger.
+
+**Statistics** — day-level block permutation, unit of dependence = the trading
+day. Justified twice over: signals within a day share serial correlation, and
+across 39 symbols they share a market-wide move, so a day-block captures both at
+once. Demonstrated empirically on the 8-day ORB sample, where the correct unit
+moved p from 0.228 to 0.040. Fixed in advance; it will not be changed after
+seeing results.
+
+**Split** — reuse 60/20/20 chronological by day: development 2026-06-01..07-22
+(37 days), validation 07-23..08-07 (12), hold-out 08-10..08-27 (14). Split by
+day, never by row. The hold-out is not read until gates 1–3 have been decided.
+Stated limitation: 14 hold-out days is thin, so hold-out evidence can confirm a
+reversal but cannot by itself confirm a small positive edge.
+
+### Gates, fixed before implementation
+
+| Gate | Criterion | Failure |
+|---|---|---|
+| **0 — power** | >= 300 signals and >= 25 distinct signal-days in development | `UNDERPOWERED`, not REJECTED — an untested claim, not a refuted one |
+| **1 — direction** | `net_move_pct` edge over Control A > 0 at >= 2 of 3 horizons, with block-permutation p < 0.05 at >= 1 | REJECTED |
+| **2 — structure** | edge over Control C > 0 at the horizons that passed Gate 1 | REJECTED — the information is in impulse selection, not the pullback |
+| **3 — validation** | sign of the edge preserved in the validation period at those horizons | REJECTED |
+| **4 — hold-out** | sign preserved and edge >= 0 in the hold-out | REJECTED. A reversal is a rejection, not noise to explain away |
+| **5 — economic** | mean MFE at a qualifying horizon > the 0.183% cost floor | `PROMISING` but flagged untradeable; not a rejection of the information claim |
+| **6 — reporting** | both variants reported whatever the outcome; "SIGNIFICANT" claimed only at p < 0.05/6 = 0.008 | — |
+
+Passing all gates sets status `ACCEPTED`, meaning only that it cleared the gates
+defined here — not that it is safe to trade.
+
+If H003 fails it is recorded REJECTED with its numbers, and the next independent
+hypothesis begins. No filters will be added to make it pass; a changed rule is
+H003 v2, registered separately, with v1's verdict intact.
