@@ -11,3 +11,6 @@ frontend/.next/
 frontend/.env.local
 
 .DS_Store
+backend/.venv-win/
+backend/*.db
+__pycache__/
