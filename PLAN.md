@@ -883,3 +883,172 @@ predictor's own distribution, never forward returns**. That is calibration on
 inputs, not selection on outcomes, so it cannot bias the test; it would replace
 an approximation with a measurement. Not done unilaterally, since it changes a
 pre-registered value.
+
+---
+
+## Step 5c — Input-only calibration of K
+
+Run on the **development period only** (37 days, 2026-06-01..2026-07-22).
+Validation and hold-out were not read. The calibration script imports
+`find_impulse`, `atr`, `store` and `split_days` and nothing else — no
+`measure_forward`, no `observe`, no `Stats`, no backtester, no paper engine. No
+signals were generated and no threshold was applied during measurement.
+
+### 1. Global impulse_score distribution
+
+`impulse_score = (impulse_high - impulse_low) / ATR(14)`, over every causal
+ordered impulse opportunity.
+
+| n | mean | median | p25 | p50 | p60 | p70 | **p75** | p80 | p90 |
+|---|---|---|---|---|---|---|---|---|---|
+| 134,365 | 2.84 | 2.67 | 1.96 | 2.67 | 2.97 | 3.31 | **3.52** | 3.75 | 4.46 |
+
+Population accounting:
+
+| | count | share |
+|---|---|---|
+| bars in development period | 108,225 | |
+| skipped, lookback crosses a session boundary | 17,316 | 16.0% |
+| eligible bars with no ordered pair in either direction | 656 | 0.6% |
+| impulse opportunities measured (UP + DOWN per bar) | 134,365 | |
+
+The 16% exclusion is the first 12 bars of each session, where a full same-day
+lookback does not exist. That is the intended behaviour, not data loss.
+
+### 2. K = 2.5 was still too permissive — and the reasoning behind it was wrong
+
+**Measured, K = 2.5 retains 56.2% of impulse opportunities.** It is close to the
+median (2.67), not the upper quartile.
+
+The error was in the statistic, not the arithmetic. The random-walk argument
+computed the standard deviation of *net displacement* over 12 bars
+(`sigma * sqrt(N)`), but `impulse_score` measures the *range between ordered
+swing extremes*, which is systematically larger — a random walk's expected range
+is about `1.6 * sigma * sqrt(N)`, roughly 1.6x the displacement SD. Comparing a
+range threshold against a displacement distribution understated it by about that
+factor, which is close to the observed gap between 2.5 and 3.5.
+
+This is the second time a reasoned value for K came out too permissive, in the
+same direction. The measured distribution replaces the reasoning rather than
+supplementing it.
+
+### 3. Long vs short
+
+| Population | n | mean | median | p75 |
+|---|---|---|---|---|
+| UP (long candidates) | 66,100 | 2.84 | 2.65 | 3.51 |
+| DOWN (short candidates) | 68,265 | 2.84 | 2.69 | 3.52 |
+
+p75 differs by **0.007**, or 0.2%. There is no basis for separate long and short
+thresholds, and the symmetry is a mild check that the mirrored algorithm is
+genuinely mirrored.
+
+### 4. Cross-symbol
+
+Per-symbol p75 across the 39 symbols:
+
+| min | median | max | stdev | spread as share of global p75 |
+|---|---|---|---|---|
+| 3.33 | 3.53 | 3.70 | 0.102 | **10.5%** |
+
+Lowest: HCLTECH 3.33, WIPRO 3.34, INFY 3.35, SUNPHARMA 3.36, ICICIBANK 3.38.
+Highest: AXISBANK 3.66, INDUSINDBK 3.66, COALINDIA 3.68, MARUTI 3.70,
+NESTLEIND 3.70.
+
+A single global threshold is **not** grossly inappropriate. The whole
+cross-symbol range spans about a tenth of the threshold's own value, and the
+ordering is unsurprising — large-cap IT names produce the smoothest paths. ATR
+normalisation is evidently doing its job, since these are stocks whose absolute
+prices differ by more than an order of magnitude. Per-symbol thresholds are not
+proposed, and would add 39 free parameters to buy a 10% adjustment.
+
+### 5. Candidate K
+
+Under the pre-agreed conceptual definition — *an impulse is a move in the upper
+quartile of causal impulse opportunities* — the value is the measured p75:
+
+```
+exact p75 = 3.5186
+```
+
+| K | retained | count (dev) | per dev day |
+|---|---|---|---|
+| 2.50 | 56.2% | 75,506 | 2,041 |
+| 3.00 | 39.0% | 52,399 | 1,416 |
+| 3.25 | 31.6% | 42,405 | 1,146 |
+| **3.50** | **25.4%** | **34,159** | **923** |
+| 3.52 | 25.0% | 33,543 | 907 |
+| 3.75 | 20.1% | 26,992 | 730 |
+| 4.00 | 15.8% | 21,276 | 575 |
+
+**Proposed: K = 3.5**, the measured p75 rounded to two significant figures. It
+retains 25.4% against the definition's 25.0%; the 0.4 percentage-point
+difference is far smaller than the sampling noise in a percentile estimated from
+heavily overlapping windows, and a round number is less likely to be mistaken
+for a fitted one. **Not committed** pending review.
+
+Two cautions on these numbers:
+
+* Consecutive bars share 12-bar windows, so the 134,365 observations are far
+  from independent. The percentile is a reliable description of this
+  development period; no confidence interval should be attached to it.
+* Every one of the 37 development days contains at least one Stage-A pass at
+  K=3.5, so Gate 0's 25-signal-day requirement has headroom at the impulse
+  stage. The eventual *signal* count is unknown — Stages B, C and D will cut
+  34,159 Stage-A passes down substantially — and cannot be known without
+  generating signals, which was not done.
+
+### 6. Non-repainting test result
+
+`tests/test_impulse_structure.py` — 16 tests, all passing. The decisive ones:
+
+| Test | Guarantee |
+|---|---|
+| `test_truncating_the_future_does_not_change_the_structure` | for every bar and both directions, evaluating bar t with all later bars deleted gives an identical `Impulse` |
+| `test_appending_future_bars_does_not_change_an_earlier_structure` | the same guarantee approached from the other side |
+| `test_structure_is_allowed_to_differ_between_different_bars` | stops the two above passing trivially on a function that always returns None |
+| `test_low_is_always_before_high_for_an_up_impulse` | a late crash low is not adopted as the impulse low |
+| `test_window_may_not_cross_into_the_previous_session` | no overnight gap inside an impulse |
+
+The existing `test_no_lookahead_truncating_future_bars_changes_nothing` covers
+the EMA engine only, so this is a separate suite rather than an extension.
+
+### 7. Clarified pullback and trigger timing
+
+The trigger bar is no longer counted as a pullback bar, and the pullback depth
+no longer reads the trigger bar's low.
+
+```
+LONG
+  impulse:        low_idx  ->  high_idx          (low_idx < high_idx)
+  pullback bars:  high_idx + 1  ..  t - 1
+  trigger bar:    t
+
+  pullback_bar_count = t - high_idx - 1          >= 1, so t >= high_idx + 2
+  pullback_low       = min(low[i]) for i in [high_idx + 1, t - 1]
+  retrace            = (impulse_high - pullback_low) / R
+  structural check   = pullback_low > impulse_low
+  trigger            = close[t] > high[t-1]
+
+SHORT (mirror)
+  impulse:        high_idx ->  low_idx           (high_idx < low_idx)
+  pullback bars:  low_idx + 1  ..  t - 1
+  trigger bar:    t
+
+  pullback_bar_count = t - low_idx - 1           >= 1
+  pullback_high      = max(high[i]) for i in [low_idx + 1, t - 1]
+  retrace            = (pullback_high - impulse_low) / R
+  structural check   = pullback_high < impulse_high
+  trigger            = close[t] < low[t-1]
+```
+
+This changes the earlier draft in one substantive way: retrace is measured from
+the completed pullback bars, not from the trigger bar. Previously
+`retrace[t] = (impulse_high - low[t]) / R` used bar t's own low, which meant the
+trigger bar was simultaneously the last pullback bar and the resumption bar. The
+duration bound is unchanged in intent — `pullback_bar_count <= impulse_bars` —
+but now counts an unambiguous set of bars.
+
+`pullback_bar_count` and the timing are implemented and tested in
+`app/research/impulse_structure.py`; the depth and trigger stages are specified
+here but not implemented.
