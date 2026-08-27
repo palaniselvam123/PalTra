@@ -1052,3 +1052,136 @@ but now counts an unambiguous set of bars.
 `pullback_bar_count` and the timing are implemented and tested in
 `app/research/impulse_structure.py`; the depth and trigger stages are specified
 here but not implemented.
+
+---
+
+## Step 6 — H003 v1 evaluated: **REJECTED**, both variants
+
+Rule frozen before implementation (Step 5b/5c). Registry status
+`DEFINED` -> `REJECTED`. Rule definition unchanged.
+
+### Signal anatomy (diagnostic only — not used as a filter)
+
+| | H003-A shallow [0.20, 0.40) | H003-B medium [0.40, 0.65] |
+|---|---|---|
+| total signals | 2,571 | 1,536 |
+| signal-days | 63 of 63 | 63 of 63 |
+| long / short | 1,231 / 1,340 | 796 / 740 |
+| symbols firing | 39 of 39 | 39 of 39 |
+| signals per day | min 19, median 38, max 72 | min 7, median 24, max 45 |
+| signals per symbol | min 47 (ICICIBANK), median 66, max 89 (TATASTEEL) | min 25 (ITC), median 38, max 61 (MARUTI) |
+| impulse_bars | min 1, median 8, max 10 | min 1, median 7, max 10 |
+| retracement depth | min 0.200, median 0.292, max 0.400 | min 0.400, median 0.483, max 0.650 |
+| impulse_score | min 3.50, median 4.26, max 9.16 | min 3.50, median 3.99, max 8.18 |
+
+Pullback duration:
+
+| bars | H003-A | H003-B |
+|---|---|---|
+| 1 | 822 (32.0%) | 142 (9.2%) |
+| 2 | 746 (29.0%) | 307 (20.0%) |
+| 3 | 542 (21.1%) | 402 (26.2%) |
+| 4+ | 461 (17.9%) | 685 (44.6%) |
+
+The variants separate on duration as well as depth, which was not designed in:
+shallow retracements resolve in 1-2 bars 61% of the time, medium ones take 4+
+bars 45% of the time. Both distributions are broad rather than piled against a
+boundary, so neither band is being defined by its own edge. Long/short balance
+is close to even for both, unlike the 8-day ORB sample where drift produced a
+3:1 skew.
+
+### Development results — primary metric `net_move_pct`
+
+Development period only (37 days, 2026-06-01..07-22), day-level block
+permutation on a difference of means.
+
+| Variant | h | n | edge vs **Control A** | p | edge vs **Control C** | p |
+|---|---|---|---|---|---|---|
+| **A** | 6 | 1,447 | **+0.0192** | **0.0037** | **−0.0325** | **0.0010** |
+| A | 12 | 1,305 | +0.0107 | 0.4375 | −0.0301 | 0.1150 |
+| A | 24 | 1,010 | +0.0357 | 0.1737 | −0.0243 | 0.4392 |
+| **B** | 6 | 888 | −0.0121 | 0.2975 | −0.0220 | 0.1118 |
+| B | 12 | 791 | −0.0118 | 0.4657 | −0.0344 | 0.1403 |
+| B | 24 | 612 | −0.0142 | 0.5357 | −0.0100 | 0.7695 |
+
+Full-sample group means (all 63 days), for context:
+
+| Variant | h | SIGNAL | Control A | Control B | Control C | MFE% | MAE% | ratio |
+|---|---|---|---|---|---|---|---|---|
+| A | 6 | 0.0106 | 0.0062 | 0.0588 | 0.0456 | 0.243 | 0.269 | 0.90 |
+| A | 12 | 0.0074 | −0.0071 | 0.1328 | 0.0441 | 0.332 | 0.349 | 0.95 |
+| A | 24 | 0.0090 | 0.0114 | 0.2462 | 0.0267 | 0.452 | 0.467 | 0.97 |
+| B | 6 | 0.0057 | −0.0020 | 0.0384 | 0.0349 | 0.239 | 0.270 | 0.88 |
+| B | 12 | 0.0014 | 0.0035 | 0.0932 | 0.0355 | 0.325 | 0.347 | 0.93 |
+| B | 24 | −0.0159 | 0.0012 | 0.2080 | −0.0098 | 0.429 | 0.468 | 0.92 |
+
+### Validation and hold-out
+
+Reported for completeness; gates 3 and 4 were never reached.
+
+| Variant | h | dev edge vs A | validation | HOLD-OUT |
+|---|---|---|---|---|
+| A | 6 | +0.0132 | −0.0257 | +0.0040 |
+| A | 12 | +0.0214 | +0.0073 | −0.0002 |
+| A | 24 | +0.0104 | −0.0305 | −0.0142 |
+| B | 6 | +0.0031 | +0.0235 | +0.0085 |
+| B | 12 | −0.0208 | +0.0392 | +0.0286 |
+| B | 24 | −0.0227 | +0.0325 | −0.0460 |
+
+### Gate-by-gate verdict
+
+| Gate | H003-A | H003-B |
+|---|---|---|
+| **0 — power** (>=300 signals, >=25 signal-days in dev) | **PASS** 1,447 / 1,305 / 1,010 signals, 37 days | **PASS** 888 / 791 / 612 signals, 37 days |
+| **1 — direction vs Control A** (edge > 0 at >=2 of 3 horizons, p < 0.05 at >=1) | **PASS** 3 of 3 positive; p = 0.0037 at 6 bars | **FAIL** 0 of 3 positive |
+| **2 — structure vs Control C** (edge > 0 at the horizons that passed Gate 1) | **FAIL** negative at all 3; p = 0.0010 at 6 bars, i.e. significantly *worse* | not reached |
+| 3 — validation | not reached | not reached |
+| 4 — hold-out | not reached | not reached |
+| label — movement | mean MFE 0.24-0.45% exceeds the 0.183% floor -> *movement potentially sufficient for further economic testing*. Not evidence of tradeability | same |
+
+**H003 v1 -> REJECTED.**
+
+### What the result actually says
+
+Variant A is the first hypothesis in this project to pass the direction test.
+Against a same-bar random-side control it is positive at all three horizons and
+significant at 6 bars (p = 0.0037, below the 0.008 multiple-comparison
+threshold). H001 and H002 were both *negative* against that control.
+
+Control C is what kills it. Against a random stage-A bar — same day, same
+symbol, same direction, impulse condition already satisfied — variant A is
+negative at every horizon and significantly negative at 6 bars (p = 0.0010).
+The directional information is in the impulse selection. The pullback and
+continuation structure, which is what H003 actually proposed, subtracts from it.
+
+That is precisely the decomposition Control C was added to make, and it is the
+reason the hypothesis can be rejected cleanly rather than being recorded as a
+weak positive. Without Control C, variant A's Gate 1 pass would have looked like
+a discovery.
+
+Variant B fails earlier and more simply: no directional edge at all, negative
+against Control A at every horizon.
+
+### Caveats, stated with the result rather than after it
+
+* **Magnitude.** The largest development edge is +0.036 percentage points, about
+  3.6 basis points, against a round-trip cost floor of 18.3 bp. Even taken at
+  face value the effect is an order of magnitude too small to trade.
+* **Estimation noise.** Re-drawing the control sample moved edge estimates by
+  roughly 2 bp — the same order as the edges themselves. Individual cells in
+  these tables should not be read as precise.
+* **Control C position bias.** Signals fire on trigger bars, while the stage-A
+  pool spans the session, and a signal is dropped when its horizon would cross
+  the close. That asymmetry could favour Control C. The rejection does not rest
+  on it: variant B fails Gate 1 on Control A, which is same-bar and carries no
+  positional bias, and variant A's Control A edge is 2-4 bp either way.
+* **Control B is not comparable across horizons.** Its mean rises steeply with
+  horizon (0.06 -> 0.13 -> 0.25 for variant A) because random bars sit earlier
+  in the session on average and capture more of the day's drift. It is reported
+  because it was pre-registered, but Controls A and C are the ones the gates use.
+* Scope: 39 large-cap NSE symbols, 5-minute bars, 63 trading days, one market
+  regime. This rejects H003 v1 on this dataset and configuration.
+
+No filters were added, no parameters re-tuned, and the rule was not modified
+after results were visible. Any revision must be registered as H003 v2 with v1
+preserved.

@@ -110,7 +110,7 @@ class TestSeed:
 
         assert r.get("H001", "v1").status == "REJECTED"
         assert r.get("H002", "v1").status == "REJECTED"
-        assert r.get("H003", "v1").status == "PROPOSED"
+        assert r.get("H003", "v1").status == "DEFINED"
 
     def test_seeded_rejections_carry_the_evidence(self, tmp_path, monkeypatch):
         """A rejection with no numbers behind it is an opinion."""
@@ -126,9 +126,10 @@ class TestSeed:
             assert len(summary["edge_vs_same_bar"]) == 3
             assert r.get(hid, "v1").dataset_id == "research_5m_v1"
 
-    def test_h003_carries_no_parameters_yet(self, tmp_path, monkeypatch):
-        """PROPOSED must not smuggle in thresholds — committing them is what
-        moving to DEFINED means."""
+    def test_h003_parameters_are_frozen_as_approved(self, tmp_path, monkeypatch):
+        """H003 was approved and moved PROPOSED -> DEFINED. What matters now is
+        that the seeded rule matches what was signed off, so a later edit to the
+        generator cannot drift away from the pre-registration unnoticed."""
         import app.research.seed_hypotheses as seed_mod
 
         r = HypothesisRegistry(tmp_path / "research.db")
@@ -136,7 +137,33 @@ class TestSeed:
         seed_mod.seed()
 
         rule = r.get("H003", "v1").rule_definition
-        assert "proposed only" in rule["state"]
+        assert rule["lookback_bars"] == 12
+        assert rule["atr_period"] == 14
+        assert rule["k_impulse_atr"] == 3.5
+        assert rule["variants"]["A"]["depth_min"] == 0.20
+        assert rule["variants"]["A"]["depth_max"] == 0.40
+        assert rule["variants"]["B"]["depth_min"] == 0.40
+        assert rule["variants"]["B"]["depth_max"] == 0.65
+        assert "development period only" in rule["k_provenance"]
+
+    def test_registered_k_matches_the_implementation(self, tmp_path, monkeypatch):
+        """The registry is the pre-registration; the module is what ran. If they
+        disagree, the recorded result describes a rule nobody tested."""
+        import app.research.pullback_hypothesis as impl
+        import app.research.seed_hypotheses as seed_mod
+
+        r = HypothesisRegistry(tmp_path / "research.db")
+        monkeypatch.setattr(seed_mod, "registry", r)
+        seed_mod.seed()
+        rule = r.get("H003", "v1").rule_definition
+
+        assert impl.K == rule["k_impulse_atr"]
+        assert impl.LOOKBACK == rule["lookback_bars"]
+        assert impl.ATR_PERIOD == rule["atr_period"]
+        assert impl.VARIANT_A.depth_min == rule["variants"]["A"]["depth_min"]
+        assert impl.VARIANT_A.depth_max == rule["variants"]["A"]["depth_max"]
+        assert impl.VARIANT_B.depth_min == rule["variants"]["B"]["depth_min"]
+        assert impl.VARIANT_B.depth_max == rule["variants"]["B"]["depth_max"]
 
     def test_seeding_twice_does_not_duplicate(self, tmp_path, monkeypatch):
         import app.research.seed_hypotheses as seed_mod

@@ -149,6 +149,48 @@ def block_permutation_p(
     return hits / iterations
 
 
+def block_permutation_means(
+    sig_by_day: dict, ctrl_by_day: dict, iterations: int = 4000, seed: int = 13
+) -> tuple[float, float]:
+    """Day-level permutation on a difference of MEANS.
+
+    `block_permutation_p` compares an MFE/MAE ratio. The primary metric for
+    H003 is `net_move_pct`, a signed mean, whose natural statistic is a mean
+    difference rather than a ratio — a ratio of signed quantities is undefined
+    when the denominator crosses zero.
+
+    Same blocking as the ratio version: whole days move together, so the
+    within-day correlation is preserved and each day contributes its signal
+    group and control group as a pair. Returns (observed_difference, p).
+
+    Inputs are dicts of day -> list[float].
+    """
+    days = sorted(set(sig_by_day) | set(ctrl_by_day))
+    if len(days) < 3:
+        return 0.0, 1.0
+
+    sig = {d: list(sig_by_day.get(d, [])) for d in days}
+    ctl = {d: list(ctrl_by_day.get(d, [])) for d in days}
+
+    def mean_of(groups: list) -> float:
+        vals = [v for g in groups for v in g]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    observed = mean_of([sig[d] for d in days]) - mean_of([ctl[d] for d in days])
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(iterations):
+        a, b = [], []
+        for d in days:
+            if rng.random() < 0.5:
+                a.append(sig[d]); b.append(ctl[d])
+            else:
+                a.append(ctl[d]); b.append(sig[d])
+        if abs(mean_of(a) - mean_of(b)) >= abs(observed):
+            hits += 1
+    return observed, hits / iterations
+
+
 def by_day(obs: list[Observation]) -> dict:
     out: dict = {}
     for o in obs:

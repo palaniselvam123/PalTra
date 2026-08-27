@@ -93,25 +93,76 @@ H003 = Hypothesis(
     version="v1",
     name="Pullback Continuation",
     description=(
-        "After a measurable directional impulse, price retraces part of that impulse and then "
-        "resumes. Tests whether the resumption point carries directional information — that is, "
-        "whether joining an established move after a counter-move is better located than "
-        "entering at an arbitrary moment in the same session."
+        "After a measurable ordered directional impulse, price retraces part of that impulse "
+        "and then resumes. Tests whether the continuation trigger after a defined pullback "
+        "carries directional information beyond an arbitrary entry following the same impulse."
     ),
-    status="PROPOSED",
+    status="DEFINED",
     rule_definition={
-        "state": "proposed only — no exact parameters committed, no generator implemented",
-        "structure": [
-            "1. impulse: a measured directional move over a defined lookback",
-            "2. pullback: a counter-move of bounded depth and duration",
-            "3. trigger: resumption in the impulse direction",
-        ],
-        "note": "parameters are deliberately absent until the rule is pre-registered as DEFINED",
+        "frozen_at": "pre-registration, before any forward outcome was read",
+        "lookback_bars": 12,
+        "atr_period": 14,
+        "k_impulse_atr": 3.5,
+        "k_provenance": (
+            "rounded 75th percentile of the causal impulse_score distribution measured on the "
+            "development period only (p75 = 3.5186, n = 134,365). Predictor distribution only; "
+            "no forward outcome was involved. Must not be re-calibrated against performance."
+        ),
+        "stage_a_impulse": (
+            "LONG: high_idx = argmax(high) over [t-12, t-1] (earliest tie); "
+            "low_idx = argmin(low) over [t-12, high_idx]; require low_idx < high_idx. "
+            "SHORT mirrors. Lookback may not cross a session boundary. "
+            "R = impulse_high - impulse_low; require R / ATR(14)[t] >= 3.5"
+        ),
+        "stage_b_pullback": (
+            "pullback_bar_count = t - end_idx - 1; require 1 <= pullback_bar_count <= impulse_bars. "
+            "LONG: pullback_low = min(low) over [end_idx+1, t-1]; "
+            "retrace = (impulse_high - pullback_low) / R. SHORT: pullback_high = max(high) over "
+            "the same bars; retrace = (pullback_high - impulse_low) / R. "
+            "Depth is measured from COMPLETED pullback bars only; bar t contributes the trigger."
+        ),
+        "stage_c_valid": "LONG: pullback_low > impulse_low. SHORT: pullback_high < impulse_high",
+        "stage_d_trigger": "LONG: close[t] > high[t-1]. SHORT: close[t] < low[t-1]",
+        "variants": {
+            "A": {"depth_min": 0.20, "depth_max": 0.40, "band": "[0.20, 0.40)", "label": "shallow"},
+            "B": {"depth_min": 0.40, "depth_max": 0.65, "band": "[0.40, 0.65]", "label": "medium"},
+        },
+        "variant_boundary_note": (
+            "The registered bands share 0.40. A is half-open at the top so exactly one variant "
+            "claims any depth; the bands are otherwise unchanged."
+        ),
+        "no_filters": (
+            "No EMA, RSI, MACD, ADX, Supertrend, VWAP, Bollinger, volume or candle-count "
+            "condition. ATR appears only to normalise impulse size across instruments."
+        ),
+        "implementation": "app/research/pullback_hypothesis.py",
+        "evaluation_plan": {
+            "horizons_bars": [6, 12, 24],
+            "primary_metric": "net_move_pct = (close[t+h] - close[t]) * dir / close[t] * 100",
+            "secondary": ["mfe_pct", "mae_pct", "mfe_mae_ratio"],
+            "controls": {
+                "A": "same bar, same symbol, same day, random side",
+                "B": "same day, same symbol, same direction, random bar",
+                "C": "same day, same symbol, same direction, random bar among stage-A passing bars",
+            },
+            "statistics": "day-level block permutation on a difference of means",
+            "comparisons": 6,
+            "significance_threshold": 0.008,
+            "split": "60/20/20 chronological by trading day",
+        },
+        "gates": {
+            "0": ">= 300 signals and >= 25 signal-days in development, else UNDERPOWERED",
+            "1": "directional edge over Control A",
+            "2": "structural edge over Control C",
+            "3": "sign preserved in validation",
+            "4": "sign preserved in hold-out",
+            "label": "mean MFE > 0.183% -> movement potentially sufficient for further "
+                     "economic testing (a label, not a gate; MFE is a best-case excursion)",
+        },
     },
     notes=(
-        "Proposed, not defined. The exact thresholds must be written into rule_definition and "
-        "the status moved to DEFINED before any evaluation is run, so the rule cannot be "
-        "adjusted after seeing results."
+        "Parameters frozen after input-only calibration and design review. Rule must not be "
+        "modified after results are seen; a revision becomes H003 v2 with v1 preserved."
     ),
 )
 
