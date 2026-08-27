@@ -286,6 +286,19 @@ class GrowwClient(BrokerClient):
                     volumes.append(int(v))
         return volumes[-days:]
 
+    async def get_candles_window(
+        self, symbol: str, interval_minutes: int, start: dt.datetime, end: dt.datetime
+    ) -> list[tuple[int, float, float, float, float, int]]:
+        """Historical bars for an EXPLICIT window.
+
+        `get_candles` only looks back from now, which is all the chart backfill
+        needs but makes older history unreachable — and Groww caps how wide a
+        single request may be, so deep history has to be walked window by
+        window. Added for the research ingester; `get_candles` is unchanged and
+        now delegates here so both paths share one parser.
+        """
+        return await self._historical(symbol, interval_minutes, start, end)
+
     async def get_candles(
         self, symbol: str, interval_minutes: int, days: int = 5
     ) -> list[tuple[int, float, float, float, float, int]]:
@@ -297,9 +310,13 @@ class GrowwClient(BrokerClient):
         handled — guessing one and silently dropping the other would leave the
         chart mysteriously empty.
         """
-        sdk = self._require_session()
         end = dt.datetime.now()
-        start = end - dt.timedelta(days=days)
+        return await self._historical(symbol, interval_minutes, end - dt.timedelta(days=days), end)
+
+    async def _historical(
+        self, symbol: str, interval_minutes: int, start: dt.datetime, end: dt.datetime
+    ) -> list[tuple[int, float, float, float, float, int]]:
+        sdk = self._require_session()
         fmt = "%Y-%m-%d %H:%M:%S"
         try:
             raw = await asyncio.to_thread(

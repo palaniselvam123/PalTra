@@ -21,6 +21,7 @@ from app.api import (
     routes_orders,
     routes_reports,
     routes_scanner,
+    routes_research,
     routes_scanner_engine,
     routes_ws,
 )
@@ -231,6 +232,7 @@ app.include_router(routes_instruments.router)
 app.include_router(routes_watchlist.router)
 app.include_router(routes_chart.router)
 app.include_router(routes_scanner_engine.router)
+app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
 
 

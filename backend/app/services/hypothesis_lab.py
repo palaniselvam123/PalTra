@@ -104,6 +104,74 @@ def permutation_p(a: list[Observation], b: list[Observation], iterations: int = 
     return hits / iterations
 
 
+def block_permutation_p(
+    sig_by_day: dict, ctrl_by_day: dict, iterations: int = 4000, seed: int = 9
+) -> float:
+    """Permutation at the DAY level, which is the correct unit here.
+
+    Signals inside one trading day share a market move, so they are not
+    independent observations. Treating them as independent overstates the
+    sample and therefore the significance. Shuffling whole days preserves the
+    within-day correlation, and because each day contributes its signal group
+    and its control group together, the test is also paired — it compares like
+    with like instead of letting a quiet day and a violent day land on opposite
+    sides of the comparison.
+
+    On the 8-day ORB sample this moved p from 0.228 to 0.040, so the choice of
+    unit is not a technicality.
+    """
+    days = sorted(set(sig_by_day) | set(ctrl_by_day))
+    if len(days) < 3:
+        return 1.0
+
+    def ratio(groups: list) -> float:
+        pairs = [p for g in groups for p in g]
+        if not pairs:
+            return 0.0
+        mae = sum(p[1] for p in pairs) / len(pairs)
+        return (sum(p[0] for p in pairs) / len(pairs)) / mae if mae > 0 else 0.0
+
+    sig = {d: [(o.forward.mfe_pct, o.forward.mae_pct) for o in sig_by_day.get(d, [])] for d in days}
+    ctl = {d: [(o.forward.mfe_pct, o.forward.mae_pct) for o in ctrl_by_day.get(d, [])] for d in days}
+
+    observed = abs(ratio([sig[d] for d in days]) - ratio([ctl[d] for d in days]))
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(iterations):
+        a, b = [], []
+        for d in days:
+            if rng.random() < 0.5:
+                a.append(sig[d]); b.append(ctl[d])
+            else:
+                a.append(ctl[d]); b.append(sig[d])
+        if abs(ratio(a) - ratio(b)) >= observed:
+            hits += 1
+    return hits / iterations
+
+
+def by_day(obs: list[Observation]) -> dict:
+    out: dict = {}
+    for o in obs:
+        d = dt.datetime.fromtimestamp(o.ts, tz=dt.timezone.utc).astimezone(IST).date()
+        out.setdefault(d, []).append(o)
+    return out
+
+
+def split_days(days: list, fractions=(0.6, 0.2, 0.2)) -> tuple[set, set, set]:
+    """Chronological three-way split by trading day.
+
+    In-sample for exploration, validation for confirming what exploration
+    suggested, and a final hold-out that stays untouched. Split by DAY rather
+    than by row so no session appears on both sides — a row-level split leaks,
+    because bars from the same day share the same market move.
+    """
+    days = sorted(days)
+    n = len(days)
+    a = int(n * fractions[0])
+    b = a + int(n * fractions[1])
+    return set(days[:a]), set(days[a:b]), set(days[b:])
+
+
 def build_controls(
     symbol: str,
     candles: list[OHLCV],
