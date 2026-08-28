@@ -3577,3 +3577,164 @@ Two things I am deliberately not deciding, as they change what is claimed:
 The remaining honest limitation is unchanged and worth restating at
 registration: 63 sessions, roughly 38 in development, one market regime, and an
 adjustment policy that is still UNKNOWN.
+
+---
+
+## Step 17 — H004 v1 executed: **REJECTED**
+
+Frozen specification run unchanged. **Hold-out never loaded.** H004 v1's
+definition, universe, sector map, controls, horizons and statistics are exactly
+as registered; nothing was altered before, during or after the run.
+
+### Execution parameters
+
+| | |
+|---|---|
+| universe | 118 stocks, 13 sectors (min size 5) |
+| development | 38 days, 2026-06-01 .. 2026-07-23 |
+| validation | 12 days, 2026-07-24 .. 2026-08-10 |
+| hold-out | 14 days — **NOT READ** |
+| timestamps contributing | 348 (~7.0 per session) |
+| permutations | 2,000 per horizon, seed 20260828 |
+| alpha | 0.0167 (Bonferroni over the three pre-registered horizons) |
+
+Alpha note: the registry fixed the test but not a numeric threshold, so 0.05/3
+is applied as the project's established convention. It is stated as an
+interpretation, not a registered constant, and was fixed before results were
+read.
+
+### Data quality and eligibility
+
+| horizon | development obs | validation obs | skipped, window ineligible | skipped, no sector outcome |
+|---|---|---|---|---|
+| 6 | 26,663 | 8,496 | 5,896 | 0 |
+| 12 | 26,663 | 8,496 | 5,896 | 0 |
+| 24 | 22,179 | 7,080 | 11,796 | 0 |
+
+Also skipped: 118 observations with no ATR, 8 with no computable score. All 50
+development and validation sessions were complete. Session-end exclusions rise
+with horizon exactly as expected — a 24-bar window needs two hours of session
+left, so more late-session bars fall out.
+
+### Frozen development tercile boundaries
+
+| sector | n | low < | high >= | | sector | n | low < | high >= |
+|---|---|---|---|---|---|---|---|---|
+| AUTO | 2,486 | −0.7696 | 0.8088 | | FIN | 3,616 | −0.7843 | 0.7939 |
+| BANK | 2,712 | −0.7377 | 0.7757 | | FMCG | 2,712 | −0.7955 | 0.8038 |
+| CAPGOODS | 2,034 | −0.7851 | 0.8621 | | IT | 1,808 | −0.7881 | 0.7400 |
+| CEMENT | 1,125 | −0.8415 | 0.8315 | | METAL | 1,582 | −0.7039 | 0.7303 |
+| CHEM | 1,130 | −1.0357 | 1.0138 | | PHARMA | 2,486 | −0.8050 | 0.7564 |
+| CONSUMER | 1,582 | −0.9921 | 0.9693 | | POWER | 1,808 | −0.8665 | 0.8507 |
+| ENERGY | 1,582 | −0.8850 | 0.8065 | | | | | |
+
+Computed on development only and applied unchanged to validation.
+
+### Development results
+
+| horizon | low mean | mid mean | high mean | **high−low** | median spread | effect size d | **p** |
+|---|---|---|---|---|---|---|---|
+| 6 | +0.01220 | +0.00797 | +0.00238 | **−0.00982** | −0.01414 | −0.0266 | 0.0750 |
+| 12 | +0.02104 | +0.01126 | +0.00887 | **−0.01218** | −0.01609 | −0.0247 | 0.0980 |
+| 24 | +0.02901 | +0.01417 | +0.01264 | **−0.01637** | −0.03177 | −0.0244 | 0.1465 |
+
+All figures in percentage points of sector-relative return.
+
+**The spread is negative at every horizon — the opposite of what H004
+predicted** — and none reaches significance.
+
+The tercile means are monotone in the wrong direction: low > mid > high at all
+three horizons. A high score is followed by *weaker* sector-relative performance.
+
+### Validation results (frozen boundaries, nothing retuned)
+
+| horizon | low mean | mid mean | high mean | **high−low** | effect size d | **p** |
+|---|---|---|---|---|---|---|
+| 6 | +0.00983 | +0.00520 | +0.01219 | **+0.00236** | +0.0061 | 0.8270 |
+| 12 | +0.00221 | +0.00442 | +0.01987 | **+0.01766** | +0.0355 | 0.1915 |
+| 24 | +0.01600 | −0.00035 | +0.04061 | **+0.02461** | +0.0366 | 0.2210 |
+
+**Every horizon reverses sign between development and validation.** Development
+is uniformly negative, validation uniformly positive, and neither is
+significant. A complete sign reversal across an out-of-sample period is the
+signature of noise, not of a relationship that merely weakened.
+
+### Implementation validation
+
+The permutation null is centred on zero at all three horizons — means +0.00058,
++0.00005 and +0.00056 against null standard deviations of 0.0056, 0.0074 and
+0.0110. A biased permutation (leaking sector or timestamp structure) would shift
+that centre. It did not, which is direct evidence the within-sector,
+day-blocked shuffle is implemented correctly.
+
+The day-level blocking was applied by drawing **one relabeling per (day,
+sector)** and applying it at every timestamp in that day. Reshuffling
+independently at each timestamp would have broken the within-day persistence of
+both score and outcome, understating the null variance and inflating
+significance.
+
+### Pre-registered gate results
+
+| gate | result | |
+|---|---|---|
+| **0 — sample** | **PASS** | 22,179–26,663 development observations per horizon |
+| **1 — relationship** | **FAIL** | 0 of 3 horizons show the predicted positive spread |
+| **2 — significance** | **FAIL** | 0 of 3 reach p < 0.0167; best is 0.0750 |
+| **3 — horizon consistency** | **PASS** | all three signs agree — on the *opposite* of the prediction |
+| **4 — validation** | **FAIL** | all three signs reverse |
+| **5 — hold-out** | **NOT EVALUATED** | hold-out never read |
+| **6 — economic** | **NOT EVALUATED** | reached only if the directional gates pass |
+
+Gate 3 passing is worth reading carefully: consistency of sign is only a virtue
+when the sign is the predicted one. Here it means the wrong-direction reading
+was stable across horizons in development — and then reversed wholesale in
+validation.
+
+### POST-HOC / DESCRIPTIVE diagnostics — not gates
+
+Development period only. None of this was pre-registered, and none of it is used
+to redefine H004 or select a subset.
+
+**Sector breadth.** 9 of 13 sectors carry a negative spread at 6 bars, 10 of 13
+at 12 bars, 9 of 13 at 24 bars. The wrong-signed reading is broad rather than
+driven by one group.
+
+**No single sector dominates.** Leave-one-sector-out at 6 bars moves the overall
+spread only between −0.0075 (without FIN) and −0.0122 (without FMCG), against
+−0.0098 overall. At 24 bars the widest single influences are METAL (−0.0106
+without it) and CONSUMER (−0.0241 without it).
+
+**Smallest sectors are not responsible.** Excluding CEMENT and CHEM — the two
+five-member sectors — leaves the spread at −0.0066 / −0.0107 / −0.0140 against
+−0.0098 / −0.0122 / −0.0164 overall.
+
+**Which side carries it varies by horizon** — the deficit sits on the high side
+at 6 bars and on the low side at 12 and 24. A real effect would not migrate
+between sides as the horizon lengthens; noise does.
+
+### Final status: **REJECTED**
+
+H004 v1 fails Gate 1 (wrong direction), Gate 2 (no significance) and Gate 4
+(validation reverses). The definition is unchanged and remains permanently
+recorded. Any revision must be registered as H004 v2 with v1's result intact.
+
+Deliberately not claimed: nothing here says the cross-sectional *direction* is
+exhausted, only that this specific pre-registered score failed on this dataset
+and configuration. Equally, the negative development spread is **not** evidence
+that inverting the score would work — it reverses in validation, which is
+precisely the reason not to trade the inverse of a rejected rule.
+
+### Methodology checks performed before declaring
+
+Every failure mode listed in the brief was checked rather than assumed:
+
+| check | result |
+|---|---|
+| sector benchmark includes the stock itself | no — leave-one-out, pinned by test |
+| future data in the score | no — score reads bars <= t only |
+| thresholds derived from validation | no — terciles cut on development, applied frozen |
+| control leak | the null preserves timestamp, sector and both marginals; null centred on zero |
+| forward-window mismatch | signals and outcomes share `SessionIndex.is_forward_window_valid` |
+| missing-bar handling differing between arms | same eligibility layer for both |
+| one sector dominating through an implementation error | no — leave-one-sector-out is flat |
+| timestamp alignment | zero misaligned bars across 596,516 rows |
