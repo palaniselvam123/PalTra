@@ -1600,3 +1600,257 @@ reasoning about thresholds has already been wrong twice in this project.
 **Open items before H004 can be approved:** the volume defect (8.2) must be
 resolved or V2 dropped; V3's correlation with `impulse_score` must be measured;
 and V4's length normalisation must be fixed in advance.
+
+---
+
+## Step 9 — Volume architecture and feature audits
+
+**H001, H002, H003 remain REJECTED, unmodified.** No forward return was
+computed anywhere in this step.
+
+### 9.1 Corrected research-volume architecture
+
+| column | meaning |
+|---|---|
+| `volume` | the broker's value, untouched (cumulative since session open) |
+| `raw_cumulative_volume` | explicit copy of the same, so the raw semantics are named rather than implied |
+| `bar_volume` | derived per-bar volume; **NULL** where not derivable |
+| `volume_quality` | `OK` / `FIRST_BAR` / `UNKNOWN` |
+
+`read()` gains `volume="bar"` (default) or `volume="raw_cumulative"`. The raw
+path reproduces H001-H003 exactly; none of their conditions read volume, so
+their verdicts are unaffected either way.
+
+**A defect caught while doing this.** The first implementation put derivation in
+a one-off migration, which meant `upsert()` wrote rows with a NULL `bar_volume`
+— so any *future* backfill would have read back as **zero volume** under the new
+default. Seven tests failed and exposed it. Derivation now lives in the store
+and `upsert()` recomputes every session it touches, so the invariant is
+maintained on write rather than depending on a migration being re-run.
+
+### 9.2 Raw vs derived semantics
+
+```
+bar_volume[t] = cumulative[t] - cumulative[t-1]     within a session
+bar_volume[first bar of session] = cumulative[first]
+```
+
+**First bar** is flagged `FIRST_BAR`, not `OK`. The counter starts from zero
+before the open, so its cumulative is its own volume — but the median first-bar
+value is 3.15x a typical later bar, which is equally consistent with a genuine
+opening burst and with pre-open auction volume folded in. This data cannot
+settle that, so the flag records the ambiguity instead of hiding it.
+
+Migration result over the full dataset:
+
+| | rows | share |
+|---|---|---|
+| `OK` | 180,326 | 97.9% |
+| `FIRST_BAR` | 2,457 | 1.3% |
+| `UNKNOWN` | 1,478 | 0.80% |
+
+### 9.3 The 791 within-session drops
+
+| property | finding |
+|---|---|
+| count | 791 (0.429% of 184,261 bars) |
+| symbols affected | **39 of 39** (19-22 each — uniform, not symbol-specific) |
+| time of day | **all 791 in the 15:00 hour**; none earlier |
+| magnitude | median 1,852,349 shares; p25 704,696; max 58,939,390 |
+| relative | median **97.6%** of the previous cumulative; p90 100% |
+| drops to <10% of previous | 779 (98.5%) |
+| decrease under 1% (revision-like) | 1 (0.1%) |
+| next bar resumes increasing | 687 of 731 (94.0%) |
+| next bar exceeds the pre-drop value | 498 (68.1%) |
+
+**Classification: counter resets at the session tail, not vendor revisions.**
+A revision would be a small correction spread across the day; these are
+near-total drops confined to the last half hour. Two sub-shapes appear —
+`874,272 -> 16,145 -> 891,228`, where the next bar returns to the main counter
+(and 874,272 + 16,145 ≈ 891,228, so the anomalous value looks like a bare
+per-bar figure), and `833,647 -> 0 -> 16,560`, where a fresh small counter
+begins. The two are indistinguishable from a single bar, which is why neither
+is guessed at.
+
+**Treatment rule (deterministic, data-semantic, no forward information):**
+
+1. A bar whose cumulative is below its predecessor's -> `UNKNOWN`, volume NULL.
+2. The bar *immediately after* one -> also `UNKNOWN`: its difference would be
+   taken against a reset baseline and would report most of the day's volume as
+   a single bar.
+3. Nothing is clipped to zero. A fabricated zero is indistinguishable
+   downstream from a genuinely quiet bar.
+
+1,478 bars = 791 resets + 687 successors (60 resets are a session's last bar).
+Volume-sensitive analysis must exclude these; `unknown_volume_timestamps()`
+names them, and `read(volume="bar")` renders them 0 purely because `OHLCV.volume`
+is typed `int` — that rendering is documented as not a claim of zero volume.
+
+**Validation of the fix.** Recomputing the V2 candidate on the corrected column:
+
+| | n | min | p25 | median | p75 | max | below 1.0 |
+|---|---|---|---|---|---|---|---|
+| before (raw cumulative) | 33,525 | 1.011 | 1.116 | 1.192 | 1.362 | 12.1 | **0 (0.0%)** |
+| after (derived per-bar) | 33,525 | 0.013 | 0.770 | 1.311 | 2.369 | 69.1 | **12,276 (36.6%)** |
+
+A ratio of two volumes that never once fell below 1.0 across 33,525 samples was
+the symptom; it now behaves like a ratio.
+
+### 9.4 Live-vs-research comparison — **NOT POSSIBLE TODAY**
+
+Reporting this as a stop condition rather than working around it.
+
+| | |
+|---|---|
+| research store | 2026-06-01 .. 2026-08-27, 63 days |
+| live store | 2026-08-28 only, 5 bars |
+| overlapping bars | **0** |
+
+Three separate reasons it cannot be run right now:
+
+1. **No date overlap** — the live in-memory store was emptied by the most
+   recent `--reload` and holds only today.
+2. **The live feed is currently SIMULATED.** Its RELIANCE bars print 2779 ->
+   3028 -> 2510 against a real price near 1330. Synthetic prices cannot validate
+   real volume.
+3. **Market is closed**, so no new tick-derived bars are forming.
+
+**A correction to what I reported earlier.** I previously wrote that the live
+path "is not implicated". That was only half right, and the half that is wrong
+matters:
+
+* `candle_store.on_tick` computes `delta = max(0, cum_volume - prev_cum)` —
+  genuine per-bar volume. Correct.
+* `backfill.ensure_backfilled` seeds the same store from
+  `client.get_candles(...)` — **the same cumulative values the research store
+  had.** So the live series mixes both semantics, with backfilled history in
+  cumulative units and today's tick bars in per-bar units, in one column.
+
+That is a real defect in the live charting path. It does not affect any
+registered verdict, and I have not changed the live path. It is reported for a
+decision.
+
+**Exact procedure to run the comparison when possible:** during a live NSE
+session with the feed on LIVE, let `candle_store` build tick bars for a set of
+symbols; after the close, ingest that same day into the research store; then
+compare bar-for-bar on `(symbol, ts)`. Only tick-derived live bars are a valid
+comparator — backfilled live bars come from the same API call as research and
+would agree by construction.
+
+### 9.5 V1 audit — terminal close location: **PASSES**
+
+| check | result |
+|---|---|
+| bars with zero range (denominator 0) | **0 of 34,159** |
+| end-bar range, p1 / p5 / median (ATR units) | 0.453 / 0.608 / 1.215 |
+| end-bar range < 0.20 ATR | 1 bar (0.003%) |
+| end-bar range < 0.25 ATR | 15 bars (0.04%) |
+| V1 stdev in the narrow subset vs elsewhere | 0.301 vs 0.297 |
+| V1 exactly 0.0 / exactly 1.0 | 1,381 (4.0%) / 1,317 (3.9%) |
+
+The denominator is not a practical problem: the impulse-end bar is by
+construction the bar containing the move's extreme, so it is rarely narrow, and
+the 1st percentile is still 0.45 ATR. Variance in the narrow tail is
+indistinguishable from the rest.
+
+**Deterministic handling rule:** if `high == low`, V1 is undefined — the
+observation is *excluded and counted*, never imputed. No threshold filter is
+applied, because the data shows none is needed and a threshold would be a
+parameter chosen without justification. Values of exactly 0.0 and 1.0 are
+legitimate (a bar closing on its low or high), not degenerate.
+
+### 9.6 V3 audit — **REDUNDANT, DROPPED**
+
+```
+V3 = impulse_range / (impulse_bars × ATR)
+   = (impulse_range / ATR) / impulse_bars
+   = impulse_score / impulse_bars          [exact identity]
+```
+
+Reconstruction error against the computed values: 4.4e-16 — floating point only.
+V3 is not a new measurement; it is Stage-A's own statistic divided by duration.
+
+| | value |
+|---|---|
+| corr(V3, impulse_score) | +0.095 |
+| corr(V3, impulse_bars) | **−0.722** |
+| stdev of V3 overall | 0.623 |
+| mean stdev *within* a fixed duration | **0.213** |
+
+| impulse_bars | n | V3 median | impulse_score median |
+|---|---|---|---|
+| 1 | 634 | 4.025 | 4.025 |
+| 3 | 1,862 | 1.333 | 3.999 |
+| 5 | 2,936 | 0.817 | 4.087 |
+| 8 | 4,035 | 0.532 | 4.255 |
+| 11 | 5,046 | 0.409 | 4.498 |
+
+`impulse_score` is essentially flat across durations (4.0 -> 4.5, because
+Stage A thresholds it at 3.5), while V3 falls as 1/bars. Holding duration
+fixed removes 66% of V3's variance. **V3 is impulse duration wearing a
+different name.**
+
+**Dropped.** If duration is the interesting quantity, the honest candidate is
+`impulse_bars` itself — already available, directly interpretable, and not
+dressed up as something new. Whether to add it is a decision for review, not
+something to slip in as a replacement.
+
+### 9.7 V4 audit — **NORMALISATION NOT DEFENSIBLE, BLOCKED**
+
+| impulse_bars | n | V4 median | 1/√N | V4 × √N |
+|---|---|---|---|---|
+| 1 | 634 | **1.000** | 1.000 | 1.000 |
+| 2 | 1,160 | **1.000** | 0.707 | 1.414 |
+| 3 | 1,862 | **1.000** | 0.577 | 1.732 |
+| 4 | 2,628 | 0.955 | 0.500 | 1.909 |
+| 6 | 3,396 | 0.816 | 0.408 | 2.000 |
+| 8 | 4,035 | 0.729 | 0.354 | 2.061 |
+| 11 | 5,046 | 0.646 | 0.302 | 2.144 |
+
+corr(V4, impulse_bars) = −0.418.
+
+Two blocking problems:
+
+1. **Structurally degenerate for short impulses.** At 1-3 bars the median is
+   *exactly* 1.000 — 3,656 observations (10.7%) pinned at the ceiling
+   regardless of market behaviour. A monotone 2-3 bar leg has efficiency 1 by
+   construction; that is arithmetic, not information.
+2. **`V4 × √N` does not work.** The proposed normalisation was motivated by a
+   random walk's expected efficiency of `1/√N`, but the observed medians sit far
+   *above* that curve — as they must, since Stage A selects large directional
+   moves. Multiplying by √N therefore over-corrects: the normalised column
+   climbs 1.000 -> 2.144 rather than flattening. It removes no length
+   dependence and introduces a new one.
+
+**Blocked.** The defensible alternative needs no constant at all: compare V4
+**within `impulse_bars` strata**, restricted to legs of 4+ bars where the
+measure is not pinned. That is a design change and is proposed, not adopted.
+
+### 9.8 Eligible H004 candidates after the audits
+
+| | status | why |
+|---|---|---|
+| **V1** terminal close location | **ELIGIBLE** | Distinct from Stage A: Stage A measures the *size* of the move over 12 bars; V1 measures where the *final bar* closed inside its own range. No prior hypothesis used bar-internal geometry — H001 uses two averages, H002 a session level, H003 swing structure and a prior-bar break. Denominator verified stable. |
+| **V2** volume trajectory | **ELIGIBLE, conditional** | Now computable. Genuinely new: no registered hypothesis has used volume at all. Conditional on the live cross-validation in 9.4, because the derivation is currently validated only internally. |
+| ~~V3~~ impulse velocity | **DROPPED** | An exact transform of Stage A's own statistic, dominated by duration |
+| ~~V4~~ leg efficiency | **BLOCKED** | Degenerate below 4 bars; the pre-proposed normalisation is not defensible |
+
+### 9.9 Stop conditions — three triggered
+
+| condition | status |
+|---|---|
+| research volume semantics unresolved | **resolved** — cumulative with session-tail resets, documented and derived |
+| research/live volume disagree materially | **CANNOT BE TESTED TODAY** (9.4) |
+| V3 effectively redundant with impulse_score | **TRIGGERED** — exact identity |
+| V4 normalisation not defensible | **TRIGGERED** |
+| V1 denominator unstable | not triggered — V1 is clean |
+
+Stopping before any forward screening, as instructed.
+
+### 9.10 Hold-out
+
+**Untouched.** Every measurement in this step used the development period only
+(37 days, 2026-06-01..2026-07-22), except the volume-defect classification,
+which is a data-integrity audit over the whole store and reads no outcome of any
+kind. The validation and hold-out periods have never been read by any screening
+or forward computation.
