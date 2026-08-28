@@ -47,10 +47,11 @@ class BackfillRequest(BaseModel):
 
 @router.get("/probe")
 async def probe(symbol: str = Query("RELIANCE"), interval: str = Query("5m"),
-                ladder: str = Query("")):
+                ladder: str = Query(""), widths: str = Query("")):
     """Measure the data source's real history limit, rather than assuming one."""
     steps = tuple(int(x) for x in ladder.split(",") if x.strip()) or None
-    return await ingestion.probe_max_history(_client(), symbol, interval, steps)
+    w = tuple(int(x) for x in widths.split(",") if x.strip()) or None
+    return await ingestion.probe_max_history(_client(), symbol, interval, steps, w)
 
 
 @router.get("/status")

@@ -2692,3 +2692,252 @@ corrupt a cross-sectional study specifically.
 **Untouched.** Nothing in this step read a forward outcome except the H003
 post-hoc, which used the development period only. The validation and hold-out
 periods remain unread by any screening.
+
+---
+
+## Step 14 — Corporate-action audit, 1-minute capability, cross-sectional design
+
+All verdicts frozen. **Hold-out not loaded.** No forward outcome was read in
+this step.
+
+### A. Corporate-action findings
+
+**Price-adjustment semantics: UNKNOWN / NOT VERIFIED.**
+
+| check | finding |
+|---|---|
+| project code | no adjustment, split, bonus or corporate-action handling anywhere in `groww_client.py`, `backfill.py` or the research package |
+| SDK signature | `get_historical_candle_data(trading_symbol, exchange, segment, start_time, end_time, interval_in_minutes, timeout)` — **no adjustment parameter exists** |
+| SDK docstring | no mention of adjustment, splits, bonuses or corporate actions |
+
+The API neither offers nor documents an adjustment policy, so the semantics
+cannot be established from the interface. Nothing has been adjusted, and nothing
+should be until the policy is known.
+
+**Empirical scan of the research window (2026-06-01 -> 2026-08-28):**
+
+| measure | value |
+|---|---|
+| overnight gaps examined | 2,428 across 39 symbols |
+| median / p95 / p99 | 0.337% / 1.518% / 2.468% |
+| maximum | **6.755%** |
+| gaps > 10% | **0** |
+| exact split/bonus ratio matches (2:1, 3:1, 5:1, 10:1, 1:2, 2:3, within 3%) | **0** |
+| intraday bar-to-bar jumps > 5% | **0** |
+
+**No unadjusted corporate action is detectable inside the research window.**
+
+Stated precisely, because the distinction matters: this does *not* prove the
+feed is adjusted. It is equally consistent with no corporate actions having
+occurred for these 39 large-caps in a three-month span, which is entirely
+ordinary. The dataset appears usable as it stands; the semantics remain
+unverified, so a longer or different universe could contain one.
+
+The largest gaps are also informative for what comes next: 2026-06-19 shows
+TECHM −6.76%, INFY −5.80%, TCS −4.45%, HCLTECH −4.26% — four IT names on one
+day. That is a sector event, not a corporate action, and it is exactly the
+structure a cross-sectional design has to reckon with.
+
+**Recommendation (not implemented):** add the gap and ratio-match scan to the
+dataset validator as a standing check. It detects the failure mode regardless of
+whether the adjustment policy is ever established, which is the property that
+matters.
+
+### B. 1-minute API capability
+
+Probed with the same discipline used for 5-minute.
+
+| property | 1-minute | 5-minute (for comparison) |
+|---|---|---|
+| max request window | **7 days** (8 refused) | 15 days |
+| history depth | **starts 2026-06-01** | starts 2026-06-01 |
+| accessible range | **2026-06-01 -> present, ~63 trading days** | identical |
+| old windows reachable | yes, at 70 and 80 days back | yes |
+| bars per full session | **367 observed** vs 375 nominal (97.9%) | 75 of 75 |
+| rate limiting | none observed | none observed |
+
+**Missing-bar behaviour — a systematic finding.** RELIANCE and TCS, on both
+2026-08-26 and 2026-08-27, each returned exactly 367 bars, first 09:15, last
+15:28, with the identical two gaps: **15:15 -> 15:20** and **15:24 -> 15:28**.
+
+Four identical patterns across two symbols and two days is not absent trading in
+India's two most liquid names; it is a feed artifact. It also lands in the same
+place as the volume-counter resets found earlier, every one of which fell in the
+15:00 hour. Something in the last fifteen minutes of the Groww feed is
+structurally unreliable, and 1-minute data exposes it more sharply than
+5-minute does.
+
+Practical cost of a full 1-minute backfill, if ever wanted: 39 symbols x ~88
+calendar days at 7-day windows is roughly 500 requests, about 10 minutes at the
+current 1.2s spacing, producing ~900,000 rows. Feasible — `CHUNK_DAYS["1m"]`
+would need raising from 3 to 6, still under the measured ceiling of 7. **Not
+done.** Only two symbols and two days were ingested as a probe; the 5-minute
+dataset is untouched (184,771 rows, 39 symbols, unchanged).
+
+### C. Recommended cross-sectional research design
+
+**Question.** At a fixed timestamp, does relative strength across stocks contain
+information about subsequent *relative* performance?
+
+**The two properties that make this different from everything tested so far:**
+
+1. Stocks are compared at the **same timestamp**, so the market-wide move at
+   that instant is common to every observation and cancels by construction.
+2. The outcome is **relative**, not absolute: a stock's forward return minus the
+   cross-sectional median forward return over the same window. Measuring an
+   absolute forward return would simply re-import the market move the design
+   exists to remove.
+
+**Observation sampling.** Timestamps drawn every N bars, non-overlapping, so no
+two observations share a lookback window. At N = 12 on 5-minute bars that is
+about 6 timestamps per session.
+
+### D. Candidate scores — three, one recommended
+
+All are computed from bars <= t only, and all use the same lookback N.
+
+**X1 — return relative to the cross-sectional median**
+
+```
+r_i(t)     = close_i(t) / close_i(t-N) - 1
+score_i(t) = r_i(t) - median_j r_j(t)
+```
+
+Simplest possible expression of the claim. One parameter (N).
+
+**X2 — volatility-adjusted relative return** *(recommended)*
+
+```
+score_i(t) = [ r_i(t) - median_j r_j(t) ] / (ATR_i(14, t) / close_i(t))
+```
+
+Same numerator, divided by the stock's own relative volatility.
+
+**X3 — cross-sectional percentile rank**
+
+```
+score_i(t) = percentile rank of r_i(t) among all j at time t
+```
+
+Robust to outliers; discards magnitude entirely.
+
+**Recommendation: X2.**
+
+X1 is simpler, but it has a known identity problem of exactly the kind that
+sank V3. On a day the market moves, high-volatility names move further for the
+same information, so ranking raw relative returns ranks *beta* — and the study
+would be measuring a well-known and uninteresting property while calling it
+relative strength. X2 removes that before the test rather than discovering it
+afterwards.
+
+The volatility normaliser is ATR(14), which is this project's established
+default and was chosen long before this question existed, so it is inherited
+rather than fitted. Parameter count stays at one.
+
+X3 is retained as a described alternative but not recommended: discarding
+magnitude throws away information for a robustness benefit that a 39-name
+universe does not obviously need.
+
+**A predictor-side diagnostic, not a second test:** the correlation between X1
+and X2, and between X1 and a simple volatility proxy, is computable from inputs
+alone and would show directly how much of X1 is beta. That reads no forward
+outcome and is not hypothesis shopping.
+
+**Lookback N = 12 bars (one hour at 5-minute).** Inherited from the impulse
+lookback already fixed in this project rather than newly chosen. If it needs
+justifying independently it should be calibrated the way K was — from the
+predictor distribution alone, never from outcomes.
+
+### E. Control and null design
+
+**Permutation: shuffle stock labels within each timestamp.**
+
+```
+for each timestamp t:
+    take the 39 scores and the 39 forward relative returns
+    randomly re-pair them
+```
+
+**Null hypothesis tested.** *At a given timestamp, the assignment of
+cross-sectional scores to stocks carries no information about which stocks
+subsequently outperform the cross-section.* Formally: scores are exchangeable
+across stocks within a timestamp.
+
+**Preserved exactly** — not approximately, which is what makes this stronger
+than any control used so far:
+
+| preserved | how |
+|---|---|
+| timestamp | permutation is within a single instant |
+| universe | the same 39 names appear on both sides |
+| market condition | the market-wide move is common to all and identical under permutation |
+| volatility environment | unchanged; the whole cross-section is the same set of numbers |
+| the marginal distribution of scores | unchanged — only the pairing is broken |
+| the marginal distribution of forward returns | unchanged |
+
+**Destroyed:** only the link between a stock's own score and its own forward
+return. That is precisely the thing under test.
+
+No modelling assumption about the market factor is required, because it cancels
+identically rather than being estimated and subtracted.
+
+**Dependence handling.** Consecutive timestamps within a day remain correlated —
+a stock relatively strong at 10:00 tends to still be so at 10:05 — so
+significance is still assessed with day-level blocking, and timestamps are
+sampled non-overlapping. Control A is retained unchanged as the direction test.
+
+### F. Data and power assessment
+
+**A correction to what I said last step.** I described the cross-sectional
+design as giving a "far larger effective sample". That was loose and I want to
+state it accurately: **it does not increase the number of independent blocks.**
+Days remain the unit of independence, so development still has 38 of them.
+
+The gain is different, and real: it **reduces the variance inside each block**.
+Every result so far has been dominated by the day's market-wide move — the ORB
+analysis measured a day-to-day standard deviation of 0.35 on a mean of 0.85,
+roughly 40% relative. A within-timestamp contrast removes that factor exactly,
+so what remains is idiosyncratic. Power comes from a smaller denominator, not
+from more observations.
+
+The size of that reduction is **measurable from inputs alone** — compare the
+variance of raw returns against the variance of cross-sectional residuals — and
+should be measured before committing, exactly as K was calibrated before H003.
+
+| question | assessment |
+|---|---|
+| Is 5-minute sufficient? | **Yes, for the first test.** At N = 12 non-overlapping it gives ~6 timestamps per session, 38 dev days, 39 names — roughly 8,900 stock-observations across 228 timestamps |
+| Would 1-minute materially help? | **Not for this.** It yields ~5x the raw timestamps, but a stock's relative rank at 10:00 and 10:01 is nearly the same number, so the extra observations carry little independent information. It would matter only for a genuinely short-lived effect measured at sub-5-minute horizons — and it brings the 15:15-15:29 gap problem with it. **Do not backfill 1-minute yet.** |
+| Is the 39-stock universe sufficient? | **Workable but thin.** Deciles hold four names each, and the cross-sectional median is estimated from 39 points |
+| Would more symbols be valuable? | **Yes — this is the highest-value data step.** ~100 liquid NSE names would sharpen rank resolution and stabilise the cross-sectional median, and unlike everything else on the wish-list it needs no new provider: same API, same 2026-06-01 depth, roughly 1,300 requests and ~470k additional rows |
+
+The clear conclusion on data: **widen the universe, not the frequency.** A
+cross-sectional design gains from more names per timestamp and gains very little
+from more timestamps per day.
+
+One caution carried forward from the gap scan: the 2026-06-19 IT cluster shows
+that sector co-movement is a live confound. Sector labels are derivable by hand
+for 39 (or 100) names and would separate "moving against the market" from
+"moving with its sector against the market". That is a real limitation of the
+design as stated, not a refinement to bolt on later.
+
+### G. Recommended next step
+
+In order, none of it started:
+
+1. **Widen the universe to ~100 liquid NSE symbols at 5-minute**, same date
+   range. Cheap, no new provider, and it is the input the cross-sectional design
+   is most sensitive to.
+2. **Run the gap and ratio-match scan over the widened universe** before using
+   it. A wider universe has a materially higher chance of containing a real
+   corporate action, and this is the one screen that catches it without knowing
+   the adjustment policy.
+3. **Measure the variance reduction from cross-sectional differencing**, input
+   only, to establish that the power argument in F actually holds on this data
+   before a hypothesis is registered on it.
+4. **Then pre-register the hypothesis** with X2, N = 12, the within-timestamp
+   permutation null, relative forward returns at 6/12/24 bars, day-level
+   blocking, and a fresh chronological split over the widened universe.
+
+**Not started, and not to be started before review:** no hypothesis registered,
+no generator written, no forward outcome inspected, no hold-out read.

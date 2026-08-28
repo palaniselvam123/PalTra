@@ -223,7 +223,7 @@ async def update(
     return await backfill(symbols, interval, recent, today, client, source, st, progress)
 
 
-async def probe_max_history(client, symbol: str, interval: str = "5m", ladder=None) -> dict:
+async def probe_max_history(client, symbol: str, interval: str = "5m", ladder=None, widths=None) -> dict:
     """Measure what the data source actually allows, in two dimensions.
 
     The application's own limits (`BACKFILL_DAYS`, `MAX_BARS`) say nothing
@@ -235,7 +235,7 @@ async def probe_max_history(client, symbol: str, interval: str = "5m", ladder=No
     now = dt.datetime.now()
 
     width: list[dict] = []
-    for days in (5, 10, 12, 15, 20, 30, 60, 90):
+    for days in widths or (5, 10, 12, 15, 20, 30, 60, 90):
         try:
             rows = await client.get_candles_window(
                 symbol, minutes, now - dt.timedelta(days=days), now
