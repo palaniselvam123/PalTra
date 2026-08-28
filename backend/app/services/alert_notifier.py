@@ -12,12 +12,25 @@ and are never returned decrypted over the API.
 
 Delivery failures are recorded, never swallowed: a scanner whose alerts
 silently stop arriving is worse than one that says it could not send.
+
+**A 2xx status is not delivery.** CallMeBot answers a rejected request with a
+2xx and an HTML body describing the problem — an invalid API key returns
+HTTP 201 with "ERROR: apikey can not be empty or it has an invalid format".
+Treating any 2xx as success therefore reported failed sends as delivered, which
+is precisely the silent failure this module claims not to have. Classification
+now reads the body.
+
+Even a clean acceptance is only that: CallMeBot confirms it queued the message,
+not that WhatsApp delivered it. `DeliveryResult.classification` distinguishes
+ACCEPTED from DELIVERED so callers cannot conflate them.
 """
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from dataclasses import dataclass
+import logging
+import re
+from dataclasses import dataclass, field
 
 import httpx
 from sqlalchemy import select
@@ -32,6 +45,81 @@ TWILIO = "twilio"
 REQUEST_TIMEOUT = 20.0
 MAX_ATTEMPTS = 3
 
+log = logging.getLogger("alerts")
+
+# Classification of what a provider response actually means.
+DELIVERED = "DELIVERED"      # provider confirms the message reached the recipient
+ACCEPTED = "ACCEPTED"        # provider took the request; delivery unconfirmed
+REJECTED = "REJECTED"        # provider refused it (bad key, unregistered number, ...)
+FAILED = "FAILED"            # transport failure, timeout, or 4xx/5xx
+UNKNOWN = "UNKNOWN"          # unrecognisable response
+
+# Substrings that mark a rejection even under a 2xx status.
+_REJECTION_MARKERS = (
+    "error",
+    "apikey",
+    "api key",
+    "invalid",
+    "not registered",
+    "activate",
+    "unauthorized",
+    "forbidden",
+)
+
+
+def mask_secret(value: str | None) -> str:
+    """Describe a secret without revealing it."""
+    if not value:
+        return "<unset>"
+    return f"<set, {len(value)} chars>"
+
+
+def mask_phone(value: str | None) -> str:
+    """Country code plus the last two digits, nothing else."""
+    v = (value or "").strip()
+    if len(v) < 5:
+        return "<unset>"
+    return f"{v[:3]}{'*' * (len(v) - 5)}{v[-2:]}"
+
+
+def sanitize(text: str | None, *secrets: str) -> str:
+    """Strip secrets and identifiers out of anything destined for a log."""
+    out = (text or "")[:400]
+    for sec in secrets:
+        if sec:
+            bare = sec.lstrip("+")
+            for form in (sec, bare, "%2B" + bare):
+                out = out.replace(form, "<REDACTED>")
+    out = re.sub(r"(?i)(apikey|api_key|token|auth|password)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
+    out = re.sub(r"(?i)(phone|number|to)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
+    out = re.sub(r"\+?\d{10,15}", "<REDACTED>", out)
+    return out
+
+
+def classify_response(status: int, body: str) -> tuple[str, str]:
+    """What a provider response really means, and why.
+
+    Reads the body rather than trusting the status code, because the primary
+    provider signals rejection with a 2xx.
+    """
+    text = (body or "").strip()
+    lowered = text.lower()
+
+    if status >= 500:
+        return FAILED, f"provider error, HTTP {status}"
+    if status >= 400:
+        return FAILED, f"request rejected, HTTP {status}"
+
+    for marker in _REJECTION_MARKERS:
+        if marker in lowered:
+            return REJECTED, f"provider returned an error body (HTTP {status})"
+
+    if not text:
+        return ACCEPTED, f"empty body, HTTP {status} (acceptance, not proof of delivery)"
+    if any(w in lowered for w in ("queued", "sent", "success", "message")):
+        return ACCEPTED, f"provider acknowledged the request (HTTP {status}); delivery unconfirmed"
+    return UNKNOWN, f"unrecognised response body (HTTP {status})"
+
 
 @dataclass
 class DeliveryResult:
@@ -39,6 +127,18 @@ class DeliveryResult:
     provider: str | None
     error: str | None = None
     skipped_reason: str | None = None
+    status_code: int | None = None
+    classification: str | None = None
+    provider_message: str | None = None      # sanitised; never contains secrets
+
+    @property
+    def delivery_confirmed(self) -> bool:
+        """True only when the provider confirms delivery, not mere acceptance.
+
+        Kept separate from `ok` so a caller cannot mistake "the API took it" for
+        "the message arrived" — the distinction that made this bug invisible.
+        """
+        return self.classification == DELIVERED
 
 
 def format_message(
@@ -144,12 +244,17 @@ class AlertNotifier:
             return await self._send_twilio(target, secret, extra, message)
         return DeliveryResult(False, channel.provider, error=f"Unknown provider {channel.provider}")
 
-    async def _with_retries(self, call, provider: str) -> DeliveryResult:
+    async def _with_retries(self, call, provider: str, *secrets: str) -> DeliveryResult:
         """Retries transient network failures with backoff.
 
         A 4xx is NOT retried: a bad API key will still be bad three attempts
         later, and hammering the endpoint risks a rate-limit ban on top of the
         original problem. Only timeouts, network errors, 429 and 5xx retry.
+
+        `secrets` are values to strip from anything logged or returned. They are
+        passed explicitly rather than pattern-matched, because a provider that
+        echoes a credential back in prose ("apikey ABC123 rejected") defeats any
+        `key=value` regex — which a test caught here.
         """
         last_error = "unknown"
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -166,17 +271,37 @@ class AlertNotifier:
             except Exception as exc:  # noqa: BLE001
                 return DeliveryResult(False, provider, error=f"{type(exc).__name__}: {exc}")
 
-            if 200 <= response.status_code < 300:
-                return DeliveryResult(True, provider)
+            body = (response.text or "")[:400]
+            classification, reason = classify_response(response.status_code, body)
+            sanitized = sanitize(body, *secrets)
 
-            body = (response.text or "")[:200]
-            if response.status_code == 429 or response.status_code >= 500:
-                last_error = f"HTTP {response.status_code}: {body}"
+            log.info(
+                "alert.delivery provider=%s status=%s classification=%s reason=%s response=%s",
+                provider, response.status_code, classification, reason, sanitized,
+            )
+
+            if classification in (ACCEPTED, DELIVERED):
+                return DeliveryResult(
+                    True, provider, status_code=response.status_code,
+                    classification=classification, provider_message=sanitized,
+                )
+
+            if classification == FAILED and (response.status_code == 429 or response.status_code >= 500):
+                last_error = f"HTTP {response.status_code}: {sanitized}"
                 if attempt < MAX_ATTEMPTS:
                     await asyncio.sleep(2**attempt)
                     continue
-            return DeliveryResult(False, provider, error=f"HTTP {response.status_code}: {body}")
-        return DeliveryResult(False, provider, error=last_error)
+
+            # A rejection is not retried: a bad key stays bad, and repeating the
+            # call risks a rate-limit ban on top of the original problem.
+            return DeliveryResult(
+                False, provider,
+                error=f"{reason}: {sanitized}",
+                status_code=response.status_code,
+                classification=classification,
+                provider_message=sanitized,
+            )
+        return DeliveryResult(False, provider, error=last_error, classification=FAILED)
 
     async def _send_callmebot(self, phone: str, apikey: str, message: str) -> DeliveryResult:
         if not phone or not apikey:
@@ -189,7 +314,7 @@ class AlertNotifier:
                     params={"phone": phone, "text": message, "apikey": apikey},
                 )
 
-        return await self._with_retries(call, CALLMEBOT)
+        return await self._with_retries(call, CALLMEBOT, apikey, phone)
 
     async def _send_twilio(self, to_number: str, auth: str, from_number: str, message: str) -> DeliveryResult:
         # `auth` is stored as "account_sid:auth_token" so one encrypted field
@@ -212,7 +337,7 @@ class AlertNotifier:
                     },
                 )
 
-        return await self._with_retries(call, TWILIO)
+        return await self._with_retries(call, TWILIO, token, sid, to_number, from_number)
 
 
 alert_notifier = AlertNotifier()

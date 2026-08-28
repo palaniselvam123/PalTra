@@ -167,8 +167,121 @@ H003 = Hypothesis(
 )
 
 
+H004 = Hypothesis(
+    hypothesis_id="H004",
+    version="v1",
+    name="Cross-Sectional Sector-Neutral Relative Strength",
+    description=(
+        "At a fixed 5-minute timestamp, does a stock's volatility-adjusted return relative to "
+        "the median return of its own sector contain information about its subsequent "
+        "sector-relative return? A new hypothesis, not a variant of H001-H003: those condition "
+        "on a completed directional move in one instrument and ask whether it continues, while "
+        "this compares instruments to one another at a single instant and never conditions on a "
+        "move having occurred."
+    ),
+    status="DEFINED",
+    rule_definition={
+        "frozen_at": "pre-registration, before any forward outcome was read",
+        "interval": "5m",
+        "lookback_bars": 12,
+        "atr_period": 14,
+        "min_sector_size": 5,
+        "universe": {
+            "verified": 125,
+            "excluded_sectors": ["TELECOM(3)", "REALTY(2)", "CONGLOM(2)"],
+            "research_universe": 118,
+            "verification": "every symbol resolved against the Groww instrument master, series=EQ",
+            "note": "LTIM and ZOMATO were proposed and REJECTED as absent from the master (renamed)",
+        },
+        "sector_rule": (
+            "Hand-assigned from the issuer's line of business; reference information containing "
+            "no return data. Deterministic, one sector per symbol, frozen in "
+            "app/research/cross_sectional.py SECTORS."
+        ),
+        "score": (
+            "sector_return_i(t) = median{ return_j(t) : j in sector(i), j != i }  [LEAVE-ONE-OUT]; "
+            "sector_relative_return_i(t) = return_i(t) - sector_return_i(t); "
+            "H004_score_i(t) = sector_relative_return_i(t) / (ATR_i(14,t) / close_i(t))"
+        ),
+        "leave_one_out_rationale": (
+            "A sector median including the stock makes the median member's relative return exactly "
+            "zero by construction - 6.81% of observations measured. Leave-one-out reduces that to "
+            "0.02% and correlates +0.988 with the naive version."
+        ),
+        "min_sector_size_rationale": (
+            "Structural, not tuned. With leave-one-out a sector of n benchmarks each member against "
+            "n-1 peers; at n=2 or 3 the peer median is a single stock. Five gives a four-peer "
+            "median, the smallest genuine group statistic. No performance figure consulted."
+        ),
+        "bucketing": (
+            "Terciles computed INDEPENDENTLY within each sector, then pooled. Global terciles would "
+            "tilt extremes toward small sectors: measured score dispersion is ~15% wider in "
+            "five-member sectors (stdev 2.202) than twelve-member ones (1.922)."
+        ),
+        "outcome": (
+            "future_sector_relative_return_i(t,h) = future_return_i(t,h) - "
+            "median{ future_return_j(t,h) : j in sector(i), j != i }. Same leave-one-out "
+            "construction as the score's benchmark."
+        ),
+        "horizons_bars": [6, 12, 24],
+        "no_filters": (
+            "No EMA, RSI, MACD, ADX, VWAP, Supertrend, volume or any other indicator. ATR enters "
+            "only as a scale for cross-instrument comparability, never as a filter."
+        ),
+        "excluded_data": (
+            "Volume is not used, so the 15:00-15:30 volume unreliability does not apply; price "
+            "coverage there is 97.9-98.4% against a midday 99.6% with zero timestamp defects, so "
+            "the full session is used."
+        ),
+        "null": (
+            "Within each fixed timestamp AND sector, randomise only the score-to-stock assignment. "
+            "Preserved: timestamp, universe, sector membership, market move, sector move, "
+            "volatility environment, and the within-sector marginal distributions of both score "
+            "and outcome. Permuting across the whole cross-section would break sector membership "
+            "and let a sector-driven result beat the null."
+        ),
+        "inference": "day-level block permutation; stock-timestamps are NOT independent",
+        "split": "chronological development / validation / hold-out; hold-out unread",
+        "implementation": "app/research/cross_sectional.py",
+        "gates": {
+            "0_sample": "sufficient development sample; else UNDERPOWERED, not REJECTED",
+            "1_relationship": "positive relationship between score and future sector-relative return",
+            "2_significance": "day-level block permutation",
+            "3_horizon_consistency": "directional consistency across 6, 12 and 24 bars",
+            "4_validation": "sign preserved in validation",
+            "5_holdout": "sign preserved in hold-out",
+            "6_economic": "assessed ONLY after the directional gates pass; statistical "
+                          "significance alone never declares a trading strategy",
+        },
+        "known_limitations": (
+            "63 sessions, ~38 in development, a single market regime, and a broker price-adjustment "
+            "policy that remains UNKNOWN / NOT VERIFIED."
+        ),
+    },
+    notes=(
+        "Pre-registered before any forward outcome was computed. Immutable: a changed rule becomes "
+        "H004 v2 and v1's record stands."
+    ),
+)
+
+
 def seed() -> list[Hypothesis]:
-    return [registry.register(h) for h in (H001, H002, H003)]
+    """Register the pre-registrations, without ever clobbering a recorded verdict.
+
+    A plain re-register would reset a hypothesis that has since been tested back
+    to its DEFINED state — which is exactly what happened to H003 v1 when H004
+    was added, silently reverting a REJECTED verdict. The registry exists to
+    make results immutable, so seeding must refuse to overwrite any version that
+    already carries a result.
+    """
+    out: list[Hypothesis] = []
+    for h in (H001, H002, H003, H004):
+        existing = registry.get(h.hypothesis_id, h.version)
+        if existing is not None and existing.result_summary is not None:
+            out.append(existing)      # a tested hypothesis is left exactly as recorded
+            continue
+        out.append(registry.register(h))
+    return out
 
 
 if __name__ == "__main__":

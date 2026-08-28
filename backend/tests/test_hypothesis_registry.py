@@ -172,4 +172,4 @@ class TestSeed:
         monkeypatch.setattr(seed_mod, "registry", r)
         seed_mod.seed()
         seed_mod.seed()
-        assert len(r.list()) == 3
+        assert len(r.list()) == 4      # H001-H004
