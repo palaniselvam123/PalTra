@@ -2941,3 +2941,330 @@ In order, none of it started:
 
 **Not started, and not to be started before review:** no hypothesis registered,
 no generator written, no forward outcome inspected, no hold-out read.
+
+---
+
+## Step 15 — Expanded universe, quality audit, cross-sectional power test
+
+All verdicts frozen. **No forward return was computed. Hold-out not loaded.**
+H004 remains NOT DEFINED.
+
+### A. Expanded universe
+
+127 candidates proposed from NIFTY-100-style large and mid caps, each checked
+against the Groww instrument master before fetching. **125 verified, 2 rejected
+and not added:**
+
+| rejected | reason |
+|---|---|
+| LTIM | not in instrument master (renamed on NSE) |
+| ZOMATO | not in instrument master (renamed on NSE) |
+
+All 125 are NSE CASH, `series = EQ` (mainboard equity), `intraday_allowed = True`,
+each with a resolved ISIN. Verification caught two stale symbols that would
+otherwise have produced silent gaps.
+
+**Ingest: 86 new symbols, 86 succeeded, 0 failures, 0 rejected rows, 411,745 new
+candles.**
+
+| | before | after |
+|---|---|---|
+| symbols | 39 | **125** |
+| candles | 184,771 | **596,516** |
+| range | 2026-06-01 .. 2026-08-28 | unchanged |
+
+**Coverage.** 96 symbols carry 64 days, 29 carry 63. The difference is entirely
+2026-08-28, which is the **current, still-trading session** — not a data defect.
+Most common bar counts are 4,787 / 4,788 / 4,725, i.e. 63-64 sessions of 75.
+
+**Liquidity, measured rather than assumed.** Median per-bar turnover ranges from
+Rs 12.4 lakh (BERGEPAINT) to Rs 21.6 crore (HDFCBANK). **Zero symbols fall below
+Rs 10 lakh per bar.** The universe is genuinely liquid throughout; the thinnest
+names are BERGEPAINT, TORNTPOWER, BAJAJHLDNG, SHREECEM.
+
+### B. Data-quality results
+
+```
+DATASET QUALITY REPORT
+  Symbols:            125          Duplicate candles:   0
+  Period:  2026-06-01 -> 2026-08-28 Invalid OHLC rows:   0
+  Trading days:       64           Invalid volume rows: 0
+  Total candles:      596,516      Timestamp issues:    0
+                                   Missing intervals:   1,240
+                                   Holidays detected:   1  (2026-06-26)
+  STATUS: WARNING
+```
+
+The WARNING is driven entirely by the partial current session: every one of the
+first 96 flagged shortfalls is dated 2026-08-28. Excluding it leaves **63
+complete sessions**, which is what the analysis below uses. Per-symbol missing
+bars on complete days peak at 25 of ~4,800 (0.52%).
+
+**Volume semantics, across all 125:**
+
+| quality | rows | share |
+|---|---|---|
+| OK | 583,922 | 97.89% |
+| FIRST_BAR | 7,971 | 1.34% |
+| UNKNOWN | 4,623 | 0.78% |
+
+**Zero sessions have a per-bar volume series that never falls** — the signature
+of a cumulative column, and its absence confirms the canonical contract holds
+across the expanded universe, not just the original 39.
+
+**End-of-session anomaly confirmed at scale.** All 4,623 UNKNOWN bars fall in the
+**15:00 hour**, with none earlier. The same signature now appears across 125
+symbols and 63 days, alongside the 1-minute gaps at 15:15-15:20 and 15:24-15:28
+found earlier. Something in the final fifteen minutes of the Groww feed is
+systematically unreliable. Flagged, not corrected.
+
+### C. Cross-sectional variance decomposition — **this partly refutes my own rationale**
+
+12-bar returns, 63 complete sessions, 441 non-overlapping timestamps (~7 per
+session), 54,986 stock-timestamp observations.
+
+| transformation | variance | std | reduction |
+|---|---|---|---|
+| A raw return | 3.848e-05 | 0.6203% | — |
+| B minus cross-sectional median | 3.208e-05 | 0.5664% | **16.6%** |
+| C minus sector median | 2.360e-05 | 0.4858% | **38.7%** |
+
+**The market common-mode is 16.6% of total variance — not the dominant term.**
+I argued in Steps 13 and 14 that cross-sectional differencing would remove the
+variance that has swamped every result. Measured, it removes about a sixth.
+That is the input-only power test doing its job, and it corrects me.
+
+**Sector explains a further 22.0% — more than the market factor does.** That was
+not anticipated and it is the single most consequential finding in this step.
+
+Internal consistency check: a 16.6% common-mode share implies an average
+pairwise correlation near 0.166, and the measured mean pairwise correlation is
+0.1754. The decomposition is self-consistent.
+
+**But the naive reading of that 16.6% understates the gain**, and the reason
+matters. A day-level statistic pooling K signals has variance
+
+```
+Var = sigma_market^2 + sigma_idio^2 / K
+```
+
+The idiosyncratic term shrinks as K grows; **the market term does not**. With
+the measured split and K = 40 signals per day, the market component accounts for
+about 89% of what remains, and adding more signals cannot reduce it. Removing it
+converts a variance *floor* into a term that shrinks with sample size — roughly
+a 9x variance reduction, or 3x on the standard error, at K = 40.
+
+So the correct statement is neither "it removes the dominant variance" (Step 13,
+too strong) nor "it only reduces within-block variance" (Step 14, too weak): it
+removes the component that does not average away. That is a real and large gain,
+for a reason different from the one I originally gave.
+
+### D. Sector effect
+
+| | all pairs | within sector | cross sector | difference |
+|---|---|---|---|---|
+| raw returns | 0.1754 | **0.3339** | 0.1635 | +0.1704 |
+| after removing cross-sectional mean | — | **0.1771** | −0.0208 | +0.1979 |
+
+(16 hand-assigned sectors, 125 symbols, all labelled; 542 within-sector pairs,
+7,208 cross-sector.)
+
+Within-sector correlation is roughly double cross-sector, and — decisively —
+**the gap does not close when the market is removed; it widens slightly**
+(+0.170 -> +0.198). Market-neutralisation therefore leaves the sector factor
+almost entirely intact.
+
+The practical consequence: a cross-sectional score that neutralises only the
+market will substantially rank **sectors** rather than stocks. On 2026-06-19,
+TECHM −6.76%, MPHASIS −6.83%, INFY −5.80%, TCS −4.45% and HCLTECH −4.26% would
+all have ranked at one extreme together, and the score would have been measuring
+"IT had a bad morning".
+
+Per instruction, sector neutralisation has **not** been added to X2. It is
+reported as a design decision requiring review.
+
+### E. Corporate-action findings — expanded universe
+
+| check | result |
+|---|---|
+| overnight gaps examined | 7,846 |
+| median / p95 / p99 | 0.330% / 1.446% / 2.442% |
+| maximum | **10.000%** (GODREJCP, 2026-08-12) |
+| gaps > 10% | **0** |
+| ratio-signature matches (>15% near an exact split/bonus ratio) | **0** |
+| intraday bar-to-bar jumps > 5% | **0** |
+
+**Adjustment status remains UNKNOWN / NOT VERIFIED.** The SDK exposes no
+adjustment parameter and documents no policy; absence of extreme events is not
+evidence of adjustment support, and is not being read as such.
+
+**Symbols requiring manual/reference-data verification: 3** — GODREJCP, LICI,
+MUTHOOTFIN. GODREJCP is the one to check first: 1025.00 -> 922.50 is *exactly*
+−10.00%, which is a suspiciously round figure suggesting a circuit limit or a
+data artifact rather than ordinary trading. None of the three matches a split or
+bonus ratio.
+
+### F. X2 input-only audit
+
+54,861 observations; **125 missing (0.23%)**, all from an absent or zero ATR.
+
+| property | value |
+|---|---|
+| distribution | p1 −4.881, p25 −1.242, **median +0.000**, p75 +1.304, p99 +5.404 |
+| range / stdev | −11.94 to +13.63, stdev 2.073 |
+| denominator ATR/close | p1 0.098%, median 0.202%, p99 0.495%, **min 0.057%** |
+| denominator below 0.01% of price | **0** |
+
+**Denominator stability: sound.** The smallest ATR/close observed is 0.057% of
+price, three orders of magnitude above zero. There is no division-blow-up risk
+and no clipping is needed.
+
+**Is X2 a disguised volatility ranking? No.**
+
+| | median ATR/close |
+|---|---|
+| bottom decile of X2 | 0.2176% |
+| top decile of X2 | 0.2336% |
+| all observations | 0.2019% |
+
+corr(X2, volatility proxy) = **+0.039**. The deciles are nearly identical in
+volatility, so X2 ranks direction, not risk.
+
+**A correction to my own audit.** The first run reported corr(X2, raw relative
+return) = +0.033, which was an artifact: I sliced two arrays of different lengths
+against each other, so 125 missing-ATR rows shifted the pairing. Recomputed on
+aligned triples: **corr(X2, raw relative return) = +0.9134.**
+
+That number matters for the X1-versus-X2 decision, and it weakens my earlier
+argument. X2 and X1 share a numerator and are 91% correlated, so volatility
+normalisation adjusts the ranking at the margin rather than measuring a
+different thing. It is still the better choice — it removes a systematic
+component rather than leaving it — but I over-sold it in Step 14 by implying X1
+would essentially be a beta ranking. corr(raw relative return, volatility) is
++0.039, so the beta contamination in X1 is small to begin with.
+
+**Cross-symbol comparability: adequate.** Per-symbol mean X2 spans −0.169
+(INDUSTOWER) to +0.423 (TITAN), stdev 0.110. Two checks on whether that is a
+problem:
+
+* the symbol accounts for **0.28% of X2's total variance**;
+* 6 of 125 symbols sit more than 2 SE from the universe mean — 5% of 125 is 6.25,
+  i.e. exactly the chance rate;
+* split-half correlation of per-symbol mean X2 across the first and second half
+  of the period is **+0.187** — weak.
+
+Symbol-level persistence is real but small, and not a material threat to the
+design. It should still be reported alongside any future result rather than
+assumed away.
+
+### G. Null / control design
+
+**Within-timestamp label permutation.**
+
+```
+for each sampled timestamp t:
+    hold the 125 scores and the 125 forward relative returns fixed
+    randomly re-pair them across stocks
+```
+
+**Hypothesis tested:** at a given instant, the assignment of cross-sectional
+scores to stocks carries no information about which stocks subsequently
+outperform the cross-section. Formally, scores are exchangeable across stocks
+within a timestamp.
+
+**Preserved exactly, not approximately:** the timestamp; the universe; the
+market-wide move at that instant; the volatility environment; the marginal
+distribution of scores; the marginal distribution of forward returns. **Destroyed:**
+only the score-to-stock pairing.
+
+No model of the market factor is needed, because it is common to every
+observation in the permuted set and cancels identically.
+
+**Why the test stays valid with many symbols observed at one timestamp.** This
+is exactly the case the permutation is built for. Ordinary tests assume
+independent observations and break when 125 stocks share a market move; the
+permutation makes no independence assumption *across stocks within a timestamp*,
+because it conditions on that timestamp's realised cross-section and only
+re-pairs labels. Any common factor — market or sector — is identical in every
+permutation and therefore contributes nothing to the null distribution.
+
+Two dependence caveats remain and are handled outside the permutation:
+
+* **Across timestamps within a day**, scores are autocorrelated. Handled by
+  sampling non-overlapping timestamps (every 12 bars) and blocking significance
+  at the day level.
+* **Sector clustering within a timestamp** is *not* removed by the permutation:
+  if IT moves together, shuffling labels breaks the stock-score link but a
+  sector-driven score would still correlate with sector-driven returns. This is
+  the strongest argument for deciding the sector question before registration.
+
+Control A (same bar, random direction) is retained unchanged as the direction
+test.
+
+### H. Power assessment
+
+**The appropriate dependence unit is the trading day, not the stock-timestamp.**
+54,986 stock-timestamps is emphatically not 54,986 independent observations.
+
+The layers of dependence, measured:
+
+| level | evidence |
+|---|---|
+| across stocks at one instant | mean pairwise correlation 0.175 |
+| within sector at one instant | 0.334, and still 0.177 after market removal |
+| across timestamps within a day | autocorrelated; mitigated by non-overlapping sampling |
+| across days | the safest independent block |
+
+| universe | timestamps/day | stock-observations/day | effective independent units per timestamp |
+|---|---|---|---|
+| 39 stocks | ~7 | ~270 | bounded by 39; with sector clustering realistically ~10-16 |
+| **125 stocks** | ~7 | **~875** | bounded by 125; with 16 sectors realistically **~16-40** |
+
+The honest summary: expanding from 39 to 125 roughly triples the raw
+cross-section and materially improves rank resolution — deciles now hold 12-13
+names instead of 4, and the cross-sectional median is estimated from 125 points
+rather than 39. It does **not** triple the independent information, because
+sector clustering binds. Significance must still be assessed with day-level
+blocking over 63 sessions.
+
+The real power gain remains the one in section C: removing the market factor
+eliminates the variance component that does not shrink as observations are
+pooled.
+
+### I. Is X2 ready for pre-registration? — **Not yet. One decision first.**
+
+X2 itself is in good shape: well-behaved distribution, stable denominator,
+0.23% missingness, demonstrably not a volatility ranking, and only trivial
+symbol-level persistence.
+
+The blocker is not X2's construction but a design question the measurements
+raised:
+
+> **The sector factor (22.0% of variance) is larger than the market factor
+> (16.6%), and market-neutralisation leaves it intact.**
+
+A market-only score will rank sectors substantially, which means a positive
+result would be ambiguous between "relative strength predicts" and "sector
+rotation predicts" — and the within-timestamp permutation cannot separate them,
+because it preserves the sector structure it would need to break.
+
+Three options, for review — I am not choosing one, since it changes what the
+hypothesis claims:
+
+1. **Register X2 as-is** and report the sector confound as a stated limitation.
+   Simplest, keeps the pre-registration honest, but accepts an ambiguous result.
+2. **Register a sector-neutral variant** (subtract the sector median instead of
+   the cross-sectional median). One extra piece of reference data, no extra
+   fitted parameter, and it tests a sharper claim: relative strength *within* a
+   sector.
+3. **Register X2 as primary with a sector-neutral secondary**, pre-declared
+   together with the multiple-comparison count adjusted from the start.
+
+**Recommendation: option 2**, on the evidence — it targets the larger factor and
+asks a question the data can actually answer unambiguously. But this is a
+change to what the hypothesis claims, so it is a decision for review rather than
+one to make inside an audit.
+
+Also to settle before registration: verify GODREJCP, LICI and MUTHOOTFIN against
+reference data, and decide whether to exclude the 15:00-15:30 window given the
+now-confirmed feed unreliability there.
