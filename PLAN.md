@@ -3268,3 +3268,312 @@ one to make inside an audit.
 Also to settle before registration: verify GODREJCP, LICI and MUTHOOTFIN against
 reference data, and decide whether to exclude the 15:00-15:30 window given the
 now-confirmed feed unreliability there.
+
+---
+
+## Step 16 — Suspicious symbols, 15:00-15:30, and the sector-neutral score
+
+All verdicts frozen. **No forward return computed. Hold-out not loaded.**
+H004 remains NOT DEFINED.
+
+### A. Suspicious-symbol investigation — all three are genuine market events
+
+| | GODREJCP 2026-08-12 | LICI 2026-08-04 | MUTHOOTFIN 2026-08-03 |
+|---|---|---|---|
+| gap | **−10.0000%** | −8.5181% | −8.0004% |
+| open/prev-close ratio | 0.900000 | 0.914819 | 0.919996 |
+| day range | 4.75% | 3.43% | 4.83% |
+| traded below the open? | **yes** (low 908.00) | yes (388.85) | yes (2766.10) |
+| bars sharing one close price | 4 of 75 | 5 of 75 | 4 of 75 |
+| volume vs typical day | **23.69x** | **13.13x** | **10.32x** |
+| recovered above pre-event close within 5 sessions | no | no | no |
+| median price 10 sessions before -> after | 1070.80 -> 931.00 (0.869) | 424.40 -> 400.55 (0.944) | 3019.40 -> 2889.95 (0.957) |
+
+**GODREJCP — the exact −10.000% is a coincidence of two round numbers, not a
+circuit.** 1025.00 x 0.9 = 922.50 exactly, but the evidence rules out a limit:
+the stock traded to a **low of 908.00, which is −11.4% from the prior close** —
+below the supposed −10% floor. A lower circuit prevents trading below the band;
+this stock traded through it. The day also had a 4.75% range with only 4 of 75
+bars sharing a price, so it was not pinned at any level.
+
+**None is a corporate action.** A split or bonus re-levels price permanently at
+an exact ratio with ordinary volume. Here all three show 10-24x normal volume,
+free two-way trading, and before/after price ratios (0.869, 0.944, 0.957) that
+do not match the gap or any standard ratio.
+
+| symbol | classification | confidence |
+|---|---|---|
+| GODREJCP | genuine market movement (news-driven repricing) | high |
+| LICI | genuine market movement | high |
+| MUTHOOTFIN | genuine market movement | high |
+
+**Recommended treatment: retain all three, unadjusted and unexcluded.** Removing
+them would strip out large idiosyncratic moves, which is precisely the
+observation a relative-strength study most needs. They are documented here
+rather than deleted.
+
+Caveat kept honest: the environment has no corporate-action reference feed, so
+this is an inference from trading behaviour, not a confirmation. The broker's
+**adjustment policy remains UNKNOWN / NOT VERIFIED.**
+
+### B. 15:00-15:30 quality audit — price and volume differ, and must be treated differently
+
+| slot | coverage | volume OK% | UNKNOWN% | mean abs return | mean range |
+|---|---|---|---|---|---|
+| 14:30-14:55 | 98.4-98.9% | **100.0%** | 0.0% | 0.085-0.092% | 0.178-0.182% |
+| 15:00 | 98.4% | **100.0%** | 0.0% | 0.1431% | 0.2601% |
+| 15:05 | 98.4% | **100.0%** | 0.0% | 0.0960% | 0.2009% |
+| 15:10 | 98.4% | **100.0%** | 0.0% | 0.1066% | 0.2236% |
+| **15:15** | 98.3% | 91.7% | **8.3%** | 0.0802% | 0.1831% |
+| **15:20** | 98.4% | 70.6% | **29.4%** | 0.1647% | 0.3237% |
+| **15:25** | 97.9% | 78.9% | **21.1%** | 0.1561% | 0.2554% |
+| midday reference | 99.6% | 100% | 0% | 0.0905% | 0.1791% |
+
+**A. Price — trustworthy.** Coverage holds at 97.9-98.4% against a midday 99.6%,
+a difference of about one percentage point. Returns and ranges are elevated into
+the close (0.16% vs 0.09% at 15:20) but that is ordinary end-of-session
+behaviour, not corruption — there is no discontinuity, no missing-bar cliff, and
+the elevation is smooth.
+
+**B. Volume — unreliable from 15:15 onward, and only from 15:15.** The break is
+sharp: 100% OK through 15:10, then 8.3% / 29.4% / 21.1% UNKNOWN. Everything
+before 15:15 is clean.
+
+**C. Timestamps — perfect.** **Zero** bars across all 125 symbols and 596,516
+rows sit off a 5-minute boundary.
+
+**Recommended treatment:**
+
+* **Price-based research: include the full 15:00-15:30 window.** Excluding it
+  would discard sound data; elevated end-of-session volatility is handled by the
+  time-of-day matching the control framework already applies.
+* **Volume-based research: exclude bars where `volume_quality != OK`,** which is
+  a per-bar rule, not a window rule. Dropping 15:15-15:30 wholesale would throw
+  away the 71-92% of bars in that window that are fine.
+
+Since the sector-neutral score uses price only (returns and ATR), **the full
+session is usable for H004.**
+
+### C. Final sector-neutral score definition
+
+```
+For stock i at timestamp t, with lookback N = 12 bars:
+
+  return_i(t)        = close_i(t) / close_i(t-N) - 1
+
+  sector_return_i(t) = median{ return_j(t) : j in sector(i), j != i }     [leave-one-out]
+
+  sector_relative_return_i(t) = return_i(t) - sector_return_i(t)
+
+  score_i(t) = sector_relative_return_i(t) / ( ATR_i(14, t) / close_i(t) )
+```
+
+**Leave-one-out is not cosmetic — the audit shows it is required.** With a plain
+sector median, **6.81% of scores are exactly zero**, because the median stock is
+its own benchmark and its relative return is zero by construction. Leave-one-out
+reduces that to **0.02%**, while correlating **+0.988** with the plain version —
+so it removes the degeneracy without distorting the measure.
+
+**Audit results:**
+
+| property | value |
+|---|---|
+| observations | 51,776 |
+| missingness | **0.25%** (118 no ATR, 12 sector below minimum) |
+| distribution | p1 −4.914, p25 −1.258, median −0.000, p75 +1.288, p99 +5.215 |
+| stdev | 2.046 |
+| denominator ATR/close | min **0.0573%**, p1 0.0981%, median 0.2008% |
+| denominator below 0.01% of price | **0** |
+
+**Denominator stability: sound.** The smallest observed ATR/close is 0.057% of
+price — three orders of magnitude clear of zero. No clipping or winsorising is
+needed, and none is proposed.
+
+**Cross-sector comparability: good, with one caveat.** Per-sector means all sit
+within +0.001 to +0.071 of zero. Per-sector standard deviations range 1.893
+(METAL) to 2.334 (CHEM).
+
+**Sensitivity to sector size — a real effect, quantified:**
+
+| sector size | observations | score stdev | \|score\| p99 |
+|---|---|---|---|
+| 5 | 4,375 | **2.202** | 6.12 |
+| 7 | 9,219 | 2.146 | 6.03 |
+| 8 | 7,023 | 2.002 | 5.65 |
+| 11 | 9,653 | 2.044 | 5.78 |
+| 12 | 10,531 | **1.922** | 5.37 |
+| 16 | 7,024 | 2.033 | 5.76 |
+
+Smaller sectors produce more dispersed scores — 2.202 at size 5 against 1.922 at
+size 12, a 15% difference — because a median over fewer peers is a noisier
+benchmark. If terciles were formed by pooling all stocks globally, small-sector
+names would be over-represented at both extremes by roughly that factor.
+
+**Proposed resolution, needing no extra transformation or parameter: form
+buckets WITHIN sector, then pool.** A stock is compared against its own sector's
+score distribution, so differing dispersion between sectors becomes irrelevant
+by construction. This is a bucketing rule, not a change to the score.
+
+### D. Sector reference rule and sizes
+
+**Rule.** Sector membership is assigned by hand from company identity — the line
+of business the issuer is in — using the frozen map below. It is reference
+information, contains no return data of any kind, is fixed before any forward
+test, and is deterministic: every symbol maps to exactly one sector.
+
+| sector | n | | sector | n |
+|---|---|---|---|---|
+| FIN | 16 | | POWER | 8 |
+| BANK | 12 | | METAL | 7 |
+| FMCG | 12 | | ENERGY | 7 |
+| AUTO | 11 | | CONSUMER | 7 |
+| PHARMA | 11 | | CEMENT | 5 |
+| CAPGOODS | 9 | | CHEM | 5 |
+| IT | 8 | | **TELECOM** | **3** |
+| | | | **REALTY** | **2** |
+| | | | **CONGLOM** | **2** |
+
+All 125 symbols are labelled; none is unclassified.
+
+**Minimum sector size: 5, proposed a priori and not tuned.** The reasoning is
+structural rather than empirical. With leave-one-out, a sector of size *n*
+benchmarks each stock against *n−1* peers. At n = 2 the peer group is a single
+stock, so the "sector return" is one company's return and the two members become
+perfect mirror images. At n = 3 the peer median is again one stock. Five members
+gives a four-peer median, the smallest group where the benchmark is a genuine
+group statistic rather than an individual. No performance figure was consulted.
+
+**Excluded by the rule: TELECOM (3), REALTY (2), CONGLOM (2) — 7 stocks. Usable
+universe: 118.** The alternative, merging small sectors into larger ones, was
+rejected: reshaping the map to clear a threshold would be fitting the reference
+data to the rule.
+
+### E. Exact cross-sectional null
+
+**Within-timestamp, within-sector label permutation.**
+
+```
+for each sampled timestamp t:
+    for each sector s with >= 5 members present at t:
+        hold the sector's scores and its forward relative returns fixed
+        randomly re-pair them across the stocks in that sector
+```
+
+**Hypothesis tested.** *Does assigning this relative-strength score to this
+particular stock carry information about subsequent relative performance, beyond
+the sector structure?* Formally: within a sector at a fixed instant, scores are
+exchangeable across its member stocks.
+
+| preserved exactly | destroyed |
+|---|---|
+| the timestamp | the score-to-stock pairing |
+| the universe and which stocks are present | |
+| **sector membership** — permutation happens inside a sector, never across | |
+| the market-wide move at that instant | |
+| each sector's own move at that instant | |
+| the volatility environment | |
+| the marginal distribution of scores, per sector | |
+| the marginal distribution of forward relative returns, per sector | |
+
+Permuting **within** sector rather than across the whole cross-section is the
+essential detail. A whole-cross-section shuffle would break sector membership
+too, so a purely sector-driven result could still beat that null — which is
+exactly the ambiguity flagged in Step 15. Confining the shuffle inside each
+sector makes the sector factor identical in every permutation, so it cannot
+contribute to the null distribution and cannot be mistaken for signal.
+
+**Why this stays valid with 118 stocks observed simultaneously.** No
+independence is assumed across stocks. The test conditions on the realised
+cross-section at that instant and only re-pairs labels, so any common factor —
+market, sector, or volatility regime — is byte-identical across every
+permutation. This is the property that makes the design work where a
+conventional test would not.
+
+Remaining dependence, handled outside the permutation: timestamps within a day
+are autocorrelated, so sampling is non-overlapping (every 12 bars) and
+significance is blocked at the day level.
+
+### F. Market-relative X2 retained as a diagnostic only
+
+| measure | value |
+|---|---|
+| corr(sector-neutral score, X2) | **+0.8167** |
+| corr(sector-relative return, market-relative return) | +0.8575 |
+| stdev: sector-neutral vs X2 | 2.046 vs 2.077 |
+
+The two scores share about two thirds of their variance and differ in the rest —
+consistent with sector explaining 22.0% of variance beyond the market. X2 is
+kept solely to establish later whether sector-neutralisation removed a real
+confound. **It is not a competing strategy and the two are not combined.**
+
+### G. Power assessment
+
+**The decisive new measurement — sector-neutralisation actually decorrelates the
+residuals:**
+
+| transformation | all pairs | within sector | cross sector |
+|---|---|---|---|
+| raw return | +0.1732 | +0.3296 | +0.1599 |
+| market-neutral | −0.0017 | **+0.1720** | −0.0165 |
+| **sector-neutral (LOO)** | **−0.0049** | **−0.0678** | **+0.0005** |
+
+Market-neutralisation leaves within-sector correlation at +0.172. Sector-neutral
+residuals are essentially uncorrelated everywhere: cross-sector +0.0005, and the
+within-sector −0.068 is the mechanical negative that removing a group median
+always induces, not residual structure.
+
+**This is what makes the design worth running.** Both common factors are gone,
+so the residuals per timestamp are close to independent.
+
+| quantity | value |
+|---|---|
+| complete sessions | 63 |
+| usable timestamps (non-overlapping, every 12 bars) | **440** (~7 per session) |
+| median stocks per timestamp | **118** |
+| stock-timestamp observations | **51,776** |
+| approximate degrees of freedom per timestamp | 118 − 13 sectors = **~105** |
+
+**The appropriate dependence unit remains the trading day.** 51,776 is
+emphatically not 51,776 independent observations, for two reasons that survive
+sector-neutralisation: the ~7 timestamps within a session are autocorrelated
+even when non-overlapping, and days themselves are the natural outer block.
+
+What has changed is what sits *inside* each block. Previously a day contributed
+one aggregate statistic dominated by that day's market move. Now a day
+contributes roughly 7 timestamps x ~105 approximately uncorrelated residuals,
+with both the market and sector factors removed by construction. The number of
+blocks is unchanged at 63 (about 38 in development); the precision within each
+block is transformed.
+
+### H. Is the design ready for H004 pre-registration? — **Yes, with the bucketing rule specified**
+
+Everything the audits were meant to settle has been settled:
+
+| check | status |
+|---|---|
+| suspicious symbols | resolved — genuine market events, retained unadjusted |
+| 15:00-15:30 | resolved — price usable, volume excluded per-bar via `volume_quality` |
+| denominator stability | sound, min 0.057% of price, no clipping needed |
+| missingness | 0.25% |
+| self-reference degeneracy | resolved by leave-one-out (6.81% -> 0.02%) |
+| sector rule | deterministic, frozen, reference-based, minimum size argued structurally |
+| small-sector sensitivity | quantified (15%), resolved by within-sector bucketing |
+| null design | within-sector permutation, sector factor provably neutral |
+| residual independence | confirmed: cross-sector +0.0005 |
+
+**One specification must be fixed in the pre-registration rather than decided
+later: buckets are formed WITHIN sector, then pooled.** Without that, the
+15% dispersion difference between size-5 and size-12 sectors would tilt global
+extremes toward small sectors.
+
+Two things I am deliberately not deciding, as they change what is claimed:
+
+* the forward horizon set (6/12/24 bars is the established convention and would
+  be my proposal, but it should be stated explicitly at registration);
+* whether the outcome is sector-relative forward return — which is the
+  consistent choice, since the score is sector-relative — or market-relative.
+  Mixing the two would test something neither score measures.
+
+The remaining honest limitation is unchanged and worth restating at
+registration: 63 sessions, roughly 38 in development, one market regime, and an
+adjustment policy that is still UNKNOWN.
