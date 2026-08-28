@@ -1185,3 +1185,174 @@ against Control A at every horizon.
 No filters were added, no parameters re-tuned, and the rule was not modified
 after results were visible. Any revision must be registered as H003 v2 with v1
 preserved.
+
+---
+
+## Step 7 — Control C infrastructure review
+
+**H003 v1 remains REJECTED.** Its pre-registered rule, gates and recorded
+results are unchanged. Everything below Task 2 is labelled sensitivity analysis
+and has no bearing on that verdict.
+
+### Task 2 — Control C time-of-day audit (development period)
+
+Distribution of signals and their original Control C samples across 30-minute
+session buckets, with mean `net_move_pct` at the 6-bar horizon.
+
+**H003-A**
+
+| bucket | signals | sig % | ctrl C | ctl % | sig move% | ctl move% |
+|---|---|---|---|---|---|---|
+| 10:15-10:45 | 201 | 12.5% | 854 | 13.4% | 0.0028 | 0.0558 |
+| 10:45-11:15 | 171 | 10.7% | 597 | 9.3% | −0.0292 | 0.0062 |
+| 11:15-11:45 | 141 | 8.8% | 511 | 8.0% | 0.0046 | 0.0168 |
+| 11:45-12:15 | 153 | 9.5% | 553 | 8.6% | 0.0297 | 0.0168 |
+| 12:15-12:45 | 119 | 7.4% | 584 | 9.1% | 0.0136 | 0.0465 |
+| 12:45-13:15 | 149 | 9.3% | 567 | 8.9% | 0.0124 | 0.0734 |
+| 13:15-13:45 | 146 | 9.1% | 615 | 9.6% | 0.0184 | 0.0551 |
+| 13:45-14:15 | 161 | 10.0% | 600 | 9.4% | 0.0552 | 0.0667 |
+| 14:15-14:45 | 152 | 9.5% | 552 | 8.6% | 0.0562 | 0.0840 |
+| 14:45-15:15 | 123 | 7.7% | 599 | 9.4% | −0.0180 | 0.0322 |
+| 15:15-15:45 | 89 | 5.5% | 364 | 5.7% | n/a | n/a |
+
+**H003-B**
+
+| bucket | signals | sig % | ctrl C | ctl % | sig move% | ctl move% |
+|---|---|---|---|---|---|---|
+| 10:15-10:45 | 137 | 13.7% | 517 | 13.0% | 0.0414 | 0.0872 |
+| 10:45-11:15 | 82 | 8.2% | 364 | 9.2% | 0.0216 | 0.0012 |
+| 11:15-11:45 | 98 | 9.8% | 331 | 8.3% | −0.0127 | 0.0349 |
+| 11:45-12:15 | 66 | 6.6% | 339 | 8.5% | −0.0676 | −0.0080 |
+| 12:15-12:45 | 68 | 6.8% | 359 | 9.0% | −0.0354 | 0.0308 |
+| 12:45-13:15 | 118 | 11.8% | 395 | 9.9% | −0.0006 | 0.0130 |
+| 13:15-13:45 | 86 | 8.6% | 392 | 9.9% | −0.0342 | −0.0107 |
+| 13:45-14:15 | 97 | 9.7% | 307 | 7.7% | 0.0286 | 0.0906 |
+| 14:15-14:45 | 90 | 9.0% | 352 | 8.9% | 0.0521 | 0.0661 |
+| 14:45-15:15 | 84 | 8.4% | 385 | 9.7% | −0.0539 | 0.0391 |
+| 15:15-15:45 | 73 | 7.3% | 231 | 5.8% | n/a | n/a |
+
+**Do signals sit systematically earlier or later than their controls?**
+
+| | mean bucket offset (control − signal) | control earlier | same bucket | control later |
+|---|---|---|---|---|
+| H003-A | **+0.067** | 35.1% | 25.3% | 39.7% |
+| H003-B | **−0.083** | 37.5% | 26.9% | 35.6% |
+
+**Measurable, but small and not systematic.** The mean offsets are under a
+tenth of a bucket — under three minutes — and they point in *opposite*
+directions for the two variants. Per-bucket shares differ by 1-2 percentage
+points in places (signals are over-represented at 10:45-11:15 and
+under-represented at 14:45-15:15 for both variants), so the distributions are
+not identical, but there is no consistent "signals fire later" bias of the kind
+that would inflate a control's forward return.
+
+The more informative column is the last pair. Control C's mean move exceeds the
+signal's mean move in 8 of 10 measurable buckets for variant A and 8 of 10 for
+variant B. The signal underperforms its control **inside** each time bucket,
+which is not something time-of-day can explain.
+
+### Task 3 — general time-matched control mechanism
+
+`app/research/matched_controls.py`. Deliberately generic; nothing in it refers
+to H003.
+
+**Held constant:** symbol, trading day, direction, the prerequisite-stage
+population supplied by the caller, and session bucket.
+**Randomised:** which eligible bar within that cell.
+
+**Bucketing.** Deterministic: `bucket = floor((minutes since 09:15) / 30)`,
+giving 13 buckets over the 09:15-15:30 session, the last a half-width tail.
+
+**Why 30 minutes, argued before any result.** Two constraints pull opposite
+ways: a bucket must be wide enough that a (symbol, day, bucket) cell usually
+holds several eligible candidates, and narrow enough that drift within a bucket
+is small next to drift between buckets. At a 5-minute interval, 30 minutes is
+6 bars — the smallest round subdivision of the session that reliably leaves
+more than a handful of candidates per cell. The width was not selected by
+looking at H003 forward performance, and the realised match rates (below)
+confirm the cell-occupancy argument independently of any outcome.
+
+**When no eligible control exists.** In order, and never further:
+
+1. Sample from the signal's own bucket. An occupied own-bucket is used
+   *alone*, never pooled with neighbours — pooling would dilute a match already
+   achieved.
+2. If empty, widen to the immediately adjacent buckets (±1) and pool those.
+3. If still empty, **skip the signal**: it contributes neither a control nor
+   itself to the matched comparison.
+
+It is never filled from another day or another symbol. Those are the variables
+the matching exists to hold constant, and borrowing across days would break the
+day-level pairing the block permutation depends on. Exact, widened and skipped
+counts are reported with every result rather than absorbed silently.
+
+Because a skipped signal is excluded from both sides, the matched comparison is
+properly paired: every signal in it obtained a matched control.
+
+18 tests cover bucket boundaries, day and direction constraints, widening,
+skip-rather-than-substitute, and exact-preferred-over-widened.
+
+### Task 4 — POST-HOC SENSITIVITY ANALYSIS
+
+**Not a re-run of the pre-registered test. H003 v1's verdict, parameters and
+recorded gate results are unchanged.**
+
+Development period, `net_move_pct`, day-level block permutation.
+
+**H003-A**
+
+| h | n | original Control C | p | **time-matched Control C** | p | exact | widened | skipped |
+|---|---|---|---|---|---|---|---|---|
+| 6 | 1,433 | −0.0301 | 0.0060 | **−0.0696** | **0.0000** | 98.3% | 1.5% | 0.2% |
+| 12 | 1,284 | −0.0505 | 0.0170 | **−0.0696** | **0.0035** | 98.2% | 1.6% | 0.2% |
+| 24 | 978 | −0.0259 | 0.4025 | **−0.0705** | 0.0367 | 98.0% | 1.7% | 0.3% |
+
+**H003-B**
+
+| h | n | original Control C | p | **time-matched Control C** | p | exact | widened | skipped |
+|---|---|---|---|---|---|---|---|---|
+| 6 | 877 | −0.0264 | 0.0480 | **−0.0663** | **0.0000** | 95.7% | 3.0% | 1.2% |
+| 12 | 766 | −0.0349 | 0.1422 | **−0.0593** | 0.0165 | 95.2% | 3.4% | 1.4% |
+| 24 | 591 | −0.0091 | 0.7708 | **−0.0620** | 0.0770 | 94.4% | 4.1% | 1.5% |
+
+Match quality is high — 94-98% of signals found a control in their own bucket,
+and fewer than 2% were skipped — so the matched comparison retains essentially
+the whole sample.
+
+**The negative structural result is not only robust, it sharpens.** Every
+matched edge is more negative than its unmatched counterpart, and every p-value
+falls. Time-of-day noise was *understating* how badly the signal did relative to
+its stage-A population, not manufacturing the deficit.
+
+The matched edges are also strikingly stable across horizons — −0.070, −0.070,
+−0.071 for variant A, against −0.030, −0.051, −0.026 unmatched. Stability of
+that kind is what removing a nuisance source of variance looks like, and it is a
+second, independent sign that the matching is doing what it claims.
+
+Note: the "original Control C" figures here differ slightly from the registered
+result (−0.0325 / −0.0301 / −0.0243 for variant A) because controls are
+re-sampled and this run pairs signals to controls before comparing. The
+registered numbers stand as recorded; the discrepancy is the ~2 bp of
+control-resampling noise already flagged with the original result.
+
+### Recommended control framework for H004
+
+1. **Control A (same bar, random side) stays the Gate 1 instrument.** It is
+   immune to every positional confound by construction — same instant, same
+   volatility — so it answers "does this know direction" cleanly and needs no
+   matching.
+2. **Control C becomes time-matched by default** for any staged hypothesis.
+   The audit shows unmatched sampling adds variance and can bias the estimate;
+   here it biased *towards* the hypothesis, but the sign of such a bias is not
+   predictable in advance and should not be left to chance.
+3. **Retire Control B from gating.** Its mean rose 0.06 -> 0.13 -> 0.25 with
+   horizon purely because unrestricted random bars sit earlier in the session
+   and capture more drift. Time-matching would fix that, at which point it
+   becomes Control C without the stage restriction — of little additional value.
+   Keep it as a reported diagnostic, not a gate.
+4. **Report match quality with every result** — exact, widened and skipped
+   percentages. A control with a 30% skip rate is a different comparison from
+   one with 2%, and the reader cannot tell without the numbers.
+5. **State the prerequisite-stage population in the pre-registration.** For a
+   staged hypothesis it defines Control C, and therefore defines what "does the
+   later structure add anything" actually means.
