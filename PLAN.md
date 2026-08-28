@@ -2214,3 +2214,187 @@ V1, V2 and V5 are **not** combined. No forward screening has been run.
 **Untouched.** Nothing in this step read a forward outcome at all — it is a data
 correctness fix and a same-day live comparison. The validation and hold-out
 periods have never been read by any screening or forward computation.
+
+---
+
+## Step 12 — H004 feature screening: V1, V2, V5
+
+A screening study, not a strategy. H001/H002/H003 remain REJECTED. **The
+hold-out was never loaded.**
+
+### 12.1 Design as executed
+
+| | |
+|---|---|
+| population | stage-A impulse-end bars: ordered impulse, `R/ATR(14) >= 3.5`, lookback 12, no session crossing |
+| observation point | the impulse-end bar `e`; features from bars <= e, outcome from `close[e]` |
+| enumeration | **1:1 per impulse end** — a bar is an impulse end if `find_impulse` at `e+1` returns an impulse ending at `e` |
+| outcome | `net_move_pct` in the impulse direction at 6 / 12 / 24 bars |
+| terciles | cut on the **development** predictor distribution, frozen before validation |
+| primary test | high-tercile minus low-tercile `net_move_pct`, day-level block permutation |
+| comparisons | 3 features x 3 horizons = 9, alpha = **0.0056** |
+| controls | A (same bar, random direction) and time-matched C — reported as **secondary** |
+
+**A correction to the earlier population count.** Previous audits reported
+34,159 stage-A observations. That enumerated by *evaluation bar*, so one impulse
+appeared once for every subsequent bar it remained visible from. Enumerating
+impulse ends 1:1 gives **15,182** distinct observations. The earlier figure was
+not wrong for what it measured — the Control C sampling pool — but it is not a
+count of distinct impulses, and this study needed the latter.
+
+| | |
+|---|---|
+| development | 38 days, 2026-06-01 .. 2026-07-23, **11,919** observations |
+| validation | 12 days, 2026-07-24 .. 2026-08-10, **3,263** observations |
+| hold-out | 14 days — **not loaded** |
+
+Exclusions: V1 lost 2 observations to a zero-range end bar; V2 lost 268 to
+`volume_quality != OK` and 52 to an impulse leg under 3 bars. Usable in
+development: V1 11,919, V2 11,724, V5 11,919.
+
+### 12.2 Results — primary test
+
+Tercile boundaries, frozen on development:
+
+| feature | low < | high >= |
+|---|---|---|
+| V1 terminal close location | 0.5128 | 0.8077 |
+| V2 volume trajectory | 0.9403 | 1.8118 |
+| V5 impulse duration | 9 bars | 11 bars |
+
+| feature | h | n (hi/lo) | mean hi | mean lo | **spread** | **p** | Cohen's d | validation |
+|---|---|---|---|---|---|---|---|---|
+| V1 | 6 | 3513 / 3518 | +0.0207 | +0.0128 | +0.0079 | 0.7792 | +0.023 | FLIPPED |
+| V1 | 12 | 3152 / 3146 | +0.0412 | +0.0161 | +0.0250 | 0.3495 | +0.054 | preserved |
+| V1 | 24 | 2384 / 2424 | −0.0031 | +0.0120 | −0.0151 | 0.4308 | −0.024 | FLIPPED |
+| V2 | 6 | 2938 / 3818 | +0.0187 | +0.0059 | +0.0127 | 0.5152 | +0.038 | preserved |
+| V2 | 12 | 2585 / 3506 | +0.0385 | +0.0163 | +0.0222 | 0.4073 | +0.048 | FLIPPED |
+| V2 | 24 | 1821 / 2781 | −0.0021 | +0.0039 | −0.0060 | 0.9040 | −0.010 | FLIPPED |
+| V5 | 6 | 4754 / 2876 | +0.0086 | +0.0129 | −0.0043 | 0.6920 | −0.013 | FLIPPED |
+| V5 | 12 | 4245 / 2594 | +0.0250 | +0.0283 | −0.0033 | 0.8320 | −0.007 | FLIPPED |
+| V5 | 24 | 3249 / 1961 | +0.0058 | +0.0021 | +0.0037 | 0.8952 | +0.006 | preserved |
+
+**Zero of nine reach alpha = 0.0056. None reach even p < 0.05.** The smallest
+p-value across all nine is 0.3495. Every effect size is negligible: the largest
+|Cohen's d| is 0.054, against 0.2 as the conventional floor for "small".
+
+Signs are not consistent across horizons within any feature — V1 gives +, +, −;
+V2 gives +, +, −; V5 gives −, −, +. A real relationship would not reverse
+between 12 and 24 bars while staying the same size.
+
+### 12.3 Secondary controls, and an artifact found in Control C
+
+Control C came out negative in all nine cells (−0.034 to −0.057). That
+uniformity across three unrelated features was itself suspicious, so it was
+tested directly: **the entire stage-A population, compared against its own
+time-matched Control C sample, scores −0.0214 (p = 0.3422).**
+
+Signal and control are drawn from the *same* population there, so the true
+expected edge is exactly zero. The deficit is therefore a property of the
+control construction, not of any feature.
+
+The mechanism is a selection asymmetry this design introduced: a signal is kept
+only if its own forward window fits inside the session, and a control draw is
+kept only if *its* window fits. Within a 30-minute bucket, an earlier draw is
+more likely to fit, so surviving controls skew earlier in the session and
+capture more of the day's remaining drift. Measured: controls sit 0.4 bars
+earlier on average — small, and in the predicted direction.
+
+**None of the Control C numbers above should be read as evidence about V1, V2 or
+V5.** The primary high-minus-low test is internal to each feature and is
+unaffected by this. For future screening, a control draw must inherit the same
+forward-window feasibility as the signal it is matched to.
+
+Match quality was otherwise good: 73-82% exact bucket matches, 5.8-10.5%
+skipped.
+
+### 12.4 Why the validation numbers must not rescue V5
+
+V5's validation spreads are all strongly positive (+0.048, +0.046, +0.068) while
+its development spreads are essentially zero. It would be easy to present that
+as a finding. It is not one.
+
+Terciles were frozen on development and the screening decision belongs to
+development. Validation is confirmatory: it can refute a development result, but
+it cannot promote a feature that showed nothing in development. Treating a null
+development result plus a positive validation result as evidence is selecting on
+the validation set, which is exactly the failure mode the three-way split
+exists to prevent. The same applies to V1 at 24 bars and V2 at 24 bars.
+
+### 12.5 Feature verdicts
+
+| feature | verdict | reasoning |
+|---|---|---|
+| **V1** terminal close location | **weak / inconclusive** | No horizon approaches significance (best p = 0.35); \|d\| <= 0.054; sign reverses between 12 and 24 bars; validation sign flips at 2 of 3 horizons |
+| **V2** volume trajectory | **weak / inconclusive** | Same pattern: best p = 0.41, \|d\| <= 0.048, sign reverses at 24 bars, validation flips at 2 of 3 |
+| **V5** impulse duration | **rejected as constructed** | Effect sizes indistinguishable from zero (\|d\| <= 0.013); and the variable is crippled by its own definition — see below |
+
+**V5's definitional problem.** The lookback of 12 caps duration, so the
+distribution piles against the ceiling: development terciles fall at 9 and 11
+bars, and the "high" bucket (11 bars) holds 5,196 of 11,919 observations. The
+three buckets are therefore "<=8 bars", "9-10 bars" and "exactly 11 bars" — a
+narrow and truncated range, not a spread of durations. This is a null result for
+V5 *as defined within a 12-bar lookback*; a wider lookback would be a different
+variable and would need its own registration and its own K calibration.
+
+### 12.6 Promotion assessment
+
+| criterion | V1 | V2 | V5 |
+|---|---|---|---|
+| 1. causal and stable definition | pass | pass | pass |
+| 2. meaningful relationship in development | **fail** | **fail** | **fail** |
+| 3. does not collapse against control | not assessable (12.3) | not assessable | not assessable |
+| 4. directionally consistent validation | **fail** (2/3 flip) | **fail** (2/3 flip) | **fail** (2/3 flip) |
+| 5. not a transform of Stage-A selection | pass | pass | partial — truncated by the same lookback |
+| 6. enough observations | pass | pass | pass |
+
+**No feature is recommended for promotion.**
+
+### 12.7 Is this underpowered?
+
+No, for effect sizes worth acting on, though the honest answer has two parts.
+
+Per observation the study is well powered: with ~3,500 per tercile, alpha
+0.0056 and 80% power, the detectable effect is roughly d = 0.086. Observed
+effects are all at or below d = 0.054, so an effect of even conventionally
+"small" size (d = 0.2) would have been unmistakable.
+
+But the day-level blocking is the binding constraint, and the effective sample
+is closer to **38 development days** than to 11,919 observations. Against that
+unit, only a fairly large and consistent daily effect would clear alpha. So this
+result rules out a substantial, stable relationship; it does not rule out a
+faint one that a much longer dataset might resolve. Given that Groww supplies
+about three rolling months, that longer dataset is not currently obtainable.
+
+### 12.8 Status after screening
+
+| | |
+|---|---|
+| H001 EMA 9/21 | REJECTED |
+| H002 ORB | REJECTED |
+| H003 v1 Pullback Continuation | REJECTED |
+| V1 terminal close location | screened — weak / inconclusive, not promoted |
+| V2 volume trajectory | screened — weak / inconclusive, not promoted |
+| V3 impulse velocity | DROPPED |
+| V4 impulse efficiency | BLOCKED |
+| V5 impulse duration | screened — rejected as constructed |
+| hold-out | **UNREAD** |
+
+No H004 v1 created. No features combined. No parameters optimised.
+
+### 12.9 Recommendation
+
+Nothing here earns promotion. Three observations worth carrying forward:
+
+* **The Control C feasibility asymmetry must be fixed before the next
+  screening**, or every future structural comparison inherits the same silent
+  bias. This is a concrete, mechanical fix.
+* **The measured ceiling is now visible.** Five variables have been screened
+  around a single Stage-A definition — two rejected outright, two inconclusive,
+  one dropped as an identity, one blocked as degenerate. That pattern suggests
+  the limiting factor is no longer the choice of variable but the framing:
+  every one of them conditions on the same impulse definition, and none has
+  moved the needle.
+* **The dataset is the binding constraint on resolving faint effects**, at 38
+  development days with a roughly three-month rolling ceiling. Deciding whether
+  a faint effect matters is a data-acquisition question, not a modelling one.
