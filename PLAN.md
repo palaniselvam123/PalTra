@@ -1356,3 +1356,247 @@ control-resampling noise already flagged with the original result.
 5. **State the prerequisite-stage population in the pre-registration.** For a
    staged hypothesis it defines Control C, and therefore defines what "does the
    later structure add anything" actually means.
+
+---
+
+## Step 8 — Episode diagnostics, a dataset defect, and the H004 proposal
+
+### Approved framework, now the default
+
+Control A (same bar, random side) for direction; **time-matched** Control C
+(symbol, day, direction, prerequisite stage, 30-minute session bucket) for
+structure; Control B diagnostic only; day-level block permutation; 60/20/20
+chronological split.
+
+### 8.1 Signal-episode diagnostics
+
+`app/research/episodes.py`. Diagnostic only — it filters nothing and revises no
+verdict.
+
+**Episode rule.** Two signals share an episode when they have the same symbol,
+trading day and direction and are separated by fewer than
+`min_separation_bars`. The separation is set to the hypothesis's own input
+window, because signals closer together than that were computed from
+overlapping data and cannot be independent observations of distinct events.
+That argument is about inputs alone; no forward return is consulted, and the
+separation must never be chosen by looking at performance.
+
+| | H001 EMA | H002 ORB | H003-A | H003-B |
+|---|---|---|---|---|
+| separation used | 21 (slow EMA) | 75 (one session) | 12 (lookback L) | 12 (lookback L) |
+| total signals | 8,180 | 2,296 | 2,571 | 1,536 |
+| signal-days | 63 | 63 | 63 | 63 |
+| signals per signal-day | 129.8 | 36.4 | 40.8 | 24.4 |
+| **distinct episodes** | **6,563** | **2,296** | **1,870** | **1,212** |
+| signals per episode | 1.25 | 1.00 | 1.37 | 1.27 |
+| median episode duration | 0 bars | 0 bars | 0 bars | 0 bars |
+| max episode duration | 58 bars | 0 bars | 24 bars | 19 bars |
+| singleton episodes | 80.8% | 100% | 72.1% | 77.3% |
+| largest episode | 6 signals | 1 signal | 8 signals | 4 signals |
+
+"Signals per signal-day" counts across all 39 symbols, so H001's 129.8 is about
+3.3 per symbol-day.
+
+**Reading.** Clustering is mild. The worst case, H003-A, collapses 2,571 signals
+into 1,870 episodes — a 27% reduction, not the five- or ten-fold inflation that
+would mean a handful of market events masquerading as thousands of
+observations. Median episode duration is zero bars everywhere: the typical
+episode is a single signal. H002 is 1.00 by construction, since it takes one
+breakout per session and the separation is a whole session.
+
+This does not alter H003's verdict and was not used to. It says the samples
+behind all three verdicts are less concentrated than raw counts might suggest,
+which if anything supports the conclusions already recorded.
+
+### 8.2 Dataset defect found: `volume` is cumulative, not per-bar
+
+Found while inspecting H004 candidate variables — a candidate built on volume
+produced a minimum of 1.011 across 33,525 observations, with nothing below 1.0.
+That is not a plausible distribution for a ratio of two volumes.
+
+Evidence:
+
+| check | result |
+|---|---|
+| symbols whose volume never falls within a session | **39 of 39** |
+| volume drops at a session boundary (a reset) | 2,355 (~60 per symbol; 62 boundaries exist) |
+| volume drops within a session | 791 of ~183,000 bars (0.4%) |
+| RELIANCE, first session | first bar 988,614 -> last bar 10,698,449 over 75 bars |
+| first five successive differences | 278,159 / 209,891 / 220,437 / 187,768 / 99,982 |
+
+The field is **cumulative volume since the session open**. The differences are
+plausible 5-minute volumes; the raw values are not.
+
+**What this does and does not affect.**
+
+* **No registered verdict changes.** H001 was tested with `volume_filter` off,
+  H002's headline result used `rvol_threshold=0`, and H003 has no volume
+  condition at any stage. None of the three gates read this field.
+* **`entry_diagnostics.observe()` computes `rvol` from it**, so the RVOL
+  segmentation reported in the early entry-diagnostics work was bucketing
+  cumulative volume, not relative volume. That table's own conclusion was
+  "noise, p=0.271", so nothing rests on it — but the row labels were wrong and
+  should not be cited.
+* **`OpeningRange.rvol` and the live scanner's volume filter** read per-bar
+  volume from the live `candle_store`, which builds bars from tick deltas and
+  is a different path. This finding is about the research store only; the live
+  path is not implicated and was not changed.
+* **Any future volume-based hypothesis is blocked** until the research store
+  differences volume within each session.
+
+The fix is mechanical — difference within session, guarding the reset — but it
+rewrites a column across 184,261 rows and is not being done unilaterally.
+
+### 8.3 H004 research proposal (candidates only — not implemented)
+
+**Question.** After an unusually large causal directional impulse, what
+observable structure distinguishes continuation from exhaustion?
+
+**Design.** H004 v1 is a **variable-screening study, not a trading rule.** The
+population is the stage-A impulse-end bars already defined by H003's Stage A
+(ordered impulse, R/ATR(14) >= 3.5, lookback 12, no session crossing) —
+34,159 observations in the development period. Variables are measured **at the
+impulse end bar**, and the forward window starts there. No pullback and no
+trigger are required, which is what separates this from H003: H003 asked
+whether a *specific structure after* the impulse adds information, and the
+answer was no. H004 asks what, if anything, measured *at the impulse itself*
+separates the two outcomes.
+
+Any variable that survives screening becomes the basis of a pre-registered
+trading rule in a later hypothesis, tested on the untouched hold-out. Screening
+therefore uses development and validation only; **the hold-out is not read.**
+
+#### Candidate variables
+
+Measured at `end_idx` from bars <= `end_idx`. Distributions below are
+development-period, predictor-side only — no forward return was computed or
+imported while selecting these.
+
+| variable | n | p25 | median | p75 | stdev |
+|---|---|---|---|---|---|
+| V1 terminal close location | 34,159 | 0.271 | 0.558 | 0.786 | 0.297 |
+| V2 volume trajectory | 33,525 | 1.116 | 1.192 | 1.362 | 0.442 |
+| V3 impulse velocity | 34,159 | 0.464 | 0.596 | 0.841 | 0.623 |
+| V4 impulse-leg efficiency | 33,524 | 0.604 | 0.757 | 0.913 | 0.202 |
+
+Pairwise correlations are all |r| <= 0.054, so these are four distinct
+measurements rather than four names for one thing.
+
+---
+
+**V1 — terminal close location**
+
+*Definition.* At the impulse end bar: `(close - low) / (high - low)` for an up
+impulse, `(high - close) / (high - low)` for a down impulse.
+
+*Behaviour.* Where the final bar of the move closed inside its own range. Near
+1, the move ended with the aggressor still in control. Near 0, the bar was
+rejected — price reached the extreme and was pushed back within the same five
+minutes, the classic shape of exhaustion.
+
+*Causal.* Yes; one bar, fully closed.
+
+*Confounders.* Unstable on narrow-range bars, where a small absolute move spans
+the ratio's whole scale; a minimum range in ATR units may be needed as a
+reported stratum, not a filter. Also mechanically related to how the impulse end
+is located: `end_idx` is the bar containing the extreme high, so its close
+sitting below that high is partly structural. The right comparison is therefore
+*within* the stage-A population, which is what Control C provides.
+
+*Novelty.* **Genuinely new.** No registered hypothesis has used bar-internal
+geometry. The app contains a candlestick-pattern module, but it has never been
+part of a registered hypothesis, and this is a continuous variable rather than a
+named pattern.
+
+---
+
+**V2 — volume trajectory ⚠️ BLOCKED**
+
+*Definition.* Volume summed over the last third of the impulse leg divided by
+the first third.
+
+*Behaviour.* Rising participation into the extreme versus fading participation.
+Note the interpretation is genuinely ambiguous: rising volume is read as
+continuation in one tradition and as a climax top in another. Measuring it is
+how that ambiguity gets settled rather than assumed.
+
+*Causal.* Yes in principle — **but not computable on the current dataset.** See
+8.2: the stored volume is cumulative, which is why this variable's minimum came
+out above 1.0. It cannot be screened until the store is corrected.
+
+*Confounders.* Intraday volume follows a U-shape across the session, so an
+impulse spanning the open will show falling volume mechanically. Time-matched
+Control C absorbs part of this; the rest needs a session-normalised volume.
+
+*Novelty.* **Genuinely new** — no registered hypothesis has used volume at all.
+
+---
+
+**V3 — impulse velocity**
+
+*Definition.* `R / (impulse_bars * ATR(14)[end_idx])`.
+
+*Behaviour.* How fast the move covered its distance. Stage A already requires
+the move to be large; this separates a large move that took ten bars from one
+that took three. A near-vertical advance is the shape most associated with
+climax and mean reversion; a steady one with participation that may persist.
+
+*Causal.* Yes.
+
+*Confounders.* ATR(14) is backward-looking, so a volatility regime shift
+inflates velocity mechanically rather than through market behaviour.
+`impulse_bars` is bounded above by the lookback of 12, which compresses the
+denominator's range. It also shares R and ATR with the stage-A threshold, so
+its correlation with `impulse_score` must be reported before it is interpreted —
+that was not computed here and is a required first step.
+
+*Novelty.* **Partly new.** It reuses stage-A's ingredients but forms a different
+quantity by normalising for duration, which stage-A does not do.
+
+---
+
+**V4 — impulse-leg path efficiency**
+
+*Definition.* `|close[end] - close[start]| / sum(|close[i] - close[i-1]|)` over
+the impulse leg only.
+
+*Behaviour.* Directness. A leg that went almost straight up reflects one side
+consistently in control; the same net move achieved through heavy two-way trade
+reflects a contest, which is more likely to continue resolving in both
+directions.
+
+*Causal.* Yes.
+
+*Confounders.* **Mechanically tied to leg length**: a driftless random walk over
+N bars has expected efficiency `1/sqrt(N)`, so short legs score higher for
+arithmetic reasons alone. It must be compared within `impulse_bars` strata, or
+normalised as `efficiency * sqrt(impulse_bars)` — decided before screening,
+never after.
+
+*Novelty.* **A variation, and flagged as such.** This is close to the efficiency
+condition written into H003's pre-registration and then removed before testing
+as redundant with a correctly-set K. It has never been evaluated, so it is
+untested rather than rejected, but it is not a new idea. It is retained
+precisely because it was dropped on reasoning rather than evidence, and
+reasoning about thresholds has already been wrong twice in this project.
+
+---
+
+#### Proposed screening plan (for review, not yet approved)
+
+* **Population:** stage-A impulse-end bars, development + validation. Hold-out
+  untouched.
+* **Horizons:** 6, 12, 24 bars from `end_idx`.
+* **Primary metric:** `net_move_pct` in the impulse direction.
+* **Contrast:** top versus bottom tercile of each variable, within the stage-A
+  population, compared against time-matched Control C.
+* **Comparisons:** 3 usable variables x 3 horizons = 9 (12 if V2 is unblocked),
+  so alpha = 0.05/9 = 0.0056.
+* **Statistics:** day-level block permutation; episode diagnostics reported
+  alongside, since the stage-A population overlaps heavily.
+* **Terciles are cut on the development-period predictor distribution only** —
+  the same input-only discipline used for K.
+
+**Open items before H004 can be approved:** the volume defect (8.2) must be
+resolved or V2 dropped; V3's correlation with `impulse_score` must be measured;
+and V4's length normalisation must be fixed in advance.
