@@ -56,11 +56,15 @@ class TestBucketing:
 
 
 class TestMatching:
+    """Bucket matching itself. A horizon of 1 keeps the whole population
+    eligible, so these isolate the matching from the horizon rule (which
+    `test_observation_window.py` covers)."""
+
     def setup_method(self):
         self.candles = session("2026-06-01")
         # eligible = every 3rd bar, both directions
         self.eligible = {"UP": list(range(0, 75, 3)), "DOWN": list(range(1, 75, 3))}
-        self.sampler = TimeMatchedSampler(self.candles, self.eligible)
+        self.sampler = TimeMatchedSampler(self.candles, self.eligible, horizon=1)
         self.rng = random.Random(1)
 
     def test_control_lands_in_the_signals_own_bucket(self):
@@ -80,7 +84,7 @@ class TestMatching:
 
     def test_control_stays_on_the_same_day(self):
         two_days = session("2026-06-01") + session("2026-06-02")
-        sampler = TimeMatchedSampler(two_days, {"UP": list(range(0, 150, 3))})
+        sampler = TimeMatchedSampler(two_days, {"UP": list(range(0, 150, 3))}, horizon=1)
         for signal_idx in (10, 80, 120):
             pick = sampler.sample(signal_idx, "UP", random.Random(2))
             assert ist_date(two_days[pick].ts) == ist_date(two_days[signal_idx].ts)
@@ -88,7 +92,7 @@ class TestMatching:
     def test_empty_bucket_widens_to_a_neighbour(self):
         """Bucket 2 (10:15-10:45) is bars 12-17; leave it empty."""
         eligible = {"UP": [i for i in range(0, 75, 2) if not 12 <= i <= 17]}
-        sampler = TimeMatchedSampler(self.candles, eligible)
+        sampler = TimeMatchedSampler(self.candles, eligible, horizon=1)
         stats = MatchStats()
         pick = sampler.sample(14, "UP", random.Random(3), stats)
         assert pick is not None
@@ -99,7 +103,7 @@ class TestMatching:
         """The failure mode this guards: filling from a distant bucket, or from
         another day, would silently undo the matching."""
         eligible = {"UP": [0, 1, 2]}          # only bucket 0
-        sampler = TimeMatchedSampler(self.candles, eligible)
+        sampler = TimeMatchedSampler(self.candles, eligible, horizon=1)
         stats = MatchStats()
         pick = sampler.sample(60, "UP", random.Random(4), stats)   # bucket 9
         assert pick is None
@@ -109,20 +113,20 @@ class TestMatching:
         """A populated own-bucket must be used alone, not pooled with
         neighbours — pooling would dilute the match it just achieved."""
         eligible = {"UP": [6, 7, 8, 13]}      # bucket 1 has three, bucket 2 has one
-        sampler = TimeMatchedSampler(self.candles, eligible)
+        sampler = TimeMatchedSampler(self.candles, eligible, horizon=1)
         picks = {sampler.sample(9, "UP", random.Random(s)) for s in range(30)}
         assert picks <= {6, 7, 8}
 
     def test_signal_with_no_peers_in_its_own_bucket_but_itself(self):
         eligible = {"UP": [30]}               # only the signal bar
-        sampler = TimeMatchedSampler(self.candles, eligible)
+        sampler = TimeMatchedSampler(self.candles, eligible, horizon=1)
         assert sampler.sample(30, "UP", random.Random(5)) is None
 
 
 class TestStats:
     def test_offsets_are_zero_when_matching_is_exact(self):
         candles = session("2026-06-01")
-        sampler = TimeMatchedSampler(candles, {"UP": list(range(0, 75, 2))})
+        sampler = TimeMatchedSampler(candles, {"UP": list(range(0, 75, 2))}, horizon=1)
         stats = MatchStats()
         rng = random.Random(6)
         for i in range(4, 70, 7):

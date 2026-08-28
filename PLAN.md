@@ -2398,3 +2398,297 @@ Nothing here earns promotion. Three observations worth carrying forward:
 * **The dataset is the binding constraint on resolving faint effects**, at 38
   development days with a roughly three-month rolling ceiling. Deciding whether
   a faint effect matters is a data-acquisition question, not a modelling one.
+
+---
+
+## Step 13 — Control framework repair and research framing review
+
+All verdicts frozen: H001 REJECTED, H002 REJECTED, H003 v1 REJECTED, V1/V2
+weak-inconclusive, V3 dropped, V4 blocked, V5 rejected as constructed. **The
+hold-out was not loaded.**
+
+### A. The Control C defect, and the fix
+
+**Defect.** A control was sampled and *then* discarded if its forward window ran
+past the close:
+
+```
+sample control bar  ->  compute forward return  ->  drop if it ran out of session
+```
+
+That is correct for a signal (the observation simply does not exist) and wrong
+for a control, because it changes the population after selection. Within a
+30-minute bucket an earlier bar is likelier to have room, so surviving controls
+skew earlier in the session and capture more of the day's remaining drift.
+Measured during the H004 screening: the whole stage-A population scored −0.0214
+against a control drawn from **itself**, where the true edge is zero by
+construction.
+
+**Fix.** Eligibility is applied *before* sampling, to build the population:
+
+```
+build population -> keep only bars whose [t+1, t+h] fits the session -> sample
+```
+
+`TimeMatchedSampler` now takes `horizon` as a **required** argument. It cannot be
+omitted, because a control population is only well defined against the window it
+will be measured over — making it optional would let the defect return silently.
+Every result now reports eligible population, sampled controls, exact/widened/
+skipped percentages and horizon feasibility.
+
+### B. Control A audit
+
+Control A shares the signal's **own bar** — same index, same horizon — so it is
+structurally immune: it is defined exactly when the signal is, and is the exact
+negation of the signal's forward return. No change to its statistical meaning
+("does the hypothesis know which direction?").
+
+Pinned by test rather than left as an assumption: if Control A were ever rebuilt
+from a neighbouring bar it would acquire precisely the asymmetry Control C had.
+
+### C. Generic observation-eligibility layer
+
+`app/services/observation_window.py` — one definition used by signals and
+controls alike.
+
+```
+is_forward_window_valid(i, h)  ==  i + h <= session_end(i)
+```
+
+* **Session-aware** — sessions are derived by grouping bars on the IST date.
+* **Holiday-aware without a calendar** — a holiday is a date with no bars, and
+  nothing can span it because the window must stay inside one session. A
+  hardcoded holiday list would go stale; this cannot.
+* **No overnight leakage** — enforced by the same rule.
+* **No future-data selection** — the rule reads only bar indices and timestamps.
+* **Deterministic and reusable** — `SessionIndex` is built once per series;
+  `forward_return_pct` delegates eligibility to it so no consumer can invent a
+  different definition.
+
+Missing bars are handled honestly rather than redefined: eligibility counts
+*bars*, matching the convention every existing hypothesis already used, and
+`window_is_contiguous` reports gaps separately instead of silently widening the
+window.
+
+### D. Test results — **274 passing, 0 failing**
+
+New `tests/test_observation_window.py` (28 tests): last bar of session,
+second-last, interior, exact boundary inclusivity, session boundary, holiday gap,
+missing bars, horizons 6/12/24, feasibility reporting, and Control A's shared
+eligibility.
+
+The decisive one is `test_sampling_does_not_shift_controls_earlier_than_signals`,
+which asserts the mean bar position of sampled controls does not drift from that
+of their signals — the measurable symptom of the old defect, rather than a
+restatement of the new code.
+
+Making `horizon` required broke eight older control tests. That is the fix
+working: they were updated to pass one explicitly.
+
+### E. H003 v1 POST-HOC CONTROL SENSITIVITY
+
+**Not a new experiment. H003 v1 = REJECTED, unchanged, no parameter touched.**
+Development period only.
+
+| variant | h | old Control C | p | **corrected Control C** | p | horizon feasible |
+|---|---|---|---|---|---|---|
+| A shallow | 6 | −0.0672 | 0.0000 | **−0.0690** | 0.0000 | 89.2% |
+| A shallow | 12 | −0.0689 | 0.0018 | **−0.0726** | 0.0013 | 80.3% |
+| A shallow | 24 | −0.0710 | 0.0328 | **−0.0690** | 0.0270 | 62.4% |
+| B medium | 6 | −0.0690 | 0.0000 | **−0.0709** | 0.0000 | 89.2% |
+| B medium | 12 | −0.0641 | 0.0080 | **−0.0688** | 0.0053 | 80.3% |
+| B medium | 24 | −0.0638 | 0.0668 | **−0.0620** | 0.0890 | 62.4% |
+
+Match quality 94-98% exact, 0.4-1.7% skipped.
+
+**H003's structural conclusion is robust.** Every corrected edge lands within
+0.005 of its uncorrected value, same sign, comparable p — even though the fix
+removes 38% of the control population at the 24-bar horizon.
+
+Why the same defect mattered for H004 and not H003: in H004 the signal
+population *was* the stage-A population, so the true edge is zero and a 0.02
+bias is the entire measurement. In H003 the signal is a strict subset and the
+measured edge (−0.07) is several times the bias. A bias matters in proportion to
+the effect it sits next to.
+
+### F. What H001-H003 and the screening collectively teach us
+
+| | conditioning event | result |
+|---|---|---|
+| H001 | EMA 9/21 crossover has occurred | worse than random, p≈0 |
+| H002 | price has broken the opening range | worse than random, p≈0 |
+| H003 | a ≥3.5 ATR impulse completed, then retraced | passes direction, fails structure |
+| V1 | ...the terminal bar of that impulse | \|d\| ≤ 0.054, null |
+| V2 | ...the volume path of that impulse | \|d\| ≤ 0.048, null |
+| V5 | ...the duration of that impulse | \|d\| ≤ 0.013, null |
+
+Six investigations, one finding: **describing a completed directional move more
+precisely does not make it more informative.**
+
+### G. The common framing assumption
+
+Yes — we have been conditioning on the same market event six times.
+
+Every hypothesis and every feature takes as given that **a large directional
+move has already happened**, then asks whether it continues. H001's crossover
+can only fire after a move has separated two averages; H002's breakout requires
+price to have already left the range; H003 requires an explicit ≥3.5 ATR
+impulse; V1, V2 and V5 are literally three descriptions of that same impulse.
+The variation between them is in the adjective, not the noun.
+
+Three reasons this framing is actively unfavourable, not merely repetitive:
+
+1. **Selecting on a large realized move selects on its noise.** A window
+   qualifies as a large impulse partly through genuine order flow and partly
+   through transient noise, and the noise component is by construction not
+   persistent. Conditioning on large realized moves therefore selects a
+   population with a built-in reversion tendency, biasing *against* continuation
+   before any rule is applied. Every continuation-flavoured result being
+   negative is consistent with exactly this.
+2. **The event is cheap and universally visible.** Stage A at K=3.5 retains a
+   quarter of all opportunities — 15,182 distinct impulses over 50 days on 39
+   liquid large-caps, about 8 per symbol-day. If a completed large move carried
+   usable information, it would be the most heavily competed signal on the
+   exchange.
+3. **Our own control already demonstrated it.** Control C holds the impulse
+   constant and randomises everything else. When every descriptor scores ~0
+   against it, the arithmetic conclusion is that the impulse is doing all of the
+   (non-)work and the descriptors add nothing.
+
+The earlier entry diagnostics said the same thing in a different currency: for
+the EMA signal, the move *before* the trigger was +0.228% with 87% favourable,
+and *after* it was −0.005% with 47% favourable. We have been repeatedly arriving
+after the event.
+
+### H. Three genuinely different research directions
+
+Each breaks the shared framing by conditioning on something other than a
+completed large move. None is adopted; none has parameters.
+
+---
+
+**Direction 1 — Compression before expansion** *(conditions on the ABSENCE of movement)*
+
+1. **Claim.** Periods where realized range is unusually small relative to that
+   instrument's own recent norm resolve into expansion, and something observable
+   during the compression indicates which way.
+2. **Available before entry.** Realized range over a trailing window against its
+   own distribution; where the close sits inside the compressed range; canonical
+   volume during compression; time of day.
+3. **Different how.** It is the exact inverse selection. Instead of selecting
+   windows with large realized moves — and therefore large noise — it selects
+   windows with small ones. That inverts the regression-to-the-mean bias rather
+   than fighting it.
+4. **Supported by this dataset.** Yes, entirely: bar ranges, ATR, close
+   position, canonical per-bar volume.
+5. **Missing.** Order-book depth, which is the natural mechanism (compression as
+   liquidity provision). Not obtainable here.
+6. **Baseline.** Control A unchanged. Control C becomes "random bar, same
+   symbol/day/direction/time bucket, *not* compressed" — a cleaner prerequisite
+   population than we have had, because the prerequisite is a state rather than
+   an event.
+7. **Testable in 63 days?** Unknown until the episode frequency is measured
+   input-only. Compression episodes are rarer than impulses, and this is the
+   first thing to check rather than assume.
+
+---
+
+**Direction 2 — Cross-sectional relative strength** *(conditions on RELATIVE, not absolute, position)*
+
+1. **Claim.** At a given instant, a stock's move relative to the simultaneous
+   move of its peers carries information that its own move alone does not — a
+   stock rising against a falling cross-section is a different object from one
+   rising with it.
+2. **Available before entry.** Each symbol's return over a trailing window; the
+   cross-sectional median across the 39 symbols at the same timestamp; the
+   symbol's deviation from it; dispersion across the cross-section.
+3. **Different how.** Fundamentally. Every prior hypothesis examined one symbol
+   in isolation on a time-series axis. This conditions on position within a
+   cross-section at a fixed instant.
+4. **Supported by this dataset.** Yes — and notably **without an index feed**: an
+   equal-weighted proxy is derivable from the 39 symbols already stored.
+5. **Missing.** True NIFTY levels with correct weights; sector classification
+   (which would separate "moving against the market" from "moving with its
+   sector against the market").
+6. **Baseline.** Control A unchanged, plus a genuinely stronger control this
+   design makes possible: **shuffle the cross-sectional label across symbols at a
+   fixed timestamp.** That holds the instant, the market-wide move and the
+   prevailing volatility *exactly* constant, which no time-series control can do.
+7. **Testable in 63 days?** Better than anything tried so far, for a reason that
+   matters — see the recommendation.
+
+---
+
+**Direction 3 — Participation change without price displacement** *(conditions on VOLUME, not on a move)*
+
+1. **Claim.** An abrupt change in participation — volume far from its own
+   time-of-day norm — marks a change in who is trading, and that precedes
+   directional resolution. The conditioning event explicitly *excludes* windows
+   that have already made a large price move, which is the opposite of a climax
+   setup.
+2. **Available before entry.** Canonical per-bar volume; a time-of-day-normalised
+   volume baseline; price displacement over the same window, used to *exclude*
+   large moves rather than require them.
+3. **Different how.** The conditioning variable is participation rather than
+   displacement, and the large-move condition is inverted from requirement to
+   exclusion.
+4. **Supported by this dataset.** Only since the volume work: per-bar volume is
+   now canonical, cross-validated against live ticks, and quality-flagged. This
+   direction was not honestly testable a week ago.
+5. **Missing.** Trade-level data with aggressor side, which is what would turn
+   "participation changed" into "who was pushing". Order-book depth likewise.
+6. **Baseline.** Control A; Control C over all bars in the same session and time
+   bucket. Volume's strong intraday U-shape makes the time-matched control
+   essential rather than optional here.
+7. **Testable in 63 days?** Yes — the conditioning event is frequent, so
+   observation count will not be the binding constraint.
+
+### I. Data gaps
+
+| gap | classification | note |
+|---|---|---|
+| Canonical per-bar volume | **AVAILABLE NOW** | fixed and cross-validated in Steps 10-11 |
+| Equal-weighted index proxy | **CAN DERIVE** | cross-sectional median of the 39 stored symbols; needs no new source |
+| Sector labels | **CAN DERIVE** | 39 manual labels; enables sector-relative vs market-relative separation |
+| 1-minute bars | **CAN DERIVE — worth verifying** | the API supports the interval; ~5x observations per day directly attacks the power ceiling. Depth and per-request window at 1m are unmeasured and would need the same probe treatment as 5m |
+| True NIFTY index level | REQUIRES NEW DATA SOURCE | the derived proxy is a substitute, not an equivalent |
+| History beyond ~3 months | REQUIRES NEW DATA SOURCE | measured hard limit: 5-minute history starts 2026-06-01 |
+| Trade-level data / aggressor side | REQUIRES NEW DATA SOURCE | would materially strengthen Direction 3 |
+| Order-book depth | REQUIRES NEW DATA SOURCE | the mechanism behind Direction 1 |
+| Bid-ask spread per symbol | REQUIRES NEW DATA SOURCE | the 0.183% cost floor currently assumes uniform slippage across all 39 symbols, which is certainly wrong in detail |
+| Pre-open auction volume, separated | REQUIRES NEW DATA SOURCE | why every session's first bar is flagged `FIRST_BAR` rather than `OK` |
+| **Corporate actions / splits** | **NOT VERIFIED — a real gap** | an unadjusted split inside the window would appear as a huge overnight gap. Large gaps are **CAN DERIVE** as candidates, but confirming them REQUIRES NEW DATA SOURCE. This has not been checked and should be before any cross-sectional work |
+| Independent trading days | REQUIRES NEW DATA SOURCE, or time | grows one per day via `update()` |
+
+### J. Recommended next direction — **Direction 2, cross-sectional relative strength**
+
+Not because it sounds more profitable, but for three specific reasons:
+
+1. **It is the most orthogonal to everything already tested.** Directions 1 and
+   3 still condition on a time-series property of a single instrument.
+   Direction 2 changes the axis rather than the adjective — and the audit above
+   says the axis is what has been wrong.
+2. **It needs no new data.** The equal-weighted proxy comes from the 39 symbols
+   already stored and validated.
+3. **It attacks the statistical ceiling that has capped every result so far.**
+   Everything to date has been limited to roughly 38 effective observations,
+   because signals within a day share a market-wide move and the day is the unit
+   of independence. A cross-sectional comparison at a fixed timestamp
+   *differences that move out by construction*: the market factor is common to
+   both sides and cancels. The residual is idiosyncratic, so the effective
+   sample is far larger for the same calendar span. That is a structural
+   improvement in power, not merely a different question.
+
+The control it enables — shuffling cross-sectional labels within a timestamp —
+is also the strongest we have been able to construct, holding time, market move
+and volatility exactly rather than approximately constant.
+
+**Before any of it:** check for unadjusted corporate actions. A split inside the
+window would masquerade as an extreme relative-strength observation and would
+corrupt a cross-sectional study specifically.
+
+### K. Hold-out
+
+**Untouched.** Nothing in this step read a forward outcome except the H003
+post-hoc, which used the development period only. The validation and hold-out
+periods remain unread by any screening.

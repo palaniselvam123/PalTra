@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 
 from app.core.market_clock import IST, MARKET_OPEN
 from app.services.indicators import OHLCV
+from app.services.observation_window import SessionIndex
 
 BUCKET_MINUTES = 30
 MAX_WIDEN_STEPS = 1     # search this many buckets either side before skipping
@@ -78,6 +79,8 @@ class MatchStats:
     widened: int = 0        # found in an adjacent bucket
     skipped: int = 0        # no eligible control; signal contributes none
     offsets: list[int] = field(default_factory=list)   # control bucket - signal bucket
+    population: int = 0     # candidate bars before horizon eligibility
+    horizon_eligible: int = 0   # candidate bars after it
 
     @property
     def attempted(self) -> int:
@@ -92,6 +95,11 @@ class MatchStats:
             "widened_pct": round(self.widened / n * 100, 1),
             "skipped_pct": round(self.skipped / n * 100, 1),
             "mean_bucket_offset": round(mean_offset, 3),
+            "population": self.population,
+            "horizon_eligible": self.horizon_eligible,
+            "horizon_feasibility_pct": (
+                round(self.horizon_eligible / self.population * 100, 1) if self.population else 0.0
+            ),
         }
 
 
@@ -103,14 +111,53 @@ class TimeMatchedSampler:
     constant and only the later stages vary.
     """
 
-    def __init__(self, candles: list[OHLCV], eligible_by_direction: dict[str, list[int]]):
+    def __init__(
+        self,
+        candles: list[OHLCV],
+        eligible_by_direction: dict[str, list[int]],
+        horizon: int,
+        session_index: SessionIndex | None = None,
+    ):
+        """Build the matched-control population for ONE horizon.
+
+        `horizon` is required rather than optional: a control population is only
+        well defined against the window it will be measured over. Candidates
+        whose forward window does not fit inside their session are removed HERE,
+        before any sampling, so the surviving population is the one the signal
+        itself would have been drawn from.
+
+        The alternative — sample first, drop afterwards when the window turns
+        out not to fit — quietly biases the control earlier in the session,
+        because an earlier bar is likelier to have room. That is the defect this
+        parameter exists to prevent, so it cannot be omitted.
+        """
         self.candles = candles
-        # (day, direction, bucket) -> [bar indices]
+        self.horizon = horizon
+        self.index = session_index or SessionIndex(candles)
+        self.stats_population = 0
+        self.stats_eligible = 0
+
+        # (day, direction, bucket) -> [bar indices], horizon-eligible only
         self._cells: dict[tuple[dt.date, str, int], list[int]] = defaultdict(list)
         for direction, indices in eligible_by_direction.items():
             for i in indices:
+                self.stats_population += 1
+                if not self.index.is_forward_window_valid(i, horizon):
+                    continue
+                self.stats_eligible += 1
                 ts = candles[i].ts
                 self._cells[(ist_date(ts), direction, session_bucket(ts))].append(i)
+
+    def feasibility(self) -> dict:
+        """Share of the candidate population that survived the horizon rule."""
+        return {
+            "population": self.stats_population,
+            "horizon_eligible": self.stats_eligible,
+            "horizon_feasibility_pct": (
+                round(self.stats_eligible / self.stats_population * 100, 1)
+                if self.stats_population else 0.0
+            ),
+        }
 
     def candidates(self, signal_idx: int, direction: str, widen: int = MAX_WIDEN_STEPS) -> list[int]:
         """Eligible bars for this signal, nearest bucket first.
@@ -161,3 +208,8 @@ class TimeMatchedSampler:
         if stats is not None:
             stats.skipped += 1
         return None
+
+    def record_feasibility(self, stats: MatchStats) -> None:
+        """Copy this sampler's population figures onto a MatchStats."""
+        stats.population = self.stats_population
+        stats.horizon_eligible = self.stats_eligible
