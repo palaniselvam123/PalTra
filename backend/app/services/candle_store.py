@@ -18,7 +18,7 @@ import time
 from collections import defaultdict
 
 from app.services.indicators import OHLCV
-from app.services.volume_contract import BACKFILL, OK, TICK
+from app.services.volume_contract import BACKFILL, OK, RECONCILED, TICK, UNKNOWN
 
 # Seconds per bar. Anything the UI offers must exist here.
 INTERVALS: dict[str, int] = {
@@ -58,40 +58,89 @@ class CandleStore:
         self._quality: dict[tuple[str, str, str], dict[int, str]] = defaultdict(dict)
         self._provenance: dict[tuple[str, str, str], dict[int, str]] = defaultdict(dict)
         self._raw_cum: dict[tuple[str, str, str], dict[int, int]] = defaultdict(dict)
+        # Cumulative counter value as it stood at each bucket's START. A bar's
+        # volume is always `current_cumulative - anchor`, never a running sum,
+        # which is what makes re-processing a tick idempotent.
+        self._anchor: dict[tuple[str, str, str], dict[int, int]] = defaultdict(dict)
 
     # ---- ingest ---------------------------------------------------------
 
     def on_tick(self, symbol: str, price: float, cum_volume: int, source: str, now: float | None = None) -> None:
-        ts = int(now if now is not None else time.time())
+        """Fold one tick into every interval's open bar.
 
-        # Volume arrives cumulative-per-day, so the per-bar figure is the
-        # delta. Tracked per source: the simulated and live feeds keep
-        # unrelated counters, and differencing across a source switch would
-        # produce one enormous bogus volume bar.
+        **Invariant: each trade's volume is counted exactly once.**
+
+        The feed reports volume cumulatively from the session open, so a bar's
+        traded volume is the *difference* between the counter now and the
+        counter as it stood when the bar opened. That anchor is stored per
+        bucket and the bar's volume is recomputed as `cumulative - anchor` on
+        every tick — an assignment, not an accumulation.
+
+        This replaces an earlier `bar.volume += delta`, which double-counted
+        whenever backfill had already populated the bucket: the backfilled
+        figure covers the WHOLE bucket, while the ticks arriving afterwards
+        cover only its tail, so the two ranges overlap rather than compose. The
+        anchor form makes them disjoint by construction instead of hoping they
+        are — and it is idempotent, so replaying the same tick changes nothing.
+
+        Tracked per source: the simulated and live feeds keep unrelated
+        counters, and differencing across a source switch would manufacture one
+        enormous bogus bar.
+        """
+        ts = int(now if now is not None else time.time())
         vol_key = (symbol, source)
-        prev_cum = self._last_cum_volume.get(vol_key, cum_volume)
-        delta = max(0, cum_volume - prev_cum)
-        self._last_cum_volume[vol_key] = cum_volume
+        prev_cum = self._last_cum_volume.get(vol_key)
 
         for name in INTERVALS:
             bucket = bucket_start(ts, name)
-            bars = self._bars[(symbol, name, source)]
-            if bars and bars[-1].ts == bucket:
-                bar = bars[-1]
+            key = (symbol, name, source)
+            bars = self._bars[key]
+            anchors = self._anchor[key]
+            bar = bars[-1] if bars and bars[-1].ts == bucket else None
+
+            if bar is None:
+                # A bucket opening under live observation. Anchor at the last
+                # counter value seen, so volume traded between the previous poll
+                # and this one lands in the new bar — the same attribution the
+                # delta form produced, now expressed idempotently.
+                anchors[bucket] = prev_cum if prev_cum is not None else cum_volume
+                bars.append(
+                    OHLCV(
+                        ts=bucket, open=price, high=price, low=price, close=price,
+                        volume=max(0, cum_volume - anchors[bucket]),
+                    )
+                )
+                self._provenance[key][bucket] = TICK
+                self._quality[key][bucket] = OK
+                if len(bars) > MAX_BARS:
+                    for dropped in bars[0 : len(bars) - MAX_BARS]:
+                        anchors.pop(dropped.ts, None)
+                    del bars[0 : len(bars) - MAX_BARS]
+            else:
+                if bucket not in anchors:
+                    # First tick into a bar backfill had already populated. Its
+                    # volume covers [bucket_start, fetch_time), and the broker's
+                    # cumulative at that moment is recorded — so the counter at
+                    # the bucket's start is recoverable, and the backfilled
+                    # volume is preserved rather than discarded or re-added.
+                    raw = self._raw_cum[key].get(bucket)
+                    base = raw if raw is not None else cum_volume
+                    anchors[bucket] = max(0, base - bar.volume)
+                    self._provenance[key][bucket] = RECONCILED
+
                 bar.high = max(bar.high, price)
                 bar.low = min(bar.low, price)
                 bar.close = price
-                bar.volume += delta
-            else:
-                bars.append(OHLCV(ts=bucket, open=price, high=price, low=price, close=price, volume=delta))
-                if len(bars) > MAX_BARS:
-                    del bars[0 : len(bars) - MAX_BARS]
-            key = (symbol, name, source)
-            # A tick-built bar is canonical per-bar volume by construction, and
-            # its provenance overrides any backfilled value on the same stamp.
-            self._quality[key][bucket] = OK
-            self._provenance[key][bucket] = TICK
+                if cum_volume < anchors[bucket]:
+                    # The counter reset inside an open bucket; this bar's traded
+                    # volume is not recoverable and must not be guessed.
+                    self._quality[key][bucket] = UNKNOWN
+                elif self._quality[key].get(bucket) != UNKNOWN:
+                    bar.volume = cum_volume - anchors[bucket]
+
             self._raw_cum[key][bucket] = cum_volume
+
+        self._last_cum_volume[vol_key] = cum_volume
 
     def seed(
         self,
@@ -143,6 +192,7 @@ class CandleStore:
             self._quality.pop(k, None)
             self._provenance.pop(k, None)
             self._raw_cum.pop(k, None)
+            self._anchor.pop(k, None)
         for vk in [k for k in self._last_cum_volume if k[1] == source]:
             del self._last_cum_volume[vk]
         return len(keys)

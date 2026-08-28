@@ -44,8 +44,15 @@ from app.core.market_clock import IST
 OK = "OK"
 FIRST_BAR = "FIRST_BAR"
 UNKNOWN = "UNKNOWN"
-TICK = "TICK"          # provenance: built from observed ticks
-BACKFILL = "BACKFILL"  # provenance: derived from broker history
+TICK = "TICK"              # provenance: built entirely from observed ticks
+BACKFILL = "BACKFILL"      # provenance: derived from broker history
+RECONCILED = "RECONCILED"  # provenance: seeded by backfill, then continued from ticks
+#
+# RECONCILED exists because the two are genuinely a third thing, not a label of
+# convenience: such a bar's early volume comes from the broker's history and its
+# later volume from ticks observed here, joined at a recovered bucket-start
+# anchor. A reader comparing ingestion paths must be able to exclude it, since
+# it belongs wholly to neither.
 
 
 def ist_date(ts: int) -> dt.date:

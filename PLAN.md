@@ -2056,3 +2056,161 @@ Not a substitute for V3. Registered on its own terms:
 **Untouched.** No screening has been run. Every distribution in this step is
 predictor-side and, where a period is involved, development only. The validation
 and hold-out periods have never been read by any forward computation.
+
+---
+
+## Step 11 — Live candle volume lifecycle fixed and re-validated
+
+H001 = REJECTED, H002 = REJECTED, H003 v1 = REJECTED — unchanged. Pre-fix
+volume diagnostics remain INVALID / SUPERSEDED. No forward outcome inspected.
+
+### 11.1 Final candle volume lifecycle
+
+**Invariant: each trade's volume is counted exactly once.**
+
+The defect was subtle because both halves were individually right. Backfill
+wrote a bar covering the *whole* bucket; ticks arriving afterwards then added
+the volume they observed, which is a *subset* of that same interval. Two
+correct numbers, summed over overlapping ranges — nothing crashed, the bar was
+merely too big.
+
+The old form could not be made safe by checking anything, because the ranges
+are not disjoint and cannot be made disjoint after the fact. So the accumulation
+was removed entirely:
+
+```
+OLD:  bar.volume += delta                      accumulate, order-dependent
+NEW:  bar.volume  = cumulative - anchor        assign, idempotent
+```
+
+`anchor` is the session counter as it stood when the bucket **opened**, stored
+per bucket. A bar's volume is therefore always a difference across its own span,
+recomputed from scratch on every tick. Replaying a tick cannot change it, and
+there is no accumulated state to corrupt.
+
+| lifecycle stage | anchor | provenance |
+|---|---|---|
+| bucket opens under live observation | last observed cumulative | `TICK` |
+| bucket populated by backfill, no ticks yet | none needed | `BACKFILL` |
+| first tick into a backfilled bucket | `raw_cumulative - bar.volume` (recovers the bucket-start counter) | `RECONCILED` |
+| counter resets mid-bucket | frozen; volume left at its last good value | quality `UNKNOWN` |
+
+### 11.2 Backfill -> tick reconciliation
+
+The mechanism recovers the bucket-start counter rather than choosing between the
+two sources:
+
+```
+backfilled bar covers [bucket_start, fetch_time)  ->  volume V
+broker's counter at fetch_time                    ->  raw_cumulative C
+
+    anchor = C - V          the counter as it stood at bucket_start
+
+thereafter:  bar.volume = cumulative_now - anchor
+```
+
+Worked example, verified in the tests: backfill reports 120,000 traded with the
+counter at 500,000, so the bucket opened at 380,000. A later tick at 530,000
+gives 150,000 — the backfilled 120,000 plus exactly the 30,000 that is genuinely
+new. Not 120,000 + 530,000, and not 120,000 + 30,000 + 120,000.
+
+**Why this rather than rebuilding from ticks.** Rebuilding would discard the
+volume that traded before this process was watching — for a bucket already
+half-elapsed when backfill ran, that is most of the bar. The anchor keeps the
+broker's figure for the unobserved portion and takes ticks for the rest, which
+is the only reconstruction that uses each source where it is authoritative.
+
+`RECONCILED` is a genuine third state, not a label of convenience: such a bar is
+part broker history and part local observation, and anyone comparing ingestion
+paths must be able to exclude it, since it belongs wholly to neither.
+
+### 11.3 Regression tests — 252 passing, 0 failing
+
+New suite `tests/test_volume_lifecycle.py` (26 tests):
+
+| | requirement | key test |
+|---|---|---|
+| A | backfilled candle has correct canonical volume | `test_backfill_volume_is_per_bar` |
+| B | tick ingestion does not double-count | `test_tick_adds_only_genuinely_new_volume`; `test_volume_never_exceeds_the_counter_movement`; 50 repeated ticks do not inflate the bar |
+| C | backfill -> tick transition stays correct | `test_backfilled_volume_is_preserved_not_discarded`; provenance becomes `RECONCILED`; the next bucket opens as a pure `TICK` bar |
+| D | reprocessing is idempotent | replaying a tick five times is a no-op; replaying a whole sequence three times equals once; re-seeding does not disturb a reconciled bar |
+| E | volume never falls on a source change | non-decreasing across a tick sequence; a mid-bucket counter reset flags `UNKNOWN` rather than shrinking the bar |
+| F | raw cumulative preserved | raw and canonical verified as different quantities on the same bar |
+| G | consumers read canonical volume only | a repo-wide scan asserts no module outside the storage layer references `raw_cumulative` |
+
+### 11.4 Updated live/research comparison
+
+Run 2026-08-28, 12:53-13:25 IST, market OPEN, feed LIVE. `TICK`-provenance bars
+only; `RECONCILED` bars excluded because their early volume comes from the same
+broker response the research store ingested.
+
+| measure | **before fix** | **after fix** |
+|---|---|---|
+| matched bars | 70 | 70 |
+| bars requiring reconciliation | n/a | **10** |
+| exact match | 1 (1.4%) | 0 (0.0%) |
+| mean absolute difference | 8,682 | 9,215 |
+| median relative error | 5.97% | **4.11%** |
+| p95 relative error | 33.38% | 159.17% |
+| **aggregate total error** | **+0.91%** | **+0.18%** |
+
+| symbol | bars | live total | research | diff % | corr |
+|---|---|---|---|---|---|
+| RELIANCE | 7 | 460,013 | 459,623 | +0.08% | 0.742 |
+| TCS | 7 | 303,367 | 300,987 | +0.79% | 0.989 |
+| HDFCBANK | 7 | 814,294 | 841,389 | **−3.22%** | 0.958 |
+| INFY | 7 | 817,896 | 801,190 | +2.09% | 0.897 |
+| ITC | 7 | 2,115,234 | 2,109,369 | +0.28% | 0.999 |
+| SBIN | 7 | 235,219 | 235,369 | **−0.06%** | 0.999 |
+| AXISBANK | 7 | 272,595 | 264,807 | +2.94% | 0.998 |
+| MARUTI | 7 | 27,238 | 27,279 | **−0.15%** | 0.999 |
+| TITAN | 7 | 34,497 | 34,745 | **−0.71%** | 0.999 |
+| WIPRO | 7 | 865,376 | 860,051 | +0.62% | 0.924 |
+
+**Adjacent-bar aggregation:**
+
+| window | median rel. error | p95 | n |
+|---|---|---|---|
+| single bar | 4.11% | 159.17% | 70 |
+| **2-bar window** | **1.51%** | **18.82%** | 60 |
+
+**The strongest evidence is the change in sign pattern, not the headline
+number.** Before the fix, live exceeded research for **10 of 10 symbols** — a
+systematic inflation, which is exactly what double-counting a tail overlap
+produces (under a fair coin, 10/10 has probability ~0.001). After the fix the
+signs are mixed, **6 positive and 4 negative**, which is what symmetric
+attribution noise looks like. The aggregate error falling from +0.91% to +0.18%
+is consistent, but the disappearance of the one-sided bias is the part that
+identifies the cause.
+
+**Remaining differences are bar-edge attribution.** The live path assigns volume
+to the bucket of the 2-second poll; the broker assigns by trade time. The
+largest discrepancies are again near-swaps between neighbouring bars —
+RELIANCE 13:00 live 122,508 vs research 193,273, and 13:05 live 141,329 vs
+70,211, summing to 263,837 against 263,484, a 0.13% difference over the pair.
+Widening to two bars cuts the median error to 1.51% and p95 from 159% to 19%.
+
+Two honest caveats. The p95 of 159% is not a semantic failure: relative error is
+unstable on small bars, where a few thousand shares of attribution is a large
+percentage of a thin bar — the aggregate and adjacent-bar figures are the
+meaningful ones. And the before/after runs cover different half-hours, so they
+are not a controlled experiment; the sign-pattern change is what carries the
+argument, not the difference of two point estimates.
+
+### 11.5 Final dispositions
+
+| | status |
+|---|---|
+| **V1** terminal close location | **ELIGIBLE.** 0 zero-range denominators in 34,159 observations; p1 end-bar range 0.453 ATR; narrow-tail variance 0.301 vs 0.297. Rule: `high == low` -> exclude and count, never impute |
+| **V2** volume trajectory | **ELIGIBLE.** Contract implemented, lifecycle fixed, cross-validated on live tick data. Distribution behaves like a ratio: 36.6% below 1.0, previously 0% |
+| **V4** leg efficiency | **BLOCKED, unchanged.** Pinned at exactly 1.000 for 1-3 bar impulses (10.7% of observations); no normalisation invented to rescue it |
+| **V5** impulse duration | **PROPOSED, unchanged.** *"Conditional on a strong causal directional impulse, does impulse duration contain information about subsequent continuation versus exhaustion?"* Not a replacement for V3, not tested |
+| V3 impulse velocity | DROPPED (exact identity `impulse_score / impulse_bars`) |
+
+V1, V2 and V5 are **not** combined. No forward screening has been run.
+
+### 11.6 Hold-out
+
+**Untouched.** Nothing in this step read a forward outcome at all — it is a data
+correctness fix and a same-day live comparison. The validation and hold-out
+periods have never been read by any screening or forward computation.
