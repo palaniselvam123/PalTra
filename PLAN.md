@@ -3738,3 +3738,215 @@ Every failure mode listed in the brief was checked rather than assumed:
 | missing-bar handling differing between arms | same eligibility layer for both |
 | one sector dominating through an implementation error | no — leave-one-sector-out is flat |
 | timestamp alignment | zero misaligned bars across 596,516 rows |
+
+---
+
+## Step 18 — Compression → Expansion: input-only framing audit
+
+No forward return, MFE, MAE or outcome of any kind was computed. Development
+days only (38 sessions, 2026-06-01..2026-07-23). **Hold-out not loaded.**
+H005 is proposed, **not registered**.
+
+### Temporal order, fixed before measuring anything
+
+```
+compression window   bars [t-K, t-1]     K = 12, entirely within one session
+transition bar       bar t
+observation          close of bar t      where forward measurement would begin
+```
+
+Bar t is excluded from every compression measure by construction, so compression
+can never be defined using the bar meant to break it. Windows that would cross a
+session boundary are dropped, not truncated — 57,000 bars excluded on that rule.
+
+Population: 298,865 observations, 38 sessions, 125 symbols.
+
+### Candidate measurements
+
+| | formula | lookback | units |
+|---|---|---|---|
+| **C1** | `(max(high) − min(low)) over [t-K, t-1] / (ATR(14)[t-1] · √K)` | 12 bars | dimensionless |
+| **C2** | `mean(TR over [t-K, t-1]) / ATR(14)[t-1]` | 12 bars | dimensionless |
+| **C3** | `TR[t] / mean(TR over [t-K, t-1])` | 12 bars + bar t | dimensionless |
+
+All three read only bars ≤ t. Missing data: a bar is skipped when ATR(14)[t-1]
+is unavailable (375 cases) or the window's mean true range is zero. Nothing is
+imputed.
+
+### Distributions (§4)
+
+| candidate | n | p5 | p10 | p25 | median | p75 | p90 |
+|---|---|---|---|---|---|---|---|
+| C1 span/(ATR·√K) | 298,865 | 0.555 | 0.617 | 0.742 | **0.917** | 1.149 | 1.416 |
+| C2 mean TR/ATR(14) | 298,865 | 0.754 | 0.794 | 0.859 | **0.932** | 1.010 | 1.089 |
+| C3 TR[t]/mean TR | 298,865 | 0.395 | 0.475 | 0.633 | **0.868** | 1.213 | 1.685 |
+
+Reference points fixed a priori rather than fitted: a driftless random walk's
+expected range over K bars is ≈1.6·σ·√K, so C1 ≈ 1.6 is "ordinary" and the
+observed median of 0.917 says these 12-bar windows are routinely far tighter
+than a random walk would produce. C2 = 1.0 and C3 = 1.0 are the natural neutral
+points; observed medians sit slightly below both.
+
+### Redundancy (§3) — **C1 is dropped**
+
+| pair | correlation |
+|---|---|
+| C1 vs **impulse_score** | **+0.7097** |
+| C2 vs impulse_score | +0.4927 |
+| C3 vs impulse_score | −0.1551 |
+| C1 vs V5 (impulse_bars) | +0.2372 |
+| C2 vs V5 | +0.0604 |
+| C3 vs V5 | +0.0317 |
+| C1 vs ATR/close | +0.2318 |
+| C2 vs ATR/close | +0.1859 |
+| C3 vs ATR/close | −0.1417 |
+| C1 vs V1 | −0.0036 |
+| C3 vs V1 | +0.0131 |
+| C1 vs C2 | +0.5775 |
+| C2 vs C3 | −0.1572 |
+
+**C1 is dropped.** At r = +0.71 with `impulse_score` it is close to a
+restatement of it: `impulse_score` is the ordered swing range over ATR, and C1
+is the *unordered* window span over ATR·√K. They differ only by the ordering
+constraint, which makes C1 approximately `impulse_score/√K` — a near-twin of V3,
+already dropped as an exact identity. Three candidates were not forced.
+
+**C2 is retained with a stated caveat.** Its 0.49 correlation with
+`impulse_score` is real overlap, and part of it is mechanical: both divide by the
+same ATR(14). It is not an identity — C2 measures average bar *size* while
+`impulse_score` measures net *displacement* — but the overlap must be reported
+alongside any eventual result rather than discovered afterwards.
+
+**C3 is genuinely new.** Every correlation with an existing variable is under
+0.16 in absolute value, and nothing in H001–H004 measures a bar against the
+scale of the window preceding it.
+
+**The structurally important number is corr(C2, C3) = −0.157.** The compressed
+state and the expansion event are near-independent measurements, so their
+conjunction is a genuine two-part condition rather than one property measured
+twice. That is exactly what a *transition* hypothesis requires and is the reason
+this framing is worth pursuing.
+
+### Expansion, defined separately (§5)
+
+Alternatives considered and rejected:
+
+* `TR[t] / ATR(14)` — rejected. It measures a bar against the instrument's
+  long-run volatility, not against the compression it is supposed to break. A
+  bar can be large versus ATR while the preceding window was not compressed at
+  all, which is a different phenomenon.
+* `|close[t] − open[t]| / TR[t]` — a directional-conviction measure, not an
+  expansion measure. It says how the bar closed, not that it expanded. Retained
+  as a possible descriptor, not as the expansion definition.
+
+C3 is preferred because its denominator is *the compressed window itself*. It
+therefore cannot call a bar an expansion unless it is large relative to the
+specific quiet period it follows — which is the definition of a transition, and
+the reason "any large candle equals expansion" is avoided.
+
+### Why this is not H002 ORB (§7)
+
+**Structurally impossible to reconstruct ORB.** The compression window needs 12
+bars entirely inside one session, so the earliest observable bar is roughly
+10:15. The measure **cannot fire during the opening range at all** — 57,000
+early-session bars are excluded by that rule.
+
+Time-of-day distribution of compressed bars confirms it:
+
+| hour | C1 bottom decile | C2 bottom decile |
+|---|---|---|
+| 10:00 | 8.7% | 9.2% |
+| 11:00 | 22.9% | 34.9% |
+| 12:00 | 22.1% | 28.8% |
+| 13:00 | 19.6% | 15.9% |
+| 14:00 | 21.1% | 9.8% |
+| 15:00 | 5.5% | 1.5% |
+
+Compression is overwhelmingly a midday phenomenon. ORB conditions on a fixed
+09:15–09:30 window and fires once per symbol-day; this conditions on a rolling
+state that occurs at arbitrary intraday times and can occur several times a day
+or not at all.
+
+### Frequency and clustering (§8)
+
+4,750 symbol-days represented. Illustrative cuts — used only to show how event
+frequency varies, with no threshold chosen and no outcome consulted:
+
+| illustrative cut | events | per symbol-day | episodes | signals/episode |
+|---|---|---|---|---|
+| C1 ≤ p10 and C3 ≥ 1.5 | 5,335 | 1.123 | 3,963 | 1.35 |
+| C1 ≤ p10 and C3 ≥ 2.0 | 2,381 | 0.501 | 2,209 | 1.08 |
+| C1 ≤ p25 and C3 ≥ 1.5 | 12,250 | 2.579 | 7,698 | 1.59 |
+| **C2 ≤ p10 and C3 ≥ 2.0** | **2,939** | **0.619** | **2,318** | **1.27** |
+
+The phenomenon is common enough to test on 63 sessions: even the most selective
+cut yields thousands of events across 38 development days, comfortably above the
+project's 300-signal power floor. Clustering is mild at 1.08–1.59 signals per
+episode. **These are not independent observations** — the trading day remains the
+blocking unit, so the binding constraint stays 38 development blocks, exactly as
+for H001–H004.
+
+### Proposed H005 candidate — **NOT REGISTERED**
+
+**Research question.** After a period of unusually low realized range, does the
+first bar that expands materially beyond that window's own scale carry
+directional information about the subsequent move?
+
+**Structure.**
+
+```
+compression   mean(TR over [t-K, t-1]) / ATR(14)[t-1]  <=  compression_threshold
+transition    TR[t] / mean(TR over [t-K, t-1])         >=  expansion_threshold
+direction     sign(close[t] - open[t]), body non-degenerate
+observation   close of bar t
+```
+
+**Inputs.** OHLC only — true range, ATR(14), and the transition bar's open and
+close. No EMA, RSI, MACD, ADX, VWAP, Supertrend or volume. No volume candidate
+is proposed, so the 15:00–15:30 volume unreliability does not apply; canonical
+per-bar volume with `volume_quality == OK` would be required if one ever were.
+
+**Why it differs from H001–H004.**
+
+| | conditions on | H005 differs because |
+|---|---|---|
+| H001 | two averages crossing | no moving average anywhere |
+| H002 | a fixed 09:15–09:30 range being broken | cannot fire before ~10:15; occurs at arbitrary times, repeatedly |
+| H003 | a completed ≥3.5 ATR impulse | conditions on the **absence** of movement, the opposite selection |
+| H004 | relative position within a cross-section | single-instrument time series; no sector, no peers |
+
+More fundamentally, the Step 13 audit found H001–H003 and V1/V2/V5 all
+conditioned on *a large move having already happened*. H005 conditions on a
+large move **not** having happened, then observes the moment that changes. That
+inverts the selection that made every prior hypothesis a regression-to-the-mean
+trap.
+
+**Threshold philosophy.** Percentile cuts taken from the **development
+predictor distribution only**, exactly as K = 3.5 was calibrated for H003 — no
+forward outcome consulted, boundaries frozen before validation is read. The
+distributions in §4 are the input; nothing has been chosen yet.
+
+**Matched control / null.**
+
+* **Control A** — same bar, random direction. Tests whether the transition knows
+  *which way*.
+* **Control C, time-matched** — same symbol, same day, same direction, same
+  30-minute session bucket, drawn from bars that satisfy the **compression
+  condition but not the expansion trigger**. This is the direct analogue of the
+  control that rejected H003: it holds the compressed state constant and varies
+  only the transition, so a positive result cannot be explained by "quiet stocks
+  behave differently".
+
+**Dependence structure.** Day-level block permutation, as for every prior
+hypothesis. Episodes at 1.08–1.59 signals each; the day stays the unit of
+independence at 38 development blocks.
+
+**Power limitations, stated in advance.** Thousands of events but only 38
+independent development blocks, one market regime, and a 63-session dataset.
+This can detect a substantial, stable effect and cannot resolve a faint one —
+the same ceiling that has bounded every result in this project.
+
+**Open item to settle at registration:** whether direction is taken from the
+transition bar's body, as proposed, or from which side of the compression range
+the close sits. The latter is closer to a range breakout and risks drifting
+toward H002, which is why the body is proposed instead.
