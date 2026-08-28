@@ -1854,3 +1854,205 @@ Stopping before any forward screening, as instructed.
 which is a data-integrity audit over the whole store and reads no outcome of any
 kind. The validation and hold-out periods have never been read by any screening
 or forward computation.
+
+---
+
+## Step 10 — Canonical volume contract, implemented and cross-validated
+
+H001, H002, H003 remain REJECTED and unmodified. No forward return was computed.
+
+### 10.1 Final volume contract
+
+`app/services/volume_contract.py` — one rule, imported by every ingestion path.
+
+> **`OHLCV.volume` is the volume traded during that candle. Always.**
+
+Nothing may place a cumulative counter in that field. Supporting fields:
+
+| field | meaning |
+|---|---|
+| `bar_volume` | canonical per-bar volume (what `OHLCV.volume` carries) |
+| `raw_cumulative_volume` | the broker's original counter, never destroyed |
+| `volume_quality` | `OK` / `FIRST_BAR` / `UNKNOWN` |
+| `provenance` | `TICK` (observed here) / `BACKFILL` (broker history) |
+
+The module lives in `services/` rather than `research/` so the live path never
+imports from the research package — that isolation is deliberate and tested.
+`research/store.py` imports the same `derive_session`; a test asserts the two
+are literally the same function object, because two copies would drift and
+drift is how the paths disagreed in the first place.
+
+### 10.2 Backfill derivation
+
+```
+Groww historical rows (cumulative since session open)
+        -> volume_contract.derive_rows()        split by IST session
+        -> OHLCV.volume = bar_volume
+           quality + raw cumulative passed alongside into candle_store.seed()
+```
+
+Previously `backfill.py` seeded `volume=r[5]` — the broker's cumulative value —
+straight into the same field the tick path fills with per-bar volume. A test now
+asserts that expression cannot reappear.
+
+### 10.3 Tick derivation
+
+Unchanged in behaviour, now labelled: `candle_store.on_tick` differences the
+cumulative day counter per tick (`delta = cum - prev_cum`) and accumulates it
+into the open bar. Each such bar is recorded `provenance=TICK`,
+`quality=OK`, with the raw counter retained.
+
+### 10.4 Reset handling
+
+Kept exactly as concluded, and code inspection did not contradict it:
+
+* reset bar -> `bar_volume = NULL`, `quality = UNKNOWN`
+* immediately following bar -> `bar_volume = NULL`, `quality = UNKNOWN`
+* negative differences are never clipped to zero; volume is never invented
+
+Across the research store: 180,326 `OK` (97.9%), 2,457 `FIRST_BAR` (1.3%),
+1,478 `UNKNOWN` (0.80%). `unknown_volume_timestamps()` names the UNKNOWN bars;
+they render as 0 only because `OHLCV.volume` is typed `int`, and that rendering
+is documented as not a claim of zero volume.
+
+### 10.5 Live-vs-research cross-validation — **RUN, DURING A LIVE SESSION**
+
+Performed 2026-08-28 between 11:40 and 12:11 IST with the market OPEN and the
+feed on LIVE. **Only `TICK`-provenance live bars were used** — a backfilled live
+bar is the same API response the research store ingests, so comparing those
+would compare one source against itself.
+
+**Per-bar comparison, 70 matched bars across 10 symbols:**
+
+| measure | value |
+|---|---|
+| matched bars | 70 |
+| exact match | 1 (1.4%) |
+| mean absolute difference | 8,682 shares |
+| median relative difference | **5.97%** |
+| p95 relative difference | 33.38% |
+
+**Aggregate comparison over the same bars:**
+
+| symbol | bars | live total | research total | diff | diff % | corr |
+|---|---|---|---|---|---|---|
+| RELIANCE | 7 | 413,450 | 410,384 | 3,066 | 0.75% | 0.993 |
+| TCS | 7 | 291,987 | 286,434 | 5,553 | 1.94% | 0.991 |
+| HDFCBANK | 7 | 862,610 | 858,666 | 3,944 | 0.46% | 0.956 |
+| INFY | 7 | 301,722 | 294,826 | 6,896 | 2.34% | 0.932 |
+| ITC | 7 | 706,579 | 701,020 | 5,559 | 0.79% | 0.987 |
+| SBIN | 7 | 349,175 | 342,066 | 7,109 | 2.08% | 0.907 |
+| AXISBANK | 7 | 477,433 | 476,002 | 1,431 | 0.30% | **−0.125** |
+| MARUTI | 7 | 11,890 | 11,837 | 53 | 0.45% | 0.994 |
+| TITAN | 7 | 30,263 | 30,168 | 95 | 0.31% | 0.998 |
+| WIPRO | 7 | 1,081,551 | 1,074,510 | 7,041 | 0.66% | 0.999 |
+| **ALL** | **70** | **4,526,660** | **4,485,913** | **40,747** | **0.91%** | pooled 0.894 |
+
+**Explanation of the expected differences.** The paths agree on *quantity* and
+differ on *attribution at bar edges*:
+
+* The live path assigns a delta to the bucket of the **poll time** (2-second
+  polling), while broker history assigns volume by **trade time**. A burst
+  straddling 11:49:59 lands in different bars.
+* AXISBANK shows this in its purest form: 11:45 live 35,970 vs research
+  209,798, and 11:50 live 225,506 vs research 52,210 — nearly swapped, summing
+  to 261,768 against 262,008. Its −0.125 per-bar correlation is one boundary
+  event, not a semantic disagreement.
+* The decisive test: **widening the window collapses the error.** Median
+  relative error falls from **6.10% for a single bar to 2.81% for two adjacent
+  bars**, and p95 from **49.05% to 11.36%**. Edge attribution cancels when
+  summed; a semantic mismatch would not.
+* Totals agree to 0.91%, with live consistently slightly *higher* — see the
+  residual defect below.
+
+**Conclusion: the two paths now produce the same semantic quantity.** The
+residual is timing granularity, not meaning.
+
+**One residual defect found and not fixed.** `on_tick` does
+`bar.volume += delta` on whatever bar occupies the bucket. If backfill seeded
+that bucket first and ticks then arrive for it, the backfilled figure and the
+tick deltas are summed — inflating the boundary bar. That likely contributes to
+the consistent ~0.9% live excess. The fix is for `on_tick` to reset a bar's
+volume the first time it writes to a `BACKFILL` bucket. It is reported rather
+than applied, because it changes live charting behaviour.
+
+### 10.6 Test results
+
+**230 passing, 0 failing.** New suite `tests/test_volume_contract.py` (23 tests)
+covers the required points:
+
+| | requirement | covered by |
+|---|---|---|
+| A | backfill exposes canonical per-bar volume | `TestBackfillPath` — including that the seeded column is *not* monotonically rising, the symptom that exposed the defect |
+| B | tick exposes canonical per-bar volume | `TestTickPath` |
+| C | raw cumulative preserved | `test_rows_preserve_the_raw_cumulative`, `test_raw_cumulative_is_recoverable` |
+| D | reset handling deterministic | `TestDerivationRule` |
+| E | both paths satisfy one contract | `test_same_cumulative_series_yields_the_same_bar_volumes` — identical underlying data through both paths must yield identical canonical volume |
+| F | RVOL consumes bar volume | `test_entry_diagnostics_rvol_uses_the_candle_volume_field` — RVOL sees a 5x burst as ~5.0 on canonical volume and under half that on cumulative |
+| G | no silent fallback | `TestNoSilentFallback` — asserts `derive_rows` is called, `volume=r[5]` cannot reappear, and both stores share one function object |
+
+Two of my own tests failed first and were wrong, not the code: an off-by-one in
+the both-paths comparison, and an arbitrary RVOL threshold. Corrected.
+
+### 10.7 Superseded historical diagnostics
+
+Marked **INVALID / SUPERSEDED — do not cite its numerical result**:
+
+| item | why |
+|---|---|
+| The **RVOL segmentation table** in the early entry-diagnostics work (buckets `<0.8x`, `0.8-1.2x`, `1.2-2x`, `>2x`, reported as "noise, p=0.271") | computed `rvol` from cumulative volume, so the buckets do not mean what they are labelled |
+| Any **`Observation.rvol`** value produced before this step | same cause |
+| The H002 note that an **RVOL >= 1.5 ORB variant** "left only 23 signals" | that gate read `OpeningRange.rvol`, itself built on the same field |
+
+No registered verdict depended on any of these: H001 ran with `volume_filter`
+off, H002's headline used `rvol_threshold=0`, and H003 has no volume condition.
+**H001/H002/H003 verdicts stand unchanged.**
+
+### 10.8 V2 status — input-only, unblocked
+
+| | n | min | p25 | median | p75 | max | below 1.0 |
+|---|---|---|---|---|---|---|---|
+| before (raw cumulative) | 33,525 | 1.011 | 1.116 | 1.192 | 1.362 | 12.1 | **0 (0.0%)** |
+| after (canonical bar volume) | 33,525 | 0.013 | 0.770 | 1.311 | 2.369 | 69.1 | **12,276 (36.6%)** |
+
+A ratio of two volumes that never once fell below 1.0 across 33,525 samples was
+the symptom; it now behaves like a ratio. Impulse legs touching an
+`UNKNOWN`-volume bar: 0 in the development period. **V2 is eligible for
+input-only screening.** No forward return has been inspected.
+
+### 10.9 Candidate dispositions
+
+| | status |
+|---|---|
+| **V1** terminal close location | **ELIGIBLE.** No zero-range denominators in 34,159 observations; p1 end-bar range 0.453 ATR; variance in the narrow tail 0.301 vs 0.297 elsewhere. Rule: if `high == low`, exclude and count — never impute, no threshold filter |
+| **V2** volume trajectory | **ELIGIBLE.** Contract implemented and cross-validated; distribution now sane |
+| **V3** impulse velocity | **DROPPED.** `V3 = impulse_score / impulse_bars` exactly (error 4.4e-16); corr with `impulse_bars` −0.722; holding duration fixed removes 66% of its variance |
+| **V4** leg efficiency | **BLOCKED, and left blocked.** Pinned at exactly 1.000 for 1-3 bar impulses (10.7% of observations); `×√N` over-corrects, climbing 1.000 -> 2.144 instead of flattening. No replacement normalisation invented |
+
+### 10.10 `impulse_bars` — registered as a separate candidate
+
+Not a substitute for V3. Registered on its own terms:
+
+> **V5 — impulse duration.** *Conditional on a strong directional impulse, does
+> impulse duration contain information about subsequent continuation versus
+> exhaustion?*
+>
+> **Definition:** `impulse_bars = |end_idx − start_idx|` from the ordered causal
+> swing pair, measured at the impulse end bar.
+> **Causal:** yes — both indices come from bars <= t.
+> **Distinct from Stage A:** Stage A thresholds impulse *magnitude*
+> (`R/ATR >= 3.5`) and says nothing about how long it took; the observed
+> `impulse_score` median is essentially flat across durations (4.03 at 1 bar,
+> 4.50 at 11), so duration is close to orthogonal to what Stage A selects.
+> **Distinct from H001-H003:** none used duration. H003 used
+> `impulse_bars` only as a *bound* on pullback length, never as a variable.
+> **Confounders:** bounded above by the lookback of 12, which truncates the
+> upper tail; and correlated with V4 (−0.418), so the two cannot be interpreted
+> independently.
+> **Status: PROPOSED. Not tested. No forward outcome inspected.**
+
+### 10.11 Hold-out
+
+**Untouched.** No screening has been run. Every distribution in this step is
+predictor-side and, where a period is involved, development only. The validation
+and hold-out periods have never been read by any forward computation.

@@ -18,6 +18,7 @@ import time
 from collections import defaultdict
 
 from app.services.indicators import OHLCV
+from app.services.volume_contract import BACKFILL, OK, TICK
 
 # Seconds per bar. Anything the UI offers must exist here.
 INTERVALS: dict[str, int] = {
@@ -50,6 +51,13 @@ class CandleStore:
         self._bars: dict[tuple[str, str, str], list[OHLCV]] = defaultdict(list)
         self._last_cum_volume: dict[tuple[str, str], int] = {}
         self._backfilled: set[tuple[str, str, str]] = set()
+        # Per-bar metadata kept alongside the OHLCV list rather than inside it,
+        # so the transport type stays the plain shape every indicator expects.
+        # OHLCV.volume always carries canonical bar volume; these record where
+        # it came from and how trustworthy it is.
+        self._quality: dict[tuple[str, str, str], dict[int, str]] = defaultdict(dict)
+        self._provenance: dict[tuple[str, str, str], dict[int, str]] = defaultdict(dict)
+        self._raw_cum: dict[tuple[str, str, str], dict[int, int]] = defaultdict(dict)
 
     # ---- ingest ---------------------------------------------------------
 
@@ -78,13 +86,32 @@ class CandleStore:
                 bars.append(OHLCV(ts=bucket, open=price, high=price, low=price, close=price, volume=delta))
                 if len(bars) > MAX_BARS:
                     del bars[0 : len(bars) - MAX_BARS]
+            key = (symbol, name, source)
+            # A tick-built bar is canonical per-bar volume by construction, and
+            # its provenance overrides any backfilled value on the same stamp.
+            self._quality[key][bucket] = OK
+            self._provenance[key][bucket] = TICK
+            self._raw_cum[key][bucket] = cum_volume
 
-    def seed(self, symbol: str, interval: str, source: str, candles: list[OHLCV]) -> None:
+    def seed(
+        self,
+        symbol: str,
+        interval: str,
+        source: str,
+        candles: list[OHLCV],
+        quality: dict[int, str] | None = None,
+        raw_cumulative: dict[int, int] | None = None,
+    ) -> None:
         """Installs historical bars for one source's series.
 
         Locally-built bars win on a timestamp collision — they were built from
         ticks this process actually observed, and only bars from the SAME
         source are ever considered, so this cannot mix price worlds.
+
+        `candles` must already satisfy the volume contract: OHLCV.volume is
+        per-bar volume, never a cumulative counter. Callers derive it with
+        `volume_contract.derive_rows` and pass the raw values through here so
+        the broker figures stay recoverable.
         """
         key = (symbol, interval, source)
         live = {b.ts: b for b in self._bars[key]}
@@ -92,6 +119,14 @@ class CandleStore:
         merged.update(live)
         self._bars[key] = [merged[ts] for ts in sorted(merged)][-MAX_BARS:]
         self._backfilled.add(key)
+
+        for ts in merged:
+            if ts in live:
+                continue          # tick-built bars keep their own provenance
+            self._provenance[key][ts] = BACKFILL
+            self._quality[key][ts] = (quality or {}).get(ts, OK)
+            if raw_cumulative and ts in raw_cumulative:
+                self._raw_cum[key][ts] = raw_cumulative[ts]
 
     def needs_backfill(self, symbol: str, interval: str, source: str) -> bool:
         return (symbol, interval, source) not in self._backfilled
@@ -104,6 +139,10 @@ class CandleStore:
         for k in keys:
             del self._bars[k]
         self._backfilled -= set(keys)
+        for k in keys:
+            self._quality.pop(k, None)
+            self._provenance.pop(k, None)
+            self._raw_cum.pop(k, None)
         for vk in [k for k in self._last_cum_volume if k[1] == source]:
             del self._last_cum_volume[vk]
         return len(keys)
@@ -111,7 +150,25 @@ class CandleStore:
     # ---- read -----------------------------------------------------------
 
     def get(self, symbol: str, interval: str, source: str, limit: int = 500) -> list[OHLCV]:
+        """Bars whose `volume` is canonical per-bar volume, whatever the path."""
         return self._bars[(symbol, interval, source)][-limit:]
+
+    def volume_quality(self, symbol: str, interval: str, source: str) -> dict[int, str]:
+        """Per-timestamp volume quality. UNKNOWN bars carry no usable volume."""
+        return dict(self._quality[(symbol, interval, source)])
+
+    def provenance(self, symbol: str, interval: str, source: str) -> dict[int, str]:
+        """Per-timestamp origin: TICK (observed here) or BACKFILL (broker history).
+
+        Needed to compare the two ingestion paths honestly: a backfilled bar
+        shares its source with the research store, so comparing those two would
+        compare one API response against itself.
+        """
+        return dict(self._provenance[(symbol, interval, source)])
+
+    def raw_cumulative(self, symbol: str, interval: str, source: str) -> dict[int, int]:
+        """The broker original cumulative counter, never overwritten."""
+        return dict(self._raw_cum[(symbol, interval, source)])
 
     def stats(self) -> dict:
         return {

@@ -123,6 +123,33 @@ async def create_manifest(dataset_id: str = Query(...), interval: str = Query("5
     return manifest.create(dataset_id, interval, source)
 
 
+@router.get("/live-provenance")
+async def live_provenance(interval: str = Query("5m")):
+    """Live-store bars with their volume provenance and quality.
+
+    Exists so the two ingestion paths can be compared honestly. A backfilled
+    live bar is the same API response the research store ingested, so comparing
+    those would compare one source against itself; only TICK-provenance bars
+    are an independent comparator.
+    """
+    from app.services.candle_store import candle_store
+    from app.services.market_data import market_data
+
+    source = market_data.source.value
+    out: dict[str, dict] = {}
+    for (symbol, iv, src) in list(candle_store._bars):  # noqa: SLF001
+        if iv != interval or src != source:
+            continue
+        bars = candle_store.get(symbol, iv, src, limit=1500)
+        out[symbol] = {
+            "provenance": {str(ts): p for ts, p in candle_store.provenance(symbol, iv, src).items()},
+            "quality": {str(ts): q for ts, q in candle_store.volume_quality(symbol, iv, src).items()},
+            "volume": {str(b.ts): b.volume for b in bars},
+            "raw_cumulative": {str(ts): v for ts, v in candle_store.raw_cumulative(symbol, iv, src).items()},
+        }
+    return {"source": source, "interval": interval, "symbols": out}
+
+
 @router.get("/manifests")
 async def list_manifests():
     return {"manifests": store.list_manifests()}

@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.services.candle_store import INTERVALS, candle_store
 from app.services.indicators import OHLCV
 from app.services.market_data import DataSource, market_data
+from app.services.volume_contract import UNKNOWN, derive_rows
 
 # How much history to request per interval. Longer bars need a wider window —
 # asking for 5 days of daily candles would return five bars.
@@ -50,10 +51,27 @@ async def ensure_backfilled(symbol: str, interval: str) -> str | None:
     if not rows:
         return f"Groww returned no historical candles for {symbol} at {interval}."
 
+    # Groww returns volume cumulative from the session open. Seeding it raw put
+    # a cumulative counter in the same field the tick path fills with per-bar
+    # volume, so one chart column carried two different quantities. Derive to
+    # the canonical contract first, and keep the raw figures alongside.
+    derived = derive_rows(rows)
     candle_store.seed(
         symbol,
         interval,
         source,
-        [OHLCV(ts=r[0], open=r[1], high=r[2], low=r[3], close=r[4], volume=r[5]) for r in rows],
+        [
+            OHLCV(ts=ts, open=o, high=h, low=lo, close=c, volume=bar_vol or 0)
+            for ts, o, h, lo, c, bar_vol, _raw, _q in derived
+        ],
+        quality={row[0]: row[7] for row in derived},
+        raw_cumulative={row[0]: row[6] for row in derived},
     )
+    unknown = sum(1 for row in derived if row[7] == UNKNOWN)
+    if unknown:
+        return (
+            f"{symbol} {interval}: {unknown} bar(s) have unrecoverable volume "
+            "(broker counter reset near the close); their volume reads 0 and must not "
+            "be treated as a quiet bar."
+        )
     return None

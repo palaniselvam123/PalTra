@@ -42,6 +42,7 @@ from pathlib import Path
 
 from app.core.market_clock import IST
 from app.services.indicators import OHLCV
+from app.services.volume_contract import FIRST_BAR, OK, UNKNOWN, derive_session
 
 # Separate file from trading.db on purpose: a research backfill must never be
 # able to lock, bloat or corrupt the database the live app writes trades to.
@@ -111,40 +112,6 @@ def day_bounds(day: dt.date) -> tuple[int, int]:
     """[start, end) epoch seconds covering one IST calendar day."""
     start = dt.datetime.combine(day, dt.time(0, 0), tzinfo=IST)
     return int(start.timestamp()), int((start + dt.timedelta(days=1)).timestamp())
-
-
-OK, FIRST_BAR, UNKNOWN = "OK", "FIRST_BAR", "UNKNOWN"
-
-
-def derive_session(cumulative: list[int]) -> list[tuple[int | None, str]]:
-    """Per-bar volumes for one session's cumulative series, in order.
-
-    The broker reports volume cumulatively from the session open, so the per-bar
-    figure is the first difference. Two cases are not ordinary differences:
-
-    * The first bar has no predecessor; its cumulative IS its own volume, since
-      the counter starts at zero. Flagged FIRST_BAR rather than OK because it
-      may also include pre-open auction volume, which this data cannot settle.
-    * The counter resets near the session close. The reset bar's true volume is
-      unrecoverable, and the bar after it would difference against a reset
-      baseline and report most of the day as one bar. Both are UNKNOWN, never
-      zero: a fabricated zero is indistinguishable downstream from a genuinely
-      quiet bar, which is the exact class of silent error this rule exists to
-      prevent.
-    """
-    out: list[tuple[int | None, str]] = []
-    reset_at: set[int] = set()
-    for i, cum in enumerate(cumulative):
-        if i == 0:
-            out.append((cum, FIRST_BAR))
-        elif cum < cumulative[i - 1]:
-            out.append((None, UNKNOWN))
-            reset_at.add(i)
-        elif (i - 1) in reset_at:
-            out.append((None, UNKNOWN))
-        else:
-            out.append((cum - cumulative[i - 1], OK))
-    return out
 
 
 @dataclass
