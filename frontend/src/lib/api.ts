@@ -493,6 +493,14 @@ export type PriceAtResponse = {
   pct_from_open?: number | null;
   source: string;
   reason?: string;
+  in_live_universe?: boolean;
+  in_history_universe?: boolean;
+  live_points?: number;
+  live_first_ist?: string | null;
+  live_last_ist?: string | null;
+  history_bars?: number;
+  history_first_ist?: string | null;
+  history_last_ist?: string | null;
 };
 
 export type AlertScanResponse = {

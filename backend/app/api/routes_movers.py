@@ -190,18 +190,9 @@ async def price_at(
     when = _resolve_as_of(d, at)
     point = price_history.price_at(symbol.upper(), when, src)
     if point is None:
-        return {
-            "found": False,
-            "symbol": symbol.upper(),
-            "day": d.isoformat(),
-            "asked_for": at,
-            "source": src,
-            "reason": (
-                "No price for that symbol near that time in either the live minute record or "
-                "broker history. Either nothing was recorded that day, the symbol is outside "
-                "the stored universe, or the date falls outside the history the broker retains."
-            ),
-        }
+        # Say which of the possible causes actually applies; the stores know.
+        diagnosis = price_history.diagnose_miss(symbol.upper(), when, src)
+        return {"found": False, "source": src, **diagnosis}
     return {"found": True, "day": d.isoformat(), "asked_for": at, "source": src, **point.as_dict()}
 
 

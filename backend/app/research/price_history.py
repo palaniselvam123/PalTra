@@ -197,6 +197,107 @@ def movers(
     return sorted(out, key=lambda m: m.pct_from_open, reverse=True), HISTORY
 
 
+def diagnose_miss(
+    symbol: str, when: dt.datetime, source: str = "live"
+) -> dict:
+    """Say precisely WHY a lookup found nothing, using what the stores know.
+
+    Listing every possible cause is not an explanation. The app can tell which
+    one applies: whether the symbol is stored at all, whether the day was
+    recorded, and if so what times it covers. A reader can act on "recording
+    started at 16:42"; they cannot act on "one of three things went wrong".
+    """
+    symbol = symbol.upper()
+    day = ist_date(int(when.timestamp()))
+    asked = ist_time_str(int(when.timestamp()))
+    today = ist_date(int(dt.datetime.now(dt.timezone.utc).timestamp()))
+
+    try:
+        from app.research.cross_sectional import SECTOR_OF
+
+        in_history_universe = symbol in SECTOR_OF
+    except Exception:  # noqa: BLE001
+        in_history_universe = False
+
+    try:
+        from app.services.market_data import market_data
+
+        in_live_universe = symbol in {x.upper() for x in market_data.symbols}
+    except Exception:  # noqa: BLE001
+        in_live_universe = False
+
+    live_points = snapshot_store.session_series(symbol, day, source)
+    history_bars = _history_bars(symbol, day) if in_history_universe else []
+
+    coverage = {
+        "symbol": symbol,
+        "day": day.isoformat(),
+        "asked_for": asked,
+        "in_live_universe": in_live_universe,
+        "in_history_universe": in_history_universe,
+        "live_points": len(live_points),
+        "live_first_ist": live_points[0].time_ist if live_points else None,
+        "live_last_ist": live_points[-1].time_ist if live_points else None,
+        "history_bars": len(history_bars),
+        "history_first_ist": ist_time_str(history_bars[0].ts) if history_bars else None,
+        "history_last_ist": ist_time_str(history_bars[-1].ts) if history_bars else None,
+    }
+
+    if not in_live_universe and not in_history_universe:
+        coverage["reason"] = (
+            f"{symbol} is not a symbol this app stores prices for — it is in neither the "
+            "live feed's universe nor the research universe."
+        )
+        return coverage
+
+    if live_points:
+        first, last = live_points[0].time_ist, live_points[-1].time_ist
+        if asked < first:
+            coverage["reason"] = (
+                f"{symbol} was recorded on {day.isoformat()} from {first} to {last}, so "
+                f"{asked} is before recording started. The recorder only captures the "
+                "session while it is running; there is no way to fill in earlier minutes."
+            )
+        elif asked > last:
+            coverage["reason"] = (
+                f"{symbol} was recorded on {day.isoformat()} from {first} to {last}, so "
+                f"{asked} is after the last recorded minute."
+            )
+        else:
+            coverage["reason"] = (
+                f"{symbol} has prices on {day.isoformat()} between {first} and {last}, but "
+                f"none within 15 minutes before {asked} — the recorder had a gap there."
+            )
+        return coverage
+
+    if in_history_universe and not history_bars:
+        if day > today:
+            coverage["reason"] = f"{day.isoformat()} is in the future."
+        elif day.weekday() >= 5:
+            coverage["reason"] = f"{day.isoformat()} is a weekend — the market was closed."
+        else:
+            stats = research_store.stats("5m", "live")
+            coverage["reason"] = (
+                f"No stored history for {symbol} on {day.isoformat()}. Broker history covers "
+                f"{stats.get('start')} to {stats.get('end')}; the date is outside that range, "
+                "or the market was closed that day."
+            )
+        return coverage
+
+    if source != "live" and day >= today:
+        coverage["reason"] = (
+            f"Nothing was recorded for {symbol} today before {asked}, and the feed is on "
+            "SIMULATED — real broker history is deliberately not used to answer a question "
+            "about today's synthetic prices."
+        )
+        return coverage
+
+    coverage["reason"] = (
+        f"No price for {symbol} near {asked} on {day.isoformat()} in either record."
+    )
+    return coverage
+
+
 def series(
     symbol: str, day: dt.date, source: str = "live", until: dt.datetime | None = None
 ) -> list[HistoricalPrice]:

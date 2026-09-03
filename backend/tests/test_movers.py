@@ -407,3 +407,70 @@ class TestLtpBatching:
         client._ltp_chunk = fake_chunk  # noqa: SLF001
         out = asyncio.run(GrowwClient.get_ltp_batch(client, [f"S{i}" for i in range(125)]))
         assert len(out) == 75 and "S0" in out and "S60" not in out
+
+
+class TestMissDiagnosis:
+    """A miss should say WHICH cause applies, not list every possibility.
+
+    "One of three things went wrong" is not something a reader can act on;
+    "recording started at 16:42" is.
+    """
+
+    def test_a_symbol_the_app_does_not_store_is_named_as_such(self, monkeypatch, store):
+        from app.research import price_history as ph
+
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        d = ph.diagnose_miss("NOTATICKER", when(11, 0), "simulated")
+        assert d["in_live_universe"] is False and d["in_history_universe"] is False
+        assert "not a symbol this app stores" in d["reason"]
+
+    def test_a_time_before_recording_started_says_so_with_the_window(self, monkeypatch, store):
+        """The exact case on screen: asking for 11:00 when the recorder began
+        at 16:42."""
+        from app.research import price_history as ph
+
+        seed(store, "AAA", [(16, 42, 100.0), (17, 4, 101.0)], 100.0)
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr("app.services.market_data.market_data.symbols", ["AAA"])
+
+        d = ph.diagnose_miss("AAA", when(11, 0), "live")
+        assert "16:42" in d["reason"] and "17:04" in d["reason"]
+        assert "before recording started" in d["reason"]
+        assert d["live_first_ist"] == "16:42" and d["live_last_ist"] == "17:04"
+
+    def test_a_time_after_the_last_record_is_distinguished(self, monkeypatch, store):
+        from app.research import price_history as ph
+
+        seed(store, "AAA", [(9, 15, 100.0), (10, 0, 101.0)], 100.0)
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr("app.services.market_data.market_data.symbols", ["AAA"])
+
+        assert "after the last recorded minute" in ph.diagnose_miss("AAA", when(15, 0), "live")["reason"]
+
+    def test_a_weekend_is_named_rather_than_blamed_on_the_recorder(self, monkeypatch, store):
+        import datetime as dt2
+
+        from app.research import price_history as ph
+
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr("app.research.cross_sectional.SECTOR_OF", {"AAA": "X"})
+
+        saturday = dt2.date(2026, 6, 13)
+        assert saturday.weekday() == 5
+        d = ph.diagnose_miss("AAA", when(11, 0, saturday), "live")
+        assert "weekend" in d["reason"]
+
+    def test_the_diagnosis_reports_the_coverage_it_used(self, monkeypatch, store):
+        """The numbers behind the sentence are returned too, so a UI can show
+        the user what times would have worked."""
+        from app.research import price_history as ph
+
+        seed(store, "AAA", [(16, 42, 100.0), (17, 4, 101.0)], 100.0)
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        d = ph.diagnose_miss("AAA", when(11, 0), "live")
+        assert d["live_points"] == 2 and d["asked_for"] == "11:00" and d["symbol"] == "AAA"

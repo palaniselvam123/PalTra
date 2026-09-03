@@ -378,9 +378,34 @@ export default function MoversPage() {
                   )}
                 </div>
               ) : (
-                <div className="flex items-start gap-2 text-amber-400">
-                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                  <span>{lookup.reason}</span>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 text-amber-400">
+                    <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                    <span>{lookup.reason}</span>
+                  </div>
+                  {/* What IS available, so the next attempt can succeed. */}
+                  {(lookup.live_points || lookup.history_bars) && (
+                    <div className="pl-6 text-xs text-slate-500">
+                      Available for {lookup.symbol} on {lookup.day}:
+                      {lookup.live_points ? (
+                        <span className="ml-1">
+                          live minute record {lookup.live_first_ist}–{lookup.live_last_ist}
+                        </span>
+                      ) : null}
+                      {lookup.history_bars ? (
+                        <span className="ml-1">
+                          {lookup.live_points ? "· " : ""}broker history {lookup.history_first_ist}–
+                          {lookup.history_last_ist}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                  {lookup.in_history_universe === false && lookup.in_live_universe === false && (
+                    <div className="pl-6 text-xs text-slate-500">
+                      Try a symbol from the tracked universe — the tables above list the ones with
+                      prices.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

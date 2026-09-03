@@ -21,6 +21,7 @@ import datetime as dt
 import re
 
 from app.core.market_clock import IST, ist_now
+from app.research.price_history import diagnose_miss
 from app.research.price_history import price_at as history_price_at
 from app.research.snapshots import ist_date
 
@@ -151,12 +152,7 @@ def lookup(text: str, source: str | None = None) -> dict | None:
             "day": day.isoformat(),
             "requested_time_ist": when_time.strftime("%H:%M"),
             "source": src,
-            "reason": (
-                f"No price for {symbol} near {when_time.strftime('%H:%M')} on "
-                f"{day.isoformat()} in either the live minute record or broker history. "
-                "Either nothing was recorded that day, the symbol is outside the stored "
-                "universe, or the date is beyond the history the broker retains."
-            ),
+            **diagnose_miss(symbol, when, src),
         }
 
     return {
