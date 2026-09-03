@@ -437,6 +437,8 @@ export type MoversResponse = {
   symbols_tracked: number;
   requested_top: number;
   gainers_total: number;
+  empty_reason?: string | null;
+  live_coverage?: { covered: boolean; symbols?: number; first_ist?: string; last_ist?: string };
   losers_total: number;
   unchanged_total: number;
   origin: string;
@@ -663,6 +665,20 @@ export const api = {
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),
   moversDays: () => request<{ source: string; days: string[]; stats: any }>("/api/movers/days"),
+
+  // A day for the whole tracked universe. Fires and returns; progress is polled,
+  // because 125 symbols against a shared rate limit is minutes, not one request.
+  moversFetchDay: (day: string, interval = "5m") =>
+    request<{ started: boolean; day: string; symbols: number }>("/api/movers/fetch-day", {
+      method: "POST",
+      body: JSON.stringify({ day, interval }),
+    }),
+
+  moversFetchDayStatus: () =>
+    request<{
+      running: boolean; day: string | null; done: number; total: number;
+      stored: number; failures: string[]; error: string | null;
+    }>("/api/movers/fetch-day/status"),
   moversWidenUniverse: () => request<any>("/api/movers/universe/widen", { method: "POST" }),
   moversAlertScan: (body: { dry_run: boolean; window_min?: number; min_speed?: number; min_move?: number }) =>
     request<AlertScanResponse>("/api/movers/alerts/scan", { method: "POST", body: JSON.stringify(body) }),

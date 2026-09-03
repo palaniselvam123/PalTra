@@ -573,3 +573,51 @@ class TestStoredMinuteBarsArePreferred:
         )
         got = ph.price_at("AAA", when(11, 0))
         assert got.origin == ph.HISTORY_1M and got.resolution_min == 1 and got.price == 111.0
+
+
+class TestEmptyResultsExplainThemselves:
+    """An empty movers table has several causes that look identical from outside.
+
+    Each needs a different action from the user — change the as-of, switch the
+    feed, or fetch the day — so returning [] for all three was a real gap.
+    """
+
+    def test_as_of_before_the_recording_started_says_when_it_ran(self, tmp_path, monkeypatch):
+        from app.research import price_history as ph
+        from app.research.snapshots import SnapshotStore
+
+        s = SnapshotStore(tmp_path / "s.db")
+        monkeypatch.setattr(ph, "snapshot_store", s)
+        day = dt.date(2026, 3, 4)
+        base = int(dt.datetime.combine(day, dt.time(16, 42), tzinfo=IST).timestamp())
+        s.record([("ACME", base + i * 60, "live", 100.0 + i, 100.0, None) for i in range(5)])
+
+        reason = ph.why_empty(day, "live", dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST))
+        assert reason is not None
+        assert "16:42" in reason, "the reason must name the window that WAS recorded"
+        assert "as it stood at" in reason.lower()
+
+    def test_simulated_feed_on_today_says_so_rather_than_looking_empty(self, monkeypatch):
+        from app.research import price_history as ph
+
+        today = dt.datetime.now(IST).date()
+        reason = ph.why_empty(today, "simulated", None)
+        assert reason is not None and "SIMULATED" in reason
+        assert "LIVE" in reason, "must say what to change, not just what is wrong"
+
+    def test_as_of_no_longer_silently_relabels_the_store(self, tmp_path, monkeypatch):
+        """The bug: an as-of that emptied the live slice fell to history, and a
+        one-symbol history table was presented with no hint that the as-of was
+        the cause. The rows may still come from history; the reason must be
+        available alongside them."""
+        from app.research import price_history as ph
+        from app.research.snapshots import SnapshotStore
+
+        s = SnapshotStore(tmp_path / "s.db")
+        monkeypatch.setattr(ph, "snapshot_store", s)
+        day = dt.date(2026, 3, 4)
+        base = int(dt.datetime.combine(day, dt.time(16, 42), tzinfo=IST).timestamp())
+        s.record([("ACME", base, "live", 100.0, 100.0, None)])
+
+        cov = ph.live_coverage(day, "live")
+        assert cov["covered"] and cov["first_ist"] == "16:42"

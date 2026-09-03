@@ -111,6 +111,8 @@ class TestSeed:
         assert r.get("H001", "v1").status == "REJECTED"
         assert r.get("H002", "v1").status == "REJECTED"
         assert r.get("H003", "v1").status == "DEFINED"
+        assert r.get("H004", "v1").status == "DEFINED"
+        assert r.get("H005", "v1").status == "DEFINED"
 
     def test_seeded_rejections_carry_the_evidence(self, tmp_path, monkeypatch):
         """A rejection with no numbers behind it is an opinion."""
@@ -172,4 +174,4 @@ class TestSeed:
         monkeypatch.setattr(seed_mod, "registry", r)
         seed_mod.seed()
         seed_mod.seed()
-        assert len(r.list()) == 4      # H001-H004
+        assert len(r.list()) == 5      # H001-H005

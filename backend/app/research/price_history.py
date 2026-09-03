@@ -158,6 +158,12 @@ def movers(
     Returns the movers and the origin, so a caller can label a 5-minute
     reconstruction as such rather than presenting it as the live record.
     """
+    # An empty slice still falls through to broker history — that is usually the
+    # more complete answer. What was missing was the reason: asking "as it stood
+    # at 10:00" on a day the recorder only covers from 17:07 empties the live
+    # slice, and the reader saw a switch of store with no explanation. Callers
+    # pair `origin` with `live_coverage()` so the window is stated rather than
+    # left to be inferred from a suspiciously short table.
     live = snapshot_store.movers(day, source, as_of)
     if live:
         return (
@@ -334,6 +340,52 @@ def series(
         for b in bars
         if cutoff is None or b.ts <= cutoff
     ]
+
+
+def why_empty(day: dt.date, source: str, as_of: dt.datetime | None) -> str | None:
+    """Why a movers query came back empty, when the reason is knowable.
+
+    An empty table has several causes that look identical from outside, and
+    each calls for a different action: change the as-of, switch the feed, or
+    fetch the day. Returning [] for all three left the reader guessing.
+    """
+    today = ist_date(int(dt.datetime.now(dt.timezone.utc).timestamp()))
+    cov = live_coverage(day, source)
+    if source != "live" and day >= today:
+        return (
+            "The feed is on SIMULATED, so today's rankings can only come from the "
+            "simulated record. Real broker history is deliberately not mixed in. "
+            "Switch the feed to LIVE, or pick an earlier day."
+        )
+    if as_of and cov.get("covered"):
+        return (
+            f"The live minute record for {day.isoformat()} runs "
+            f"{cov['first_ist']}-{cov['last_ist']} ({cov['symbols']} symbols), so nothing "
+            f"had been recorded by the requested time. Clear the 'as it stood at' box "
+            f"to see it, or fetch this day from the broker."
+        )
+    if not research_store.symbols("5m", "live"):
+        return "Nothing is stored for this day yet — fetch it from the broker."
+    return None
+
+
+def live_coverage(day: dt.date, source: str = "live") -> dict:
+    """The window the live minute record spans for a day, if any.
+
+    Lets an empty as-of slice say "recording ran 16:42-17:08" instead of
+    leaving the reader to wonder where the rows went.
+    """
+    rows = snapshot_store.movers(day, source)
+    if not rows:
+        return {"covered": False}
+    first = min(r.first_ts for r in rows if r.first_ts)
+    last = max(r.last_ts for r in rows)
+    return {
+        "covered": True,
+        "symbols": len(rows),
+        "first_ist": ist_time_str(first),
+        "last_ist": ist_time_str(last),
+    }
 
 
 def available_days(source: str = "live") -> dict:

@@ -114,6 +114,8 @@ async def movers(
         "gainers_total": split["gainers_total"],
         "losers_total": split["losers_total"],
         "unchanged_total": split["unchanged_total"],
+        "live_coverage": price_history.live_coverage(d, src),
+        "empty_reason": price_history.why_empty(d, src, as_of) if not all_movers else None,
         "gainers": [_mover_dict(m) for m in split["gainers"]],
         "losers": [_mover_dict(m) for m in split["losers"]],
         "recorder": {"running": market_recorder.running, "last_run_at": market_recorder.status()["last_run_at"]},
@@ -343,3 +345,70 @@ async def widen_universe():
         "added_count": len(added),
         "tracked_now": len(market_data.symbols),
     }
+
+
+# ---- fetching a whole day for the universe -------------------------------
+
+# Progress for the day-fetch job. One at a time: 125 symbols against a rate
+# limit the live quote loop shares is not something to run concurrently.
+_fetch_job: dict = {"running": False, "day": None, "interval": None, "done": 0,
+                    "total": 0, "stored": 0, "failures": [], "error": None}
+
+
+class FetchDayRequest(BaseModel):
+    day: str | None = None
+    interval: str = "5m"
+
+
+@router.get("/fetch-day/status")
+async def fetch_day_status():
+    return dict(_fetch_job)
+
+
+@router.post("/fetch-day")
+async def fetch_day(req: FetchDayRequest):
+    """Pull a whole day for every tracked symbol, so the rankings have a universe.
+
+    The interactive lookup fetches one symbol at a time, which is right when
+    someone asks about one stock and wrong for a gainers table: a 125-name
+    ranking needs 125 days of history, and firing those off one lookup at a
+    time would take as long and report nothing while it ran.
+    """
+    import asyncio
+
+    from app.research import ingestion, price_fetch
+    from app.research.cross_sectional import SECTOR_OF
+    from app.research.store import store as research_store
+
+    if _fetch_job["running"]:
+        raise HTTPException(409, "A day fetch is already running.")
+
+    d = _resolve_day(req.day)
+    blocked = price_fetch.fetch_blocked_reason("UNIVERSE", d, "live")
+    if blocked:
+        raise HTTPException(400, blocked)
+
+    symbols = sorted(set(SECTOR_OF) | set(research_store.symbols(req.interval, "live")))
+
+    async def run():
+        _fetch_job.update(running=True, day=d.isoformat(), interval=req.interval,
+                          done=0, total=len(symbols), stored=0, failures=[], error=None)
+        try:
+            for symbol in symbols:
+                try:
+                    report = await ingestion.backfill(
+                        [symbol], req.interval, d, d, price_fetch.broker_client(), "live", research_store
+                    )
+                    _fetch_job["stored"] += report.candles_fetched
+                except Exception as exc:  # noqa: BLE001
+                    _fetch_job["failures"].append(f"{symbol}: {str(exc)[:120]}")
+                _fetch_job["done"] += 1
+        except Exception as exc:  # noqa: BLE001
+            _fetch_job["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            _fetch_job["running"] = False
+
+    asyncio.create_task(run())
+    return {"started": True, "day": d.isoformat(), "interval": req.interval,
+            "symbols": len(symbols),
+            "note": "Runs in the background; poll /api/movers/fetch-day/status."}

@@ -52,6 +52,7 @@ export default function MoversPage() {
   // Point-in-time lookup
   const [lookupSymbol, setLookupSymbol] = useState("RELIANCE");
   const [lookupTime, setLookupTime] = useState("11:00");
+  const [fetching, setFetching] = useState<string | null>(null);
   const [lookup, setLookup] = useState<PriceAtResponse | null>(null);
 
   const [alerts, setAlerts] = useState<AlertScanResponse | null>(null);
@@ -77,6 +78,26 @@ export default function MoversPage() {
     const id = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // A whole-universe fetch takes minutes, so it reports progress rather than
+  // spinning silently; the rankings reload once it lands.
+  const fetchWholeDay = async () => {
+    setFetching("Starting…");
+    try {
+      await api.moversFetchDay(day || new Date().toISOString().slice(0, 10), "5m");
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const st = await api.moversFetchDayStatus();
+        setFetching(`${st.done}/${st.total}…`);
+        if (!st.running) break;
+      }
+      refresh();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setFetching(null);
+    }
+  };
 
   const runLookup = async () => {
     setBusy(true);
@@ -239,9 +260,28 @@ export default function MoversPage() {
             <History size={16} className="mt-0.5 shrink-0" />
             <span>
               Showing <strong>{movers.day}</strong> from stored broker history at{" "}
-              {movers.resolution_min}-minute resolution — the live minute record does not cover this
-              day. Percentages are from the true session open.
+              {movers.resolution_min}-minute resolution.{" "}
+              {movers.live_coverage?.covered
+                ? `The live minute record for this day only runs ${movers.live_coverage.first_ist}–${movers.live_coverage.last_ist}, so history answered instead.`
+                : "The live minute record does not cover this day."}{" "}
+              Percentages are from the true session open.
             </span>
+          </div>
+        )}
+
+        {movers && movers.empty_reason && (
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{movers.empty_reason}</span>
+            </div>
+            <button
+              onClick={fetchWholeDay}
+              disabled={fetching !== null}
+              className="shrink-0 rounded border border-amber-500/50 px-3 py-1 text-xs font-medium hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              {fetching ?? "Fetch this day"}
+            </button>
           </div>
         )}
 
