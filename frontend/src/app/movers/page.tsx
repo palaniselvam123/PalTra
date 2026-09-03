@@ -164,6 +164,8 @@ export default function MoversPage() {
     setWindow_({ since: "09:15", at: "" });
   };
 
+  const [moverTab, setMoverTab] = useState<"gainers" | "losers">("gainers");
+
   const filtersOn =
     priceIdx[0] > 0 ||
     priceIdx[1] < PRICE_STOPS.length - 1 ||
@@ -483,7 +485,7 @@ export default function MoversPage() {
               <table className="w-full text-sm">
                 <thead className="text-xs uppercase text-slate-500">
                   <tr>
-                    <Th>Symbol</Th>
+                    <Th>Stock</Th>
                     <Th right>Speed</Th>
                     <Th right>{peak ? "Best window" : `Last ${fast.window_min}m`}</Th>
                     <Th right>From open</Th>
@@ -494,7 +496,9 @@ export default function MoversPage() {
                 <tbody>
                   {fast.movers.map((f) => (
                     <tr key={f.symbol} className="border-t border-slate-800/70">
-                      <Td className="font-medium">{f.symbol}</Td>
+                      <Td>
+                        <StockCell symbol={f.symbol} name={f.name} />
+                      </Td>
                       <Td right>
                         <Pct value={f.speed_pct_per_min} suffix="%/min" digits={3} />
                       </Td>
@@ -515,30 +519,57 @@ export default function MoversPage() {
         </section>
 
         {/* ---- gainers / losers ---- */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <MoverTable
-            title={`Top ${top} gainers`}
-            icon={<ArrowUpRight size={15} className="text-profit" />}
-            rows={movers?.gainers ?? []}
-            total={movers?.gainers_total ?? 0}
-            requested={top}
-            tracked={movers?.symbols_tracked ?? 0}
-            fromLabel={fromLabel}
-            openLabel={openLabel}
-            emptyText={emptyMsg("above")}
-          />
-          <MoverTable
-            title={`Top ${top} losers`}
-            icon={<ArrowDownRight size={15} className="text-loss" />}
-            rows={movers?.losers ?? []}
-            total={movers?.losers_total ?? 0}
-            requested={top}
-            tracked={movers?.symbols_tracked ?? 0}
-            fromLabel={fromLabel}
-            openLabel={openLabel}
-            emptyText={emptyMsg("below")}
-          />
-        </div>
+        <section className="rounded-xl border border-slate-800 bg-card p-4">
+          <div className="mb-3 flex items-center gap-1 border-b border-slate-800">
+            <button
+              onClick={() => setMoverTab("gainers")}
+              className={clsx(
+                "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                moverTab === "gainers"
+                  ? "border-profit text-profit"
+                  : "border-transparent text-slate-500 hover:text-slate-300",
+              )}
+            >
+              <ArrowUpRight size={15} />
+              Top {top} gainers
+              <span className="font-normal text-slate-500">{movers?.gainers_total ?? 0}</span>
+            </button>
+            <button
+              onClick={() => setMoverTab("losers")}
+              className={clsx(
+                "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                moverTab === "losers"
+                  ? "border-loss text-loss"
+                  : "border-transparent text-slate-500 hover:text-slate-300",
+              )}
+            >
+              <ArrowDownRight size={15} />
+              Top {top} losers
+              <span className="font-normal text-slate-500">{movers?.losers_total ?? 0}</span>
+            </button>
+          </div>
+          {moverTab === "gainers" ? (
+            <MoverTable
+              rows={movers?.gainers ?? []}
+              total={movers?.gainers_total ?? 0}
+              requested={top}
+              tracked={movers?.symbols_tracked ?? 0}
+              fromLabel={fromLabel}
+              openLabel={openLabel}
+              emptyText={emptyMsg("above")}
+            />
+          ) : (
+            <MoverTable
+              rows={movers?.losers ?? []}
+              total={movers?.losers_total ?? 0}
+              requested={top}
+              tracked={movers?.symbols_tracked ?? 0}
+              fromLabel={fromLabel}
+              openLabel={openLabel}
+              emptyText={emptyMsg("below")}
+            />
+          )}
+        </section>
 
         {/* ---- point-in-time lookup ---- */}
         <section className="rounded-xl border border-slate-800 bg-card p-4">
@@ -577,7 +608,7 @@ export default function MoversPage() {
               {lookup.found ? (
                 <div className="space-y-1">
                   <div className="text-lg font-semibold tabular-nums">
-                    {lookup.symbol} — ₹{lookup.price?.toFixed(2)}
+                    <StockCell symbol={lookup.symbol} name={lookup.name} /> — ₹{lookup.price?.toFixed(2)}
                   </div>
                   <div className="text-slate-400">
                     recorded at {lookup.recorded_at_ist} IST on {lookup.day}
@@ -800,9 +831,22 @@ function RangeSlider({
   );
 }
 
+function StockCell({ symbol, name }: { symbol: string; name?: string }) {
+  // The symbol always shows — it is what the rest of the app (lookup, chat,
+  // orders) keys on — with the company name in front when the instrument
+  // master resolved one. An unresolved name silently falls back to the
+  // symbol alone rather than showing an empty string before the bracket.
+  return name ? (
+    <>
+      <span className="font-medium">{name}</span>{" "}
+      <span className="text-slate-500">({symbol})</span>
+    </>
+  ) : (
+    <span className="font-medium">{symbol}</span>
+  );
+}
+
 function MoverTable({
-  title,
-  icon,
   rows,
   total,
   requested,
@@ -811,8 +855,6 @@ function MoverTable({
   fromLabel = "From open",
   openLabel = "Open",
 }: {
-  title: string;
-  icon: React.ReactNode;
   fromLabel?: string;
   openLabel?: string;
   rows: MoverRow[];
@@ -825,13 +867,10 @@ function MoverTable({
   // different responses, so say which it is rather than just showing fewer rows.
   const short = rows.length < requested;
   return (
-    <section className="rounded-xl border border-slate-800 bg-card p-4">
-      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-        {icon} {title}
-        <span className="font-normal text-slate-500">
-          showing {rows.length} of {total}
-        </span>
-      </h2>
+    <div>
+      <p className="mb-2 text-xs text-slate-500">
+        showing {rows.length} of {total}
+      </p>
       {short && rows.length > 0 && (
         <p className="mb-2 text-xs text-slate-500">
           {total < requested && tracked < requested * 2
@@ -847,9 +886,11 @@ function MoverTable({
             <thead className="text-xs uppercase text-slate-500">
               <tr>
                 <Th>#</Th>
-                <Th>Symbol</Th>
+                <Th>Stock</Th>
                 <Th right>{fromLabel}</Th>
                 <Th right>Price</Th>
+                <Th right>High</Th>
+                <Th right>Low</Th>
                 <Th right>{openLabel}</Th>
                 <Th right>At</Th>
               </tr>
@@ -858,11 +899,15 @@ function MoverTable({
               {rows.map((m, i) => (
                 <tr key={m.symbol} className="border-t border-slate-800/70">
                   <Td className="tabular-nums text-slate-500">{i + 1}</Td>
-                  <Td className="font-medium">{m.symbol}</Td>
+                  <Td>
+                    <StockCell symbol={m.symbol} name={m.name} />
+                  </Td>
                   <Td right>
                     <Pct value={m.pct_from_open} />
                   </Td>
                   <Td right className="tabular-nums">{m.last_price.toFixed(2)}</Td>
+                  <Td right className="tabular-nums text-profit/80">{m.high_price.toFixed(2)}</Td>
+                  <Td right className="tabular-nums text-loss/80">{m.low_price.toFixed(2)}</Td>
                   <Td right className="tabular-nums text-slate-400">{m.open_price.toFixed(2)}</Td>
                   <Td right className="text-slate-400">{m.last_time_ist}</Td>
                 </tr>
@@ -871,7 +916,7 @@ function MoverTable({
           </table>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

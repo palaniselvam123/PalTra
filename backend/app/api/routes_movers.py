@@ -26,9 +26,27 @@ from app.services.movers import (
 router = APIRouter(prefix="/api/movers", tags=["movers"])
 
 
+def _company_name(symbol: str) -> str:
+    """The tradable name behind a ticker, or "" when it is not in the master.
+
+    A blank is returned rather than the symbol itself: the caller shows the
+    symbol regardless, and echoing it as a name would make an unknown
+    instrument look like a resolved one.
+    """
+    try:
+        from app.services.instruments import instrument_master
+
+        instrument_master.ensure_loaded()
+        inst = instrument_master.get(symbol)
+        return inst.name if inst else ""
+    except Exception:  # noqa: BLE001 — a name is decoration, never a reason to fail
+        return ""
+
+
 def _mover_dict(m) -> dict:
     return {
         "symbol": m.symbol,
+        "name": _company_name(m.symbol),
         "open_price": round(m.open_price, 2),
         "last_price": round(m.last_price, 2),
         "pct_from_open": round(m.pct_from_open, 3),
@@ -241,7 +259,7 @@ async def fast(
         "min_speed_pct_per_min": min_speed,
         "min_move_pct": min_move,
         "count": len(movers_fast),
-        "movers": [f.as_dict() for f in movers_fast],
+        "movers": [{**f.as_dict(), "name": _company_name(f.symbol)} for f in movers_fast],
     }
 
 
@@ -268,7 +286,8 @@ async def price_at(
     if point is None:
         return {"found": False, "source": src, **note}
     return {"found": True, "day": d.isoformat(), "asked_for": at, "source": src,
-            "fetched_now": bool(note.get("fetched")), **point.as_dict()}
+            "fetched_now": bool(note.get("fetched")),
+            "name": _company_name(point.symbol), **point.as_dict()}
 
 
 @router.get("/series")

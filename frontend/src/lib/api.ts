@@ -417,6 +417,7 @@ export type AiStatus = {
 
 export type MoverRow = {
   symbol: string;
+  name?: string;
   open_price: number;
   last_price: number;
   pct_from_open: number;
@@ -456,6 +457,7 @@ export type MoversResponse = {
 
 export type FastMoverRow = {
   symbol: string;
+  name?: string;
   pct_from_open: number;
   speed_pct_per_min: number;
   window_move_pct: number;
@@ -494,6 +496,7 @@ export type RecorderStatus = {
 export type PriceAtResponse = {
   found: boolean;
   symbol: string;
+  name?: string;
   day: string;
   asked_for: string;
   recorded_at_ist?: string;
