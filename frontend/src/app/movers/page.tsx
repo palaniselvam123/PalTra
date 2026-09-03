@@ -261,9 +261,11 @@ export default function MoversPage() {
             <span>
               Showing <strong>{movers.day}</strong> from stored broker history at{" "}
               {movers.resolution_min}-minute resolution.{" "}
-              {movers.live_coverage?.covered
-                ? `The live minute record for this day only runs ${movers.live_coverage.first_ist}–${movers.live_coverage.last_ist}, so history answered instead.`
-                : "The live minute record does not cover this day."}{" "}
+              {!movers.live_coverage?.covered
+                ? "The live minute record does not cover this day."
+                : movers.live_coverage.in_session === false
+                ? `The recorder only ran ${movers.live_coverage.first_ist}–${movers.live_coverage.last_ist}, after the close, so it saw only frozen quotes — history answered instead.`
+                : `The live minute record for this day only runs ${movers.live_coverage.first_ist}–${movers.live_coverage.last_ist}, so history answered instead.`}{" "}
               Percentages are from the true session open.
             </span>
           </div>

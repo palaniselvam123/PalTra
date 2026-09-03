@@ -438,7 +438,7 @@ export type MoversResponse = {
   requested_top: number;
   gainers_total: number;
   empty_reason?: string | null;
-  live_coverage?: { covered: boolean; symbols?: number; first_ist?: string; last_ist?: string };
+  live_coverage?: { covered: boolean; in_session?: boolean; symbols?: number; first_ist?: string; last_ist?: string };
   losers_total: number;
   unchanged_total: number;
   origin: string;

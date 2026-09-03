@@ -150,6 +150,27 @@ def price_at(
     )
 
 
+def _covers_session(rows: list, day: dt.date) -> bool:
+    """Whether a live record actually observed the trading session.
+
+    A recorder started after 15:30 still writes rows: the broker keeps serving
+    the last close, so every symbol gets an identical price at 17:07 and 18:05
+    and a move of exactly 0.00%. Those rows exist but describe nothing, and
+    preferring them over real broker history — which the finer resolution would
+    otherwise justify — produced a table of 26 stocks all flat at zero.
+
+    Coverage means at least one point inside 09:15-15:30, not merely a row
+    somewhere on the date.
+    """
+    from app.core.market_clock import MARKET_CLOSE, MARKET_OPEN
+
+    start = int(dt.datetime.combine(day, MARKET_OPEN, tzinfo=IST).timestamp())
+    end = int(dt.datetime.combine(day, MARKET_CLOSE, tzinfo=IST).timestamp())
+    return any(
+        (m.first_ts or m.last_ts) <= end and m.last_ts >= start for m in rows
+    )
+
+
 def movers(
     day: dt.date, source: str = "live", as_of: dt.datetime | None = None
 ) -> tuple[list[HistoricalMover], str]:
@@ -165,7 +186,7 @@ def movers(
     # pair `origin` with `live_coverage()` so the window is stated rather than
     # left to be inferred from a suspiciously short table.
     live = snapshot_store.movers(day, source, as_of)
-    if live:
+    if live and _covers_session(live, day):
         return (
             [
                 HistoricalMover(
@@ -357,6 +378,12 @@ def why_empty(day: dt.date, source: str, as_of: dt.datetime | None) -> str | Non
             "simulated record. Real broker history is deliberately not mixed in. "
             "Switch the feed to LIVE, or pick an earlier day."
         )
+    if cov.get("covered") and not cov.get("in_session"):
+        return (
+            f"The recorder only ran {cov['first_ist']}-{cov['last_ist']}, after the 15:30 "
+            f"close, so every quote it saw was the frozen last price and no stock shows any "
+            f"move. Fetch this day from the broker for the real session."
+        )
     if as_of and cov.get("covered"):
         return (
             f"The live minute record for {day.isoformat()} runs "
@@ -382,6 +409,7 @@ def live_coverage(day: dt.date, source: str = "live") -> dict:
     last = max(r.last_ts for r in rows)
     return {
         "covered": True,
+        "in_session": _covers_session(rows, day),
         "symbols": len(rows),
         "first_ist": ist_time_str(first),
         "last_ist": ist_time_str(last),

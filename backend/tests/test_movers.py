@@ -8,6 +8,7 @@ against live ones.
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 
 import pytest
 
@@ -589,12 +590,12 @@ class TestEmptyResultsExplainThemselves:
         s = SnapshotStore(tmp_path / "s.db")
         monkeypatch.setattr(ph, "snapshot_store", s)
         day = dt.date(2026, 3, 4)
-        base = int(dt.datetime.combine(day, dt.time(16, 42), tzinfo=IST).timestamp())
+        base = int(dt.datetime.combine(day, dt.time(11, 42), tzinfo=IST).timestamp())
         s.record([("ACME", base + i * 60, "live", 100.0 + i, 100.0, None) for i in range(5)])
 
         reason = ph.why_empty(day, "live", dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST))
         assert reason is not None
-        assert "16:42" in reason, "the reason must name the window that WAS recorded"
+        assert "11:42" in reason, "the reason must name the window that WAS recorded"
         assert "as it stood at" in reason.lower()
 
     def test_simulated_feed_on_today_says_so_rather_than_looking_empty(self, monkeypatch):
@@ -616,8 +617,78 @@ class TestEmptyResultsExplainThemselves:
         s = SnapshotStore(tmp_path / "s.db")
         monkeypatch.setattr(ph, "snapshot_store", s)
         day = dt.date(2026, 3, 4)
-        base = int(dt.datetime.combine(day, dt.time(16, 42), tzinfo=IST).timestamp())
+        base = int(dt.datetime.combine(day, dt.time(11, 42), tzinfo=IST).timestamp())
         s.record([("ACME", base, "live", 100.0, 100.0, None)])
 
         cov = ph.live_coverage(day, "live")
-        assert cov["covered"] and cov["first_ist"] == "16:42"
+        assert cov["covered"] and cov["first_ist"] == "11:42" and cov["in_session"]
+
+
+class TestPostCloseRecordIsNotSessionCoverage:
+    """A recorder started after 15:30 writes rows that describe nothing.
+
+    The broker keeps serving the last close, so every symbol lands at an
+    identical price and a move of exactly 0.00%. Those rows exist, so a check
+    for "is there a live record for this day" says yes — and the finer
+    resolution then wins over real broker history, producing a table of stocks
+    all flat at zero. Coverage has to mean the session, not the date.
+    """
+
+    def _post_close_store(self, tmp_path, day):
+        from app.research.snapshots import SnapshotStore
+
+        s = SnapshotStore(tmp_path / "s.db")
+        base = int(dt.datetime.combine(day, dt.time(17, 7), tzinfo=IST).timestamp())
+        rows = []
+        for sym, price in (("ACME", 100.0), ("BETA", 250.0)):
+            for i in range(7):
+                rows.append((sym, base + i * 600, "live", price, price, None))
+        s.record(rows)
+        return s
+
+    def test_post_close_rows_do_not_count_as_coverage(self, tmp_path):
+        from app.research import price_history as ph
+
+        day = dt.date(2026, 3, 4)
+        s = self._post_close_store(tmp_path, day)
+        rows = s.movers(day, "live")
+        assert len(rows) == 2, "the rows are really there"
+        assert all(r.pct_from_open == 0.0 for r in rows), "and every one is flat"
+        assert not ph._covers_session(rows, day), "but none of it is session data"
+
+    def test_in_session_rows_do_count(self, tmp_path):
+        from app.research import price_history as ph
+        from app.research.snapshots import SnapshotStore
+
+        day = dt.date(2026, 3, 4)
+        s = SnapshotStore(tmp_path / "t.db")
+        base = int(dt.datetime.combine(day, dt.time(9, 20), tzinfo=IST).timestamp())
+        s.record([("ACME", base + i * 60, "live", 100.0 + i, 100.0, None) for i in range(5)])
+        assert ph._covers_session(s.movers(day, "live"), day)
+
+    def test_a_post_close_record_falls_through_to_history(self, tmp_path, monkeypatch):
+        from app.research import price_history as ph
+
+        day = dt.date(2026, 3, 4)
+        monkeypatch.setattr(ph, "snapshot_store", self._post_close_store(tmp_path, day))
+        monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["ZULU"])
+        bar_ts = int(dt.datetime.combine(day, dt.time(9, 20), tzinfo=IST).timestamp())
+        bars = [
+            SimpleNamespace(ts=bar_ts, open=100.0, high=101.0, low=99.0, close=100.0),
+            SimpleNamespace(ts=bar_ts + 300, open=100.0, high=106.0, low=100.0, close=105.0),
+        ]
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
+
+        out, origin = ph.movers(day, "live")
+        assert origin == ph.HISTORY, "real session data must win over frozen quotes"
+        assert [m.symbol for m in out] == ["ZULU"]
+        assert out[0].pct_from_open == pytest.approx(5.0)
+
+    def test_the_reason_names_the_post_close_window(self, tmp_path, monkeypatch):
+        from app.research import price_history as ph
+
+        day = dt.date(2026, 3, 4)
+        monkeypatch.setattr(ph, "snapshot_store", self._post_close_store(tmp_path, day))
+        monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: [])
+        reason = ph.why_empty(day, "live", None)
+        assert reason and "17:07" in reason and "15:30" in reason
