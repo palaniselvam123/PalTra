@@ -31,6 +31,7 @@ from app.research.snapshots import PricePoint, ist_date, ist_time_str, snapshot_
 from app.research.store import store as research_store
 
 LIVE = "live_minute_record"
+HISTORY_1M = "broker_history_1m"
 HISTORY = "broker_history_5m"
 
 
@@ -98,9 +99,17 @@ class HistoricalMover:
         return 0 <= (t.hour * 60 + t.minute) - (9 * 60 + 15) <= 20
 
 
-def _history_bars(symbol: str, day: dt.date):
-    """That day's 5-minute bars for one symbol, from the research store."""
-    return research_store.read(symbol, "5m", "live", start=day, end=day)
+def _history_bars(symbol: str, day: dt.date) -> tuple[list, str, int]:
+    """That day's stored bars, finest first, with their origin and resolution.
+
+    1-minute bars are preferred when present: they are what an on-demand fetch
+    stores, and answering "what was it at 11:02" from a 5-minute bucket when a
+    1-minute bar exists would throw away precision the app already has.
+    """
+    minute = research_store.read(symbol, "1m", "live", start=day, end=day)
+    if minute:
+        return minute, HISTORY_1M, 1
+    return research_store.read(symbol, "5m", "live", start=day, end=day), HISTORY, 5
 
 
 def price_at(
@@ -126,7 +135,7 @@ def price_at(
     if source != "live" and day >= ist_date(int(dt.datetime.now(dt.timezone.utc).timestamp())):
         return None
 
-    bars = _history_bars(symbol, day)
+    bars, origin, resolution = _history_bars(symbol, day)
     if not bars:
         return None
     target = int(when.timestamp())
@@ -137,7 +146,7 @@ def price_at(
     bar = max(candidates, key=lambda b: b.ts)
     return HistoricalPrice(
         symbol=symbol, ts=bar.ts, price=bar.close, open_price=bars[0].open,
-        origin=HISTORY, resolution_min=5,
+        origin=origin, resolution_min=resolution,
     )
 
 
@@ -169,8 +178,9 @@ def movers(
 
     cutoff = int(as_of.timestamp()) if as_of else None
     out: list[HistoricalMover] = []
+    resolution_seen, origin_seen = 5, HISTORY
     for symbol in research_store.symbols("5m", "live"):
-        bars = _history_bars(symbol, day)
+        bars, origin_seen, resolution_seen = _history_bars(symbol, day)
         if cutoff is not None:
             bars = [b for b in bars if b.ts <= cutoff]
         if not bars:
@@ -189,12 +199,12 @@ def movers(
                 high_price=max(b.high for b in bars),
                 low_price=min(b.low for b in bars),
                 points=len(bars),
-                origin=HISTORY,
-                resolution_min=5,
+                origin=origin_seen,
+                resolution_min=resolution_seen,
                 first_ts=bars[0].ts,
             )
         )
-    return sorted(out, key=lambda m: m.pct_from_open, reverse=True), HISTORY
+    return sorted(out, key=lambda m: m.pct_from_open, reverse=True), origin_seen
 
 
 def diagnose_miss(
@@ -227,7 +237,7 @@ def diagnose_miss(
         in_live_universe = False
 
     live_points = snapshot_store.session_series(symbol, day, source)
-    history_bars = _history_bars(symbol, day) if in_history_universe else []
+    history_bars = _history_bars(symbol, day)[0] if in_history_universe else []
 
     coverage = {
         "symbol": symbol,
@@ -315,12 +325,12 @@ def series(
     if source != "live" and day >= ist_date(int(dt.datetime.now(dt.timezone.utc).timestamp())):
         return []
 
-    bars = _history_bars(symbol, day)
+    bars, origin, resolution = _history_bars(symbol, day)
     if not bars:
         return []
     open_price = bars[0].open
     return [
-        HistoricalPrice(symbol, b.ts, b.close, open_price, HISTORY, 5)
+        HistoricalPrice(symbol, b.ts, b.close, open_price, origin, resolution)
         for b in bars
         if cutoff is None or b.ts <= cutoff
     ]
@@ -339,3 +349,53 @@ def available_days(source: str = "live") -> dict:
         "history_resolution_min": 5,
         "live_resolution_min": 1,
     }
+
+
+async def resolve_price(
+    symbol: str, when: dt.datetime, source: str = "live", allow_fetch: bool = True
+) -> tuple[HistoricalPrice | None, dict]:
+    """Answer a price question, fetching the day from the broker if needed.
+
+    The stored records are tried first because they cost nothing. Only when
+    both miss does this reach for the network, and only for a day a fetch could
+    actually help with — `price_fetch` refuses futures, weekends, and questions
+    about today's synthetic feed rather than issuing a request that cannot
+    succeed.
+
+    Returns the price and a note describing how it was obtained, so a caller can
+    tell a cached answer from one that was just fetched, and can explain a
+    remaining miss precisely.
+    """
+    from app.research import price_fetch
+
+    found = price_at(symbol, when, source)
+    if found is not None:
+        return found, {"fetched": False, "cached": True}
+
+    if not allow_fetch:
+        return None, diagnose_miss(symbol, when, source)
+
+    day = ist_date(int(when.timestamp()))
+    outcome = await price_fetch.ensure_day(symbol, day, source)
+
+    if not outcome.get("fetched"):
+        # A fetch that could not run explains itself better than the store can:
+        # "not connected to Groww" is actionable where "no record" is not.
+        diagnosis = diagnose_miss(symbol, when, source)
+        if outcome.get("reason"):
+            diagnosis["reason"] = outcome["reason"]
+        diagnosis["fetch_attempted"] = True
+        return None, diagnosis
+
+    found = price_at(symbol, when, source)
+    if found is None:
+        diagnosis = diagnose_miss(symbol, when, source)
+        diagnosis["fetch_attempted"] = True
+        diagnosis["reason"] = (
+            f"Fetched {outcome.get('candles', 0)} candles for {symbol} on {day.isoformat()} "
+            f"from Groww, but none within 15 minutes before "
+            f"{ist_time_str(int(when.timestamp()))} — the market was likely not trading then."
+        )
+        return None, diagnosis
+
+    return found, {"fetched": True, "cached": False, "candles": outcome.get("candles")}

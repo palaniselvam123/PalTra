@@ -194,7 +194,7 @@ class TestFastMoverSpeed:
         bars += [OHLCV(ts_at(9, 15, past) + 20 * 300, 100.0, 104.0, 100.0, 103.5, 10)]
 
         monkeypatch.setattr(ph, "snapshot_store", store)          # no live record
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: bars if d == past else [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5) if d == past else ([], ph.HISTORY, 5))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["AAA"])
 
         out = movers_mod.fast_movers(past, "live", None, 10, 0.10, 0.75)
@@ -294,7 +294,7 @@ class TestHistoricalFallback:
                 for i in range(20)]
 
         monkeypatch.setattr(ph, "snapshot_store", store)          # empty: no live record
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: bars if d == past else [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5) if d == past else ([], ph.HISTORY, 5))
 
         got = ph.price_at("AAA", when(10, 0, past))
         assert got is not None
@@ -307,7 +307,7 @@ class TestHistoricalFallback:
 
         seed(store, "AAA", [(10, 0, 123.0)], 100.0)
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
 
         got = ph.price_at("AAA", when(10, 0))
         assert got.origin == ph.LIVE and got.resolution_min == 1 and got.price == 123.0
@@ -322,7 +322,7 @@ class TestHistoricalFallback:
         bars = [OHLCV(int(dt.datetime.combine(today, dt.time(10, 0), tzinfo=IST).timestamp()),
                       100.0, 101.0, 99.0, 100.5, 10)]
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: bars)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
 
         at_ten = dt.datetime.combine(today, dt.time(10, 0), tzinfo=IST)
         assert ph.price_at("AAA", at_ten, source="simulated") is None
@@ -339,7 +339,7 @@ class TestHistoricalFallback:
         past = DAY - dt2.timedelta(days=30)
         bars = [OHLCV(ts_at(10, 0, past), 100.0, 101.0, 99.0, 100.5, 10)]
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: bars)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
 
         assert ph.price_at("AAA", when(10, 0, past), source="simulated") is not None
 
@@ -355,7 +355,7 @@ class TestHistoricalFallback:
         bars = [OHLCV(ts_at(9, 15, past) + i * 300, 100.0, 102.0, 99.0, 100.0 + i, 10)
                 for i in range(10)]
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: bars)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["AAA"])
 
         rows, origin = ph.movers(past)
@@ -420,7 +420,7 @@ class TestMissDiagnosis:
         from app.research import price_history as ph
 
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
         d = ph.diagnose_miss("NOTATICKER", when(11, 0), "simulated")
         assert d["in_live_universe"] is False and d["in_history_universe"] is False
         assert "not a symbol this app stores" in d["reason"]
@@ -432,7 +432,7 @@ class TestMissDiagnosis:
 
         seed(store, "AAA", [(16, 42, 100.0), (17, 4, 101.0)], 100.0)
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
         monkeypatch.setattr("app.services.market_data.market_data.symbols", ["AAA"])
 
         d = ph.diagnose_miss("AAA", when(11, 0), "live")
@@ -445,7 +445,7 @@ class TestMissDiagnosis:
 
         seed(store, "AAA", [(9, 15, 100.0), (10, 0, 101.0)], 100.0)
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
         monkeypatch.setattr("app.services.market_data.market_data.symbols", ["AAA"])
 
         assert "after the last recorded minute" in ph.diagnose_miss("AAA", when(15, 0), "live")["reason"]
@@ -456,7 +456,7 @@ class TestMissDiagnosis:
         from app.research import price_history as ph
 
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
         monkeypatch.setattr("app.research.cross_sectional.SECTOR_OF", {"AAA": "X"})
 
         saturday = dt2.date(2026, 6, 13)
@@ -471,6 +471,105 @@ class TestMissDiagnosis:
 
         seed(store, "AAA", [(16, 42, 100.0), (17, 4, 101.0)], 100.0)
         monkeypatch.setattr(ph, "snapshot_store", store)
-        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: [])
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
         d = ph.diagnose_miss("AAA", when(11, 0), "live")
         assert d["live_points"] == 2 and d["asked_for"] == "11:00" and d["symbol"] == "AAA"
+
+
+class TestFetchOnMiss:
+    """A miss should trigger a fetch, not a shrug — the broker has the data."""
+
+    def test_a_fetch_is_refused_for_a_future_date(self):
+        import datetime as dt2
+
+        from app.research import price_fetch
+
+        tomorrow = dt2.datetime.now(IST).date() + dt2.timedelta(days=1)
+        assert "future" in price_fetch.fetch_blocked_reason("AAA", tomorrow)
+
+    def test_a_fetch_is_refused_for_a_weekend(self):
+        from app.research import price_fetch
+
+        saturday = dt.date(2026, 6, 13)
+        assert saturday.weekday() == 5
+        assert "weekend" in price_fetch.fetch_blocked_reason("AAA", saturday)
+
+    def test_a_fetch_is_refused_for_todays_simulated_prices(self):
+        """Answering a question about the synthetic feed with real NSE data
+        would swap one world for the other."""
+        import datetime as dt2
+
+        from app.research import price_fetch
+
+        today = dt2.datetime.now(IST).date()
+        reason = price_fetch.fetch_blocked_reason("AAA", today, source="simulated")
+        assert "SIMULATED" in reason
+
+    def test_no_broker_session_is_reported_as_such(self, monkeypatch):
+        """'Not connected to Groww' is actionable; 'no record' is not."""
+        from app.research import price_fetch
+
+        monkeypatch.setattr(price_fetch, "broker_client", lambda: None)
+        past = dt.date(2026, 6, 15)
+        assert past.weekday() < 5
+        assert "Not connected to Groww" in price_fetch.fetch_blocked_reason("AAA", past)
+
+    def test_a_stored_day_is_not_refetched(self, monkeypatch):
+        """The fetch is a cache fill, not a per-request call."""
+        import asyncio
+
+        from app.research import price_fetch
+
+        monkeypatch.setattr(price_fetch, "already_stored", lambda *a, **k: True)
+        called = {"n": 0}
+
+        async def boom(*a, **k):
+            called["n"] += 1
+
+        monkeypatch.setattr(price_fetch, "_do_fetch", boom)
+        out = asyncio.run(price_fetch.ensure_day("AAA", dt.date(2026, 6, 15)))
+        assert out["cached"] is True and out["fetched"] is False and called["n"] == 0
+
+    def test_resolve_returns_the_stored_price_without_fetching(self, monkeypatch, store):
+        import asyncio
+
+        from app.research import price_history as ph
+
+        seed(store, "AAA", [(11, 0, 123.0)], 100.0)
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        point, note = asyncio.run(ph.resolve_price("AAA", when(11, 0), "live"))
+        assert point.price == 123.0 and note["cached"] is True and note["fetched"] is False
+
+    def test_resolve_surfaces_the_fetch_reason_when_it_cannot_run(self, monkeypatch, store):
+        """The blocked reason replaces the generic store diagnosis, because it
+        is the one the reader can do something about."""
+        import asyncio
+
+        from app.research import price_fetch
+        from app.research import price_history as ph
+
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: ([], ph.HISTORY, 5))
+        monkeypatch.setattr(price_fetch, "broker_client", lambda: None)
+
+        point, note = asyncio.run(ph.resolve_price("AAA", when(11, 0, dt.date(2026, 6, 15)), "live"))
+        assert point is None
+        assert "Not connected to Groww" in note["reason"]
+        assert note["fetch_attempted"] is True
+
+
+class TestStoredMinuteBarsArePreferred:
+    def test_one_minute_history_beats_five_minute(self, monkeypatch, store):
+        """An on-demand fetch stores 1-minute bars; answering from a 5-minute
+        bucket when those exist would discard precision the app has."""
+        from app.research import price_history as ph
+        from app.services.indicators import OHLCV
+
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        minute = [OHLCV(ts_at(11, 0), 100.0, 101.0, 99.0, 111.0, 5)]
+        monkeypatch.setattr(
+            ph.research_store, "read",
+            lambda sym, iv, src, start=None, end=None: minute if iv == "1m" else [],
+        )
+        got = ph.price_at("AAA", when(11, 0))
+        assert got.origin == ph.HISTORY_1M and got.resolution_min == 1 and got.price == 111.0

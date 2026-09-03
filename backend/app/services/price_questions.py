@@ -108,59 +108,85 @@ def looks_like_price_question(text: str) -> bool:
     return asks_price and has_time
 
 
-def lookup(text: str, source: str | None = None) -> dict | None:
-    """Answer a point-in-time price question, or explain why it cannot be.
+async def lookup_async(text: str, source: str | None = None) -> dict | None:
+    """Like `lookup`, but reaches for the broker when nothing is stored.
 
-    Returns None when the question is not one of these, so the caller can leave
-    the facts untouched.
+    The chat path is async and a person is waiting, so an unrecorded morning is
+    worth one request rather than an apology.
     """
+    parsed = _parse(text, source)
+    if parsed is None or "_symbol" not in parsed:
+        return parsed
+
+    from app.research.price_history import resolve_price
+
+    symbol, when, day, src = parsed["_symbol"], parsed["_when"], parsed["_day"], parsed["_source"]
+    point, note = await resolve_price(symbol, when, src)
+    if point is None:
+        return _miss(text, symbol, day, when, src, note)
+    return _hit(text, symbol, day, when, point, src, fetched=bool(note.get("fetched")))
+
+
+def lookup(text: str, source: str | None = None) -> dict | None:
+    """Answer from what is already stored, without touching the network."""
+    parsed = _parse(text, source)
+    if parsed is None or "_symbol" not in parsed:
+        return parsed
+
+    symbol, when, day, src = parsed["_symbol"], parsed["_when"], parsed["_day"], parsed["_source"]
+    point = history_price_at(symbol, when, src)
+    if point is None:
+        return _miss(text, symbol, day, when, src, diagnose_miss(symbol, when, src))
+    return _hit(text, symbol, day, when, point, src, fetched=False)
+
+
+def _parse(text: str, source: str | None) -> dict | None:
+    """Pull symbol, time and day out of the question, or say what is missing."""
     if not looks_like_price_question(text):
         return None
 
     from app.services.market_data import market_data
 
     src = source or market_data.source.value
-    now = ist_now()
-    today = ist_date(int(now.timestamp()))
-
+    today = ist_date(int(ist_now().timestamp()))
     symbol = find_symbol(text)
     when_time = find_time(text)
     day = find_day(text, today)
 
     if symbol is None:
-        return {
-            "asked": text,
-            "answered": False,
-            "reason": "No tracked symbol was named in the question.",
-        }
+        return {"asked": text, "answered": False,
+                "reason": "No tracked symbol was named in the question."}
     if when_time is None:
-        return {
-            "asked": text,
-            "answered": False,
-            "symbol": symbol,
-            "reason": "No time of day was recognised in the question.",
-        }
+        return {"asked": text, "answered": False, "symbol": symbol,
+                "reason": "No time of day was recognised in the question."}
 
-    when = dt.datetime.combine(day, when_time, tzinfo=IST)
-    point = history_price_at(symbol, when, src)
+    return {
+        "_symbol": symbol,
+        "_when": dt.datetime.combine(day, when_time, tzinfo=IST),
+        "_day": day,
+        "_source": src,
+    }
 
-    if point is None:
-        return {
-            "asked": text,
-            "answered": False,
-            "symbol": symbol,
-            "day": day.isoformat(),
-            "requested_time_ist": when_time.strftime("%H:%M"),
-            "source": src,
-            **diagnose_miss(symbol, when, src),
-        }
 
+def _miss(text, symbol, day, when, src, diagnosis: dict) -> dict:
+    return {
+        "asked": text,
+        "answered": False,
+        "symbol": symbol,
+        "day": day.isoformat(),
+        "requested_time_ist": when.strftime("%H:%M"),
+        "source": src,
+        **diagnosis,
+    }
+
+
+def _hit(text, symbol, day, when, point, src, fetched: bool) -> dict:
     return {
         "asked": text,
         "answered": True,
         "symbol": point.symbol,
         "day": day.isoformat(),
-        "requested_time_ist": when_time.strftime("%H:%M"),
+        "requested_time_ist": when.strftime("%H:%M"),
         "recorded_time_ist": point.time_ist,
         "price": round(point.price, 2),
         "session_open": round(point.open_price, 2) if point.open_price else None,
@@ -168,10 +194,11 @@ def lookup(text: str, source: str | None = None) -> dict | None:
         "source": src,
         "origin": point.origin,
         "resolution_min": point.resolution_min,
+        "fetched_from_broker_now": fetched,
         "note": (
             "`recorded_time_ist` is the timestamp actually found. If it differs from the "
             "requested time, say so rather than presenting it as exact. `resolution_min` is "
-            "the spacing of the underlying record — 1 for the live minute record, 5 for "
-            "broker history — so state which one answered when the gap matters."
+            "the spacing of the underlying record - 1 minute or 5 - so state which answered "
+            "when the gap matters."
         ),
     }

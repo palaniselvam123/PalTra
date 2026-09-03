@@ -276,9 +276,9 @@ async def answer(message: str, history: list[dict] | None = None) -> dict:
     # A point-in-time price ("what was RELIANCE at 11:00") lives in the recorder's
     # table, not in the trade snapshot. Resolve it here so the model can answer
     # from a fact rather than being forced to say it has nothing recorded.
-    from app.services.price_questions import lookup as price_lookup
+    from app.services.price_questions import lookup_async as price_lookup
 
-    priced = price_lookup(message)
+    priced = await price_lookup(message)
     if priced is not None:
         context["price_lookup"] = priced
 

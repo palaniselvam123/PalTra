@@ -325,8 +325,9 @@ export default function MoversPage() {
             <Search size={15} className="text-bot" /> What was it at…
           </h2>
           <p className="mb-3 text-xs text-slate-500">
-            The same question the chatbot answers. Prices are recorded once a minute, so the answer
-            names the minute it actually found.
+            The same question the chatbot answers. Answered from the minute record or stored
+            history where available; otherwise the day is fetched from Groww on the spot and kept,
+            so the next ask is instant.
           </p>
           <div className="flex flex-wrap items-end gap-2">
             <Field label="Symbol">
@@ -345,7 +346,8 @@ export default function MoversPage() {
               />
             </Field>
             <button onClick={runLookup} disabled={busy} className={btnPrimary}>
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Look up
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              {busy ? "Fetching…" : "Look up"}
             </button>
           </div>
 
@@ -366,8 +368,14 @@ export default function MoversPage() {
                   </div>
                   {lookup.origin && (
                     <div className="text-xs text-slate-500">
-                      from {lookup.origin === "broker_history_5m" ? "stored broker history" : "the live minute record"}
+                      from{" "}
+                      {lookup.origin === "live_minute_record"
+                        ? "the live minute record"
+                        : "stored broker history"}
                       {lookup.resolution_min ? ` · ${lookup.resolution_min}-minute resolution` : ""}
+                      {lookup.fetched_now && (
+                        <span className="ml-1 text-bot">· fetched from Groww just now and cached</span>
+                      )}
                     </div>
                   )}
                   {lookup.pct_from_open != null && (

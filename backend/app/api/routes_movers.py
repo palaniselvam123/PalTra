@@ -183,17 +183,21 @@ async def price_at(
     at: str = Query(..., description="HH:MM IST"),
     day: str | None = Query(None),
     source: str | None = Query(None),
+    fetch: bool = Query(True, description="Fetch the day from Groww when it is not stored"),
 ):
-    """What a stock was trading at, at a given minute of a given day."""
+    """What a stock was trading at, at a given minute of a given day.
+
+    Falls back to the broker when neither record has the day, so a question
+    about an unrecorded morning is answered rather than refused.
+    """
     d = _resolve_day(day)
     src = source or market_data.source.value
     when = _resolve_as_of(d, at)
-    point = price_history.price_at(symbol.upper(), when, src)
+    point, note = await price_history.resolve_price(symbol.upper(), when, src, allow_fetch=fetch)
     if point is None:
-        # Say which of the possible causes actually applies; the stores know.
-        diagnosis = price_history.diagnose_miss(symbol.upper(), when, src)
-        return {"found": False, "source": src, **diagnosis}
-    return {"found": True, "day": d.isoformat(), "asked_for": at, "source": src, **point.as_dict()}
+        return {"found": False, "source": src, **note}
+    return {"found": True, "day": d.isoformat(), "asked_for": at, "source": src,
+            "fetched_now": bool(note.get("fetched")), **point.as_dict()}
 
 
 @router.get("/series")

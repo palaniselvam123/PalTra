@@ -489,6 +489,8 @@ export type PriceAtResponse = {
   price?: number;
   origin?: string;
   resolution_min?: number;
+  fetched_now?: boolean;
+  fetch_attempted?: boolean;
   open_price?: number | null;
   pct_from_open?: number | null;
   source: string;
