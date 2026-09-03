@@ -220,7 +220,13 @@ def movers(
     floor = int(since.timestamp()) if since else None
     out: list[HistoricalMover] = []
     resolution_seen, origin_seen = 5, HISTORY
-    for symbol in research_store.symbols("5m", "live"):
+    # Iterating only the 5m store meant a symbol with no stored history was
+    # absent rather than unranked — indistinguishable, on screen, from one that
+    # did not move. The universe decides who is considered; the `continue`
+    # below drops those with no bars for this particular day.
+    from app.research.universe_extra import movers_universe
+
+    for symbol in sorted(movers_universe() | set(research_store.symbols("5m", "live"))):
         bars, origin_seen, resolution_seen = _history_bars(symbol, day)
         if cutoff is not None:
             bars = [b for b in bars if b.ts <= cutoff]

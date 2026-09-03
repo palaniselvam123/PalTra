@@ -95,6 +95,10 @@ async def movers(
     at: str | None = Query(None, description="HH:MM IST; window end — ranks as it stood then"),
     since: str | None = Query(None, description="HH:MM IST; window start, default the 09:15 open"),
     top: int = Query(15, ge=1, le=200),
+    min_price: float | None = Query(None, ge=0, description="Ignore stocks priced below this"),
+    max_price: float | None = Query(None, ge=0, description="Ignore stocks priced above this"),
+    min_pct: float | None = Query(None, description="Ignore moves below this % (signed)"),
+    max_pct: float | None = Query(None, description="Ignore moves above this % (signed)"),
     source: str | None = Query(None, description="live | simulated; defaults to the active feed"),
 ):
     d = _resolve_day(day)
@@ -102,7 +106,24 @@ async def movers(
     as_of = _resolve_as_of(d, at)
     frm = _resolve_as_of(d, since)
     all_movers, origin = price_history.movers(d, src, as_of, frm)
-    split = split_gainers_losers(all_movers, top)
+    tracked_total = len(all_movers)
+
+    # Filters run on the ranking, never on the store: the totals below are the
+    # totals AFTER filtering, and `symbols_tracked` keeps the unfiltered count
+    # so "25 of 38" cannot be mistaken for the size of the universe.
+    def keep(m) -> bool:
+        if min_price is not None and m.last_price < min_price:
+            return False
+        if max_price is not None and m.last_price > max_price:
+            return False
+        if min_pct is not None and m.pct_from_open < min_pct:
+            return False
+        if max_pct is not None and m.pct_from_open > max_pct:
+            return False
+        return True
+
+    filtered = [m for m in all_movers if keep(m)]
+    split = split_gainers_losers(filtered, top)
     return {
         "day": d.isoformat(),
         "as_of": at,
@@ -113,14 +134,36 @@ async def movers(
         "origin": origin,
         "resolution_min": all_movers[0].resolution_min if all_movers else None,
         "session": session_state(),
-        "symbols_tracked": len(all_movers),
-        "baseline_is_session_open": all(m.baseline_is_session_open for m in all_movers) if all_movers else True,
+        "symbols_tracked": tracked_total,
+        "symbols_after_filter": len(filtered),
+        "filters": {
+            "min_price": min_price, "max_price": max_price,
+            "min_pct": min_pct, "max_pct": max_pct,
+        },
+        "price_range": (
+            {"min": min(m.last_price for m in all_movers), "max": max(m.last_price for m in all_movers)}
+            if all_movers else None
+        ),
+        "pct_range": (
+            {"min": min(m.pct_from_open for m in all_movers), "max": max(m.pct_from_open for m in all_movers)}
+            if all_movers else None
+        ),
+        "baseline_is_session_open": all(m.baseline_is_session_open for m in filtered) if filtered else True,
         "requested_top": top,
         "gainers_total": split["gainers_total"],
         "losers_total": split["losers_total"],
         "unchanged_total": split["unchanged_total"],
         "live_coverage": price_history.live_coverage(d, src),
-        "empty_reason": price_history.why_empty(d, src, as_of) if not all_movers else None,
+        "empty_reason": (
+            price_history.why_empty(d, src, as_of)
+            if not all_movers
+            else (
+                f"{tracked_total} symbols have prices for this window, but none pass the "
+                f"current price/percentage filters."
+                if not filtered
+                else None
+            )
+        ),
         "gainers": [_mover_dict(m) for m in split["gainers"]],
         "losers": [_mover_dict(m) for m in split["losers"]],
         "recorder": {"running": market_recorder.running, "last_run_at": market_recorder.status()["last_run_at"]},
@@ -145,7 +188,20 @@ async def morning(
         "source": src,
         "origin": origin,
         "resolution_min": all_movers[0].resolution_min if all_movers else None,
-        "symbols_tracked": len(all_movers),
+        "symbols_tracked": tracked_total,
+        "symbols_after_filter": len(filtered),
+        "filters": {
+            "min_price": min_price, "max_price": max_price,
+            "min_pct": min_pct, "max_pct": max_pct,
+        },
+        "price_range": (
+            {"min": min(m.last_price for m in all_movers), "max": max(m.last_price for m in all_movers)}
+            if all_movers else None
+        ),
+        "pct_range": (
+            {"min": min(m.pct_from_open for m in all_movers), "max": max(m.pct_from_open for m in all_movers)}
+            if all_movers else None
+        ),
         "requested_top": top,
         "gainers_total": split["gainers_total"],
         "losers_total": split["losers_total"],
@@ -393,7 +449,9 @@ async def fetch_day(req: FetchDayRequest):
     if blocked:
         raise HTTPException(400, blocked)
 
-    symbols = sorted(set(SECTOR_OF) | set(research_store.symbols(req.interval, "live")))
+    from app.research.universe_extra import movers_universe
+
+    symbols = sorted(movers_universe() | set(research_store.symbols(req.interval, "live")))
 
     async def run():
         _fetch_job.update(running=True, day=d.isoformat(), interval=req.interval,

@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  SlidersHorizontal,
   Zap,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -29,6 +30,15 @@ import {
 
 const REFRESH_MS = 15_000;
 
+type Query = {
+  since: string;
+  at: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minPct?: number;
+  maxPct?: number;
+};
+
 export default function MoversPage() {
   const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
@@ -44,7 +54,15 @@ export default function MoversPage() {
   // the From box never fires a request for 01:00.
   const [fromTime, setFromTime] = useState("09:15");
   const [toTime, setToTime] = useState("");
-  const [window_, setWindow_] = useState<{ since: string; at: string }>({ since: "09:15", at: "" });
+  // Prices span ~₹20 to ~₹47,000, so a linear slider spends 99% of its travel
+  // on names nobody is filtering for. Discrete stops keep every position useful.
+  const PRICE_STOPS = [0, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
+  const PCT_MIN = -10;
+  const PCT_MAX = 10;
+
+  const [priceIdx, setPriceIdx] = useState<[number, number]>([0, PRICE_STOPS.length - 1]);
+  const [pctRange, setPctRange] = useState<[number, number]>([PCT_MIN, PCT_MAX]);
+  const [window_, setWindow_] = useState<Query>({ since: "09:15", at: "" });
   const asOf = window_.at;
   // Empty means today. Any past date is answered from stored broker history.
   const [day, setDay] = useState("");
@@ -69,6 +87,10 @@ export default function MoversPage() {
         top,
         at: window_.at || undefined,
         since: window_.since || undefined,
+        min_price: window_.minPrice,
+        max_price: window_.maxPrice,
+        min_pct: window_.minPct,
+        max_pct: window_.maxPct,
         day: day || undefined,
       })
       .then((m) => {
@@ -121,7 +143,32 @@ export default function MoversPage() {
       ? `No stock is ${dir} its ${movers!.window_start_ist} price in this window.`
       : `No stock is ${dir} its open yet.`;
 
-  const runQuery = () => setWindow_({ since: fromTime.trim(), at: toTime.trim() });
+  const runQuery = () =>
+    setWindow_({
+      since: fromTime.trim(),
+      at: toTime.trim(),
+      // Only send an edge that was actually moved. Sending the slider's own
+      // extremes would filter on 0 and 50000 and quietly drop anything priced
+      // outside the widget's range rather than outside the user's intent.
+      minPrice: priceIdx[0] > 0 ? PRICE_STOPS[priceIdx[0]] : undefined,
+      maxPrice: priceIdx[1] < PRICE_STOPS.length - 1 ? PRICE_STOPS[priceIdx[1]] : undefined,
+      minPct: pctRange[0] > PCT_MIN ? pctRange[0] : undefined,
+      maxPct: pctRange[1] < PCT_MAX ? pctRange[1] : undefined,
+    });
+
+  const resetFilters = () => {
+    setFromTime("09:15");
+    setToTime("");
+    setPriceIdx([0, PRICE_STOPS.length - 1]);
+    setPctRange([PCT_MIN, PCT_MAX]);
+    setWindow_({ since: "09:15", at: "" });
+  };
+
+  const filtersOn =
+    priceIdx[0] > 0 ||
+    priceIdx[1] < PRICE_STOPS.length - 1 ||
+    pctRange[0] > PCT_MIN ||
+    pctRange[1] < PCT_MAX;
 
   const runLookup = async () => {
     setBusy(true);
@@ -286,16 +333,9 @@ export default function MoversPage() {
             >
               Query
             </button>
-            {(window_.since !== "09:15" || window_.at) && (
-              <button
-                onClick={() => {
-                  setFromTime("09:15");
-                  setToTime("");
-                  setWindow_({ since: "09:15", at: "" });
-                }}
-                className="text-xs text-slate-400 underline"
-              >
-                whole session
+            {(window_.since !== "09:15" || window_.at || filtersOn) && (
+              <button onClick={resetFilters} className="text-xs text-slate-400 underline">
+                reset
               </button>
             )}
           </div>
@@ -316,6 +356,71 @@ export default function MoversPage() {
             </span>
           </div>
         )}
+
+        <section className="rounded-xl border border-slate-800 bg-card p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <SlidersHorizontal size={15} className="text-slate-500" />
+            Filters
+            <span className="font-normal text-slate-500">
+              {movers
+                ? `${movers.symbols_after_filter ?? movers.symbols_tracked} of ${movers.symbols_tracked} symbols pass`
+                : ""}
+            </span>
+            {filtersOn && (
+              <span className="rounded bg-sky-500/15 px-2 py-0.5 text-xs font-normal text-sky-300">
+                active
+              </span>
+            )}
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            <RangeSlider
+              label="Price"
+              value={priceIdx}
+              min={0}
+              max={PRICE_STOPS.length - 1}
+              step={1}
+              onChange={setPriceIdx}
+              format={(i) =>
+                i === 0
+                  ? "any"
+                  : i === PRICE_STOPS.length - 1
+                  ? "any"
+                  : `₹${PRICE_STOPS[i].toLocaleString("en-IN")}`
+              }
+              hint={
+                movers?.price_range
+                  ? `data spans ₹${movers.price_range.min.toFixed(0)} – ₹${movers.price_range.max.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                  : undefined
+              }
+            />
+            <RangeSlider
+              label="Move"
+              value={pctRange}
+              min={PCT_MIN}
+              max={PCT_MAX}
+              step={0.25}
+              onChange={setPctRange}
+              format={(v) => (v === PCT_MIN || v === PCT_MAX ? "any" : `${v > 0 ? "+" : ""}${v}%`)}
+              hint={
+                movers?.pct_range
+                  ? `data spans ${movers.pct_range.min.toFixed(2)}% – ${movers.pct_range.max > 0 ? "+" : ""}${movers.pct_range.max.toFixed(2)}%`
+                  : undefined
+              }
+            />
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              onClick={runQuery}
+              className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+            >
+              Apply filters
+            </button>
+            <span className="text-xs text-slate-500">
+              Filters narrow the ranking, not the recording — the totals beside each table are
+              after filtering.
+            </span>
+          </div>
+        </section>
 
         {movers && movers.empty_reason && (
           <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
@@ -634,6 +739,63 @@ function Stat({
         {value}
       </div>
       {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+function RangeSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  format,
+  hint,
+}: {
+  label: string;
+  value: [number, number];
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: [number, number]) => void;
+  format: (v: number) => string;
+  hint?: string;
+}) {
+  // Two native range inputs rather than a drag library: they are keyboard
+  // accessible for free. The handles are clamped so the low one can never pass
+  // the high one, which would otherwise produce an empty range that reads as
+  // "nothing matched" instead of "these bounds are inverted".
+  const [lo, hi] = value;
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between text-xs">
+        <span className="font-medium text-slate-300">{label}</span>
+        <span className="tabular-nums text-slate-400">
+          {format(lo)} <span className="text-slate-600">to</span> {format(hi)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={lo}
+        onChange={(e) => onChange([Math.min(Number(e.target.value), hi), hi])}
+        className="w-full accent-sky-500"
+        aria-label={`${label} minimum`}
+      />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={hi}
+        onChange={(e) => onChange([lo, Math.max(Number(e.target.value), lo)])}
+        className="w-full accent-sky-500"
+        aria-label={`${label} maximum`}
+      />
+      {hint && <p className="mt-0.5 text-[11px] text-slate-600">{hint}</p>}
     </div>
   );
 }

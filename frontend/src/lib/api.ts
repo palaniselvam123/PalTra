@@ -438,6 +438,9 @@ export type MoversResponse = {
   requested_top: number;
   gainers_total: number;
   window_start_ist?: string;
+  symbols_after_filter?: number;
+  price_range?: { min: number; max: number } | null;
+  pct_range?: { min: number; max: number } | null;
   window_end_ist?: string;
   empty_reason?: string | null;
   live_coverage?: { covered: boolean; in_session?: boolean; symbols?: number; first_ist?: string; last_ist?: string };
@@ -658,7 +661,12 @@ export const api = {
   moversRecorderStart: () => request<RecorderStatus>("/api/movers/recorder/start", { method: "POST" }),
   moversRecorderStop: () => request<RecorderStatus>("/api/movers/recorder/stop", { method: "POST" }),
   moversFlush: () => request<any>("/api/movers/recorder/flush", { method: "POST" }),
-  movers: (params: { day?: string; at?: string; since?: string; top?: number } = {}) =>
+  movers: (
+    params: {
+      day?: string; at?: string; since?: string; top?: number;
+      min_price?: number; max_price?: number; min_pct?: number; max_pct?: number;
+    } = {},
+  ) =>
     request<MoversResponse>(`/api/movers${queryString(stringifyParams(params))}`),
   moversMorning: (params: { day?: string; top?: number } = {}) =>
     request<MoversResponse>(`/api/movers/morning${queryString(stringifyParams(params))}`),

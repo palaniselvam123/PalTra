@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.research import universe_extra
+
 from app.research.snapshots import SnapshotStore, ist_date
 from app.services.movers import AlertLedger, FastMover, format_alert
 from app.services.price_questions import (
@@ -197,6 +199,7 @@ class TestFastMoverSpeed:
         monkeypatch.setattr(ph, "snapshot_store", store)          # no live record
         monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5) if d == past else ([], ph.HISTORY, 5))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["AAA"])
+        monkeypatch.setattr(universe_extra, "movers_universe", lambda: {"AAA"})
 
         out = movers_mod.fast_movers(past, "live", None, 10, 0.10, 0.75)
         assert [f.symbol for f in out] == ["AAA"]
@@ -672,6 +675,7 @@ class TestPostCloseRecordIsNotSessionCoverage:
         day = dt.date(2026, 3, 4)
         monkeypatch.setattr(ph, "snapshot_store", self._post_close_store(tmp_path, day))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["ZULU"])
+        monkeypatch.setattr(universe_extra, "movers_universe", lambda: {"ZULU"})
         bar_ts = int(dt.datetime.combine(day, dt.time(9, 20), tzinfo=IST).timestamp())
         bars = [
             SimpleNamespace(ts=bar_ts, open=100.0, high=101.0, low=99.0, close=100.0),
@@ -690,6 +694,7 @@ class TestPostCloseRecordIsNotSessionCoverage:
         day = dt.date(2026, 3, 4)
         monkeypatch.setattr(ph, "snapshot_store", self._post_close_store(tmp_path, day))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: [])
+        monkeypatch.setattr(universe_extra, "movers_universe", lambda: set())
         reason = ph.why_empty(day, "live", None)
         assert reason and "17:07" in reason and "15:30" in reason
 
@@ -718,6 +723,7 @@ class TestExplicitWindow:
 
         monkeypatch.setattr(ph, "snapshot_store", SimpleNamespace(movers=lambda *a, **k: []))
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["ZULU"])
+        monkeypatch.setattr(universe_extra, "movers_universe", lambda: {"ZULU"})
         bars = self._day_bars(day)
         monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
         return ph
@@ -793,3 +799,135 @@ class TestExplicitWindow:
         s.record([("ACME", base, "live", 105.0, 100.0, None)])
         at_open = dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST)
         assert s.movers(day, "live", None, at_open)[0].open_price == pytest.approx(100.0)
+
+
+class TestRangeFilters:
+    """Price and percentage bounds narrow the ranking, not the store.
+
+    The totals beside each table are what the user reads to judge whether a
+    short list means a quiet day or a narrow filter, so a filtered total must
+    never be reported as the size of the universe.
+    """
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        return TestClient(app)
+
+    def test_price_bounds_exclude_by_last_price(self, monkeypatch):
+        from app.api import routes_movers as rm
+
+        rows = [
+            SimpleNamespace(symbol="CHEAP", last_price=20.0, pct_from_open=5.0,
+                            open_price=19.0, high_price=21.0, low_price=19.0,
+                            last_ts=0, last_time_ist="10:00", points=3,
+                            first_time_ist="09:15", baseline_is_session_open=True,
+                            resolution_min=5, first_ts=0),
+            SimpleNamespace(symbol="MID", last_price=800.0, pct_from_open=2.0,
+                            open_price=784.0, high_price=810.0, low_price=780.0,
+                            last_ts=0, last_time_ist="10:00", points=3,
+                            first_time_ist="09:15", baseline_is_session_open=True,
+                            resolution_min=5, first_ts=0),
+            SimpleNamespace(symbol="DEAR", last_price=40000.0, pct_from_open=1.0,
+                            open_price=39600.0, high_price=40100.0, low_price=39500.0,
+                            last_ts=0, last_time_ist="10:00", points=3,
+                            first_time_ist="09:15", baseline_is_session_open=True,
+                            resolution_min=5, first_ts=0),
+        ]
+        monkeypatch.setattr(rm.price_history, "movers", lambda *a, **k: (rows, rm.price_history.HISTORY))
+
+        r = self._client().get("/api/movers", params={"min_price": 100, "max_price": 5000, "source": "live"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["symbols_tracked"] == 3, "the universe is unchanged by a filter"
+        assert body["symbols_after_filter"] == 1
+        assert [m["symbol"] for m in body["gainers"]] == ["MID"]
+
+    def test_percentage_bounds_are_signed(self, monkeypatch):
+        """-1% is BELOW -0.5%, so a min of -1 must keep a -0.5% stock and drop a
+        -2% one. Comparing magnitudes would invert the loser side."""
+        from app.api import routes_movers as rm
+
+        def row(sym, pct):
+            return SimpleNamespace(symbol=sym, last_price=100.0, pct_from_open=pct,
+                                   open_price=100.0, high_price=101.0, low_price=99.0,
+                                   last_ts=0, last_time_ist="10:00", points=3,
+                                   first_time_ist="09:15", baseline_is_session_open=True,
+                                   resolution_min=5, first_ts=0)
+
+        rows = [row("UP", 3.0), row("FLATISH", -0.5), row("DOWN", -2.0)]
+        monkeypatch.setattr(rm.price_history, "movers", lambda *a, **k: (rows, rm.price_history.HISTORY))
+
+        body = self._client().get(
+            "/api/movers", params={"min_pct": -1, "max_pct": 1, "source": "live"}
+        ).json()
+        assert body["symbols_after_filter"] == 1
+        assert [m["symbol"] for m in body["losers"]] == ["FLATISH"]
+
+    def test_filtering_everything_out_says_so(self, monkeypatch):
+        """An empty table because of a filter must not read like an empty store —
+        the actions that fix them are completely different."""
+        from app.api import routes_movers as rm
+
+        rows = [SimpleNamespace(symbol="ONE", last_price=100.0, pct_from_open=1.0,
+                                open_price=99.0, high_price=101.0, low_price=99.0,
+                                last_ts=0, last_time_ist="10:00", points=3,
+                                first_time_ist="09:15", baseline_is_session_open=True,
+                                resolution_min=5, first_ts=0)]
+        monkeypatch.setattr(rm.price_history, "movers", lambda *a, **k: (rows, rm.price_history.HISTORY))
+
+        body = self._client().get(
+            "/api/movers", params={"min_price": 90000, "source": "live"}
+        ).json()
+        assert body["symbols_after_filter"] == 0
+        assert "filters" in body["empty_reason"]
+        assert "1 symbols have prices" in body["empty_reason"]
+
+    def test_the_data_range_is_reported_for_the_slider_bounds(self, monkeypatch):
+        from app.api import routes_movers as rm
+
+        rows = [SimpleNamespace(symbol="A", last_price=22.5, pct_from_open=-2.4,
+                                open_price=23.0, high_price=23.0, low_price=22.0,
+                                last_ts=0, last_time_ist="10:00", points=3,
+                                first_time_ist="09:15", baseline_is_session_open=True,
+                                resolution_min=5, first_ts=0),
+                SimpleNamespace(symbol="B", last_price=47000.0, pct_from_open=3.1,
+                                open_price=45600.0, high_price=47100.0, low_price=45000.0,
+                                last_ts=0, last_time_ist="10:00", points=3,
+                                first_time_ist="09:15", baseline_is_session_open=True,
+                                resolution_min=5, first_ts=0)]
+        monkeypatch.setattr(rm.price_history, "movers", lambda *a, **k: (rows, rm.price_history.HISTORY))
+
+        body = self._client().get("/api/movers", params={"source": "live"}).json()
+        assert body["price_range"] == {"min": 22.5, "max": 47000.0}
+        assert body["pct_range"]["min"] == pytest.approx(-2.4)
+
+
+class TestWatchlistNamesAreRanked:
+    """A watchlist symbol must be ranked, not absent.
+
+    ANTELOPUS sat in the persisted watchlist since August and appeared nowhere
+    in the tables. The universe-wide fetch covered the research map only, so no
+    history was ever pulled for it — and a symbol with no bars is dropped
+    silently, which on screen is indistinguishable from one that did not move.
+    """
+
+    def test_the_universe_includes_what_the_feed_polls(self, monkeypatch):
+        from app.research import universe_extra
+        from app.research.cross_sectional import SECTOR_OF
+
+        monkeypatch.setattr(
+            universe_extra, "movers_universe", universe_extra.movers_universe
+        )
+        from app.services.market_data import market_data
+
+        market_data.add_symbol("ZZTESTONLY")
+        try:
+            uni = universe_extra.movers_universe()
+            assert "ZZTESTONLY" in uni, "a polled symbol must be considered for ranking"
+            assert set(SECTOR_OF) <= uni, "and the research map stays included"
+        finally:
+            if "ZZTESTONLY" in market_data.symbols:
+                market_data.symbols.remove("ZZTESTONLY")
