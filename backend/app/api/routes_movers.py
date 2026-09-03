@@ -92,18 +92,23 @@ async def recorder_flush():
 @router.get("")
 async def movers(
     day: str | None = Query(None, description="YYYY-MM-DD; defaults to today IST"),
-    at: str | None = Query(None, description="HH:MM IST; ranks as it stood at that moment"),
+    at: str | None = Query(None, description="HH:MM IST; window end — ranks as it stood then"),
+    since: str | None = Query(None, description="HH:MM IST; window start, default the 09:15 open"),
     top: int = Query(15, ge=1, le=200),
     source: str | None = Query(None, description="live | simulated; defaults to the active feed"),
 ):
     d = _resolve_day(day)
     src = source or market_data.source.value
     as_of = _resolve_as_of(d, at)
-    all_movers, origin = price_history.movers(d, src, as_of)
+    frm = _resolve_as_of(d, since)
+    all_movers, origin = price_history.movers(d, src, as_of, frm)
     split = split_gainers_losers(all_movers, top)
     return {
         "day": d.isoformat(),
         "as_of": at,
+        "since": since,
+        "window_start_ist": (frm.strftime("%H:%M") if frm else "09:15"),
+        "window_end_ist": (as_of.strftime("%H:%M") if as_of else "15:30"),
         "source": src,
         "origin": origin,
         "resolution_min": all_movers[0].resolution_min if all_movers else None,

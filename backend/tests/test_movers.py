@@ -692,3 +692,104 @@ class TestPostCloseRecordIsNotSessionCoverage:
         monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: [])
         reason = ph.why_empty(day, "live", None)
         assert reason and "17:07" in reason and "15:30" in reason
+
+
+class TestExplicitWindow:
+    """Ranking a chosen window, not always the whole day up to a cutoff.
+
+    `as_of` alone answers "how far has it come since the open, as of 11:00".
+    That is a different question from "what moved between 10:00 and 11:00", and
+    only the second isolates an hour. The baseline has to move with the window
+    or the number describes one span while the label claims another.
+    """
+
+    def _day_bars(self, day):
+        base = int(dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST).timestamp())
+        # rises to 110 by 10:00, falls back to 100 by 11:00: up on the day at
+        # 10:00, down over the 10:00-11:00 hour.
+        prices = {0: 100.0, 45: 110.0, 105: 100.0}
+        return [
+            SimpleNamespace(ts=base + m * 60, open=p, high=p, low=p, close=p)
+            for m, p in sorted(prices.items())
+        ]
+
+    def _patched(self, monkeypatch, day):
+        from app.research import price_history as ph
+
+        monkeypatch.setattr(ph, "snapshot_store", SimpleNamespace(movers=lambda *a, **k: []))
+        monkeypatch.setattr(ph.research_store, "symbols", lambda *a, **k: ["ZULU"])
+        bars = self._day_bars(day)
+        monkeypatch.setattr(ph, "_history_bars", lambda sym, d: (bars, ph.HISTORY, 5))
+        return ph
+
+    def test_whole_session_measures_from_the_open(self, monkeypatch):
+        day = dt.date(2026, 3, 4)
+        ph = self._patched(monkeypatch, day)
+        out, _ = ph.movers(day, "live")
+        assert out[0].pct_from_open == pytest.approx(0.0), "100 -> 100 over the day"
+        assert out[0].baseline_is_session_open
+
+    def test_as_of_alone_still_measures_from_the_open(self, monkeypatch):
+        day = dt.date(2026, 3, 4)
+        ph = self._patched(monkeypatch, day)
+        at_ten = dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST)
+        out, _ = ph.movers(day, "live", at_ten)
+        assert out[0].pct_from_open == pytest.approx(10.0), "up 10% from the open by 10:00"
+
+    def test_a_window_measures_from_its_own_start(self, monkeypatch):
+        day = dt.date(2026, 3, 4)
+        ph = self._patched(monkeypatch, day)
+        out, _ = ph.movers(
+            day,
+            "live",
+            dt.datetime.combine(day, dt.time(11, 0), tzinfo=IST),
+            dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST),
+        )
+        assert out[0].pct_from_open == pytest.approx(-9.0909, abs=1e-3), "110 -> 100 in the hour"
+        assert not out[0].baseline_is_session_open, "this is not a from-open number"
+        assert out[0].first_time_ist == "10:00"
+
+    def test_the_window_excludes_a_bar_that_started_before_it(self, monkeypatch):
+        """A 5-minute bar stamped 09:55 covers 09:55-10:00. Letting it in would
+        put pre-window price into a window that says it starts at 10:00."""
+        day = dt.date(2026, 3, 4)
+        ph = self._patched(monkeypatch, day)
+        out, _ = ph.movers(
+            day, "live", None, dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST)
+        )
+        assert out[0].first_time_ist == "10:00"
+
+    def test_live_record_honours_the_same_window(self, tmp_path, monkeypatch):
+        from app.research.snapshots import SnapshotStore
+
+        day = dt.date(2026, 3, 4)
+        s = SnapshotStore(tmp_path / "w.db")
+        base = int(dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST).timestamp())
+        s.record([
+            ("ACME", base, "live", 100.0, 100.0, None),
+            ("ACME", base + 45 * 60, "live", 110.0, 100.0, None),
+            ("ACME", base + 105 * 60, "live", 100.0, 100.0, None),
+        ])
+        whole = s.movers(day, "live")
+        assert whole[0].pct_from_open == pytest.approx(0.0)
+
+        hour = s.movers(
+            day,
+            "live",
+            dt.datetime.combine(day, dt.time(11, 0), tzinfo=IST),
+            dt.datetime.combine(day, dt.time(10, 0), tzinfo=IST),
+        )
+        assert hour[0].pct_from_open == pytest.approx(-9.0909, abs=1e-3)
+        assert hour[0].open_price == pytest.approx(110.0), "baseline is the 10:00 price"
+
+    def test_a_since_at_the_open_keeps_the_true_session_open(self, tmp_path):
+        """09:15 is the default, so it must behave exactly like no window at all
+        rather than substituting the first recorded price for the real open."""
+        from app.research.snapshots import SnapshotStore
+
+        day = dt.date(2026, 3, 4)
+        s = SnapshotStore(tmp_path / "o.db")
+        base = int(dt.datetime.combine(day, dt.time(9, 20), tzinfo=IST).timestamp())
+        s.record([("ACME", base, "live", 105.0, 100.0, None)])
+        at_open = dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST)
+        assert s.movers(day, "live", None, at_open)[0].open_price == pytest.approx(100.0)

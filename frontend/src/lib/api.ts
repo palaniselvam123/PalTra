@@ -437,6 +437,8 @@ export type MoversResponse = {
   symbols_tracked: number;
   requested_top: number;
   gainers_total: number;
+  window_start_ist?: string;
+  window_end_ist?: string;
   empty_reason?: string | null;
   live_coverage?: { covered: boolean; in_session?: boolean; symbols?: number; first_ist?: string; last_ist?: string };
   losers_total: number;
@@ -656,7 +658,7 @@ export const api = {
   moversRecorderStart: () => request<RecorderStatus>("/api/movers/recorder/start", { method: "POST" }),
   moversRecorderStop: () => request<RecorderStatus>("/api/movers/recorder/stop", { method: "POST" }),
   moversFlush: () => request<any>("/api/movers/recorder/flush", { method: "POST" }),
-  movers: (params: { day?: string; at?: string; top?: number } = {}) =>
+  movers: (params: { day?: string; at?: string; since?: string; top?: number } = {}) =>
     request<MoversResponse>(`/api/movers${queryString(stringifyParams(params))}`),
   moversMorning: (params: { day?: string; top?: number } = {}) =>
     request<MoversResponse>(`/api/movers/morning${queryString(stringifyParams(params))}`),

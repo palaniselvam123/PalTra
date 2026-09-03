@@ -90,9 +90,14 @@ class HistoricalMover:
 
     @property
     def baseline_is_session_open(self) -> bool:
-        """Broker history always starts at the open; the live record may not."""
-        if self.origin == HISTORY:
-            return True
+        """Whether the percentage really is measured from the 09:15 open.
+
+        History used to be assumed to start at the open, which held only while
+        the whole session was the window. Asking for 10:00-11:00 makes the
+        baseline the 10:00 price, and reporting that as "from open" would put a
+        wrong label on a correct number. The timestamp decides it now, for both
+        stores alike.
+        """
         if not self.first_ts:
             return False
         t = dt.datetime.fromtimestamp(self.first_ts, tz=dt.timezone.utc).astimezone(IST)
@@ -172,12 +177,20 @@ def _covers_session(rows: list, day: dt.date) -> bool:
 
 
 def movers(
-    day: dt.date, source: str = "live", as_of: dt.datetime | None = None
+    day: dt.date,
+    source: str = "live",
+    as_of: dt.datetime | None = None,
+    since: dt.datetime | None = None,
 ) -> tuple[list[HistoricalMover], str]:
-    """Every symbol's move for a day, from whichever store covers it.
+    """Every symbol's move across a window of a day, from whichever store covers it.
 
     Returns the movers and the origin, so a caller can label a 5-minute
     reconstruction as such rather than presenting it as the live record.
+
+    `since` and `as_of` bound the window. Without `since` the baseline is the
+    session open; with one, it is the first bar at or after it, so a question
+    about the 10:00-11:00 hour is answered about that hour rather than about
+    the whole day up to 11:00.
     """
     # An empty slice still falls through to broker history — that is usually the
     # more complete answer. What was missing was the reason: asking "as it stood
@@ -185,7 +198,7 @@ def movers(
     # slice, and the reader saw a switch of store with no explanation. Callers
     # pair `origin` with `live_coverage()` so the window is stated rather than
     # left to be inferred from a suspiciously short table.
-    live = snapshot_store.movers(day, source, as_of)
+    live = snapshot_store.movers(day, source, as_of, since)
     if live and _covers_session(live, day):
         return (
             [
@@ -204,12 +217,17 @@ def movers(
         return [], LIVE
 
     cutoff = int(as_of.timestamp()) if as_of else None
+    floor = int(since.timestamp()) if since else None
     out: list[HistoricalMover] = []
     resolution_seen, origin_seen = 5, HISTORY
     for symbol in research_store.symbols("5m", "live"):
         bars, origin_seen, resolution_seen = _history_bars(symbol, day)
         if cutoff is not None:
             bars = [b for b in bars if b.ts <= cutoff]
+        if floor is not None:
+            # `>= floor - resolution` would let a bar that STARTED before the
+            # window supply the baseline. The window has to begin where it says.
+            bars = [b for b in bars if b.ts >= floor]
         if not bars:
             continue
         open_price = bars[0].open

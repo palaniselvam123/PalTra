@@ -40,7 +40,12 @@ export default function MoversPage() {
   const [error, setError] = useState<string | null>(null);
 
   // "as it stood at" — the whole reason the prices are recorded.
-  const [asOf, setAsOf] = useState("");
+  // The window is edited freely and applied on Query, so a half-typed "1" in
+  // the From box never fires a request for 01:00.
+  const [fromTime, setFromTime] = useState("09:15");
+  const [toTime, setToTime] = useState("");
+  const [window_, setWindow_] = useState<{ since: string; at: string }>({ since: "09:15", at: "" });
+  const asOf = window_.at;
   // Empty means today. Any past date is answered from stored broker history.
   const [day, setDay] = useState("");
   const [availableDays, setAvailableDays] = useState<any>(null);
@@ -60,7 +65,12 @@ export default function MoversPage() {
   const refresh = useCallback(() => {
     api.moversRecorder().then(setRecorder).catch(() => {});
     api
-      .movers({ top, at: asOf || undefined, day: day || undefined })
+      .movers({
+        top,
+        at: window_.at || undefined,
+        since: window_.since || undefined,
+        day: day || undefined,
+      })
       .then((m) => {
         setMovers(m);
         setError(null);
@@ -71,7 +81,7 @@ export default function MoversPage() {
       .then(setFast)
       .catch(() => {});
     api.moversDays().then((d: any) => setAvailableDays(d.available)).catch(() => {});
-  }, [asOf, day, peak, top]);
+  }, [window_, day, peak, top]);
 
   useEffect(() => {
     refresh();
@@ -98,6 +108,20 @@ export default function MoversPage() {
       setFetching(null);
     }
   };
+
+  // Times are applied only here, so the tables always match the boxes that
+  // were actually submitted rather than whatever was mid-keystroke.
+  // "FROM OPEN" is only true for a window that starts at the open; a 10:00
+  // start measures from 10:00 and the header has to say so.
+  const windowed = !!movers?.window_start_ist && movers.window_start_ist !== "09:15";
+  const fromLabel = windowed ? `From ${movers!.window_start_ist}` : "From open";
+  const openLabel = windowed ? `At ${movers!.window_start_ist}` : "Open";
+  const emptyMsg = (dir: "above" | "below") =>
+    windowed
+      ? `No stock is ${dir} its ${movers!.window_start_ist} price in this window.`
+      : `No stock is ${dir} its open yet.`;
+
+  const runQuery = () => setWindow_({ since: fromTime.trim(), at: toTime.trim() });
 
   const runLookup = async () => {
     setBusy(true);
@@ -240,16 +264,38 @@ export default function MoversPage() {
             )}
             <span className="mx-1 text-slate-700">|</span>
             <Clock size={14} className="text-slate-500" />
-            <label className="text-slate-400">As it stood at</label>
+            <label className="text-slate-400">From</label>
             <input
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              placeholder="HH:MM"
-              className={input + " w-24"}
+              value={fromTime}
+              onChange={(e) => setFromTime(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runQuery()}
+              placeholder="09:15"
+              className={input + " w-20"}
             />
-            {asOf && (
-              <button onClick={() => setAsOf("")} className="text-xs text-slate-400 underline">
-                now
+            <label className="text-slate-400">to</label>
+            <input
+              value={toTime}
+              onChange={(e) => setToTime(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runQuery()}
+              placeholder="15:30"
+              className={input + " w-20"}
+            />
+            <button
+              onClick={runQuery}
+              className="rounded bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-500"
+            >
+              Query
+            </button>
+            {(window_.since !== "09:15" || window_.at) && (
+              <button
+                onClick={() => {
+                  setFromTime("09:15");
+                  setToTime("");
+                  setWindow_({ since: "09:15", at: "" });
+                }}
+                className="text-xs text-slate-400 underline"
+              >
+                whole session
               </button>
             )}
           </div>
@@ -372,7 +418,9 @@ export default function MoversPage() {
             total={movers?.gainers_total ?? 0}
             requested={top}
             tracked={movers?.symbols_tracked ?? 0}
-            emptyText="No stock is above its open yet."
+            fromLabel={fromLabel}
+            openLabel={openLabel}
+            emptyText={emptyMsg("above")}
           />
           <MoverTable
             title={`Top ${top} losers`}
@@ -381,7 +429,9 @@ export default function MoversPage() {
             total={movers?.losers_total ?? 0}
             requested={top}
             tracked={movers?.symbols_tracked ?? 0}
-            emptyText="No stock is below its open yet."
+            fromLabel={fromLabel}
+            openLabel={openLabel}
+            emptyText={emptyMsg("below")}
           />
         </div>
 
@@ -596,9 +646,13 @@ function MoverTable({
   requested,
   tracked,
   emptyText,
+  fromLabel = "From open",
+  openLabel = "Open",
 }: {
   title: string;
   icon: React.ReactNode;
+  fromLabel?: string;
+  openLabel?: string;
   rows: MoverRow[];
   total: number;
   requested: number;
@@ -632,9 +686,9 @@ function MoverTable({
               <tr>
                 <Th>#</Th>
                 <Th>Symbol</Th>
-                <Th right>From open</Th>
+                <Th right>{fromLabel}</Th>
                 <Th right>Price</Th>
-                <Th right>Open</Th>
+                <Th right>{openLabel}</Th>
                 <Th right>At</Th>
               </tr>
             </thead>

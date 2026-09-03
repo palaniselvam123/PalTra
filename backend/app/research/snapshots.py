@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.core.market_clock import IST
+from app.core.market_clock import MARKET_OPEN, IST
 from app.research.store import DB_PATH
 
 SCHEMA = """
@@ -200,16 +200,34 @@ class SnapshotStore:
         return [PricePoint(*r) for r in rows]
 
     def movers(
-        self, day: dt.date, source: str = "live", as_of: dt.datetime | None = None
+        self,
+        day: dt.date,
+        source: str = "live",
+        as_of: dt.datetime | None = None,
+        since: dt.datetime | None = None,
     ) -> list[Mover]:
-        """Every symbol's move from its session open, ranked best first.
+        """Every symbol's move across a window of the day, ranked best first.
 
         `as_of` restricts to prices recorded at or before that moment, which is
         what makes an honest "as it stood at 10:30" view possible after the fact.
+        `since` moves the other edge, so the move can be measured from 10:00
+        rather than from the open.
+
+        The baseline follows the window. With no `since` (or one at or before
+        09:15) it is the recorded session open, so the percentage means what
+        "from open" normally means. Once a later start is asked for, the
+        denormalised open would answer a different question than the one on
+        screen, so the first price inside the window becomes the baseline.
         """
         lo, hi = day_bounds(day)
         if as_of is not None:
             hi = min(hi, int(as_of.timestamp()) + 1)
+        windowed = False
+        if since is not None:
+            start = int(since.timestamp())
+            if start > int(dt.datetime.combine(day, MARKET_OPEN, tzinfo=IST).timestamp()):
+                windowed = True
+            lo = max(lo, start)
         with self._conn() as conn:
             rows = conn.execute(
                 """
@@ -228,6 +246,12 @@ class SnapshotStore:
             ).fetchall()
             out: list[Mover] = []
             for symbol, open_price, last_ts, high_price, low_price, points, first_ts in rows:
+                if windowed:
+                    row = conn.execute(
+                        "SELECT price FROM intraday_prices WHERE symbol=? AND source=? AND ts=?",
+                        (symbol, source, first_ts),
+                    ).fetchone()
+                    open_price = row[0] if row else None
                 if not open_price:
                     continue
                 last = conn.execute(
