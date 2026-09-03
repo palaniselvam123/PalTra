@@ -23,6 +23,7 @@ import datetime as dt
 from dataclasses import dataclass, field
 
 from app.core.market_clock import IST, ist_now
+from app.research import price_history
 from app.research.snapshots import Mover, ist_time_str, snapshot_store
 
 # Defaults, chosen to be legible rather than tuned. They are configurable at the
@@ -42,6 +43,8 @@ class FastMover:
     last_price: float
     last_ts: int
     direction: str              # UP | DOWN
+    origin: str = price_history.LIVE
+    resolution_min: int = 1
 
     @property
     def last_time_ist(self) -> str:
@@ -57,6 +60,8 @@ class FastMover:
             "last_ts": self.last_ts,
             "last_time_ist": self.last_time_ist,
             "direction": self.direction,
+            "origin": self.origin,
+            "resolution_min": self.resolution_min,
         }
 
 
@@ -85,19 +90,33 @@ def fast_movers(
     min_speed: float = FAST_PCT_PER_MIN,
     min_move: float = MIN_MOVE_PCT,
 ) -> list[FastMover]:
-    """Symbols whose move is arriving quickly right now.
+    """Symbols whose move arrived quickly, on any day the app has prices for.
 
     Speed uses the price `window_min` ago as its baseline, not the session open,
     so a stock that gapped up and then went flat does not register as fast.
+
+    Works on a historical day as well as a live one. The underlying record is
+    coarser there — 5-minute bars rather than 1-minute — so a short window
+    contains fewer observations and the rate is correspondingly blunter. Each
+    result carries the resolution it was computed at rather than leaving the
+    caller to assume.
     """
-    now = as_of or ist_now()
-    baseline_at = now - dt.timedelta(minutes=window_min)
+    rows, origin = price_history.movers(day, source, as_of)
+    if not rows:
+        return []
+
+    resolution = rows[0].resolution_min
+    # A window shorter than the record's own spacing cannot contain a baseline.
+    effective_window = max(window_min, resolution)
     out: list[FastMover] = []
 
-    for m in snapshot_store.movers(day, source, as_of):
+    for m in rows:
         if abs(m.pct_from_open) < min_move:
             continue
-        past = snapshot_store.price_at(m.symbol, baseline_at, source, tolerance_min=window_min)
+        baseline_at = dt.datetime.fromtimestamp(m.last_ts, tz=dt.timezone.utc).astimezone(
+            IST
+        ) - dt.timedelta(minutes=effective_window)
+        past = price_history.price_at(m.symbol, baseline_at, source, tolerance_min=effective_window)
         if past is None or past.price <= 0:
             continue
         elapsed_min = max((m.last_ts - past.ts) / 60.0, 1.0)
@@ -114,8 +133,75 @@ def fast_movers(
                 last_price=m.last_price,
                 last_ts=m.last_ts,
                 direction="UP" if speed > 0 else "DOWN",
+                origin=origin,
+                resolution_min=resolution,
             )
         )
+    return sorted(out, key=lambda f: abs(f.speed_pct_per_min), reverse=True)
+
+
+def peak_fast_movers(
+    day: dt.date,
+    source: str = "live",
+    until: dt.datetime | None = None,
+    window_min: int = SPEED_WINDOW_MIN,
+    min_speed: float = FAST_PCT_PER_MIN,
+    min_move: float = MIN_MOVE_PCT,
+) -> list[FastMover]:
+    """Each symbol's FASTEST window during a session, and when it happened.
+
+    `fast_movers` answers "what is moving now", which is the right question
+    while the market is open and a useless one afterwards: measured at 15:25 it
+    only ever describes the last few minutes before the close. Reviewing a past
+    morning needs the other question — what moved fast *at any point* — so this
+    walks the session and keeps each symbol's peak.
+
+    `until` bounds the scan, which is how "what moved fast in the morning" is
+    expressed: pass the 11:00 cutoff.
+    """
+    rows, origin = price_history.movers(day, source, until)
+    if not rows:
+        return []
+    resolution = rows[0].resolution_min
+    step = max(resolution, 1)
+    out: list[FastMover] = []
+
+    for m in rows:
+        series = price_history.series(m.symbol, day, source, until)
+        if len(series) < 2:
+            continue
+        best: FastMover | None = None
+        for i, point in enumerate(series):
+            # The bar `window_min` earlier, in index terms for this resolution.
+            back = max(0, i - max(1, window_min // step))
+            if back == i:
+                continue
+            prior = series[back]
+            if prior.price <= 0:
+                continue
+            elapsed_min = max((point.ts - prior.ts) / 60.0, 1.0)
+            window_move = (point.price - prior.price) / prior.price * 100
+            speed = window_move / elapsed_min
+            if abs(speed) < min_speed:
+                continue
+            pct_open = ((point.price - m.open_price) / m.open_price * 100) if m.open_price else 0.0
+            if abs(pct_open) < min_move:
+                continue
+            candidate = FastMover(
+                symbol=m.symbol,
+                pct_from_open=pct_open,
+                speed_pct_per_min=speed,
+                window_move_pct=window_move,
+                last_price=point.price,
+                last_ts=point.ts,
+                direction="UP" if speed > 0 else "DOWN",
+                origin=origin,
+                resolution_min=resolution,
+            )
+            if best is None or abs(candidate.speed_pct_per_min) > abs(best.speed_pct_per_min):
+                best = candidate
+        if best is not None:
+            out.append(best)
     return sorted(out, key=lambda f: abs(f.speed_pct_per_min), reverse=True)
 
 

@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  History,
+  CalendarDays,
   Clock,
   Loader2,
   RefreshCw,
@@ -39,6 +41,12 @@ export default function MoversPage() {
 
   // "as it stood at" — the whole reason the prices are recorded.
   const [asOf, setAsOf] = useState("");
+  // Empty means today. Any past date is answered from stored broker history.
+  const [day, setDay] = useState("");
+  const [availableDays, setAvailableDays] = useState<any>(null);
+  // Peak scans the whole session for each symbol's fastest window. "Right now"
+  // is the useful question live; reviewing a past morning needs the other one.
+  const [peak, setPeak] = useState(false);
 
   // Point-in-time lookup
   const [lookupSymbol, setLookupSymbol] = useState("RELIANCE");
@@ -50,14 +58,18 @@ export default function MoversPage() {
   const refresh = useCallback(() => {
     api.moversRecorder().then(setRecorder).catch(() => {});
     api
-      .movers({ top: 15, at: asOf || undefined })
+      .movers({ top: 15, at: asOf || undefined, day: day || undefined })
       .then((m) => {
         setMovers(m);
         setError(null);
       })
       .catch((e) => setError(String(e?.message ?? e)));
-    api.moversFast({}).then(setFast).catch(() => {});
-  }, [asOf]);
+    api
+      .moversFast({ day: day || undefined, peak: peak || undefined, until: peak ? "11:00" : undefined })
+      .then(setFast)
+      .catch(() => {});
+    api.moversDays().then((d: any) => setAvailableDays(d.available)).catch(() => {});
+  }, [asOf, day, peak]);
 
   useEffect(() => {
     refresh();
@@ -68,7 +80,7 @@ export default function MoversPage() {
   const runLookup = async () => {
     setBusy(true);
     try {
-      setLookup(await api.moversPriceAt({ symbol: lookupSymbol.trim().toUpperCase(), at: lookupTime }));
+      setLookup(await api.moversPriceAt({ symbol: lookupSymbol.trim().toUpperCase(), at: lookupTime, day: day || undefined }));
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -169,6 +181,25 @@ export default function MoversPage() {
             Track full universe
           </button>
           <div className="ml-auto flex items-center gap-2 text-sm">
+            <CalendarDays size={14} className="text-slate-500" />
+            <label className="text-slate-400">Day</label>
+            <input
+              type="date"
+              value={day}
+              onChange={(e) => {
+                setDay(e.target.value);
+                // A past session is over: "what is moving now" has no answer
+                // there, so default to "what moved fast that morning".
+                if (e.target.value) setPeak(true);
+              }}
+              className={input + " w-40"}
+            />
+            {day && (
+              <button onClick={() => setDay("")} className="text-xs text-slate-400 underline">
+                today
+              </button>
+            )}
+            <span className="mx-1 text-slate-700">|</span>
             <Clock size={14} className="text-slate-500" />
             <label className="text-slate-400">As it stood at</label>
             <input
@@ -185,7 +216,18 @@ export default function MoversPage() {
           </div>
         </div>
 
-        {movers && !movers.baseline_is_session_open && movers.symbols_tracked > 0 && (
+        {movers && movers.origin === "broker_history_5m" && movers.symbols_tracked > 0 && (
+          <div className="flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-300">
+            <History size={16} className="mt-0.5 shrink-0" />
+            <span>
+              Showing <strong>{movers.day}</strong> from stored broker history at{" "}
+              {movers.resolution_min}-minute resolution — the live minute record does not cover this
+              day. Percentages are from the true session open.
+            </span>
+          </div>
+        )}
+
+        {movers && movers.origin !== "broker_history_5m" && !movers.baseline_is_session_open && movers.symbols_tracked > 0 && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
             <span>
@@ -199,16 +241,31 @@ export default function MoversPage() {
 
         {/* ---- fast movers ---- */}
         <section className="rounded-xl border border-slate-800 bg-card p-4">
-          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-            <Zap size={15} className="text-bot" /> Moving fast right now
-          </h2>
+          <div className="mb-1 flex flex-wrap items-center gap-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Zap size={15} className="text-bot" />
+              {peak ? "Moved fastest that morning" : "Moving fast right now"}
+            </h2>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={peak}
+                onChange={(e) => setPeak(e.target.checked)}
+                className="accent-bot"
+              />
+              Peak of the session (to 11:00)
+            </label>
+          </div>
           <p className="mb-3 text-xs text-slate-500">
-            Rate of change over the last {fast?.window_min ?? 10} minutes, not the size of the move.
-            A stock up 3% over two hours does not appear here; one that did it in ten minutes does.
+            {peak
+              ? `Each symbol's fastest ${fast?.window_min ?? 10}-minute stretch up to 11:00, and when it happened. Measuring "right now" on a finished session only ever describes the last few minutes before the close.`
+              : `Rate of change over the last ${fast?.window_min ?? 10} minutes, not the size of the move. A stock up 3% over two hours does not appear here; one that did it in ten minutes does.`}
           </p>
           {!fast || fast.movers.length === 0 ? (
             <Empty>
-              Nothing is moving faster than {fast?.min_speed_pct_per_min ?? 0.1}%/min right now.
+              {peak
+                ? `Nothing reached ${fast?.min_speed_pct_per_min ?? 0.1}%/min during that session.`
+                : `Nothing is moving faster than ${fast?.min_speed_pct_per_min ?? 0.1}%/min right now.`}
             </Empty>
           ) : (
             <div className="overflow-x-auto">
@@ -217,10 +274,10 @@ export default function MoversPage() {
                   <tr>
                     <Th>Symbol</Th>
                     <Th right>Speed</Th>
-                    <Th right>Last {fast.window_min}m</Th>
+                    <Th right>{peak ? "Best window" : `Last ${fast.window_min}m`}</Th>
                     <Th right>From open</Th>
                     <Th right>Price</Th>
-                    <Th right>At</Th>
+                    <Th right>{peak ? "Peaked at" : "At"}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,6 +364,12 @@ export default function MoversPage() {
                       </span>
                     )}
                   </div>
+                  {lookup.origin && (
+                    <div className="text-xs text-slate-500">
+                      from {lookup.origin === "broker_history_5m" ? "stored broker history" : "the live minute record"}
+                      {lookup.resolution_min ? ` · ${lookup.resolution_min}-minute resolution` : ""}
+                    </div>
+                  )}
                   {lookup.pct_from_open != null && (
                     <div className="text-slate-400">
                       <Pct value={lookup.pct_from_open} /> from the session open of ₹
@@ -323,6 +386,17 @@ export default function MoversPage() {
             </div>
           )}
         </section>
+
+        {availableDays && (
+          <p className="text-xs text-slate-500">
+            Queryable: live minute record for{" "}
+            {availableDays.live_minute_days?.length
+              ? availableDays.live_minute_days.join(", ")
+              : "no days yet"}
+            {availableDays.history_range?.length === 2 &&
+              ` · broker history ${availableDays.history_range[0]} to ${availableDays.history_range[1]} at 5-minute resolution`}
+          </p>
+        )}
 
         {/* ---- alerts ---- */}
         <section className="rounded-xl border border-slate-800 bg-card p-4">

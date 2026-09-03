@@ -21,7 +21,8 @@ import datetime as dt
 import re
 
 from app.core.market_clock import IST, ist_now
-from app.research.snapshots import ist_date, snapshot_store
+from app.research.price_history import price_at as history_price_at
+from app.research.snapshots import ist_date
 
 # "at 11", "at 11:00", "at 11am", "at 11.30", "11:00 am"
 _TIME_RE = re.compile(
@@ -140,7 +141,7 @@ def lookup(text: str, source: str | None = None) -> dict | None:
         }
 
     when = dt.datetime.combine(day, when_time, tzinfo=IST)
-    point = snapshot_store.price_at(symbol, when, src)
+    point = history_price_at(symbol, when, src)
 
     if point is None:
         return {
@@ -151,9 +152,10 @@ def lookup(text: str, source: str | None = None) -> dict | None:
             "requested_time_ist": when_time.strftime("%H:%M"),
             "source": src,
             "reason": (
-                f"No price for {symbol} was recorded within 15 minutes before "
-                f"{when_time.strftime('%H:%M')} on {day.isoformat()} from the {src} feed. "
-                "Either the recorder was not running then, or the symbol was not being tracked."
+                f"No price for {symbol} near {when_time.strftime('%H:%M')} on "
+                f"{day.isoformat()} in either the live minute record or broker history. "
+                "Either nothing was recorded that day, the symbol is outside the stored "
+                "universe, or the date is beyond the history the broker retains."
             ),
         }
 
@@ -168,9 +170,12 @@ def lookup(text: str, source: str | None = None) -> dict | None:
         "session_open": round(point.open_price, 2) if point.open_price else None,
         "pct_from_open": round(point.pct_from_open, 3) if point.pct_from_open is not None else None,
         "source": src,
+        "origin": point.origin,
+        "resolution_min": point.resolution_min,
         "note": (
-            "Prices are recorded once a minute. `recorded_time_ist` is the minute actually "
-            "found; if it differs from the requested time, report the difference rather than "
-            "presenting it as exact."
+            "`recorded_time_ist` is the timestamp actually found. If it differs from the "
+            "requested time, say so rather than presenting it as exact. `resolution_min` is "
+            "the spacing of the underlying record — 1 for the live minute record, 5 for "
+            "broker history — so state which one answered when the gap matters."
         ),
     }

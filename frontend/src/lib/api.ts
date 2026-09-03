@@ -435,6 +435,8 @@ export type MoversResponse = {
   source: string;
   session: string;
   symbols_tracked: number;
+  origin: string;
+  resolution_min: number | null;
   baseline_is_session_open: boolean;
   gainers: MoverRow[];
   losers: MoverRow[];
@@ -450,12 +452,16 @@ export type FastMoverRow = {
   last_ts: number;
   last_time_ist: string;
   direction: "UP" | "DOWN";
+  origin: string;
+  resolution_min: number;
 };
 
 export type FastMoversResponse = {
   day: string;
   source: string;
   window_min: number;
+  peak: boolean;
+  until: string | null;
   min_speed_pct_per_min: number;
   min_move_pct: number;
   count: number;
@@ -481,6 +487,8 @@ export type PriceAtResponse = {
   asked_for: string;
   recorded_at_ist?: string;
   price?: number;
+  origin?: string;
+  resolution_min?: number;
   open_price?: number | null;
   pct_from_open?: number | null;
   source: string;
@@ -497,7 +505,7 @@ export type AlertScanResponse = {
   results: { symbol: string; direction: string; message: string; delivery: any }[];
 };
 
-function stringifyParams(params: Record<string, string | number | undefined>): Record<string, string | undefined> {
+function stringifyParams(params: Record<string, string | number | boolean | undefined>): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(params)) out[k] = v === undefined ? undefined : String(v);
   return out;
@@ -636,7 +644,7 @@ export const api = {
     request<MoversResponse>(`/api/movers${queryString(stringifyParams(params))}`),
   moversMorning: (params: { day?: string; top?: number } = {}) =>
     request<MoversResponse>(`/api/movers/morning${queryString(stringifyParams(params))}`),
-  moversFast: (params: { day?: string; window_min?: number; min_speed?: number; min_move?: number } = {}) =>
+  moversFast: (params: { day?: string; window_min?: number; min_speed?: number; min_move?: number; peak?: boolean; until?: string } = {}) =>
     request<FastMoversResponse>(`/api/movers/fast${queryString(stringifyParams(params))}`),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),

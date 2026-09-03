@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.market_clock import IST, ist_now, session_state
+from app.research import price_history
 from app.research.snapshots import ist_date, snapshot_store
 from app.services.alert_notifier import alert_notifier
 from app.services.broadcaster import broadcaster
@@ -19,7 +20,7 @@ from app.services.market_data import market_data
 from app.services.market_recorder import market_recorder
 from app.services.movers import (
     FAST_PCT_PER_MIN, MIN_MOVE_PCT, SPEED_WINDOW_MIN, alert_ledger, fast_movers,
-    format_alert, morning_cutoff, ranked_movers, split_gainers_losers,
+    format_alert, morning_cutoff, peak_fast_movers, ranked_movers, split_gainers_losers,
 )
 
 router = APIRouter(prefix="/api/movers", tags=["movers"])
@@ -98,12 +99,14 @@ async def movers(
     d = _resolve_day(day)
     src = source or market_data.source.value
     as_of = _resolve_as_of(d, at)
-    all_movers = ranked_movers(d, src, as_of)
+    all_movers, origin = price_history.movers(d, src, as_of)
     split = split_gainers_losers(all_movers, top)
     return {
         "day": d.isoformat(),
         "as_of": at,
         "source": src,
+        "origin": origin,
+        "resolution_min": all_movers[0].resolution_min if all_movers else None,
         "session": session_state(),
         "symbols_tracked": len(all_movers),
         "baseline_is_session_open": all(m.baseline_is_session_open for m in all_movers) if all_movers else True,
@@ -123,12 +126,14 @@ async def morning(
     d = _resolve_day(day)
     src = source or market_data.source.value
     cutoff = morning_cutoff(d)
-    all_movers = ranked_movers(d, src, cutoff)
+    all_movers, origin = price_history.movers(d, src, cutoff)
     split = split_gainers_losers(all_movers, top)
     return {
         "day": d.isoformat(),
         "cutoff_ist": cutoff.strftime("%H:%M"),
         "source": src,
+        "origin": origin,
+        "resolution_min": all_movers[0].resolution_min if all_movers else None,
         "symbols_tracked": len(all_movers),
         "gainers": [_mover_dict(m) for m in split["gainers"]],
         "losers": [_mover_dict(m) for m in split["losers"]],
@@ -143,15 +148,24 @@ async def fast(
     min_speed: float = Query(FAST_PCT_PER_MIN, ge=0.0),
     min_move: float = Query(MIN_MOVE_PCT, ge=0.0),
     source: str | None = Query(None),
+    peak: bool = Query(False, description="Scan the whole session for each symbol's fastest window"),
+    until: str | None = Query(None, description="HH:MM IST; bound the peak scan, e.g. 11:00"),
 ):
     d = _resolve_day(day)
     src = source or market_data.source.value
-    movers_fast = fast_movers(
-        d, src, _resolve_as_of(d, at), window_min, min_speed, min_move
-    )
+    if peak:
+        movers_fast = peak_fast_movers(
+            d, src, _resolve_as_of(d, until), window_min, min_speed, min_move
+        )
+    else:
+        movers_fast = fast_movers(
+            d, src, _resolve_as_of(d, at), window_min, min_speed, min_move
+        )
     return {
         "day": d.isoformat(),
         "source": src,
+        "peak": peak,
+        "until": until,
         "window_min": window_min,
         "min_speed_pct_per_min": min_speed,
         "min_move_pct": min_move,
@@ -174,7 +188,7 @@ async def price_at(
     d = _resolve_day(day)
     src = source or market_data.source.value
     when = _resolve_as_of(d, at)
-    point = snapshot_store.price_at(symbol.upper(), when, src)
+    point = price_history.price_at(symbol.upper(), when, src)
     if point is None:
         return {
             "found": False,
@@ -183,21 +197,12 @@ async def price_at(
             "asked_for": at,
             "source": src,
             "reason": (
-                "No price was recorded for that symbol within 15 minutes before that time. "
-                "Either the recorder was not running, or the symbol is not in the tracked universe."
+                "No price for that symbol near that time in either the live minute record or "
+                "broker history. Either nothing was recorded that day, the symbol is outside "
+                "the stored universe, or the date falls outside the history the broker retains."
             ),
         }
-    return {
-        "found": True,
-        "symbol": point.symbol,
-        "day": d.isoformat(),
-        "asked_for": at,
-        "recorded_at_ist": point.time_ist,
-        "price": round(point.price, 2),
-        "open_price": round(point.open_price, 2) if point.open_price else None,
-        "pct_from_open": round(point.pct_from_open, 3) if point.pct_from_open is not None else None,
-        "source": src,
-    }
+    return {"found": True, "day": d.isoformat(), "asked_for": at, "source": src, **point.as_dict()}
 
 
 @router.get("/series")
@@ -228,6 +233,7 @@ async def days(source: str | None = Query(None)):
         "source": src,
         "days": [d.isoformat() for d in snapshot_store.recorded_days(src)],
         "stats": snapshot_store.stats(src),
+        "available": price_history.available_days(src),
     }
 
 

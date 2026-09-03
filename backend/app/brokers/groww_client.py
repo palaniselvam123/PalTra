@@ -185,7 +185,34 @@ class GrowwClient(BrokerClient):
 
     # ---- market data --------------------------------------------------
 
+    # Groww rejects a quote request naming more than 50 instruments with
+    # "size must be between 1 and 50". Widening the tracked universe past that
+    # broke the whole feed rather than the excess names, because one oversized
+    # request returns nothing at all.
+    LTP_BATCH_LIMIT = 50
+
     async def get_ltp_batch(self, symbols: list[str]) -> dict[str, float]:
+        """Last traded price for many symbols, split into calls the API accepts.
+
+        Chunks are merged into one mapping, and a chunk that fails does not take
+        the others down with it: a partial quote set still lets most of the
+        universe update, where an all-or-nothing failure freezes every price.
+        """
+        out: dict[str, float] = {}
+        errors: list[str] = []
+        for start in range(0, len(symbols), self.LTP_BATCH_LIMIT):
+            chunk = symbols[start : start + self.LTP_BATCH_LIMIT]
+            try:
+                out.update(await self._ltp_chunk(chunk))
+            except BrokerDataForbidden:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                errors.append(str(exc))
+        if not out and errors:
+            raise BrokerOrderError(f"Groww LTP fetch failed: {errors[0]}")
+        return out
+
+    async def _ltp_chunk(self, symbols: list[str]) -> dict[str, float]:
         sdk = self._require_session()
         keys = tuple(f"{self.EXCHANGE}_{s}" for s in symbols)
         try:
