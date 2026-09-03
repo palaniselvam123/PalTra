@@ -415,6 +415,94 @@ export type AiStatus = {
   last_error: string | null;
 };
 
+export type MoverRow = {
+  symbol: string;
+  open_price: number;
+  last_price: number;
+  pct_from_open: number;
+  high_price: number;
+  low_price: number;
+  last_ts: number;
+  last_time_ist: string;
+  points: number;
+  first_time_ist: string;
+  baseline_is_session_open: boolean;
+};
+
+export type MoversResponse = {
+  day: string;
+  as_of: string | null;
+  source: string;
+  session: string;
+  symbols_tracked: number;
+  baseline_is_session_open: boolean;
+  gainers: MoverRow[];
+  losers: MoverRow[];
+  recorder: { running: boolean; last_run_at: string | null };
+};
+
+export type FastMoverRow = {
+  symbol: string;
+  pct_from_open: number;
+  speed_pct_per_min: number;
+  window_move_pct: number;
+  last_price: number;
+  last_ts: number;
+  last_time_ist: string;
+  direction: "UP" | "DOWN";
+};
+
+export type FastMoversResponse = {
+  day: string;
+  source: string;
+  window_min: number;
+  min_speed_pct_per_min: number;
+  min_move_pct: number;
+  count: number;
+  movers: FastMoverRow[];
+};
+
+export type RecorderStatus = {
+  running: boolean;
+  interval_sec: number;
+  last_run_at: string | null;
+  last_written: number;
+  total_written: number;
+  last_error: string | null;
+  session: string;
+  source: string;
+  store: { points: number; symbols: number; first: string | null; last: string | null; last_time_ist: string | null };
+};
+
+export type PriceAtResponse = {
+  found: boolean;
+  symbol: string;
+  day: string;
+  asked_for: string;
+  recorded_at_ist?: string;
+  price?: number;
+  open_price?: number | null;
+  pct_from_open?: number | null;
+  source: string;
+  reason?: string;
+};
+
+export type AlertScanResponse = {
+  day: string;
+  source: string;
+  dry_run: boolean;
+  candidates: number;
+  alerted: number;
+  already_alerted_today: number;
+  results: { symbol: string; direction: string; message: string; delivery: any }[];
+};
+
+function stringifyParams(params: Record<string, string | number | undefined>): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(params)) out[k] = v === undefined ? undefined : String(v);
+  return out;
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 export const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws/live";
 
@@ -540,6 +628,22 @@ export const api = {
   scanConfig: () => request<{ config: ScanConfig; options: ScanOptions }>("/api/scan/config"),
   setScanConfig: (body: Partial<ScanConfig>) =>
     request<{ config: ScanConfig }>("/api/scan/config", { method: "POST", body: JSON.stringify(body) }),
+  moversRecorder: () => request<RecorderStatus>("/api/movers/recorder"),
+  moversRecorderStart: () => request<RecorderStatus>("/api/movers/recorder/start", { method: "POST" }),
+  moversRecorderStop: () => request<RecorderStatus>("/api/movers/recorder/stop", { method: "POST" }),
+  moversFlush: () => request<any>("/api/movers/recorder/flush", { method: "POST" }),
+  movers: (params: { day?: string; at?: string; top?: number } = {}) =>
+    request<MoversResponse>(`/api/movers${queryString(stringifyParams(params))}`),
+  moversMorning: (params: { day?: string; top?: number } = {}) =>
+    request<MoversResponse>(`/api/movers/morning${queryString(stringifyParams(params))}`),
+  moversFast: (params: { day?: string; window_min?: number; min_speed?: number; min_move?: number } = {}) =>
+    request<FastMoversResponse>(`/api/movers/fast${queryString(stringifyParams(params))}`),
+  moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
+    request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),
+  moversDays: () => request<{ source: string; days: string[]; stats: any }>("/api/movers/days"),
+  moversWidenUniverse: () => request<any>("/api/movers/universe/widen", { method: "POST" }),
+  moversAlertScan: (body: { dry_run: boolean; window_min?: number; min_speed?: number; min_move?: number }) =>
+    request<AlertScanResponse>("/api/movers/alerts/scan", { method: "POST", body: JSON.stringify(body) }),
   scanStatus: () => request<ScanStatus>("/api/scan/status"),
   scanStart: () => request<ScanStatus>("/api/scan/start", { method: "POST" }),
   scanStop: () => request<ScanStatus>("/api/scan/stop", { method: "POST" }),

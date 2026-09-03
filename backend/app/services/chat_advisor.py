@@ -53,6 +53,9 @@ reason, a news event or a number that is not in it. If the user asks about somet
 say plainly what you do not have recorded rather than guessing. You have no market data beyond what is in the \
 facts and no memory of anything outside them.
 
+PRICE LOOKUPS:
+If `price_lookup` is present in the facts, the user asked what a stock traded at at a particular time and it has been looked up for you in the recorded minute prices. When `answered` is true, give the price and say which minute it came from — if `recorded_time_ist` differs from `requested_time_ist`, state that plainly rather than implying the figure is from the exact minute asked for. When `answered` is false, relay the `reason` as it stands; do not substitute a current price or estimate one.
+
 HOW TO ANSWER:
 - Quote the actual figures from the facts. When explaining a P&L outcome, show the arithmetic step by step so \
 the user can check it: gross move, then charges, then the net.
@@ -269,6 +272,15 @@ async def answer(message: str, history: list[dict] | None = None) -> dict:
     key = await ai_advisor._api_key()  # raises AiUnavailable with a clear message
 
     context = await build_context()
+
+    # A point-in-time price ("what was RELIANCE at 11:00") lives in the recorder's
+    # table, not in the trade snapshot. Resolve it here so the model can answer
+    # from a fact rather than being forced to say it has nothing recorded.
+    from app.services.price_questions import lookup as price_lookup
+
+    priced = price_lookup(message)
+    if priced is not None:
+        context["price_lookup"] = priced
 
     conversation: list[dict] = []
     for turn in (history or [])[-MAX_HISTORY_TURNS:]:

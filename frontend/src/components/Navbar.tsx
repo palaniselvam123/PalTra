@@ -12,6 +12,7 @@ import {
   LineChart,
   Radar,
   Settings,
+  Zap,
   LayoutDashboard,
   Wifi,
   WifiOff,
@@ -84,6 +85,7 @@ export function Navbar({
           <NavLink href="/" active={pathname === "/"} icon={<LayoutDashboard size={15} />} label="Dashboard" />
           <NavLink href="/chart" active={pathname === "/chart"} icon={<LineChart size={15} />} label="Charts" />
           <NavLink href="/trade" active={pathname === "/trade"} icon={<CandlestickChart size={15} />} label="Trade" />
+          <NavLink href="/movers" active={pathname === "/movers"} icon={<Zap size={15} />} label="Movers" />
           <NavLink href="/scanner" active={pathname === "/scanner"} icon={<Radar size={15} />} label="Scanner" />
           <NavLink href="/reports" active={pathname === "/reports"} icon={<FileBarChart size={15} />} label="Reports" />
           <NavLink href="/settings" active={pathname === "/settings"} icon={<Settings size={15} />} label="Settings" />

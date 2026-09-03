@@ -21,6 +21,7 @@ from app.api import (
     routes_orders,
     routes_reports,
     routes_scanner,
+    routes_movers,
     routes_research,
     routes_scanner_engine,
     routes_ws,
@@ -197,6 +198,12 @@ async def lifespan(app: FastAPI):
             },
         )
 
+    # The recorder copies the minute bars the tick loop already produces onto
+    # disk. Started with the app because a morning that was not recorded cannot
+    # be recovered later — there is no backfill for "what was it at 11:00".
+    from app.services.market_recorder import market_recorder
+    await market_recorder.start()
+
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())
@@ -232,6 +239,7 @@ app.include_router(routes_instruments.router)
 app.include_router(routes_watchlist.router)
 app.include_router(routes_chart.router)
 app.include_router(routes_scanner_engine.router)
+app.include_router(routes_movers.router)
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
 
