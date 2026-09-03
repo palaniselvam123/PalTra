@@ -77,9 +77,22 @@ def ranked_movers(
 
 
 def split_gainers_losers(movers: list[Mover], top: int = 15) -> dict:
-    gainers = [m for m in movers if m.pct_from_open > 0][:top]
-    losers = [m for m in movers if m.pct_from_open < 0][-top:][::-1]
-    return {"gainers": gainers, "losers": losers}
+    """The best and worst `top`, with the totals they were drawn from.
+
+    The totals matter: asking for the top 50 and receiving 12 could mean a quiet
+    day or a universe of only 26 tracked names, and those call for different
+    responses. Returning both lets the caller say which it is instead of
+    silently showing a short list.
+    """
+    up = [m for m in movers if m.pct_from_open > 0]
+    down = [m for m in movers if m.pct_from_open < 0]
+    return {
+        "gainers": up[:top],
+        "losers": down[-top:][::-1],      # sorted descending, so the tail is the worst
+        "gainers_total": len(up),
+        "losers_total": len(down),
+        "unchanged_total": len(movers) - len(up) - len(down),
+    }
 
 
 def fast_movers(

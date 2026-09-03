@@ -435,6 +435,10 @@ export type MoversResponse = {
   source: string;
   session: string;
   symbols_tracked: number;
+  requested_top: number;
+  gainers_total: number;
+  losers_total: number;
+  unchanged_total: number;
   origin: string;
   resolution_min: number | null;
   baseline_is_session_open: boolean;

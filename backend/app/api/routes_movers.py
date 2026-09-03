@@ -93,7 +93,7 @@ async def recorder_flush():
 async def movers(
     day: str | None = Query(None, description="YYYY-MM-DD; defaults to today IST"),
     at: str | None = Query(None, description="HH:MM IST; ranks as it stood at that moment"),
-    top: int = Query(15, ge=1, le=100),
+    top: int = Query(15, ge=1, le=200),
     source: str | None = Query(None, description="live | simulated; defaults to the active feed"),
 ):
     d = _resolve_day(day)
@@ -110,6 +110,10 @@ async def movers(
         "session": session_state(),
         "symbols_tracked": len(all_movers),
         "baseline_is_session_open": all(m.baseline_is_session_open for m in all_movers) if all_movers else True,
+        "requested_top": top,
+        "gainers_total": split["gainers_total"],
+        "losers_total": split["losers_total"],
+        "unchanged_total": split["unchanged_total"],
         "gainers": [_mover_dict(m) for m in split["gainers"]],
         "losers": [_mover_dict(m) for m in split["losers"]],
         "recorder": {"running": market_recorder.running, "last_run_at": market_recorder.status()["last_run_at"]},
@@ -119,7 +123,7 @@ async def movers(
 @router.get("/morning")
 async def morning(
     day: str | None = Query(None),
-    top: int = Query(15, ge=1, le=100),
+    top: int = Query(15, ge=1, le=200),
     source: str | None = Query(None),
 ):
     """The ranking as it stood at the end of the morning window."""
@@ -135,6 +139,10 @@ async def morning(
         "origin": origin,
         "resolution_min": all_movers[0].resolution_min if all_movers else None,
         "symbols_tracked": len(all_movers),
+        "requested_top": top,
+        "gainers_total": split["gainers_total"],
+        "losers_total": split["losers_total"],
+        "unchanged_total": split["unchanged_total"],
         "gainers": [_mover_dict(m) for m in split["gainers"]],
         "losers": [_mover_dict(m) for m in split["losers"]],
     }

@@ -47,6 +47,7 @@ export default function MoversPage() {
   // Peak scans the whole session for each symbol's fastest window. "Right now"
   // is the useful question live; reviewing a past morning needs the other one.
   const [peak, setPeak] = useState(false);
+  const [top, setTop] = useState(15);
 
   // Point-in-time lookup
   const [lookupSymbol, setLookupSymbol] = useState("RELIANCE");
@@ -58,7 +59,7 @@ export default function MoversPage() {
   const refresh = useCallback(() => {
     api.moversRecorder().then(setRecorder).catch(() => {});
     api
-      .movers({ top: 15, at: asOf || undefined, day: day || undefined })
+      .movers({ top, at: asOf || undefined, day: day || undefined })
       .then((m) => {
         setMovers(m);
         setError(null);
@@ -69,7 +70,7 @@ export default function MoversPage() {
       .then(setFast)
       .catch(() => {});
     api.moversDays().then((d: any) => setAvailableDays(d.available)).catch(() => {});
-  }, [asOf, day, peak]);
+  }, [asOf, day, peak, top]);
 
   useEffect(() => {
     refresh();
@@ -180,6 +181,23 @@ export default function MoversPage() {
           <button onClick={widen} disabled={busy} className={btn}>
             Track full universe
           </button>
+          <div className="flex items-center gap-1 text-sm">
+            <span className="text-slate-400">Show top</span>
+            {[15, 25, 50].map((n) => (
+              <button
+                key={n}
+                onClick={() => setTop(n)}
+                className={clsx(
+                  "rounded-md border px-2 py-1 text-xs",
+                  top === n
+                    ? "border-bot bg-bot/15 text-bot"
+                    : "border-slate-700 bg-slate-800/60 text-slate-300 hover:bg-slate-700/60",
+                )}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
           <div className="ml-auto flex items-center gap-2 text-sm">
             <CalendarDays size={14} className="text-slate-500" />
             <label className="text-slate-400">Day</label>
@@ -306,15 +324,21 @@ export default function MoversPage() {
         {/* ---- gainers / losers ---- */}
         <div className="grid gap-4 lg:grid-cols-2">
           <MoverTable
-            title="Going up"
+            title={`Top ${top} gainers`}
             icon={<ArrowUpRight size={15} className="text-profit" />}
             rows={movers?.gainers ?? []}
+            total={movers?.gainers_total ?? 0}
+            requested={top}
+            tracked={movers?.symbols_tracked ?? 0}
             emptyText="No stock is above its open yet."
           />
           <MoverTable
-            title="Going down"
+            title={`Top ${top} losers`}
             icon={<ArrowDownRight size={15} className="text-loss" />}
             rows={movers?.losers ?? []}
+            total={movers?.losers_total ?? 0}
+            requested={top}
+            tracked={movers?.symbols_tracked ?? 0}
             emptyText="No stock is below its open yet."
           />
         </div>
@@ -526,18 +550,37 @@ function MoverTable({
   title,
   icon,
   rows,
+  total,
+  requested,
+  tracked,
   emptyText,
 }: {
   title: string;
   icon: React.ReactNode;
   rows: MoverRow[];
+  total: number;
+  requested: number;
+  tracked: number;
   emptyText: string;
 }) {
+  // A short list can mean a quiet day or a small universe. Those call for
+  // different responses, so say which it is rather than just showing fewer rows.
+  const short = rows.length < requested;
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
         {icon} {title}
+        <span className="font-normal text-slate-500">
+          showing {rows.length} of {total}
+        </span>
       </h2>
+      {short && rows.length > 0 && (
+        <p className="mb-2 text-xs text-slate-500">
+          {total < requested && tracked < requested * 2
+            ? `Only ${tracked} symbols have prices for this day — use "Track full universe" for a wider list.`
+            : `Only ${total} moved this way today.`}
+        </p>
+      )}
       {rows.length === 0 ? (
         <Empty>{emptyText}</Empty>
       ) : (
@@ -545,6 +588,7 @@ function MoverTable({
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
+                <Th>#</Th>
                 <Th>Symbol</Th>
                 <Th right>From open</Th>
                 <Th right>Price</Th>
@@ -553,8 +597,9 @@ function MoverTable({
               </tr>
             </thead>
             <tbody>
-              {rows.map((m) => (
+              {rows.map((m, i) => (
                 <tr key={m.symbol} className="border-t border-slate-800/70">
+                  <Td className="tabular-nums text-slate-500">{i + 1}</Td>
                   <Td className="font-medium">{m.symbol}</Td>
                   <Td right>
                     <Pct value={m.pct_from_open} />
