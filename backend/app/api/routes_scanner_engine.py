@@ -23,14 +23,14 @@ router = APIRouter(prefix="/api/scan", tags=["scanner-engine"])
 
 VALID_MA = {"EMA", "SMA"}
 VALID_SIGNALS = {"GOLDEN_CROSS", "DEATH_CROSS", "BOTH"}
-VALID_UNIVERSE = {"WATCHLIST", "CORE", "CUSTOM"}
+VALID_UNIVERSE = {"WATCHLIST", "CORE", "CUSTOM", "GAINERS"}
 
 
 class ConfigRequest(BaseModel):
     timeframe: str | None = None
-    fast_period: int | None = Field(None, ge=2, le=400)
+    fast_period: int | None = Field(None, ge=5, le=400)
     fast_type: str | None = None
-    slow_period: int | None = Field(None, ge=3, le=400)
+    slow_period: int | None = Field(None, ge=8, le=400)
     slow_type: str | None = None
     signal_type: str | None = None
     trend_filter: bool | None = None
@@ -42,11 +42,14 @@ class ConfigRequest(BaseModel):
     pattern_lookback: int | None = Field(None, ge=1, le=10)
     adx_filter: bool | None = None
     adx_threshold: float | None = Field(None, ge=5, le=60)
+    rsi_filter: bool | None = None
+    rsi_overbought: float | None = Field(None, ge=50, le=90)
     min_price: float | None = Field(None, ge=0, le=1_000_000)
     max_price: float | None = Field(None, ge=0, le=1_000_000)
     cooldown_minutes: int | None = Field(None, ge=0, le=1440)
     once_per_session: bool | None = None
     universe: str | None = None
+    intrabar: bool | None = None
     custom_symbols: str | None = None
 
 
@@ -77,11 +80,14 @@ def _config_dict(cfg: ScannerConfig) -> dict:
         "pattern_lookback": cfg.pattern_lookback,
         "adx_filter": cfg.adx_filter,
         "adx_threshold": cfg.adx_threshold,
+        "rsi_filter": bool(getattr(cfg, "rsi_filter", True)),
+        "rsi_overbought": float(getattr(cfg, "rsi_overbought", 70.0) or 70.0),
         "min_price": cfg.min_price,
         "max_price": cfg.max_price,
         "cooldown_minutes": cfg.cooldown_minutes,
         "once_per_session": cfg.once_per_session,
         "universe": cfg.universe,
+        "intrabar": cfg.intrabar,
         "custom_symbols": cfg.custom_symbols,
     }
 
@@ -127,6 +133,12 @@ async def set_config(body: ConfigRequest):
         # meaningful crossover — the lines would track or invert permanently.
         if cfg.fast_period >= cfg.slow_period:
             raise HTTPException(400, "fast_period must be smaller than slow_period")
+        if cfg.slow_period - cfg.fast_period < 5:
+            raise HTTPException(
+                400,
+                "fast and slow MAs must be at least 5 periods apart — "
+                "EMA2/EMA3 is tick noise and the bot will not trade it",
+            )
         if cfg.max_price > 0 and cfg.min_price > cfg.max_price:
             raise HTTPException(400, "min_price cannot be greater than max_price")
         if cfg.universe == "CUSTOM" and not (cfg.custom_symbols or "").strip():

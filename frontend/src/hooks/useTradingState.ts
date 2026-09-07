@@ -17,12 +17,21 @@ export type Position = {
   target: number;
   order_id: string;
 };
+export type FeedPnl = {
+  pnl: number;
+  trades: number;
+  win_rate_pct: number;
+  profit_factor: number;
+};
+
 export type Summary = {
   total_pnl: number;
   trades_closed: number;
   win_rate_pct: number;
   profit_factor: number;
   max_drawdown: number;
+  /** Split by price series — simulated fills say nothing about real edge. */
+  by_feed?: Record<string, FeedPnl>;
 };
 
 const EMPTY_SUMMARY: Summary = { total_pnl: 0, trades_closed: 0, win_rate_pct: 0, profit_factor: 0, max_drawdown: 0 };
@@ -48,10 +57,16 @@ export function useTradingState() {
     api.getPositions().then(setPositions).catch(() => {});
   }, []);
 
+  // Every P&L figure on the dashboard is scoped to the feed currently
+  // selected. Blending a synthetic price series with the real market into one
+  // number is the most misleading thing this screen could do — a strategy can
+  // read as profitable purely because the simulator drifted upward.
+  const feedScope = feed?.source;
+
   const refreshSummary = useCallback(() => {
-    api.getSummary().then(setSummary).catch(() => {});
+    api.getSummary(feedScope).then(setSummary).catch(() => {});
     api.getHistory().then(setHistory).catch(() => {});
-    api.getAccount().then(setAccount).catch(() => {});
+    api.getAccount(feedScope).then(setAccount).catch(() => {});
   }, []);
 
   const refreshBot = useCallback(() => {

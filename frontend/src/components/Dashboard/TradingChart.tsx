@@ -107,7 +107,7 @@ export function TradingChart({ symbol, tick, stopLoss, target }: Props) {
   }, [target]);
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="rounded-card border border-border bg-surface p-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-medium text-slate-200">{symbol}</span>
         {tick && <span className="font-mono text-sm text-bot">{tick.ltp.toFixed(2)}</span>}

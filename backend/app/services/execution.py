@@ -45,6 +45,7 @@ async def place_paper_entry(
     target: float,
     source: str = "MANUAL",
     reason: str = "",
+    quantity_override: int | None = None,
 ) -> EntryResult:
     if state.kill_switch_active:
         raise EntryRejected("Kill switch is active. No new orders until reset.", 423)
@@ -108,6 +109,7 @@ async def place_paper_entry(
         # there isn't one, so it would just make the sandbox untestable after
         # 3pm. Live data always enforces it.
         enforce_session_cutoff=market_data.source is DataSource.LIVE,
+        fixed_quantity=quantity_override,
     )
     if decision.result.value == "rejected":
         await broadcaster.publish("log", {"level": "ERROR", "message": f"[{source}] Order rejected: {decision.reason}"})

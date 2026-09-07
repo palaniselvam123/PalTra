@@ -19,7 +19,7 @@ function Tile({
   hint?: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2.5" title={hint}>
+    <div className="rounded-card border border-border bg-surface px-3 py-2.5" title={hint}>
       <div className="text-[11px] text-slate-500 flex items-center gap-1">
         {label}
         {hint && <Info size={10} className="text-slate-600" />}

@@ -66,6 +66,7 @@ FILTER_SETS = [
     pytest.param({"volume_filter": True, "volume_multiplier": 1.2}, id="volume"),
     pytest.param({"pattern_filter": True, "pattern_lookback": 3}, id="pattern"),
     pytest.param({"trend_filter": True, "trend_period": 50}, id="trend"),
+    pytest.param({"rsi_filter": True, "rsi_overbought": 70}, id="rsi"),
     pytest.param(
         {
             "adx_filter": True,

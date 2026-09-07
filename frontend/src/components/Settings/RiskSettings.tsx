@@ -63,6 +63,9 @@ export function RiskSettings() {
   const [derived, setDerived] = useState<Record<string, number>>({});
   const [dayState, setDayState] = useState<any>(null);
   const [saved, setSaved] = useState(false);
+  const [loadAmount, setLoadAmount] = useState(50_000);
+  const [loadBusy, setLoadBusy] = useState(false);
+  const [loadedNote, setLoadedNote] = useState<string | null>(null);
 
   const load = () => {
     api.getRiskConfig().then((res: any) => {
@@ -92,6 +95,21 @@ export function RiskSettings() {
     load();
   };
 
+  const PRESETS = [10_000, 50_000, 100_000];
+
+  const credit = async (amount: number) => {
+    if (!amount || amount <= 0) return;
+    setLoadBusy(true);
+    setLoadedNote(null);
+    try {
+      const res = await api.loadVirtualMoney(amount);
+      setLoadedNote(`Loaded ₹${amount.toLocaleString("en-IN")} — capital is now ₹${res.account_capital.toLocaleString("en-IN")}`);
+      load();
+    } finally {
+      setLoadBusy(false);
+    }
+  };
+
   const capital = config.account_capital ?? 0;
   const preview = (key: string, valueKey?: string, mode: "pct" | "multiple" = "pct") => {
     if (!valueKey) return null;
@@ -105,11 +123,12 @@ export function RiskSettings() {
   const lockTone = dayState?.lock_kind === "PROFIT_TARGET" ? "profit" : "loss";
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-5 space-y-4">
+    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
       <h2 className="text-sm font-medium text-slate-200">Risk Management Engine</h2>
       <p className="text-xs text-slate-500">
         Enforced server-side before every order — the bot and the manual form both go through it, and neither can
-        bypass it. The 15:30 IST auto square-off (the NSE close) is fixed and applies on live market data.
+        bypass it. Saved values stay on disk and survive a restart; they do not snap back to ₹1,00,000 / 2% / 5
+        trades. The 15:30 IST auto square-off (the NSE close) is fixed and applies on live market data.
       </p>
 
       <div className="grid grid-cols-2 gap-3">
@@ -145,7 +164,45 @@ export function RiskSettings() {
         >
           Save Risk Config
         </button>
-        {saved && <span className="text-xs text-profit">Saved</span>}
+        {saved && <span className="text-xs text-profit">Saved — will still be here after a restart</span>}
+      </div>
+
+      <div className="border-t border-border pt-3 space-y-2">
+        <div className="text-xs font-medium text-slate-300">Load virtual money</div>
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          Credits extra paper capital. Daily loss %, max trades and the other knobs stay as you saved them —
+          this does not reset the page to defaults.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {PRESETS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              disabled={loadBusy}
+              onClick={() => credit(n)}
+              className="px-2.5 py-1 rounded-md border border-border text-[11px] text-slate-300 hover:bg-white/5 disabled:opacity-50"
+            >
+              +₹{n.toLocaleString("en-IN")}
+            </button>
+          ))}
+          <input
+            type="number"
+            min={1}
+            step={1000}
+            value={loadAmount}
+            onChange={(e) => setLoadAmount(parseFloat(e.target.value))}
+            className="w-28 bg-base border border-border rounded-md px-2 py-1 text-xs text-slate-200 font-mono"
+          />
+          <button
+            type="button"
+            disabled={loadBusy || !loadAmount}
+            onClick={() => credit(loadAmount)}
+            className="px-3 py-1.5 rounded-md bg-profit/20 text-profit text-xs font-medium hover:bg-profit/30 transition disabled:opacity-50"
+          >
+            {loadBusy ? "Loading…" : "Load virtual money"}
+          </button>
+        </div>
+        {loadedNote && <div className="text-xs text-profit">{loadedNote}</div>}
       </div>
 
       {dayState && (

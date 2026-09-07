@@ -154,7 +154,7 @@ export default function TradePage() {
         </div>
 
         {/* Wallet */}
-        <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="rounded-card border border-border bg-surface p-4">
           <div className="flex items-center gap-2 mb-3">
             <Wallet size={14} className="text-bot" />
             <span className="text-sm font-medium text-slate-200">Desk Wallet</span>
@@ -188,7 +188,7 @@ export default function TradePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
           {/* Watchlist */}
-          <div className="lg:col-span-2 rounded-lg border border-border bg-surface overflow-hidden">
+          <div className="lg:col-span-2 rounded-card border border-border bg-surface overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2 flex-wrap">
               <div>
                 <span className="text-sm font-medium text-slate-200">
@@ -314,7 +314,7 @@ export default function TradePage() {
                 onFilled={refresh}
               />
             ) : (
-              <div className="rounded-lg border border-border bg-surface p-6 text-center text-xs text-slate-500">
+              <div className="rounded-card border border-border bg-surface p-6 text-center text-xs text-slate-500">
                 Pick a symbol from the watchlist to open an order ticket.
               </div>
             )}
@@ -322,7 +322,7 @@ export default function TradePage() {
         </div>
 
         {/* Positions */}
-        <div className="rounded-lg border border-border bg-surface overflow-hidden">
+        <div className="rounded-card border border-border bg-surface overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
             <span className="text-sm font-medium text-slate-200">
               Desk Positions <span className="text-xs text-slate-500">({positions.length})</span>
@@ -349,7 +349,7 @@ export default function TradePage() {
                   <th className="px-3 py-2 font-medium text-right">Qty</th>
                   <th className="px-3 py-2 font-medium text-right">Entry</th>
                   <th className="px-3 py-2 font-medium text-right">LTP</th>
-                  <th className="px-3 py-2 font-medium text-right">Value</th>
+                  <th className="px-3 py-2 font-medium text-right">Amount</th>
                   <th className="px-3 py-2 font-medium text-right">SL / Target</th>
                   <th className="px-3 py-2 font-medium text-right">P&amp;L</th>
                   <th className="px-3 py-2" />
@@ -397,7 +397,7 @@ export default function TradePage() {
         </div>
 
         {/* Closed P&L */}
-        <div className="rounded-lg border border-border bg-surface overflow-hidden">
+        <div className="rounded-card border border-border bg-surface overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
             <span className="text-sm font-medium text-slate-200">
               Desk Trade History <span className="text-xs text-slate-500">({history.filter((t) => t.status !== "CANCELLED").length} closed)</span>
@@ -418,14 +418,17 @@ export default function TradePage() {
                   <th className="px-3 py-2 font-medium">Side</th>
                   <th className="px-3 py-2 font-medium text-right">Qty</th>
                   <th className="px-3 py-2 font-medium text-right">Entry</th>
+                  <th className="px-3 py-2 font-medium text-right">Amount</th>
                   <th className="px-3 py-2 font-medium text-right">Exit</th>
+                  <th className="px-3 py-2 font-medium text-right">SL</th>
+                  <th className="px-3 py-2 font-medium text-right">Target</th>
                   <th className="px-3 py-2 font-medium text-right">P&amp;L</th>
                 </tr>
               </thead>
               <tbody>
                 {history.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-slate-500">
+                    <td colSpan={10} className="px-4 py-8 text-center text-xs text-slate-500">
                       No closed trades on the desk yet.
                     </td>
                   </tr>
@@ -454,8 +457,17 @@ export default function TradePage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-right">{t.quantity}</td>
                       <td className="px-3 py-2 font-mono text-xs text-right">{num(t.entry_price)}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-right text-slate-400">
+                        {money(t.amount ?? t.entry_price * t.quantity)}
+                      </td>
                       <td className="px-3 py-2 font-mono text-xs text-right">
                         {voided ? "—" : t.exit_price !== null ? num(t.exit_price) : "—"}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-right text-loss">
+                        {t.stop_loss ? num(t.stop_loss) : "—"}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-right text-profit">
+                        {t.target ? num(t.target) : "—"}
                       </td>
                       <td className={clsx("px-3 py-2 font-mono text-right", voided ? "text-slate-500" : pnlClass(t.pnl))}>
                         {voided ? "₹0.00" : money(t.pnl, true)}
@@ -486,7 +498,7 @@ function PnlTile({
   big?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+    <div className="rounded-card border border-border bg-surface px-3 py-2.5">
       <div className="text-[11px] text-slate-500">{label}</div>
       <div className={clsx("font-mono mt-0.5", big ? "text-xl" : "text-base", tone ?? "text-slate-100")}>{value}</div>
       {sub && <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>}

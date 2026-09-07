@@ -452,12 +452,17 @@ export function AdvancedChart({
   const bars = payload?.candles.length ?? 0;
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
-      <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-b border-border">
+    <div className="overflow-hidden rounded-card border border-border bg-surface">
+      {/* Toolbar: four labelled groups separated by rules, on a single
+          non-wrapping scroll line. Previously every control sat in one
+          flex-wrap row at three different font sizes, so timeframes, overlays
+          and the oscillator picker ran together into an undifferentiated
+          strip that reflowed unpredictably as the window narrowed. */}
+      <div className="flex items-center gap-2.5 overflow-x-auto border-b border-border px-3 py-2">
         <select
           value={symbol}
           onChange={(e) => onSymbolChange(e.target.value)}
-          className="bg-base border border-border rounded-md px-2 py-1 text-sm text-slate-100 font-medium focus:outline-none focus:border-bot/60"
+          className="shrink-0 rounded-md border border-border bg-base px-2 py-1 text-body font-semibold text-slate-100 focus:border-bot/60 focus:outline-none"
         >
           {symbols.map((s) => (
             <option key={s} value={s}>
@@ -466,14 +471,16 @@ export function AdvancedChart({
           ))}
         </select>
 
-        <div className="flex rounded-md border border-border overflow-hidden text-[11px]">
+        <span className="h-5 w-px shrink-0 bg-border" />
+
+        <div className="flex shrink-0 overflow-hidden rounded-md border border-border">
           {INTERVAL_LIST.map((iv) => (
             <button
               key={iv}
               onClick={() => setIntervalValue(iv)}
               className={clsx(
-                "px-2 py-1 transition",
-                interval === iv ? "bg-bot/20 text-bot" : "text-slate-400 hover:text-slate-200"
+                "px-2 py-1 text-caption transition-colors",
+                interval === iv ? "bg-bot/15 font-medium text-bot" : "text-slate-400 hover:text-slate-200"
               )}
             >
               {iv}
@@ -481,51 +488,68 @@ export function AdvancedChart({
           ))}
         </div>
 
-        <div className="flex items-center gap-1 flex-wrap">
-          {OVERLAYS.map((o) => (
+        <span className="h-5 w-px shrink-0 bg-border" />
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="text-caption uppercase text-slate-500">Overlay</span>
+          <div className="flex items-center gap-1">
+            {OVERLAYS.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => toggle(o.id)}
+                className={clsx(
+                  "rounded border px-1.5 py-0.5 text-caption transition-colors",
+                  active.includes(o.id)
+                    ? "border-transparent font-medium text-slate-900"
+                    : "border-border text-slate-500 hover:text-slate-300"
+                )}
+                style={active.includes(o.id) ? { backgroundColor: o.color } : undefined}
+              >
+                {o.label}
+              </button>
+            ))}
             <button
-              key={o.id}
-              onClick={() => toggle(o.id)}
+              onClick={() => setShowPatterns((v) => !v)}
+              title="Mark candlestick patterns (hammer, engulfing, doji…) detected on closed bars"
               className={clsx(
-                "px-1.5 py-0.5 rounded text-[10px] border transition",
-                active.includes(o.id)
-                  ? "border-transparent text-slate-900 font-medium"
+                "rounded border px-1.5 py-0.5 text-caption transition-colors",
+                showPatterns
+                  ? "border-transparent bg-violet-400 font-medium text-slate-900"
                   : "border-border text-slate-500 hover:text-slate-300"
               )}
-              style={active.includes(o.id) ? { backgroundColor: o.color } : undefined}
             >
-              {o.label}
+              Patterns
             </button>
-          ))}
+          </div>
         </div>
 
-        <button
-          onClick={() => setShowPatterns((v) => !v)}
-          title="Mark candlestick patterns (hammer, engulfing, doji…) detected on closed bars"
-          className={clsx(
-            "px-1.5 py-0.5 rounded text-[10px] border transition",
-            showPatterns ? "border-transparent bg-violet-400 text-slate-900 font-medium" : "border-border text-slate-500 hover:text-slate-300"
-          )}
-        >
-          Patterns
-        </button>
+        <span className="h-5 w-px shrink-0 bg-border" />
 
-        <div className="flex rounded-md border border-border overflow-hidden text-[10px] ml-auto">
-          <button
-            onClick={() => setOsc(null)}
-            className={clsx("px-2 py-1", osc === null ? "bg-bot/20 text-bot" : "text-slate-500 hover:text-slate-300")}
-          >
-            none
-          </button>
-          {OSCILLATORS.map((o) => (
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
+          <span className="text-caption uppercase text-slate-500">Lower</span>
+          <div className="flex overflow-hidden rounded-md border border-border">
             <button
-              key={o.id}
-              onClick={() => setOsc(o.id)}
-              className={clsx("px-2 py-1", osc === o.id ? "bg-bot/20 text-bot" : "text-slate-500 hover:text-slate-300")}
+              onClick={() => setOsc(null)}
+              className={clsx(
+                "px-2 py-1 text-caption transition-colors",
+                osc === null ? "bg-bot/15 font-medium text-bot" : "text-slate-500 hover:text-slate-300"
+              )}
             >
-              {o.label}
+              None
             </button>
-          ))}
+            {OSCILLATORS.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => setOsc(o.id)}
+                className={clsx(
+                  "px-2 py-1 text-caption transition-colors",
+                  osc === o.id ? "bg-bot/15 font-medium text-bot" : "text-slate-500 hover:text-slate-300"
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

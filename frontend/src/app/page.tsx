@@ -6,6 +6,7 @@ import { MetricCards } from "@/components/Dashboard/MetricCards";
 import { PositionsTable } from "@/components/Dashboard/PositionsTable";
 import { AdvancedChart } from "@/components/Chart/AdvancedChart";
 import { LiveConsole } from "@/components/Dashboard/LiveConsole";
+import { SymbolStrip } from "@/components/Dashboard/SymbolStrip";
 import { PlaceOrderForm } from "@/components/Dashboard/PlaceOrderForm";
 import { BotControl } from "@/components/Dashboard/BotControl";
 import { AccountBalance } from "@/components/Dashboard/AccountBalance";
@@ -54,48 +55,58 @@ export default function DashboardPage() {
         botRunning={bot?.enabled ?? false}
       />
 
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+      {/* A trading desk is a main workspace plus a rail, not a 50/50 split.
+          Previously the chart shared one row equally with the event log, so
+          the most important element on the page got half the width and an
+          almost-always-empty console got the other half. The chart now leads
+          a two-thirds workspace; status and controls stack in the rail. */}
+      <main className="mx-auto max-w-[1720px] space-y-4 px-5 py-5">
         <MetricCards
           totalPnl={summary.total_pnl}
           winRatePct={summary.win_rate_pct}
           profitFactor={summary.profit_factor}
           maxDrawdown={summary.max_drawdown}
           capitalDeployed={capitalDeployed}
+          history={history}
+          accountCapital={account?.starting_capital}
+          byFeed={summary.by_feed}
         />
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {symbols.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSelectedSymbol(s)}
-              className={`px-2.5 py-1 rounded-md text-xs font-mono border ${
-                s === activeSymbol ? "border-bot text-bot bg-bot/10" : "border-border text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              {s} {ticks[s]?.ltp.toFixed(2)}
-            </button>
-          ))}
-        </div>
+        <SymbolStrip symbols={symbols} ticks={ticks} active={activeSymbol} onSelect={setSelectedSymbol} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {activeSymbol && (
-            <AdvancedChart
-              symbol={activeSymbol}
-              symbols={Object.keys(ticks).sort()}
-              onSymbolChange={setSelectedSymbol}
-              tick={ticks[activeSymbol]}
-              stopLoss={activePosition?.stop_loss}
-              target={activePosition?.target}
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
+          {/* --- workspace ------------------------------------------------ */}
+          <div className="space-y-4 xl:col-span-2">
+            {activeSymbol && (
+              <AdvancedChart
+                symbol={activeSymbol}
+                symbols={Object.keys(ticks).sort()}
+                onSymbolChange={setSelectedSymbol}
+                tick={ticks[activeSymbol]}
+                stopLoss={activePosition?.stop_loss}
+                target={activePosition?.target}
+                height={560}
+              />
+            )}
+
+            <PositionsTable
+              positions={positions}
+              ticks={ticks}
+              onClose={async (symbol) => {
+                await api.closePosition(symbol);
+                refreshPositions();
+                refreshSummary();
+              }}
             />
-          )}
-          <LiveConsole logs={logs} />
-        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          <div className="lg:col-span-1 space-y-4">
-            <AccountBalance account={account} />
+            <TradeHistory trades={history} />
+          </div>
+
+          {/* --- rail: status, then controls ------------------------------ */}
+          <div className="space-y-4">
+            <AccountBalance account={account} onCapitalChanged={refreshSummary} />
             <BotControl bot={bot} onChanged={setBot} />
-            <AiExpertPanel symbols={symbols} activeSymbol={activeSymbol} />
+            <LiveConsole logs={logs} />
             <PlaceOrderForm
               symbols={symbols}
               ticks={ticks}
@@ -106,18 +117,7 @@ export default function DashboardPage() {
                 refreshSummary();
               }}
             />
-          </div>
-          <div className="lg:col-span-2 space-y-4">
-            <PositionsTable
-              positions={positions}
-              ticks={ticks}
-              onClose={async (symbol) => {
-                await api.closePosition(symbol);
-                refreshPositions();
-                refreshSummary();
-              }}
-            />
-            <TradeHistory trades={history} />
+            <AiExpertPanel symbols={symbols} activeSymbol={activeSymbol} />
           </div>
         </div>
       </main>

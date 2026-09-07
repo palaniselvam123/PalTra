@@ -47,8 +47,31 @@ async def trigger_kill_switch(reason: str, *, square_off: bool = True) -> None:
 
 
 async def reset_kill_switch() -> None:
+    """Operator reset. Clears BOTH halts.
+
+    A loss-limit breach sets two things: the kill switch and the risk
+    manager's day lock. Clearing only the first left the platform still
+    locked, so the button that says "reset to resume" did not resume
+    anything — the bot went on refusing to start with the old lock reason.
+    The reset is an explicit operator override, so it says so in the log
+    rather than quietly discarding a safety stop.
+    """
     from app.services.strategy_runner import strategy_runner
 
+    was_locked = state.risk_manager.state.locked
+    lock_reason = state.risk_manager.state.lock_reason
+
     state.kill_switch_active = False
+    state.risk_manager.release_lock()
+
+    if was_locked:
+        await broadcaster.publish(
+            "log",
+            {
+                "level": "WARN",
+                "message": f"Day lock cleared by operator reset — was: {lock_reason}",
+            },
+        )
+
     await broadcaster.publish("kill_switch", {"active": False, "reason": ""})
     await strategy_runner.publish_status()

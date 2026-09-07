@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState } from "react";
 import clsx from "clsx";
 import { Play, Square, Bot, Loader2 } from "lucide-react";
@@ -35,7 +37,7 @@ export function BotControl({ bot, onChanged }: Props) {
 
   if (!bot) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4 text-xs text-slate-500">Loading bot status…</div>
+      <div className="rounded-card border border-border bg-surface p-4 text-xs text-slate-500">Loading bot status…</div>
     );
   }
 
@@ -54,7 +56,7 @@ export function BotControl({ bot, onChanged }: Props) {
   const qualifying = bot.opening_ranges.filter((r) => r.qualifies);
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+    <div className="rounded-card border border-border bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Bot size={15} className="text-bot" />
@@ -65,7 +67,16 @@ export function BotControl({ bot, onChanged }: Props) {
         </span>
       </div>
 
-      <p className="text-[11px] text-slate-500">{STATUS_HELP[bot.status]}</p>
+      <p className="text-[11px] text-slate-500">
+        {/* ARMED means something different per strategy — the ORB wording
+            ("range locked, watching for breakouts") is actively wrong for the
+            two strategies that never build a range. */}
+        {bot.status === "ARMED" && bot.config.strategy === "scanner"
+          ? "Armed. Trading BUY and SELL signals as the scanner fires them — no need to start it separately."
+          : bot.status === "ARMED" && bot.config.strategy === "gainers"
+            ? "Armed. Ranking the top 50 gainers, then buying only on an EMA 9/21 entry. A death cross sells the same stock."
+            : STATUS_HELP[bot.status]}
+      </p>
 
       {bot.status === "BUILDING_RANGE" && bot.range_ends_in_sec !== null && (
         <div className="text-xs text-bot font-mono">Range locks in {bot.range_ends_in_sec}s</div>
@@ -90,6 +101,26 @@ export function BotControl({ bot, onChanged }: Props) {
           </button>
         )}
 
+        {/* Strategy picker. Sits ahead of the timing toggle because it
+            changes what the timing means: ORB needs an opening range, the
+            gainers strategy only needs a ranking. */}
+        <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
+          {(["orb", "gainers", "scanner"] as const).map((st) => (
+            <button
+              key={st}
+              disabled={bot.enabled || busy}
+              onClick={() => act(() => api.setBotConfig({ strategy: st }))}
+              className={clsx(
+                "px-2.5 py-1.5 transition",
+                bot.config.strategy === st ? "bg-bot/20 text-bot" : "text-slate-400 hover:text-slate-200",
+                bot.enabled && "cursor-not-allowed opacity-50"
+              )}
+            >
+              {st === "orb" ? "ORB" : st === "gainers" ? "TOP GAINERS" : "SCANNER"}
+            </button>
+          ))}
+        </div>
+
         <div className="flex rounded-md border border-border overflow-hidden text-[11px]">
           {(["demo", "market"] as const).map((m) => (
             <button
@@ -108,7 +139,93 @@ export function BotControl({ bot, onChanged }: Props) {
         </div>
       </div>
 
+      {(bot.config.strategy === "scanner" || bot.config.strategy === "gainers") && (
+        <div
+          className={clsx(
+            "rounded-md border px-3 py-2 text-[11px] leading-relaxed",
+            bot.scanner_running
+              ? "border-border bg-surface2 text-slate-300"
+              : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+          )}
+        >
+          {bot.scanner_running ? (
+            <>
+              <strong className="font-semibold">Scanner is running with the bot.</strong> Top 50
+              gainers (or whichever universe is saved on the Scanner page) are watched for EMA 9/21
+              signals. A BUY opens a position; a SELL closes the same stock. Stop-loss and target
+              still apply in between.
+            </>
+          ) : (
+            <>
+              <strong className="font-semibold">Scanner will start when you start the bot.</strong> You
+              do not have to visit the{" "}
+              <Link href="/scanner" className="underline">
+                Scanner page
+              </Link>{" "}
+              first.
+            </>
+          )}
+        </div>
+      )}
+
+      {bot.config.strategy === "gainers" && (bot.gainers_candidates?.length ?? 0) > 0 && (
+        <div className="rounded-md border border-border bg-surface2 px-3 py-2">
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-caption font-medium text-slate-300">
+              Candidates — top {bot.config.gainers_top_n} by move from open
+            </span>
+            <span className="text-caption text-slate-400">via {bot.gainers_source}</span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {bot.gainers_candidates!.slice(0, 10).map((c) => (
+              <span
+                key={c.symbol}
+                className="rounded bg-profit/10 px-1.5 py-0.5 font-mono text-[11px] text-profit"
+              >
+                {c.symbol} +{c.pct_from_open}%
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {bot.config.strategy === "gainers" && (
+        <div className="rounded-md border border-border bg-surface2 px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+          Ranking is the watchlist, not the buy. A top gainer is bought only after the same EMA 9/21
+          entry the scanner uses, then sold on the matching exit (or stop/target / 15:30).
+        </div>
+      )}
+
+      {(bot.config.strategy === "scanner" || bot.config.strategy === "gainers") && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-400">
+          <strong className="font-semibold">Entries are gated the same way on every universe.</strong>{" "}
+          Closed candles only, EMA 9/21 minimum, ADX + volume + RSI, 5-minute hold before a SELL can
+          close, even-split size with a 1% risk cap, and no new buys after{" "}
+          {bot.config.last_entry_buffer_min
+            ? `${bot.config.last_entry_buffer_min} min before square-off`
+            : "the cut-off"}
+          . Starting the bot rewrites a noise config (EMA2/EMA3, forming-bar) to those defaults.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono border-t border-border pt-2">
+        {bot.config.strategy === "scanner" || bot.config.strategy === "gainers" ? (
+          <>
+            <span>
+              {bot.config.strategy === "gainers"
+                ? `Universe: top ${bot.config.gainers_top_n} + TA`
+                : "Universe: scanner (all saved lists)"}
+            </span>
+            <span>Max positions: {bot.config.gainers_max_positions}</span>
+            <span className="text-loss">Stop: −{bot.config.gainers_stop_loss_pct}%</span>
+            <span className="text-profit">Target: +{bot.config.gainers_target_pct}%</span>
+            <span className="col-span-2">
+              Entry: <span className="text-profit">closed 5m EMA 9/21</span>
+              {bot.scanner_running ? " · scanner live" : ""}
+            </span>
+          </>
+        ) : (
+        <>
         <span>Candle: {bot.config.candle_interval_sec}s</span>
         <span>Range: {bot.config.range_duration_sec}s</span>
         <span>RVOL ≥ {bot.config.rvol_threshold}</span>
@@ -126,16 +243,18 @@ export function BotControl({ bot, onChanged }: Props) {
         >
           ADX trend filter: {bot.config.adx_filter_enabled ? `on, ≥ ${bot.config.adx_threshold}` : "off"}
         </button>
+        </>
+        )}
       </div>
 
-      {bot.config.session_mode === "demo" && (
+      {bot.config.session_mode === "demo" && bot.config.strategy === "orb" && (
         <p className="text-[11px] text-amber-400/80">
           Demo timing compresses the opening range so the engine can be tested outside market hours. Use MARKET TIMING
           (5-min candles, 09:15–09:30 range) for anything real.
         </p>
       )}
 
-      {bot.config.session_mode === "market" && bot.enabled && bot.range_window && (
+      {bot.config.strategy === "orb" && bot.config.session_mode === "market" && bot.enabled && bot.range_window && (
         <p className={clsx("text-[11px]", bot.late_start ? "text-amber-400/80" : "text-slate-500")}>
           {bot.late_start ? (
             <>

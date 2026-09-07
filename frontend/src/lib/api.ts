@@ -8,6 +8,17 @@ export type BotConfig = {
   adx_filter_enabled: boolean;
   adx_period: number;
   adx_threshold: number;
+  strategy: "orb" | "gainers" | "scanner";
+  scanner_close_on_sell: boolean;
+  last_entry_buffer_min: number;
+  scanner_min_hold_sec: number;
+  gainers_top_n: number;
+  gainers_allocation_pct: number;
+  gainers_stop_loss_pct: number;
+  gainers_target_pct: number;
+  gainers_min_gain_pct: number;
+  gainers_max_positions: number;
+  gainers_scan_interval_sec: number;
 };
 
 export type OpeningRangeRow = {
@@ -30,6 +41,10 @@ export type BotStatus = {
   range_ends_in_sec: number | null;
   opening_ranges: OpeningRangeRow[];
   symbols_traded: string[];
+  gainers_candidates?: { symbol: string; pct_from_open: number }[];
+  gainers_source?: string | null;
+  scanner_running?: boolean;
+  scanner_intrabar?: boolean;
   late_start: boolean;
   range_window: string | null;
 };
@@ -59,6 +74,12 @@ export type AccountSummary = {
   exposure_ratio: number;
   open_positions: number;
   return_pct: number;
+  buying_power_total?: number;
+  buying_power_used?: number;
+  buying_power_available?: number;
+  leverage?: number;
+  feed_scope?: string;
+  realised_by_feed?: Record<string, number>;
 };
 
 export type Transaction = {
@@ -283,11 +304,13 @@ export type ScanConfig = {
   pattern_lookback: number;
   adx_filter: boolean;
   adx_threshold: number;
+  rsi_filter: boolean;
+  rsi_overbought: number;
   min_price: number;
   max_price: number;
   cooldown_minutes: number;
   once_per_session: boolean;
-  universe: "WATCHLIST" | "CORE" | "CUSTOM";
+  universe: "WATCHLIST" | "CORE" | "CUSTOM" | "GAINERS";
   custom_symbols: string;
 };
 
@@ -560,6 +583,65 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+
+/** Citation back into an uploaded course document. */
+export type CourseSource = {
+  documentFilename: string;
+  page: number | null;
+  section: string | null;
+  snippet: string;
+};
+
+export type CourseAnalysis = {
+  setup: string;
+  bias: "bullish" | "bearish" | "neutral" | "unclear";
+  market_summary: string;
+  entry: {
+    guidance: string;
+    conditions_met: string[];
+    conditions_not_met: string[];
+    trigger_level: number | null;
+  };
+  exit: {
+    guidance: string;
+    stop_loss_level: number | null;
+    target_levels: number[];
+    trail_rule: string | null;
+  };
+  risk: { position_sizing_note: string; risk_reward: string | null; invalidation: string };
+  teaching_notes: string[];
+  cautions: string[];
+  confidence: "low" | "medium" | "high";
+  grounded: boolean;
+};
+
+/** What OUR pattern engine found — the RAG is told this, it does not re-detect. */
+export type EnginePattern = {
+  name: string;
+  label: string;
+  bias: string;
+  trend: string;
+  note: string;
+  close: number;
+};
+
+export type CourseExplanation = {
+  symbol: string;
+  analysis: CourseAnalysis;
+  sources: CourseSource[];
+  disclaimer: string;
+  engine_pattern: EnginePattern | null;
+  engine_description: string;
+};
+
+export type CourseStatus = {
+  configured: boolean;
+  reachable: boolean;
+  documents_ready: number;
+  model: string | null;
+  error: string | null;
+};
+
 export const api = {
   health: () => request<{ status: string; mode: string }>("/api/health"),
 
@@ -583,17 +665,24 @@ export const api = {
   getRiskConfig: () => request<any>("/api/orders/risk-config"),
   setRiskConfig: (body: any) =>
     request("/api/orders/risk-config", { method: "POST", body: JSON.stringify(body) }),
+  loadVirtualMoney: (amount: number) =>
+    request<{ ok: boolean; loaded: number; account_capital: number }>("/api/orders/capital/load", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
 
-  getSummary: () =>
+  getSummary: (feed?: string) =>
     request<{
       total_pnl: number;
       trades_closed: number;
       win_rate_pct: number;
       profit_factor: number;
       max_drawdown: number;
-    }>("/api/orders/summary"),
+      by_feed?: Record<string, { pnl: number; trades: number; win_rate_pct: number; profit_factor: number }>;
+    }>(`/api/orders/summary${queryString({ feed })}`),
   getHistory: () => request<any[]>("/api/orders/history"),
-  getAccount: () => request<AccountSummary>("/api/orders/account"),
+  getAccount: (feed?: string) =>
+    request<AccountSummary>(`/api/orders/account${queryString({ feed })}`),
 
   getBotStatus: () => request<BotStatus>("/api/bot/status"),
   startBot: () => request<BotStatus>("/api/bot/start", { method: "POST" }),
@@ -776,4 +865,17 @@ export const api = {
 
   getAiAnalyses: (symbol?: string, limit = 25) =>
     request<any[]>(`/api/ai/analyses${queryString({ symbol, limit: String(limit) })}`),
+
+  getCourseStatus: () => request<CourseStatus>("/api/course/status"),
+  explainWithCourse: (symbol: string, interval = "5m") =>
+    request<CourseExplanation>(`/api/course/explain${queryString({ symbol, interval })}`),
+  askCourse: (question: string, conversation_id?: string) =>
+    request<{ answer: string; sources: CourseSource[]; conversationId: string }>("/api/course/ask", {
+      method: "POST",
+      body: JSON.stringify({ question, conversation_id }),
+    }),
+  searchCourse: (q: string, top_k = 5) =>
+    request<{ results: { documentFilename: string; page: number | null; content: string }[] }>(
+      `/api/course/search${queryString({ q, top_k: String(top_k) })}`
+    ),
 };

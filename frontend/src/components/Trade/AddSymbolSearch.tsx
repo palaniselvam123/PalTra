@@ -80,7 +80,7 @@ export function AddSymbolSearch({ onAdded }: { onAdded: () => void }) {
       </div>
 
       {open && (results.length > 0 || error) && (
-        <div className="absolute z-20 mt-1 w-72 right-0 rounded-lg border border-border bg-surface shadow-xl overflow-hidden">
+        <div className="absolute z-20 mt-1 w-72 right-0 rounded-card border border-border bg-surface shadow-xl overflow-hidden">
           {error && <div className="px-3 py-2 text-[11px] text-loss border-b border-border">{error}</div>}
           <div className="max-h-72 overflow-y-auto">
             {results.map((r) => (

@@ -45,7 +45,16 @@ class ScannerStatus:
     last_scan_at: str | None = None
     last_error: str | None = None
     signals_today: int = 0
+    # What the bot did with the most recent signal, so the scanner page can
+    # show the outcome next to the signal that caused it.
+    last_action: str = ""
+    # SELL crossovers dropped because nothing was held in that symbol.
+    suppressed_sells: int = 0
     notes: list[str] = field(default_factory=list)
+
+
+# How many ranked gainers the GAINERS universe scans.
+GAINERS_UNIVERSE_SIZE = 50
 
 
 class ScannerWorker:
@@ -58,6 +67,7 @@ class ScannerWorker:
         self._backfill_attempted: dict[tuple[str, str], dt.datetime] = {}
         self._notes: dict[str, str] = {}
         self._timeframe: str = "5m"
+        self._intrabar: bool = False
 
     # ---- config ---------------------------------------------------------
 
@@ -70,6 +80,54 @@ class ScannerWorker:
                 await session.commit()
                 await session.refresh(cfg)
             return cfg
+
+    async def harden_for_live_trading(self) -> list[str]:
+        """If the scanner is set to a noise MA pair / forming-bar mode, rewrite
+        it to something an intraday bot can actually trade.
+
+        Alerts can use whatever the operator likes. The trading bot will not
+        follow EMA2/EMA3 on a forming bar — that combination bought and sold
+        the same name 40 seconds apart.
+        """
+        changes: list[str] = []
+        async with async_session() as session:
+            cfg = await session.get(ScannerConfig, 1)
+            if cfg is None:
+                return changes
+            if cfg.fast_period < 9:
+                changes.append(f"fast MA {cfg.fast_period} → 9")
+                cfg.fast_period = 9
+            if cfg.slow_period < 21 or cfg.slow_period <= cfg.fast_period:
+                changes.append(f"slow MA {cfg.slow_period} → 21")
+                cfg.slow_period = 21
+            if cfg.intrabar:
+                changes.append("intrabar off (closed candles only)")
+                cfg.intrabar = False
+            if not cfg.adx_filter:
+                changes.append("ADX filter on")
+                cfg.adx_filter = True
+            if not cfg.volume_filter:
+                changes.append("volume filter on")
+                cfg.volume_filter = True
+            if not getattr(cfg, "rsi_filter", False):
+                changes.append("RSI overbought filter on")
+                cfg.rsi_filter = True
+            if not cfg.trend_filter:
+                changes.append("trend filter on (close above EMA50)")
+                cfg.trend_filter = True
+            if (cfg.trend_period or 0) > 50:
+                changes.append(f"trend EMA {cfg.trend_period} → 50")
+                cfg.trend_period = 50
+            if cfg.universe not in ("CUSTOM", "CORE", "GAINERS"):
+                changes.append("universe → GAINERS (top 50)")
+                cfg.universe = "GAINERS"
+            if (cfg.cooldown_minutes or 0) < 30:
+                changes.append(f"cooldown {cfg.cooldown_minutes}m → 30m")
+                cfg.cooldown_minutes = 30
+            if changes:
+                await session.commit()
+                self._intrabar = bool(cfg.intrabar)
+        return changes
 
     def params_from(self, cfg: ScannerConfig) -> StrategyParams:
         return StrategyParams(
@@ -87,6 +145,8 @@ class ScannerWorker:
             pattern_lookback=cfg.pattern_lookback,
             adx_filter=cfg.adx_filter,
             adx_threshold=cfg.adx_threshold,
+            rsi_filter=bool(getattr(cfg, "rsi_filter", True)),
+            rsi_overbought=float(getattr(cfg, "rsi_overbought", 70.0) or 70.0),
         )
 
     def universe_for(self, cfg: ScannerConfig) -> list[str]:
@@ -94,6 +154,18 @@ class ScannerWorker:
             return list(NIFTY50_UNIVERSE)
         if cfg.universe == "CUSTOM":
             return [s.strip().upper() for s in (cfg.custom_symbols or "").split(",") if s.strip()]
+        if cfg.universe == "GAINERS":
+            # Only the strongest names of the session. Scanning the whole feed
+            # produced crossover alerts on stocks that were going nowhere; the
+            # ranking is the filter that makes a crossover worth acting on.
+            from app.services.strategy_runner import strategy_runner
+
+            ranked = strategy_runner.gainers_preview()[0]
+            symbols = [r["symbol"] for r in ranked[:GAINERS_UNIVERSE_SIZE]]
+            # Fall back to the streaming set rather than scanning nothing at
+            # all before the ranking has data (e.g. right after a restart).
+            return symbols or list(market_data.symbols)
+
         # WATCHLIST: everything currently streaming, which is the only set with
         # live prices — scanning a symbol with no feed would never fire.
         return list(market_data.symbols)
@@ -149,6 +221,7 @@ class ScannerWorker:
         symbols = self.universe_for(cfg)
         timeframe = cfg.timeframe
         self._timeframe = timeframe
+        self._intrabar = bool(cfg.intrabar)
         source = market_data.source.value
 
         self.status.universe_size = len(symbols)
@@ -175,6 +248,7 @@ class ScannerWorker:
             return fired
 
         priced_out = 0
+        suppressed_sells = 0
         for symbol in symbols:
             try:
                 # Price band first: it is a cheap lookup, and skipping here
@@ -194,21 +268,36 @@ class ScannerWorker:
 
                 await self._ensure_history(symbol, timeframe)
                 bars = candle_store.get(symbol, timeframe, source, limit=600)
-                # The final bar is still forming; judging it would let a signal
-                # appear and vanish within one candle.
-                closed = bars[:-1]
+                if cfg.intrabar:
+                    # Act on the forming bar. This is what makes the scanner
+                    # fire the moment a cross happens instead of at the next
+                    # bar close — at the cost that a signal can appear and then
+                    # vanish if price crosses back before the bar completes.
+                    closed = bars
+                else:
+                    closed = bars[:-1]
                 if len(closed) < params.warmup_bars():
                     continue
 
                 scanned += 1
                 latest_ts = closed[-1].ts
                 key = (symbol, timeframe)
-                if self._evaluated.get(key) == latest_ts:
-                    continue  # this bar has already been judged
-                self._evaluated[key] = latest_ts
+                # In intrabar mode the forming bar must be re-judged on every
+                # pass, so the "already seen this bar" guard is skipped.
+                if not cfg.intrabar:
+                    if self._evaluated.get(key) == latest_ts:
+                        continue  # this bar has already been judged
+                    self._evaluated[key] = latest_ts
 
                 signal = engine.evaluate(symbol, timeframe, closed)
                 if signal is not None:
+                    # A SELL is an exit signal. Raising one on a stock that was
+                    # never bought is noise: there is nothing to sell, and the
+                    # bot cannot act on it. Suppressed at source so it does not
+                    # reach the log, the alert channel, or the signal table.
+                    if signal.side == "SELL" and signal.symbol not in state.paper_engine.positions:
+                        suppressed_sells += 1
+                        continue
                     await self._handle_signal(signal, cfg, source)
                     fired.append(signal)
             except asyncio.CancelledError:
@@ -219,6 +308,7 @@ class ScannerWorker:
                 self._notes[symbol] = f"{type(exc).__name__}: {exc}"
 
         self.status.scanned_symbols = scanned
+        self.status.suppressed_sells = suppressed_sells
         self.status.last_scan_at = ist_now().isoformat()
         notes = sorted({v for v in self._notes.values()})[:4]
         if priced_out:
@@ -305,6 +395,32 @@ class ScannerWorker:
                 row.alert_status = "FAILED"
                 row.alert_error = result.error
 
+        # Route the signal to the bot. The scanner remains an observer: it
+        # hands the signal over and records what came back, but it never sizes
+        # or places anything itself — that stays behind place_paper_entry and
+        # the risk gate, same as every other entry path.
+        action = "not traded — bot is off"
+        try:
+            from app.services.strategy_runner import strategy_runner
+
+            action = await strategy_runner.on_scanner_signal(
+                symbol=signal.symbol,
+                side=signal.side,
+                price=signal.price,
+                reason=signal.reasons[0] if signal.reasons else f"{signal.side} crossover",
+                fast_period=cfg.fast_period,
+                slow_period=cfg.slow_period,
+                forming_bar=bool(cfg.intrabar),
+            )
+        except Exception as exc:  # noqa: BLE001 — a trade failure must not stop scanning
+            action = f"error — {exc}"
+            await broadcaster.publish(
+                "log",
+                {"level": "ERROR", "message": f"[SCANNER→BOT] {signal.symbol} could not be traded: {exc}"},
+            )
+
+        self.status.last_action = f"{signal.side} {signal.symbol}: {action}"
+
         async with async_session() as session:
             session.add(row)
             await session.commit()
@@ -317,7 +433,8 @@ class ScannerWorker:
                 "level": level,
                 "message": f"[SCANNER] {signal.side} {signal.symbol} {signal.timeframe} @ ₹{signal.price} — "
                 f"{signal.reasons[0]}. Alert {row.alert_status}"
-                + (f" ({row.alert_error})" if row.alert_error else ""),
+                + (f" ({row.alert_error})" if row.alert_error else "")
+                + f" · BOT: {action}",
             },
         )
         await broadcaster.publish(
@@ -398,10 +515,26 @@ class ScannerWorker:
             "signals_today": self.status.signals_today,
             "notes": self.status.notes,
             "feed_source": market_data.source.value,
+            # What the bot did with the last signal, so the scanner page shows
+            # the consequence rather than only the observation.
+            "last_action": self.status.last_action,
+            "suppressed_sells": self.status.suppressed_sells,
+            "bot_trading": _bot_is_trading_scanner_signals(),
         }
 
     async def publish_status(self) -> None:
         await broadcaster.publish("scanner_status", self.snapshot())
+
+
+def _bot_is_trading_scanner_signals() -> bool:
+    """True when the bot is enabled AND in scanner mode — i.e. these signals
+    will actually be traded rather than only recorded."""
+    try:
+        from app.services.strategy_runner import strategy_runner
+
+        return strategy_runner.enabled and strategy_runner.config.strategy == "scanner"
+    except Exception:  # noqa: BLE001
+        return False
 
 
 scanner_worker = ScannerWorker()

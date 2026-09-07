@@ -116,7 +116,7 @@ export function AiKeyForm() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-5 space-y-4">
+    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
       <div className="flex items-center gap-2">
         <Brain size={16} className="text-bot" />
         <h2 className="text-sm font-medium text-slate-200">AI Trading Expert (OpenAI)</h2>

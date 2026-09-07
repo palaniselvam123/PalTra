@@ -141,9 +141,10 @@ export default function ScannerPage() {
               <Radar size={17} className="text-bot" /> Automated Scanner &amp; Alert Engine
             </h1>
             <p className="text-xs text-slate-500 max-w-3xl">
-              Watches a universe for moving-average crossovers and sends a WhatsApp alert. It only observes — it can
-              never place an order. Signals are evaluated <strong>on candle close only</strong>, so a cross that
-              appears and vanishes inside a forming bar never fires.
+              Watches a universe for moving-average crossovers and sends a WhatsApp alert. Starting the
+              Top Gainers or Scanner bot also starts this engine, so you do not have to come here first.
+              Signals are evaluated <strong>on candle close only</strong>. A BUY is an entry; a SELL closes
+              a long the bot already holds.
             </p>
           </div>
           <button
@@ -159,7 +160,7 @@ export default function ScannerPage() {
         )}
 
         {/* controls */}
-        <div className="rounded-lg border border-border bg-surface p-4 flex items-center gap-3 flex-wrap">
+        <div className="rounded-card border border-border bg-surface p-4 flex items-center gap-3 flex-wrap">
           {running ? (
             <button
               onClick={() => act(api.scanStop)}
@@ -225,7 +226,7 @@ export default function ScannerPage() {
         )}
 
         {status?.notes && status.notes.length > 0 && (
-          <div className="rounded-lg border border-border bg-surface px-4 py-2 text-[11px] text-slate-400 space-y-0.5">
+          <div className="rounded-card border border-border bg-surface px-4 py-2 text-[11px] text-slate-400 space-y-0.5">
             {status.notes.map((n) => (
               <div key={n}>· {n}</div>
             ))}
@@ -234,7 +235,7 @@ export default function ScannerPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {/* strategy */}
-          <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+          <div className="rounded-card border border-border bg-surface p-4 space-y-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-slate-200">Strategy</h2>
               {running && <span className="text-[10px] text-amber-400">stop the scanner to edit</span>}
@@ -252,7 +253,13 @@ export default function ScannerPage() {
                     >
                       {options.universes.map((u) => (
                         <option key={u} value={u}>
-                          {u === "WATCHLIST" ? "Streaming watchlist" : u === "CORE" ? "Core 20" : "Custom"}
+                          {u === "WATCHLIST"
+                            ? "Streaming watchlist"
+                            : u === "CORE"
+                              ? "Core 20"
+                              : u === "GAINERS"
+                                ? "Top 50 gainers"
+                                : "Custom"}
                         </option>
                       ))}
                     </select>
@@ -295,7 +302,7 @@ export default function ScannerPage() {
                       </select>
                       <input
                         type="range"
-                        min={2}
+                        min={5}
                         max={100}
                         value={config.fast_period}
                         onChange={(e) => patch({ fast_period: +e.target.value })}
@@ -316,7 +323,7 @@ export default function ScannerPage() {
                       </select>
                       <input
                         type="range"
-                        min={3}
+                        min={8}
                         max={250}
                         value={config.slow_period}
                         onChange={(e) => patch({ slow_period: +e.target.value })}
@@ -329,6 +336,12 @@ export default function ScannerPage() {
                 {config.fast_period >= config.slow_period && (
                   <p className="text-[11px] text-loss">
                     Fast must be shorter than slow, or the two lines can never cross meaningfully.
+                  </p>
+                )}
+                {config.slow_period - config.fast_period < 5 && config.fast_period < config.slow_period && (
+                  <p className="text-[11px] text-loss">
+                    EMA{config.fast_period}/EMA{config.slow_period} is tick noise. Use at least 9/21 if the bot
+                    will trade these signals.
                   </p>
                 )}
 
@@ -414,6 +427,32 @@ export default function ScannerPage() {
                       A crossover is a trend-following signal. In a flat range it sells the dip and buys the bounce —
                       the classic whipsaw. ADX measures trend strength regardless of direction; below 20 means there
                       is no trend to follow. On real NSE data this removed 45% of crossovers.
+                    </p>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.rsi_filter ?? true}
+                    onChange={(e) => patch({ rsi_filter: e.target.checked })}
+                    className="accent-cyan-500"
+                  />
+                  Block buys when RSI ≥ {config.rsi_overbought ?? 70}
+                </label>
+                {config.rsi_filter && (
+                  <div className="space-y-1 pl-6">
+                    <input
+                      type="range"
+                      min={60}
+                      max={85}
+                      value={config.rsi_overbought ?? 70}
+                      onChange={(e) => patch({ rsi_overbought: +e.target.value })}
+                      className="w-full accent-cyan-500"
+                    />
+                    <p className="text-[10px] text-slate-600 leading-relaxed">
+                      A golden cross into RSI 80 is chasing an already-stretched move. Death-cross exits are not
+                      blocked — those still close a long you hold.
                     </p>
                   </div>
                 )}
@@ -523,7 +562,7 @@ export default function ScannerPage() {
           </div>
 
           {/* whatsapp */}
-          <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+          <div className="rounded-card border border-border bg-surface p-4 space-y-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-slate-200">WhatsApp alerts</h2>
               {activeChannel && (
@@ -631,7 +670,7 @@ export default function ScannerPage() {
         </div>
 
         {/* signal log */}
-        <div className="rounded-lg border border-border bg-surface overflow-hidden">
+        <div className="rounded-card border border-border bg-surface overflow-hidden">
           <div className="px-4 py-3 border-b border-border text-sm font-medium text-slate-200">
             Live Signal Log <span className="text-xs text-slate-500">({signals.length})</span>
           </div>

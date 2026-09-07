@@ -211,6 +211,9 @@ async def get_trade_history(
                 "quantity": t.quantity,
                 "entry_price": t.entry_price,
                 "exit_price": t.exit_price,
+                "stop_loss": t.stop_loss,
+                "target": t.target,
+                "amount": round((t.entry_price or 0) * (t.quantity or 0), 2),
                 "pnl": t.pnl,
                 "status": t.status,
                 "exit_reason": t.exit_reason,
@@ -221,9 +224,14 @@ async def get_trade_history(
         ]
 
 
-async def get_trade_summary(account: str = state.ACCOUNT_AUTO) -> dict:
+async def get_trade_summary(account: str = state.ACCOUNT_AUTO, feed: str | None = None) -> dict:
     """Today's closed-trade stats, computed fresh from the DB so a page
     refresh never loses P&L — unlike a client-side WebSocket accumulator.
+
+    `feed` scopes every figure to one price series ("live" or "simulated").
+    Without it the headline blends a random walk with the real market, which
+    is the single most misleading number this app can show: a strategy can
+    look profitable purely because the synthetic feed drifted.
     """
     async with async_session() as session:
         rows = (
@@ -231,6 +239,9 @@ async def get_trade_summary(account: str = state.ACCOUNT_AUTO) -> dict:
                 select(Trade).where(Trade.status == "CLOSED", Trade.account == account)
             )
         ).scalars().all()
+
+    if feed:
+        rows = [t for t in rows if _feed_bucket(t) == feed]
 
     today = dt.date.today()
     todays = [t for t in rows if t.closed_at and t.closed_at.date() == today]
@@ -262,7 +273,45 @@ async def get_trade_summary(account: str = state.ACCOUNT_AUTO) -> dict:
         "win_rate_pct": round(win_rate_pct, 1),
         "profit_factor": round(profit_factor, 2),
         "max_drawdown": round(max_drawdown, 2),
+        # Split by price series. Mixing them into one figure is misleading:
+        # simulated fills come from a random walk and say nothing about the
+        # strategy's real performance, so a headline number that blends the
+        # two can look like an edge that does not exist.
+        "by_feed": _summarise_by_feed(todays),
     }
+
+
+def _feed_bucket(trade: Trade) -> str:
+    """Rows written before `feed_source` existed default to "unknown"; they are
+    reported as such rather than being folded into either bucket.
+    """
+    value = (trade.feed_source or "unknown").lower()
+    return value if value in ("simulated", "live") else "unknown"
+
+
+def _summarise_by_feed(trades: list[Trade]) -> dict:
+    buckets: dict[str, list[Trade]] = {"simulated": [], "live": [], "unknown": []}
+    for t in trades:
+        buckets[_feed_bucket(t)].append(t)
+
+    out: dict[str, dict] = {}
+    for name, rows in buckets.items():
+        pnl = sum(t.pnl or 0 for t in rows)
+        wins = [t for t in rows if (t.pnl or 0) > 0]
+        losses = [t for t in rows if (t.pnl or 0) < 0]
+        gross_profit = sum(t.pnl for t in wins)
+        gross_loss = abs(sum(t.pnl for t in losses))
+        out[name] = {
+            "pnl": round(pnl, 2),
+            "trades": len(rows),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate_pct": round(len(wins) / len(rows) * 100, 1) if rows else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 2)
+            if gross_loss > 0
+            else (round(gross_profit, 2) if gross_profit > 0 else 0.0),
+        }
+    return out
 
 
 async def close_and_settle(
@@ -330,7 +379,7 @@ def _explain_exit(reason: str, result: PaperCloseResult) -> str:
     return detail
 
 
-async def get_account_summary(account: str = state.ACCOUNT_AUTO) -> dict:
+async def get_account_summary(account: str = state.ACCOUNT_AUTO, feed: str | None = None) -> dict:
     """The virtual wallet.
 
     Balance is starting capital plus ALL realised P&L to date (not just
@@ -346,8 +395,15 @@ async def get_account_summary(account: str = state.ACCOUNT_AUTO) -> dict:
             )
         ).scalars().all()
 
+    # `realised_by_feed` is computed from the UNFILTERED rows so the split is
+    # still complete even when the view itself is scoped to one feed.
+    all_rows = rows
+    if feed:
+        rows = [t for t in rows if _feed_bucket(t) == feed]
+
     starting_capital = state.capital_for(account)
     realised_all_time = round(sum(t.pnl or 0 for t in rows), 2)
+    leverage = float(state.risk_manager.config.max_leverage)
 
     today = ist_now().date()
     realised_today = round(sum(t.pnl or 0 for t in rows if t.closed_at and t.closed_at.date() == today), 2)
@@ -370,6 +426,24 @@ async def get_account_summary(account: str = state.ACCOUNT_AUTO) -> dict:
         "starting_capital": round(starting_capital, 2),
         "balance": balance,
         "realised_all_time": realised_all_time,
+        # All-time realised P&L split by the price series it was earned on.
+        # Buying power, so the effect of a purchase is visible immediately.
+        # `balance` deliberately does not move when a position opens (MIS
+        # exposure is notional, not a cash deduction), which is correct but
+        # left no field that answered "how much can I still deploy?".
+        "buying_power_total": round(balance * leverage, 2),
+        "buying_power_used": round(exposure, 2),
+        "buying_power_available": round(max(0.0, balance * leverage - exposure), 2),
+        "leverage": leverage,
+        "feed_scope": feed or "all",
+        "realised_by_feed": {
+            name: round(sum(t.pnl or 0 for t in bucket), 2)
+            for name, bucket in {
+                "simulated": [t for t in all_rows if _feed_bucket(t) == "simulated"],
+                "live": [t for t in all_rows if _feed_bucket(t) == "live"],
+                "unknown": [t for t in all_rows if _feed_bucket(t) == "unknown"],
+            }.items()
+        },
         "realised_today": realised_today,
         "unrealised": round(unrealised, 2),
         "equity": equity,

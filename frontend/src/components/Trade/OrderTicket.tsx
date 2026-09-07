@@ -66,7 +66,7 @@ export function OrderTicket({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="rounded-card border border-border bg-surface overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <div>
           <div className="text-sm font-medium text-slate-100">{row.symbol}</div>

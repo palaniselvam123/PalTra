@@ -641,3 +641,53 @@ keeps its rows across an upgrade.
 - Treat your Groww API key as a live credential even though this app only reads with it.
 
 - **The daily risk lock does not survive a restart.** It lives in memory; the `daily_risk_state` table exists but nothing writes to it. Restarting the backend clears a loss-limit lock and the kill switch.
+
+## Course coach — your own curriculum, cited
+
+A fourth explanation layer, sitting alongside the three that already exist.
+The distinction matters, because none of them overlap:
+
+| Layer | Owns | Source of truth |
+|---|---|---|
+| `indicators.py` / `patterns.py` | price structure and candle geometry | deterministic math |
+| `explain.py` | translating those numbers into plain English | computed values |
+| `ai_advisor.py` | news, earnings, analyst actions, macro | OpenAI + web search |
+| **`course_coach.py`** | **what your uploaded course teaches** | **your PDFs, cited by page** |
+
+`patterns.py` already says a hammer is *"a small body with a long lower wick
+after a decline"*. True, and generic. What it cannot say is what **your**
+curriculum teaches about trading it — where the stop belongs and why, the
+risk-taker versus risk-averse entry, what invalidates the setup. That is the
+gap this fills, with citations back to the page.
+
+### Two load-bearing rules
+
+1. **The RAG never re-detects.** `patterns.py` owns detection. The `PatternHit`
+   is sent to the knowledge base as ground truth via its `pattern` field, and
+   its own detector is skipped. Two detectors over the same bars would
+   eventually disagree, and this engine's answer is the one the charts,
+   scanner and backtests are built on.
+2. **Advisory only.** Unlike `ai_advisor`, this layer does not even have a
+   veto. It cannot open, size, block or influence a position — it talks to the
+   user, not to the order path. Every call degrades to `None` on failure, so an
+   unreachable knowledge base changes nothing about trading.
+
+### Setup
+
+Run the RAG service (the `Tradingapp-RAG` project), upload your course PDFs,
+then set in `backend/.env`:
+
+```bash
+COURSE_RAG_ENABLED=true
+COURSE_RAG_URL=http://localhost:3001
+COURSE_RAG_API_KEY=<must match RAG_API_KEYS in the RAG service>
+```
+
+Endpoints: `GET /api/course/status`, `GET /api/course/explain?symbol=&interval=`,
+`POST /api/course/ask`, `GET /api/course/search?q=` (retrieval only — no LLM
+call, so it costs nothing).
+
+The UI lives on the chart page: a verdict line (entry / wait / no setup / manage
+position), the risk, the confidence, and what is still missing — with the full
+reasoning collapsed behind a link, because a wall of text at the moment a candle
+closes is worse than nothing.

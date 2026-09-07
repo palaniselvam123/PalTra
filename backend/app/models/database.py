@@ -98,6 +98,9 @@ class RiskSettings(Base):
     daily_max_loss_pct: Mapped[float] = mapped_column(Float, default=2.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=5)
     max_spread_pct: Mapped[float] = mapped_column(Float, default=0.15)
+    daily_profit_target_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    max_leverage: Mapped[float] = mapped_column(Float, default=5.0)
+    min_edge_multiple: Mapped[float] = mapped_column(Float, default=1.5)
     square_off_time_ist: Mapped[str] = mapped_column(String, default="15:30")
 
 
@@ -186,9 +189,9 @@ class ScannerConfig(Base):
     slow_period: Mapped[int] = mapped_column(Integer, default=21)
     slow_type: Mapped[str] = mapped_column(String, default="EMA")
     signal_type: Mapped[str] = mapped_column(String, default="BOTH")  # GOLDEN_CROSS | DEATH_CROSS | BOTH
-    trend_filter: Mapped[bool] = mapped_column(Boolean, default=False)
-    trend_period: Mapped[int] = mapped_column(Integer, default=200)
-    volume_filter: Mapped[bool] = mapped_column(Boolean, default=False)
+    trend_filter: Mapped[bool] = mapped_column(Boolean, default=True)
+    trend_period: Mapped[int] = mapped_column(Integer, default=50)
+    volume_filter: Mapped[bool] = mapped_column(Boolean, default=True)
     volume_multiplier: Mapped[float] = mapped_column(Float, default=1.5)
     volume_lookback: Mapped[int] = mapped_column(Integer, default=20)
     # Require a supporting candlestick pattern on the signal bar. A crossover
@@ -206,13 +209,19 @@ class ScannerConfig(Base):
     # Trend-strength gate. A moving-average crossover is a trend-following
     # signal; in a range it sells the dip and buys the bounce (whipsaw).
     # ADX below the threshold means there is no trend to follow.
-    adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
+    adx_filter: Mapped[bool] = mapped_column(Boolean, default=True)
     adx_threshold: Mapped[float] = mapped_column(Float, default=20.0)
+    rsi_filter: Mapped[bool] = mapped_column(Boolean, default=True)
+    rsi_overbought: Mapped[float] = mapped_column(Float, default=70.0)
     min_price: Mapped[float] = mapped_column(Float, default=0.0)
     max_price: Mapped[float] = mapped_column(Float, default=0.0)
+    # Judge the FORMING bar instead of waiting for it to close. Fires the
+    # moment a cross happens, at the cost that a signal can vanish if price
+    # crosses back before the bar completes.
+    intrabar: Mapped[bool] = mapped_column(Boolean, default=False)
     cooldown_minutes: Mapped[int] = mapped_column(Integer, default=60)
     once_per_session: Mapped[bool] = mapped_column(Boolean, default=True)
-    universe: Mapped[str] = mapped_column(String, default="WATCHLIST")  # WATCHLIST | CORE | CUSTOM
+    universe: Mapped[str] = mapped_column(String, default="GAINERS")  # WATCHLIST | CORE | CUSTOM | GAINERS
     custom_symbols: Mapped[str] = mapped_column(Text, default="")       # comma-separated when CUSTOM
 
 
@@ -286,10 +295,13 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "scanner_config": {
         "pattern_filter": "BOOLEAN DEFAULT 0",
         "pattern_lookback": "INTEGER DEFAULT 3",
-        "adx_filter": "BOOLEAN DEFAULT 0",
+        "adx_filter": "BOOLEAN DEFAULT 1",
         "adx_threshold": "FLOAT DEFAULT 20",
+        "rsi_filter": "BOOLEAN DEFAULT 1",
+        "rsi_overbought": "FLOAT DEFAULT 70",
         "min_price": "FLOAT DEFAULT 0",
         "max_price": "FLOAT DEFAULT 0",
+        "intrabar": "BOOLEAN DEFAULT 0",
     },
     "scanner_signals": {
         "pattern": "TEXT",
@@ -308,6 +320,11 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "exit_charges": "FLOAT DEFAULT 0.0",
         "account": "TEXT DEFAULT 'AUTO'",
         "feed_source": "TEXT DEFAULT 'unknown'",
+    },
+    "risk_settings": {
+        "daily_profit_target_pct": "FLOAT DEFAULT 0.0",
+        "max_leverage": "FLOAT DEFAULT 5.0",
+        "min_edge_multiple": "FLOAT DEFAULT 1.5",
     },
 }
 

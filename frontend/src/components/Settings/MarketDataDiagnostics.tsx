@@ -31,7 +31,7 @@ export function MarketDataDiagnostics() {
   const verdict = result ? VERDICT_COPY[result.verdict] ?? VERDICT_COPY.MARKET_DATA_ERROR : null;
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-5 space-y-4">
+    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
       <h2 className="text-sm font-medium text-slate-200">Live Data Diagnostics</h2>
       <p className="text-xs text-slate-500">
         Checks each Groww capability separately, so you can tell a credential problem from a missing market-data

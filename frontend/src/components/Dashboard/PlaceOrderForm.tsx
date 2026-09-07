@@ -66,7 +66,7 @@ export function PlaceOrderForm({ symbols, ticks, feed, killSwitchActive, onOrder
   const disabled = killSwitchActive || marketBlocked;
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+    <div className="rounded-card border border-border bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-slate-200">Place Order (Paper)</span>
         <div className="flex rounded-md border border-border overflow-hidden text-xs">

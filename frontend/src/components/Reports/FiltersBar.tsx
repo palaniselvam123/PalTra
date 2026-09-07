@@ -55,7 +55,7 @@ export function FiltersBar({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-3 space-y-3">
+    <div className="rounded-card border border-border bg-surface p-3 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center rounded-md border border-border overflow-hidden text-[11px]">
           {PRESETS.map((p) => (

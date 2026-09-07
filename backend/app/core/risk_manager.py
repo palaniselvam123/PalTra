@@ -155,6 +155,7 @@ class RiskManager:
         bid: float,
         ask: float,
         enforce_session_cutoff: bool = True,
+        fixed_quantity: int | None = None,
     ) -> RiskDecision:
         """`enforce_session_cutoff` is switched off only when running against
         the synthetic feed, where there is no real NSE session for the cut-off
@@ -182,9 +183,27 @@ class RiskManager:
                 f"Spread {spread:.3f}% exceeds guard threshold {self.config.max_spread_pct}%",
             )
 
-        qty = self.position_size(entry_price, stop_loss_price)
-        if qty <= 0:
-            return RiskDecision(RiskCheckResult.REJECTED, "Computed position size is zero (entry == stop-loss?)")
+        # `fixed_quantity` replaces the 1% sizing step ONLY. The kill switch,
+        # day lock, session cut-off, trade cap, spread guard, loss limit and
+        # profit target all still apply, and an explicit size is still held to
+        # the leverage ceiling. Sizing is the one rule a deliberate allocation
+        # strategy has to override; the rest exist to stop the day running
+        # away, and nothing gets to bypass those.
+        if fixed_quantity is not None:
+            qty = int(fixed_quantity)
+            if qty <= 0:
+                return RiskDecision(RiskCheckResult.REJECTED, "Allocation produced a zero-share order")
+            max_shares = int((self.config.account_capital * self.config.max_leverage) // entry_price)
+            if qty > max_shares:
+                return RiskDecision(
+                    RiskCheckResult.REJECTED,
+                    f"{qty} shares at {entry_price} exceeds the "
+                    f"{self.config.max_leverage}x leverage ceiling ({max_shares} max)",
+                )
+        else:
+            qty = self.position_size(entry_price, stop_loss_price)
+            if qty <= 0:
+                return RiskDecision(RiskCheckResult.REJECTED, "Computed position size is zero (entry == stop-loss?)")
 
         if self.state.realized_pnl <= self.config.daily_max_loss_value:
             self._trip_loss_limit()
@@ -222,6 +241,48 @@ class RiskManager:
             return RiskDecision(RiskCheckResult.REJECTED, self.state.lock_reason)
 
         return None
+
+    def reconcile_lock(self) -> bool:
+        """Re-check a day lock against the CURRENT limits.
+
+        The lock is a latch: once tripped it stays set until the next trading
+        day. That is right while the limits are fixed, but it means raising
+        `daily_max_loss_pct` after a breach leaves the platform locked against
+        a threshold that no longer exists — the operator changes the setting,
+        nothing happens, and the bot refuses to start with a message quoting
+        the old number.
+
+        So after a limits change, a lock whose condition is no longer true is
+        released. A lock that still breaches the new limit stays exactly where
+        it is. Returns True if the lock was released.
+        """
+        if not self.state.locked:
+            return False
+
+        if self.state.lock_kind == "LOSS_LIMIT":
+            if self.state.realized_pnl > self.config.daily_max_loss_value:
+                self._clear_lock()
+                return True
+        elif self.state.lock_kind == "PROFIT_TARGET":
+            target = self.config.daily_profit_target_value
+            if target <= 0 or self.state.realized_pnl < target:
+                self._clear_lock()
+                return True
+        return False
+
+    def _clear_lock(self) -> None:
+        self.state.locked = False
+        self.state.lock_reason = ""
+        self.state.lock_kind = ""
+
+    def release_lock(self) -> None:
+        """Operator override — clears the day lock regardless of P&L.
+
+        Deliberately separate from `reconcile_lock`: this one discards the
+        safety stop on the operator's say-so, so the caller is expected to
+        make that explicit to the user rather than doing it silently.
+        """
+        self._clear_lock()
 
     def _trip_loss_limit(self) -> None:
         self.state.locked = True

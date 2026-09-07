@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.services.indicators import OHLCV, adx, ema, sma
+from app.services.indicators import OHLCV, adx, ema, rsi, sma
 from app.services import patterns as candle_patterns
 from app.services.explain import explain_signal
 
@@ -43,6 +43,34 @@ class StrategyParams:
     pattern_lookback: int = 3
     adx_filter: bool = False
     adx_threshold: float = 20.0
+    # Block BUY when RSI is already stretched. A golden cross into RSI 80 is
+    # chasing an exhausted move; the death-cross exit is left unfiltered so a
+    # held long can still get out.
+    rsi_filter: bool = False
+    rsi_overbought: float = 70.0
+
+    @classmethod
+    def trading_defaults(cls) -> "StrategyParams":
+        """The set the bot actually trades: EMA 9/21 on closed 5m bars, with
+        trend / ADX / volume / RSI gates. Alert configs can be noisier; this
+        is the floor an entry has to clear.
+        """
+        return cls(
+            fast_period=9,
+            fast_type="EMA",
+            slow_period=21,
+            slow_type="EMA",
+            signal_type=BOTH,
+            trend_filter=True,
+            trend_period=50,
+            volume_filter=True,
+            volume_multiplier=1.5,
+            volume_lookback=20,
+            adx_filter=True,
+            adx_threshold=20.0,
+            rsi_filter=True,
+            rsi_overbought=70.0,
+        )
 
     @property
     def fast_label(self) -> str:
@@ -65,6 +93,8 @@ class StrategyParams:
             need = max(need, candle_patterns.MIN_BARS + self.pattern_lookback + 1)
         if self.adx_filter:
             need = max(need, 30)  # Wilder's ADX needs 2*period+1 bars
+        if self.rsi_filter:
+            need = max(need, 16)  # Wilder RSI needs period+1 closes
         return need
 
 
@@ -85,6 +115,7 @@ class Signal:
     candle_pattern: str | None = None
     candle_desc: str = ""
     candle_ohlc: tuple[float, float, float, float] | None = None
+    rsi_value: float | None = None
     plain_english: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
@@ -115,6 +146,7 @@ class StrategyEngine:
             "slow": _moving_average(candles, p.slow_type, p.slow_period),
             "adx": adx(candles, 14)["adx"] if p.adx_filter else None,
             "trend": _moving_average(candles, "EMA", p.trend_period) if p.trend_filter else None,
+            "rsi": rsi(candles, 14) if p.rsi_filter else None,
         }
         return ctx
 
@@ -172,6 +204,16 @@ class StrategyEngine:
                 return None
             reasons.append(
                 f"ADX {adx_value:.1f} is at or above {p.adx_threshold:.0f} — there is a real trend to follow"
+            )
+
+        rsi_value = None
+        if p.rsi_filter and side == "BUY":
+            series = ctx["rsi"]
+            rsi_value = series[i] if series else None
+            if rsi_value is None or rsi_value >= p.rsi_overbought:
+                return None
+            reasons.append(
+                f"RSI {rsi_value:.0f} is below {p.rsi_overbought:.0f} — not buying an already-stretched move"
             )
 
         if p.trend_filter:
@@ -247,6 +289,7 @@ class StrategyEngine:
             candle=own_candle,
             candle_desc=own_desc,
             confirmed_by=confirming_hit,
+            rsi_value=rsi_value,
         )
 
         return Signal(
@@ -265,6 +308,7 @@ class StrategyEngine:
             candle_pattern=own_candle.name if own_candle else None,
             candle_desc=own_desc,
             candle_ohlc=(bar.open, bar.high, bar.low, bar.close),
+            rsi_value=round(rsi_value, 1) if rsi_value is not None else None,
             plain_english=plain,
             reasons=reasons,
         )

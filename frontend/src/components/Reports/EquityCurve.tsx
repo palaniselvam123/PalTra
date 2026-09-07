@@ -44,7 +44,7 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
 
   if (!geometry) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-slate-500">
+      <div className="rounded-card border border-border bg-surface p-6 text-center text-sm text-slate-500">
         No closed trades in this filter — nothing to plot.
       </div>
     );
@@ -54,7 +54,7 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
   const active = hover !== null ? points[hover] : null;
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="rounded-card border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
         <div className="text-sm font-medium text-slate-200">Equity Curve</div>
         <div className="text-xs text-slate-500">

@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { Navbar } from "@/components/Navbar";
 import { AdvancedChart } from "@/components/Chart/AdvancedChart";
+import { CoursePanel } from "@/components/Chart/CoursePanel";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type WatchRow } from "@/lib/api";
-import { num, pct, pnlClass } from "@/lib/format";
+import { money, num, pct, pnlClass } from "@/lib/format";
 
 export default function ChartPage() {
   const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks, positions } =
@@ -54,7 +55,7 @@ export default function ChartPage() {
       <main className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-4 items-start">
           {/* watchlist rail */}
-          <div className="rounded-lg border border-border bg-surface overflow-hidden order-2 lg:order-1">
+          <div className="rounded-card border border-border bg-surface overflow-hidden order-2 lg:order-1">
             <div className="px-3 py-2 border-b border-border text-[11px] text-slate-400">
               Watchlist <span className="text-slate-600">({rows.length})</span>
             </div>
@@ -92,13 +93,17 @@ export default function ChartPage() {
               height={520}
             />
 
+            <CoursePanel symbol={symbol} hasPosition={!!position} />
+
             {position && (
-              <div className="rounded-lg border border-border bg-surface px-4 py-2.5 flex items-center gap-5 flex-wrap text-[11px]">
+              <div className="rounded-card border border-border bg-surface px-4 py-2.5 flex items-center gap-5 flex-wrap text-[11px]">
                 <span className="text-slate-400">
                   Open position ·{" "}
                   <span className={position.side === "BUY" ? "text-profit" : "text-loss"}>{position.side}</span>{" "}
                   <span className="font-mono text-slate-200">{position.quantity}</span> @{" "}
                   <span className="font-mono text-slate-200">{num(position.entry_price)}</span>
+                  {" · "}
+                  <span className="font-mono text-slate-200">{money(position.entry_price * position.quantity)}</span>
                 </span>
                 <span className="text-slate-500">
                   SL <span className="font-mono text-loss">{num(position.stop_loss)}</span>

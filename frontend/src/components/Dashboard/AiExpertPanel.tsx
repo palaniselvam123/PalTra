@@ -85,7 +85,7 @@ export function AiExpertPanel({ symbols, activeSymbol }: { symbols: string[]; ac
   };
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="rounded-card border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border flex items-center gap-2">
         <Brain size={14} className="text-bot" />
         <span className="text-sm font-medium text-slate-200">AI Trading Expert</span>

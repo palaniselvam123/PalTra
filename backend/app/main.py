@@ -14,6 +14,7 @@ from app.api import (
     routes_bot,
     routes_chat,
     routes_chart,
+    routes_course,
     routes_instruments,
     routes_manual,
     routes_marketdata,
@@ -68,6 +69,9 @@ async def _tick_feed_loop() -> None:
 
                 # Bracket enforcement runs on every tick, bot on or off.
                 await strategy_runner.monitor_tick(tick.symbol, tick.ltp)
+                # Tick-driven entry for the gainers strategy; self-throttled,
+                # so this is a cheap comparison on most ticks.
+                await strategy_runner.maybe_scan_gainers()
                 await manual_desk.monitor_tick(tick.symbol, tick.ltp)
 
                 # Chart history is kept separately from the strategy's single
@@ -141,6 +145,22 @@ async def _square_off_scheduler_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    from app.services.risk_store import load_into_manager
+
+    if await load_into_manager():
+        cap = state.risk_manager.config.account_capital
+        await broadcaster.publish(
+            "log",
+            {
+                "level": "INFO",
+                "message": (
+                    f"Restored saved risk settings — virtual capital ₹{cap:,.0f}, "
+                    f"daily loss {state.risk_manager.config.daily_max_loss_pct:g}%, "
+                    f"max {state.risk_manager.config.max_trades_per_day} trades/day."
+                ),
+            },
+        )
 
     # A stored Groww token is good until end of day, so a restart should not
     # cost the user their live session.
@@ -220,7 +240,7 @@ app = FastAPI(title="Intraday ORB Trading Bot", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=settings.frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -238,6 +258,7 @@ app.include_router(routes_manual.router)
 app.include_router(routes_instruments.router)
 app.include_router(routes_watchlist.router)
 app.include_router(routes_chart.router)
+app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_research.router)

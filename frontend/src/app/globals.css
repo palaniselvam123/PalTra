@@ -21,9 +21,27 @@
 [data-theme="dark"] {
   /* Space-separated RGB channels so Tailwind's <alpha-value> works and
      existing classes like `bg-bot/20` keep functioning. */
-  --c-base: 11 15 25;
-  --c-surface: 17 24 39;
-  --c-border: 30 41 59;
+  /* Deep indigo-navy rather than neutral near-black. The previous values sat
+     on the grey axis, which is why the app read as an admin panel: with no
+     hue in the ground, every accent floats on top of it instead of belonging
+     to it. Carrying a blue cast through base/surface/border makes the whole
+     surface feel like one material. */
+  --c-base: 9 12 30;
+  --c-surface: 19 24 51;
+  --c-border: 42 50 92;
+  /* A second surface level. Depth needs more than one step: without this,
+     nested panels either float with a shadow that reads wrong on dark, or
+     disappear into their parent. */
+  --c-surface-2: 28 35 70;
+  /* Categorical accents. These identify things — a section, a nav item, a
+     metric's subject — and must never be used for financial direction, which
+     stays exclusively green/red so those two keep their meaning. */
+  --c-violet: 167 139 250;
+  --c-sky: 56 189 248;
+  --c-amber: 251 191 36;
+  --c-teal: 45 212 191;
+  --c-pink: 244 114 182;
+  --c-indigo: 129 140 248;
   --c-profit: 16 185 129;
   --c-loss: 244 63 94;
   --c-bot: 6 182 212;
@@ -36,25 +54,67 @@
 }
 
 [data-theme="light"] {
-  --c-base: 246 248 251;
+  /* A tinted ground, not white. Cards stay near-white so they lift off the
+     background — that separation is what a flat white-on-white page lacked.
+     Text is a deep navy rather than neutral grey: on a blue-tinted ground,
+     grey text reads as washed out, while navy looks intentional and holds
+     contrast (about 13:1 on the card surface). */
+  --c-base: 232 240 252;
   --c-surface: 255 255 255;
-  --c-border: 219 226 236;
-  /* Green and red are darkened for contrast against white — the dark-mode
-     values are tuned for a near-black background and fail legibility here. */
-  --c-profit: 4 132 94;
-  --c-loss: 206 25 61;
-  --c-bot: 8 132 163;
+  --c-surface-2: 238 245 255;
+  --c-border: 205 216 233;
 
-  --c-body-text: 15 23 42;
-  --c-scrollbar: 203 213 225;
-  --c-hover: 15 23 42;         /* dark tint over light surfaces */
-  --hover-strong: 0.07;
-  --hover-soft: 0.04;
+  --c-profit: 0 166 118;
+  --c-loss: 226 55 78;
+  --c-bot: 37 122 235;
+
+  --c-violet: 124 77 245;
+  --c-sky: 14 137 226;
+  --c-amber: 214 138 4;
+  --c-teal: 13 158 150;
+  --c-pink: 219 39 119;
+  --c-indigo: 79 86 232;
+
+  --c-body-text: 15 28 51;
+  --c-scrollbar: 191 209 235;
+  --c-hover: 15 28 51;
+  --hover-strong: 0.06;
+  --hover-soft: 0.035;
 }
 
 body {
   background-color: rgb(var(--c-base));
   color: rgb(var(--c-body-text));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The ground is a gradient field, not a fill. Three widely-spread stops —
+   blue, violet, and a warm amber note — keep it from reading as one flat
+   colour, and all three are low-saturation so price green/red still wins the
+   eye wherever it appears. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 45% at 2% -14%, rgb(var(--c-bot) / 0.22), transparent 60%),
+    radial-gradient(52% 42% at 100% -6%, rgb(var(--c-violet) / 0.16), transparent 62%);
+}
+
+[data-theme="dark"] body::before {
+  background:
+    radial-gradient(65% 55% at 8% -8%, rgb(var(--c-indigo) / 0.26), transparent 66%),
+    radial-gradient(60% 50% at 98% 2%, rgb(var(--c-bot) / 0.16), transparent 66%),
+    radial-gradient(70% 60% at 62% 106%, rgb(var(--c-violet) / 0.18), transparent 68%);
+}
+
+/* Prices, P&L and quantities must line up column-to-column. Proportional
+   digits make a table of numbers ragged and genuinely harder to compare. */
+.font-mono,
+[class*="tabular"] {
+  font-variant-numeric: tabular-nums;
 }
 
 ::-webkit-scrollbar {
@@ -86,13 +146,23 @@ body {
    they are invisible, so light mode uses a dark tint of the same weight. */
 [data-theme="light"] .hover\:bg-white\/5:hover,
 [data-theme="light"] .hover\:bg-white\/\[0\.03\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.04\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.05\]:hover,
 [data-theme="light"] .hover\:bg-white\/\[0\.02\]:hover {
   background-color: rgb(15 23 42 / 0.05);
+}
+/* The heavier washes need a heavier dark tint, or a "pressed" state reads
+   identically to its resting state on white. */
+[data-theme="light"] .hover\:bg-white\/\[0\.08\]:hover {
+  background-color: rgb(15 23 42 / 0.09);
 }
 [data-theme="light"] .bg-white\/5,
 [data-theme="light"] .bg-white\/\[0\.04\],
 [data-theme="light"] .bg-white\/\[0\.03\] {
   background-color: rgb(15 23 42 / 0.05);
+}
+[data-theme="light"] .bg-white\/\[0\.07\] {
+  background-color: rgb(15 23 42 / 0.08);
 }
 
 /* Amber warning banners read as muddy on white without a lift. */
@@ -113,3 +183,66 @@ body {
 }
 .flash-up { animation: flash-green 0.6s ease-out; }
 .flash-down { animation: flash-red 0.6s ease-out; }
+
+/* --- card material ------------------------------------------------------
+   Every panel using the shared `rounded-card` radius gets a faint top-down
+   sheen and a hairline highlight on its upper edge. Real surfaces catch more
+   light at the top; a perfectly flat fill is the main thing that makes a
+   dark UI read as "a div with a background colour" rather than a material.
+   Kept very low-contrast so it never competes with content. */
+[data-theme="dark"] .rounded-card {
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0) 42%);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+}
+
+[data-theme="light"] .rounded-card {
+  background-color: rgb(255 255 255);
+  background-image: none;
+  border-color: rgb(var(--c-border));
+  box-shadow: 0 1px 2px rgb(15 28 51 / 0.06), 0 4px 12px -6px rgb(15 28 51 / 0.10);
+}
+
+/* The nav sits on the ambient wash rather than over content, so it can afford
+   to be translucent — it picks up the hue behind it. */
+[data-theme="dark"] header.sticky {
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent);
+}
+
+/* --- gradient surfaces --------------------------------------------------
+   Applied to the chrome and to the one hero panel, deliberately not to every
+   card: a gradient on everything cancels itself out and leaves the page
+   looking noisy rather than rich. */
+
+[data-theme="light"] header.sticky {
+  background-color: rgb(255 255 255);
+  background-image: none;
+  border-bottom-color: rgb(var(--c-border));
+  box-shadow: 0 1px 3px rgb(15 28 51 / 0.06);
+}
+
+/* Table header rows: a soft tint so the head separates from the body without
+   a heavy rule. */
+[data-theme="light"] thead tr {
+  background-image: none;
+  background-color: rgb(var(--c-surface-2));
+}
+
+/* Section headings sit at full strength — on a tinted ground the previous
+   slate-200 was noticeably lighter than the body copy beneath it. */
+[data-theme="light"] .text-section,
+[data-theme="light"] .text-title,
+[data-theme="light"] .text-display,
+[data-theme="light"] .text-metric {
+  color: rgb(var(--c-body-text));
+}
+
+/* Utility for anything that should carry the brand gradient. */
+.grad-brand {
+  background-image: linear-gradient(135deg, rgb(var(--c-bot)), rgb(var(--c-violet)));
+}
+.grad-text {
+  background-image: linear-gradient(135deg, rgb(var(--c-bot)), rgb(var(--c-violet)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

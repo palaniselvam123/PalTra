@@ -158,7 +158,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
   const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="rounded-card border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
         <div className="text-sm font-medium text-slate-200">
           Transactions <span className="text-xs text-slate-500">({transactions.length})</span>
@@ -178,7 +178,10 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
               <th className="px-3 py-2 font-medium">Source</th>
               <th className="px-3 py-2 font-medium text-right">Qty</th>
               <th className="px-3 py-2 font-medium text-right">Entry</th>
+              <th className="px-3 py-2 font-medium text-right">Amount</th>
               <th className="px-3 py-2 font-medium text-right">Exit</th>
+              <th className="px-3 py-2 font-medium text-right">SL</th>
+              <th className="px-3 py-2 font-medium text-right">Target</th>
               <th className="px-3 py-2 font-medium text-right">Charges</th>
               <th className="px-3 py-2 font-medium text-right">R</th>
               <th className="px-3 py-2 font-medium text-right">Hold</th>
@@ -189,7 +192,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
           <tbody>
             {transactions.length === 0 && (
               <tr>
-                <td colSpan={14} className="px-4 py-8 text-center text-sm text-slate-500">
+                <td colSpan={17} className="px-4 py-8 text-center text-sm text-slate-500">
                   No transactions match these filters.
                 </td>
               </tr>
@@ -222,8 +225,15 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
                     <td className="px-3 py-2 text-[11px] text-slate-400">{t.source}</td>
                     <td className="px-3 py-2 font-mono text-xs text-right">{t.quantity}</td>
                     <td className="px-3 py-2 font-mono text-xs text-right">{num(t.entry_price)}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-right text-slate-400">{money(t.turnover)}</td>
                     <td className="px-3 py-2 font-mono text-xs text-right">
                       {t.exit_price !== null ? num(t.exit_price) : "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-right text-loss">
+                      {t.stop_loss ? num(t.stop_loss) : "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-right text-profit">
+                      {t.target ? num(t.target) : "—"}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-right text-slate-400">
                       {t.charges_recorded ? money(t.charges) : "—"}
@@ -250,7 +260,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
                   </tr>
                   {open && (
                     <tr className="border-b border-border/50">
-                      <td colSpan={14} className="p-0">
+                      <td colSpan={17} className="p-0">
                         <ExpandedDetail trade={t} />
                       </td>
                     </tr>

@@ -125,7 +125,61 @@ async def set_risk_config(body: RiskConfigRequest):
     c.max_spread_pct = body.max_spread_pct
     c.max_leverage = body.max_leverage
     c.min_edge_multiple = body.min_edge_multiple
-    return {"ok": True}
+
+    # A limits change has to re-examine an existing lock, or raising the loss
+    # cap after a breach silently does nothing and the bot keeps refusing to
+    # start against a threshold the user just removed.
+    released = state.risk_manager.reconcile_lock()
+    if released:
+        await broadcaster.publish(
+            "log",
+            {
+                "level": "WARN",
+                "message": (
+                    "Day lock released: realised P&L no longer breaches the updated limits. "
+                    "Entries are allowed again."
+                ),
+            },
+        )
+        await broadcaster.publish("kill_switch", {"active": state.kill_switch_active, "reason": ""})
+
+    from app.services.risk_store import save_from_manager
+
+    await save_from_manager()
+    return {"ok": True, "lock_released": released}
+
+
+class LoadCapitalRequest(BaseModel):
+    amount: float
+
+
+@router.post("/capital/load")
+async def load_virtual_money(body: LoadCapitalRequest):
+    """Credits extra paper capital without resetting the other risk knobs."""
+    if body.amount < 1 or body.amount > 10_000_000:
+        raise HTTPException(400, "amount must be between ₹1 and ₹1,00,00,000")
+    from app.services.risk_store import add_virtual_money
+
+    try:
+        new_capital = await add_virtual_money(body.amount)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    await broadcaster.publish(
+        "log",
+        {
+            "level": "INFO",
+            "message": (
+                f"Loaded ₹{body.amount:,.0f} virtual money — account capital is now "
+                f"₹{new_capital:,.0f}. Daily loss % and trade cap are unchanged."
+            ),
+        },
+    )
+    return {
+        "ok": True,
+        "loaded": body.amount,
+        "account_capital": new_capital,
+    }
 
 
 @router.get("/positions")
@@ -146,14 +200,19 @@ async def close_position(symbol: str):
 
 
 @router.get("/summary")
-async def order_summary():
-    return await get_trade_summary()
+async def order_summary(feed: str | None = None):
+    """`feed=live|simulated` scopes every figure to one price series."""
+    if feed and feed not in ("live", "simulated", "unknown"):
+        raise HTTPException(400, "feed must be live, simulated or unknown")
+    return await get_trade_summary(feed=feed)
 
 
 @router.get("/account")
-async def account_summary():
+async def account_summary(feed: str | None = None):
     """Virtual wallet: balance, equity, exposure."""
-    return await get_account_summary()
+    if feed and feed not in ("live", "simulated", "unknown"):
+        raise HTTPException(400, "feed must be live, simulated or unknown")
+    return await get_account_summary(feed=feed)
 
 
 @router.get("/history")

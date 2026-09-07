@@ -90,7 +90,7 @@ export default function ReportsPage() {
 
         {/* The two wallets are independent, so mixing their trades into one
             performance figure would be meaningless. Account comes first. */}
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1 w-fit">
+        <div className="flex items-center gap-1 rounded-card border border-border bg-surface p-1 w-fit">
           {[
             { id: undefined, label: "Both accounts" },
             { id: "AUTO", label: "Strategy / Bot" },
@@ -122,7 +122,7 @@ export default function ReportsPage() {
         )}
 
         {loading && !report ? (
-          <div className="rounded-lg border border-border bg-surface px-4 py-10 flex items-center justify-center gap-2 text-sm text-slate-500">
+          <div className="rounded-card border border-border bg-surface px-4 py-10 flex items-center justify-center gap-2 text-sm text-slate-500">
             <Loader2 size={16} className="animate-spin" /> Building report…
           </div>
         ) : report ? (

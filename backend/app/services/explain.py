@@ -38,6 +38,7 @@ def explain_signal(
     candle: PatternHit | None,
     candle_desc: str,
     confirmed_by: PatternHit | None,
+    rsi_value: float | None = None,
 ) -> list[str]:
     """A short list of plain sentences. Each is independently true and stands
     on its own, so the UI can show one or all of them.
@@ -96,6 +97,11 @@ def explain_signal(
             )
         else:
             lines.append(f"Volume was {volume_ratio:.1f}x its recent average — nothing unusual.")
+
+    if rsi_value is not None:
+        lines.append(
+            f"RSI is {rsi_value:.0f}. Above 70 the move is stretched; this buy is only allowed while it stays below that."
+        )
 
     return lines
 

@@ -12,10 +12,10 @@ const STORAGE_KEY = "orb.theme";
  *  paint, so the stored preference applies without a dark-to-light flash on
  *  load. This hook syncs React state to whatever that script already decided. */
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  const [theme, setThemeState] = useState<Theme>("light");
 
   useEffect(() => {
-    const current = (document.documentElement.getAttribute("data-theme") as Theme) || "dark";
+    const current = (document.documentElement.getAttribute("data-theme") as Theme) || "light";
     setThemeState(current);
   }, []);
 
