@@ -1,0 +1,41 @@
+# Git / editor
+.git
+.gitignore
+.cursor
+**/.DS_Store
+
+# Secrets and local env — never send these to the build context
+.env
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.local.example
+**/*.pem
+**/*.key
+**/credentials.json
+**/secrets.json
+
+# Local Python / Node junk
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/.venv-win
+**/node_modules
+**/.next
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+
+# Runtime data that must not bake into the image
+**/*.db
+**/*.db-journal
+**/*.sqlite
+**/*.sqlite3
+backend/research_data/
+backend/trading.db
+
+# Not needed to run the backend on Fly
+frontend/
+backend/tests/
+**/*.md
+**/tsconfig.tsbuildinfo
