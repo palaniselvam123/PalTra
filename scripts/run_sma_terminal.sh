@@ -18,4 +18,4 @@ fi
 
 export PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}"
 export TRADING_MODE="${TRADING_MODE:-PAPER}"
-exec "$PY" -m uvicorn main:app --host 127.0.0.1 --port "${SMA_PORT:-8001}" --reload
+exec "$PY" -m uvicorn main:app --host 0.0.0.0 --port "${SMA_PORT:-8001}" --reload

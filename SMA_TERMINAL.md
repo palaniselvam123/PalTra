@@ -33,5 +33,45 @@ npm run dev
 
 Open http://localhost:3000/terminal
 
+## Open it on a phone
+
+The phone and the computer must be on the same Wi‑Fi. `localhost` on the phone is the phone itself, so both servers have to listen on the computer’s LAN address.
+
+1. On the computer, find that address. It looks like `192.168.1.42`.
+
+```bash
+# macOS
+ipconfig getifaddr en0
+
+# Linux
+hostname -I
+
+# Windows
+ipconfig
+```
+
+2. Start the API so it accepts connections from the network (the startup script already binds `0.0.0.0`):
+
+```bash
+scripts/run_sma_terminal.sh
+```
+
+3. Start the UI with that address baked into the API URL, and listen on every interface:
+
+```bash
+cd frontend
+NEXT_PUBLIC_SMA_API_URL=http://192.168.1.42:8001 npm run dev -- -H 0.0.0.0 -p 3000
+```
+
+Replace `192.168.1.42` with the address from step 1. Restart `npm run dev` if you change it — Next.js reads `NEXT_PUBLIC_*` only at startup.
+
+4. On the phone browser open:
+
+```text
+http://192.168.1.42:3000/terminal
+```
+
+If the page loads but prices stay blank, the computer firewall is blocking ports **3000** and **8001**. Allow those two on private networks. Mobile data will not work; the phone has to be on that same Wi‑Fi.
+
 REST and the 1-second WebSocket (`/ws/stream`) are served by `backend/main.py`.
 Strategy logic is in `backend/strategy_engine.py`.
