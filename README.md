@@ -16,12 +16,26 @@ These are separate on purpose — this is the core safety model:
 | Switch | Options | What it controls |
 |---|---|---|
 | **Data source** | `SIMULATED` / `LIVE NSE` | Where prices come from |
-| **Execution** | `VIRTUAL MONEY` (locked) | Always simulated. Not user-changeable |
+| **Execution** | `PAPER_TRADING` (default) / `LIVE_MONEY` | Whether fills are virtual or real Groww MIS |
 
-Connecting your Groww API key changes only the prices. It cannot cause a real
-order: `place_paper_entry()` is the sole entry path and it fills against the
-local paper engine. There is no code path from a strategy signal to
-`GrowwClient.place_order()`.
+The engine **always boots in `PAPER_TRADING`**. Switching to `LIVE_MONEY` requires
+an explicit confirmation dialog in the UI **and** a valid Groww API session.
+Without both, the mode change is refused.
+
+### Critical trading safety invariants
+
+1. **No intra-candle repainting** — crossover signals evaluate only closed
+   1-minute (or configured) candles (`iloc[-2]` vs `iloc[-3]` on the raw series),
+   never the forming tick bar. LIVE_MONEY forces this even if the scanner's
+   intrabar toggle is on.
+2. **Idempotency & order lock** — an `asyncio.Lock` serialises dispatch; any
+   order in `PENDING`/`TRANSIT` blocks new entries.
+3. **Orphan SL prevention** — before Long↔Short flips, the Exchange Stop-Loss
+   is cancelled and verified before the reverse order fires.
+4. **Paper default** — see above.
+5. **Hard kill switch** — `max_daily_loss` (% and optional absolute INR) and
+   `max_trades_per_day` cancel open orders, square off MIS, and lock the bot
+   for the day.
 
 ## Stack
 

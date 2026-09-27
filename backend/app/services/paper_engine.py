@@ -31,6 +31,13 @@ class PaperPosition:
     opened_at: dt.datetime
     order_id: str
     trade_id: int | None = None
+    # Live MIS bookkeeping. Empty in PAPER_TRADING. `sl_order_id` is the
+    # Exchange Stop-Loss that MUST be cancelled and verified before any
+    # Long↔Short flip (orphan-SL prevention).
+    mode: str = "paper"  # paper | live
+    entry_broker_order_id: str = ""
+    sl_order_id: str = ""
+    order_status: str = "FILLED"
 
 
 @dataclass

@@ -101,6 +101,8 @@ class RiskSettings(Base):
     daily_profit_target_pct: Mapped[float] = mapped_column(Float, default=0.0)
     max_leverage: Mapped[float] = mapped_column(Float, default=5.0)
     min_edge_multiple: Mapped[float] = mapped_column(Float, default=1.5)
+    # Absolute INR daily-loss floor (0 = disabled; % rule alone applies).
+    max_daily_loss_inr: Mapped[float] = mapped_column(Float, default=0.0)
     square_off_time_ist: Mapped[str] = mapped_column(String, default="15:30")
 
 
@@ -325,6 +327,7 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "daily_profit_target_pct": "FLOAT DEFAULT 0.0",
         "max_leverage": "FLOAT DEFAULT 5.0",
         "min_edge_multiple": "FLOAT DEFAULT 1.5",
+        "max_daily_loss_inr": "FLOAT DEFAULT 0.0",
     },
 }
 

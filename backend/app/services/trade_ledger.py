@@ -26,10 +26,11 @@ async def record_open_trade(
     entry_charges: float = 0.0,
     account: str = state.ACCOUNT_AUTO,
     feed_source: str = "simulated",
+    mode: str = "paper",
 ) -> int:
     async with async_session() as session:
         trade = Trade(
-            mode="paper",
+            mode=mode if mode in ("paper", "live") else "paper",
             symbol=symbol,
             side=side,
             quantity=quantity,
@@ -67,11 +68,22 @@ async def _record_close(result: PaperCloseResult, exit_reason: str | None = None
 
 
 async def close_symbol_and_persist(
-    symbol: str, exit_reason: str | None = None, account: str = state.ACCOUNT_AUTO
+    symbol: str,
+    exit_reason: str | None = None,
+    account: str = state.ACCOUNT_AUTO,
+    *,
+    skip_live_broker: bool = False,
 ) -> PaperCloseResult | None:
-    """Closes a paper position at the current quote and writes the result to
-    the trade history. Shared by the manual close endpoint, the kill switch,
-    and the end-of-day IST hard cut-off scheduler.
+    """Closes a paper (or mirrored live) position at the current quote and
+    writes the result to the trade history. Shared by the manual close
+    endpoint, the kill switch, and the end-of-day IST hard cut-off scheduler.
+
+    For LIVE_MONEY positions the Exchange SL is cancelled and verified first
+    so a late SL fill cannot orphan against the square-off (invariant #3).
+
+    `skip_live_broker=True` is for the kill-switch path that already ran
+    `cancel_all` + `square_off_all` at the broker — only the local ledger
+    needs settling.
     """
     from app.services.market_data import market_data
 
@@ -81,6 +93,67 @@ async def close_symbol_and_persist(
 
     engine = state.engine_for(account)
     position = engine.positions.get(symbol)
+
+    if (
+        not skip_live_broker
+        and position is not None
+        and position.mode == "live"
+        and position.sl_order_id
+    ):
+        from app.brokers.base import BrokerOrderError
+        from app.services.live_broker import LiveBrokerUnavailable, cancel_sl_and_verify
+
+        try:
+            await cancel_sl_and_verify(position.sl_order_id)
+            position.sl_order_id = ""
+        except (BrokerOrderError, LiveBrokerUnavailable) as exc:
+            # Fail closed: do not invent a local close while the SL may still
+            # fire at the exchange.
+            from app.services.broadcaster import broadcaster
+
+            await broadcaster.publish(
+                "log",
+                {
+                    "level": "ERROR",
+                    "message": f"Refusing to close {symbol}: Exchange SL cancel failed — {exc}",
+                },
+            )
+            return None
+
+    if not skip_live_broker and position is not None and position.mode == "live":
+        # Square the live MIS book at market before clearing the mirror.
+        try:
+            from app.brokers.base import OrderRequest
+            from app.services.live_broker import require_valid_live_session
+
+            client = await require_valid_live_session()
+            exit_side = "SELL" if position.side == "BUY" else "BUY"
+            live_fill = await client.place_order(
+                OrderRequest(
+                    symbol=symbol,
+                    side=exit_side,  # type: ignore[arg-type]
+                    quantity=position.quantity,
+                    order_type="MARKET",
+                    tag="live-exit",
+                )
+            )
+            if live_fill.filled_price and live_fill.filled_price > 0:
+                quote = {**quote, "ltp": float(live_fill.filled_price)}
+                state.latest_quotes[symbol] = {
+                    **state.latest_quotes.get(symbol, {}),
+                    "ltp": float(live_fill.filled_price),
+                }
+        except Exception as exc:  # noqa: BLE001
+            from app.services.broadcaster import broadcaster
+
+            await broadcaster.publish(
+                "log",
+                {
+                    "level": "ERROR",
+                    "message": f"Live square-off failed for {symbol}: {exc}",
+                },
+            )
+            return None
 
     # A position must be closed against the SAME price series it was opened on.
     # Switching the data source mid-position and then closing books a P&L
@@ -315,7 +388,11 @@ def _summarise_by_feed(trades: list[Trade]) -> dict:
 
 
 async def close_and_settle(
-    symbol: str, reason: str, account: str = state.ACCOUNT_AUTO
+    symbol: str,
+    reason: str,
+    account: str = state.ACCOUNT_AUTO,
+    *,
+    skip_live_broker: bool = False,
 ) -> tuple[PaperCloseResult | None, object | None]:
     """The single close path used by manual closes, strategy auto-exits, the
     kill switch, and the end-of-day cut-off: square off, persist to history,
@@ -324,7 +401,9 @@ async def close_and_settle(
     """
     from app.services.broadcaster import broadcaster
 
-    result = await close_symbol_and_persist(symbol, exit_reason=reason, account=account)
+    result = await close_symbol_and_persist(
+        symbol, exit_reason=reason, account=account, skip_live_broker=skip_live_broker
+    )
     if result is None:
         return None, None
 

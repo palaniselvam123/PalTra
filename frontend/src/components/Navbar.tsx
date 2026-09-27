@@ -69,6 +69,9 @@ type Props = {
   feed: FeedStatus | null;
   onFeedChanged: (f: FeedStatus) => void;
   botRunning: boolean;
+  /** PAPER_TRADING | LIVE_MONEY execution mode (independent of data source). */
+  mode?: "paper" | "live";
+  onModeChange?: (next: "paper" | "live", confirmLiveMoney?: boolean) => Promise<void>;
 };
 
 export function Navbar({
@@ -80,6 +83,8 @@ export function Navbar({
   feed,
   onFeedChanged,
   botRunning,
+  mode = "paper",
+  onModeChange,
 }: Props) {
   const pathname = usePathname();
   const notif = useNotificationCenter();
@@ -87,6 +92,9 @@ export function Navbar({
   const [switching, setSwitching] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
+  const [liveConfirmOpen, setLiveConfirmOpen] = useState(false);
+  const [modeBusy, setModeBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -111,8 +119,40 @@ export function Navbar({
     }
   };
 
+  const requestMode = async (next: "paper" | "live") => {
+    if (!onModeChange || next === mode) return;
+    setModeError(null);
+    if (next === "live") {
+      setLiveConfirmOpen(true);
+      return;
+    }
+    setModeBusy(true);
+    try {
+      await onModeChange("paper", false);
+    } catch (e: any) {
+      setModeError(e.message ?? "Could not switch to PAPER_TRADING");
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
+  const confirmLiveMoney = async () => {
+    if (!onModeChange) return;
+    setModeBusy(true);
+    setModeError(null);
+    try {
+      await onModeChange("live", true);
+      setLiveConfirmOpen(false);
+    } catch (e: any) {
+      setModeError(e.message ?? "Could not enable LIVE_MONEY — check Groww credentials");
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
   const pnlColor = totalPnl > 0 ? "text-profit" : totalPnl < 0 ? "text-loss" : "text-slate-400";
   const sourceLocked = switching || botRunning;
+  const isLiveMoney = mode === "live";
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
@@ -215,14 +255,21 @@ export function Navbar({
             )}
           </div>
 
-          <Badge
-            tone="profit"
-            icon={<ShieldCheck size={11} />}
+          <button
+            type="button"
+            onClick={() => requestMode(isLiveMoney ? "paper" : "live")}
+            disabled={modeBusy || !onModeChange}
             className="hidden xl:inline-flex"
-            title="Orders are always simulated. No real money is ever sent to the broker."
+            title={
+              isLiveMoney
+                ? "LIVE_MONEY — real MIS orders go to Groww. Click to return to PAPER_TRADING."
+                : "PAPER_TRADING — virtual fills only. Click to request LIVE_MONEY."
+            }
           >
-            VIRTUAL
-          </Badge>
+            <Badge tone={isLiveMoney ? "loss" : "profit"} icon={<ShieldCheck size={11} />}>
+              {isLiveMoney ? "LIVE ₹" : "PAPER"}
+            </Badge>
+          </button>
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
           <div className="flex items-center gap-1 pl-1">
@@ -277,9 +324,15 @@ export function Navbar({
                     onClick={toggle}
                   />
                   <div className="border-t border-border px-3 py-2 xl:hidden">
-                    <Badge tone="profit" icon={<ShieldCheck size={11} />}>
-                      VIRTUAL MONEY
-                    </Badge>
+                    <button
+                      type="button"
+                      disabled={modeBusy || !onModeChange}
+                      onClick={() => requestMode(isLiveMoney ? "paper" : "live")}
+                    >
+                      <Badge tone={isLiveMoney ? "loss" : "profit"} icon={<ShieldCheck size={11} />}>
+                        {isLiveMoney ? "LIVE_MONEY" : "PAPER_TRADING"}
+                      </Badge>
+                    </button>
                   </div>
                 </div>
               )}
@@ -288,10 +341,48 @@ export function Navbar({
         </div>
       </div>
 
-      {(feedError || feed?.error) && (
+      {(feedError || feed?.error || modeError) && (
         <div className="border-t border-loss/30 bg-loss/10 px-4 py-1.5">
           <div className="mx-auto max-w-7xl text-caption tracking-normal text-loss">
-            {feedError ?? feed?.error}
+            {modeError ?? feedError ?? feed?.error}
+          </div>
+        </div>
+      )}
+
+      {isLiveMoney && (
+        <FeedBanner tone="loss" icon={<AlertTriangle size={13} />}>
+          <strong className="font-semibold">LIVE_MONEY is on.</strong> Orders are sent to Groww as
+          real MIS. Kill switch cancels open orders and squares positions. Switch back to PAPER when
+          done.
+        </FeedBanner>
+      )}
+
+      {liveConfirmOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-card border border-loss/40 bg-surface p-5 shadow-pop">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 shrink-0 text-loss" size={20} />
+              <div className="space-y-2">
+                <h2 className="text-title font-semibold text-slate-100">Enable LIVE_MONEY?</h2>
+                <p className="text-body leading-relaxed text-slate-400">
+                  This routes real rupees through Groww MIS. Requires a valid Groww API session.
+                  Paper mode is the default for a reason — confirm only if you intend to trade live.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={modeBusy}
+                onClick={() => setLiveConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="danger" size="sm" disabled={modeBusy} onClick={confirmLiveMoney}>
+                {modeBusy ? "Connecting…" : "Confirm LIVE_MONEY"}
+              </Button>
+            </div>
           </div>
         </div>
       )}

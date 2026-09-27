@@ -29,6 +29,9 @@ class RiskConfig:
     account_capital: float = 100_000.0
     risk_per_trade_pct: float = 1.0        # 1% rule
     daily_max_loss_pct: float = 2.0        # loss circuit breaker
+    # Absolute rupee floor for the day lock (invariant #5: max_daily_loss_inr).
+    # When > 0, the effective loss cap is the tighter of this and the % rule.
+    max_daily_loss_inr: float = 0.0
     daily_profit_target_pct: float = 0.0   # 0 disables the profit lock
     max_trades_per_day: int = 5
     max_spread_pct: float = 0.15
@@ -44,8 +47,11 @@ class RiskConfig:
 
     @property
     def daily_max_loss_value(self) -> float:
-        """The loss limit in rupees — negative."""
-        return -abs(self.account_capital * (self.daily_max_loss_pct / 100))
+        """The loss limit in rupees — negative. More restrictive of % vs INR."""
+        by_pct = abs(self.account_capital * (self.daily_max_loss_pct / 100))
+        if self.max_daily_loss_inr and self.max_daily_loss_inr > 0:
+            return -min(by_pct, abs(self.max_daily_loss_inr))
+        return -by_pct
 
     @property
     def daily_profit_target_value(self) -> float:
@@ -287,10 +293,14 @@ class RiskManager:
     def _trip_loss_limit(self) -> None:
         self.state.locked = True
         self.state.lock_kind = "LOSS_LIMIT"
+        inr_note = ""
+        if self.config.max_daily_loss_inr and self.config.max_daily_loss_inr > 0:
+            inr_note = f", max_daily_loss_inr ₹{self.config.max_daily_loss_inr:.0f}"
         self.state.lock_reason = (
             f"Daily loss limit hit: ₹{self.state.realized_pnl:.2f} breached the "
             f"₹{self.config.daily_max_loss_value:.0f} cap "
-            f"({self.config.daily_max_loss_pct}% of capital). Trading is locked for the rest of the day."
+            f"({self.config.daily_max_loss_pct}% of capital{inr_note}). "
+            "Trading is locked for the rest of the day."
         )
 
     def _trip_profit_target(self) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from app.core.risk_manager import DailyRiskState, RiskConfig, RiskManager
 from app.services.paper_engine import PaperEngine
 
-mode: str = "paper"  # "paper" | "live" — Paper is the hardcoded startup default
+mode: str = "paper"  # PAPER_TRADING boot default — LIVE_MONEY needs UI confirm + Groww session
 kill_switch_active: bool = False
 
 risk_manager = RiskManager(RiskConfig(), DailyRiskState())

@@ -5,8 +5,10 @@ Two rules shape everything here:
 **Signals fire on candle close, never intra-candle.** A forming bar's close is
 just the current tick; a fast MA computed from it wobbles across the slow MA
 repeatedly within one bar and would fire a burst of contradictory alerts. The
-worker therefore evaluates only *completed* bars, and this module detects the
-cross between the last two of them.
+worker therefore drops `bars[-1]` (the forming candle) and this module detects
+the cross between the last two *closed* bars — equivalent to comparing
+`df.iloc[-2]` vs `df.iloc[-3]` on the raw series that still includes the
+forming tick candle.
 
 **Indicators come from `app.services.indicators`, not a second library.** The
 chart, the ORB entry gate and this scanner all read the same EMA. Introducing

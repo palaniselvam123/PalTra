@@ -7,6 +7,9 @@ a manual close or a bot auto-exit), and the end-of-day IST cut-off.
 Keeping this in one place matters — an earlier version had the bot's circuit
 breaker only stop the bot while leaving open positions running, which is
 exactly the failure the breaker exists to prevent.
+
+Safety invariant #5: on breach, cancel all open orders, square off open MIS
+positions, and lock the bot for the day.
 """
 from __future__ import annotations
 
@@ -25,8 +28,18 @@ async def trigger_kill_switch(reason: str, *, square_off: bool = True) -> None:
         await strategy_runner.force_halt()
 
     if square_off:
+        # LIVE_MONEY: cancel working orders (incl. Exchange SLs) and square
+        # broker MIS first, then settle the local mirror book without a
+        # second broker round-trip.
+        skip_broker = False
+        if state.mode == "live":
+            from app.services.live_broker import live_square_off_and_cancel
+
+            await live_square_off_and_cancel()
+            skip_broker = True
+
         for symbol in list(state.paper_engine.positions.keys()):
-            await close_and_settle(symbol, "KILL SWITCH SQUARE-OFF")
+            await close_and_settle(symbol, "KILL SWITCH SQUARE-OFF", skip_live_broker=skip_broker)
 
     # Hitting the profit target stops the day just like a loss breach does,
     # but it is good news — don't report it as an emergency.

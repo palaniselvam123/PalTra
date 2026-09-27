@@ -22,7 +22,9 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function ReportsPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
+  const { connected, summary, mode,
+    setMode,
+    killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
 
   const [filters, setFilters] = useState<ReportFilters>({});
   const [options, setOptions] = useState<any>(null);
@@ -69,6 +71,8 @@ export default function ReportsPage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-4">

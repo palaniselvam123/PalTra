@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app import state
 from app.services.broadcaster import broadcaster
-from app.services.execution import EntryRejected, place_paper_entry
+from app.services.execution import EntryRejected, place_entry
 from app.services.safety import reset_kill_switch as _reset_kill_switch, trigger_kill_switch
 from app.services.trade_ledger import (
     close_and_settle,
@@ -27,22 +27,55 @@ class PlaceOrderRequest(BaseModel):
 
 class ModeRequest(BaseModel):
     mode: str  # paper | live
+    # LIVE_MONEY requires an explicit UI confirmation. Silently flipping the
+    # mode on a mis-click would route real rupees — refuse without this flag.
+    confirm_live_money: bool = False
 
 
 @router.get("/mode")
 async def get_mode():
-    return {"mode": state.mode, "kill_switch_active": state.kill_switch_active}
+    return {
+        "mode": state.mode,
+        "kill_switch_active": state.kill_switch_active,
+        "label": "LIVE_MONEY" if state.mode == "live" else "PAPER_TRADING",
+    }
 
 
 @router.post("/mode")
 async def set_mode(body: ModeRequest):
+    """Switch execution mode. Boots PAPER_TRADING by default (invariant #4).
+
+    LIVE_MONEY requires:
+      1. confirm_live_money=True (UI confirmation dialog)
+      2. A valid Groww API session with a non-expired access token
+    """
     if body.mode not in ("paper", "live"):
         raise HTTPException(400, "mode must be 'paper' or 'live'")
     if state.kill_switch_active:
-        raise HTTPException(423, "Kill switch is active — restart the platform to change modes.")
+        raise HTTPException(423, "Kill switch is active — reset it before changing modes.")
+
+    if body.mode == "live":
+        if not body.confirm_live_money:
+            raise HTTPException(
+                400,
+                "LIVE_MONEY requires explicit confirmation. "
+                "Set confirm_live_money=true after the UI warning dialog.",
+            )
+        try:
+            from app.services.live_broker import require_valid_live_session
+
+            await require_valid_live_session()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(503, str(exc)) from exc
+
     state.mode = body.mode
-    await broadcaster.publish("log", {"level": "WARN", "message": f"Trading mode switched to {body.mode.upper()}"})
-    return {"mode": state.mode}
+    label = "LIVE_MONEY" if body.mode == "live" else "PAPER_TRADING"
+    level = "ERROR" if body.mode == "live" else "WARN"
+    await broadcaster.publish(
+        "log",
+        {"level": level, "message": f"Execution mode switched to {label}"},
+    )
+    return {"mode": state.mode, "label": label}
 
 
 @router.post("/place")
@@ -51,7 +84,7 @@ async def place_order(body: PlaceOrderRequest):
     bot uses — see app/services/execution.py.
     """
     try:
-        entry = await place_paper_entry(
+        entry = await place_entry(
             symbol=body.symbol,
             side=body.side,
             entry_price=body.entry_price,
@@ -63,7 +96,13 @@ async def place_order(body: PlaceOrderRequest):
         raise HTTPException(exc.status_code, exc.reason) from exc
 
     return {
-        "order": {"broker_order_id": entry.order_id, "status": "FILLED", "filled_price": entry.filled_price},
+        "order": {
+            "broker_order_id": entry.order_id,
+            "status": "FILLED",
+            "filled_price": entry.filled_price,
+            "mode": entry.mode,
+            "sl_order_id": entry.sl_order_id,
+        },
         "fill": {
             "order_id": entry.order_id,
             "symbol": entry.symbol,
@@ -71,6 +110,8 @@ async def place_order(body: PlaceOrderRequest):
             "quantity": entry.quantity,
             "filled_price": entry.filled_price,
             "charges": entry.charges,
+            "mode": entry.mode,
+            "sl_order_id": entry.sl_order_id,
         },
     }
 
@@ -79,6 +120,7 @@ class RiskConfigRequest(BaseModel):
     account_capital: float
     risk_per_trade_pct: float
     daily_max_loss_pct: float
+    max_daily_loss_inr: float = 0.0
     daily_profit_target_pct: float = 0.0
     max_trades_per_day: int
     max_spread_pct: float
@@ -93,6 +135,7 @@ async def get_risk_config():
         "account_capital": c.account_capital,
         "risk_per_trade_pct": c.risk_per_trade_pct,
         "daily_max_loss_pct": c.daily_max_loss_pct,
+        "max_daily_loss_inr": c.max_daily_loss_inr,
         "daily_profit_target_pct": c.daily_profit_target_pct,
         "max_trades_per_day": c.max_trades_per_day,
         "max_spread_pct": c.max_spread_pct,
@@ -120,6 +163,7 @@ async def set_risk_config(body: RiskConfigRequest):
     c.account_capital = body.account_capital
     c.risk_per_trade_pct = body.risk_per_trade_pct
     c.daily_max_loss_pct = body.daily_max_loss_pct
+    c.max_daily_loss_inr = body.max_daily_loss_inr
     c.daily_profit_target_pct = body.daily_profit_target_pct
     c.max_trades_per_day = body.max_trades_per_day
     c.max_spread_pct = body.max_spread_pct
@@ -223,8 +267,7 @@ async def order_history():
 @router.post("/kill-switch")
 async def kill_switch():
     """Manual emergency kill switch: cancels intent to trade and squares off
-    every open paper (or, once live orders are enabled, live) position at
-    market.
+    every open paper (or live MIS) position at market.
     """
     await trigger_kill_switch("Manual kill switch activated by user")
     return {"active": True}

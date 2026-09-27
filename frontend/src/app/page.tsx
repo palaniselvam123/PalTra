@@ -21,6 +21,8 @@ export default function DashboardPage() {
     ticks,
     logs,
     positions,
+    mode,
+    setMode,
     killSwitchActive,
     killSwitch,
     resetKillSwitch,
@@ -53,6 +55,8 @@ export default function DashboardPage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
 
       {/* A trading desk is a main workspace plus a rail, not a 50/50 split.

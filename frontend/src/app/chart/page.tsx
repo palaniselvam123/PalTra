@@ -10,7 +10,9 @@ import { api, type WatchRow } from "@/lib/api";
 import { money, num, pct, pnlClass } from "@/lib/format";
 
 export default function ChartPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks, positions } =
+  const { connected, summary, mode,
+    setMode,
+    killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks, positions } =
     useTradingState();
 
   const [watch, setWatch] = useState<WatchRow[]>([]);
@@ -50,6 +52,8 @@ export default function ChartPage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
 
       <main className="max-w-[1600px] mx-auto px-4 py-4">
