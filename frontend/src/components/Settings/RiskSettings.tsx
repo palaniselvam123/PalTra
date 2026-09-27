@@ -34,6 +34,12 @@ const FIELDS: FieldDef[] = [
     hint: "Squares off everything and locks trading for the day.",
   },
   {
+    key: "max_daily_loss_inr",
+    label: "Max Daily Loss (₹ absolute)",
+    step: 100,
+    hint: "Hard INR floor. When set (>0), the day lock uses the tighter of this and the % rule. 0 disables the absolute floor.",
+  },
+  {
     key: "daily_profit_target_pct",
     label: "Daily Profit Target (%)",
     step: 0.1,

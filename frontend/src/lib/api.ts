@@ -645,9 +645,16 @@ export type CourseStatus = {
 export const api = {
   health: () => request<{ status: string; mode: string }>("/api/health"),
 
-  getMode: () => request<{ mode: string; kill_switch_active: boolean }>("/api/orders/mode"),
-  setMode: (mode: "paper" | "live") =>
-    request("/api/orders/mode", { method: "POST", body: JSON.stringify({ mode }) }),
+  getMode: () =>
+    request<{ mode: string; kill_switch_active: boolean; label?: string }>("/api/orders/mode"),
+  setMode: (mode: "paper" | "live", opts?: { confirmLiveMoney?: boolean }) =>
+    request<{ mode: string; label?: string }>("/api/orders/mode", {
+      method: "POST",
+      body: JSON.stringify({
+        mode,
+        confirm_live_money: Boolean(opts?.confirmLiveMoney),
+      }),
+    }),
 
   getPositions: () => request<any[]>("/api/orders/positions"),
   placeOrder: (body: {

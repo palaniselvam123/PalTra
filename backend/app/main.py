@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI):
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())
-    await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
+    await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER_TRADING mode (LIVE_MONEY requires explicit UI confirmation)."})
     yield
     if scanner_worker.running:
         await scanner_worker.stop()

@@ -12,7 +12,9 @@ import { api, type DeskAccount, type DeskPosition, type WatchRow } from "@/lib/a
 import { money, num, pct, pnlClass } from "@/lib/format";
 
 export default function TradePage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks } =
+  const { connected, summary, mode,
+    setMode,
+    killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks } =
     useTradingState();
 
   const [watch, setWatch] = useState<WatchRow[]>([]);
@@ -109,6 +111,8 @@ export default function TradePage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-4">

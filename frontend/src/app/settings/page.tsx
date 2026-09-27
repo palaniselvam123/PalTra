@@ -8,7 +8,9 @@ import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnosti
 import { useTradingState } from "@/hooks/useTradingState";
 
 export default function SettingsPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
+  const { connected, summary, mode,
+    setMode,
+    killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
 
   return (
     <div>
@@ -21,6 +23,8 @@ export default function SettingsPage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
         <ApiKeyForm />

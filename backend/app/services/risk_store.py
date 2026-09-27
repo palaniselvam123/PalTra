@@ -20,6 +20,7 @@ def apply_row(config: RiskConfig, row: RiskSettings) -> None:
     config.account_capital = float(row.account_capital)
     config.risk_per_trade_pct = float(row.risk_per_trade_pct)
     config.daily_max_loss_pct = float(row.daily_max_loss_pct)
+    config.max_daily_loss_inr = float(getattr(row, "max_daily_loss_inr", 0.0) or 0.0)
     config.daily_profit_target_pct = float(getattr(row, "daily_profit_target_pct", 0.0) or 0.0)
     config.max_trades_per_day = int(row.max_trades_per_day)
     config.max_spread_pct = float(row.max_spread_pct)
@@ -37,6 +38,7 @@ def snapshot(config: RiskConfig) -> dict:
         "account_capital": config.account_capital,
         "risk_per_trade_pct": config.risk_per_trade_pct,
         "daily_max_loss_pct": config.daily_max_loss_pct,
+        "max_daily_loss_inr": config.max_daily_loss_inr,
         "daily_profit_target_pct": config.daily_profit_target_pct,
         "max_trades_per_day": config.max_trades_per_day,
         "max_spread_pct": config.max_spread_pct,

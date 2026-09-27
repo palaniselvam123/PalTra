@@ -268,13 +268,20 @@ class ScannerWorker:
 
                 await self._ensure_history(symbol, timeframe)
                 bars = candle_store.get(symbol, timeframe, source, limit=600)
-                if cfg.intrabar:
+                # Invariant #1 — NO INTRA-CANDLE REPAINTING. LIVE_MONEY never
+                # evaluates the forming bar; paper may opt into intrabar alerts
+                # only for observation (the bot still refuses forming_bar).
+                use_forming = bool(cfg.intrabar) and state.mode != "live"
+                if use_forming:
                     # Act on the forming bar. This is what makes the scanner
                     # fire the moment a cross happens instead of at the next
                     # bar close — at the cost that a signal can appear and then
                     # vanish if price crosses back before the bar completes.
                     closed = bars
                 else:
+                    # Drop the still-forming candle (df.iloc[-1]). Signals
+                    # compare the last two CLOSED bars ([-2] vs [-3] of the
+                    # raw series).
                     closed = bars[:-1]
                 if len(closed) < params.warmup_bars():
                     continue
@@ -284,7 +291,7 @@ class ScannerWorker:
                 key = (symbol, timeframe)
                 # In intrabar mode the forming bar must be re-judged on every
                 # pass, so the "already seen this bar" guard is skipped.
-                if not cfg.intrabar:
+                if not use_forming:
                     if self._evaluated.get(key) == latest_ts:
                         continue  # this bar has already been judged
                     self._evaluated[key] = latest_ts
@@ -298,7 +305,7 @@ class ScannerWorker:
                     if signal.side == "SELL" and signal.symbol not in state.paper_engine.positions:
                         suppressed_sells += 1
                         continue
-                    await self._handle_signal(signal, cfg, source)
+                    await self._handle_signal(signal, cfg, source, forming_bar=use_forming)
                     fired.append(signal)
             except asyncio.CancelledError:
                 raise
@@ -336,7 +343,14 @@ class ScannerWorker:
 
     # ---- signal handling ------------------------------------------------
 
-    async def _handle_signal(self, signal: Signal, cfg: ScannerConfig, source: str) -> None:
+    async def _handle_signal(
+        self,
+        signal: Signal,
+        cfg: ScannerConfig,
+        source: str,
+        *,
+        forming_bar: bool = False,
+    ) -> None:
         allowed, skip_reason = alert_notifier.should_send(
             signal.symbol,
             signal.timeframe,
@@ -410,7 +424,7 @@ class ScannerWorker:
                 reason=signal.reasons[0] if signal.reasons else f"{signal.side} crossover",
                 fast_period=cfg.fast_period,
                 slow_period=cfg.slow_period,
-                forming_bar=bool(cfg.intrabar),
+                forming_bar=forming_bar,
             )
         except Exception as exc:  # noqa: BLE001 — a trade failure must not stop scanning
             action = f"error — {exc}"

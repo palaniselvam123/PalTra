@@ -40,7 +40,7 @@ type Query = {
 };
 
 export default function MoversPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+  const { connected, summary, mode, setMode, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
 
   const [recorder, setRecorder] = useState<RecorderStatus | null>(null);
@@ -220,6 +220,8 @@ export default function MoversPage() {
         feed={feed}
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
+        mode={mode}
+        onModeChange={setMode}
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 space-y-6">

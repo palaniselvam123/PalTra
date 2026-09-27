@@ -131,9 +131,9 @@ export function useTradingState() {
 
   useEffect(() => setConnected(wsConnected), [wsConnected]);
 
-  const setMode = useCallback(async (next: "paper" | "live") => {
-    await api.setMode(next);
-    setModeState(next);
+  const setMode = useCallback(async (next: "paper" | "live", confirmLiveMoney = false) => {
+    const res = await api.setMode(next, { confirmLiveMoney });
+    setModeState((res.mode as "paper" | "live") ?? next);
   }, []);
 
   const killSwitch = useCallback(async () => {
