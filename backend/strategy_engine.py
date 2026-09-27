@@ -431,6 +431,24 @@ class StrategyEngine:
             row.net_pnl = costs["net_pnl"]
             db.commit()
 
+    def _day_open_and_change(self) -> tuple[float | None, float | None]:
+        """Session change versus the first candle open of today (IST)."""
+        frame = self.candles
+        if frame is None or getattr(frame, "empty", True) or self.ltp <= 0:
+            return None, None
+        today = _ist_now().date()
+        day_open = None
+        for _, row in frame.iterrows():
+            ts = dt.datetime.fromtimestamp(int(row["ts"]), IST)
+            if ts.date() == today:
+                day_open = float(row["open"])
+                break
+        if day_open is None:
+            day_open = float(frame.iloc[0]["open"])
+        if day_open <= 0:
+            return day_open, None
+        return day_open, (self.ltp - day_open) / day_open * 100
+
     def _loss_breached(self, cfg: BotConfig) -> bool:
         unreal = self._unrealized()
         net = self.realized_net + (unreal["net"] if unreal else 0.0)
@@ -474,6 +492,7 @@ class StrategyEngine:
         unreal = self._unrealized()
         kpis = self._kpis()
         pos = self.position
+        day_open, day_change = self._day_open_and_change()
         return {
             "bot_status": self.status,
             "halt_reason": self.halt_reason,
@@ -484,6 +503,8 @@ class StrategyEngine:
             "symbol": cfg.symbol if cfg else "",
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
+            "day_open": day_open,
+            "day_change_pct": day_change,
             "sma9": self.sma9,
             "sma21": self.sma21,
             "atr14": self.atr14,

@@ -19,22 +19,13 @@ export function Header({ state, config, connected, onChanged }: Props) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [prevClose, setPrevClose] = useState<number | null>(null);
 
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
   }, [config?.symbol]);
 
-  // Day-change baseline: first LTP we see for this symbol in the session.
-  useEffect(() => {
-    setPrevClose(null);
-  }, [state?.symbol]);
-  useEffect(() => {
-    if (state?.ltp && prevClose === null) setPrevClose(state.ltp);
-  }, [state?.ltp, prevClose]);
-
   const ltp = state?.ltp ?? 0;
-  const changePct = prevClose && prevClose > 0 ? ((ltp - prevClose) / prevClose) * 100 : 0;
+  const changePct = state?.day_change_pct ?? 0;
   const live = (state?.mode ?? config?.trading_mode) === "LIVE";
   const running = state?.bot_status === "RUNNING";
 
@@ -115,7 +106,7 @@ export function Header({ state, config, connected, onChanged }: Props) {
                 symbol === s ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
               )}
             >
-              {s}
+              {s === symbol ? `NSE: ${s}` : s}
             </button>
           ))}
           <form

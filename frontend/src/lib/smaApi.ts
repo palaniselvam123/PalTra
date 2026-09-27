@@ -38,6 +38,8 @@ export type SmaState = {
   symbol: string;
   exchange: string;
   ltp: number;
+  day_open?: number | null;
+  day_change_pct?: number | null;
   sma9: number | null;
   sma21: number | null;
   atr14: number | null;
