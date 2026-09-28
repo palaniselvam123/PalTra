@@ -240,13 +240,15 @@ async def place(
             "Simulated prices must not size a live order.",
             409,
         )
-    if market_data.source is DataSource.LIVE:
+    if state.manual_live and market_data.source is DataSource.LIVE:
         if not health.market_open:
             raise ManualOrderRejected(
-                f"Market is {health.session} — live quotes are frozen at last close, so no entries.", 409
+                f"Market is {health.session}. A real Groww order has to wait until 09:15 IST. "
+                "Turn off “Send orders to Groww” if you only want a practice fill at the last close.",
+                409,
             )
         if health.stale:
-            raise ManualOrderRejected("Live feed looks stale — entry blocked.", 409)
+            raise ManualOrderRejected("Live feed looks stale — real Groww entries are blocked until it recovers.", 409)
 
     fill_price = (
         round(quote["ltp"], 2)
@@ -297,8 +299,10 @@ async def place(
         fill = state.manual_engine.open_at_price(order, filled_price, result_id)
         from app.services.groww_funds import clear_funds_cache
         clear_funds_cache()
+        broker_order_id = result_id
     else:
-        _result, fill = state.manual_engine.fill_market_order(order, quote["ltp"])
+        result, fill = state.manual_engine.fill_market_order(order, quote["ltp"])
+        broker_order_id = result.broker_order_id
 
     trade_id = await record_open_trade(
         symbol=symbol,
@@ -346,7 +350,7 @@ async def place(
     )
 
     return ManualFill(
-        order_id=result.broker_order_id,
+        order_id=broker_order_id,
         symbol=symbol,
         side=side,
         quantity=quantity,

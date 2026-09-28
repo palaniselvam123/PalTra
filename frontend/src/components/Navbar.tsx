@@ -307,8 +307,8 @@ export function Navbar({
 
       {feed?.source === "live" && !feed.market_open && (
         <FeedBanner tone="warn">
-          Market is {feed.session.replace("_", "-").toLowerCase()} — quotes are frozen at last close, so new
-          entries are blocked until 09:15 IST. Existing brackets still track.
+          Market is {feed.session.replace("_", "-").toLowerCase()} — quotes are the last close. Practice buys
+          still fill here. Real Groww orders wait until 09:15 IST.
         </FeedBanner>
       )}
 
