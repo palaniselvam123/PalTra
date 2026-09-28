@@ -8,13 +8,14 @@ import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnosti
 import { useTradingState } from "@/hooks/useTradingState";
 
 export default function SettingsPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+    useTradingState();
 
   return (
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}

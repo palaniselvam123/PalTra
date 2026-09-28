@@ -19,7 +19,7 @@ export type ClosedTrade = {
   closed_at: string | null;
 };
 
-export function TradeHistory({ trades }: { trades: ClosedTrade[] }) {
+export function TradeHistory({ trades, emptyLabel }: { trades: ClosedTrade[]; emptyLabel?: string }) {
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
@@ -57,7 +57,7 @@ export function TradeHistory({ trades }: { trades: ClosedTrade[] }) {
             {trades.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
-                  No closed trades yet.
+                  {emptyLabel ?? "No closed trades yet."}
                 </td>
               </tr>
             )}

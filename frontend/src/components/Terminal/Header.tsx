@@ -22,10 +22,11 @@ type Props = {
   state: SmaState | null;
   config: SmaConfig | null;
   connected: boolean;
+  loadNote?: string | null;
   onChanged: () => void;
 };
 
-export function Header({ state, config, connected, onChanged }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged }: Props) {
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -182,19 +183,27 @@ export function Header({ state, config, connected, onChanged }: Props) {
 
         <div ref={searchRef} className="relative flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-[#151921] px-2 py-1">
           <span className="px-1 text-[10px] uppercase tracking-wider text-slate-500">NSE</span>
-          {symbols.map((s) => (
-            <button
-              key={s}
-              disabled={busy}
-              onClick={() => applySymbol(s)}
-              className={clsx(
-                "rounded-full px-2 py-0.5 text-xs font-medium",
-                symbol === s ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
-              )}
-            >
-              {s === symbol ? `NSE: ${s}` : s}
-            </button>
-          ))}
+          {!config?.symbol && (
+            <span className="px-2 text-xs text-slate-500">
+              {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
+            </span>
+          )}
+          {symbols.map((s) => {
+            const selected = Boolean(config?.symbol) && symbol === s;
+            return (
+              <button
+                key={s}
+                disabled={busy}
+                onClick={() => applySymbol(s)}
+                className={clsx(
+                  "rounded-full px-2 py-0.5 text-xs font-medium",
+                  selected ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                {selected ? `NSE: ${s}` : s}
+              </button>
+            );
+          })}
           <form
             className="flex items-center"
             onSubmit={(e) => {
@@ -277,7 +286,13 @@ export function Header({ state, config, connected, onChanged }: Props) {
 
         <span className="flex items-center gap-1.5 text-[11px] text-slate-400" title={state?.data_source}>
           <Radio size={12} className={connected ? "text-[#10B981]" : "text-[#F43F5E]"} />
-          {connected ? state?.bot_status ?? "LIVE" : "OFFLINE"}
+          {state && state.ltp > 0
+            ? state.data_source || "QUOTES"
+            : connected
+              ? state?.bot_status ?? "CHECKING"
+              : loadNote
+                ? "NO REPLY"
+                : "CHECKING"}
           {state?.data_source ? ` · ${state.data_source}` : ""}
         </span>
 

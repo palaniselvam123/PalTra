@@ -3,7 +3,7 @@
 import { inr, px, type SmaState } from "@/lib/smaApi";
 import clsx from "clsx";
 
-export function LivePositionCard({ state }: { state: SmaState | null }) {
+export function LivePositionCard({ state, pending }: { state: SmaState | null; pending?: boolean }) {
   const pos = state?.position;
   const direction = pos?.direction;
   const tone = direction === "LONG" ? "text-[#10B981]" : direction === "SHORT" ? "text-[#F43F5E]" : "text-slate-400";
@@ -12,7 +12,13 @@ export function LivePositionCard({ state }: { state: SmaState | null }) {
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Live position</div>
       <div className={clsx("mt-1 font-mono text-lg font-semibold", tone)}>
-        {pos ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY` : "FLAT — WAITING FOR CROSSOVER"}
+        {state == null
+          ? pending
+            ? "Position did not load"
+            : "Loading position…"
+          : pos
+            ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY`
+            : "FLAT — WAITING FOR CROSSOVER"}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
         <Row label="Entry" value={px(pos?.entry_price)} />

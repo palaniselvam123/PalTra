@@ -40,7 +40,7 @@ type Query = {
 };
 
 export default function MoversPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
 
   const [recorder, setRecorder] = useState<RecorderStatus | null>(null);
@@ -213,7 +213,7 @@ export default function MoversPage() {
     <div className="min-h-screen bg-bg text-slate-100">
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}

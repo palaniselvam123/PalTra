@@ -30,6 +30,10 @@ export default function DashboardPage() {
     setBot,
     history,
     account,
+    accountLoad,
+    positionsLoad,
+    historyLoad,
+    summaryLoad,
     feed,
     setFeed,
     refreshPositions,
@@ -38,9 +42,24 @@ export default function DashboardPage() {
 
   const [deskPositions, setDeskPositions] = useState<DeskPosition[]>([]);
   const [deskHistory, setDeskHistory] = useState<ClosedTrade[]>([]);
+  const [deskPosLoad, setDeskPosLoad] = useState<"loading" | "ok" | "error">("loading");
+  const [deskHistLoad, setDeskHistLoad] = useState<"loading" | "ok" | "error">("loading");
   useEffect(() => {
+    let busy = false;
     const load = () => {
-      api.deskPositions().then(setDeskPositions).catch(() => {});
+      if (busy) return;
+      busy = true;
+      const done = () => {
+        busy = false;
+      };
+      api
+        .deskPositions()
+        .then((rows) => {
+          setDeskPositions(rows);
+          setDeskPosLoad("ok");
+        })
+        .catch(() => setDeskPosLoad((prev) => (prev === "ok" ? "ok" : "error")))
+        .finally(done);
       api
         .deskHistory()
         .then((rows) => {
@@ -61,11 +80,12 @@ export default function DashboardPage() {
                 closed_at: t.closed_at,
               }))
           );
+          setDeskHistLoad("ok");
         })
-        .catch(() => {});
+        .catch(() => setDeskHistLoad((prev) => (prev === "ok" ? "ok" : "error")));
     };
     load();
-    const id = setInterval(load, 4000);
+    const id = setInterval(load, 15000);
     return () => clearInterval(id);
   }, []);
 
@@ -80,7 +100,7 @@ export default function DashboardPage() {
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}
@@ -96,7 +116,7 @@ export default function DashboardPage() {
           a two-thirds workspace; status and controls stack in the rail. */}
       <main className="mx-auto max-w-[1720px] space-y-4 px-5 py-5">
         <MetricCards
-          totalPnl={summary.total_pnl}
+          totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
           winRatePct={summary.win_rate_pct}
           profitFactor={summary.profit_factor}
           maxDrawdown={summary.max_drawdown}
@@ -124,6 +144,20 @@ export default function DashboardPage() {
             )}
 
             <PositionsTable
+              emptyTitle={
+                deskPosLoad === "error" || positionsLoad === "error"
+                  ? "Positions did not load"
+                  : deskPosLoad === "loading" || positionsLoad === "loading"
+                    ? "Loading positions…"
+                    : "No open positions"
+              }
+              emptyHint={
+                deskPosLoad === "error" || positionsLoad === "error"
+                  ? "The request did not answer. This is not an empty account."
+                  : deskPosLoad === "loading" || positionsLoad === "loading"
+                    ? "Still waiting on the desk."
+                    : "Entries opened by the bot or the manual desk appear here with live P&L and their bracket levels."
+              }
               positions={[
                 ...deskPositions.map((d) => ({
                   symbol: d.symbol,
@@ -146,12 +180,21 @@ export default function DashboardPage() {
               }}
             />
 
-            <TradeHistory trades={[...deskHistory, ...history]} />
+            <TradeHistory
+              trades={[...deskHistory, ...history]}
+              emptyLabel={
+                deskHistLoad === "error" || historyLoad === "error"
+                  ? "Trades did not load. This is not an empty book."
+                  : deskHistLoad === "loading" || historyLoad === "loading"
+                    ? "Loading trades…"
+                    : "No closed trades yet."
+              }
+            />
           </div>
 
           {/* --- rail: status, then controls ------------------------------ */}
           <div className="space-y-4">
-            <AccountBalance account={account} onCapitalChanged={refreshSummary} />
+            <AccountBalance account={account} loadState={accountLoad} onCapitalChanged={refreshSummary} />
             <BotControl bot={bot} onChanged={setBot} />
             <LiveConsole logs={logs} />
             <PlaceOrderForm

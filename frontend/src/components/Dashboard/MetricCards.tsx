@@ -8,7 +8,7 @@ import { AreaSpark, Meter, MiniBars, Ring, SplitBar } from "@/components/ui/viz"
 import type { ClosedTrade } from "@/components/Dashboard/TradeHistory";
 
 type Props = {
-  totalPnl: number;
+  totalPnl: number | null;
   winRatePct: number;
   profitFactor: number;
   maxDrawdown: number;
@@ -69,7 +69,9 @@ export function MetricCards({
 
   const wins = pnls.filter((p) => p > 0).length;
   const losses = pnls.filter((p) => p < 0).length;
-  const up = totalPnl >= 0;
+  const known = totalPnl != null;
+  const pnl = totalPnl ?? 0;
+  const up = pnl >= 0;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -103,7 +105,9 @@ export function MetricCards({
                 up ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"
               )}
             >
-              {up ? "▲" : "▼"} {accountCapital ? ((totalPnl / accountCapital) * 100).toFixed(2) : "0.00"}%
+              {known
+                ? `${up ? "▲" : "▼"} ${accountCapital ? ((pnl / accountCapital) * 100).toFixed(2) : "0.00"}%`
+                : "did not load"}
             </span>
           </div>
 
@@ -113,15 +117,16 @@ export function MetricCards({
               up ? "text-profit" : "text-loss"
             )}
           >
-            {up ? "+" : ""}
-            {inr(totalPnl)}
+            {known ? `${up ? "+" : ""}${inr(pnl)}` : "—"}
           </div>
 
           <div className="mt-3 flex items-center gap-4">
             <span className="text-caption tracking-normal text-slate-500">
-              {closed.length > 0
-                ? `curve: cumulative closed P&L · ${wins}W / ${losses}L`
-                : "no closed trades yet"}
+              {!known
+                ? "P&L did not load. This is not a zero day."
+                : closed.length > 0
+                  ? `curve: cumulative closed P&L · ${wins}W / ${losses}L`
+                  : "no closed trades yet"}
             </span>
             {pnls.length > 0 && (
               <div className="ml-auto w-24">

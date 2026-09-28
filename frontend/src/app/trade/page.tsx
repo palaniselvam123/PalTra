@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
 import { FileBarChart, Loader2, Search, Wallet, X, XCircle } from "lucide-react";
@@ -12,7 +12,7 @@ import { api, type DeskAccount, type DeskPosition, type WatchRow } from "@/lib/a
 import { money, num, pct, pnlClass } from "@/lib/format";
 
 export default function TradePage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks } =
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks } =
     useTradingState();
 
   const [watch, setWatch] = useState<WatchRow[]>([]);
@@ -35,15 +35,56 @@ export default function TradePage() {
     intraday_eligible: number;
   } | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
-  const [watchReady, setWatchReady] = useState(false);
-  const [positionsReady, setPositionsReady] = useState(false);
+  const [watchLoad, setWatchLoad] = useState<"loading" | "ok" | "error">("loading");
+  const [positionsLoad, setPositionsLoad] = useState<"loading" | "ok" | "error">("loading");
+  const [historyLoad, setHistoryLoad] = useState<"loading" | "ok" | "error">("loading");
+  const [accountLoad, setAccountLoad] = useState<"loading" | "ok" | "error">("loading");
+  const [summaryDeskLoad, setSummaryDeskLoad] = useState<"loading" | "ok" | "error">("loading");
+  const inflight = useRef(false);
 
   const refresh = useCallback(() => {
-    api.deskWatchlist().then(setWatch).catch(() => {}).finally(() => setWatchReady(true));
-    api.deskAccount().then(setAccount).catch(() => {});
-    api.deskPositions().then(setPositions).catch(() => {}).finally(() => setPositionsReady(true));
-    api.deskSummary().then(setDeskSummary).catch(() => {});
-    api.deskHistory().then(setHistory).catch(() => {});
+    if (inflight.current) return;
+    inflight.current = true;
+    const keep = (setter: typeof setWatchLoad) => setter((prev) => (prev === "ok" ? "ok" : "error"));
+    Promise.allSettled([
+      api
+        .deskWatchlist()
+        .then((rows) => {
+          setWatch(rows);
+          setWatchLoad("ok");
+        })
+        .catch(() => keep(setWatchLoad)),
+      api
+        .deskAccount()
+        .then((row) => {
+          setAccount(row);
+          setAccountLoad("ok");
+        })
+        .catch(() => keep(setAccountLoad)),
+      api
+        .deskPositions()
+        .then((rows) => {
+          setPositions(rows);
+          setPositionsLoad("ok");
+        })
+        .catch(() => keep(setPositionsLoad)),
+      api
+        .deskSummary()
+        .then((row) => {
+          setDeskSummary(row);
+          setSummaryDeskLoad("ok");
+        })
+        .catch(() => keep(setSummaryDeskLoad)),
+      api
+        .deskHistory()
+        .then((rows) => {
+          setHistory(rows);
+          setHistoryLoad("ok");
+        })
+        .catch(() => keep(setHistoryLoad)),
+    ]).finally(() => {
+      inflight.current = false;
+    });
   }, []);
 
   useEffect(() => {
@@ -63,7 +104,7 @@ export default function TradePage() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 3000);
+    const id = setInterval(refresh, 15000);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -93,6 +134,10 @@ export default function TradePage() {
 
   const fromGroww = account?.funds_source === "groww";
   const armed = account?.execution === "groww";
+  const realised = summaryDeskLoad === "ok" ? (deskSummary?.total_pnl ?? null) : null;
+  const openShown = positionsLoad === "ok" ? openPnl : null;
+  const pnlToday = realised != null && openShown != null ? realised + openShown : null;
+  const stalled = [watchLoad, positionsLoad, historyLoad, accountLoad, summaryDeskLoad].some((s) => s === "error");
 
   const toggleGrowwOrders = async () => {
     setWalletError(null);
@@ -130,7 +175,7 @@ export default function TradePage() {
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}
@@ -140,6 +185,11 @@ export default function TradePage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+        {stalled && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            The desk did not answer. Blank figures are a failed load, not an empty account.
+          </div>
+        )}
         <div className="flex items-start gap-3 flex-wrap">
           <div>
             <h1 className="text-lg font-semibold text-slate-100">Manual Trading Desk</h1>
@@ -160,22 +210,27 @@ export default function TradePage() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           <PnlTile
             label="P&L Today"
-            value={money((deskSummary?.total_pnl ?? 0) + openPnl, true)}
-            tone={pnlClass((deskSummary?.total_pnl ?? 0) + openPnl)}
+            value={money(pnlToday, true)}
+            tone={pnlClass(pnlToday)}
             sub="realised + open"
             big
           />
           <PnlTile
             label="Realised Today"
-            value={money(deskSummary?.total_pnl, true)}
-            tone={pnlClass(deskSummary?.total_pnl)}
-            sub={`${deskSummary?.trades_closed ?? 0} closed`}
+            value={money(realised, true)}
+            tone={pnlClass(realised)}
+            sub={summaryDeskLoad === "ok" ? `${deskSummary?.trades_closed ?? 0} closed` : "did not load"}
           />
-          <PnlTile label="Open P&L" value={money(openPnl, true)} tone={pnlClass(openPnl)} sub={`${positions.length} positions`} />
-          <PnlTile label="Win Rate" value={pct(deskSummary?.win_rate_pct)} sub="today" />
+          <PnlTile
+            label="Open P&L"
+            value={money(openShown, true)}
+            tone={pnlClass(openShown)}
+            sub={positionsLoad === "ok" ? `${positions.length} positions` : "did not load"}
+          />
+          <PnlTile label="Win Rate" value={summaryDeskLoad === "ok" ? pct(deskSummary?.win_rate_pct) : "—"} sub="today" />
           <PnlTile
             label="Profit Factor"
-            value={num(deskSummary?.profit_factor)}
+            value={summaryDeskLoad === "ok" ? num(deskSummary?.profit_factor) : "—"}
             tone={(deskSummary?.profit_factor ?? 0) >= 1 ? "text-profit" : "text-loss"}
             sub="gross win ÷ gross loss"
           />
@@ -224,20 +279,29 @@ export default function TradePage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <Stat
               label={armed ? "Groww cash" : fromGroww ? "Groww cash · practice orders" : "Practice balance"}
-              value={account?.funds_error && account.balance === 0 ? "—" : money(account?.balance)}
+              value={
+                accountLoad !== "ok"
+                  ? "—"
+                  : account?.funds_error && account.balance === 0
+                    ? "—"
+                    : money(account?.balance)
+              }
               tone="text-slate-100"
               big
             />
             <Stat
               label="Realised (all time)"
-              value={money(account?.realised_all_time, true)}
+              value={accountLoad === "ok" ? money(account?.realised_all_time, true) : "—"}
               tone={pnlClass(account?.realised_all_time)}
             />
-            <Stat label="Unrealised" value={money(openPnl, true)} tone={pnlClass(openPnl)} />
-            <Stat label="Equity" value={money((account?.balance ?? 0) + openPnl)} />
+            <Stat label="Unrealised" value={money(openShown, true)} tone={pnlClass(openShown)} />
+            <Stat
+              label="Equity"
+              value={accountLoad === "ok" && openShown != null ? money((account?.balance ?? 0) + openShown) : "—"}
+            />
             <Stat
               label="Margin available"
-              value={money(account?.margin_available)}
+              value={accountLoad === "ok" ? money(account?.margin_available) : "—"}
               sub={
                 fromGroww
                   ? "MIS margin from Groww"
@@ -249,7 +313,7 @@ export default function TradePage() {
             />
             <Stat
               label="Deployed"
-              value={money(account?.open_exposure)}
+              value={accountLoad === "ok" ? money(account?.open_exposure) : "—"}
               sub={account ? `${num(account.exposure_ratio)}× capital` : undefined}
             />
           </div>
@@ -296,7 +360,11 @@ export default function TradePage() {
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-4 py-8 text-center text-xs text-slate-500">
-                        {watchReady ? "No symbols on this watchlist." : "Loading the watchlist…"}
+                        {watchLoad === "error"
+                          ? "The watchlist did not load. This is not an empty list."
+                          : watchLoad === "loading"
+                            ? "Loading the watchlist…"
+                            : "No symbols on this watchlist."}
                       </td>
                     </tr>
                   )}
@@ -428,7 +496,11 @@ export default function TradePage() {
                 {positions.length === 0 && (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-xs text-slate-500">
-                      {positionsReady ? "No open positions on the desk." : "Loading positions…"}
+                      {positionsLoad === "error"
+                        ? "Positions did not load. This is not an empty desk."
+                        : positionsLoad === "loading"
+                          ? "Loading positions…"
+                          : "No open positions on the desk."}
                     </td>
                   </tr>
                 )}
@@ -498,7 +570,11 @@ export default function TradePage() {
                 {history.length === 0 && (
                   <tr>
                     <td colSpan={10} className="px-4 py-8 text-center text-xs text-slate-500">
-                      No closed trades on the desk yet.
+                      {historyLoad === "error"
+                        ? "Trade history did not load. This is not an empty book."
+                        : historyLoad === "loading"
+                          ? "Loading trades…"
+                          : "No closed trades on the desk yet."}
                     </td>
                   </tr>
                 )}

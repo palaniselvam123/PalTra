@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
@@ -86,6 +87,7 @@ class StrategyEngine:
         self.trades_today = 0
         self._session_date = _ist_now().date().isoformat()
         self._quote_symbol = ""
+        self._cfg_cache = None
 
     def stop(self) -> None:
         self._stop = True
@@ -96,6 +98,7 @@ class StrategyEngine:
             if row is None:
                 raise RuntimeError("BotConfig missing — init_db() was not called")
             db.expunge(row)
+            self._cfg_cache = row
             return row
 
     def _roll_session(self, now: dt.datetime) -> None:
@@ -117,7 +120,10 @@ class StrategyEngine:
                 raise
             except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
-            await self._sleep(0.5)
+            # A stopped book after the close does not need two quotes a second.
+            # That loop was keeping the only CPU busy while the desk waited.
+            pause = 5.0 if (not market_is_open() and self.status != "RUNNING") else 0.5
+            await self._sleep(pause)
 
     async def tick(self, now: dt.datetime) -> None:
         cfg = self.load_config()
@@ -507,11 +513,14 @@ class StrategyEngine:
         }
 
     def snapshot(self) -> dict:
-        cfg = None
-        try:
-            cfg = self.load_config()
-        except Exception:  # noqa: BLE001
-            cfg = None
+        # Serve the config the loop already loaded. A sqlite read on this
+        # request path blocks every other page while the file is busy.
+        cfg = self._cfg_cache
+        if cfg is None:
+            try:
+                cfg = self.load_config()
+            except Exception:  # noqa: BLE001
+                cfg = None
         unreal = self._unrealized()
         kpis = self._kpis()
         pos = self.position
@@ -652,9 +661,15 @@ class StrategyEngine:
         }
 
     def trades(self) -> list[dict]:
+        now = time.monotonic()
+        cached = getattr(self, "_trades_cache", None)
+        if cached is not None and now - cached[0] < 8:
+            return cached[1]
         with session_factory()() as db:
             rows = db.query(TradeLog).order_by(TradeLog.id.desc()).limit(200).all()
-        return [_trade_dict(r) for r in rows]
+        payload = [_trade_dict(r) for r in rows]
+        self._trades_cache = (now, payload)
+        return payload
 
 
 def _trade_dict(row: TradeLog) -> dict:

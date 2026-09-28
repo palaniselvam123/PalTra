@@ -23,7 +23,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function ScannerPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
 
   const [config, setConfig] = useState<ScanConfig | null>(null);
@@ -125,7 +125,7 @@ export default function ScannerPage() {
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}

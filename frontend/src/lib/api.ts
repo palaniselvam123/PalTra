@@ -577,17 +577,35 @@ function queryString(params: Record<string, string | undefined>): string {
   return qs ? `?${qs}` : "";
 }
 
+const REQUEST_MS = 12000;
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    signal: options?.signal ?? AbortSignal.timeout(15000),
-    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail ?? `Request failed: ${res.status}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_MS);
+  const parent = options?.signal;
+  if (parent) {
+    if (parent.aborted) controller.abort();
+    else parent.addEventListener("abort", () => controller.abort(), { once: true });
   }
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail ?? `Request failed: ${res.status}`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("The server did not answer. This is not an empty account.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 

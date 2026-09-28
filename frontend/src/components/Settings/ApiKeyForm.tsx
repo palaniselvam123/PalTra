@@ -25,15 +25,20 @@ export function ApiKeyForm() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginResult, setLoginResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saved, setSaved] = useState<CredentialStatus | null>(null);
+  const [check, setCheck] = useState<"loading" | "ok" | "error">("loading");
 
   // Without this the form always renders blank, so stored credentials look
   // lost after every refresh — the fields are write-only by design (the API
   // never returns a decrypted key), so the badge is the only evidence.
+  // A failed check must not say the keys are missing.
   const refreshSaved = (which: string) =>
     api
       .getCredentialStatus(which)
-      .then(setSaved)
-      .catch(() => setSaved(null));
+      .then((row) => {
+        setSaved(row);
+        setCheck("ok");
+      })
+      .catch(() => setCheck("error"));
 
   useEffect(() => {
     refreshSaved(broker);
@@ -90,10 +95,22 @@ export function ApiKeyForm() {
             saved?.configured ? "bg-profit/15 text-profit" : "bg-slate-700/40 text-slate-400"
           )}
         >
-          {saved?.configured ? "KEYS SAVED" : "NOT CONFIGURED"}
+          {check === "loading"
+            ? "CHECKING…"
+            : check === "error"
+              ? "COULD NOT CHECK"
+              : saved?.configured
+                ? "KEYS SAVED"
+                : "NOT CONFIGURED"}
         </span>
       </div>
 
+      {check === "error" && (
+        <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+          The key check did not answer. This does not mean the keys are missing, and you do not need to type them
+          again. Market status can still show Groww as connected.
+        </div>
+      )}
       {saved?.configured && (
         <div className="text-[11px] text-slate-400 bg-base border border-border rounded-md px-3 py-2 space-y-0.5">
           <div>

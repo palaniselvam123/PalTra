@@ -245,7 +245,15 @@ class GrowwClient(BrokerClient):
         sdk = self._require_session()
         keys = tuple(f"{self.EXCHANGE}_{s}" for s in symbols)
         try:
-            raw = await asyncio.to_thread(sdk.get_ltp, exchange_trading_symbols=keys, segment=self.SEGMENT)
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_ltp,
+                    exchange_trading_symbols=keys,
+                    segment=self.SEGMENT,
+                    timeout=6,
+                ),
+                timeout=8,
+            )
         except Exception as exc:  # noqa: BLE001
             if _is_forbidden(exc):
                 raise BrokerDataForbidden(_FORBIDDEN_HINT) from exc
@@ -272,8 +280,15 @@ class GrowwClient(BrokerClient):
         """Quote including bid/ask depth, used by the spread guard."""
         sdk = self._require_session()
         try:
-            raw = await asyncio.to_thread(
-                sdk.get_quote, trading_symbol=symbol, exchange=self.EXCHANGE, segment=self.SEGMENT
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_quote,
+                    trading_symbol=symbol,
+                    exchange=self.EXCHANGE,
+                    segment=self.SEGMENT,
+                    timeout=6,
+                ),
+                timeout=8,
             )
         except Exception as exc:  # noqa: BLE001
             if _is_forbidden(exc):
@@ -423,7 +438,10 @@ class GrowwClient(BrokerClient):
         """Cash and MIS buying power from Groww. Raises BrokerOrderError."""
         sdk = self._require_session()
         try:
-            raw = await asyncio.to_thread(sdk.get_available_margin_details)
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(sdk.get_available_margin_details, timeout=6),
+                timeout=8,
+            )
         except Exception as exc:  # noqa: BLE001
             raise BrokerOrderError(f"Could not read Groww margin: {exc}") from exc
         try:

@@ -12,12 +12,12 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
 
   return (
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Card label="Theoretical MA-cross gross" value={k?.theoretical_gross ?? 0} hint="Signal-candle price vs exit" />
-      <Card label="Actual candle-fill gross" value={k?.actual_gross ?? 0} hint="Includes fill lag vs the cross" />
+      <Card label="Theoretical MA-cross gross" value={state ? (k?.theoretical_gross ?? 0) : null} hint="Signal-candle price vs exit" />
+      <Card label="Actual candle-fill gross" value={state ? (k?.actual_gross ?? 0) : null} hint="Includes fill lag vs the cross" />
       <div className="relative rounded-xl border border-white/5 bg-[#151921] p-4">
         <button className="text-left" onClick={() => setOpen((v) => !v)}>
           <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Brokerage & statutory taxes</div>
-          <div className="mt-1 font-mono text-xl text-[#F59E0B]">{inr(k?.total_charges ?? 0)}</div>
+          <div className="mt-1 font-mono text-xl text-[#F59E0B]">{state ? inr(k?.total_charges ?? 0) : "—"}</div>
           <div className="mt-1 text-[11px] text-slate-500">Groww · STT · NSE · stamp · GST</div>
         </button>
         {open && b && (
@@ -33,18 +33,25 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
       </div>
       <Card
         label="Realistic net P&L"
-        value={k?.net ?? 0}
-        hint={`Win rate ${((k?.win_rate ?? 0)).toFixed(0)}% · ${k?.trades ?? 0} taken, limit ${cap}`}
+        value={state ? (k?.net ?? 0) : null}
+        hint={
+          state
+            ? `Win rate ${(k?.win_rate ?? 0).toFixed(0)}% · ${k?.trades ?? 0} taken, limit ${cap}`
+            : "Terminal totals did not load"
+        }
       />
     </section>
   );
 }
 
-function Card({ label, value, hint }: { label: string; value: number; hint: string }) {
+function Card({ label, value, hint }: { label: string; value: number | null; hint: string }) {
+  const up = (value ?? 0) >= 0;
   return (
     <div className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className={clsx("mt-1 font-mono text-xl", value >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>{inr(value)}</div>
+      <div className={clsx("mt-1 font-mono text-xl", value == null ? "text-slate-500" : up ? "text-[#10B981]" : "text-[#F43F5E]")}>
+        {value == null ? "—" : inr(value)}
+      </div>
       <div className="mt-1 text-[11px] text-slate-500">{hint}</div>
     </div>
   );
