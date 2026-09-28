@@ -362,15 +362,100 @@ def test_failed_quote_keeps_the_last_real_price(monkeypatch):
     assert client.data_source != "SIMULATOR"
 
 
-def test_simulator_only_when_there_is_no_groww_token():
+def test_simulator_only_when_there_is_no_groww_token(monkeypatch):
     import asyncio
 
     from groww_client import GrowwClient
 
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "")
     client = GrowwClient(mode="PAPER", token="unused")
     client.token = ""
     _ltp, _frame, source = asyncio.run(client.refresh("ANTELOPUS"))
     assert source == "SIMULATOR"
+
+
+def test_empty_env_token_uses_the_saved_desk_session(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
+    client = GrowwClient(mode="PAPER", token="unused")
+    client.token = ""
+    client.set_mode("PAPER", "")
+    assert client.token == ""
+    frame = pd.DataFrame(
+        [{"ts": 1, "open": 1160.0, "high": 1166.0, "low": 1158.0, "close": 1159.45, "volume": 1}]
+    )
+
+    async def fake(symbol):
+        assert symbol == "ANTELOPUS"
+        assert client.token == "desk-token"
+        return 1159.45, frame
+
+    client._refresh_live = fake  # type: ignore[method-assign]
+    ltp, _, source = asyncio.run(client.refresh("ANTELOPUS"))
+    assert ltp == 1159.45
+    assert source == "LAST CLOSE"
+    assert client.data_source != "SIMULATOR"
+
+
+def test_desk_session_token_reads_an_unexpired_row(tmp_path, monkeypatch):
+    import sqlite3
+
+    from cryptography.fernet import Fernet
+
+    import groww_client
+
+    key = Fernet.generate_key().decode()
+    cipher = Fernet(key.encode()).encrypt(b"quote-only-token").decode()
+    db = tmp_path / "trading.db"
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "create table broker_credentials "
+            "(broker text, access_token_encrypted text, token_expires_at text)"
+        )
+        con.execute(
+            "insert into broker_credentials values (?, ?, ?)",
+            ("groww", cipher, "2099-01-01 23:59:00"),
+        )
+    monkeypatch.setenv("DESK_TRADING_DB", str(db))
+    monkeypatch.setenv("ENCRYPTION_KEY", key)
+    groww_client._desk_token_cache = None
+    assert groww_client.desk_session_token() == "quote-only-token"
+    with sqlite3.connect(db) as con:
+        con.execute("update broker_credentials set token_expires_at = ?", ("2000-01-01 00:00:00",))
+    groww_client._desk_token_cache = None
+    assert groww_client.desk_session_token() == ""
+
+
+def test_empty_mode_token_does_not_clear_a_loaded_session():
+    from groww_client import GrowwClient
+
+    client = GrowwClient(mode="PAPER", token="kept")
+    client.set_mode("PAPER", "")
+    assert client.token == "kept"
+
+
+def test_ltp_is_kept_when_candle_history_fails():
+    from groww_client import GrowwClient
+
+    client = GrowwClient(mode="PAPER", token="test-token")
+
+    class Sdk:
+        def get_ltp(self, **_kwargs):
+            assert _kwargs.get("timeout") == 6
+            return {"NSE_ANTELOPUS": 1159.45}
+
+        def get_historical_candle_data(self, **_kwargs):
+            raise TimeoutError("candles")
+
+    client._sdk = Sdk()
+    ltp, frame = client._load_quote("ANTELOPUS")
+    assert ltp == 1159.45
+    assert len(frame) == 1
+    assert float(frame.iloc[-1]["close"]) == 1159.45
 
 
 def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):

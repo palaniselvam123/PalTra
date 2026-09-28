@@ -1,9 +1,10 @@
 """Groww execution wrapper with PAPER and LIVE paths.
 
 PAPER reads the real NSE last price and 1-minute candles whenever a Groww
-token is present, including after the close. The internal simulator runs
-only when that quote is unavailable. Fills are booked locally; the exchange
-is never called.
+token is present, including after the close. The token is the env value or
+the session the desk already saved. The internal simulator runs only when
+neither exists. Fills are booked locally; this token is never used to place
+an order from the quote path.
 
 LIVE places MIS limit orders with a 0.20% protection buffer (not raw market
 orders) and a resting exchange SL for the ATR stop.
@@ -13,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import math
+import os
 import random
+import sqlite3
 import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -29,11 +32,57 @@ _QUOTE_TTL_OPEN_SEC = 3.0
 _QUOTE_TTL_CLOSED_SEC = 60.0
 _QUOTE_TIMEOUT_SEC = 8.0
 _QUOTE_RETRY_SEC = 20.0
+_SDK_TIMEOUT_SEC = 6
+_DESK_TOKEN_TTL_SEC = 30.0
+_desk_token_cache: tuple[float, str] | None = None
 
 # Statuses that mean "do not place another order yet".
 IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
 TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED"})
+
+
+def desk_session_token() -> str:
+    """Access token the desk already saved, used for quotes only.
+
+    GROWW_ACCESS_TOKEN on this host is empty, so the terminal would otherwise
+    invent a price. The decrypted value is never logged or returned over HTTP.
+    """
+    global _desk_token_cache
+    now = time.monotonic()
+    if _desk_token_cache is not None and now - _desk_token_cache[0] < _DESK_TOKEN_TTL_SEC:
+        return _desk_token_cache[1]
+    token = _read_desk_token()
+    _desk_token_cache = (now, token)
+    return token
+
+
+def _read_desk_token() -> str:
+    path = os.environ.get("DESK_TRADING_DB", "/data/trading.db")
+    key = os.environ.get("ENCRYPTION_KEY", "").strip()
+    if not key or not os.path.isfile(path):
+        return ""
+    try:
+        uri = f"file:{path}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=2) as con:
+            row = con.execute(
+                "select access_token_encrypted, token_expires_at "
+                "from broker_credentials where broker = ? limit 1",
+                ("groww",),
+            ).fetchone()
+        if not row or not row[0] or not row[1]:
+            return ""
+        expires = dt.datetime.fromisoformat(str(row[1]).replace("Z", ""))
+        if expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
+        if expires <= dt.datetime.now():
+            return ""
+        from cryptography.fernet import Fernet
+
+        plain = Fernet(key.encode()).decrypt(str(row[0]).encode()).decode()
+        return plain.strip()
+    except Exception:
+        return ""
 
 
 def market_is_open(now: dt.datetime | None = None) -> bool:
@@ -149,7 +198,7 @@ class CandleSimulator:
 class GrowwClient:
     def __init__(self, mode: str = "PAPER", token: str = ""):
         self.mode = "LIVE" if (mode or "").upper() == "LIVE" else "PAPER"
-        self.token = token or get_settings().groww_access_token
+        self.token = token or get_settings().groww_access_token or desk_session_token()
         self.simulator = CandleSimulator()
         self.data_source = "SIMULATOR"
         self.last_error = ""
@@ -164,7 +213,9 @@ class GrowwClient:
 
     def set_mode(self, mode: str, token: str | None = None) -> None:
         self.mode = "LIVE" if mode.upper() == "LIVE" else "PAPER"
-        if token is not None:
+        # Boot passes the empty env token. That must not wipe the desk session.
+        if token and token != self.token:
+            self._sdk = None
             self.token = token
 
     def _next_id(self, prefix: str) -> str:
@@ -203,6 +254,7 @@ class GrowwClient:
         The simulator is only for a desk with no Groww token.
         """
         symbol = (symbol or "").upper()
+        self._ensure_quote_token()
         now_m = time.monotonic()
         cached = self._quotes.get(symbol)
         ttl = _QUOTE_TTL_OPEN_SEC if market_is_open() else _QUOTE_TTL_CLOSED_SEC
@@ -220,6 +272,7 @@ class GrowwClient:
                     self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
                     if cached is not None:
                         return self._serve_quote(symbol, live=False)
+                    self.data_source = "ERROR"
                     raise
                 self._quotes[symbol] = (float(ltp), frame, now_m)
                 self._retry_after.pop(symbol, None)
@@ -227,8 +280,17 @@ class GrowwClient:
                 return self._serve_quote(symbol, live=market_is_open())
             if cached is not None:
                 return self._serve_quote(symbol, live=False)
+            self.data_source = "ERROR"
             raise RuntimeError(self.last_error or "NSE quote unavailable")
         return self._simulator_quote(symbol)
+
+    def _ensure_quote_token(self) -> None:
+        if self.token:
+            return
+        loaded = desk_session_token()
+        if loaded:
+            self.token = loaded
+            self._sdk = None
 
     async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
         # The Groww SDK blocks with no HTTP timeout. Keep that off the event
@@ -238,31 +300,30 @@ class GrowwClient:
     def _load_quote(self, symbol: str) -> tuple[float, pd.DataFrame]:
         sdk = self._require_sdk()
         key = (f"NSE_{symbol}",)
-        raw_ltp = sdk.get_ltp(exchange_trading_symbols=key, segment="CASH")
-        data = raw_ltp.get("payload", raw_ltp) if isinstance(raw_ltp, dict) else raw_ltp
-        ltp = None
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if symbol in str(k):
-                    ltp = float(v.get("ltp") or v.get("last_price")) if isinstance(v, dict) else float(v)
-                    break
-            if ltp is None and "ltp" in data:
-                ltp = float(data["ltp"])
-        if ltp is None:
-            raise RuntimeError(f"Unexpected LTP payload: {raw_ltp!r}"[:200])
+        raw_ltp = sdk.get_ltp(
+            exchange_trading_symbols=key, segment="CASH", timeout=_SDK_TIMEOUT_SEC
+        )
+        ltp = _parse_ltp(raw_ltp, symbol)
         end = dt.datetime.now(IST).replace(tzinfo=None)
         start = end - dt.timedelta(days=5)
-        raw = sdk.get_historical_candle_data(
-            trading_symbol=symbol,
-            exchange="NSE",
-            segment="CASH",
-            start_time=start.strftime("%Y-%m-%d %H:%M:%S"),
-            end_time=end.strftime("%Y-%m-%d %H:%M:%S"),
-            interval_in_minutes=1,
-        )
-        frame = _parse_candles(raw)
+        frame = pd.DataFrame()
+        try:
+            raw = sdk.get_historical_candle_data(
+                trading_symbol=symbol,
+                exchange="NSE",
+                segment="CASH",
+                start_time=start.strftime("%Y-%m-%d %H:%M:%S"),
+                end_time=end.strftime("%Y-%m-%d %H:%M:%S"),
+                interval_in_minutes=1,
+                timeout=_SDK_TIMEOUT_SEC,
+            )
+            frame = _parse_candles(raw)
+        except Exception:
+            frame = pd.DataFrame()
         if frame.empty:
-            raise RuntimeError("Groww returned no 1-minute candles")
+            # The header price is the last trade. A missing candle file must
+            # not send the terminal back to the practice tape.
+            return float(ltp), _one_bar(ltp)
         # Append a forming bar at the live LTP so iloc[-1] is never a closed bar
         # the strategy might mistake for a signal.
         last_ts = int(frame.iloc[-1]["ts"])
@@ -446,6 +507,41 @@ class GrowwClient:
                 "average_price": price,
             }
         ]
+
+
+def _parse_ltp(raw, symbol: str) -> float:
+    data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+    ltp = None
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if symbol in str(key):
+                ltp = (
+                    float(value.get("ltp") or value.get("last_price"))
+                    if isinstance(value, dict)
+                    else float(value)
+                )
+                break
+        if ltp is None and "ltp" in data:
+            ltp = float(data["ltp"])
+    if ltp is None or not math.isfinite(ltp) or ltp <= 0:
+        raise RuntimeError("Unexpected LTP payload")
+    return ltp
+
+
+def _one_bar(ltp: float) -> pd.DataFrame:
+    now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
+    return pd.DataFrame(
+        [
+            {
+                "ts": now_ts,
+                "open": ltp,
+                "high": ltp,
+                "low": ltp,
+                "close": ltp,
+                "volume": 0,
+            }
+        ]
+    )
 
 
 def _parse_candles(raw) -> pd.DataFrame:
