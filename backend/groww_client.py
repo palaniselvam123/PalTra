@@ -1,8 +1,9 @@
 """Groww execution wrapper with PAPER and LIVE paths.
 
-PAPER fetches live 1-minute candles and LTP when a token and an open session
-are available, and otherwise runs an internal 1-minute simulator. Fills are
-booked locally; the exchange is never called.
+PAPER reads the real NSE last price and 1-minute candles whenever a Groww
+token is present, including after the close. The internal simulator runs
+only when that quote is unavailable. Fills are booked locally; the exchange
+is never called.
 
 LIVE places MIS limit orders with a 0.20% protection buffer (not raw market
 orders) and a resting exchange SL for the ATR stop.
@@ -13,6 +14,7 @@ import asyncio
 import datetime as dt
 import math
 import random
+import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
@@ -22,6 +24,11 @@ from config import get_settings
 from indicators import round_to_nse_tick
 
 IST = ZoneInfo("Asia/Kolkata")
+# A closed session does not need a new candle download every second.
+_QUOTE_TTL_OPEN_SEC = 3.0
+_QUOTE_TTL_CLOSED_SEC = 60.0
+_QUOTE_TIMEOUT_SEC = 8.0
+_QUOTE_RETRY_SEC = 20.0
 
 # Statuses that mean "do not place another order yet".
 IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
@@ -151,6 +158,9 @@ class GrowwClient:
         self._ltp = self.simulator.price
         self._sdk = None
         self._positions: list[dict] = []
+        self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
+        self._retry_after: dict[str, float] = {}
+        self._sim_symbol = ""
 
     def set_mode(self, mode: str, token: str | None = None) -> None:
         self.mode = "LIVE" if mode.upper() == "LIVE" else "PAPER"
@@ -171,24 +181,54 @@ class GrowwClient:
         self._sdk = GrowwAPI(self.token)
         return self._sdk
 
-    async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
-        """Update LTP + candle frame. Prefers Groww; falls back to the simulator."""
-        if self.token and (self.mode == "LIVE" or market_is_open()):
-            try:
-                ltp, frame = await self._refresh_live(symbol)
-                self._ltp = ltp
-                self.data_source = "GROWW"
-                self.last_error = ""
-                return ltp, frame, self.data_source
-            except Exception as exc:  # noqa: BLE001
-                self.last_error = str(exc)
-                if self.mode == "LIVE":
-                    # Live must not silently trade the simulator.
-                    raise
+    def _serve_quote(self, symbol: str, live: bool) -> tuple[float, pd.DataFrame, str]:
+        ltp, frame, _saved = self._quotes[symbol]
+        self._ltp = ltp
+        self.data_source = "GROWW" if live else "LAST CLOSE"
+        return ltp, frame, self.data_source
+
+    def _simulator_quote(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
+        if self._sim_symbol != symbol:
+            self.simulator = CandleSimulator()
+            self._sim_symbol = symbol
         ltp = self.simulator.advance()
         self._ltp = ltp
         self.data_source = "SIMULATOR"
         return ltp, self.simulator.frame(), self.data_source
+
+    async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
+        """Update LTP + candle frame from NSE when a token exists.
+
+        After the close this is the last traded price, not a fresh tick.
+        The simulator is only for a desk with no Groww token.
+        """
+        symbol = (symbol or "").upper()
+        now_m = time.monotonic()
+        cached = self._quotes.get(symbol)
+        ttl = _QUOTE_TTL_OPEN_SEC if market_is_open() else _QUOTE_TTL_CLOSED_SEC
+        if cached is not None and now_m - cached[2] < ttl:
+            self.last_error = ""
+            return self._serve_quote(symbol, live=market_is_open())
+        if self.token:
+            if now_m >= self._retry_after.get(symbol, 0.0):
+                try:
+                    ltp, frame = await asyncio.wait_for(
+                        self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.last_error = f"NSE quote failed: {exc}"[:240]
+                    self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
+                    if cached is not None:
+                        return self._serve_quote(symbol, live=False)
+                    raise
+                self._quotes[symbol] = (float(ltp), frame, now_m)
+                self._retry_after.pop(symbol, None)
+                self.last_error = ""
+                return self._serve_quote(symbol, live=market_is_open())
+            if cached is not None:
+                return self._serve_quote(symbol, live=False)
+            raise RuntimeError(self.last_error or "NSE quote unavailable")
+        return self._simulator_quote(symbol)
 
     async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
         sdk = self._require_sdk()
@@ -208,8 +248,8 @@ class GrowwClient:
             raise RuntimeError(f"Unexpected LTP payload: {raw!r}"[:200])
 
         ltp = await asyncio.to_thread(_ltp)
-        end = dt.datetime.now()
-        start = end - dt.timedelta(days=2)
+        end = dt.datetime.now(IST).replace(tzinfo=None)
+        start = end - dt.timedelta(days=5)
 
         def _candles():
             return sdk.get_historical_candle_data(

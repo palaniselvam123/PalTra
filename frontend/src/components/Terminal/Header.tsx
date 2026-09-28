@@ -1,11 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, Radio } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Loader2, Radio, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 
-const QUICK = ["KIRLOSFER", "ANTELOPUS"];
+const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
+const SAVED_KEY = "sma.symbols";
+
+type Hit = { symbol: string; name: string };
+
+function deskOrigin(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+}
 
 type Props = {
   state: SmaState | null;
@@ -16,13 +27,77 @@ type Props = {
 
 export function Header({ state, config, connected, onChanged }: Props) {
   const [symbol, setSymbol] = useState(config?.symbol ?? "KIRLOSFER");
+  const [saved, setSaved] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const symbols = Array.from(new Set([...DEFAULTS, ...saved]));
 
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
   }, [config?.symbol]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(parsed)) {
+        setSaved(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)).slice(0, 12));
+      }
+    } catch {
+      /* a private browser can refuse storage */
+    }
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 1) {
+      setHits([]);
+      return;
+    }
+    const id = setTimeout(() => {
+      setSearching(true);
+      fetch(`${deskOrigin()}/api/instruments/search?q=${encodeURIComponent(q)}&limit=8`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error("Search is unavailable");
+          return (await res.json()) as Hit[];
+        })
+        .then((rows) => {
+          setHits(rows);
+          setOpen(true);
+        })
+        .catch(() => setHits([]))
+        .finally(() => setSearching(false));
+    }, 200);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const remember = (next: string) => {
+    const cleaned = next.trim().toUpperCase();
+    if (!cleaned || DEFAULTS.includes(cleaned)) return;
+    setSaved((prev) => {
+      const list = [cleaned, ...prev.filter((s) => s !== cleaned)].slice(0, 12);
+      try {
+        localStorage.setItem(SAVED_KEY, JSON.stringify(list));
+      } catch {
+        /* storage full or blocked */
+      }
+      return list;
+    });
+  };
 
   const ltp = state?.ltp ?? 0;
   const changePct = state?.day_change_pct ?? 0;
@@ -37,6 +112,10 @@ export function Header({ state, config, connected, onChanged }: Props) {
     try {
       await smaApi.saveConfig({ symbol: cleaned });
       setSymbol(cleaned);
+      remember(cleaned);
+      setQuery("");
+      setHits([]);
+      setOpen(false);
       onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not change symbol");
@@ -94,9 +173,9 @@ export function Header({ state, config, connected, onChanged }: Props) {
         </a>
         <div className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</div>
 
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#151921] px-2 py-1">
+        <div ref={searchRef} className="relative flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-[#151921] px-2 py-1">
           <span className="px-1 text-[10px] uppercase tracking-wider text-slate-500">NSE</span>
-          {QUICK.map((s) => (
+          {symbols.map((s) => (
             <button
               key={s}
               disabled={busy}
@@ -110,18 +189,40 @@ export function Header({ state, config, connected, onChanged }: Props) {
             </button>
           ))}
           <form
+            className="flex items-center"
             onSubmit={(e) => {
               e.preventDefault();
-              applySymbol(symbol);
+              const typed = query.trim().toUpperCase();
+              if (typed) applySymbol(typed);
             }}
           >
+            <Search size={12} className="text-slate-500" />
             <input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              className="w-28 bg-transparent px-2 text-xs uppercase text-slate-100 outline-none"
-              aria-label="NSE symbol"
+              value={query}
+              onChange={(e) => setQuery(e.target.value.toUpperCase())}
+              onFocus={() => hits.length > 0 && setOpen(true)}
+              placeholder="Find a stock"
+              className="w-28 bg-transparent px-2 text-xs uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-500"
+              aria-label="Find an NSE stock"
             />
+            {searching && <Loader2 size={11} className="animate-spin text-slate-500" />}
           </form>
+          {open && hits.length > 0 && (
+            <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-white/10 bg-[#151921] shadow-xl">
+              {hits.map((hit) => (
+                <button
+                  key={hit.symbol}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => applySymbol(hit.symbol)}
+                  className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
+                >
+                  <span className="text-xs font-medium text-slate-100">{hit.symbol}</span>
+                  <span className="truncate text-[10px] text-slate-500">{hit.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="font-mono text-sm">

@@ -309,6 +309,98 @@ def api(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_closed_market_quote_is_the_last_nse_price(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
+    client = GrowwClient(mode="PAPER", token="test-token")
+    frame = pd.DataFrame(
+        [{"ts": 1, "open": 1135.0, "high": 1285.0, "low": 1094.0, "close": 1261.7, "volume": 10}]
+    )
+
+    async def fake(symbol):
+        assert symbol == "ANTELOPUS"
+        return 1261.7, frame
+
+    client._refresh_live = fake  # type: ignore[method-assign]
+    ltp, got, source = asyncio.run(client.refresh("antelopus"))
+    assert ltp == 1261.7
+    assert source == "LAST CLOSE"
+    assert float(got.iloc[-1]["close"]) == 1261.7
+
+    async def should_not_run(_symbol):
+        raise AssertionError("cached quote was fetched again")
+
+    client._refresh_live = should_not_run  # type: ignore[method-assign]
+    again, _, source_again = asyncio.run(client.refresh("ANTELOPUS"))
+    assert again == 1261.7
+    assert source_again == "LAST CLOSE"
+
+
+def test_failed_quote_keeps_the_last_real_price(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
+    client = GrowwClient(mode="PAPER", token="test-token")
+    frame = pd.DataFrame(
+        [{"ts": 1, "open": 1260.0, "high": 1262.0, "low": 1259.0, "close": 1261.7, "volume": 1}]
+    )
+    client._quotes["ANTELOPUS"] = (1261.7, frame, 0.0)
+
+    async def fail(_symbol):
+        raise TimeoutError("timed out")
+
+    client._refresh_live = fail  # type: ignore[method-assign]
+    ltp, _, source = asyncio.run(client.refresh("ANTELOPUS"))
+    assert ltp == 1261.7
+    assert source == "LAST CLOSE"
+    assert "timed out" in client.last_error
+    assert client.data_source != "SIMULATOR"
+
+
+def test_simulator_only_when_there_is_no_groww_token():
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    client = GrowwClient(mode="PAPER", token="unused")
+    client.token = ""
+    _ltp, _frame, source = asyncio.run(client.refresh("ANTELOPUS"))
+    assert source == "SIMULATOR"
+
+
+def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+    from strategy_engine import StrategyEngine
+
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: False)
+    engine = StrategyEngine(broker=GrowwClient(mode="PAPER", token="unused"))
+    engine.status = "RUNNING"
+    engine.data_source = "LAST CLOSE"
+    called = {"entry": False}
+
+    async def refuse(*_args, **_kwargs):
+        called["entry"] = True
+        raise AssertionError("entry after the close")
+
+    engine.broker.place_entry = refuse  # type: ignore[method-assign]
+    frame = enrich(_ohlcv([100.0] * 40))
+    now = dt.datetime(2026, 9, 28, 19, 0, tzinfo=IST)
+
+    class Config:
+        square_off_time = "15:15"
+
+    asyncio.run(engine.on_minute(now, Config(), frame))  # type: ignore[arg-type]
+    assert called["entry"] is False
+    assert engine.last_signal == "market closed — showing the last NSE price"
+
+
 def test_boots_in_paper_and_live_needs_confirmation(api):
     state = api.get("/api/state")
     assert state.status_code == 200

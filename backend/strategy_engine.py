@@ -85,6 +85,7 @@ class StrategyEngine:
         self.realized_net = 0.0
         self.trades_today = 0
         self._session_date = _ist_now().date().isoformat()
+        self._quote_symbol = ""
 
     def stop(self) -> None:
         self._stop = True
@@ -122,6 +123,12 @@ class StrategyEngine:
         cfg = self.load_config()
         self._roll_session(now)
         self.broker.set_mode(cfg.trading_mode)
+        symbol = (cfg.symbol or "").upper()
+        if symbol != self._quote_symbol:
+            # Drop the previous name's tape so a new symbol cannot inherit it.
+            self._quote_symbol = symbol
+            self.candles = pd.DataFrame()
+            self.ltp = 0.0
         try:
             ltp, frame, source = await self.broker.refresh(cfg.symbol)
         except Exception as exc:  # noqa: BLE001
@@ -165,8 +172,13 @@ class StrategyEngine:
             self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
             return
 
+        # A real last-close tape must not open a position after the bell.
+        # The simulator still demonstrates signals when no NSE quote exists.
+        if not market_is_open(now) and self.data_source != "SIMULATOR":
+            self.last_signal = "market closed — showing the last NSE price"
+            return
+
         # Opening-auction buffer applies whenever we are inside a real session.
-        # The simulator (market closed) is allowed to demonstrate signals.
         if market_is_open(now) and now.time() < dt.time(9, 20):
             self.last_signal = "skipped — opening auction buffer (09:15–09:20)"
             return
