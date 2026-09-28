@@ -358,7 +358,7 @@ def test_failed_quote_keeps_the_last_real_price(monkeypatch):
     ltp, _, source = asyncio.run(client.refresh("ANTELOPUS"))
     assert ltp == 1261.7
     assert source == "LAST CLOSE"
-    assert "timed out" in client.last_error
+    assert client.last_error == ""
     assert client.data_source != "SIMULATOR"
 
 
@@ -470,6 +470,28 @@ def test_ltp_is_kept_when_candle_history_fails():
     assert ltp == 1159.45
     assert len(frame) == 1
     assert float(frame.iloc[-1]["close"]) == 1159.45
+
+
+def test_session_open_fills_the_day_change_when_candles_are_missing():
+    from groww_client import GrowwClient
+
+    client = GrowwClient(mode="PAPER", token="test-token")
+
+    class Sdk:
+        def get_ltp(self, **_kwargs):
+            return {"NSE_SHIPROCKET": 120.9}
+
+        def get_historical_candle_data(self, **_kwargs):
+            raise TimeoutError("candles")
+
+        def get_ohlc(self, **_kwargs):
+            return {"NSE_SHIPROCKET": {"open": 126.19, "high": 127.0, "low": 119.5, "close": 120.9}}
+
+    client._sdk = Sdk()
+    ltp, frame = client._load_quote("SHIPROCKET")
+    assert ltp == 120.9
+    assert float(frame.iloc[-1]["open"]) == 126.19
+    assert float(frame.iloc[-1]["close"]) == 120.9
 
 
 def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):

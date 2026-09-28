@@ -271,10 +271,14 @@ class GrowwClient:
                         self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC
                     )
                 except Exception as exc:  # noqa: BLE001
-                    self.last_error = f"NSE quote failed: {exc}"[:240]
                     self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
-                    if cached is not None:
+                    # A late download can still fill the cache after the wait.
+                    latest = self._quotes.get(symbol)
+                    if latest is not None:
+                        self.last_error = ""
                         return self._serve_quote(symbol, live=False)
+                    detail = str(exc).strip() or type(exc).__name__
+                    self.last_error = f"NSE quote failed: {detail}"[:240]
                     self.data_source = "ERROR"
                     raise
                 self._quotes[symbol] = (float(ltp), frame, now_m)
@@ -307,6 +311,9 @@ class GrowwClient:
             exchange_trading_symbols=key, segment="CASH", timeout=_SDK_TIMEOUT_SEC
         )
         ltp = _parse_ltp(raw_ltp, symbol)
+        # Publish the last trade before the slower candle download. A caller
+        # that stops waiting still has a real price instead of the practice tape.
+        self._quotes[symbol] = (float(ltp), _one_bar(ltp), time.monotonic())
         end = dt.datetime.now(IST).replace(tzinfo=None)
         start = end - dt.timedelta(days=5)
         frame = pd.DataFrame()
@@ -324,9 +331,7 @@ class GrowwClient:
         except Exception:
             frame = pd.DataFrame()
         if frame.empty:
-            # The header price is the last trade. A missing candle file must
-            # not send the terminal back to the practice tape.
-            return float(ltp), _one_bar(ltp)
+            frame = _one_bar(ltp, _session_ohlc(sdk, symbol))
         # Append a forming bar at the live LTP so iloc[-1] is never a closed bar
         # the strategy might mistake for a signal.
         last_ts = int(frame.iloc[-1]["ts"])
@@ -354,6 +359,7 @@ class GrowwClient:
             frame.loc[frame.index[-1], "close"] = ltp
             frame.loc[frame.index[-1], "high"] = max(float(frame.iloc[-1]["high"]), ltp)
             frame.loc[frame.index[-1], "low"] = min(float(frame.iloc[-1]["low"]), ltp)
+        self._quotes[symbol] = (float(ltp), frame, time.monotonic())
         return float(ltp), frame
 
     async def place_entry(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:
@@ -531,15 +537,47 @@ def _parse_ltp(raw, symbol: str) -> float:
     return ltp
 
 
-def _one_bar(ltp: float) -> pd.DataFrame:
+def _session_ohlc(sdk, symbol: str) -> dict:
+    try:
+        raw = sdk.get_ohlc(
+            exchange_trading_symbols=(f"NSE_{symbol}",),
+            segment="CASH",
+            timeout=3,
+        )
+    except Exception:
+        return {}
+    data = raw.get("payload", raw) if isinstance(raw, dict) else None
+    if not isinstance(data, dict):
+        return {}
+    for key, value in data.items():
+        if symbol in str(key) and isinstance(value, dict):
+            return value
+    return data if "open" in data else {}
+
+
+def _bar_price(ohlc: dict, name: str, fallback: float) -> float:
+    try:
+        value = float(ohlc.get(name))
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(value) or value <= 0:
+        return fallback
+    return value
+
+
+def _one_bar(ltp: float, ohlc: dict | None = None) -> pd.DataFrame:
+    ohlc = ohlc or {}
+    open_ = _bar_price(ohlc, "open", ltp)
+    high = max(_bar_price(ohlc, "high", ltp), ltp, open_)
+    low = min(_bar_price(ohlc, "low", ltp), ltp, open_)
     now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
     return pd.DataFrame(
         [
             {
                 "ts": now_ts,
-                "open": ltp,
-                "high": ltp,
-                "low": ltp,
+                "open": open_,
+                "high": high,
+                "low": low,
                 "close": ltp,
                 "volume": 0,
             }
