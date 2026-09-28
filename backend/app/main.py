@@ -28,6 +28,7 @@ from app.api import (
     routes_ws,
 )
 from app.core.config import get_settings
+from app.core.desk_lock import install_desk_lock
 from app.core.market_clock import ist_now
 from app.models.database import init_db
 from app.services.broadcaster import broadcaster
@@ -263,6 +264,7 @@ app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
+install_desk_lock(app)
 
 
 @app.get("/api/health")
