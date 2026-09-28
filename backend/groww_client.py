@@ -231,37 +231,35 @@ class GrowwClient:
         return self._simulator_quote(symbol)
 
     async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
+        # The Groww SDK blocks with no HTTP timeout. Keep that off the event
+        # loop or the whole site stops answering while a quote is in flight.
+        return await asyncio.to_thread(self._load_quote, symbol)
+
+    def _load_quote(self, symbol: str) -> tuple[float, pd.DataFrame]:
         sdk = self._require_sdk()
         key = (f"NSE_{symbol}",)
-
-        def _ltp():
-            raw = sdk.get_ltp(exchange_trading_symbols=key, segment="CASH")
-            data = raw.get("payload", raw) if isinstance(raw, dict) else raw
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if symbol in str(k):
-                        if isinstance(v, dict):
-                            return float(v.get("ltp") or v.get("last_price"))
-                        return float(v)
-                if "ltp" in data:
-                    return float(data["ltp"])
-            raise RuntimeError(f"Unexpected LTP payload: {raw!r}"[:200])
-
-        ltp = await asyncio.to_thread(_ltp)
+        raw_ltp = sdk.get_ltp(exchange_trading_symbols=key, segment="CASH")
+        data = raw_ltp.get("payload", raw_ltp) if isinstance(raw_ltp, dict) else raw_ltp
+        ltp = None
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if symbol in str(k):
+                    ltp = float(v.get("ltp") or v.get("last_price")) if isinstance(v, dict) else float(v)
+                    break
+            if ltp is None and "ltp" in data:
+                ltp = float(data["ltp"])
+        if ltp is None:
+            raise RuntimeError(f"Unexpected LTP payload: {raw_ltp!r}"[:200])
         end = dt.datetime.now(IST).replace(tzinfo=None)
         start = end - dt.timedelta(days=5)
-
-        def _candles():
-            return sdk.get_historical_candle_data(
-                trading_symbol=symbol,
-                exchange="NSE",
-                segment="CASH",
-                start_time=start.strftime("%Y-%m-%d %H:%M:%S"),
-                end_time=end.strftime("%Y-%m-%d %H:%M:%S"),
-                interval_in_minutes=1,
-            )
-
-        raw = await asyncio.to_thread(_candles)
+        raw = sdk.get_historical_candle_data(
+            trading_symbol=symbol,
+            exchange="NSE",
+            segment="CASH",
+            start_time=start.strftime("%Y-%m-%d %H:%M:%S"),
+            end_time=end.strftime("%Y-%m-%d %H:%M:%S"),
+            interval_in_minutes=1,
+        )
         frame = _parse_candles(raw)
         if frame.empty:
             raise RuntimeError("Groww returned no 1-minute candles")
