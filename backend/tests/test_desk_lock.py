@@ -157,6 +157,11 @@ def _session_header(response) -> dict[str, str]:
     return {"cookie": f"desk_session={token}"}
 
 
+def test_sma_terminal_requires_google_sign_in(client):
+    http, _private = client
+    assert http.get("/sma/api/state").status_code == 401
+
+
 def test_trading_api_requires_google_sign_in(client):
     http, _private = client
     assert http.get("/api/manual/account").status_code == 401

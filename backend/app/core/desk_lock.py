@@ -215,7 +215,7 @@ async def desk_lock_middleware(request: Request, call_next):
     if _api_public(path):
         return await call_next(request)
     signed_in = session_ok(request)
-    if path.startswith("/api/") or path.startswith("/ws"):
+    if path.startswith("/api/") or path.startswith("/ws") or path.startswith("/sma"):
         if not signed_in:
             return JSONResponse({"detail": "Sign in required"}, status_code=401)
         return await call_next(request)

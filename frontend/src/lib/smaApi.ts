@@ -1,6 +1,23 @@
-/** Client for the SMA + ATR terminal (`uvicorn main:app --port 8001`). */
+/** Client for the SMA + ATR terminal.
 
-export const SMA_API = process.env.NEXT_PUBLIC_SMA_API_URL || "http://127.0.0.1:8001";
+Locally that is `uvicorn main:app --port 8001`. On the deployed site the same
+routes are mounted at `/sma` on this host, so the browser must not call
+127.0.0.1.
+*/
+
+function resolveSmaApi(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_SMA_API_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return `${window.location.origin}/sma`;
+    }
+  }
+  return "http://127.0.0.1:8001";
+}
+
+export const SMA_API = resolveSmaApi();
 
 export type SmaConfig = {
   symbol: string;

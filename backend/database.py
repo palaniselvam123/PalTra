@@ -23,10 +23,20 @@ def reset_engine() -> None:
     get_settings.cache_clear()
 
 
+def database_url() -> str:
+    """Persist the terminal on the Fly volume when that volume is mounted."""
+    configured = os.environ.get("SMA_DATABASE_URL")
+    if configured:
+        return configured
+    if os.path.isfile("/data/trading.db"):
+        return "sqlite:////data/sma_terminal.db"
+    return get_settings().sma_database_url
+
+
 def get_engine():
     global _engine, _Session
     if _engine is None:
-        url = os.environ.get("SMA_DATABASE_URL", get_settings().sma_database_url)
+        url = database_url()
         _engine = create_engine(url, connect_args={"check_same_thread": False})
         _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine

@@ -27,21 +27,41 @@ from strategy_engine import StrategyEngine
 engine = StrategyEngine()
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
+_booted = False
+_task: asyncio.Task | None = None
+
+
+def boot_engine() -> asyncio.Task | None:
+    """Start the 1-second loop once. Safe if both the standalone app and a mount call it."""
+    global _booted, _task
+    if _booted:
+        return _task
+    _booted = True
     init_db()
     cfg = engine.load_config()
     engine.broker.set_mode(cfg.trading_mode, get_settings().groww_access_token)
-    task = asyncio.create_task(engine.run())
+    _task = asyncio.create_task(engine.run())
+    return _task
+
+
+def stop_engine() -> None:
+    engine.stop()
+    if _task is not None and not _task.done():
+        _task.cancel()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = boot_engine()
     try:
         yield
     finally:
-        engine.stop()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        stop_engine()
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="SMA ATR Intraday Terminal", lifespan=lifespan)

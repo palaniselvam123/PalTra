@@ -225,6 +225,15 @@ async def lifespan(app: FastAPI):
     from app.services.market_recorder import market_recorder
     await market_recorder.start()
 
+    sma_task = None
+    try:
+        from app.sma_host import boot_terminal, rewrite_terminal_bundle
+
+        rewrite_terminal_bundle()
+        sma_task = boot_terminal()
+    except Exception as exc:  # noqa: BLE001
+        print("sma terminal unavailable", exc)
+
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())
@@ -232,6 +241,14 @@ async def lifespan(app: FastAPI):
     yield
     if scanner_worker.running:
         await scanner_worker.stop()
+    try:
+        from app.sma_host import stop_terminal
+
+        stop_terminal()
+    except Exception:  # noqa: BLE001
+        pass
+    if sma_task is not None:
+        sma_task.cancel()
     tick_task.cancel()
     square_off_task.cancel()
     health_task.cancel()
@@ -265,6 +282,13 @@ app.include_router(routes_movers.router)
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
 install_desk_lock(app)
+
+try:
+    from app.sma_host import mount_terminal
+
+    mount_terminal(app)
+except Exception as exc:  # noqa: BLE001
+    print("sma mount skipped", exc)
 
 
 @app.get("/api/health")
