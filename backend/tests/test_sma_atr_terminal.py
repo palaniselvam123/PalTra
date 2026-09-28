@@ -438,6 +438,20 @@ def test_empty_mode_token_does_not_clear_a_loaded_session():
     assert client.token == "kept"
 
 
+def test_quote_client_skips_the_changelog_download():
+    from growwapi import GrowwAPI
+
+    from groww_client import GrowwClient
+
+    def boom(_self):
+        raise AssertionError("changelog")
+
+    GrowwAPI._get_changelog = boom
+    client = GrowwClient(mode="PAPER", token="test-token")
+    sdk = client._require_sdk()
+    assert sdk.token == "test-token"
+
+
 def test_ltp_is_kept_when_candle_history_fails():
     from groww_client import GrowwClient
 

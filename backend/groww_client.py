@@ -229,6 +229,9 @@ class GrowwClient:
             raise RuntimeError("GROWW_ACCESS_TOKEN is empty")
         from growwapi import GrowwAPI
 
+        # The SDK fetches a changelog with no HTTP timeout before it returns.
+        # That call has frozen this host. Quotes do not need it.
+        GrowwAPI._get_changelog = lambda _self: {}
         self._sdk = GrowwAPI(self.token)
         return self._sdk
 
