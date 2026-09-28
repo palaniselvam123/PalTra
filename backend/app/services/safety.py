@@ -27,6 +27,17 @@ async def trigger_kill_switch(reason: str, *, square_off: bool = True) -> None:
     if square_off:
         for symbol in list(state.paper_engine.positions.keys()):
             await close_and_settle(symbol, "KILL SWITCH SQUARE-OFF")
+        if state.manual_live:
+            from app.services import manual_desk
+
+            for symbol in list(state.manual_engine.positions.keys()):
+                try:
+                    await manual_desk.close(symbol, "KILL SWITCH SQUARE-OFF")
+                except Exception as exc:  # noqa: BLE001
+                    await broadcaster.publish(
+                        "log",
+                        {"level": "ERROR", "message": f"Kill switch could not close {symbol} at Groww: {exc}"},
+                    )
 
     # Hitting the profit target stops the day just like a loss breach does,
     # but it is good news — don't report it as an emergency.

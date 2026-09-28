@@ -99,6 +99,35 @@ def _to_epoch_seconds(value) -> int | None:
     return None
 
 
+def parse_margin_payload(raw: dict) -> dict:
+    """Normalise Groww's `/margins/detail/user` body.
+
+    The SDK returns either the payload itself or `{status, payload}`.
+    `clear_cash` is unlevered cash. `mis_balance_available` is what an
+    intraday MIS order can still use — Groww has already applied leverage,
+    so the desk must not multiply it again.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("Groww margin response was not an object")
+    data = raw
+    if "clear_cash" not in data and isinstance(raw.get("payload"), dict):
+        data = raw["payload"]
+    equity = data.get("equity_margin_details") or {}
+
+    def num(value: object) -> float:
+        try:
+            return round(float(value), 2)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "clear_cash": num(data.get("clear_cash")),
+        "mis_balance_available": num(equity.get("mis_balance_available")),
+        "cnc_balance_available": num(equity.get("cnc_balance_available")),
+        "net_margin_used": num(data.get("net_margin_used")),
+    }
+
+
 class GrowwClient(BrokerClient):
     name = "groww"
 
@@ -390,7 +419,39 @@ class GrowwClient(BrokerClient):
     async def get_quote(self, symbol: str) -> Quote:
         return await self.get_full_quote(symbol)
 
-    # ---- orders (live dispatch stays disabled at the app layer) --------
+    async def get_available_margin(self) -> dict:
+        """Cash and MIS buying power from Groww. Raises BrokerOrderError."""
+        sdk = self._require_session()
+        try:
+            raw = await asyncio.to_thread(sdk.get_available_margin_details)
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerOrderError(f"Could not read Groww margin: {exc}") from exc
+        try:
+            return parse_margin_payload(raw if isinstance(raw, dict) else {})
+        except ValueError as exc:
+            raise BrokerOrderError(str(exc)) from exc
+
+    async def get_order_fill(self, broker_order_id: str) -> tuple[str, float | None]:
+        """One status read after a place. Price is None until Groww reports a fill."""
+        sdk = self._require_session()
+        try:
+            raw = await asyncio.to_thread(
+                sdk.get_order_status, self.SEGMENT, broker_order_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerOrderError(f"Could not read Groww order {broker_order_id}: {exc}") from exc
+        data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
+        if not isinstance(data, dict):
+            return "", None
+        status = str(_pick(data, "order_status", "status", default="") or "")
+        price = _pick(data, "average_fill_price", "filled_price")
+        try:
+            filled = float(price) if price not in (None, "", 0, 0.0) else None
+        except (TypeError, ValueError):
+            filled = None
+        return status, filled
+
+    # ---- orders -------------------------------------------------------
 
     async def place_order(self, order: OrderRequest) -> OrderResult:
         sdk = self._require_session()

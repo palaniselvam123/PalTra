@@ -202,12 +202,14 @@ export function OrderTicket({
           )}
         >
           {busy && <Loader2 size={14} className="animate-spin" />}
-          {side} {quantity.toLocaleString("en-IN")} {row.symbol}
+          {account?.execution === "groww" ? `${side} on Groww` : side}{" "}
+          {quantity.toLocaleString("en-IN")} {row.symbol}
         </button>
 
         <p className="text-[10px] text-slate-600">
-          Virtual money. This desk has its own wallet and its own reports — nothing here touches the strategy
-          account or your broker.
+          {account?.execution === "groww"
+            ? "This button sends a real NSE MIS order to your Groww account."
+            : "Practice money until you turn on “Send orders to Groww”. The balance above is your Groww cash when the broker is connected."}
         </p>
       </div>
     </div>

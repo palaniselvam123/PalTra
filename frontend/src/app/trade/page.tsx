@@ -34,6 +34,7 @@ export default function TradePage() {
     mainboard_equity: number;
     intraday_eligible: number;
   } | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     api.deskWatchlist().then(setWatch).catch(() => {});
@@ -83,6 +84,31 @@ export default function TradePage() {
     try {
       await api.deskClose(symbol);
       refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fromGroww = account?.funds_source === "groww";
+  const armed = account?.execution === "groww";
+
+  const toggleGrowwOrders = async () => {
+    setWalletError(null);
+    if (!armed) {
+      if (!account?.groww_connected) {
+        setWalletError(account?.funds_error || "Groww is not connected. Log in from Settings first.");
+        return;
+      }
+      const ok = window.confirm(
+        "Buy and Sell will place real MIS orders in your Groww account. You can lose real money. Continue?"
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      setAccount(await api.deskSetExecution(armed ? "paper" : "groww", true));
+    } catch (e: any) {
+      setWalletError(e.message ?? "Could not change order mode");
     } finally {
       setBusy(false);
     }
@@ -158,13 +184,38 @@ export default function TradePage() {
           <div className="flex items-center gap-2 mb-3">
             <Wallet size={14} className="text-bot" />
             <span className="text-sm font-medium text-slate-200">Desk Wallet</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-profit/10 text-profit border border-profit/30">
-              NOT REAL MONEY
+            <span
+              className={clsx(
+                "text-[10px] px-1.5 py-0.5 rounded border",
+                armed
+                  ? "bg-loss/10 text-loss border-loss/40"
+                  : fromGroww
+                    ? "bg-bot/10 text-bot border-bot/40"
+                    : "bg-profit/10 text-profit border-profit/30"
+              )}
+            >
+              {armed ? "LIVE GROWW ORDERS" : fromGroww ? "GROWW BALANCE" : "NOT REAL MONEY"}
             </span>
-            <span className="text-[10px] text-slate-600 ml-auto">separate from the bot account</span>
+            <button
+              type="button"
+              onClick={toggleGrowwOrders}
+              disabled={busy}
+              className={clsx(
+                "ml-auto text-[11px] px-2 py-1 rounded-md border transition disabled:opacity-40",
+                armed
+                  ? "border-loss/40 text-loss hover:bg-loss/10"
+                  : "border-bot/40 text-bot hover:bg-bot/10"
+              )}
+            >
+              {armed ? "Stop real orders" : "Send orders to Groww"}
+            </button>
           </div>
+          {account?.funds_error && (
+            <p className="text-[11px] text-loss mb-2">{account.funds_error}</p>
+          )}
+          {walletError && <p className="text-[11px] text-loss mb-2">{walletError}</p>}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Stat label="Balance" value={money(account?.balance)} tone="text-slate-100" big />
+            <Stat label={fromGroww ? "Groww cash" : "Balance"} value={money(account?.balance)} tone="text-slate-100" big />
             <Stat
               label="Realised (all time)"
               value={money(account?.realised_all_time, true)}
@@ -175,7 +226,13 @@ export default function TradePage() {
             <Stat
               label="Margin available"
               value={money(account?.margin_available)}
-              sub={account ? `${account.max_leverage}× on balance` : undefined}
+              sub={
+                fromGroww
+                  ? "MIS margin from Groww"
+                  : account
+                    ? `${account.max_leverage}× on balance`
+                    : undefined
+              }
               tone="text-bot"
             />
             <Stat

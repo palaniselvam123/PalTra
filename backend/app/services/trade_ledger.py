@@ -67,7 +67,10 @@ async def _record_close(result: PaperCloseResult, exit_reason: str | None = None
 
 
 async def close_symbol_and_persist(
-    symbol: str, exit_reason: str | None = None, account: str = state.ACCOUNT_AUTO
+    symbol: str,
+    exit_reason: str | None = None,
+    account: str = state.ACCOUNT_AUTO,
+    exit_price: float | None = None,
 ) -> PaperCloseResult | None:
     """Closes a paper position at the current quote and writes the result to
     the trade history. Shared by the manual close endpoint, the kill switch,
@@ -76,7 +79,7 @@ async def close_symbol_and_persist(
     from app.services.market_data import market_data
 
     quote = state.latest_quotes.get(symbol)
-    if not quote:
+    if exit_price is None and not quote:
         return None
 
     engine = state.engine_for(account)
@@ -107,7 +110,12 @@ async def close_symbol_and_persist(
                 engine.positions.pop(symbol, None)
                 return None
 
-    result = engine.close_position(symbol, quote["ltp"])
+    if exit_price is None:
+        if not quote:
+            return None
+        result = engine.close_position(symbol, quote["ltp"])
+    else:
+        result = engine.close_at_price(symbol, exit_price)
     if result is None:
         return None
     await _record_close(result, exit_reason)
@@ -315,7 +323,10 @@ def _summarise_by_feed(trades: list[Trade]) -> dict:
 
 
 async def close_and_settle(
-    symbol: str, reason: str, account: str = state.ACCOUNT_AUTO
+    symbol: str,
+    reason: str,
+    account: str = state.ACCOUNT_AUTO,
+    exit_price: float | None = None,
 ) -> tuple[PaperCloseResult | None, object | None]:
     """The single close path used by manual closes, strategy auto-exits, the
     kill switch, and the end-of-day cut-off: square off, persist to history,
@@ -324,7 +335,9 @@ async def close_and_settle(
     """
     from app.services.broadcaster import broadcaster
 
-    result = await close_symbol_and_persist(symbol, exit_reason=reason, account=account)
+    result = await close_symbol_and_persist(
+        symbol, exit_reason=reason, account=account, exit_price=exit_price
+    )
     if result is None:
         return None, None
 

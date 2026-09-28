@@ -40,6 +40,33 @@ class ManualOrderRejected(Exception):
         self.status_code = status_code
 
 
+async def _send_groww_order(order: OrderRequest) -> tuple[str, float, str]:
+    """Place one MIS order. Returns (broker_order_id, price, status).
+
+    Price falls back to the last quote when Groww has accepted the order but
+    has not published an average fill yet.
+    """
+    from app.brokers.base import BrokerAuthError, BrokerOrderError
+    from app.services.groww_funds import groww_client
+
+    client = groww_client()
+    if client is None or not await client.is_token_valid():
+        raise ManualOrderRejected("Groww is not connected. Log in from Settings, then turn real orders on again.", 409)
+    quote = state.latest_quotes.get(order.symbol)
+    fallback = float(quote["ltp"]) if quote else 0.0
+    try:
+        placed = await client.place_order(order)
+        status, price = await client.get_order_fill(placed.broker_order_id)
+    except (BrokerAuthError, BrokerOrderError) as exc:
+        raise ManualOrderRejected(str(exc), 502) from exc
+    if not status:
+        status = placed.status or "PLACED"
+    filled = price or placed.filled_price or fallback
+    if not filled:
+        raise ManualOrderRejected("Groww accepted the order but did not return a price.", 502)
+    return placed.broker_order_id or "GROWW", float(filled), status
+
+
 @dataclass
 class ManualFill:
     order_id: str
@@ -86,18 +113,54 @@ def watchlist() -> list[dict]:
 
 
 async def margin_snapshot() -> dict:
-    """What the desk can currently deploy."""
+    """What the desk can currently deploy.
+
+    When Groww answers, Balance is ``clear_cash`` and Margin available is
+    ``mis_balance_available``. Those figures replace the practice wallet.
+    They are not multiplied by the practice 50× leverage — Groww already
+    applied MIS leverage inside ``mis_balance_available``.
+    """
+    from app.services.groww_funds import groww_desk_funds
     from app.services.trade_ledger import get_account_summary
 
     summary = await get_account_summary(ACCOUNT)
     leverage = state.risk_manager.config.max_leverage
     buying_power = summary["balance"] * leverage
-    return {
+    snapshot = {
         **summary,
         "max_leverage": leverage,
         "buying_power": round(buying_power, 2),
         "margin_available": round(max(0.0, buying_power - summary["open_exposure"]), 2),
+        "funds_source": "paper",
+        "execution": "groww" if state.manual_live else "paper",
+        "groww_connected": False,
+        "funds_error": None,
+        "clear_cash": None,
+        "mis_balance_available": None,
     }
+    info = await groww_desk_funds()
+    snapshot["groww_connected"] = info["connected"]
+    snapshot["funds_error"] = info["error"]
+    funds = info["funds"]
+    if not funds:
+        return snapshot
+
+    cash = float(funds["clear_cash"])
+    mis = float(funds["mis_balance_available"])
+    snapshot.update(
+        {
+            "funds_source": "groww",
+            "clear_cash": cash,
+            "mis_balance_available": mis,
+            "balance": cash,
+            "equity": round(cash + summary["unrealised"], 2),
+            "max_leverage": 1,
+            "buying_power": mis,
+            "margin_available": round(max(0.0, mis), 2),
+            "exposure_ratio": round(summary["open_exposure"] / cash, 2) if cash > 0 else 0.0,
+        }
+    )
+    return snapshot
 
 
 def preview(symbol: str, side: str, quantity: int) -> dict:
@@ -114,12 +177,17 @@ def preview(symbol: str, side: str, quantity: int) -> dict:
     if not quote:
         raise ManualOrderRejected(f"No live quote for {symbol} yet.", 404)
 
-    fill = state.manual_engine.expected_fill_price(side, quote["ltp"])
+    fill = (
+        round(quote["ltp"], 2)
+        if state.manual_live
+        else state.manual_engine.expected_fill_price(side, quote["ltp"])
+    )
     charges = estimate_charges(side, fill, quantity)
     exit_side = "SELL" if side == "BUY" else "BUY"
     round_trip_charges = round(charges + estimate_charges(exit_side, fill, quantity), 2)
-    slippage_round_trip = round(fill * (state.manual_engine.slippage_pct / 100) * 2 * quantity, 2)
-    breakeven_per_share = round_trip_cost_per_share(side, fill, quantity, state.manual_engine.slippage_pct)
+    slip_pct = 0.0 if state.manual_live else state.manual_engine.slippage_pct
+    slippage_round_trip = round(fill * (slip_pct / 100) * 2 * quantity, 2)
+    breakeven_per_share = round_trip_cost_per_share(side, fill, quantity, slip_pct)
 
     return {
         "symbol": symbol,
@@ -166,6 +234,12 @@ async def place(
     # Same session honesty rule as the strategy account: filling against
     # frozen out-of-hours prices invents trades that could never have happened.
     health = market_data.health()
+    if state.manual_live and market_data.source is not DataSource.LIVE:
+        raise ManualOrderRejected(
+            "Switch the price feed to NSE before sending a real Groww order. "
+            "Simulated prices must not size a live order.",
+            409,
+        )
     if market_data.source is DataSource.LIVE:
         if not health.market_open:
             raise ManualOrderRejected(
@@ -174,11 +248,24 @@ async def place(
         if health.stale:
             raise ManualOrderRejected("Live feed looks stale — entry blocked.", 409)
 
-    fill_price = state.manual_engine.expected_fill_price(side, quote["ltp"])
+    fill_price = (
+        round(quote["ltp"], 2)
+        if state.manual_live
+        else state.manual_engine.expected_fill_price(side, quote["ltp"])
+    )
     order_value = fill_price * quantity
 
     margin = await margin_snapshot()
+    if state.manual_live and margin["funds_source"] != "groww":
+        detail = margin["funds_error"] or "Groww balance is not available."
+        raise ManualOrderRejected(f"Real orders are on, but {detail}", 409)
     if order_value > margin["margin_available"]:
+        if margin["funds_source"] == "groww":
+            raise ManualOrderRejected(
+                f"Order needs ₹{order_value:,.0f} but Groww MIS margin free is only "
+                f"₹{margin['margin_available']:,.0f} (cash ₹{margin['balance']:,.0f}).",
+                403,
+            )
         raise ManualOrderRejected(
             f"Order needs ₹{order_value:,.0f} but only ₹{margin['margin_available']:,.0f} of margin is free "
             f"(balance ₹{margin['balance']:,.0f} × {margin['max_leverage']}× leverage, "
@@ -200,9 +287,18 @@ async def place(
             raise ManualOrderRejected("For a SELL, target must be below the entry price.")
 
     order = OrderRequest(
-        symbol=symbol, side=side, quantity=quantity, stop_loss=stop_loss or 0.0, target=target or 0.0
+        symbol=symbol, side=side, quantity=quantity, stop_loss=stop_loss or 0.0, target=target or 0.0,
+        order_type="MARKET",
     )
-    result, fill = state.manual_engine.fill_market_order(order, quote["ltp"])
+    if state.manual_live:
+        result_id, filled_price, status = await _send_groww_order(order)
+        if status.upper() in ("REJECTED", "FAILED", "CANCELLED"):
+            raise ManualOrderRejected(f"Groww rejected the order ({status}).", 502)
+        fill = state.manual_engine.open_at_price(order, filled_price, result_id)
+        from app.services.groww_funds import clear_funds_cache
+        clear_funds_cache()
+    else:
+        _result, fill = state.manual_engine.fill_market_order(order, quote["ltp"])
 
     trade_id = await record_open_trade(
         symbol=symbol,
@@ -261,7 +357,20 @@ async def place(
 
 
 async def close(symbol: str, reason: str = "MANUAL CLOSE") -> dict:
-    result, _ = await close_and_settle(symbol, reason, account=ACCOUNT)
+    exit_price = None
+    if state.manual_live:
+        position = state.manual_engine.positions.get(symbol)
+        if position is None:
+            raise ManualOrderRejected(f"No open manual position in {symbol}.", 404)
+        exit_side = "SELL" if position.side == "BUY" else "BUY"
+        _order_id, exit_price, status = await _send_groww_order(
+            OrderRequest(symbol=symbol, side=exit_side, quantity=position.quantity, order_type="MARKET")
+        )
+        if status.upper() in ("REJECTED", "FAILED", "CANCELLED"):
+            raise ManualOrderRejected(f"Groww rejected the exit ({status}). The position is still open.", 502)
+        from app.services.groww_funds import clear_funds_cache
+        clear_funds_cache()
+    result, _ = await close_and_settle(symbol, reason, account=ACCOUNT, exit_price=exit_price)
     if result is None:
         raise ManualOrderRejected(f"No open manual position in {symbol} (or no live quote yet).", 404)
     return {"symbol": symbol, "pnl": result.pnl, "exit_price": result.exit_price}
@@ -270,9 +379,11 @@ async def close(symbol: str, reason: str = "MANUAL CLOSE") -> dict:
 async def square_off_all() -> list[dict]:
     out = []
     for symbol in list(state.manual_engine.positions.keys()):
-        result, _ = await close_and_settle(symbol, "DESK SQUARE-OFF ALL", account=ACCOUNT)
-        if result:
-            out.append({"symbol": symbol, "pnl": result.pnl})
+        try:
+            closed = await close(symbol, "DESK SQUARE-OFF ALL")
+        except ManualOrderRejected:
+            continue
+        out.append({"symbol": symbol, "pnl": closed["pnl"]})
     return out
 
 
@@ -304,7 +415,9 @@ async def monitor_tick(symbol: str, ltp: float) -> None:
 
     _exiting.add(symbol)
     try:
-        await close_and_settle(symbol, f"DESK {reason}", account=ACCOUNT)
+        await close(symbol, f"DESK {reason}")
+    except ManualOrderRejected:
+        pass
     finally:
         _exiting.discard(symbol)
 

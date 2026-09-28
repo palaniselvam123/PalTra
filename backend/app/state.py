@@ -21,6 +21,9 @@ risk_manager = RiskManager(RiskConfig(), DailyRiskState())
 paper_engine = PaperEngine()
 manual_engine = PaperEngine()
 manual_capital: float = 100_000.0
+# Practice orders until the desk operator confirms. A restart clears this
+# so a redeploy cannot keep sending real Groww orders on its own.
+manual_live: bool = False
 
 ACCOUNT_AUTO = "AUTO"
 ACCOUNT_MANUAL = "MANUAL"

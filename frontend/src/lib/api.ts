@@ -392,6 +392,12 @@ export type DeskAccount = AccountSummary & {
   max_leverage: number;
   buying_power: number;
   margin_available: number;
+  funds_source?: "groww" | "paper";
+  execution?: "groww" | "paper";
+  groww_connected?: boolean;
+  funds_error?: string | null;
+  clear_cash?: number | null;
+  mis_balance_available?: number | null;
 };
 
 export type DeskPosition = {
@@ -853,6 +859,11 @@ export const api = {
     request<DeskAccount>("/api/manual/capital", {
       method: "POST",
       body: JSON.stringify({ starting_capital }),
+    }),
+  deskSetExecution: (mode: "paper" | "groww", confirmLive = false) =>
+    request<DeskAccount>("/api/manual/execution", {
+      method: "POST",
+      body: JSON.stringify({ mode, confirm_live: confirmLive }),
     }),
 
   getChatStatus: () =>
