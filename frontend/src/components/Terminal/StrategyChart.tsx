@@ -6,6 +6,17 @@ import type { ChartPayload } from "@/lib/smaApi";
 
 type Props = { chart: ChartPayload | null };
 
+function istClock(time: unknown): string {
+  const sec = typeof time === "number" ? time : 0;
+  if (!sec) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(sec * 1000));
+}
+
 export function StrategyChart({ chart }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
@@ -28,7 +39,13 @@ export function StrategyChart({ chart }: Props) {
         horzLines: { color: "#1c2230" },
       },
       rightPriceScale: { borderColor: "#1c2230" },
-      timeScale: { borderColor: "#1c2230", timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderColor: "#1c2230",
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: (time: unknown) => istClock(time),
+      },
+      localization: { timeFormatter: (time: unknown) => istClock(time) },
       crosshair: { mode: 1 },
       autoSize: true,
     });

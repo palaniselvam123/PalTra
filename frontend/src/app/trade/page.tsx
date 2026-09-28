@@ -35,11 +35,13 @@ export default function TradePage() {
     intraday_eligible: number;
   } | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [watchReady, setWatchReady] = useState(false);
+  const [positionsReady, setPositionsReady] = useState(false);
 
   const refresh = useCallback(() => {
-    api.deskWatchlist().then(setWatch).catch(() => {});
+    api.deskWatchlist().then(setWatch).catch(() => {}).finally(() => setWatchReady(true));
     api.deskAccount().then(setAccount).catch(() => {});
-    api.deskPositions().then(setPositions).catch(() => {});
+    api.deskPositions().then(setPositions).catch(() => {}).finally(() => setPositionsReady(true));
     api.deskSummary().then(setDeskSummary).catch(() => {});
     api.deskHistory().then(setHistory).catch(() => {});
   }, []);
@@ -194,7 +196,7 @@ export default function TradePage() {
                     : "bg-profit/10 text-profit border-profit/30"
               )}
             >
-              {armed ? "LIVE GROWW ORDERS" : fromGroww ? "GROWW BALANCE" : "NOT REAL MONEY"}
+              {armed ? "LIVE GROWW ORDERS" : "PRACTICE ORDERS"}
             </span>
             <button
               type="button"
@@ -210,12 +212,22 @@ export default function TradePage() {
               {armed ? "Stop real orders" : "Send orders to Groww"}
             </button>
           </div>
+          {fromGroww && !armed && (
+            <p className="text-[11px] text-slate-400 mb-2">
+              This figure is your Groww cash. Buy and Sell still fill on the practice book until you confirm Send orders to Groww.
+            </p>
+          )}
           {account?.funds_error && (
             <p className="text-[11px] text-loss mb-2">{account.funds_error}</p>
           )}
           {walletError && <p className="text-[11px] text-loss mb-2">{walletError}</p>}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Stat label={fromGroww ? "Groww cash" : "Balance"} value={money(account?.balance)} tone="text-slate-100" big />
+            <Stat
+              label={armed ? "Groww cash" : fromGroww ? "Groww cash · practice orders" : "Practice balance"}
+              value={account?.funds_error && account.balance === 0 ? "—" : money(account?.balance)}
+              tone="text-slate-100"
+              big
+            />
             <Stat
               label="Realised (all time)"
               value={money(account?.realised_all_time, true)}
@@ -284,7 +296,7 @@ export default function TradePage() {
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-4 py-8 text-center text-xs text-slate-500">
-                        Waiting for quotes…
+                        {watchReady ? "No symbols on this watchlist." : "Loading the watchlist…"}
                       </td>
                     </tr>
                   )}
@@ -416,7 +428,7 @@ export default function TradePage() {
                 {positions.length === 0 && (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-xs text-slate-500">
-                      No open positions on the desk.
+                      {positionsReady ? "No open positions on the desk." : "Loading positions…"}
                     </td>
                   </tr>
                 )}

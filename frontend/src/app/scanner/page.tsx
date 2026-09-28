@@ -242,6 +242,10 @@ export default function ScannerPage() {
               {saved && <span className="text-[10px] text-profit ml-auto">saved</span>}
             </div>
 
+            {!(config && options) && (
+              <p className="text-xs text-slate-500">Strategy settings did not load. Refresh the page.</p>
+            )}
+
             {config && options && (
               <fieldset disabled={running} className={clsx("space-y-3", running && "opacity-50")}>
                 <div className="grid grid-cols-2 gap-3">

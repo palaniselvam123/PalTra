@@ -129,13 +129,14 @@ export function Navbar({
           <span className="grad-text hidden text-title font-bold sm:inline">ORB Desk</span>
         </Link>
 
-        <nav className="hidden min-w-0 items-center gap-6 self-stretch lg:flex">
+        <nav className="hidden min-w-0 items-center gap-4 self-stretch xl:flex">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={clsx(
                   "relative px-1 py-5 text-body font-medium transition-colors",
                   active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
@@ -151,11 +152,12 @@ export function Navbar({
         </nav>
 
         {/* Compact nav for narrow viewports — icons only, no wrapping. */}
-        <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto lg:hidden">
+        <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto xl:hidden">
           {NAV.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
+              prefetch={false}
               title={label}
               className={clsx(
                 "rounded-md p-1.5 transition-colors",
@@ -169,10 +171,21 @@ export function Navbar({
 
         {/* --- Zone 2: live state, deliberately quiet -------------------- */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <div className="hidden items-center gap-3 md:flex">
-            <span className="flex items-center gap-1.5" title={connected ? "Live updates connected" : "Reconnecting…"}>
-              <StatusDot tone={connected ? "info" : "loss"} pulse={connected} />
-              <span className="text-caption text-slate-400">{connected ? "Live" : "Offline"}</span>
+          <div className="hidden items-center gap-3 xl:flex">
+            <span
+              className="flex items-center gap-1.5"
+              title={
+                connected
+                  ? "Live updates connected"
+                  : feed
+                    ? "Prices are loaded. The live socket is still reconnecting."
+                    : "Reconnecting…"
+              }
+            >
+              <StatusDot tone={connected ? "info" : feed ? "warn" : "loss"} pulse={connected} />
+              <span className="text-caption text-slate-400">
+                {connected ? "Live" : feed ? "Quotes" : "Offline"}
+              </span>
             </span>
 
             <span className="h-3 w-px bg-border" />
@@ -221,9 +234,9 @@ export function Navbar({
             tone="profit"
             icon={<ShieldCheck size={11} />}
             className="hidden xl:inline-flex"
-            title="Orders are always simulated. No real money is ever sent to the broker."
+            title="Practice orders until you confirm Send orders to Groww on the Trade page. Groww cash can still be shown."
           >
-            VIRTUAL
+            PRACTICE
           </Badge>
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
@@ -278,9 +291,19 @@ export function Navbar({
                     label={theme === "dark" ? "Light theme" : "Dark theme"}
                     onClick={toggle}
                   />
+                  <MenuItem
+                    icon={<ShieldCheck size={14} />}
+                    label="Sign out"
+                    hint="Locks the desk on this browser"
+                    onClick={() => {
+                      fetch("/api/session/logout", { method: "POST" }).finally(() => {
+                        window.location.href = "/login/";
+                      });
+                    }}
+                  />
                   <div className="border-t border-border px-3 py-2 xl:hidden">
                     <Badge tone="profit" icon={<ShieldCheck size={11} />}>
-                      VIRTUAL MONEY
+                      PRACTICE
                     </Badge>
                   </div>
                 </div>

@@ -122,8 +122,8 @@ export function ApiKeyForm() {
         with a live adapter — Zerodha/Angel One store credentials but have no login implementation yet.
       </p>
       <p className="text-xs text-slate-500">
-        These keys are used for <span className="text-slate-300">market data only</span>. Order placement stays
-        simulated: the app never sends an order to your broker, so a valid key cannot spend real money here.
+        These keys read market data and the Groww cash balance. Orders stay on the practice book until you confirm
+        Send orders to Groww on the Trade page, and a real order still waits until 09:15 IST.
       </p>
 
       <div className="grid grid-cols-2 gap-3">

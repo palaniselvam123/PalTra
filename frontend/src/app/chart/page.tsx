@@ -14,10 +14,11 @@ export default function ChartPage() {
     useTradingState();
 
   const [watch, setWatch] = useState<WatchRow[]>([]);
+  const [watchReady, setWatchReady] = useState(false);
   const [symbol, setSymbol] = useState("RELIANCE");
 
   useEffect(() => {
-    const load = () => api.deskWatchlist().then(setWatch).catch(() => {});
+    const load = () => api.deskWatchlist().then(setWatch).catch(() => {}).finally(() => setWatchReady(true));
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
@@ -60,7 +61,11 @@ export default function ChartPage() {
               Watchlist <span className="text-slate-600">({rows.length})</span>
             </div>
             <div className="max-h-[560px] overflow-y-auto">
-              {rows.length === 0 && <div className="px-3 py-6 text-center text-[11px] text-slate-600">Waiting…</div>}
+              {rows.length === 0 && (
+                <div className="px-3 py-6 text-center text-[11px] text-slate-600">
+                  {watchReady ? "No symbols on the desk watchlist." : "Loading the watchlist…"}
+                </div>
+              )}
               {rows.map((r) => (
                 <button
                   key={r.symbol}

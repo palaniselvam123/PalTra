@@ -139,7 +139,7 @@ export type ReportSummary = {
   avg_win: number;
   avg_loss: number;
   payoff_ratio: number | null;
-  largest_win: number;
+  largest_win: number | null;
   largest_loss: number;
   max_win_streak: number;
   max_loss_streak: number;
@@ -580,6 +580,7 @@ function queryString(params: Record<string, string | undefined>): string {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
+    signal: options?.signal ?? AbortSignal.timeout(15000),
     headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
   });
   if (!res.ok) {

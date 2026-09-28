@@ -34,7 +34,7 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
       <Card
         label="Realistic net P&L"
         value={k?.net ?? 0}
-        hint={`Win rate ${((k?.win_rate ?? 0)).toFixed(0)}% · ${k?.trades ?? 0} / ${cap} trades`}
+        hint={`Win rate ${((k?.win_rate ?? 0)).toFixed(0)}% · ${k?.trades ?? 0} taken, limit ${cap}`}
       />
     </section>
   );

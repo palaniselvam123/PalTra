@@ -444,22 +444,33 @@ class StrategyEngine:
             db.commit()
 
     def _day_open_and_change(self) -> tuple[float | None, float | None]:
-        """Session change versus the first candle open of today (IST)."""
+        """Percent versus the previous session's last close.
+
+        A one-bar stub whose open equals the last trade is not a flat day.
+        That happens when candle history has not arrived yet.
+        """
         frame = self.candles
         if frame is None or getattr(frame, "empty", True) or self.ltp <= 0:
             return None, None
         today = _ist_now().date()
         day_open = None
+        prev_close = None
         for _, row in frame.iterrows():
             ts = dt.datetime.fromtimestamp(int(row["ts"]), IST)
-            if ts.date() == today:
+            if ts.date() < today:
+                prev_close = float(row["close"])
+            elif ts.date() == today and day_open is None:
                 day_open = float(row["open"])
-                break
         if day_open is None:
             day_open = float(frame.iloc[0]["open"])
-        if day_open <= 0:
+        baseline = prev_close if prev_close and prev_close > 0 else day_open
+        if baseline is None or baseline <= 0:
             return day_open, None
-        return day_open, (self.ltp - day_open) / day_open * 100
+        # The stub bar published before candles arrive uses the last trade as
+        # its open. That is not a 0% day.
+        if prev_close is None and len(frame) <= 2 and abs(baseline - self.ltp) < 0.02:
+            return day_open, None
+        return day_open, (self.ltp - baseline) / baseline * 100
 
     def _loss_breached(self, cfg: BotConfig) -> bool:
         unreal = self._unrealized()

@@ -20,7 +20,9 @@ export default function TerminalPage() {
     smaApi.config().then(setConfig).catch(() => {});
     smaApi.chart().then(setChart).catch(() => {});
     smaApi.trades().then(setTrades).catch(() => {});
-    smaApi.state().then(setState).catch(() => {});
+    smaApi.state().then((next) => {
+      setState((prev) => (next.ltp > 0 || !prev || prev.ltp <= 0 ? next : prev));
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -47,7 +49,8 @@ export default function TerminalPage() {
       ws.onerror = () => ws?.close();
       ws.onmessage = (ev) => {
         try {
-          setState(JSON.parse(ev.data) as SmaState);
+          const next = JSON.parse(ev.data) as SmaState;
+          setState((prev) => (next.ltp > 0 || !prev || prev.ltp <= 0 ? next : prev));
         } catch {
           /* ignore malformed frames */
         }

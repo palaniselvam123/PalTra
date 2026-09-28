@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/ui";
 import { money } from "@/lib/format";
 
 type Props = {
-  positions: Position[];
+  positions: (Position & { ltp?: number })[];
   ticks: Record<string, Tick>;
   onClose: (symbol: string) => void;
 };
@@ -52,7 +52,7 @@ export function PositionsTable({ positions, ticks, onClose }: Props) {
               </tr>
             )}
             {positions.map((p) => {
-              const ltp = ticks[p.symbol]?.ltp ?? p.entry_price;
+              const ltp = ticks[p.symbol]?.ltp ?? p.ltp ?? p.entry_price;
               const pnl = p.side === "BUY" ? (ltp - p.entry_price) * p.quantity : (p.entry_price - ltp) * p.quantity;
               const amount = p.entry_price * p.quantity;
               return (

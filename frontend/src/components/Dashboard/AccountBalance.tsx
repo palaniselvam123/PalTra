@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Wallet, TrendingUp, Layers } from "lucide-react";
 import type { AccountSummary } from "@/lib/api";
@@ -34,8 +34,18 @@ export function AccountBalance({
       setBusy(false);
     }
   };
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (account) return;
+    const id = setTimeout(() => setSlow(true), 12000);
+    return () => clearTimeout(id);
+  }, [account]);
   if (!account) {
-    return <div className="rounded-card border border-border bg-surface p-4 text-xs text-slate-500">Loading balance…</div>;
+    return (
+      <div className="rounded-card border border-border bg-surface p-4 text-xs text-slate-500">
+        {slow ? "Balance did not load. This is not a zero balance." : "Loading balance…"}
+      </div>
+    );
   }
 
   const grew = account.balance >= account.starting_capital;

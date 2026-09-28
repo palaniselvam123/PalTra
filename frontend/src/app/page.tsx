@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { MetricCards } from "@/components/Dashboard/MetricCards";
 import { PositionsTable } from "@/components/Dashboard/PositionsTable";
@@ -13,7 +13,8 @@ import { AccountBalance } from "@/components/Dashboard/AccountBalance";
 import { TradeHistory } from "@/components/Dashboard/TradeHistory";
 import { AiExpertPanel } from "@/components/Dashboard/AiExpertPanel";
 import { useTradingState } from "@/hooks/useTradingState";
-import { api } from "@/lib/api";
+import { api, type DeskPosition } from "@/lib/api";
+import type { ClosedTrade } from "@/components/Dashboard/TradeHistory";
 
 export default function DashboardPage() {
   const {
@@ -34,6 +35,39 @@ export default function DashboardPage() {
     refreshPositions,
     refreshSummary,
   } = useTradingState();
+
+  const [deskPositions, setDeskPositions] = useState<DeskPosition[]>([]);
+  const [deskHistory, setDeskHistory] = useState<ClosedTrade[]>([]);
+  useEffect(() => {
+    const load = () => {
+      api.deskPositions().then(setDeskPositions).catch(() => {});
+      api
+        .deskHistory()
+        .then((rows) => {
+          setDeskHistory(
+            rows
+              .filter((t) => t.status === "CLOSED")
+              .map((t) => ({
+                id: t.id + 1_000_000,
+                symbol: t.symbol,
+                side: t.side,
+                quantity: t.quantity,
+                entry_price: t.entry_price,
+                exit_price: t.exit_price,
+                stop_loss: t.stop_loss,
+                target: t.target,
+                amount: t.amount,
+                pnl: t.pnl,
+                closed_at: t.closed_at,
+              }))
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 4000);
+    return () => clearInterval(id);
+  }, []);
 
   const symbols = useMemo(() => Object.keys(ticks).slice(0, 10), [ticks]);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
@@ -90,16 +124,29 @@ export default function DashboardPage() {
             )}
 
             <PositionsTable
-              positions={positions}
+              positions={[
+                ...deskPositions.map((d) => ({
+                  symbol: d.symbol,
+                  side: d.side,
+                  quantity: d.quantity,
+                  entry_price: d.entry_price,
+                  stop_loss: d.stop_loss,
+                  target: d.target,
+                  order_id: d.order_id,
+                  ltp: d.ltp,
+                })),
+                ...positions.filter((p) => !deskPositions.some((d) => d.symbol === p.symbol)),
+              ]}
               ticks={ticks}
               onClose={async (symbol) => {
-                await api.closePosition(symbol);
+                if (deskPositions.some((d) => d.symbol === symbol)) await api.deskClose(symbol);
+                else await api.closePosition(symbol);
                 refreshPositions();
                 refreshSummary();
               }}
             />
 
-            <TradeHistory trades={history} />
+            <TradeHistory trades={[...deskHistory, ...history]} />
           </div>
 
           {/* --- rail: status, then controls ------------------------------ */}

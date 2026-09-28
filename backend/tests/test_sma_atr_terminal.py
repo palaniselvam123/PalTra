@@ -522,6 +522,52 @@ def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):
     assert engine.last_signal == "market closed — showing the last NSE price"
 
 
+def test_day_change_uses_the_previous_close(monkeypatch):
+    from strategy_engine import StrategyEngine
+
+    monkeypatch.setattr(
+        "strategy_engine._ist_now",
+        lambda: dt.datetime(2026, 9, 28, 22, 0, tzinfo=IST),
+    )
+    engine = StrategyEngine()
+    yesterday = int(dt.datetime(2026, 9, 27, 15, 30, tzinfo=IST).timestamp())
+    today = int(dt.datetime(2026, 9, 28, 15, 29, tzinfo=IST).timestamp())
+    engine.candles = pd.DataFrame(
+        [
+            {"ts": yesterday, "open": 126.0, "high": 127.0, "low": 125.0, "close": 126.19, "volume": 1},
+            {"ts": today, "open": 122.0, "high": 122.8, "low": 119.3, "close": 120.9, "volume": 1},
+        ]
+    )
+    engine.ltp = 120.9
+    day_open, change = engine._day_open_and_change()
+    assert day_open == 122.0
+    assert change == pytest.approx((120.9 - 126.19) / 126.19 * 100)
+
+
+def test_stub_bar_does_not_report_a_flat_day(monkeypatch):
+    from strategy_engine import StrategyEngine
+
+    monkeypatch.setattr(
+        "strategy_engine._ist_now",
+        lambda: dt.datetime(2026, 9, 28, 22, 0, tzinfo=IST),
+    )
+    engine = StrategyEngine()
+    today = int(dt.datetime(2026, 9, 28, 22, 0, tzinfo=IST).timestamp())
+    engine.candles = pd.DataFrame(
+        [{"ts": today, "open": 120.9, "high": 120.9, "low": 120.9, "close": 120.9, "volume": 0}]
+    )
+    engine.ltp = 120.9
+    _open, change = engine._day_open_and_change()
+    assert change is None
+
+
+def test_a_losing_book_has_no_largest_win():
+    from app.services.reports import _largest_win
+
+    assert _largest_win([{"net_pnl": -0.33}]) is None
+    assert _largest_win([{"net_pnl": -0.33}, {"net_pnl": 1.5}]) == 1.5
+
+
 def test_boots_in_paper_and_live_needs_confirmation(api):
     state = api.get("/api/state")
     assert state.status_code == 200

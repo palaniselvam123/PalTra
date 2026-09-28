@@ -78,7 +78,11 @@ export function SummaryGrid({ summary }: { summary: ReportSummary }) {
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
         <Tile label="Gross Profit" value={money(summary.gross_profit)} tone="text-profit" />
         <Tile label="Gross Loss" value={money(-summary.gross_loss)} tone="text-loss" />
-        <Tile label="Largest Win" value={money(summary.largest_win, true)} tone="text-profit" />
+        <Tile
+          label="Largest Win"
+          value={summary.largest_win == null ? "—" : money(summary.largest_win, true)}
+          tone={summary.largest_win == null ? "text-slate-500" : "text-profit"}
+        />
         <Tile label="Largest Loss" value={money(summary.largest_loss, true)} tone="text-loss" />
         <Tile
           label="Streaks"

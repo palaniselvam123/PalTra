@@ -294,7 +294,7 @@ def _summarise(rows: list[dict], account: str = "AUTO") -> dict:
         "avg_win": round(avg_win, 2),
         "avg_loss": round(avg_loss, 2),
         "payoff_ratio": round(avg_win / avg_loss, 2) if avg_loss else None,
-        "largest_win": round(max((r["net_pnl"] or 0 for r in closed), default=0.0), 2),
+        "largest_win": _largest_win(closed),
         "largest_loss": round(min((r["net_pnl"] or 0 for r in closed), default=0.0), 2),
         "max_win_streak": best_win_streak,
         "max_loss_streak": worst_loss_streak,
@@ -307,6 +307,12 @@ def _summarise(rows: list[dict], account: str = "AUTO") -> dict:
         "unrealised_open": round(sum(r.get("unrealised_pnl") or 0 for r in open_rows), 2),
         "equity_curve": curve,
     }
+
+
+def _largest_win(closed: list[dict]) -> float | None:
+    """The best winning trade. A book of only losses has no largest win."""
+    wins = [float(r["net_pnl"]) for r in closed if (r.get("net_pnl") or 0) > 0]
+    return round(max(wins), 2) if wins else None
 
 
 def _group(rows: list[dict], key: str) -> list[dict]:

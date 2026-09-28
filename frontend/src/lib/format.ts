@@ -20,6 +20,7 @@ export function pct(value: number | null | undefined, digits = 1): string {
 /** Holding time reads better as "1m 12s" than "72". */
 export function duration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined) return "—";
+  if (seconds <= 0) return "under 1s";
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;

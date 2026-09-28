@@ -26,7 +26,7 @@ type Props = {
 };
 
 export function Header({ state, config, connected, onChanged }: Props) {
-  const [symbol, setSymbol] = useState(config?.symbol ?? "KIRLOSFER");
+  const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
@@ -71,7 +71,10 @@ export function Header({ state, config, connected, onChanged }: Props) {
           setHits(rows);
           setOpen(true);
         })
-        .catch(() => setHits([]))
+        .catch(() => {
+          setHits([]);
+          setOpen(true);
+        })
         .finally(() => setSearching(false));
     }, 200);
     return () => clearTimeout(id);
@@ -99,8 +102,9 @@ export function Header({ state, config, connected, onChanged }: Props) {
     });
   };
 
-  const ltp = state?.ltp ?? 0;
-  const changePct = state?.day_change_pct ?? 0;
+  const quoted = state != null && state.ltp > 0;
+  const ltp = quoted ? state.ltp : null;
+  const changePct = quoted ? state?.day_change_pct : null;
   const live = (state?.mode ?? config?.trading_mode) === "LIVE";
   const running = state?.bot_status === "RUNNING";
 
@@ -168,9 +172,12 @@ export function Header({ state, config, connected, onChanged }: Props) {
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-[#0B0E14]/90 backdrop-blur">
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-3">
-        <a href="/" className="text-[11px] uppercase tracking-[0.16em] text-slate-500 hover:text-slate-300">
-          Desk
-        </a>
+        <nav className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+          <a href="/" className="hover:text-slate-300">Dashboard</a>
+          <a href="/trade/" className="hover:text-slate-300">Trade</a>
+          <a href="/chart/" className="hover:text-slate-300">Charts</a>
+          <a href="/settings/" className="hover:text-slate-300">Settings</a>
+        </nav>
         <div className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</div>
 
         <div ref={searchRef} className="relative flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-[#151921] px-2 py-1">
@@ -207,6 +214,11 @@ export function Header({ state, config, connected, onChanged }: Props) {
             />
             {searching && <Loader2 size={11} className="animate-spin text-slate-500" />}
           </form>
+          {open && query.trim() && !searching && hits.length === 0 && (
+            <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
+              No NSE match
+            </div>
+          )}
           {open && hits.length > 0 && (
             <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-white/10 bg-[#151921] shadow-xl">
               {hits.map((hit) => (
@@ -227,15 +239,20 @@ export function Header({ state, config, connected, onChanged }: Props) {
 
         <div className="font-mono text-sm">
           <span className="text-slate-100">{px(ltp)}</span>
-          <span className={clsx("ml-2 text-xs", changePct >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-            {changePct >= 0 ? "+" : ""}
-            {changePct.toFixed(2)}%
+          <span
+            className={clsx(
+              "ml-2 text-xs",
+              changePct == null ? "text-slate-500" : changePct >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"
+            )}
+          >
+            {changePct == null ? "—" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
           </span>
         </div>
 
         <button
           disabled={busy}
           onClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
+          title={live ? "Live Groww orders are on" : "Practice fills only. This does not send orders to Groww."}
           className={clsx(
             "rounded-full px-3 py-1 text-xs font-semibold",
             live
@@ -243,12 +260,13 @@ export function Header({ state, config, connected, onChanged }: Props) {
               : "bg-[#F59E0B]/15 text-[#F59E0B] ring-1 ring-[#F59E0B]/40"
           )}
         >
-          {live ? "LIVE REAL MONEY" : "PAPER SIMULATOR (SAFE)"}
+          {live ? "LIVE REAL MONEY" : "PAPER · no Groww orders"}
         </button>
 
         <button
           disabled={busy}
           onClick={toggleBot}
+          title="Paper fills on this page only. Starting the bot does not send a Groww order."
           className={clsx(
             "rounded-md px-3 py-1.5 text-xs font-semibold",
             running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
