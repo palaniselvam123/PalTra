@@ -41,6 +41,7 @@ from app.models.database import AlertChannel, async_session
 
 CALLMEBOT = "callmebot"
 TWILIO = "twilio"
+TELEGRAM = "telegram"
 
 REQUEST_TIMEOUT = 20.0
 MAX_ATTEMPTS = 3
@@ -164,6 +165,27 @@ def format_message(
     return "\n".join(lines)
 
 
+class TelegramSetupError(Exception):
+    """The bot token was rejected, or the user has not messaged the bot yet."""
+
+
+def chat_id_from_updates(payload: dict) -> str | None:
+    """Latest chat that messaged the bot, from a getUpdates payload."""
+    results = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        return None
+    for item in reversed(results):
+        if not isinstance(item, dict):
+            continue
+        msg = item.get("message") or item.get("edited_message") or item.get("channel_post") or {}
+        if not isinstance(msg, dict):
+            continue
+        chat = msg.get("chat") or {}
+        if isinstance(chat, dict) and chat.get("id") is not None:
+            return str(chat["id"])
+    return None
+
+
 class AlertNotifier:
     """Owns delivery plus the dedup/cooldown policy.
 
@@ -242,6 +264,8 @@ class AlertNotifier:
             return await self._send_callmebot(target, secret, message)
         if channel.provider == TWILIO:
             return await self._send_twilio(target, secret, extra, message)
+        if channel.provider == TELEGRAM:
+            return await self._send_telegram(target, secret, message)
         return DeliveryResult(False, channel.provider, error=f"Unknown provider {channel.provider}")
 
     async def _with_retries(self, call, provider: str, *secrets: str) -> DeliveryResult:
@@ -261,7 +285,7 @@ class AlertNotifier:
             try:
                 response = await call()
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                last_error = f"{type(exc).__name__}: {exc}"
+                last_error = sanitize(f"{type(exc).__name__}: {exc}", *secrets)
                 if attempt < MAX_ATTEMPTS:
                     await asyncio.sleep(2**attempt)
                     continue
@@ -269,7 +293,9 @@ class AlertNotifier:
                     False, provider, error=f"network failure after {MAX_ATTEMPTS} attempts: {last_error}"
                 )
             except Exception as exc:  # noqa: BLE001
-                return DeliveryResult(False, provider, error=f"{type(exc).__name__}: {exc}")
+                return DeliveryResult(
+                    False, provider, error=sanitize(f"{type(exc).__name__}: {exc}", *secrets)
+                )
 
             body = (response.text or "")[:400]
             classification, reason = classify_response(response.status_code, body)
@@ -338,6 +364,43 @@ class AlertNotifier:
                 )
 
         return await self._with_retries(call, TWILIO, token, sid, to_number, from_number)
+
+    async def discover_telegram_chat(self, token: str) -> str:
+        """Chat id of the last person who messaged this bot."""
+        token = (token or "").strip()
+        if ":" not in token:
+            raise TelegramSetupError("That does not look like a BotFather token. It contains a colon.")
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.get(
+                    f"https://api.telegram.org/bot{token}/getUpdates",
+                    params={"timeout": 0},
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise TelegramSetupError("Telegram did not answer. Try Save again.") from exc
+        try:
+            payload = response.json()
+        except Exception as exc:  # noqa: BLE001
+            raise TelegramSetupError("Telegram returned an unreadable reply.") from exc
+        if response.status_code == 401 or (isinstance(payload, dict) and payload.get("ok") is False):
+            raise TelegramSetupError("Telegram rejected that bot token. Copy it again from BotFather.")
+        chat_id = chat_id_from_updates(payload if isinstance(payload, dict) else {})
+        if not chat_id:
+            raise TelegramSetupError("Open the bot in Telegram, send it any message, then tap Save again.")
+        return chat_id
+
+    async def _send_telegram(self, chat_id: str, token: str, message: str) -> DeliveryResult:
+        if not chat_id or not token:
+            return DeliveryResult(False, TELEGRAM, error="Telegram needs a bot token and a chat")
+
+        async def call():
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                return await client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": message},
+                )
+
+        return await self._with_retries(call, TELEGRAM, token, chat_id)
 
 
 alert_notifier = AlertNotifier()
