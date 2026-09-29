@@ -14,6 +14,22 @@ def test_depth_quotes_wait_until_the_open():
     assert broker_poll_due(False) is False
 
 
+def test_an_nse_position_can_return_to_nse_prices():
+    from app.services.market_data import switch_is_safe
+
+    assert switch_is_safe("live", "live") is True
+    assert switch_is_safe("live", "simulated") is False
+    assert switch_is_safe("unknown", "live") is True
+    assert switch_is_safe("unknown", "simulated") is False
+    assert switch_is_safe("simulated", "simulated") is True
+
+
+def test_interactive_symbols_is_the_streaming_list():
+    from app.services.market_data import market_data
+
+    assert market_data.interactive_symbols() == list(market_data.symbols)
+
+
 @pytest.mark.asyncio
 async def test_cached_balance_does_not_call_groww(monkeypatch):
     from app.services import groww_funds as funds

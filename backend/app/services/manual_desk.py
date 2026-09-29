@@ -85,7 +85,7 @@ def watchlist() -> list[dict]:
     give you a buy button that silently cannot fill.
     """
     rows = []
-    for symbol in market_data.symbols:
+    for symbol in market_data.interactive_symbols():
         quote = state.latest_quotes.get(symbol)
         if not quote:
             continue

@@ -134,10 +134,13 @@ export function Navbar({
     ? feedSlow
       ? "No reply"
       : "Checking…"
-    : feed.market_open && connected
-      ? "Live"
-      : "Quotes";
-  const linkTone = linkLabel === "Live" ? "info" : linkLabel === "Quotes" ? "warn" : linkLabel === "No reply" ? "loss" : "neutral";
+    : feed.source === "simulated"
+      ? "Sim"
+      : feed.market_open && connected
+        ? "Live"
+        : "Quotes";
+  const linkTone =
+    linkLabel === "Live" ? "info" : linkLabel === "Quotes" || linkLabel === "Sim" ? "warn" : linkLabel === "No reply" ? "loss" : "neutral";
 
   const switchSource = async (source: "simulated" | "live") => {
     if (feed?.source === source) return;
@@ -216,7 +219,9 @@ export function Navbar({
               className="flex items-center gap-1.5"
               title={
                 linkLabel === "Live"
-                  ? "Market is open and live updates are connected"
+                  ? "Market is open and NSE quotes are connected"
+                  : linkLabel === "Sim"
+                    ? "These prices are simulated. Switch to NSE for the real tape."
                   : linkLabel === "Quotes"
                     ? feed?.market_open
                       ? "Prices are loaded. The live socket is still reconnecting."

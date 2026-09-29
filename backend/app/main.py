@@ -234,6 +234,33 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print("sma terminal unavailable", exc)
 
+    # A restart used to boot the simulator, then refuse NSE because the open
+    # WIPRO practice position was still on the book. That position was filled
+    # on NSE prices, so the desk should come back on NSE when Groww is connected.
+    if "groww" in restored:
+        from app.services.groww_funds import groww_client
+        from app.services.market_data import switch_is_safe
+
+        client = groww_client()
+        if client is not None:
+            try:
+                feeds = await routes_marketdata._open_position_feeds()
+                if all(switch_is_safe(feed, "live") for feed in feeds.values()):
+                    await market_data.use_live(client)
+                    await broadcaster.publish(
+                        "log",
+                        {
+                            "level": "INFO",
+                            "message": "Market data source → LIVE Groww quotes. "
+                            "Orders stay on the practice book until you confirm Send orders to Groww.",
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                await broadcaster.publish(
+                    "log",
+                    {"level": "WARN", "message": f"Could not resume NSE quotes after restart: {exc}"},
+                )
+
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())

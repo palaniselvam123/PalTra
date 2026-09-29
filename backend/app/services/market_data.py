@@ -121,6 +121,19 @@ def broker_poll_due(market_open: bool) -> bool:
     return bool(market_open)
 
 
+def switch_is_safe(opened_on: str, target: str) -> bool:
+    """An open position may move onto the series it was filled on.
+
+    A row with no recorded series may take NSE prices. It must not be marked
+    to the simulator, which is a new random walk after every restart.
+    """
+    opened = (opened_on or "unknown").lower()
+    dest = (target or "").lower()
+    if opened == dest:
+        return True
+    return opened == "unknown" and dest == "live"
+
+
 class MarketDataManager:
     def __init__(self):
         self.source = DataSource.SIMULATED
@@ -136,6 +149,10 @@ class MarketDataManager:
         self.last_tick_at: dt.datetime | None = None
         self.last_change_at: dt.datetime | None = None
         self._last_prices: dict[str, float] = {}
+
+    def interactive_symbols(self) -> list[str]:
+        """Names the desk and scanner can show. Same list the feed is streaming."""
+        return list(self.symbols)
 
     def add_symbol(self, symbol: str) -> bool:
         """Adds a symbol to live streaming beyond the bot's fixed 20-name
