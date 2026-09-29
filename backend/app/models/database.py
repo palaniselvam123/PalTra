@@ -141,6 +141,10 @@ class Trade(Base):
     # not survive a restart, so a position opened against one cannot be
     # honestly closed against the next run's prices.
     feed_source: Mapped[str] = mapped_column(String, default="unknown")  # simulated | live | unknown
+    # Groww's own id when this row was accepted by the broker. Empty for a
+    # practice fill. Restoring an open row uses this so a later exit can be
+    # sent to Groww, and a practice row is never mistaken for one.
+    broker_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     entry_charges: Mapped[float] = mapped_column(Float, default=0.0)
     exit_charges: Mapped[float] = mapped_column(Float, default=0.0)
@@ -320,6 +324,7 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "exit_charges": "FLOAT DEFAULT 0.0",
         "account": "TEXT DEFAULT 'AUTO'",
         "feed_source": "TEXT DEFAULT 'unknown'",
+        "broker_order_id": "TEXT",
     },
     "risk_settings": {
         "daily_profit_target_pct": "FLOAT DEFAULT 0.0",

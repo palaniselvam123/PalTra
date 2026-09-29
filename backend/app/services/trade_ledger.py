@@ -26,10 +26,12 @@ async def record_open_trade(
     entry_charges: float = 0.0,
     account: str = state.ACCOUNT_AUTO,
     feed_source: str = "simulated",
+    mode: str = "paper",
+    broker_order_id: str | None = None,
 ) -> int:
     async with async_session() as session:
         trade = Trade(
-            mode="paper",
+            mode="live" if mode == "live" else "paper",
             symbol=symbol,
             side=side,
             quantity=quantity,
@@ -41,6 +43,7 @@ async def record_open_trade(
             entry_charges=entry_charges,
             account=account,
             feed_source=feed_source,
+            broker_order_id=broker_order_id,
         )
         session.add(trade)
         await session.commit()
@@ -181,7 +184,7 @@ async def restore_open_positions() -> tuple[list[str], list[str]]:
                 stop_loss=trade.stop_loss,
                 target=trade.target,
                 opened_at=trade.opened_at,
-                order_id=f"RESTORED-{trade.id}",
+                order_id=(trade.broker_order_id or "").strip() or f"RESTORED-{trade.id}",
                 trade_id=trade.id,
             )
             restored.append(trade.symbol)

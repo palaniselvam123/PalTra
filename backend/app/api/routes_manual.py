@@ -89,6 +89,8 @@ async def place(body: PlaceRequest):
         "filled_price": fill.filled_price,
         "charges": fill.charges,
         "trade_id": fill.trade_id,
+        "sent_to_groww": fill.sent_to_groww,
+        "status": fill.status,
     }
 
 

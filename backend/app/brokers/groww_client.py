@@ -453,8 +453,11 @@ class GrowwClient(BrokerClient):
         """One status read after a place. Price is None until Groww reports a fill."""
         sdk = self._require_session()
         try:
-            raw = await asyncio.to_thread(
-                sdk.get_order_status, self.SEGMENT, broker_order_id
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_order_status, self.SEGMENT, broker_order_id, timeout=6
+                ),
+                timeout=8,
             )
         except Exception as exc:  # noqa: BLE001
             raise BrokerOrderError(f"Could not read Groww order {broker_order_id}: {exc}") from exc
@@ -474,27 +477,46 @@ class GrowwClient(BrokerClient):
     async def place_order(self, order: OrderRequest) -> OrderResult:
         sdk = self._require_session()
         try:
-            resp = await asyncio.to_thread(
-                sdk.place_order,
-                validity="DAY",
-                exchange=self.EXCHANGE,
-                segment=self.SEGMENT,
-                trading_symbol=order.symbol,
-                transaction_type=order.side,
-                quantity=order.quantity,
-                order_type=order.order_type,
-                product="MIS",
-                price=order.price or 0.0,
-                trigger_price=order.trigger_price,
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.place_order,
+                    validity="DAY",
+                    exchange=self.EXCHANGE,
+                    segment=self.SEGMENT,
+                    trading_symbol=order.symbol,
+                    transaction_type=order.side,
+                    quantity=order.quantity,
+                    order_type=order.order_type,
+                    product="MIS",
+                    price=order.price or 0.0,
+                    trigger_price=order.trigger_price,
+                    timeout=6,
+                ),
+                timeout=8,
             )
         except Exception as exc:  # noqa: BLE001
             raise BrokerOrderError(f"Order placement failed for {order.symbol}: {exc}") from exc
 
         data = resp.get("payload", resp) if isinstance(resp, dict) and "payload" in resp else resp
+        if not isinstance(data, dict):
+            data = {}
+        # A FAILURE body is not an order. Defaulting the status to PLACED
+        # booked a desk fill for a request Groww refused.
+        top_status = str(resp.get("status") or "") if isinstance(resp, dict) else ""
+        if top_status.upper() == "FAILURE":
+            err = resp.get("error") if isinstance(resp, dict) else None
+            message = ""
+            if isinstance(err, dict):
+                message = str(err.get("message") or err.get("code") or "")
+            elif err:
+                message = str(err)
+            raise BrokerOrderError(message or "Groww refused the order.")
+        remark = str(_pick(data, "remark", "message", default="") or "")
         return OrderResult(
-            broker_order_id=str(_pick(data, "groww_order_id", "order_id", "orderId", default="")),
-            status=str(_pick(data, "order_status", "status", default="PLACED")),
+            broker_order_id=str(_pick(data, "groww_order_id", "order_id", "orderId", default="") or ""),
+            status=str(_pick(data, "order_status", "status", default="") or ""),
             filled_price=_pick(data, "average_fill_price", "filled_price"),
+            message=remark,
         )
 
     async def cancel_order(self, broker_order_id: str) -> None:

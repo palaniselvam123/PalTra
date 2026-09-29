@@ -40,11 +40,21 @@ class ManualOrderRejected(Exception):
         self.status_code = status_code
 
 
+_DEAD_ORDER = {"REJECTED", "FAILED", "CANCELLED", "FAILURE"}
+
+
+def is_practice_order(order_id: str | None) -> bool:
+    """True when this id was invented by the desk, not returned by Groww."""
+    oid = (order_id or "").strip().upper()
+    return (not oid) or oid == "GROWW" or oid.startswith("PAPER-") or oid.startswith("RESTORED-")
+
+
 async def _send_groww_order(order: OrderRequest) -> tuple[str, float, str]:
     """Place one MIS order. Returns (broker_order_id, price, status).
 
-    Price falls back to the last quote when Groww has accepted the order but
-    has not published an average fill yet.
+    A missing Groww order id is a refusal. The desk must not book a fill for
+    an order Groww never accepted. Price falls back to the last quote only
+    after that id exists, for the moment before an average fill is published.
     """
     from app.brokers.base import BrokerAuthError, BrokerOrderError
     from app.services.groww_funds import groww_client
@@ -56,15 +66,35 @@ async def _send_groww_order(order: OrderRequest) -> tuple[str, float, str]:
     fallback = float(quote["ltp"]) if quote else 0.0
     try:
         placed = await client.place_order(order)
-        status, price = await client.get_order_fill(placed.broker_order_id)
     except (BrokerAuthError, BrokerOrderError) as exc:
         raise ManualOrderRejected(str(exc), 502) from exc
+    order_id = (placed.broker_order_id or "").strip()
+    if is_practice_order(order_id):
+        detail = (placed.message or "").strip()
+        raise ManualOrderRejected(
+            detail or "Groww did not accept the order. Nothing was booked on the desk.",
+            502,
+        )
+    try:
+        status, price = await client.get_order_fill(order_id)
+    except (BrokerAuthError, BrokerOrderError):
+        # The order id already came back. A status read failing must not hide
+        # that Groww has the order, and must not pretend it filled.
+        status, price = placed.status or "OPEN", placed.filled_price
     if not status:
-        status = placed.status or "PLACED"
+        status = placed.status or "OPEN"
+    if status.upper() in _DEAD_ORDER:
+        raise ManualOrderRejected(
+            f"Groww rejected the order ({status}). Check order {order_id} on Groww. Nothing was booked on the desk.",
+            502,
+        )
     filled = price or placed.filled_price or fallback
     if not filled:
-        raise ManualOrderRejected("Groww accepted the order but did not return a price.", 502)
-    return placed.broker_order_id or "GROWW", float(filled), status
+        raise ManualOrderRejected(
+            f"Groww accepted order {order_id} but did not return a price.",
+            502,
+        )
+    return order_id, float(filled), status
 
 
 @dataclass
@@ -76,6 +106,8 @@ class ManualFill:
     filled_price: float
     charges: float
     trade_id: int
+    sent_to_groww: bool
+    status: str
 
 
 def watchlist() -> list[dict]:
@@ -292,14 +324,15 @@ async def place(
         symbol=symbol, side=side, quantity=quantity, stop_loss=stop_loss or 0.0, target=target or 0.0,
         order_type="MARKET",
     )
+    sent_to_groww = False
+    broker_status = "FILLED"
     if state.manual_live:
-        result_id, filled_price, status = await _send_groww_order(order)
-        if status.upper() in ("REJECTED", "FAILED", "CANCELLED"):
-            raise ManualOrderRejected(f"Groww rejected the order ({status}).", 502)
+        result_id, filled_price, broker_status = await _send_groww_order(order)
         fill = state.manual_engine.open_at_price(order, filled_price, result_id)
         from app.services.groww_funds import clear_funds_cache
         clear_funds_cache()
         broker_order_id = result_id
+        sent_to_groww = True
     else:
         result, fill = state.manual_engine.fill_market_order(order, quote["ltp"])
         broker_order_id = result.broker_order_id
@@ -315,6 +348,8 @@ async def place(
         entry_charges=fill.charges,
         account=ACCOUNT,
         feed_source=market_data.health().source,
+        mode="live" if sent_to_groww else "paper",
+        broker_order_id=broker_order_id if sent_to_groww else None,
     )
     position = state.manual_engine.positions.get(symbol)
     if position:
@@ -357,20 +392,28 @@ async def place(
         filled_price=fill.filled_price,
         charges=fill.charges,
         trade_id=trade_id,
+        sent_to_groww=sent_to_groww,
+        status=broker_status,
     )
 
 
 async def close(symbol: str, reason: str = "MANUAL CLOSE") -> dict:
+    """Close one desk position.
+
+    A practice fill (PAPER- / RESTORED- id) is never sent to Groww, even when
+    real orders are armed — that would sell a share Groww does not hold.
+    A position that Groww already accepted is exited on Groww even if the
+    desk has since been switched back to practice, so the real share is not
+    left open.
+    """
     exit_price = None
-    if state.manual_live:
-        position = state.manual_engine.positions.get(symbol)
-        if position is None:
-            raise ManualOrderRejected(f"No open manual position in {symbol}.", 404)
+    position = state.manual_engine.positions.get(symbol)
+    if position is not None and not is_practice_order(position.order_id):
         exit_side = "SELL" if position.side == "BUY" else "BUY"
         _order_id, exit_price, status = await _send_groww_order(
             OrderRequest(symbol=symbol, side=exit_side, quantity=position.quantity, order_type="MARKET")
         )
-        if status.upper() in ("REJECTED", "FAILED", "CANCELLED"):
+        if status.upper() in _DEAD_ORDER:
             raise ManualOrderRejected(f"Groww rejected the exit ({status}). The position is still open.", 502)
         from app.services.groww_funds import clear_funds_cache
         clear_funds_cache()
@@ -448,6 +491,7 @@ def positions() -> list[dict]:
                 "stop_loss": pos.stop_loss,
                 "target": pos.target,
                 "order_id": pos.order_id,
+                "on_groww": not is_practice_order(pos.order_id),
                 "trade_id": pos.trade_id,
                 "ltp": round(ltp, 2),
                 "value": round(pos.entry_price * pos.quantity, 2),

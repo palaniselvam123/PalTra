@@ -408,6 +408,7 @@ export type DeskPosition = {
   stop_loss: number;
   target: number;
   order_id: string;
+  on_groww?: boolean;
   trade_id: number | null;
   ltp: number;
   value: number;

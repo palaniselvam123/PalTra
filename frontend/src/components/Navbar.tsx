@@ -92,6 +92,7 @@ export function Navbar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuBox, setMenuBox] = useState<{ top: number; right: number } | null>(null);
   const [feedSlow, setFeedSlow] = useState(false);
+  const [deskLive, setDeskLive] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLSpanElement>(null);
 
@@ -100,6 +101,24 @@ export function Navbar({
     const id = setTimeout(() => setFeedSlow(true), 8000);
     return () => clearTimeout(id);
   }, [feed]);
+
+  useEffect(() => {
+    let stop = false;
+    const pull = () => {
+      api
+        .deskAccount()
+        .then((row) => {
+          if (!stop) setDeskLive(row.execution === "groww");
+        })
+        .catch(() => undefined);
+    };
+    pull();
+    const id = setInterval(pull, 15000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -280,12 +299,16 @@ export function Navbar({
           </div>
 
           <Badge
-            tone="profit"
+            tone={deskLive ? "loss" : "profit"}
             icon={<ShieldCheck size={11} />}
             className="hidden xl:inline-flex"
-            title="Practice orders until you confirm Send orders to Groww on the Trade page. Groww cash can still be shown."
+            title={
+              deskLive
+                ? "The next order on the Trade page is sent to Groww. A practice position already on the desk is not."
+                : "Practice orders until you confirm Send orders to Groww on the Trade page. Groww cash can still be shown."
+            }
           >
-            PRACTICE
+            {deskLive ? "LIVE ORDERS" : "PRACTICE"}
           </Badge>
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
@@ -364,8 +387,8 @@ export function Navbar({
                       onClick={signOut}
                     />
                     <div className="border-t border-border px-3 py-2 xl:hidden">
-                      <Badge tone="profit" icon={<ShieldCheck size={11} />}>
-                        PRACTICE
+                      <Badge tone={deskLive ? "loss" : "profit"} icon={<ShieldCheck size={11} />}>
+                        {deskLive ? "LIVE ORDERS" : "PRACTICE"}
                       </Badge>
                     </div>
                   </div>,

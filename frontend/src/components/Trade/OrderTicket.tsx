@@ -56,7 +56,11 @@ export function OrderTicket({
         stop_loss: useBracket && stopLoss ? Number(stopLoss) : null,
         target: useBracket && target ? Number(target) : null,
       });
-      setDone(`${side} ${res.quantity} ${res.symbol} filled at ₹${res.filled_price}`);
+      setDone(
+        res.sent_to_groww
+          ? `Sent to Groww. Order ${res.order_id} is ${res.status || "OPEN"} at ₹${res.filled_price}. It should appear on Groww's Orders page.`
+          : `Practice fill. ${side} ${res.quantity} ${res.symbol} at ₹${res.filled_price}. This was not sent to Groww.`
+      );
       onFilled();
     } catch (e: any) {
       setError(e.message ?? "Order rejected");

@@ -506,7 +506,19 @@ export default function TradePage() {
                 )}
                 {positions.map((p) => (
                   <tr key={p.symbol} className="border-b border-border/50 last:border-0">
-                    <td className="px-4 py-2 text-slate-100">{p.symbol}</td>
+                    <td className="px-4 py-2 text-slate-100">
+                      <span className="inline-flex items-center gap-1">
+                        {p.symbol}
+                        {p.on_groww === false && (
+                          <span
+                            className="text-[9px] px-1 py-0.5 rounded bg-slate-700/50 text-slate-400"
+                            title="This row is on the practice book. Closing it does not send an order to Groww."
+                          >
+                            PRACTICE
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className={clsx("px-3 py-2 text-xs", p.side === "BUY" ? "text-profit" : "text-loss")}>
                       {p.side}
                     </td>
