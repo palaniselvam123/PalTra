@@ -105,14 +105,41 @@ def _gap_frame(gaps: list[float], atr: float = 1.0) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _level_frame(level: float, pcts: list[float], atr: float = 1.0) -> pd.DataFrame:
+    """Percent gaps of SMA 21, so a cheap stock and a dear stock can share one path."""
+    rows = []
+    for i, pct in enumerate([*pcts, pcts[-1]]):
+        slow = level
+        rows.append(
+            {
+                "ts": 1_700_000_000 + i * 60,
+                "open": level,
+                "high": level + 0.5,
+                "low": level - 0.5,
+                "close": level,
+                "volume": 1000,
+                "sma_9": slow * (1 + pct / 100.0),
+                "sma_21": slow,
+                "atr_14": atr,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def test_a_closing_sma_gap_is_a_few_minutes_from_a_cross():
     from strategy_engine import minutes_until_cross, minutes_until_stop
 
-    side, minutes = minutes_until_cross(_gap_frame([-1.5, -1.0, -0.5]))
+    side, minutes, gap = minutes_until_cross(_gap_frame([-1.5, -1.0, -0.5]))
     assert side == "BULLISH"
     assert minutes == pytest.approx(1.0)
-    apart, _ = minutes_until_cross(_gap_frame([-1.0, -2.0, -3.0]))
+    assert gap == pytest.approx(-0.5)
+    apart, _, _ = minutes_until_cross(_gap_frame([-1.0, -2.0, -3.0]))
     assert apart is None
+    cheap, cheap_min, _ = minutes_until_cross(_level_frame(120.0, [-1.5, -1.0, -0.5]))
+    dear, dear_min, dear_gap = minutes_until_cross(_level_frame(1160.0, [-1.5, -1.0, -0.5]))
+    assert cheap == dear == "BULLISH"
+    assert cheap_min == pytest.approx(dear_min) == pytest.approx(1.0)
+    assert dear_gap == pytest.approx(-0.5)
     assert minutes_until_stop("SHORT", 100.2, 101.0, 0.4) == pytest.approx(2.0)
     assert minutes_until_stop("LONG", 100.2, 101.0, 0.4) is None
 

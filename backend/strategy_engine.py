@@ -870,7 +870,7 @@ class StrategyEngine:
         """Telegram before an entry, and before a close. The order itself is a separate message."""
         pos = self.positions.get(symbol)
         mode = (cfg.trading_mode or "PAPER").upper()
-        side, minutes = minutes_until_cross(frame)
+        side, minutes, gap_pct = minutes_until_cross(frame)
         if side is None:
             self._gate_warning((symbol, "cross", "BULLISH"), None, "")
             self._gate_warning((symbol, "cross", "BEARISH"), None, "")
@@ -882,7 +882,9 @@ class StrategyEngine:
                 or (pos.direction == "SHORT" and side == "BULLISH")
             )
             if pos is None:
-                text = upcoming_entry_alert(mode=mode, symbol=symbol, side=side, minutes=minutes or 0)
+                text = upcoming_entry_alert(
+                    mode=mode, symbol=symbol, side=side, minutes=minutes or 0, gap_pct=gap_pct or 0
+                )
             elif closes:
                 text = upcoming_close_alert(
                     mode=mode,
@@ -890,6 +892,7 @@ class StrategyEngine:
                     position=pos.direction,
                     side=side,
                     minutes=minutes or 0,
+                    gap_pct=gap_pct or 0,
                 )
             else:
                 text = ""
@@ -1218,30 +1221,42 @@ def close_alert(
     )
 
 
-def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None]:
+def sma_gap_pct(fast: float, slow: float) -> float | None:
+    """SMA 9 minus SMA 21, as a percent of SMA 21. A ₹1 gap is not the same on every stock."""
+    if pd.isna(fast) or pd.isna(slow):
+        return None
+    slow_f = float(slow)
+    if slow_f == 0:
+        return None
+    return (float(fast) - slow_f) / slow_f * 100.0
+
+
+def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None, float | None]:
     """How soon SMA 9 will cross SMA 21 if the last closed bars keep their pace.
 
-    The forming bar is ignored. Returns ("BULLISH" or "BEARISH", minutes), or
-    (None, None) when the averages are moving apart or are not ready.
+    The gap on each candle is a percent of that candle's SMA 21, so a ₹120
+    stock and a ₹1,160 stock share one scale. The forming bar is ignored.
+    Returns ("BULLISH" or "BEARISH", minutes, gap percent), or (None, None, None)
+    when the averages are moving apart or are not ready.
     """
     if frame is None or len(frame) < lookback + 1:
-        return None, None
+        return None, None, None
     closed = frame.iloc[-(lookback + 1) : -1]
     gaps: list[float] = []
     for _, row in closed.iterrows():
-        fast, slow = row.get("sma_9"), row.get("sma_21")
-        if pd.isna(fast) or pd.isna(slow):
-            return None, None
-        gaps.append(float(fast) - float(slow))
+        gap = sma_gap_pct(row.get("sma_9"), row.get("sma_21"))
+        if gap is None:
+            return None, None, None
+        gaps.append(gap)
     if len(gaps) < 2:
-        return None, None
+        return None, None, None
     gap = gaps[-1]
     slope = (gaps[-1] - gaps[0]) / (len(gaps) - 1)
     if gap < 0 and slope > 0:
-        return "BULLISH", abs(gap) / slope
+        return "BULLISH", abs(gap) / slope, gap
     if gap > 0 and slope < 0:
-        return "BEARISH", gap / abs(slope)
-    return None, None
+        return "BEARISH", gap / abs(slope), gap
+    return None, None, None
 
 
 def minutes_until_stop(direction: str, ltp: float, stop: float, atr: float) -> float | None:
@@ -1272,22 +1287,28 @@ def _about(minutes: float) -> int:
     return max(1, int(round(minutes)))
 
 
-def upcoming_entry_alert(*, mode: str, symbol: str, side: str, minutes: float) -> str:
+def _gap_text(gap_pct: float) -> str:
+    return f"{abs(gap_pct):.2f}% from SMA 21"
+
+
+def upcoming_entry_alert(*, mode: str, symbol: str, side: str, minutes: float, gap_pct: float) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
     return (
         f"PalTra heads-up\n"
         f"{symbol} may be ordered in about {_about(minutes)} min\n"
-        f"SMA 9 is nearing a cross. A {order} would be placed.\n"
+        f"SMA 9 is {_gap_text(gap_pct)}. A {order} would be placed.\n"
         f"{mode} · no order yet"
     )
 
 
-def upcoming_close_alert(*, mode: str, symbol: str, position: str, side: str, minutes: float) -> str:
+def upcoming_close_alert(
+    *, mode: str, symbol: str, position: str, side: str, minutes: float, gap_pct: float
+) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
     return (
         f"PalTra heads-up\n"
         f"{position} {symbol} may close in about {_about(minutes)} min\n"
-        f"SMA 9 is nearing a cross. A {order} would follow.\n"
+        f"SMA 9 is {_gap_text(gap_pct)}. A {order} would follow.\n"
         f"{mode} · no close yet"
     )
 
