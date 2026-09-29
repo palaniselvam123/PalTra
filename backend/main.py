@@ -89,6 +89,7 @@ class ConfigUpdate(BaseModel):
     atr_period: int | None = Field(default=None, ge=2, le=100)
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
+    use_stop: bool | None = None
     adx_threshold: float | None = Field(default=None, ge=0, le=100)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
@@ -110,6 +111,7 @@ def _config_dict(row: BotConfig) -> dict:
         "atr_period": row.atr_period,
         "atr_multiplier": row.atr_multiplier,
         "use_adx_filter": row.use_adx_filter,
+        "use_stop": True if row.use_stop is None else bool(row.use_stop),
         "adx_threshold": row.adx_threshold,
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,

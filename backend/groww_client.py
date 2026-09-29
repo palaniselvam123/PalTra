@@ -39,7 +39,9 @@ _desk_token_cache: tuple[float, str] | None = None
 # Statuses that mean "do not place another order yet".
 IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
 TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
-TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED"})
+# Groww's own word for a filled order is EXECUTED. Missing it left a long
+# on the terminal after the exchange stop had already sold the shares.
+TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED", "EXECUTED", "DELIVERY_AWAITED"})
 
 
 def desk_session_token() -> str:
@@ -459,6 +461,39 @@ class GrowwClient:
         if isinstance(data, dict):
             data = data.get("positions") or []
         return list(data or [])
+
+    async def net_quantity(self, symbol: str) -> int | None:
+        """Signed MIS quantity at Groww. None when the book could not be read.
+
+        A name Groww does not list is flat (0). Callers must not treat None
+        as flat — that is a failed read, and flattening would invent an exit.
+        """
+        if self.mode != "LIVE":
+            return None
+        try:
+            rows = await self.get_positions()
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)[:200]
+            return None
+        if not isinstance(rows, list):
+            return None
+        want = (symbol or "").upper()
+        total = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("trading_symbol") or row.get("symbol") or "").upper()
+            bare = sym.split("-")[0]
+            if bare != want and sym != want:
+                continue
+            raw_qty = row.get("net_quantity")
+            if raw_qty is None:
+                raw_qty = row.get("quantity") or 0
+            try:
+                total += int(float(raw_qty))
+            except (TypeError, ValueError):
+                return None
+        return total
 
     async def _live_limit(self, symbol: str, side: str, qty: int, ltp: float, kind: str) -> OrderAck:
         buffer = get_settings().market_protection_pct / 100.0

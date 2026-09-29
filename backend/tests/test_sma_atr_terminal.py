@@ -223,6 +223,32 @@ async def test_reverse_blocked_when_sl_cancel_not_confirmed(engine):
 
 
 @pytest.mark.asyncio
+async def test_executed_groww_stop_clears_the_long(engine):
+    from strategy_engine import OpenPosition
+
+    engine.status = "RUNNING"
+    engine.broker.sl_status = "EXECUTED"
+    engine.position = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=1154.85,
+        ma_cross_price=1155,
+        atr_at_entry=4,
+        sl_trigger=1150.5,
+        sl_order_id="SL-LIVE",
+        entry_order_id="E-LIVE",
+        entry_time=dt.datetime(2026, 9, 29, 10, 0, tzinfo=IST),
+        trade_id=_seed_open_trade(),
+        mode="LIVE",
+    )
+    cfg = engine.load_config()
+    cfg.trading_mode = "LIVE"
+    await engine._watch_stop(cfg)
+    assert engine.position is None
+    assert engine.last_signal == "ATR stop hit — flat"
+
+
+@pytest.mark.asyncio
 async def test_pending_order_blocks_a_second_entry(engine):
     engine.inflight = "PENDING"
     cfg = engine.load_config()

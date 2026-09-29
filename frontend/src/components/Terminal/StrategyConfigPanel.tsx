@@ -36,6 +36,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         atr_period: Number(form.atr_period),
         atr_multiplier: Number(form.atr_multiplier),
         use_adx_filter: form.use_adx_filter,
+        use_stop: form.use_stop !== false,
         adx_threshold: Number(form.adx_threshold),
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
@@ -66,6 +67,15 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
       </div>
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={form.use_stop !== false}
+          onChange={(e) => set("use_stop", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        Exchange stop-loss at 1.5× ATR. Uncheck to enter with no stop order.
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
         <input
           type="checkbox"
           checked={form.use_adx_filter}

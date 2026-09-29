@@ -129,6 +129,7 @@ class StrategyEngine:
         cfg = self.load_config()
         self._roll_session(now)
         self.broker.set_mode(cfg.trading_mode)
+        await self._settle_exchange_flat(cfg)
         symbol = (cfg.symbol or "").upper()
         if symbol != self._quote_symbol:
             # Drop the previous name's tape so a new symbol cannot inherit it.
@@ -278,7 +279,10 @@ class StrategyEngine:
         fill = round_to_nse_tick(ack.fill_price or cross_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier))
         sl_side = "SELL" if direction == "LONG" else "BUY"
-        sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, int(cfg.qty), sl)
+        sl_id = ""
+        if bool(getattr(cfg, "use_stop", True)):
+            sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, int(cfg.qty), sl)
+            sl_id = sl_ack.order_id
         trade_id = self._insert_open_trade(
             cfg=cfg,
             direction=direction,
@@ -296,7 +300,7 @@ class StrategyEngine:
             ma_cross_price=cross_price,
             atr_at_entry=atr,
             sl_trigger=sl,
-            sl_order_id=sl_ack.order_id,
+            sl_order_id=sl_id,
             entry_order_id=ack.order_id,
             entry_time=now,
             trade_id=trade_id,
@@ -325,9 +329,53 @@ class StrategyEngine:
             await self._sleep(0.05)
         raise SlCancelFailed(f"SL {pos.sl_order_id} cancel was not confirmed — reverse blocked")
 
+    async def _groww_net(self, symbol: str) -> int | None:
+        fn = getattr(self.broker, "net_quantity", None)
+        if fn is None:
+            return None
+        try:
+            return await fn(symbol)
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _settle_exchange_flat(self, cfg: BotConfig) -> None:
+        """Book an open terminal trade once Groww's MIS book for it is flat.
+
+        A restart forgets the in-memory position. The exchange stop can already
+        have sold the shares. Leaving the row open is what kept the screen on
+        LONG after Groww showed the stop filled.
+        """
+        if self.position is not None:
+            return
+        if (cfg.trading_mode or "").upper() != "LIVE":
+            return
+        now_m = time.monotonic()
+        if now_m - getattr(self, "_flat_check_at", 0.0) < 15:
+            return
+        self._flat_check_at = now_m
+        if await self._groww_net(cfg.symbol) != 0:
+            return
+        with session_factory()() as db:
+            rows = (
+                db.query(TradeLog)
+                .filter(TradeLog.exit_time.is_(None), TradeLog.symbol == (cfg.symbol or "").upper())
+                .all()
+            )
+            pending = [(int(row.id), float(row.sl_trigger_price or row.entry_price), row.direction, float(row.entry_price), int(row.qty)) for row in rows]
+        for trade_id, px, direction, entry, qty in pending:
+            buy, sell = legs_for(direction, entry, px)
+            costs = calculate_charges(buy, sell, qty)
+            self.realized_net += costs["net_pnl"]
+            self._finalize_trade(trade_id, px, "ATR_SL_HIT", _ist_now(), costs)
+            self.last_signal = "Exchange stop already filled — flat"
+
     async def _watch_stop(self, cfg: BotConfig) -> None:
         pos = self.position
         if pos is None or self.status != "RUNNING":
+            return
+        # No exchange stop and no resting order: nothing to watch. Square-off
+        # and an opposite cross still close the position.
+        if not bool(getattr(cfg, "use_stop", True)) and not pos.sl_order_id:
             return
         hit = False
         fill_price = self.ltp
@@ -337,7 +385,17 @@ class StrategyEngine:
                 hit = True
                 # Exchange fill price if the adapter stored one; else the trigger.
                 fill_price = pos.sl_trigger
-        else:
+            elif status not in IN_FLIGHT:
+                # Groww reports a filled stop as EXECUTED. If that word was
+                # missed, a flat MIS book is the same fact: the shares are gone.
+                opened = pos.entry_time
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=IST)
+                age = (_ist_now() - opened).total_seconds()
+                if age >= 20 and await self._groww_net(cfg.symbol) == 0:
+                    hit = True
+                    fill_price = pos.sl_trigger or self.ltp
+        elif bool(getattr(cfg, "use_stop", True)):
             if pos.direction == "LONG" and self.ltp <= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
@@ -448,6 +506,7 @@ class StrategyEngine:
             row.brokerage_and_taxes = costs["total_charges"]
             row.net_pnl = costs["net_pnl"]
             db.commit()
+        self._trades_cache = None
 
     def _day_open_and_change(self) -> tuple[float | None, float | None]:
         """Percent versus the previous session's last close.

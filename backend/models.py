@@ -46,6 +46,9 @@ class BotConfig(Base):
     atr_period: Mapped[int] = mapped_column(Integer, default=14)
     atr_multiplier: Mapped[float] = mapped_column(Float, default=1.5)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When false, entries are sent without an exchange stop. Square-off, the
+    # panic button, and an opposite crossover still close the position.
+    use_stop: Mapped[bool] = mapped_column(Boolean, default=True)
     adx_threshold: Mapped[float] = mapped_column(Float, default=20.0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=15)

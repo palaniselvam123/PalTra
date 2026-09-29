@@ -28,6 +28,7 @@ export type SmaConfig = {
   atr_period: number;
   atr_multiplier: number;
   use_adx_filter: boolean;
+  use_stop?: boolean;
   adx_threshold: number;
   max_daily_loss: number;
   max_trades_per_day: number;

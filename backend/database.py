@@ -48,10 +48,22 @@ def session_factory() -> sessionmaker[Session]:
     return _Session
 
 
+def _ensure_bot_config_columns(engine) -> None:
+    """create_all does not add a column to a table that already exists."""
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(bot_config)").fetchall()
+        if not rows:
+            return
+        names = {row[1] for row in rows}
+        if "use_stop" not in names:
+            conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN use_stop BOOLEAN DEFAULT 1")
+
+
 def init_db() -> BotConfig:
     """Create tables and seed a single BotConfig row from settings."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _ensure_bot_config_columns(engine)
     SessionLocal = session_factory()
     settings = get_settings()
     with SessionLocal() as db:
