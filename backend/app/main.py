@@ -306,6 +306,14 @@ app.include_router(routes_chart.router)
 app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
+# These routers live on the deployed image and are not in this checkout.
+# Skipping a missing module keeps a local run working.
+for _extra in ("routes_volatility", "routes_scalp", "routes_order_book"):
+    try:
+        _mod = __import__(f"app.api.{_extra}", fromlist=["router"])
+        app.include_router(_mod.router)
+    except Exception as exc:  # noqa: BLE001
+        print(_extra, "skipped", exc)
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
 install_desk_lock(app)
@@ -321,3 +329,32 @@ except Exception as exc:  # noqa: BLE001
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "mode": state.mode}
+
+
+def _mount_exported_ui() -> None:
+    """Serve the Next.js static export at `/` when the image includes it.
+
+    Registered last so `/api/*` and `/sma` keep their own routes. `html=True`
+    serves each folder's `index.html`.
+    """
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    class NoStoreStatic(StaticFiles):
+        async def get_response(self, path: str, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+    candidates = (
+        Path("/app/static"),
+        Path(__file__).resolve().parent.parent / "static",
+    )
+    for directory in candidates:
+        if (directory / "index.html").is_file():
+            app.mount("/", NoStoreStatic(directory=str(directory), html=True), name="ui")
+            return
+
+
+_mount_exported_ui()
