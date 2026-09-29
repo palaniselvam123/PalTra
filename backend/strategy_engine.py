@@ -104,6 +104,8 @@ class StrategyEngine:
         # bot was started or the stock was armed. None means the first bar
         # we see is that bar. A cross on it must not trade.
         self._skip_cross_until: dict[str, int | None] = {}
+        # Heads-up keys already sent, so a near cross does not message every minute.
+        self._warned: set[tuple] = set()
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -207,6 +209,7 @@ class StrategyEngine:
             self._session_date = day
             self.realized_net = 0.0
             self.trades_today = 0
+            self._warned.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -334,6 +337,7 @@ class StrategyEngine:
             return
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
+        self._warn_upcoming(symbol, frame, cfg, now)
         cross = closed_candle_cross(frame)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -862,6 +866,80 @@ class StrategyEngine:
         self.ltp = ltp
         return net <= -abs(float(cfg.max_daily_loss))
 
+    def _warn_upcoming(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Telegram before an entry, and before a close. The order itself is a separate message."""
+        pos = self.positions.get(symbol)
+        mode = (cfg.trading_mode or "PAPER").upper()
+        side, minutes = minutes_until_cross(frame)
+        if side is None:
+            self._gate_warning((symbol, "cross", "BULLISH"), None, "")
+            self._gate_warning((symbol, "cross", "BEARISH"), None, "")
+        else:
+            other = "BEARISH" if side == "BULLISH" else "BULLISH"
+            self._gate_warning((symbol, "cross", other), None, "")
+            closes = pos is not None and (
+                (pos.direction == "LONG" and side == "BEARISH")
+                or (pos.direction == "SHORT" and side == "BULLISH")
+            )
+            if pos is None:
+                text = upcoming_entry_alert(mode=mode, symbol=symbol, side=side, minutes=minutes or 0)
+            elif closes:
+                text = upcoming_close_alert(
+                    mode=mode,
+                    symbol=symbol,
+                    position=pos.direction,
+                    side=side,
+                    minutes=minutes or 0,
+                )
+            else:
+                text = ""
+                minutes = None
+            self._gate_warning((symbol, "cross", side), minutes, text)
+
+        if pos is None:
+            self._gate_warning((symbol, "stop"), None, "")
+            self._gate_warning((symbol, "squareoff"), None, "")
+            return
+        atr = _latest_atr(frame) or float(pos.atr_at_entry or 0)
+        ltp = float(self._ltps.get(symbol) or self.ltp or 0)
+        stop_in = minutes_until_stop(pos.direction, ltp, float(pos.sl_trigger), atr)
+        self._gate_warning(
+            (symbol, "stop"),
+            stop_in,
+            upcoming_stop_alert(
+                symbol=symbol,
+                direction=pos.direction,
+                minutes=stop_in or 0,
+                ltp=ltp,
+                stop=float(pos.sl_trigger),
+            ),
+        )
+        if not market_is_open(now) and self.data_source != "GROWW":
+            self._gate_warning((symbol, "squareoff"), None, "")
+            return
+        ahead = minutes_until_clock(now, cfg.square_off_time)
+        self._gate_warning(
+            (symbol, "squareoff"),
+            ahead,
+            upcoming_square_off_alert(
+                symbol=symbol,
+                direction=pos.direction,
+                minutes=ahead or 0,
+                clock=cfg.square_off_time,
+            ),
+        )
+
+    def _gate_warning(self, key: tuple, minutes: float | None, message: str) -> None:
+        """Send once while the event is inside 3 minutes. Arm again after it moves past 5."""
+        if minutes is not None and 0 < minutes <= _WARN_MINUTES and message:
+            if key in self._warned:
+                return
+            self._warned.add(key)
+            _schedule_whatsapp(message)
+            return
+        if minutes is None or minutes > _WARN_CLEAR_MINUTES:
+            self._warned.discard(key)
+
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
         if not market_is_open(now) and self.data_source != "GROWW":
             return False
@@ -1088,6 +1166,9 @@ class StrategyEngine:
         return payload
 
 
+_WARN_MINUTES = 3
+_WARN_CLEAR_MINUTES = 5
+
 _ALERT_REASON = {
     "MA_CROSS": "MA cross",
     "ATR_SL_HIT": "ATR stop",
@@ -1109,7 +1190,8 @@ def fill_alert(
     """WhatsApp text for a fill. No account numbers or order ids."""
     clock = when.strftime("%d %b %H:%M:%S")
     return (
-        f"PalTra {mode} {direction} {symbol}\n"
+        f"PalTra Order placed\n"
+        f"{mode} {direction} {symbol}\n"
         f"Filled {qty} @ {fill:,.2f}\n"
         f"Stop {stop:,.2f}\n"
         f"{clock} IST"
@@ -1133,6 +1215,98 @@ def close_alert(
         f"Exit {exit_price:,.2f} · {why}\n"
         f"P&L {gross:+,.2f}  net {net:+,.2f}\n"
         f"{clock} IST"
+    )
+
+
+def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None]:
+    """How soon SMA 9 will cross SMA 21 if the last closed bars keep their pace.
+
+    The forming bar is ignored. Returns ("BULLISH" or "BEARISH", minutes), or
+    (None, None) when the averages are moving apart or are not ready.
+    """
+    if frame is None or len(frame) < lookback + 1:
+        return None, None
+    closed = frame.iloc[-(lookback + 1) : -1]
+    gaps: list[float] = []
+    for _, row in closed.iterrows():
+        fast, slow = row.get("sma_9"), row.get("sma_21")
+        if pd.isna(fast) or pd.isna(slow):
+            return None, None
+        gaps.append(float(fast) - float(slow))
+    if len(gaps) < 2:
+        return None, None
+    gap = gaps[-1]
+    slope = (gaps[-1] - gaps[0]) / (len(gaps) - 1)
+    if gap < 0 and slope > 0:
+        return "BULLISH", abs(gap) / slope
+    if gap > 0 and slope < 0:
+        return "BEARISH", gap / abs(slope)
+    return None, None
+
+
+def minutes_until_stop(direction: str, ltp: float, stop: float, atr: float) -> float | None:
+    """Minutes to the stop if price walks toward it at about one ATR per minute."""
+    if atr is None or atr <= 0 or ltp <= 0:
+        return None
+    if direction == "LONG":
+        room = ltp - stop
+    elif direction == "SHORT":
+        room = stop - ltp
+    else:
+        return None
+    if room <= 0:
+        return None
+    return room / atr
+
+
+def minutes_until_clock(now: dt.datetime, hhmm: str) -> float | None:
+    target = _parse_hhmm(hhmm)
+    due = now.replace(hour=target.hour, minute=target.minute, second=0, microsecond=0)
+    minutes = (due - now).total_seconds() / 60
+    if minutes <= 0:
+        return None
+    return minutes
+
+
+def _about(minutes: float) -> int:
+    return max(1, int(round(minutes)))
+
+
+def upcoming_entry_alert(*, mode: str, symbol: str, side: str, minutes: float) -> str:
+    order = "BUY" if side == "BULLISH" else "SELL"
+    return (
+        f"PalTra heads-up\n"
+        f"{symbol} may be ordered in about {_about(minutes)} min\n"
+        f"SMA 9 is nearing a cross. A {order} would be placed.\n"
+        f"{mode} · no order yet"
+    )
+
+
+def upcoming_close_alert(*, mode: str, symbol: str, position: str, side: str, minutes: float) -> str:
+    order = "BUY" if side == "BULLISH" else "SELL"
+    return (
+        f"PalTra heads-up\n"
+        f"{position} {symbol} may close in about {_about(minutes)} min\n"
+        f"SMA 9 is nearing a cross. A {order} would follow.\n"
+        f"{mode} · no close yet"
+    )
+
+
+def upcoming_stop_alert(*, symbol: str, direction: str, minutes: float, ltp: float, stop: float) -> str:
+    return (
+        f"PalTra heads-up\n"
+        f"{direction} {symbol} may hit its stop in about {_about(minutes)} min\n"
+        f"Price {ltp:,.2f} · stop {stop:,.2f}\n"
+        f"No close yet"
+    )
+
+
+def upcoming_square_off_alert(*, symbol: str, direction: str, minutes: float, clock: str) -> str:
+    return (
+        f"PalTra heads-up\n"
+        f"{direction} {symbol} square-off in about {_about(minutes)} min\n"
+        f"Closes at {clock} IST\n"
+        f"No close yet"
     )
 
 

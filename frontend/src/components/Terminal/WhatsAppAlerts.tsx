@@ -68,8 +68,8 @@ export function WhatsAppAlerts() {
       setSecret("");
       setNote(
         provider === "telegram"
-          ? "Telegram is on. Fills and closes will arrive in that chat."
-          : "WhatsApp is on. Fills and closes will message this phone."
+          ? "Telegram is on. You get a warning a few minutes before an order, when it is placed, a few minutes before it closes, and when it closes."
+          : "WhatsApp is on. You get a warning a few minutes before an order, when it is placed, a few minutes before it closes, and when it closes."
       );
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "Could not save alerts");

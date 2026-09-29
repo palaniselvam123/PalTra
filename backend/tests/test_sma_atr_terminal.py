@@ -67,6 +67,7 @@ def test_whatsapp_text_names_the_fill_and_the_close():
         stop=1171.25,
         when=dt.datetime(2026, 9, 29, 14, 58, 26),
     )
+    assert "Order placed" in opened
     assert "LIVE LONG ANTELOPUS" in opened
     assert "1,175.95" in opened
     assert "1,171.25" in opened
@@ -82,6 +83,95 @@ def test_whatsapp_text_names_the_fill_and_the_close():
     assert "closed LONG ANTELOPUS" in closed
     assert "square-off" in closed
     assert "-10.95" in closed
+
+
+def _gap_frame(gaps: list[float], atr: float = 1.0) -> pd.DataFrame:
+    """Closed SMA gaps, oldest first, plus a forming bar the strategy must ignore."""
+    rows = []
+    for i, gap in enumerate([*gaps, gaps[-1]]):
+        rows.append(
+            {
+                "ts": 1_700_000_000 + i * 60,
+                "open": 100.0,
+                "high": 100.5,
+                "low": 99.5,
+                "close": 100.0,
+                "volume": 1000,
+                "sma_9": 100.0 + gap,
+                "sma_21": 100.0,
+                "atr_14": atr,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_a_closing_sma_gap_is_a_few_minutes_from_a_cross():
+    from strategy_engine import minutes_until_cross, minutes_until_stop
+
+    side, minutes = minutes_until_cross(_gap_frame([-1.5, -1.0, -0.5]))
+    assert side == "BULLISH"
+    assert minutes == pytest.approx(1.0)
+    apart, _ = minutes_until_cross(_gap_frame([-1.0, -2.0, -3.0]))
+    assert apart is None
+    assert minutes_until_stop("SHORT", 100.2, 101.0, 0.4) == pytest.approx(2.0)
+    assert minutes_until_stop("LONG", 100.2, 101.0, 0.4) is None
+
+
+@pytest.mark.asyncio
+async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, monkeypatch):
+    from strategy_engine import OpenPosition
+
+    notes: list[str] = []
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    cfg.square_off_time = "15:15"
+    now = dt.datetime(2026, 9, 29, 14, 0, tzinfo=IST)
+    frame = _gap_frame([-1.5, -1.0, -0.5])
+    await engine.on_minute(now, cfg, frame)
+    await engine.on_minute(now + dt.timedelta(minutes=1), cfg, frame)
+    assert sum("may be ordered" in note for note in notes) == 1
+    assert "SHIPROCKET" not in engine.positions
+
+    notes.clear()
+    engine._warned.clear()
+    engine.positions["SHIPROCKET"] = OpenPosition(
+        direction="SHORT",
+        qty=1,
+        entry_price=100.0,
+        ma_cross_price=100.0,
+        atr_at_entry=1.0,
+        sl_trigger=103.0,
+        sl_order_id="",
+        entry_order_id="E",
+        entry_time=now,
+        trade_id=1,
+        mode="PAPER",
+    )
+    engine.ltp = 100.0
+    engine._ltps["SHIPROCKET"] = 100.0
+    await engine.on_minute(now, cfg, frame)
+    assert any("may close" in note for note in notes)
+    assert not any("may be ordered" in note for note in notes)
+
+    notes.clear()
+    engine._warned.discard(("SHIPROCKET", "stop"))
+    engine.ltp = 102.2
+    engine._ltps["SHIPROCKET"] = 102.2
+    tight = _gap_frame([-3.0, -4.0, -5.0], atr=0.4)
+    await engine.on_minute(now + dt.timedelta(minutes=2), cfg, tight)
+    assert any("may hit its stop" in note for note in notes)
+
+    notes.clear()
+    engine._warned.discard(("SHIPROCKET", "squareoff"))
+    engine.ltp = 100.0
+    engine._ltps["SHIPROCKET"] = 100.0
+    await engine.on_minute(dt.datetime(2026, 9, 29, 15, 13, tzinfo=IST), cfg, tight)
+    assert any("square-off in about" in note for note in notes)
 
 
 def test_groww_charge_breakdown_matches_schedule():
