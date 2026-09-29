@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { WS_URL } from "@/lib/api";
+import { resolveWsUrl } from "@/lib/api";
 
 export type WsMessage = { channel: string; data: any };
 
@@ -19,7 +19,7 @@ export function useWebSocket(onMessage: (msg: WsMessage) => void) {
 
     const connect = () => {
       if (cancelled) return;
-      socket = new WebSocket(WS_URL);
+      socket = new WebSocket(resolveWsUrl());
       openTimer = setTimeout(() => socket?.close(), 8000);
 
       socket.onopen = () => {

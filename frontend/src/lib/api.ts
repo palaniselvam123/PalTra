@@ -565,8 +565,18 @@ function stringifyParams(params: Record<string, string | number | boolean | unde
   return out;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-export const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws/live";
+/** On the deployed site the browser must call this host, not the build machine. */
+export function resolveApiBase(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") return window.location.origin;
+  }
+  return (process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000").replace(/\/$/, "");
+}
+
+export function resolveWsUrl(): string {
+  return resolveApiBase().replace(/^http/, "ws") + "/ws/live";
+}
 
 /** Drops empty values so an untouched filter never narrows the query. */
 function queryString(params: Record<string, string | undefined>): string {
@@ -589,7 +599,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     else parent.addEventListener("abort", () => controller.abort(), { once: true });
   }
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${resolveApiBase()}${path}`, {
       ...options,
       signal: controller.signal,
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
@@ -751,7 +761,7 @@ export const api = {
   getTransaction: (id: number) =>
     request<{ transaction: Transaction; ai_analyses: any[] }>(`/api/reports/transaction/${id}`),
   // Not a JSON endpoint — the browser downloads it, so hand back a URL.
-  reportCsvUrl: (filters: ReportFilters = {}) => `${API_BASE}/api/reports/export.csv${queryString(filters)}`,
+  reportCsvUrl: (filters: ReportFilters = {}) => `${resolveApiBase()}/api/reports/export.csv${queryString(filters)}`,
 
   getAiStatus: () => request<AiStatus>("/api/ai/status"),
   saveAiKey: (api_key: string) => request("/api/ai/key", { method: "POST", body: JSON.stringify({ api_key }) }),

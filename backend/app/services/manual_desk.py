@@ -18,6 +18,7 @@ strategy account's are.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from app import state
@@ -355,6 +356,11 @@ async def place(
     if position:
         position.trade_id = trade_id
 
+    _schedule_alert(
+        f"PalTra {'LIVE' if sent_to_groww else 'PRACTICE'} {side} {symbol}\n"
+        f"Filled {quantity} @ {fill.filled_price:,.2f}\n"
+        f"Manual desk"
+    )
     await broadcaster.publish(
         "log",
         {
@@ -420,7 +426,31 @@ async def close(symbol: str, reason: str = "MANUAL CLOSE") -> dict:
     result, _ = await close_and_settle(symbol, reason, account=ACCOUNT, exit_price=exit_price)
     if result is None:
         raise ManualOrderRejected(f"No open manual position in {symbol} (or no live quote yet).", 404)
+    _schedule_alert(
+        f"PalTra closed {symbol}\n"
+        f"Exit {result.exit_price:,.2f} · {reason}\n"
+        f"P&L {result.pnl:+,.2f}\n"
+        f"Manual desk"
+    )
     return {"symbol": symbol, "pnl": result.pnl, "exit_price": result.exit_price}
+
+
+def _schedule_alert(message: str) -> None:
+    """A failed Telegram or WhatsApp send must not change the fill."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send(message)
+        except Exception:  # noqa: BLE001
+            return
+
+    loop.create_task(_send())
 
 
 async def square_off_all() -> list[dict]:
