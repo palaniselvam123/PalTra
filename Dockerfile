@@ -27,6 +27,8 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY backend/ /app/
+COPY frontend/out/ /app/static/
+RUN cp /app/main.py /app/sma_terminal_main.py
 
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app /data

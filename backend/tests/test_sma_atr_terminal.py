@@ -570,6 +570,43 @@ def test_day_change_uses_the_previous_close(monkeypatch):
     assert change == pytest.approx((120.9 - 126.19) / 126.19 * 100)
 
 
+def test_day_change_stays_fast_on_a_long_tape(monkeypatch):
+    """The websocket computes this on the only thread that can serve the desk."""
+    import time
+
+    from strategy_engine import StrategyEngine
+
+    monkeypatch.setattr(
+        "strategy_engine._ist_now",
+        lambda: dt.datetime(2026, 9, 28, 12, 0, tzinfo=IST),
+    )
+    start = int(dt.datetime(2026, 9, 20, 9, 15, tzinfo=IST).timestamp())
+    n = 80_000
+    ts = [start + i * 60 for i in range(n)]
+    midnight = int(dt.datetime(2026, 9, 28, tzinfo=IST).timestamp())
+    engine = StrategyEngine()
+    engine.candles = pd.DataFrame(
+        {
+            "ts": ts,
+            "open": [100.0] * n,
+            "high": [101.0] * n,
+            "low": [99.0] * n,
+            "close": [100.0] * n,
+            "volume": [1] * n,
+        }
+    )
+    prev_i = max(i for i, t in enumerate(ts) if t < midnight)
+    engine.candles.loc[prev_i, "close"] = 110.0
+    engine.candles.loc[prev_i + 1, "open"] = 108.0
+    engine.ltp = 121.0
+    t0 = time.perf_counter()
+    day_open, change = engine._day_open_and_change()
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.25
+    assert day_open == 108.0
+    assert change == pytest.approx((121.0 - 110.0) / 110.0 * 100)
+
+
 def test_stub_bar_does_not_report_a_flat_day(monkeypatch):
     from strategy_engine import StrategyEngine
 

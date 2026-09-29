@@ -450,13 +450,14 @@ class GrowwClient:
     async def get_positions(self) -> list[dict]:
         if self.mode == "PAPER":
             return list(self._positions)
-        sdk = self._require_sdk()
-
         def _pos():
-            fn = getattr(sdk, "get_positions", None) or getattr(sdk, "get_positions_for_user")
+            sdk = self._require_sdk()
+            fn = getattr(sdk, "get_positions_for_user", None) or getattr(sdk, "get_positions", None)
+            if fn is None:
+                raise RuntimeError("Groww positions API is unavailable")
             return fn(segment="CASH")
 
-        raw = await asyncio.to_thread(_pos)
+        raw = await asyncio.wait_for(asyncio.to_thread(_pos), timeout=4)
         data = raw.get("payload", raw) if isinstance(raw, dict) else raw
         if isinstance(data, dict):
             data = data.get("positions") or []
@@ -620,11 +621,19 @@ def _one_bar(ltp: float, ohlc: dict | None = None) -> pd.DataFrame:
     )
 
 
+# Five sessions of 1-minute bars is enough for SMA 21 and the day change.
+# A larger download, walked with iterrows on the request path, froze the site.
+_MAX_CANDLES = 2500
+_CANDLE_READ_CAP = 20000
+
+
 def _parse_candles(raw) -> pd.DataFrame:
     data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
     rows = data.get("candles", data.get("data", [])) if isinstance(data, dict) else data
     out = []
     for row in rows or []:
+        if len(out) >= _CANDLE_READ_CAP:
+            break
         if isinstance(row, (list, tuple)) and len(row) >= 6:
             ts_raw, o, h, l, c, v = row[:6]
         elif isinstance(row, dict):
@@ -648,6 +657,8 @@ def _parse_candles(raw) -> pd.DataFrame:
     if not out:
         return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
     frame = pd.DataFrame(out).sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
+    if len(frame) > _MAX_CANDLES:
+        frame = frame.iloc[-_MAX_CANDLES:].reset_index(drop=True)
     return frame
 
 

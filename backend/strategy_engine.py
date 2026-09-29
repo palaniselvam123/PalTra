@@ -144,6 +144,8 @@ class StrategyEngine:
             return
         self.ltp = float(ltp)
         self.data_source = source
+        if frame is not None and not frame.empty and len(frame) > 2500:
+            frame = frame.iloc[-2500:].reset_index(drop=True)
         self.candles = frame
         enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period) if not frame.empty else frame
         self.candles = enriched
@@ -518,16 +520,20 @@ class StrategyEngine:
         if frame is None or getattr(frame, "empty", True) or self.ltp <= 0:
             return None, None
         today = _ist_now().date()
-        day_open = None
-        prev_close = None
-        for _, row in frame.iterrows():
-            ts = dt.datetime.fromtimestamp(int(row["ts"]), IST)
-            if ts.date() < today:
-                prev_close = float(row["close"])
-            elif ts.date() == today and day_open is None:
-                day_open = float(row["open"])
-        if day_open is None:
-            day_open = float(frame.iloc[0]["open"])
+        today_start = int(dt.datetime(today.year, today.month, today.day, tzinfo=IST).timestamp())
+        ts = frame["ts"]
+        if not ts.is_monotonic_increasing:
+            frame = frame.sort_values("ts")
+            ts = frame["ts"]
+        # Binary search. Walking every bar here runs on the websocket thread
+        # and was leaving the desk unable to answer for the whole scan.
+        idx = int(ts.searchsorted(today_start, side="left"))
+        n = len(frame)
+        prev_close = float(frame["close"].iloc[idx - 1]) if idx > 0 else None
+        if idx < n:
+            day_open = float(frame["open"].iloc[idx])
+        else:
+            day_open = float(frame["open"].iloc[0]) if n else None
         baseline = prev_close if prev_close and prev_close > 0 else day_open
         if baseline is None or baseline <= 0:
             return day_open, None
