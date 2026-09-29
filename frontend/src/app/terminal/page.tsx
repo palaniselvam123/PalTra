@@ -89,7 +89,7 @@ export default function TerminalPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0B0E14] text-slate-200">
+    <div className="terminal-dark min-h-screen bg-[#0B0E14] text-slate-200">
       <Header state={state} config={config} connected={connected} loadNote={loadNote} onChanged={refresh} />
       <main className="mx-auto max-w-[1600px] space-y-4 px-4 py-4">
         {loadNote && (

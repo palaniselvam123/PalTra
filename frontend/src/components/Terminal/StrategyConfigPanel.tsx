@@ -95,7 +95,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-0.5 w-full rounded-md border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-sm text-slate-100 outline-none focus:border-[#10B981]/50"
+        className="mt-0.5 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none focus:border-[#10B981]/50"
       />
     </label>
   );

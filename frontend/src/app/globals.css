@@ -128,6 +128,15 @@ body::before {
 
 /* --- slate scale inversion for light mode -------------------------------- */
 
+/* Phones paint input text with their own fill colour. Tie it to the colour
+   the field already uses, or a dark value vanishes on a dark field. */
+input,
+textarea,
+select {
+  -webkit-text-fill-color: currentColor;
+  caret-color: currentColor;
+}
+
 [data-theme="light"] .text-slate-100 { color: #0f172a; }
 [data-theme="light"] .text-slate-200 { color: #17233b; }
 [data-theme="light"] .text-slate-300 { color: #334155; }
@@ -169,6 +178,33 @@ body::before {
 [data-theme="light"] .text-amber-300 { color: #92610a; }
 [data-theme="light"] .text-amber-400 { color: #a16207; }
 [data-theme="light"] .text-violet-300 { color: #6d28d9; }
+
+/* The SMA terminal stays a dark surface when the rest of the desk is light.
+   Light theme turns slate text near-black, which hides the numbers typed
+   into these fields. */
+[data-theme="light"] .terminal-dark .text-slate-100 { color: #f1f5f9; }
+[data-theme="light"] .terminal-dark .text-slate-200 { color: #e2e8f0; }
+[data-theme="light"] .terminal-dark .text-slate-300 { color: #cbd5e1; }
+[data-theme="light"] .terminal-dark .text-slate-400 { color: #94a3b8; }
+[data-theme="light"] .terminal-dark .text-slate-500 { color: #94a3b8; }
+
+[data-theme="light"] .terminal-dark input,
+[data-theme="light"] .terminal-dark textarea,
+[data-theme="light"] .terminal-dark select,
+.terminal-dark input,
+.terminal-dark textarea,
+.terminal-dark select {
+  color: #f8fafc;
+  -webkit-text-fill-color: #f8fafc;
+  caret-color: #f8fafc;
+  color-scheme: dark;
+}
+
+[data-theme="light"] .terminal-dark input::placeholder,
+.terminal-dark input::placeholder {
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+}
 
 /* The chart library paints its own canvas; it is told the theme separately
    via props, so nothing to override here. */
