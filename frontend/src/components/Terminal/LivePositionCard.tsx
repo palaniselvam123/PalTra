@@ -20,7 +20,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
             : "Loading position…"
           : pos
             ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY`
-            : "FLAT — order follows SMA 9 vs SMA 21"}
+            : "FLAT — waiting for the next SMA cross"}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
         <Row label="Entry" value={px(pos?.entry_price)} />

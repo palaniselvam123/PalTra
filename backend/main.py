@@ -22,7 +22,13 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from database import init_db, session_factory
 from models import BotConfig
-from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, attach_market_prices, trade_names
+from strategy_engine import (
+    MAX_TRADE_SYMBOLS,
+    ForceRefused,
+    StrategyEngine,
+    attach_market_prices,
+    trade_names,
+)
 
 engine = StrategyEngine()
 
@@ -167,6 +173,7 @@ async def set_trade_symbol(body: TradeSymbolUpdate):
                 if len(names) >= MAX_TRADE_SYMBOLS:
                     raise HTTPException(409, f"Trade is limited to {MAX_TRADE_SYMBOLS} stocks at once")
                 names.append(symbol)
+                engine.hold_for_next_cross([symbol])
         else:
             if symbol in _open_symbols():
                 raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
@@ -253,9 +260,26 @@ async def start_bot():
         raise HTTPException(423, engine.halt_reason or "Halted for the day")
     if engine.status == "DAY_COMPLETED":
         raise HTTPException(423, engine.halt_reason or "Session already squared off")
+    # A cross already on the tape is not an order. The next cross is.
+    engine.hold_for_next_cross(trade_names(engine.load_config()))
     engine.status = "RUNNING"
     engine.halt_reason = ""
     return {"bot_status": engine.status}
+
+
+class ForceOrder(BaseModel):
+    symbol: str = ""
+
+
+@app.post("/api/bot/force")
+async def force_order(body: ForceOrder):
+    """Manual check order. Starts the bot. Does not wait for a cross."""
+    try:
+        result = await engine.force_order(body.symbol)
+    except ForceRefused as exc:
+        code = 423 if engine.status in ("HALTED", "DAY_COMPLETED") else 400
+        raise HTTPException(code, str(exc)) from exc
+    return {"bot_status": engine.status, "last_signal": result}
 
 
 @app.post("/api/bot/pause")

@@ -674,23 +674,58 @@ def test_a_losing_book_has_no_largest_win():
 
 
 @pytest.mark.asyncio
-async def test_flat_stock_enters_when_the_averages_are_already_apart(engine, monkeypatch):
+async def test_start_ignores_a_cross_already_on_the_tape(engine, monkeypatch):
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
-    engine.status = "RUNNING"
     engine.data_source = "GROWW"
-    closes = [100.0] * 30 + [float(100 + i) for i in range(20)] + [120.0] * 6
-    frame = enrich(_ohlcv(closes))
-    from indicators import closed_candle_bias, closed_candle_cross
-
-    assert closed_candle_cross(frame) is None
-    assert closed_candle_bias(frame) == "BULLISH"
+    crossed = [100.0] * 40
+    crossed[-2] = 160.0
+    frame = enrich(_ohlcv(crossed))
+    assert closed_candle_cross(frame) == "BULLISH"
+    engine._frames["SHIPROCKET"] = frame
+    engine.hold_for_next_cross(["SHIPROCKET"])
+    engine.status = "RUNNING"
     cfg = engine.load_config()
     cfg.symbol = "SHIPROCKET"
     cfg.use_adx_filter = False
     now = dt.datetime(2026, 9, 29, 14, 0, 5, tzinfo=IST)
     await engine.on_minute(now, cfg, frame)
+    assert "SHIPROCKET" not in engine.positions
+    assert engine.broker.events == []
+
+    later = [100.0] * 41
+    later[-2] = 180.0
+    fresh = enrich(_ohlcv(later))
+    assert closed_candle_cross(fresh) == "BULLISH"
+    assert int(fresh.iloc[-2]["ts"]) > int(frame.iloc[-2]["ts"])
+    await engine.on_minute(now + dt.timedelta(minutes=1), cfg, fresh)
     assert engine.positions["SHIPROCKET"].direction == "LONG"
-    assert any(event.startswith("ENTRY") for event in engine.broker.events)
+
+
+@pytest.mark.asyncio
+async def test_force_order_uses_the_live_side_and_starts_the_bot(engine, monkeypatch):
+    session = {"open": False}
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: session["open"])
+    closes = [100.0] * 40
+    closes[-2] = 40.0
+    closes[-1] = 200.0
+    raw = _ohlcv(closes)
+    frame = enrich(raw)
+    assert closed_candle_cross(frame) == "BEARISH"
+    engine._frames["SHIPROCKET"] = raw
+    engine._ltps["SHIPROCKET"] = 200.0
+    engine.status = "STOPPED"
+    engine.data_source = "GROWW"
+    result = await engine.force_order("SHIPROCKET")
+    assert engine.status == "RUNNING"
+    assert "opened LONG" in result
+    assert engine.positions["SHIPROCKET"].direction == "LONG"
+    session["open"] = True
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    await engine.on_minute(dt.datetime(2026, 9, 29, 14, 0, tzinfo=IST), cfg, frame)
+    assert engine.positions["SHIPROCKET"].direction == "LONG"
+    assert engine.broker.events.count("ENTRY BUY") == 1
 
 
 def test_chart_can_move_while_another_stock_stays_armed(api):

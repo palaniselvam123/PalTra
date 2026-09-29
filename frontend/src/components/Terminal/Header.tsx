@@ -168,6 +168,27 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
     }
   };
 
+  const forceOrder = async () => {
+    const target = (symbol || config?.symbol || "").trim().toUpperCase();
+    if (!target) return;
+    const ok = window.confirm(
+      live
+        ? `Force a live ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross or a closed candle. The bot will start.`
+        : `Force a practice ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross. The bot will start.`
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await smaApi.forceOrder(target);
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Force order failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleBot = async () => {
     setBusy(true);
     setError(null);
@@ -321,17 +342,22 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         <button
           disabled={busy}
           onClick={toggleBot}
-          title={
-            live
-              ? "Sends Groww orders for every stock whose Trade button is on, even if the chart shows another."
-              : "Practice fills for every stock whose Trade button is on."
-          }
+          title="Starts the bot. A cross that already happened is skipped. The next cross can order an armed stock."
           className={clsx(
             "rounded-md px-3 py-1.5 text-xs font-semibold",
             running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
           )}
         >
           {running ? "PAUSE BOT" : "START BOT"}
+        </button>
+
+        <button
+          disabled={busy || !symbol}
+          onClick={forceOrder}
+          title="Order the chart stock now from the current SMA side, without waiting for a cross. Starts the bot."
+          className="rounded-md bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#1a1203]"
+        >
+          FORCE ORDER
         </button>
 
         <span className="flex items-center gap-1.5 text-[11px] text-slate-400" title={state?.data_source}>
@@ -356,7 +382,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       </div>
       <p className="px-4 pb-2 text-[11px] leading-relaxed text-slate-500">
         This is the SMA terminal. Chart only changes the stock you are looking at. Trade arms that
-        stock even on another chart. A flat armed stock is ordered on the side SMA 9 is already on.
+        stock even on another chart. Start waits for the next SMA cross. Force order buys or sells
+        the chart stock now and starts the bot.
       </p>
       {(error || state?.halt_reason || state?.last_error) && (
         <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">

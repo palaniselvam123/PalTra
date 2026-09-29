@@ -25,7 +25,7 @@ import pandas as pd
 from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
-from indicators import closed_candle_bias, closed_candle_cross, enrich, round_to_nse_tick
+from indicators import closed_candle_cross, enrich, round_to_nse_tick
 from models import BotConfig, TradeLog
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -37,6 +37,10 @@ class OrderBusy(Exception):
 
 class SlCancelFailed(Exception):
     pass
+
+
+class ForceRefused(Exception):
+    """A manual force-order was refused before a broker request."""
 
 
 @dataclass
@@ -96,6 +100,10 @@ class StrategyEngine:
         self._ltps: dict[str, float] = {}
         self._minutes: dict[str, str] = {}
         self._signals: dict[str, str] = {}
+        # symbol -> timestamp of the closed bar already on the tape when the
+        # bot was started or the stock was armed. None means the first bar
+        # we see is that bar. A cross on it must not trade.
+        self._skip_cross_until: dict[str, int | None] = {}
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -327,18 +335,20 @@ class StrategyEngine:
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
         cross = closed_candle_cross(frame)
-        # An open stock reverses only on a new cross. A flat armed stock
-        # enters on the side the averages are already on, so arming it
-        # does not wait for the next cross.
-        if symbol in self.positions:
-            signal = cross
-        else:
-            signal = cross or closed_candle_bias(frame)
+        # A cross that was already printed when the bot started, or when this
+        # stock was armed, is skipped. The next cross on a newer closed bar
+        # is the one that may trade. Being flat does not enter early.
+        if self._cross_is_stale(symbol, frame):
+            text = f"{symbol} waiting for the next MA cross"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return
+        signal = cross
         if signal is None:
             text = (
                 f"{symbol} holding"
                 if symbol in self.positions
-                else f"{symbol} flat — SMA 9 and SMA 21 have not separated"
+                else f"{symbol} flat — waiting for an SMA cross"
             )
             self._signals[symbol] = text
             self.last_signal = text
@@ -421,6 +431,102 @@ class StrategyEngine:
             return "entry blocked — trade cap"
         await self._open(want, cross_price, atr, cfg, now)
         return f"opened {want}"
+
+    def hold_for_next_cross(self, symbols: list[str]) -> None:
+        """Remember the closed bar already on the tape. Do not trade that cross."""
+        for symbol in symbols:
+            name = (symbol or "").upper()
+            if not name:
+                continue
+            self._skip_cross_until[name] = _closed_bar_ts(self._frames.get(name))
+
+    def _cross_is_stale(self, symbol: str, frame: pd.DataFrame) -> bool:
+        if symbol not in self._skip_cross_until:
+            return False
+        closed_ts = _closed_bar_ts(frame)
+        anchor = self._skip_cross_until[symbol]
+        if anchor is None:
+            self._skip_cross_until[symbol] = closed_ts
+            return True
+        if closed_ts is None or closed_ts <= anchor:
+            return True
+        self._skip_cross_until.pop(symbol, None)
+        return False
+
+    async def force_order(self, symbol: str) -> str:
+        """Buy or sell from the live SMA side, then leave the bot running.
+
+        This does not wait for a cross and does not require the candle, or
+        the session, to be closed. A cross already on the tape still cannot
+        fire an extra order on this same bar.
+        """
+        if self.status == "HALTED":
+            raise ForceRefused(self.halt_reason or "Halted for the day")
+        if self.status == "DAY_COMPLETED":
+            raise ForceRefused(self.halt_reason or "Session already squared off")
+        name = (symbol or "").upper().strip()
+        if not name or not name.isalnum():
+            raise ForceRefused("Choose a stock on the chart first")
+        if name in self.positions:
+            direction = self.positions[name].direction
+            raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
+        cfg = self.load_config()
+        if self.status != "RUNNING":
+            self.status = "RUNNING"
+            self.halt_reason = ""
+            # Other armed stocks keep waiting for a cross that prints after this start.
+            self.hold_for_next_cross([item for item in trade_names(cfg) if item != name])
+        frame = self._frames.get(name)
+        if frame is None or getattr(frame, "empty", True):
+            try:
+                ltp, frame, source = await self.broker.refresh(name)
+            except Exception as exc:  # noqa: BLE001
+                raise ForceRefused(str(exc)) from exc
+            if frame is None or getattr(frame, "empty", True):
+                raise ForceRefused(f"{name} has no candles yet")
+            self._frames[name] = frame
+            self._ltps[name] = float(ltp)
+            if name == (cfg.symbol or "").upper():
+                self.ltp = float(ltp)
+                self.last_error = ""
+                self.data_source = source
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        side = _live_ma_side(enriched)
+        if side is None:
+            raise ForceRefused(f"{name} has no SMA yet")
+        price = float(self._ltps.get(name) or enriched.iloc[-1]["close"] or 0)
+        if price <= 0:
+            raise ForceRefused(f"{name} has no price")
+        atr = _latest_atr(enriched)
+        if atr is None:
+            raise ForceRefused(f"{name} ATR is not ready")
+        # The bar we just looked at stays ignored, so this manual fill is not
+        # reversed by a cross that was already printed.
+        self.hold_for_next_cross([name])
+        self._focus = name
+        self.ltp = price
+        now = _ist_now()
+        async with self.lock:
+            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                raise ForceRefused("blocked — order PENDING/TRANSIT")
+            self.inflight = "TRANSIT"
+            try:
+                result = await self._apply_locked(
+                    signal=side,
+                    cross_price=price,
+                    atr=atr,
+                    adx_blocks_entry=False,
+                    cfg=_cfg_for(cfg, name),
+                    now=now,
+                )
+            except SlCancelFailed as exc:
+                self.last_error = str(exc)
+                raise ForceRefused(str(exc)) from exc
+            finally:
+                self.inflight = None
+        self.last_signal = result
+        self._signals[name] = result
+        return result
 
     async def _open(self, direction: str, cross_price: float, atr: float, cfg: BotConfig, now: dt.datetime) -> None:
         side = "BUY" if direction == "LONG" else "SELL"
@@ -869,9 +975,18 @@ class StrategyEngine:
             candles[-1]["sma21"] = None
             candles[-1]["atr14"] = None
         markers = []
+        cfg = self._cfg_cache
+        if cfg is None:
+            try:
+                cfg = self.load_config()
+            except Exception:  # noqa: BLE001
+                cfg = None
+        view = (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
             rows = db.query(TradeLog).order_by(TradeLog.id.desc()).limit(40).all()
         for row in reversed(rows):
+            if view and (row.symbol or "").upper() != view:
+                continue
             if row.entry_time is not None:
                 markers.append(
                     {
@@ -945,6 +1060,40 @@ class StrategyEngine:
         payload = [_trade_dict(r) for r in rows]
         self._trades_cache = (now, payload)
         return payload
+
+
+def _closed_bar_ts(frame: pd.DataFrame | None) -> int | None:
+    if frame is None or getattr(frame, "empty", True) or len(frame) < 2 or "ts" not in frame.columns:
+        return None
+    try:
+        return int(frame.iloc[-2]["ts"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def _live_ma_side(frame: pd.DataFrame) -> str | None:
+    """SMA 9 versus SMA 21 on the forming bar, then the last closed bar."""
+    if frame is None or getattr(frame, "empty", True):
+        return None
+    for idx in (-1, -2):
+        if len(frame) < abs(idx):
+            continue
+        row = frame.iloc[idx]
+        fast, slow = row.get("sma_9"), row.get("sma_21")
+        if pd.isna(fast) or pd.isna(slow) or fast == slow:
+            continue
+        return "BULLISH" if fast > slow else "BEARISH"
+    return None
+
+
+def _latest_atr(frame: pd.DataFrame) -> float | None:
+    for idx in (-1, -2):
+        if len(frame) < abs(idx):
+            continue
+        atr = _finite(frame.iloc[idx].get("atr_14"))
+        if atr is not None and atr > 0:
+            return atr
+    return None
 
 
 def mark_to_market(direction: str, entry: float, market: float | None, qty: int) -> tuple[float, float] | None:

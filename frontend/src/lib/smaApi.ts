@@ -194,6 +194,11 @@ export const smaApi = {
       body: JSON.stringify({ mode, confirm_live: confirmLive }),
     }),
   start: () => request<{ bot_status: string }>("/api/bot/start", { method: "POST" }),
+  forceOrder: (symbol: string) =>
+    request<{ bot_status: string; last_signal: string }>("/api/bot/force", {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    }),
   pause: () => request<{ bot_status: string }>("/api/bot/pause", { method: "POST" }),
   kill: () => request<{ bot_status: string; halt_reason: string }>("/api/bot/kill", { method: "POST" }),
   trades: () => request<TradeRow[]>("/api/trades"),
