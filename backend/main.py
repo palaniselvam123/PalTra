@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from database import init_db, session_factory
 from models import BotConfig
-from strategy_engine import StrategyEngine
+from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, trade_names
 
 engine = StrategyEngine()
 
@@ -39,6 +39,7 @@ def boot_engine() -> asyncio.Task | None:
     _booted = True
     init_db()
     cfg = engine.load_config()
+    engine.restore_open_books()
     engine.broker.set_mode(cfg.trading_mode, get_settings().groww_access_token)
     _task = asyncio.create_task(engine.run())
     return _task
@@ -104,6 +105,7 @@ class ModeUpdate(BaseModel):
 def _config_dict(row: BotConfig) -> dict:
     return {
         "symbol": row.symbol,
+        "trade_symbols": trade_names(row),
         "exchange": row.exchange,
         "qty": row.qty,
         "sma_fast": row.sma_fast,
@@ -140,12 +142,46 @@ async def get_config():
     return _config_dict(engine.load_config())
 
 
+class TradeSymbolUpdate(BaseModel):
+    symbol: str
+    armed: bool
+
+
+def _open_symbols() -> set[str]:
+    return {symbol for symbol, pos in engine.positions.items() if pos is not None}
+
+
+@app.post("/api/trade-symbols")
+async def set_trade_symbol(body: TradeSymbolUpdate):
+    """Arm or disarm a stock without changing the chart on screen."""
+    symbol = (body.symbol or "").upper().strip()
+    if not symbol or not symbol.isalnum():
+        raise HTTPException(400, "Symbol must be an NSE trading symbol")
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        names = trade_names(row)
+        if body.armed:
+            if symbol not in names:
+                if len(names) >= MAX_TRADE_SYMBOLS:
+                    raise HTTPException(409, f"Trade is limited to {MAX_TRADE_SYMBOLS} stocks at once")
+                names.append(symbol)
+        else:
+            if symbol in _open_symbols():
+                raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
+            names = [name for name in names if name != symbol]
+        row.trade_symbols = ",".join(names)
+        db.commit()
+        db.refresh(row)
+        return _config_dict(row)
+
+
 @app.put("/api/config")
 async def put_config(body: ConfigUpdate):
-    if engine.position is not None and body.symbol:
-        if body.symbol.upper().strip() != engine.load_config().symbol:
-            raise HTTPException(409, "Close the open position before changing symbol")
-    if engine.position is not None and body.qty is not None and body.qty != engine.position.qty:
+    # The chart symbol can change while another stock stays open. Quantity is
+    # shared, so an open book still blocks a size change.
+    if body.qty is not None and any(pos.qty != body.qty for pos in engine.positions.values()):
         raise HTTPException(409, "Close the open position before changing quantity")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
@@ -201,7 +237,7 @@ async def set_mode(body: ModeUpdate):
                 503,
                 "GROWW_ACCESS_TOKEN is not set. Refusing to enable LIVE.",
             )
-    if engine.position is not None:
+    if _open_symbols():
         raise HTTPException(409, "Close the open position before switching execution mode")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)

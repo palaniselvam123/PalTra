@@ -631,6 +631,49 @@ def test_a_losing_book_has_no_largest_win():
     assert _largest_win([{"net_pnl": -0.33}, {"net_pnl": 1.5}]) == 1.5
 
 
+def test_chart_can_move_while_another_stock_stays_armed(api):
+    from strategy_engine import OpenPosition
+
+    from main import engine
+
+    relied = api.put("/api/config", json={"symbol": "RELIANCE"})
+    assert relied.status_code == 200
+    armed = api.post("/api/trade-symbols", json={"symbol": "RELIANCE", "armed": True})
+    assert armed.status_code == 200
+    assert "RELIANCE" in armed.json()["trade_symbols"]
+    engine._focus = "RELIANCE"
+    engine.positions["RELIANCE"] = OpenPosition(
+        direction="SHORT",
+        qty=1,
+        entry_price=1189.95,
+        ma_cross_price=1189.95,
+        atr_at_entry=0.84,
+        sl_trigger=1191.2,
+        sl_order_id="SL-R",
+        entry_order_id="E-R",
+        entry_time=dt.datetime(2026, 9, 29, 13, 40, tzinfo=IST),
+        trade_id=1,
+        mode="PAPER",
+    )
+    viewed = api.put("/api/config", json={"symbol": "KIRLOSFER"})
+    assert viewed.status_code == 200
+    assert viewed.json()["symbol"] == "KIRLOSFER"
+    assert "RELIANCE" in viewed.json()["trade_symbols"]
+    assert engine.positions["RELIANCE"].direction == "SHORT"
+    blocked = api.post("/api/trade-symbols", json={"symbol": "RELIANCE", "armed": False})
+    assert blocked.status_code == 409
+    second = api.post("/api/trade-symbols", json={"symbol": "ANTELOPUS", "armed": True})
+    assert second.status_code == 200
+    assert "ANTELOPUS" in second.json()["trade_symbols"]
+
+
+def test_ltp_payload_accepts_a_single_unnamed_price():
+    from groww_client import _parse_ltp
+
+    assert _parse_ltp({"payload": {"NSE_RELIANCE": "1,189.30"}}, "RELIANCE") == 1189.30
+    assert _parse_ltp({"payload": {"instrument": {"last_price": 1188.7}}}, "RELIANCE") == 1188.7
+
+
 def test_boots_in_paper_and_live_needs_confirmation(api):
     state = api.get("/api/state")
     assert state.status_code == 200

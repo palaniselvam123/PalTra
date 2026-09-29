@@ -10,7 +10,9 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
 
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Live position</div>
+      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+        Live position{state?.symbol ? ` · ${state.symbol}` : ""}
+      </div>
       <div className={clsx("mt-1 font-mono text-lg font-semibold", tone)}>
         {state == null
           ? pending
@@ -42,6 +44,21 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         <Meter label="Unrealized net" value={state?.unrealized_net_pnl ?? 0} hint={`est. charges ${inr(state?.estimated_charges ?? 0)}`} />
       </div>
       {state?.last_signal && <p className="mt-3 text-xs text-slate-500">{state.last_signal}</p>}
+      {(state?.books ?? []).filter((book) => book.symbol !== state?.symbol).length > 0 && (
+        <div className="mt-3 space-y-1 border-t border-white/5 pt-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500">Open on other charts</div>
+          {(state?.books ?? [])
+            .filter((book) => book.symbol !== state?.symbol)
+            .map((book) => (
+              <div key={book.symbol} className="flex items-center justify-between font-mono text-xs">
+                <span className="text-slate-300">{book.symbol}</span>
+                <span className={book.direction === "LONG" ? "text-[#10B981]" : "text-[#F43F5E]"}>
+                  {book.direction} {book.qty}
+                </span>
+              </div>
+            ))}
+        </div>
+      )}
     </section>
   );
 }

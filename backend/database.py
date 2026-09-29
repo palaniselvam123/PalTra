@@ -57,6 +57,12 @@ def _ensure_bot_config_columns(engine) -> None:
         names = {row[1] for row in rows}
         if "use_stop" not in names:
             conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN use_stop BOOLEAN DEFAULT 1")
+        if "trade_symbols" not in names:
+            conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN trade_symbols TEXT DEFAULT ''")
+            conn.exec_driver_sql(
+                "UPDATE bot_config SET trade_symbols = symbol "
+                "WHERE trade_symbols IS NULL OR trade_symbols = ''"
+            )
 
 
 def init_db() -> BotConfig:
@@ -77,6 +83,7 @@ def init_db() -> BotConfig:
             row = BotConfig(
                 id=1,
                 symbol=(settings.default_symbol or "KIRLOSFER").upper(),
+                trade_symbols=(settings.default_symbol or "KIRLOSFER").upper(),
                 exchange="NSE",
                 qty=int(settings.default_qty or 1000),
                 sma_fast=9,

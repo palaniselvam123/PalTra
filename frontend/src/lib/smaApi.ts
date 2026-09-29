@@ -21,6 +21,7 @@ export const SMA_API = resolveSmaApi();
 
 export type SmaConfig = {
   symbol: string;
+  trade_symbols?: string[];
   exchange: string;
   qty: number;
   sma_fast: number;
@@ -54,6 +55,15 @@ export type SmaState = {
   last_error: string;
   last_signal: string;
   symbol: string;
+  trade_symbols?: string[];
+  books?: {
+    symbol: string;
+    direction: "LONG" | "SHORT";
+    qty: number;
+    entry_price: number;
+    sl_trigger: number;
+    ltp: number | null;
+  }[];
   exchange: string;
   ltp: number;
   day_open?: number | null;
@@ -170,6 +180,11 @@ export const smaApi = {
   config: () => request<SmaConfig>("/api/config"),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
+  setTradeSymbol: (symbol: string, armed: boolean) =>
+    request<SmaConfig>("/api/trade-symbols", {
+      method: "POST",
+      body: JSON.stringify({ symbol, armed }),
+    }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {
       method: "POST",

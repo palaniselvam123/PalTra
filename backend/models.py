@@ -39,6 +39,9 @@ class BotConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     symbol: Mapped[str] = mapped_column(String, default="KIRLOSFER")
+    # Comma-separated NSE names the bot may order. The symbol above is only
+    # the chart on screen, so a Trade button can stay armed on another page.
+    trade_symbols: Mapped[str] = mapped_column(String, default="")
     exchange: Mapped[str] = mapped_column(String, default="NSE")
     qty: Mapped[int] = mapped_column(Integer, default=1000)
     sma_fast: Mapped[int] = mapped_column(Integer, default=9)

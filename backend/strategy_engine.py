@@ -63,6 +63,25 @@ def _parse_hhmm(value: str) -> dt.time:
     return dt.time(int(hh), int(mm))
 
 
+MAX_TRADE_SYMBOLS = 4
+
+
+def trade_names(cfg: BotConfig) -> list[str]:
+    """Stocks the bot may order. The chart symbol is not implied."""
+    raw = getattr(cfg, "trade_symbols", None) or ""
+    names: list[str] = []
+    for part in str(raw).upper().replace(" ", "").split(","):
+        if part and part.isalnum() and part not in names:
+            names.append(part)
+    return names[:MAX_TRADE_SYMBOLS]
+
+
+def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
+    data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
+    data["symbol"] = symbol
+    return BotConfig(**data)
+
+
 class StrategyEngine:
     def __init__(self, broker: GrowwClient | None = None):
         self.broker = broker or GrowwClient(mode="PAPER")
@@ -70,7 +89,12 @@ class StrategyEngine:
         self.inflight: str | None = None  # PENDING | TRANSIT | None
         self.status = "STOPPED"  # STOPPED | RUNNING | PAUSED | DAY_COMPLETED | HALTED
         self.halt_reason = ""
-        self.position: OpenPosition | None = None
+        self.positions: dict[str, OpenPosition] = {}
+        self._focus = ""
+        self._unbound_position: OpenPosition | None = None
+        self._frames: dict[str, pd.DataFrame] = {}
+        self._ltps: dict[str, float] = {}
+        self._minutes: dict[str, str] = {}
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -81,13 +105,80 @@ class StrategyEngine:
         self.last_signal = ""
         self.candles = pd.DataFrame()
         self._stop = False
-        self._last_minute = ""
         self._sleep = asyncio.sleep
         self.realized_net = 0.0
         self.trades_today = 0
         self._session_date = _ist_now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
+
+    def _position_key(self) -> str:
+        if self._focus:
+            return self._focus
+        cached = self._cfg_cache
+        if cached is not None and cached.symbol:
+            return str(cached.symbol).upper()
+        return ""
+
+    @property
+    def position(self) -> OpenPosition | None:
+        key = self._position_key()
+        if self._unbound_position is not None and key:
+            self.positions[key] = self._unbound_position
+            self._unbound_position = None
+        if self._unbound_position is not None and not key:
+            return self._unbound_position
+        return self.positions.get(key)
+
+    @position.setter
+    def position(self, value: OpenPosition | None) -> None:
+        key = self._position_key()
+        if not key:
+            self._unbound_position = value
+            return
+        self._unbound_position = None
+        if value is None:
+            self.positions.pop(key, None)
+        else:
+            self.positions[key] = value
+
+    def restore_open_books(self) -> None:
+        """A restart must remember a live position or the next cross orders again."""
+        with session_factory()() as db:
+            rows = db.query(TradeLog).filter(TradeLog.exit_time.is_(None)).all()
+            pending = [
+                (
+                    str(row.symbol or "").upper(),
+                    row.direction,
+                    int(row.qty),
+                    float(row.entry_price),
+                    float(row.ma_cross_price),
+                    float(row.atr_at_entry),
+                    float(row.sl_trigger_price),
+                    row.entry_time,
+                    int(row.id),
+                    row.mode or "PAPER",
+                )
+                for row in rows
+            ]
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode in pending:
+            if not symbol or symbol in self.positions:
+                continue
+            if when is not None and when.tzinfo is None:
+                when = when.replace(tzinfo=IST)
+            self.positions[symbol] = OpenPosition(
+                direction=direction,
+                qty=qty,
+                entry_price=entry,
+                ma_cross_price=cross,
+                atr_at_entry=atr,
+                sl_trigger=sl,
+                sl_order_id="",
+                entry_order_id="",
+                entry_time=when or _ist_now(),
+                trade_id=trade_id,
+                mode=mode,
+            )
 
     def stop(self) -> None:
         self._stop = True
@@ -129,34 +220,50 @@ class StrategyEngine:
         cfg = self.load_config()
         self._roll_session(now)
         self.broker.set_mode(cfg.trading_mode)
-        await self._settle_exchange_flat(cfg)
-        symbol = (cfg.symbol or "").upper()
-        if symbol != self._quote_symbol:
-            # Drop the previous name's tape so a new symbol cannot inherit it.
-            self._quote_symbol = symbol
-            self.candles = pd.DataFrame()
-            self.ltp = 0.0
-        try:
-            ltp, frame, source = await self.broker.refresh(cfg.symbol)
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = str(exc)
-            self.data_source = "ERROR"
-            return
-        self.ltp = float(ltp)
-        self.data_source = source
-        if frame is not None and not frame.empty and len(frame) > 2500:
-            frame = frame.iloc[-2500:].reset_index(drop=True)
-        self.candles = frame
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period) if not frame.empty else frame
-        self.candles = enriched
-        if not enriched.empty and len(enriched) >= 2:
-            # Display values from the last CLOSED bar so the UI does not
-            # repaint SMA/ATR with the forming tick.
-            closed = enriched.iloc[-2]
-            self.sma9 = _finite(closed.get("sma_9"))
-            self.sma21 = _finite(closed.get("sma_21"))
-            self.atr14 = _finite(closed.get("atr_14"))
-            self.adx14 = _finite(closed.get("adx_14"))
+        view = (cfg.symbol or "").upper()
+        armed = trade_names(cfg)
+        # The chart can be a stock the bot is not ordering. Open books stay watched.
+        watch = list(dict.fromkeys([*self.positions.keys(), *armed, view]))[: MAX_TRADE_SYMBOLS + 1]
+        self._focus = view
+        await self._settle_exchange_flat(cfg, armed)
+        if view != self._quote_symbol:
+            self._quote_symbol = view
+            cached = self._frames.get(view)
+            self.candles = cached if cached is not None else pd.DataFrame()
+            self.ltp = self._ltps.get(view, 0.0)
+        for symbol in watch:
+            if not symbol:
+                continue
+            try:
+                ltp, frame, source = await self.broker.refresh(symbol)
+            except Exception as exc:  # noqa: BLE001
+                if symbol == view:
+                    self.last_error = str(exc)
+                    self.data_source = "ERROR"
+                continue
+            if frame is not None and not frame.empty and len(frame) > 2500:
+                frame = frame.iloc[-2500:].reset_index(drop=True)
+            self._frames[symbol] = frame
+            self._ltps[symbol] = float(ltp)
+            if symbol != view:
+                continue
+            self.last_error = ""
+            self.ltp = float(ltp)
+            self.data_source = source
+            enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period) if not frame.empty else frame
+            self.candles = enriched
+            if not enriched.empty and len(enriched) >= 2:
+                # Display values from the last CLOSED bar so the UI does not
+                # repaint SMA/ATR with the forming tick.
+                closed = enriched.iloc[-2]
+                self.sma9 = _finite(closed.get("sma_9"))
+                self.sma21 = _finite(closed.get("sma_21"))
+                self.atr14 = _finite(closed.get("atr_14"))
+                self.adx14 = _finite(closed.get("adx_14"))
+
+        self._focus = view
+        if view in self._ltps:
+            self.ltp = self._ltps[view]
 
         if self.status != "RUNNING":
             return
@@ -165,12 +272,36 @@ class StrategyEngine:
             await self.kill(f"max_daily_loss ₹{cfg.max_daily_loss:.0f} breached")
             return
 
-        await self._watch_stop(cfg)
+        for symbol in list(self.positions):
+            self._focus = symbol
+            self.ltp = self._ltps.get(symbol, 0.0)
+            await self._watch_stop(_cfg_for(cfg, symbol))
+
+        self._focus = view
+        if view in self._ltps:
+            self.ltp = self._ltps[view]
+        if self.status != "RUNNING":
+            return
 
         minute_key = now.strftime("%Y-%m-%d %H:%M")
-        if now.second == 1 and minute_key != self._last_minute:
-            self._last_minute = minute_key
-            await self.on_minute(now, cfg, enriched)
+        if now.second != 1:
+            return
+        for symbol in armed:
+            if self._minutes.get(symbol) == minute_key:
+                continue
+            self._minutes[symbol] = minute_key
+            frame = self._frames.get(symbol)
+            if frame is None or getattr(frame, "empty", True):
+                continue
+            enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+            self._focus = symbol
+            self.ltp = self._ltps.get(symbol, self.ltp)
+            await self.on_minute(now, _cfg_for(cfg, symbol), enriched)
+            if self.status != "RUNNING":
+                break
+        self._focus = view
+        if view in self._ltps:
+            self.ltp = self._ltps[view]
 
     async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> None:
         if self.status != "RUNNING":
@@ -201,6 +332,7 @@ class StrategyEngine:
 
     async def apply_signal(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
         """Stop-and-reverse on a closed-candle cross. Returns a short status."""
+        self._focus = (cfg.symbol or "").upper()
         curr = frame.iloc[-2]
         atr = _finite(curr.get("atr_14"))
         if atr is None or atr <= 0:
@@ -340,36 +472,46 @@ class StrategyEngine:
         except Exception:  # noqa: BLE001
             return None
 
-    async def _settle_exchange_flat(self, cfg: BotConfig) -> None:
+    async def _settle_exchange_flat(self, cfg: BotConfig, symbols: list[str]) -> None:
         """Book an open terminal trade once Groww's MIS book for it is flat.
 
         A restart forgets the in-memory position. The exchange stop can already
         have sold the shares. Leaving the row open is what kept the screen on
         LONG after Groww showed the stop filled.
         """
-        if self.position is not None:
-            return
         if (cfg.trading_mode or "").upper() != "LIVE":
             return
         now_m = time.monotonic()
         if now_m - getattr(self, "_flat_check_at", 0.0) < 15:
             return
         self._flat_check_at = now_m
-        if await self._groww_net(cfg.symbol) != 0:
-            return
-        with session_factory()() as db:
-            rows = (
-                db.query(TradeLog)
-                .filter(TradeLog.exit_time.is_(None), TradeLog.symbol == (cfg.symbol or "").upper())
-                .all()
-            )
-            pending = [(int(row.id), float(row.sl_trigger_price or row.entry_price), row.direction, float(row.entry_price), int(row.qty)) for row in rows]
-        for trade_id, px, direction, entry, qty in pending:
-            buy, sell = legs_for(direction, entry, px)
-            costs = calculate_charges(buy, sell, qty)
-            self.realized_net += costs["net_pnl"]
-            self._finalize_trade(trade_id, px, "ATR_SL_HIT", _ist_now(), costs)
-            self.last_signal = "Exchange stop already filled — flat"
+        for symbol in symbols:
+            if symbol in self.positions:
+                continue
+            if await self._groww_net(symbol) != 0:
+                continue
+            with session_factory()() as db:
+                rows = (
+                    db.query(TradeLog)
+                    .filter(TradeLog.exit_time.is_(None), TradeLog.symbol == symbol)
+                    .all()
+                )
+                pending = [
+                    (
+                        int(row.id),
+                        float(row.sl_trigger_price or row.entry_price),
+                        row.direction,
+                        float(row.entry_price),
+                        int(row.qty),
+                    )
+                    for row in rows
+                ]
+            for trade_id, px, direction, entry, qty in pending:
+                buy, sell = legs_for(direction, entry, px)
+                costs = calculate_charges(buy, sell, qty)
+                self.realized_net += costs["net_pnl"]
+                self._finalize_trade(trade_id, px, "ATR_SL_HIT", _ist_now(), costs)
+                self.last_signal = "Exchange stop already filled — flat"
 
     async def _watch_stop(self, cfg: BotConfig) -> None:
         pos = self.position
@@ -381,7 +523,16 @@ class StrategyEngine:
             return
         hit = False
         fill_price = self.ltp
-        if (cfg.trading_mode or "").upper() == "LIVE" and pos.sl_order_id:
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (cfg.trading_mode or "").upper() == "LIVE" and not pos.sl_order_id:
+            # Restored after a restart: the exchange still holds the stop id.
+            # A flat book means that stop filled. Any other read must not exit.
+            net = await self._groww_net(symbol)
+            if net != 0:
+                return
+            hit = True
+            fill_price = pos.sl_trigger or self.ltp
+        elif (cfg.trading_mode or "").upper() == "LIVE" and pos.sl_order_id:
             status = (await self.broker.get_order_status(pos.sl_order_id)).upper()
             if status in TERMINAL_FILLED:
                 hit = True
@@ -427,17 +578,24 @@ class StrategyEngine:
                 return
             self.inflight = "TRANSIT"
             try:
-                if self.position is not None:
+                cfg = self.load_config()
+                for symbol in list(self.positions):
+                    self._focus = symbol
+                    if self.position is None:
+                        continue
                     try:
                         await self._cancel_sl_verified(self.position)
                     except SlCancelFailed:
                         # SL may have filled as we tried to cancel — book whatever
                         # position is left at LTP if we still have one.
                         pass
-                    if self.position is not None:
-                        cfg = self.load_config()
-                        await self._close_position(self.position, self.ltp or self.position.entry_price, reason, _ist_now(), cfg)
-                        self.position = None
+                    if self.position is None:
+                        continue
+                    px = self._ltps.get(symbol) or self.position.entry_price
+                    await self._close_position(
+                        self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
+                    )
+                    self.position = None
             finally:
                 self.inflight = None
 
@@ -544,8 +702,17 @@ class StrategyEngine:
         return day_open, (self.ltp - baseline) / baseline * 100
 
     def _loss_breached(self, cfg: BotConfig) -> bool:
-        unreal = self._unrealized()
-        net = self.realized_net + (unreal["net"] if unreal else 0.0)
+        net = self.realized_net
+        view = self._focus
+        ltp = self.ltp
+        for symbol in list(self.positions):
+            self._focus = symbol
+            self.ltp = self._ltps.get(symbol, ltp)
+            unreal = self._unrealized()
+            if unreal:
+                net += unreal["net"]
+        self._focus = view
+        self.ltp = ltp
         return net <= -abs(float(cfg.max_daily_loss))
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
@@ -586,10 +753,29 @@ class StrategyEngine:
                 cfg = self.load_config()
             except Exception:  # noqa: BLE001
                 cfg = None
-        unreal = self._unrealized()
+        view = (cfg.symbol if cfg else self._focus or "").upper()
+        saved_focus, saved_ltp = self._focus, self.ltp
+        self._focus = view
+        if view in self._ltps:
+            self.ltp = self._ltps[view]
+        try:
+            unreal = self._unrealized()
+            pos = self.position
+            day_open, day_change = self._day_open_and_change()
+            books = [
+                {
+                    "symbol": symbol,
+                    "direction": book.direction,
+                    "qty": book.qty,
+                    "entry_price": book.entry_price,
+                    "sl_trigger": book.sl_trigger,
+                    "ltp": self._ltps.get(symbol),
+                }
+                for symbol, book in self.positions.items()
+            ]
+        finally:
+            self._focus, self.ltp = saved_focus, saved_ltp
         kpis = self._kpis()
-        pos = self.position
-        day_open, day_change = self._day_open_and_change()
         return {
             "bot_status": self.status,
             "halt_reason": self.halt_reason,
@@ -598,6 +784,8 @@ class StrategyEngine:
             "last_error": self.last_error,
             "last_signal": self.last_signal,
             "symbol": cfg.symbol if cfg else "",
+            "trade_symbols": trade_names(cfg) if cfg else [],
+            "books": books,
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
             "day_open": day_open,

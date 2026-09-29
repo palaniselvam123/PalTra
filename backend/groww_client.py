@@ -554,23 +554,44 @@ class GrowwClient:
         ]
 
 
+def _as_price(value) -> float | None:
+    if isinstance(value, dict):
+        for key in ("ltp", "last_price", "last_traded_price", "value", "close"):
+            if key in value:
+                found = _as_price(value[key])
+                if found is not None:
+                    return found
+        return None
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isfinite(number) and number > 0:
+        return number
+    return None
+
+
 def _parse_ltp(raw, symbol: str) -> float:
     data = raw.get("payload", raw) if isinstance(raw, dict) else raw
-    ltp = None
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if symbol in str(key):
-                ltp = (
-                    float(value.get("ltp") or value.get("last_price"))
-                    if isinstance(value, dict)
-                    else float(value)
-                )
-                break
-        if ltp is None and "ltp" in data:
-            ltp = float(data["ltp"])
-    if ltp is None or not math.isfinite(ltp) or ltp <= 0:
+    if not isinstance(data, dict):
         raise RuntimeError("Unexpected LTP payload")
-    return ltp
+    symbol = (symbol or "").upper()
+    for key, value in data.items():
+        if symbol and symbol in str(key).upper():
+            found = _as_price(value)
+            if found is not None:
+                return found
+    for key in ("ltp", "last_price", "last_traded_price"):
+        found = _as_price(data.get(key))
+        if found is not None:
+            return found
+    # Groww sometimes keys the quote by an id that does not contain the symbol.
+    found_values = [price for price in (_as_price(value) for value in data.values()) if price is not None]
+    if len(found_values) == 1:
+        return found_values[0]
+    raise RuntimeError("Unexpected LTP payload")
 
 
 def _session_ohlc(sdk, symbol: str) -> dict:

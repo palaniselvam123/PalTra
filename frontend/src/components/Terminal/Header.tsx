@@ -109,6 +109,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   const live = (state?.mode ?? config?.trading_mode) === "LIVE";
   const running = state?.bot_status === "RUNNING";
 
+  const armed = new Set((config?.trade_symbols ?? []).map((s) => s.toUpperCase()));
+
   const applySymbol = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
     if (!cleaned) return;
@@ -138,6 +140,29 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Mode change refused");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTrade = async (next: string) => {
+    const cleaned = next.trim().toUpperCase();
+    if (!cleaned) return;
+    const turningOn = !armed.has(cleaned);
+    if (turningOn && live) {
+      const ok = window.confirm(
+        `Arm ${cleaned} for live SMA orders? The bot can buy or sell it while this chart stays on ${symbol || "the stock you are viewing"}.`
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await smaApi.setTradeSymbol(cleaned, turningOn);
+      remember(cleaned);
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not change the trade button");
     } finally {
       setBusy(false);
     }
@@ -179,7 +204,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           <a href="/chart/" className="hover:text-slate-300">Charts</a>
           <a href="/settings/" className="hover:text-slate-300">Settings</a>
         </nav>
-        <div className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</div>
+        <div className="text-sm font-semibold tracking-tight text-slate-100">
+          SMA × ATR Terminal
+          {config?.symbol ? <span className="ml-2 font-normal text-slate-400">· chart {config.symbol}</span> : null}
+        </div>
 
         <div ref={searchRef} className="relative flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-[#151921] px-2 py-1">
           <span className="px-1 text-[10px] uppercase tracking-wider text-slate-500">NSE</span>
@@ -190,18 +218,36 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           )}
           {symbols.map((s) => {
             const selected = Boolean(config?.symbol) && symbol === s;
+            const trading = armed.has(s);
             return (
-              <button
-                key={s}
-                disabled={busy}
-                onClick={() => applySymbol(s)}
-                className={clsx(
-                  "rounded-full px-2 py-0.5 text-xs font-medium",
-                  selected ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
-                )}
-              >
-                {selected ? `NSE: ${s}` : s}
-              </button>
+              <span key={s} className="inline-flex items-center overflow-hidden rounded-full">
+                <button
+                  disabled={busy}
+                  onClick={() => applySymbol(s)}
+                  title="Show this stock on the chart. Open orders on other stocks stay put."
+                  className={clsx(
+                    "px-2 py-0.5 text-xs font-medium",
+                    selected ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  {selected ? `Chart: ${s}` : s}
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => toggleTrade(s)}
+                  title={
+                    trading
+                      ? "Bot is allowed to order this stock even on another chart"
+                      : "Arm this stock so the bot can order it from any chart"
+                  }
+                  className={clsx(
+                    "border-l border-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                    trading ? "bg-[#10B981]/20 text-[#10B981]" : "text-slate-500 hover:text-slate-200"
+                  )}
+                >
+                  {trading ? "Trading" : "Trade"}
+                </button>
+              </span>
             );
           })}
           <form
@@ -275,7 +321,11 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         <button
           disabled={busy}
           onClick={toggleBot}
-          title="Paper fills on this page only. Starting the bot does not send a Groww order."
+          title={
+            live
+              ? "Sends Groww orders for every stock whose Trade button is on, even if the chart shows another."
+              : "Practice fills for every stock whose Trade button is on."
+          }
           className={clsx(
             "rounded-md px-3 py-1.5 text-xs font-semibold",
             running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
@@ -304,6 +354,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           PANIC SQUARE-OFF ALL
         </button>
       </div>
+      <p className="px-4 pb-2 text-[11px] leading-relaxed text-slate-500">
+        This is the SMA terminal. Chart buttons only change the stock you are looking at. Trade buttons
+        let the bot order that stock while you are on another chart.
+      </p>
       {(error || state?.halt_reason || state?.last_error) && (
         <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">
           {error || state?.halt_reason || state?.last_error}
