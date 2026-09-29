@@ -7,6 +7,7 @@ import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
 import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
+import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { smaApi, type ChartPayload, type SmaConfig, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 export default function TerminalPage() {
@@ -104,6 +105,7 @@ export default function TerminalPage() {
           </div>
           <div className="space-y-4">
             <LivePositionCard state={state} pending={Boolean(loadNote)} />
+            <WhatsAppAlerts />
             <StrategyConfigPanel config={config} onChanged={refresh} />
           </div>
         </div>

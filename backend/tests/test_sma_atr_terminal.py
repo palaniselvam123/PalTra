@@ -55,6 +55,35 @@ def test_open_trade_is_marked_from_the_live_price():
     assert rows[1]["points"] == pytest.approx(0.90)
 
 
+def test_whatsapp_text_names_the_fill_and_the_close():
+    from strategy_engine import close_alert, fill_alert
+
+    opened = fill_alert(
+        mode="LIVE",
+        direction="LONG",
+        symbol="ANTELOPUS",
+        qty=1,
+        fill=1175.95,
+        stop=1171.25,
+        when=dt.datetime(2026, 9, 29, 14, 58, 26),
+    )
+    assert "LIVE LONG ANTELOPUS" in opened
+    assert "1,175.95" in opened
+    assert "1,171.25" in opened
+    closed = close_alert(
+        direction="LONG",
+        symbol="ANTELOPUS",
+        exit_price=1165.0,
+        reason="EOD_SQUARE_OFF",
+        gross=-10.95,
+        net=-12.74,
+        when=dt.datetime(2026, 9, 29, 15, 15, 4),
+    )
+    assert "closed LONG ANTELOPUS" in closed
+    assert "square-off" in closed
+    assert "-10.95" in closed
+
+
 def test_groww_charge_breakdown_matches_schedule():
     # 1000 shares, buy 100 / sell 101.
     out = calculate_charges(100, 101, 1000)
@@ -228,6 +257,21 @@ async def test_reverse_cancels_sl_before_new_entry(engine):
     assert engine.position is not None
     assert engine.position.direction == "LONG"
     assert engine.position.sl_trigger < engine.position.entry_price
+
+
+@pytest.mark.asyncio
+async def test_a_fill_is_queued_for_whatsapp(engine, monkeypatch):
+    notes: list[str] = []
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    cfg.qty = 1
+    result = await engine.apply_signal(
+        "BULLISH", _bullish_frame(), cfg, dt.datetime(2026, 9, 29, 14, 0, tzinfo=IST)
+    )
+    assert "opened" in result
+    assert any("LONG SHIPROCKET" in note for note in notes)
 
 
 @pytest.mark.asyncio

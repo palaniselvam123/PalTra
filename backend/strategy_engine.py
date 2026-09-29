@@ -550,6 +550,17 @@ class StrategyEngine:
             now=now,
         )
         self.trades_today += 1
+        _schedule_whatsapp(
+            fill_alert(
+                mode=(cfg.trading_mode or "PAPER").upper(),
+                direction=direction,
+                symbol=cfg.symbol,
+                qty=int(cfg.qty),
+                fill=fill,
+                stop=sl,
+                when=now,
+            )
+        )
         self.position = OpenPosition(
             direction=direction,
             qty=int(cfg.qty),
@@ -788,8 +799,21 @@ class StrategyEngine:
             row.gross_pnl = costs["gross_pnl"]
             row.brokerage_and_taxes = costs["total_charges"]
             row.net_pnl = costs["net_pnl"]
+            symbol = row.symbol
+            direction = row.direction
             db.commit()
         self._trades_cache = None
+        _schedule_whatsapp(
+            close_alert(
+                direction=direction,
+                symbol=symbol,
+                exit_price=exit_price,
+                reason=reason,
+                gross=float(costs.get("gross_pnl") or 0),
+                net=float(costs.get("net_pnl") or 0),
+                when=now,
+            )
+        )
 
     def _day_open_and_change(self) -> tuple[float | None, float | None]:
         """Percent versus the previous session's last close.
@@ -1060,6 +1084,72 @@ class StrategyEngine:
         payload = [_trade_dict(r) for r in rows]
         self._trades_cache = (now, payload)
         return payload
+
+
+_ALERT_REASON = {
+    "MA_CROSS": "MA cross",
+    "ATR_SL_HIT": "ATR stop",
+    "EOD_SQUARE_OFF": "square-off",
+    "KILL_SWITCH": "panic square-off",
+}
+
+
+def fill_alert(
+    *,
+    mode: str,
+    direction: str,
+    symbol: str,
+    qty: int,
+    fill: float,
+    stop: float,
+    when: dt.datetime,
+) -> str:
+    """WhatsApp text for a fill. No account numbers or order ids."""
+    clock = when.strftime("%d %b %H:%M:%S")
+    return (
+        f"PalTra {mode} {direction} {symbol}\n"
+        f"Filled {qty} @ {fill:,.2f}\n"
+        f"Stop {stop:,.2f}\n"
+        f"{clock} IST"
+    )
+
+
+def close_alert(
+    *,
+    direction: str,
+    symbol: str,
+    exit_price: float,
+    reason: str,
+    gross: float,
+    net: float,
+    when: dt.datetime,
+) -> str:
+    clock = when.strftime("%d %b %H:%M:%S")
+    why = _ALERT_REASON.get(reason, reason or "closed")
+    return (
+        f"PalTra closed {direction} {symbol}\n"
+        f"Exit {exit_price:,.2f} · {why}\n"
+        f"P&L {gross:+,.2f}  net {net:+,.2f}\n"
+        f"{clock} IST"
+    )
+
+
+def _schedule_whatsapp(message: str) -> None:
+    """Send after the order is booked. A failed alert must not change the fill."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send(message)
+        except Exception:  # noqa: BLE001
+            return
+
+    loop.create_task(_send())
 
 
 def _closed_bar_ts(frame: pd.DataFrame | None) -> int | None:
