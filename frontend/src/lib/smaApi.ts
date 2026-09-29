@@ -58,11 +58,12 @@ export type SmaState = {
   trade_symbols?: string[];
   books?: {
     symbol: string;
-    direction: "LONG" | "SHORT";
+    direction: "LONG" | "SHORT" | "FLAT";
     qty: number;
-    entry_price: number;
-    sl_trigger: number;
+    entry_price: number | null;
+    sl_trigger: number | null;
     ltp: number | null;
+    note?: string;
   }[];
   exchange: string;
   ltp: number;

@@ -25,7 +25,7 @@ import pandas as pd
 from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
-from indicators import closed_candle_cross, enrich, round_to_nse_tick
+from indicators import closed_candle_bias, closed_candle_cross, enrich, round_to_nse_tick
 from models import BotConfig, TradeLog
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -95,6 +95,7 @@ class StrategyEngine:
         self._frames: dict[str, pd.DataFrame] = {}
         self._ltps: dict[str, float] = {}
         self._minutes: dict[str, str] = {}
+        self._signals: dict[str, str] = {}
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -284,19 +285,17 @@ class StrategyEngine:
             return
 
         minute_key = now.strftime("%Y-%m-%d %H:%M")
-        if now.second != 1:
-            return
         for symbol in armed:
             if self._minutes.get(symbol) == minute_key:
                 continue
-            self._minutes[symbol] = minute_key
             frame = self._frames.get(symbol)
-            if frame is None or getattr(frame, "empty", True):
+            if frame is None or getattr(frame, "empty", True) or len(frame) < 3:
                 continue
             enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
             await self.on_minute(now, _cfg_for(cfg, symbol), enriched)
+            self._minutes[symbol] = minute_key
             if self.status != "RUNNING":
                 break
         self._focus = view
@@ -325,8 +324,24 @@ class StrategyEngine:
 
         if frame is None or frame.empty:
             return
-        signal = closed_candle_cross(frame)
+        symbol = (cfg.symbol or "").upper()
+        self._focus = symbol
+        cross = closed_candle_cross(frame)
+        # An open stock reverses only on a new cross. A flat armed stock
+        # enters on the side the averages are already on, so arming it
+        # does not wait for the next cross.
+        if symbol in self.positions:
+            signal = cross
+        else:
+            signal = cross or closed_candle_bias(frame)
         if signal is None:
+            text = (
+                f"{symbol} holding"
+                if symbol in self.positions
+                else f"{symbol} flat — SMA 9 and SMA 21 have not separated"
+            )
+            self._signals[symbol] = text
+            self.last_signal = text
             return
         await self.apply_signal(signal, frame, cfg, now)
 
@@ -357,10 +372,12 @@ class StrategyEngine:
                     now=now,
                 )
                 self.last_signal = result
+                self._signals[self._focus] = result
                 return result
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
                 self.last_signal = f"blocked — {exc}"
+                self._signals[self._focus] = self.last_signal
                 return self.last_signal
             finally:
                 self.inflight = None
@@ -762,17 +779,22 @@ class StrategyEngine:
             unreal = self._unrealized()
             pos = self.position
             day_open, day_change = self._day_open_and_change()
-            books = [
-                {
-                    "symbol": symbol,
-                    "direction": book.direction,
-                    "qty": book.qty,
-                    "entry_price": book.entry_price,
-                    "sl_trigger": book.sl_trigger,
-                    "ltp": self._ltps.get(symbol),
-                }
-                for symbol, book in self.positions.items()
-            ]
+            armed_names = trade_names(cfg) if cfg else []
+            shown = list(dict.fromkeys([*armed_names, *self.positions.keys()]))
+            books = []
+            for symbol in shown:
+                book = self.positions.get(symbol)
+                books.append(
+                    {
+                        "symbol": symbol,
+                        "direction": book.direction if book else "FLAT",
+                        "qty": book.qty if book else 0,
+                        "entry_price": book.entry_price if book else None,
+                        "sl_trigger": book.sl_trigger if book else None,
+                        "ltp": self._ltps.get(symbol),
+                        "note": self._signals.get(symbol, ""),
+                    }
+                )
         finally:
             self._focus, self.ltp = saved_focus, saved_ltp
         kpis = self._kpis()

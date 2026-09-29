@@ -81,6 +81,25 @@ def enrich(df: pd.DataFrame, sma_fast: int = 9, sma_slow: int = 21, atr_period: 
     return out
 
 
+def closed_candle_bias(df: pd.DataFrame) -> str | None:
+    """Direction of the last closed bar: fast SMA above or below the slow SMA.
+
+    A stock that is already trending does not need a brand-new cross to be
+    eligible. The crossover helper still decides reversals.
+    """
+    if len(df) < 3:
+        return None
+    curr = df.iloc[-2]
+    fast, slow = curr.get("sma_9"), curr.get("sma_21")
+    if pd.isna(fast) or pd.isna(slow):
+        return None
+    if fast > slow:
+        return "BULLISH"
+    if fast < slow:
+        return "BEARISH"
+    return None
+
+
 def closed_candle_cross(df: pd.DataFrame) -> str | None:
     """Bullish / bearish SMA cross on closed candles only.
 

@@ -631,6 +631,26 @@ def test_a_losing_book_has_no_largest_win():
     assert _largest_win([{"net_pnl": -0.33}, {"net_pnl": 1.5}]) == 1.5
 
 
+@pytest.mark.asyncio
+async def test_flat_stock_enters_when_the_averages_are_already_apart(engine, monkeypatch):
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    closes = [100.0] * 30 + [float(100 + i) for i in range(20)] + [120.0] * 6
+    frame = enrich(_ohlcv(closes))
+    from indicators import closed_candle_bias, closed_candle_cross
+
+    assert closed_candle_cross(frame) is None
+    assert closed_candle_bias(frame) == "BULLISH"
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    now = dt.datetime(2026, 9, 29, 14, 0, 5, tzinfo=IST)
+    await engine.on_minute(now, cfg, frame)
+    assert engine.positions["SHIPROCKET"].direction == "LONG"
+    assert any(event.startswith("ENTRY") for event in engine.broker.events)
+
+
 def test_chart_can_move_while_another_stock_stays_armed(api):
     from strategy_engine import OpenPosition
 

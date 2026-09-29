@@ -355,8 +355,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         </button>
       </div>
       <p className="px-4 pb-2 text-[11px] leading-relaxed text-slate-500">
-        This is the SMA terminal. Chart buttons only change the stock you are looking at. Trade buttons
-        let the bot order that stock while you are on another chart.
+        This is the SMA terminal. Chart only changes the stock you are looking at. Trade arms that
+        stock even on another chart. A flat armed stock is ordered on the side SMA 9 is already on.
       </p>
       {(error || state?.halt_reason || state?.last_error) && (
         <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">

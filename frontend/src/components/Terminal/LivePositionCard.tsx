@@ -20,7 +20,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
             : "Loading position…"
           : pos
             ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY`
-            : "FLAT — WAITING FOR CROSSOVER"}
+            : "FLAT — order follows SMA 9 vs SMA 21"}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
         <Row label="Entry" value={px(pos?.entry_price)} />
@@ -44,19 +44,25 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         <Meter label="Unrealized net" value={state?.unrealized_net_pnl ?? 0} hint={`est. charges ${inr(state?.estimated_charges ?? 0)}`} />
       </div>
       {state?.last_signal && <p className="mt-3 text-xs text-slate-500">{state.last_signal}</p>}
-      {(state?.books ?? []).filter((book) => book.symbol !== state?.symbol).length > 0 && (
+      {(state?.books ?? []).length > 0 && (
         <div className="mt-3 space-y-1 border-t border-white/5 pt-3">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500">Open on other charts</div>
-          {(state?.books ?? [])
-            .filter((book) => book.symbol !== state?.symbol)
-            .map((book) => (
-              <div key={book.symbol} className="flex items-center justify-between font-mono text-xs">
-                <span className="text-slate-300">{book.symbol}</span>
-                <span className={book.direction === "LONG" ? "text-[#10B981]" : "text-[#F43F5E]"}>
-                  {book.direction} {book.qty}
-                </span>
-              </div>
-            ))}
+          <div className="text-[10px] uppercase tracking-wider text-slate-500">Armed stocks</div>
+          {(state?.books ?? []).map((book) => (
+            <div key={book.symbol} className="flex items-center justify-between gap-2 font-mono text-xs">
+              <span className="text-slate-300">{book.symbol}</span>
+              <span
+                className={
+                  book.direction === "LONG"
+                    ? "text-[#10B981]"
+                    : book.direction === "SHORT"
+                      ? "text-[#F43F5E]"
+                      : "text-slate-500"
+                }
+              >
+                {book.direction === "FLAT" ? "FLAT" : `${book.direction} ${book.qty}`}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </section>
