@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { smaApi, inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
 
@@ -10,18 +11,82 @@ const REASON: Record<string, string> = {
   KILL_SWITCH: "KILL SWITCH",
 };
 
+type Book = "PAPER" | "LIVE";
+
+const BOOKS: { id: Book; title: string; note: string }[] = [
+  {
+    id: "PAPER",
+    title: "Simulation",
+    note: "Paper fills only. After the close this tape walks forward from the last NSE price, and an order still waits for the next SMA cross.",
+  },
+  {
+    id: "LIVE",
+    title: "NSE live",
+    note: "Fills that were sent to Groww on the NSE tape.",
+  },
+];
+
+function bookOf(trade: TradeRow): Book {
+  return (trade.mode || "PAPER").toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+}
+
 export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state: SmaState | null }) {
+  const [book, setBook] = useState<Book>("PAPER");
+  const [picked, setPicked] = useState(false);
+  useEffect(() => {
+    if (picked || !state?.mode) return;
+    setBook(state.mode === "LIVE" ? "LIVE" : "PAPER");
+  }, [picked, state?.mode]);
+  const rows = trades.filter((trade) => bookOf(trade) === book);
+  const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
+  const simulation = book === "PAPER";
+
   return (
-    <section className="rounded-xl border border-white/5 bg-[#151921]">
-      <div className="flex items-center justify-between px-4 py-3">
-        <h2 className="text-sm font-medium text-slate-200">Trade blotter</h2>
-        <a
-          href={smaApi.csvUrl()}
-          className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/5"
-        >
-          Download CSV
-        </a>
+    <section
+      className={clsx(
+        "rounded-xl border bg-[#151921]",
+        simulation ? "border-[#F59E0B]/40" : "border-[#F43F5E]/40"
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Trade blotter</div>
+          <h2 className={clsx("text-sm font-medium", simulation ? "text-[#F59E0B]" : "text-[#F43F5E]")}>
+            {selected.title}
+          </h2>
+        </div>
+        <div className="flex items-center gap-2">
+          {BOOKS.map((item) => {
+            const count = trades.filter((trade) => bookOf(trade) === item.id).length;
+            const on = item.id === book;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setPicked(true);
+                  setBook(item.id);
+                }}
+                className={clsx(
+                  "rounded-md px-3 py-1.5 text-xs font-semibold",
+                  on && item.id === "PAPER" && "bg-[#F59E0B] text-[#1a1203]",
+                  on && item.id === "LIVE" && "bg-[#F43F5E] text-white",
+                  !on && "border border-white/10 text-slate-300 hover:bg-white/5"
+                )}
+              >
+                {item.title} · {count}
+              </button>
+            );
+          })}
+          <a
+            href={smaApi.csvUrl(book)}
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/5"
+          >
+            Download CSV
+          </a>
+        </div>
       </div>
+      <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] text-left text-xs">
           <thead className="text-[10px] uppercase tracking-wider text-slate-500">
@@ -47,14 +112,16 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
             </tr>
           </thead>
           <tbody>
-            {trades.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
-                  No closed trades yet. Crossovers are judged on closed 1-minute candles only.
+                  {simulation
+                    ? "No simulated trades yet. Start the bot and wait for the next SMA cross."
+                    : "No NSE live trades on this page."}
                 </td>
               </tr>
             )}
-            {trades.map((t) => {
+            {rows.map((t) => {
               const market = marketPrice(t, state);
               const live = markPnl(t, market);
               const pnl = t.exit_price == null ? live?.pnl ?? null : t.gross_pnl;

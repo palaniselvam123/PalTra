@@ -202,7 +202,8 @@ export const smaApi = {
   pause: () => request<{ bot_status: string }>("/api/bot/pause", { method: "POST" }),
   kill: () => request<{ bot_status: string; halt_reason: string }>("/api/bot/kill", { method: "POST" }),
   trades: () => request<TradeRow[]>("/api/trades"),
-  csvUrl: () => `${SMA_API}/api/trades.csv`,
+  csvUrl: (mode?: "PAPER" | "LIVE") =>
+    `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",
 };
 

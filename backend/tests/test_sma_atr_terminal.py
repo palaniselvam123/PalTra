@@ -427,7 +427,7 @@ def test_closed_market_quote_is_the_last_nse_price(monkeypatch):
     from groww_client import GrowwClient
 
     monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
-    client = GrowwClient(mode="PAPER", token="test-token")
+    client = GrowwClient(mode="LIVE", token="test-token")
     frame = pd.DataFrame(
         [{"ts": 1, "open": 1135.0, "high": 1285.0, "low": 1094.0, "close": 1261.7, "volume": 10}]
     )
@@ -457,7 +457,7 @@ def test_failed_quote_keeps_the_last_real_price(monkeypatch):
     from groww_client import GrowwClient
 
     monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
-    client = GrowwClient(mode="PAPER", token="test-token")
+    client = GrowwClient(mode="LIVE", token="test-token")
     frame = pd.DataFrame(
         [{"ts": 1, "open": 1260.0, "high": 1262.0, "low": 1259.0, "close": 1261.7, "volume": 1}]
     )
@@ -486,6 +486,105 @@ def test_simulator_only_when_there_is_no_groww_token(monkeypatch):
     assert source == "SIMULATOR"
 
 
+def test_paper_after_the_close_walks_from_the_last_nse_price(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
+    client = GrowwClient(mode="PAPER", token="test-token")
+    ts = int(dt.datetime(2026, 9, 29, 15, 29, tzinfo=IST).timestamp())
+    frame = pd.DataFrame(
+        [{"ts": ts, "open": 1160.0, "high": 1166.0, "low": 1158.0, "close": 1162.5, "volume": 10}]
+    )
+    calls = {"n": 0}
+
+    async def fake(symbol):
+        calls["n"] += 1
+        assert symbol == "ANTELOPUS"
+        return 1162.5, frame
+
+    client._refresh_live = fake  # type: ignore[method-assign]
+    ltp, got, source = asyncio.run(client.refresh("ANTELOPUS"))
+    assert source == "SIMULATOR"
+    assert calls["n"] == 1
+    assert float(got.iloc[0]["close"]) == 1162.5
+    assert abs(ltp - 1162.5) < 20
+    _again, _, source_again = asyncio.run(client.refresh("ANTELOPUS"))
+    assert calls["n"] == 1
+    assert source_again == "SIMULATOR"
+
+    async def other(symbol):
+        px = 120.5 if symbol == "SHIPROCKET" else 1189.6
+        return px, pd.DataFrame(
+            [{"ts": ts, "open": px, "high": px, "low": px, "close": px, "volume": 1}]
+        )
+
+    client._refresh_live = other  # type: ignore[method-assign]
+    ship, ship_frame, _ = asyncio.run(client.refresh("SHIPROCKET"))
+    ante_again, ante_frame, _ = asyncio.run(client.refresh("ANTELOPUS"))
+    assert float(ship_frame.iloc[0]["close"]) == 120.5
+    assert abs(ship - 120.5) < 20
+    assert float(ante_frame.iloc[0]["close"]) == 1162.5
+    assert abs(ante_again - 1162.5) < 30
+
+
+def test_totals_stay_on_the_selected_book(engine):
+    from database import session_factory
+    from models import TradeLog
+
+    day = engine._session_date
+    when = dt.datetime(2026, 9, 29, 14, 0)
+    with session_factory()() as db:
+        db.add(
+            TradeLog(
+                date=day,
+                symbol="ANTELOPUS",
+                direction="LONG",
+                qty=1,
+                entry_time=when,
+                entry_price=100,
+                ma_cross_price=100,
+                atr_at_entry=1,
+                sl_trigger_price=98,
+                exit_time=when,
+                exit_price=110,
+                exit_reason="MA_CROSS",
+                gross_pnl=10,
+                brokerage_and_taxes=1,
+                net_pnl=9,
+                mode="PAPER",
+            )
+        )
+        db.add(
+            TradeLog(
+                date=day,
+                symbol="RELIANCE",
+                direction="LONG",
+                qty=1,
+                entry_time=when,
+                entry_price=100,
+                ma_cross_price=100,
+                atr_at_entry=1,
+                sl_trigger_price=98,
+                exit_time=when,
+                exit_price=90,
+                exit_reason="EOD_SQUARE_OFF",
+                gross_pnl=-10,
+                brokerage_and_taxes=1,
+                net_pnl=-11,
+                mode="LIVE",
+            )
+        )
+        db.commit()
+    paper = engine._kpis("PAPER")
+    live = engine._kpis("LIVE")
+    assert paper["trades"] == 1
+    assert paper["net"] == 9
+    assert live["trades"] == 1
+    assert live["net"] == -11
+
+
 def test_empty_env_token_uses_the_saved_desk_session(monkeypatch):
     import asyncio
 
@@ -493,9 +592,9 @@ def test_empty_env_token_uses_the_saved_desk_session(monkeypatch):
 
     monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
     monkeypatch.setattr("groww_client.market_is_open", lambda now=None: False)
-    client = GrowwClient(mode="PAPER", token="unused")
+    client = GrowwClient(mode="LIVE", token="unused")
     client.token = ""
-    client.set_mode("PAPER", "")
+    client.set_mode("LIVE", "")
     assert client.token == ""
     frame = pd.DataFrame(
         [{"ts": 1, "open": 1160.0, "high": 1166.0, "low": 1158.0, "close": 1159.45, "volume": 1}]

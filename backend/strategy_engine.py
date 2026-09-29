@@ -927,7 +927,7 @@ class StrategyEngine:
                 )
         finally:
             self._focus, self.ltp = saved_focus, saved_ltp
-        kpis = self._kpis()
+        kpis = self._kpis((cfg.trading_mode if cfg else "PAPER") or "PAPER")
         return {
             "bot_status": self.status,
             "halt_reason": self.halt_reason,
@@ -1030,10 +1030,12 @@ class StrategyEngine:
             "sl_trigger": pos.sl_trigger if pos else None,
         }
 
-    def _kpis(self) -> dict:
+    def _kpis(self, mode: str = "PAPER") -> dict:
         day = self._session_date
+        book = (mode or "PAPER").upper()
         with session_factory()() as db:
             rows = db.query(TradeLog).filter(TradeLog.date == day, TradeLog.exit_price.isnot(None)).all()
+        rows = [row for row in rows if (row.mode or "PAPER").upper() == book]
         theoretical = 0.0
         actual = 0.0
         charges = 0.0

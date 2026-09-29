@@ -336,7 +336,11 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
               : "bg-[#F59E0B]/15 text-[#F59E0B] ring-1 ring-[#F59E0B]/40"
           )}
         >
-          {live ? "LIVE REAL MONEY" : "PAPER · no Groww orders"}
+          {live
+            ? "LIVE REAL MONEY"
+            : state?.data_source === "SIMULATOR"
+              ? "SIMULATION · tape moving"
+              : "PAPER · no Groww orders"}
         </button>
 
         <button

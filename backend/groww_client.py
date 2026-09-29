@@ -168,7 +168,8 @@ class CandleSimulator:
         now = now or dt.datetime.now(IST)
         key = now.strftime("%Y-%m-%d %H:%M")
         bar = self.candles[-1]
-        shock = self._rng.uniform(-0.35, 0.35)
+        span = max(self.price, 1.0) * 0.0003
+        shock = self._rng.uniform(-span, span)
         self.price = max(1.0, self.price + shock)
         px = round(self.price, 2)
         if key != self._minute_key:
@@ -193,6 +194,36 @@ class CandleSimulator:
             bar["volume"] = int(bar["volume"]) + self._rng.randint(10, 80)
         return px
 
+    def adopt(self, frame: pd.DataFrame, price: float) -> None:
+        """Continue from a real NSE tape instead of a fresh random walk."""
+        if frame is None or getattr(frame, "empty", True):
+            return
+        rows: list[dict] = []
+        for rec in frame.to_dict("records"):
+            try:
+                ts = int(rec["ts"])
+                close = float(rec["close"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            rows.append(
+                {
+                    "ts": ts,
+                    "open": float(rec.get("open") or close),
+                    "high": float(rec.get("high") or close),
+                    "low": float(rec.get("low") or close),
+                    "close": close,
+                    "volume": int(float(rec.get("volume") or 0)),
+                }
+            )
+        if not rows:
+            return
+        if len(rows) > 2500:
+            rows = rows[-2500:]
+        self.candles = rows
+        self.price = float(price) if price and price > 0 else float(rows[-1]["close"])
+        last = dt.datetime.fromtimestamp(rows[-1]["ts"], tz=IST)
+        self._minute_key = last.strftime("%Y-%m-%d %H:%M")
+
     def frame(self) -> pd.DataFrame:
         return pd.DataFrame(self.candles)
 
@@ -211,6 +242,7 @@ class GrowwClient:
         self._positions: list[dict] = []
         self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
         self._retry_after: dict[str, float] = {}
+        self._simulators: dict[str, CandleSimulator] = {}
         self._sim_symbol = ""
 
     def set_mode(self, mode: str, token: str | None = None) -> None:
@@ -244,22 +276,50 @@ class GrowwClient:
         return ltp, frame, self.data_source
 
     def _simulator_quote(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
-        if self._sim_symbol != symbol:
-            self.simulator = CandleSimulator()
-            self._sim_symbol = symbol
-        ltp = self.simulator.advance()
+        sim = self._simulators.get(symbol)
+        cached = self._quotes.get(symbol)
+        if sim is None:
+            start = float(cached[0]) if cached else 875.0
+            sim = CandleSimulator(start_price=start)
+            if cached is not None and cached[1] is not None and not getattr(cached[1], "empty", True):
+                sim.adopt(cached[1], start)
+            self._simulators[symbol] = sim
+        self.simulator = sim
+        self._sim_symbol = symbol
+        ltp = sim.advance()
         self._ltp = ltp
         self.data_source = "SIMULATOR"
-        return ltp, self.simulator.frame(), self.data_source
+        if cached is not None:
+            self.last_error = ""
+        return ltp, sim.frame(), self.data_source
 
     async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
         """Update LTP + candle frame from NSE when a token exists.
 
-        After the close this is the last traded price, not a fresh tick.
-        The simulator is only for a desk with no Groww token.
+        Live mode after the close stays on the last traded price.
+        Paper mode after the close walks a simulated tape from that price
+        so a cross can still be tested without a Groww order.
         """
         symbol = (symbol or "").upper()
         self._ensure_quote_token()
+        if self.mode != "LIVE" and not market_is_open():
+            if symbol not in self._simulators and symbol not in self._quotes and self.token:
+                now_m = time.monotonic()
+                if now_m >= self._retry_after.get(symbol, 0.0):
+                    try:
+                        ltp, frame = await asyncio.wait_for(
+                            self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
+                        if symbol not in self._quotes:
+                            detail = str(exc).strip() or type(exc).__name__
+                            self.last_error = f"NSE quote failed: {detail}"[:240]
+                    else:
+                        self._quotes[symbol] = (float(ltp), frame, now_m)
+                        self._retry_after.pop(symbol, None)
+                        self.last_error = ""
+            return self._simulator_quote(symbol)
         now_m = time.monotonic()
         cached = self._quotes.get(symbol)
         ttl = _QUOTE_TTL_OPEN_SEC if market_is_open() else _QUOTE_TTL_CLOSED_SEC

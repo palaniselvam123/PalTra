@@ -302,8 +302,11 @@ async def trades():
 
 
 @app.get("/api/trades.csv")
-async def trades_csv():
+async def trades_csv(mode: str = ""):
     rows = attach_market_prices(engine.trades(), engine._ltps)
+    book = (mode or "").upper()
+    if book in ("PAPER", "LIVE"):
+        rows = [row for row in rows if (row.get("mode") or "PAPER").upper() == book]
     buffer = io.StringIO()
     fields = [
         "id",
