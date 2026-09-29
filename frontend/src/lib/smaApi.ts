@@ -138,6 +138,8 @@ export type TradeRow = {
   exit_time: string | null;
   exit_price: number | null;
   exit_reason: string | null;
+  market_price?: number | null;
+  mark_pnl?: number | null;
   gross_pnl: number | null;
   brokerage_and_taxes: number | null;
   net_pnl: number | null;

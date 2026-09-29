@@ -13,6 +13,48 @@ from indicators import closed_candle_cross, enrich, round_to_nse_tick
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def test_open_trade_is_marked_from_the_live_price():
+    from strategy_engine import attach_market_prices, mark_to_market
+
+    long_pts, long_pnl = mark_to_market("LONG", 1175.95, 1180.20, 1)
+    assert long_pts == pytest.approx(4.25)
+    assert long_pnl == pytest.approx(4.25)
+    short_pts, short_pnl = mark_to_market("SHORT", 120.50, 119.10, 1)
+    assert short_pts == pytest.approx(1.40)
+    assert short_pnl == pytest.approx(1.40)
+
+    rows = attach_market_prices(
+        [
+            {
+                "symbol": "RELIANCE",
+                "direction": "LONG",
+                "qty": 1,
+                "entry_price": 1175.95,
+                "exit_price": None,
+                "points": None,
+                "gross_pnl": None,
+            },
+            {
+                "symbol": "SHIPROCKET",
+                "direction": "SHORT",
+                "qty": 1,
+                "entry_price": 120.50,
+                "exit_price": 119.60,
+                "points": 0.90,
+                "gross_pnl": 0.90,
+            },
+        ],
+        {"RELIANCE": 1180.20, "SHIPROCKET": 50.0},
+    )
+    assert rows[0]["market_price"] == pytest.approx(1180.20)
+    assert rows[0]["mark_pnl"] == pytest.approx(4.25)
+    assert rows[0]["gross_pnl"] is None
+    # A closed row is marked at the exit fill, not the latest quote.
+    assert rows[1]["market_price"] == pytest.approx(119.60)
+    assert rows[1]["mark_pnl"] == pytest.approx(0.90)
+    assert rows[1]["points"] == pytest.approx(0.90)
+
+
 def test_groww_charge_breakdown_matches_schedule():
     # 1000 shares, buy 100 / sell 101.
     out = calculate_charges(100, 101, 1000)

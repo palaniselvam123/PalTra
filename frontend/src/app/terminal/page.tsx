@@ -107,7 +107,7 @@ export default function TerminalPage() {
             <StrategyConfigPanel config={config} onChanged={refresh} />
           </div>
         </div>
-        <TradeHistoryTable trades={trades} />
+        <TradeHistoryTable trades={trades} state={state} />
       </main>
     </div>
   );

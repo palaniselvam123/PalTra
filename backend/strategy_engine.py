@@ -947,6 +947,56 @@ class StrategyEngine:
         return payload
 
 
+def mark_to_market(direction: str, entry: float, market: float | None, qty: int) -> tuple[float, float] | None:
+    """Signed points and rupee P&L of a fill against a market (or exit) price."""
+    if market is None:
+        return None
+    try:
+        entry_f = float(entry)
+        market_f = float(market)
+        qty_i = int(qty)
+    except (TypeError, ValueError):
+        return None
+    if not (entry_f == entry_f and market_f == market_f):
+        return None
+    side = (direction or "").upper()
+    if side == "LONG":
+        points = market_f - entry_f
+    elif side == "SHORT":
+        points = entry_f - market_f
+    else:
+        return None
+    return points, points * qty_i
+
+
+def attach_market_prices(rows: list[dict], ltps: dict[str, float]) -> list[dict]:
+    """Copy trade rows and add the price used to mark them.
+
+    A closed row is marked at its exit fill. An open row uses the latest
+    quote for that symbol. Stored gross and net stay untouched.
+    """
+    stamped: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        exit_px = item.get("exit_price")
+        market: float | None
+        try:
+            if exit_px is not None and float(exit_px) > 0:
+                market = float(exit_px)
+            else:
+                raw = ltps.get(str(item.get("symbol") or "").upper())
+                market = float(raw) if raw else None
+        except (TypeError, ValueError):
+            market = None
+        item["market_price"] = market
+        marked = mark_to_market(str(item.get("direction") or ""), item.get("entry_price"), market, item.get("qty") or 0)
+        item["mark_pnl"] = None if marked is None else round(marked[1], 2)
+        if item.get("points") is None and marked is not None:
+            item["points"] = round(marked[0], 4)
+        stamped.append(item)
+    return stamped
+
+
 def _trade_dict(row: TradeLog) -> dict:
     points = None
     if row.exit_price is not None:

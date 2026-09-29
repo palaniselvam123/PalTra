@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from database import init_db, session_factory
 from models import BotConfig
-from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, trade_names
+from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, attach_market_prices, trade_names
 
 engine = StrategyEngine()
 
@@ -274,12 +274,12 @@ async def kill_bot():
 
 @app.get("/api/trades")
 async def trades():
-    return engine.trades()
+    return attach_market_prices(engine.trades(), engine._ltps)
 
 
 @app.get("/api/trades.csv")
 async def trades_csv():
-    rows = engine.trades()
+    rows = attach_market_prices(engine.trades(), engine._ltps)
     buffer = io.StringIO()
     fields = [
         "id",
@@ -289,6 +289,8 @@ async def trades_csv():
         "qty",
         "entry_time",
         "entry_price",
+        "market_price",
+        "mark_pnl",
         "ma_cross_price",
         "atr_at_entry",
         "sl_trigger_price",
