@@ -201,6 +201,11 @@ export const smaApi = {
     }),
   pause: () => request<{ bot_status: string }>("/api/bot/pause", { method: "POST" }),
   kill: () => request<{ bot_status: string; halt_reason: string }>("/api/bot/kill", { method: "POST" }),
+  closePosition: (symbol: string) =>
+    request<{ bot_status: string; last_signal: string }>("/api/bot/close", {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    }),
   trades: () => request<TradeRow[]>("/api/trades"),
   csvUrl: (mode?: "PAPER" | "LIVE") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,

@@ -1419,3 +1419,53 @@ async def test_an_open_row_groww_does_not_hold_is_removed_without_an_order(engin
     assert "SUNTV" not in engine.positions
     assert engine.broker.events == []
     assert engine.trades()[0]["exit_reason"] == "NOT_ON_GROWW"
+
+
+@pytest.mark.asyncio
+async def test_close_symbol_flattens_one_book_and_leaves_the_bot_running(engine):
+    from strategy_engine import OpenPosition
+
+    engine.status = "RUNNING"
+    trade_id = _seed_open_trade()
+    engine.positions["KIRLOSFER"] = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=100,
+        ma_cross_price=100,
+        atr_at_entry=1,
+        sl_trigger=98,
+        sl_order_id="",
+        entry_order_id="E1",
+        entry_time=dt.datetime(2026, 9, 30, 10, 0, tzinfo=IST),
+        trade_id=trade_id,
+        mode="PAPER",
+    )
+    engine._ltps["KIRLOSFER"] = 110
+    engine._focus = "SUNTV"
+    engine.positions["SUNTV"] = OpenPosition(
+        direction="SHORT",
+        qty=1,
+        entry_price=600,
+        ma_cross_price=600,
+        atr_at_entry=2,
+        sl_trigger=610,
+        sl_order_id="",
+        entry_order_id="E2",
+        entry_time=dt.datetime(2026, 9, 30, 10, 5, tzinfo=IST),
+        trade_id=trade_id + 1,
+        mode="PAPER",
+    )
+    result = await engine.close_symbol("KIRLOSFER")
+    assert result == "KIRLOSFER closed"
+    assert "KIRLOSFER" not in engine.positions
+    assert engine.positions["SUNTV"].direction == "SHORT"
+    assert engine._focus == "SUNTV"
+    assert engine.status == "RUNNING"
+    assert "EXIT SELL" in engine.broker.events
+    assert engine.trades()[0]["exit_reason"] == "MANUAL_CLOSE"
+
+
+def test_close_without_a_position_is_refused(api):
+    response = api.post("/api/bot/close", json={"symbol": "SUNTV"})
+    assert response.status_code == 400
+    assert "no open position" in response.json()["detail"]

@@ -304,6 +304,20 @@ async def pause_bot():
     return {"bot_status": engine.status}
 
 
+class CloseOrder(BaseModel):
+    symbol: str = ""
+
+
+@app.post("/api/bot/close")
+async def close_position(body: CloseOrder):
+    """Close one open stock. Does not halt the bot."""
+    try:
+        result = await engine.close_symbol(body.symbol)
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"bot_status": engine.status, "last_signal": result}
+
+
 @app.post("/api/bot/kill")
 async def kill_bot():
     """Panic: cancel SL, flatten MIS, lock the strategy."""

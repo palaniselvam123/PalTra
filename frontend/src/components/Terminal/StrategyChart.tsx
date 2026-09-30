@@ -2,9 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
-import { px, type ChartPayload } from "@/lib/smaApi";
+import { inr, px, type ChartPayload, type SmaState } from "@/lib/smaApi";
 
-type Props = { chart: ChartPayload | null };
+type Props = {
+  chart: ChartPayload | null;
+  state: SmaState | null;
+  closing: boolean;
+  onClose: () => void;
+};
 
 type SmaHover = { sma9: number | null; sma21: number | null };
 
@@ -36,7 +41,26 @@ function lineValue(row: unknown): number | null {
   return null;
 }
 
-export function StrategyChart({ chart }: Props) {
+function entryLook(gross: number | null): { title: string; color: string } {
+  if (gross == null) return { title: "Entry", color: "#94a3b8" };
+  return {
+    title: `P&L ${gross >= 0 ? "+" : ""}${inr(gross)}`,
+    color: gross >= 0 ? "#10B981" : "#F43F5E",
+  };
+}
+
+function livePnl(state: SmaState | null): { gross: number; pct: number; points: number } | null {
+  const pos = state?.position;
+  if (!pos || !state || state.ltp <= 0 || pos.entry_price <= 0) return null;
+  const points = pos.direction === "LONG" ? state.ltp - pos.entry_price : pos.entry_price - state.ltp;
+  return {
+    points,
+    gross: points * pos.qty,
+    pct: (points / pos.entry_price) * 100,
+  };
+}
+
+export function StrategyChart({ chart, state, closing, onClose }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -45,6 +69,7 @@ export function StrategyChart({ chart }: Props) {
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
+  const pnlGrossRef = useRef<number | null>(null);
   const [hover, setHover] = useState<SmaHover | null>(null);
 
   useEffect(() => {
@@ -180,15 +205,25 @@ export function StrategyChart({ chart }: Props) {
       });
     }
     if (chart.entry_price) {
+      const look = entryLook(pnlGrossRef.current);
       entryLine.current = candleRef.current.createPriceLine({
         price: chart.entry_price,
-        color: "#94a3b8",
+        color: look.color,
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        title: "Entry",
+        title: look.title,
       });
     }
   }, [chart]);
+
+  const pnl = livePnl(state);
+  const pos = state?.position;
+  const pnlGross = pnl?.gross ?? null;
+  pnlGrossRef.current = pnlGross;
+  useEffect(() => {
+    if (!entryLine.current) return;
+    entryLine.current.applyOptions(entryLook(pnlGross));
+  }, [pnlGross]);
 
   const latest = latestSma(chart);
   const sma9 = hover ? hover.sma9 : latest.sma9;
@@ -205,7 +240,33 @@ export function StrategyChart({ chart }: Props) {
           <span className="text-[#F59E0B]">Stop</span>
         </div>
       </div>
-      <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
+      <div className="relative">
+        <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
+        {pos && pnl && (
+          <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[240px] rounded-lg border border-white/10 bg-[#0B0E14]/90 p-2.5 shadow-lg">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+              {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
+            </div>
+            <div className={`mt-1 font-mono text-lg font-semibold ${pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}`}>
+              {pnl.gross >= 0 ? "+" : ""}
+              {inr(pnl.gross)}
+            </div>
+            <div className="font-mono text-[11px] text-slate-400">
+              {pnl.points >= 0 ? "+" : ""}
+              {pnl.points.toFixed(2)} pts · {pnl.pct >= 0 ? "+" : ""}
+              {pnl.pct.toFixed(2)}%
+            </div>
+            <button
+              type="button"
+              disabled={closing}
+              onClick={onClose}
+              className="pointer-events-auto mt-2 w-full rounded-md border border-[#F43F5E]/50 bg-[#F43F5E]/15 px-2 py-1.5 text-xs font-semibold text-[#fda4af] hover:bg-[#F43F5E]/25 disabled:opacity-50"
+            >
+              {closing ? "Closing…" : "Close position"}
+            </button>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

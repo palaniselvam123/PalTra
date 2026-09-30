@@ -551,6 +551,47 @@ class StrategyEngine:
         self._signals[name] = result
         return result
 
+    async def close_symbol(self, symbol: str) -> str:
+        """Close one open book. Does not stop the bot or touch the other stocks."""
+        name = (symbol or "").upper().strip()
+        if not name or name not in self.positions:
+            raise ForceRefused(f"{name or 'That stock'} has no open position")
+        cfg = self.load_config()
+        async with self.lock:
+            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                raise ForceRefused("An order is already in progress")
+            self.inflight = "TRANSIT"
+            saved_focus, saved_ltp = self._focus, self.ltp
+            self._focus = name
+            try:
+                pos = self.position
+                if pos is None:
+                    raise ForceRefused(f"{name} has no open position")
+                try:
+                    await self._cancel_sl_verified(pos)
+                except SlCancelFailed as exc:
+                    self.last_error = str(exc)
+                    raise ForceRefused(str(exc)) from exc
+                if self.position is None:
+                    return f"{name} was already flat"
+                px = self._ltps.get(name) or self.position.entry_price
+                try:
+                    await self._close_position(
+                        self.position, px, "MANUAL_CLOSE", _ist_now(), _cfg_for(cfg, name)
+                    )
+                except SlCancelFailed as exc:
+                    self.last_error = str(exc)
+                    raise ForceRefused(str(exc)) from exc
+                self.position = None
+                text = f"{name} closed"
+                self.last_signal = text
+                self._signals[name] = text
+                return text
+            finally:
+                self.inflight = None
+                self._focus = saved_focus
+                self.ltp = saved_ltp
+
     async def _read_order(self, order_id: str) -> tuple[str, float | None]:
         fn = getattr(self.broker, "read_order", None)
         try:
@@ -1539,6 +1580,7 @@ _ALERT_REASON = {
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
     "NOT_ON_GROWW": "not on Groww — no order sent",
+    "MANUAL_CLOSE": "closed from the screen",
 }
 
 

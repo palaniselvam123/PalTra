@@ -12,6 +12,7 @@ const REASON: Record<string, string> = {
   EOD_SQUARE_OFF: "EOD SQUARE-OFF",
   KILL_SWITCH: "KILL SWITCH",
   NOT_ON_GROWW: "NOT ON GROWW",
+  MANUAL_CLOSE: "MANUAL CLOSE",
 };
 
 type Book = "PAPER" | "LIVE";
@@ -56,7 +57,17 @@ function shownPnl(trade: TradeRow, state: SmaState | null): number | null {
   return trade.gross_pnl;
 }
 
-export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state: SmaState | null }) {
+export function TradeHistoryTable({
+  trades,
+  state,
+  closingSymbol,
+  onClose,
+}: {
+  trades: TradeRow[];
+  state: SmaState | null;
+  closingSymbol: string | null;
+  onClose: (trade: TradeRow) => void;
+}) {
   const [book, setBook] = useState<Book>("PAPER");
   const [picked, setPicked] = useState(false);
   const [stock, setStock] = useState("ALL");
@@ -275,6 +286,8 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
         title="Open"
         rows={openRows}
         state={state}
+        closingSymbol={closingSymbol}
+        onClose={onClose}
         empty={
           inBook.length === 0
             ? simulation
@@ -287,6 +300,8 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
         <OrderTable
           title="Completed"
           rows={completedRows}
+          closingSymbol={null}
+          onClose={onClose}
           state={state}
           empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
         />
@@ -295,18 +310,22 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
   );
 }
 
-const COLUMNS = ["#", "Stock", "Side", "Executed", "Market", "P&L", "ATR", "SL", "Exit", "Trigger", "Charges", "Net"];
+const COLUMNS = ["#", "Stock", "Side", "Executed", "Market", "P&L", "ATR", "SL", "Exit", "Trigger", "Charges", "Net", ""];
 
 function OrderTable({
   title,
   rows,
   state,
   empty,
+  closingSymbol,
+  onClose,
 }: {
   title: string;
   rows: TradeRow[];
   state: SmaState | null;
   empty: string;
+  closingSymbol: string | null;
+  onClose: (trade: TradeRow) => void;
 }) {
   return (
     <div className="border-t border-white/5">
@@ -334,7 +353,13 @@ function OrderTable({
               </tr>
             )}
             {rows.map((trade) => (
-              <OrderRow key={trade.id} trade={trade} state={state} />
+              <OrderRow
+                key={trade.id}
+                trade={trade}
+                state={state}
+                closing={closingSymbol === trade.symbol.toUpperCase()}
+                onClose={onClose}
+              />
             ))}
           </tbody>
         </table>
@@ -343,7 +368,17 @@ function OrderTable({
   );
 }
 
-function OrderRow({ trade: t, state }: { trade: TradeRow; state: SmaState | null }) {
+function OrderRow({
+  trade: t,
+  state,
+  closing,
+  onClose,
+}: {
+  trade: TradeRow;
+  state: SmaState | null;
+  closing: boolean;
+  onClose: (trade: TradeRow) => void;
+}) {
   const market = marketPrice(t, state);
   const live = markPnl(t, market);
   const pnl = t.exit_price == null ? live?.pnl ?? null : t.gross_pnl;
@@ -403,6 +438,20 @@ function OrderRow({ trade: t, state }: { trade: TradeRow; state: SmaState | null
       </td>
       <td className={clsx("px-3 py-2 font-mono", (t.net_pnl ?? 0) >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
         {t.net_pnl == null ? "—" : inr(t.net_pnl)}
+      </td>
+      <td className="px-3 py-2">
+        {t.exit_price == null ? (
+          <button
+            type="button"
+            disabled={closing}
+            onClick={() => onClose(t)}
+            className="rounded-md border border-[#F43F5E]/50 bg-[#F43F5E]/15 px-2 py-1 text-[11px] font-semibold text-[#fda4af] hover:bg-[#F43F5E]/25 disabled:opacity-50"
+          >
+            {closing ? "Closing…" : "Close"}
+          </button>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
       </td>
     </tr>
   );
