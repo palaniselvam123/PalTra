@@ -193,7 +193,7 @@ export default function TerminalPage() {
           </div>
         )}
         <PnlMetricsRow state={state} />
-        <div className={`flex flex-col gap-4 ${railFolded ? "" : "xl:flex-row"}`}>
+        <div className="flex flex-col gap-4 xl:flex-row">
           <div className="min-w-0 flex-1">
             <StrategyChart
               chart={chart}
@@ -210,7 +210,7 @@ export default function TerminalPage() {
             <button
               type="button"
               onClick={toggleRail}
-              className="self-start rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:self-stretch xl:[writing-mode:vertical-rl]"
+              className="self-start rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
             >
               Show side panel
             </button>
