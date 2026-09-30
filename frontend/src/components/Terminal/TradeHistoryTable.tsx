@@ -11,6 +11,7 @@ const REASON: Record<string, string> = {
   ATR_SL_HIT: "ATR SL HIT",
   EOD_SQUARE_OFF: "EOD SQUARE-OFF",
   KILL_SWITCH: "KILL SWITCH",
+  NOT_ON_GROWW: "NOT ON GROWW",
 };
 
 type Book = "PAPER" | "LIVE";

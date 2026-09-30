@@ -1309,3 +1309,113 @@ def test_auth_failure_retries_with_the_desk_session(monkeypatch):
     assert ltp == 10.0
     assert source == "GROWW"
     assert client.token == "desk-token"
+
+
+def test_a_refused_groww_body_is_not_an_order():
+    from groww_client import GrowwOrderRejected, _order_ack_from_response
+
+    try:
+        _order_ack_from_response({"status": "FAILURE", "error": {"message": "Intraday orders are not available"}})
+        raise AssertionError("expected a refusal")
+    except GrowwOrderRejected as exc:
+        assert "Intraday" in str(exc)
+    try:
+        _order_ack_from_response({"payload": {"remark": "stopped"}})
+        raise AssertionError("missing id must not be invented")
+    except GrowwOrderRejected as exc:
+        assert "stopped" in str(exc)
+    ack = _order_ack_from_response(
+        {"payload": {"groww_order_id": "GM123", "order_status": "EXECUTED", "average_fill_price": 600.5}}
+    )
+    assert ack.order_id == "GM123"
+    assert ack.status == "EXECUTED"
+    assert ack.fill_price == 600.5
+
+
+@pytest.mark.asyncio
+async def test_a_pending_live_order_is_cancelled_and_not_booked(engine):
+    from groww_client import OrderAck
+
+    async def pending_entry(symbol, side, qty, ltp):
+        engine.broker.events.append(f"ENTRY {side}")
+        return OrderAck("GM-PEND", "PENDING", None)
+
+    engine.broker.place_entry = pending_entry  # type: ignore[method-assign]
+    engine.broker.sl_status = "PENDING"
+    cfg = engine.load_config()
+    cfg.trading_mode = "LIVE"
+    cfg.symbol = "SUNTV"
+    cfg.qty = 1
+    cfg.use_stop = False
+    result = await engine.apply_signal(
+        "BULLISH", _bullish_frame(), cfg, dt.datetime(2026, 9, 30, 11, 0, tzinfo=IST)
+    )
+    assert "cancelled" in result
+    assert "CANCEL GM-PEND" in engine.broker.events
+    assert engine.position is None
+    assert engine.trades() == []
+
+
+@pytest.mark.asyncio
+async def test_a_live_exit_is_not_sent_when_groww_is_flat(engine):
+    from strategy_engine import OpenPosition
+
+    async def net_quantity(symbol):
+        return 0
+
+    engine.broker.net_quantity = net_quantity  # type: ignore[method-assign]
+    trade_id = _seed_open_trade()
+    engine.position = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=600,
+        ma_cross_price=600,
+        atr_at_entry=4,
+        sl_trigger=590,
+        sl_order_id="",
+        entry_order_id="GM1",
+        entry_time=dt.datetime(2026, 9, 30, 10, 0, tzinfo=IST),
+        trade_id=trade_id,
+        mode="LIVE",
+    )
+    cfg = engine.load_config()
+    cfg.trading_mode = "LIVE"
+    cfg.symbol = "SUNTV"
+    cfg.use_stop = False
+    await engine._close_position(
+        engine.position, 590, "MA_CROSS", dt.datetime(2026, 9, 30, 14, 0, tzinfo=IST), cfg
+    )
+    assert not any(event.startswith("EXIT") for event in engine.broker.events)
+    closed = engine.trades()[0]
+    assert closed["exit_reason"] == "NOT_ON_GROWW"
+    assert closed["gross_pnl"] == 0
+
+
+@pytest.mark.asyncio
+async def test_an_open_row_groww_does_not_hold_is_removed_without_an_order(engine):
+    from strategy_engine import OpenPosition
+
+    async def net_quantity(symbol):
+        return 0
+
+    engine.broker.net_quantity = net_quantity  # type: ignore[method-assign]
+    trade_id = _seed_open_trade()
+    engine.positions["SUNTV"] = OpenPosition(
+        direction="SHORT",
+        qty=1,
+        entry_price=610,
+        ma_cross_price=610,
+        atr_at_entry=3,
+        sl_trigger=620,
+        sl_order_id="",
+        entry_order_id="GM2",
+        entry_time=dt.datetime(2026, 9, 30, 10, 0, tzinfo=IST),
+        trade_id=trade_id,
+        mode="LIVE",
+    )
+    cfg = engine.load_config()
+    cfg.trading_mode = "LIVE"
+    await engine._drop_positions_groww_does_not_hold(cfg)
+    assert "SUNTV" not in engine.positions
+    assert engine.broker.events == []
+    assert engine.trades()[0]["exit_reason"] == "NOT_ON_GROWW"

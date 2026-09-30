@@ -19,6 +19,7 @@ strategy account's are.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from app import state
@@ -471,6 +472,8 @@ async def monitor_tick(symbol: str, ltp: float) -> None:
     something checks it on every tick — so this runs regardless of whether the
     bot is on, exactly like `strategy_runner.monitor_tick`.
     """
+    if time.monotonic() < _exit_blocked_until.get(symbol, 0.0):
+        return
     position = state.manual_engine.positions.get(symbol)
     if position is None or symbol in _exiting:
         return
@@ -493,13 +496,19 @@ async def monitor_tick(symbol: str, ltp: float) -> None:
     _exiting.add(symbol)
     try:
         await close(symbol, f"DESK {reason}")
-    except ManualOrderRejected:
-        pass
+    except ManualOrderRejected as exc:
+        text = str(exc).lower()
+        delay = 30 * 60 if ("intraday" in text or "about to close" in text) else 45
+        _exit_blocked_until[symbol] = time.monotonic() + delay
     finally:
         _exiting.discard(symbol)
 
 
 _exiting: set[str] = set()
+# A rejected exit must not be sent again on the next quote. Groww's
+# "intraday orders are not available" was retried every tick, then a later
+# order still went through.
+_exit_blocked_until: dict[str, float] = {}
 
 
 def positions() -> list[dict]:

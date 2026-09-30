@@ -11,6 +11,9 @@ Safety invariants
 4. The engine boots in PAPER. LIVE is a confirmed mode on the client.
 5. `max_daily_loss` squares off, cancels SL orders, and locks the day.
    `max_trades_per_day` blocks the next entry (a reverse closes flat and locks).
+6. A live order is a position only after Groww reports the fill. A pending
+   order is cancelled. It must not sit on the book and fill hours later.
+   An exit is not sent when Groww does not hold that position.
 """
 from __future__ import annotations
 
@@ -41,6 +44,14 @@ class SlCancelFailed(Exception):
 
 class ForceRefused(Exception):
     """A manual force-order was refused before a broker request."""
+
+
+def _intraday_is_shut(message: str) -> bool:
+    """Groww has stopped taking intraday orders for the session."""
+    text = (message or "").lower()
+    return "intraday" in text and (
+        "not available" in text or "about to close" in text or "stopped" in text
+    )
 
 
 @dataclass
@@ -240,6 +251,7 @@ class StrategyEngine:
         # The chart can be a stock the bot is not ordering. Open books stay watched.
         watch = list(dict.fromkeys([*self.positions.keys(), *armed, view]))[: MAX_TRADE_SYMBOLS + 1]
         self._focus = view
+        await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
         if view != self._quote_symbol:
             self._quote_symbol = view
@@ -321,9 +333,10 @@ class StrategyEngine:
             return
         if self._past_square_off(now, cfg):
             await self._square_off("EOD_SQUARE_OFF")
-            self.status = "DAY_COMPLETED"
-            self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
-            self._announce_down("DAY_COMPLETED", self.halt_reason)
+            if self.status != "DAY_COMPLETED" and not self.positions:
+                self.status = "DAY_COMPLETED"
+                self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
+                self._announce_down("DAY_COMPLETED", self.halt_reason)
             return
 
         # A real last-close tape must not open a position after the bell.
@@ -396,9 +409,7 @@ class StrategyEngine:
                 self._signals[self._focus] = result
                 return result
             except SlCancelFailed as exc:
-                self.last_error = str(exc)
-                self.last_signal = f"blocked — {exc}"
-                self._signals[self._focus] = self.last_signal
+                self._note_broker_block(exc)
                 return self.last_signal
             finally:
                 self.inflight = None
@@ -481,6 +492,8 @@ class StrategyEngine:
             direction = self.positions[name].direction
             raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
         cfg = self.load_config()
+        if (cfg.trading_mode or "").upper() == "LIVE" and _ist_now().time() >= _parse_hhmm(cfg.square_off_time):
+            raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
         if self.status != "RUNNING":
             self.status = "RUNNING"
             self.halt_reason = ""
@@ -538,10 +551,113 @@ class StrategyEngine:
         self._signals[name] = result
         return result
 
+    async def _read_order(self, order_id: str) -> tuple[str, float | None]:
+        fn = getattr(self.broker, "read_order", None)
+        try:
+            if fn is not None:
+                status, price = await fn(order_id)
+                return (status or "").upper(), price
+            status = await self.broker.get_order_status(order_id)
+            return (status or "").upper(), None
+        except Exception:  # noqa: BLE001
+            return "UNKNOWN", None
+
+    async def _require_live_fill(self, ack, cfg: BotConfig):
+        """Return only when Groww has filled this order.
+
+        A DAY limit that is still pending is cancelled. Leaving it working is
+        how a batch of orders filled hours later, after this screen already
+        showed them as done.
+        """
+        from groww_client import TERMINAL_CANCELLED, TERMINAL_FILLED
+
+        status = (getattr(ack, "status", "") or "").upper()
+        order_id = str(getattr(ack, "order_id", "") or "")
+        if not order_id or order_id.startswith(("LIVE", "PAPER")):
+            raise SlCancelFailed(getattr(ack, "message", "") or "Groww did not accept the order. Nothing was booked.")
+        if status in TERMINAL_CANCELLED or status in {"REJECTED", "FAILED", "FAILURE"}:
+            raise SlCancelFailed(getattr(ack, "message", "") or f"Groww {status} the order. Nothing was booked.")
+        price = getattr(ack, "fill_price", None)
+        if status not in TERMINAL_FILLED:
+            for _ in range(6):
+                await self._sleep(0.5)
+                status, seen = await self._read_order(order_id)
+                if seen:
+                    price = seen
+                if status in TERMINAL_FILLED:
+                    break
+                if status in TERMINAL_CANCELLED or status in {"REJECTED", "FAILED", "FAILURE"}:
+                    raise SlCancelFailed(f"Groww {status} the order. Nothing was booked.")
+        if status in TERMINAL_FILLED:
+            ack.status = status
+            if price:
+                ack.fill_price = price
+            return ack
+        try:
+            await self.broker.cancel_order(order_id)
+        except Exception as exc:  # noqa: BLE001
+            status, seen = await self._read_order(order_id)
+            if status in TERMINAL_FILLED:
+                ack.status = status
+                if seen:
+                    ack.fill_price = seen
+                return ack
+            raise SlCancelFailed(f"Could not cancel the unfilled Groww order: {exc}") from exc
+        status, seen = await self._read_order(order_id)
+        if status in TERMINAL_FILLED:
+            ack.status = status
+            if seen:
+                ack.fill_price = seen
+            return ack
+        raise SlCancelFailed(
+            "That order was still pending at Groww, so it was cancelled. It will not fill later."
+        )
+
+    def _book_not_on_groww(self, pos: OpenPosition, now: dt.datetime) -> None:
+        """The screen had a position Groww does not. Remove it without an order."""
+        costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
+        self._finalize_trade(pos.trade_id, pos.entry_price, "NOT_ON_GROWW", now, costs)
+
+    async def _drop_positions_groww_does_not_hold(self, cfg: BotConfig) -> None:
+        """A local open row whose Groww book is flat is not a live position.
+
+        Sending an exit for it would open the other side. That is the order
+        that showed up on Groww hours after this screen still looked fine.
+        """
+        if (cfg.trading_mode or "").upper() != "LIVE" or self.inflight:
+            return
+        now_m = time.monotonic()
+        if now_m - getattr(self, "_phantom_check_at", 0.0) < 15:
+            return
+        self._phantom_check_at = now_m
+        for symbol in list(self.positions):
+            pos = self.positions.get(symbol)
+            if pos is None or (pos.mode or "").upper() != "LIVE":
+                continue
+            opened = pos.entry_time
+            if opened is not None and opened.tzinfo is None:
+                opened = opened.replace(tzinfo=IST)
+            if opened is not None and (_ist_now() - opened).total_seconds() < 20:
+                continue
+            net = await self._groww_net(symbol)
+            if net != 0:
+                continue
+            self._focus = symbol
+            self._book_not_on_groww(pos, _ist_now())
+            self.position = None
+            text = f"{symbol} is not on Groww. Removed it here. No order was sent."
+            self.last_signal = text
+            self._signals[symbol] = text
+
     async def _open(self, direction: str, cross_price: float, atr: float, cfg: BotConfig, now: dt.datetime) -> None:
         side = "BUY" if direction == "LONG" else "SELL"
-        ack = await self.broker.place_entry(cfg.symbol, side, int(cfg.qty), cross_price)
-        if ack.status in ("REJECTED", "FAILED"):
+        try:
+            ack = await self.broker.place_entry(cfg.symbol, side, int(cfg.qty), cross_price)
+        except Exception as exc:  # noqa: BLE001
+            raise SlCancelFailed(str(exc) or "Groww did not accept the entry") from exc
+        if (cfg.trading_mode or "").upper() == "LIVE":
+            ack = await self._require_live_fill(ack, cfg)
+        elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE"):
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
         fill = round_to_nse_tick(ack.fill_price or cross_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier))
@@ -650,12 +766,13 @@ class StrategyEngine:
                     )
                     for row in rows
                 ]
-            for trade_id, px, direction, entry, qty in pending:
-                buy, sell = legs_for(direction, entry, px)
-                costs = calculate_charges(buy, sell, qty)
-                self.realized_net += costs["net_pnl"]
-                self._finalize_trade(trade_id, px, "ATR_SL_HIT", _ist_now(), costs)
-                self.last_signal = "Exchange stop already filled — flat"
+            for trade_id, _px, _direction, entry, _qty in pending:
+                # Groww is flat and this process is not holding the book.
+                # Close the row here. Do not send an order: that order would
+                # open the other side.
+                costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
+                self._finalize_trade(trade_id, entry, "NOT_ON_GROWW", _ist_now(), costs)
+                self.last_signal = "Not on Groww — removed here, no order sent"
 
     async def _watch_stop(self, cfg: BotConfig) -> None:
         pos = self.position
@@ -736,9 +853,20 @@ class StrategyEngine:
                     if self.position is None:
                         continue
                     px = self._ltps.get(symbol) or self.position.entry_price
-                    await self._close_position(
-                        self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
-                    )
+                    try:
+                        await self._close_position(
+                            self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
+                        )
+                    except SlCancelFailed as exc:
+                        self.last_error = str(exc)
+                        self.last_signal = f"blocked — {exc}"
+                        self._signals[symbol] = self.last_signal
+                        if _intraday_is_shut(str(exc)):
+                            self.status = "DAY_COMPLETED"
+                            self.halt_reason = str(exc)
+                            self._announce_down("DAY_COMPLETED", self.halt_reason)
+                            return
+                        continue
                     self.position = None
             finally:
                 self.inflight = None
@@ -759,12 +887,41 @@ class StrategyEngine:
     ) -> None:
         exit_side = "SELL" if pos.direction == "LONG" else "BUY"
         px = round_to_nse_tick(float(exit_price))
-        if reason != "ATR_SL_HIT" or (cfg.trading_mode or "").upper() == "PAPER":
-            # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-            if not ((cfg.trading_mode or "").upper() == "LIVE" and reason == "ATR_SL_HIT"):
-                ack = await self.broker.place_exit(cfg.symbol, exit_side, pos.qty, px)
-                if ack.fill_price:
-                    px = round_to_nse_tick(ack.fill_price)
+        live = (cfg.trading_mode or "").upper() == "LIVE"
+        # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
+        send_exit = not (live and reason == "ATR_SL_HIT")
+        if send_exit and live:
+            net = await self._groww_net(cfg.symbol)
+            if net is None:
+                raise SlCancelFailed(
+                    f"Could not read {cfg.symbol} on Groww, so no exit was sent"
+                )
+            if (pos.direction == "LONG" and net <= 0) or (pos.direction == "SHORT" and net >= 0):
+                if net == 0:
+                    self._book_not_on_groww(pos, now)
+                    return
+                raise SlCancelFailed(
+                    f"Groww's {cfg.symbol} position does not match this {pos.direction}. No order was sent."
+                )
+            qty = min(pos.qty, abs(int(net)))
+            try:
+                ack = await self.broker.place_exit(cfg.symbol, exit_side, qty, px)
+            except Exception as exc:  # noqa: BLE001
+                raise SlCancelFailed(str(exc) or "Groww did not accept the exit") from exc
+            try:
+                ack = await self._require_live_fill(ack, cfg)
+            except SlCancelFailed:
+                # The exit may have filled while it was being cancelled.
+                net_after = await self._groww_net(cfg.symbol)
+                if net_after != 0:
+                    raise
+                ack = None
+            if ack is not None and ack.fill_price:
+                px = round_to_nse_tick(ack.fill_price)
+        elif send_exit:
+            ack = await self.broker.place_exit(cfg.symbol, exit_side, pos.qty, px)
+            if ack.fill_price:
+                px = round_to_nse_tick(ack.fill_price)
         buy, sell = legs_for(pos.direction, pos.entry_price, px)
         costs = calculate_charges(buy, sell, pos.qty)
         self.realized_net += costs["net_pnl"]
@@ -944,9 +1101,7 @@ class StrategyEngine:
                 self._signals[symbol] = text
                 return True
             except SlCancelFailed as exc:
-                self.last_error = str(exc)
-                self.last_signal = f"blocked — {exc}"
-                self._signals[symbol] = self.last_signal
+                self._note_broker_block(exc, symbol)
                 return False
             finally:
                 self.inflight = None
@@ -967,9 +1122,7 @@ class StrategyEngine:
                 self._signals[symbol] = text
                 return True
             except SlCancelFailed as exc:
-                self.last_error = str(exc)
-                self.last_signal = f"blocked — {exc}"
-                self._signals[symbol] = self.last_signal
+                self._note_broker_block(exc, symbol)
                 return False
             finally:
                 self.inflight = None
@@ -1090,6 +1243,17 @@ class StrategyEngine:
         self.status = "HALTED"
         self.halt_reason = reason
         self._announce_down("HALTED", reason)
+
+    def _note_broker_block(self, exc: SlCancelFailed, symbol: str = "") -> None:
+        self.last_error = str(exc)
+        self.last_signal = f"blocked — {exc}"
+        key = symbol or self._focus
+        if key:
+            self._signals[key] = self.last_signal
+        if _intraday_is_shut(str(exc)) and self.status != "DAY_COMPLETED":
+            self.status = "DAY_COMPLETED"
+            self.halt_reason = str(exc)
+            self._announce_down("DAY_COMPLETED", self.halt_reason)
 
     def _announce_down(self, status: str, reason: str) -> None:
         _schedule_whatsapp(bot_down_alert(status, reason, _ist_now()))
@@ -1374,6 +1538,7 @@ _ALERT_REASON = {
     "ATR_SL_HIT": "ATR stop",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
+    "NOT_ON_GROWW": "not on Groww — no order sent",
 }
 
 

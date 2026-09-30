@@ -48,6 +48,51 @@ TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 # Groww's own word for a filled order is EXECUTED. Missing it left a long
 # on the terminal after the exchange stop had already sold the shares.
 TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED", "EXECUTED", "DELIVERY_AWAITED"})
+_DEAD_ORDER = TERMINAL_CANCELLED | {"REJECTED", "FAILED", "FAILURE"}
+
+
+class GrowwOrderRejected(RuntimeError):
+    """Groww did not accept the order. Nothing should be booked locally."""
+
+
+def _status_and_price(data: dict) -> tuple[str, float | None]:
+    status = str(data.get("order_status") or data.get("status") or "")
+    raw_price = data.get("average_fill_price") or data.get("filled_price")
+    try:
+        price = float(raw_price) if raw_price not in (None, "", 0, 0.0) else None
+    except (TypeError, ValueError):
+        price = None
+    return status, price
+
+
+def _order_ack_from_response(raw) -> OrderAck:
+    """A Groww place_order body. A refusal or a missing id is not an order.
+
+    Inventing a local id and calling it PENDING booked a position the exchange
+    never had. That resting DAY order could then fill hours later.
+    """
+    if not isinstance(raw, dict):
+        raise GrowwOrderRejected("Groww returned no order")
+    if str(raw.get("status") or "").upper() == "FAILURE":
+        err = raw.get("error")
+        message = ""
+        if isinstance(err, dict):
+            message = str(err.get("message") or err.get("code") or "")
+        elif err:
+            message = str(err)
+        raise GrowwOrderRejected(message or "Groww refused the order")
+    data = raw.get("payload", raw) if "payload" in raw else raw
+    if not isinstance(data, dict):
+        data = {}
+    remark = str(data.get("remark") or data.get("message") or "")
+    order_id = str(data.get("groww_order_id") or data.get("order_id") or "").strip()
+    status = str(data.get("order_status") or data.get("status") or "").upper()
+    if not order_id:
+        raise GrowwOrderRejected(remark or "Groww did not accept the order")
+    if status in _DEAD_ORDER:
+        raise GrowwOrderRejected(remark or f"Groww {status} the order")
+    _status, price = _status_and_price(data)
+    return OrderAck(order_id, status or "PENDING", price, remark)
 
 
 def _env_access_token() -> str:
@@ -545,32 +590,42 @@ class GrowwClient:
         await asyncio.to_thread(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
 
     async def get_order_status(self, order_id: str) -> str:
+        status, _price = await self.read_order(order_id)
+        return status
+
+    async def read_order(self, order_id: str) -> tuple[str, float | None]:
+        """Groww status and average fill. ('', None) when the id is blank.
+
+        UNKNOWN means the read failed. Callers must not treat that as flat
+        or as a fill.
+        """
         if not order_id:
-            return ""
+            return "", None
         local = self._orders.get(order_id)
         if local is not None and (self.mode == "PAPER" or order_id.startswith("PAPER")):
-            return local.status
+            return local.status, local.fill_price
         sdk = self._require_sdk()
 
-        def _status():
+        def _read():
             if hasattr(sdk, "get_order_status"):
                 raw = sdk.get_order_status(groww_order_id=order_id, segment="CASH")
                 data = raw.get("payload", raw) if isinstance(raw, dict) else raw
                 if isinstance(data, dict):
-                    return str(data.get("order_status") or data.get("status") or "")
+                    return _status_and_price(data)
             raw = sdk.get_order_list(segment="CASH")
             orders = raw.get("payload", raw) if isinstance(raw, dict) else raw
             for o in orders or []:
                 oid = str(o.get("groww_order_id") or o.get("order_id") or "")
                 if oid == order_id:
-                    return str(o.get("order_status") or o.get("status") or "")
-            return ""
+                    return _status_and_price(o)
+            return "", None
 
         try:
-            return (await asyncio.to_thread(_status)).upper()
+            status, price = await asyncio.to_thread(_read)
+            return status.upper(), price
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
-            return "UNKNOWN"
+            return "UNKNOWN", None
 
     async def get_positions(self) -> list[dict]:
         if self.mode == "PAPER":
@@ -659,14 +714,10 @@ class GrowwClient:
             return sdk.place_order(**kwargs)
 
         raw = await asyncio.to_thread(_place)
-        data = raw.get("payload", raw) if isinstance(raw, dict) else raw
-        if not isinstance(data, dict):
-            data = {}
-        oid = str(data.get("groww_order_id") or data.get("order_id") or self._next_id("LIVE"))
-        status = str(data.get("order_status") or data.get("status") or "PENDING").upper()
-        fill = data.get("average_fill_price") or data.get("filled_price")
-        ack = OrderAck(oid, status, float(fill) if fill else None)
-        self._orders[oid] = _SimOrder(oid, side, qty, order_type, status, ack.fill_price, trigger)
+        ack = _order_ack_from_response(raw)
+        self._orders[ack.order_id] = _SimOrder(
+            ack.order_id, side, qty, order_type, ack.status, ack.fill_price, trigger
+        )
         return ack
 
     def _apply_paper_position(self, symbol: str, side: str, qty: int, price: float) -> None:

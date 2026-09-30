@@ -186,3 +186,20 @@ async def test_practice_position_is_not_sold_on_groww(desk, monkeypatch):
     monkeypatch.setattr(manual_desk, "close_and_settle", settle)
     await manual_desk.close("WIPRO")
     assert "WIPRO" not in desk.positions
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_desk_exit_is_not_retried_on_the_next_tick(desk, monkeypatch):
+    manual_desk._exiting.clear()
+    manual_desk._exit_blocked_until.clear()
+    await manual_desk.place(symbol="WIPRO", side="BUY", quantity=1, stop_loss=90)
+    calls: list[str] = []
+
+    async def boom(symbol, reason="MANUAL CLOSE"):
+        calls.append(reason)
+        raise ManualOrderRejected("Intraday orders are not available as market is about to close")
+
+    monkeypatch.setattr(manual_desk, "close", boom)
+    await manual_desk.monitor_tick("WIPRO", 80)
+    await manual_desk.monitor_tick("WIPRO", 80)
+    assert calls == ["DESK STOP-LOSS HIT"]
