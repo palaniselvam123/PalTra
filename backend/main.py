@@ -270,6 +270,7 @@ async def start_bot():
     from strategy_engine import _ist_now
 
     engine._roll_session(_ist_now())
+    engine.release_manual_panic()
     if engine.status == "HALTED":
         raise HTTPException(423, engine.halt_reason or "Halted for the day")
     if engine.status == "DAY_COMPLETED":

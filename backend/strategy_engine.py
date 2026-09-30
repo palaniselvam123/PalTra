@@ -462,6 +462,7 @@ class StrategyEngine:
         the session, to be closed. A cross already on the tape still cannot
         fire an extra order on this same bar.
         """
+        self.release_manual_panic()
         if self.status == "HALTED":
             raise ForceRefused(self.halt_reason or "Halted for the day")
         if self.status == "DAY_COMPLETED":
@@ -966,6 +967,19 @@ class StrategyEngine:
             return
         self.status = "HALTED"
         self.halt_reason = reason
+
+    def release_manual_panic(self) -> bool:
+        """A panic flattens the book. Pressing Start again may trade the same day.
+
+        A loss-limit or trade-cap halt stays locked.
+        """
+        if self.status != "HALTED":
+            return False
+        if (self.halt_reason or "") != "Manual PANIC SQUARE-OFF":
+            return False
+        self.status = "STOPPED"
+        self.halt_reason = ""
+        return True
 
     def release_paper_halt(self) -> bool:
         """Drop a practice halt so confirming live is not blocked by the simulator."""

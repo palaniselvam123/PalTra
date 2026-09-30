@@ -1079,6 +1079,30 @@ def test_a_live_halt_still_blocks_another_confirm(api, monkeypatch):
     assert engine.status == "HALTED"
 
 
+def test_start_resumes_after_a_manual_panic(api):
+    from main import engine
+
+    engine.positions.clear()
+    engine.status = "HALTED"
+    engine.halt_reason = "Manual PANIC SQUARE-OFF"
+    resumed = api.post("/api/bot/start")
+    assert resumed.status_code == 200
+    assert resumed.json()["bot_status"] == "RUNNING"
+    assert engine.halt_reason == ""
+
+
+def test_start_stays_locked_after_a_loss_halt(api):
+    from main import engine
+
+    engine.positions.clear()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_daily_loss ₹5000 breached"
+    blocked = api.post("/api/bot/start")
+    assert blocked.status_code == 423
+    assert blocked.json()["detail"] == "max_daily_loss ₹5000 breached"
+    assert engine.status == "HALTED"
+
+
 def test_desk_session_is_used_ahead_of_the_fly_secret(monkeypatch):
     import asyncio
 
