@@ -374,7 +374,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           <button
             disabled={busy}
             onClick={toggleBot}
-            title="Starts the bot. A cross that already happened is skipped. A sell goes out with the Telegram heads-up, before a bearish cross. A buy waits for the cross."
+            title="Starts the bot. A cross that already happened is skipped. Buy and sell both wait until the SMA cross prints. Telegram only warns before that."
             className={clsx(
               "min-h-11 rounded-md px-3 py-2 text-xs font-semibold",
               running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
@@ -385,7 +385,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           <button
             disabled={busy || !symbol}
             onClick={forceOrder}
-            title="Order the chart stock now from the current SMA side, without waiting for a cross. Starts the bot."
+            title="Order the chart stock now from the current SMA side, without waiting for a cross. Checked VWAP, volume, density, and RSI still apply. Starts the bot."
             className="min-h-11 rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-[#1a1203]"
           >
             FORCE ORDER
@@ -406,9 +406,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         </span>
       </div>
       <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
-        Chart only changes the stock on screen. Trade arms that stock even on another chart. A buy
-        waits for the next SMA cross. A sell goes out with the Telegram heads-up, about 3 minutes
-        before a bearish cross. Force order buys or sells the chart stock now and starts the bot.
+        Chart only changes the stock on screen. Trade arms that stock even on another chart. Buy and
+        sell both wait for the next SMA cross. Telegram warns about 3 minutes before that cross, and
+        the order waits until the cross prints. Force order uses the current SMA side. Checked VWAP,
+        volume, density, and RSI filters apply to both.
       </p>
       {(error || state?.halt_reason || state?.last_error) && (
         <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">

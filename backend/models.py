@@ -53,6 +53,17 @@ class BotConfig(Base):
     # panic button, and an opposite crossover still close the position.
     use_stop: Mapped[bool] = mapped_column(Boolean, default=True)
     adx_threshold: Mapped[float] = mapped_column(Float, default=20.0)
+    # Optional entry checks. Unchecked means the order ignores that reading.
+    use_vwap: Mapped[bool] = mapped_column(Boolean, default=False)
+    use_volume: Mapped[bool] = mapped_column(Boolean, default=False)
+    volume_min_ratio: Mapped[float] = mapped_column(Float, default=1.0)
+    use_density: Mapped[bool] = mapped_column(Boolean, default=False)
+    density_min_pct: Mapped[float] = mapped_column(Float, default=50.0)
+    use_rsi: Mapped[bool] = mapped_column(Boolean, default=False)
+    rsi_long_min: Mapped[float] = mapped_column(Float, default=40.0)
+    rsi_long_max: Mapped[float] = mapped_column(Float, default=70.0)
+    rsi_short_min: Mapped[float] = mapped_column(Float, default=30.0)
+    rsi_short_max: Mapped[float] = mapped_column(Float, default=60.0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=15)
     square_off_time: Mapped[str] = mapped_column(String, default="15:15")

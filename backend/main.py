@@ -99,6 +99,16 @@ class ConfigUpdate(BaseModel):
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
     adx_threshold: float | None = Field(default=None, ge=0, le=100)
+    use_vwap: bool | None = None
+    use_volume: bool | None = None
+    volume_min_ratio: float | None = Field(default=None, gt=0, le=10)
+    use_density: bool | None = None
+    density_min_pct: float | None = Field(default=None, ge=1, le=100)
+    use_rsi: bool | None = None
+    rsi_long_min: float | None = Field(default=None, ge=0, le=100)
+    rsi_long_max: float | None = Field(default=None, ge=0, le=100)
+    rsi_short_min: float | None = Field(default=None, ge=0, le=100)
+    rsi_short_max: float | None = Field(default=None, ge=0, le=100)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
@@ -122,6 +132,16 @@ def _config_dict(row: BotConfig) -> dict:
         "use_adx_filter": row.use_adx_filter,
         "use_stop": True if row.use_stop is None else bool(row.use_stop),
         "adx_threshold": row.adx_threshold,
+        "use_vwap": bool(getattr(row, "use_vwap", False)),
+        "use_volume": bool(getattr(row, "use_volume", False)),
+        "volume_min_ratio": float(getattr(row, "volume_min_ratio", 1.0) or 1.0),
+        "use_density": bool(getattr(row, "use_density", False)),
+        "density_min_pct": float(getattr(row, "density_min_pct", 50.0) or 50.0),
+        "use_rsi": bool(getattr(row, "use_rsi", False)),
+        "rsi_long_min": float(getattr(row, "rsi_long_min", 40.0) or 40.0),
+        "rsi_long_max": float(getattr(row, "rsi_long_max", 70.0) or 70.0),
+        "rsi_short_min": float(getattr(row, "rsi_short_min", 30.0) or 30.0),
+        "rsi_short_max": float(getattr(row, "rsi_short_max", 60.0) or 60.0),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,
@@ -208,6 +228,10 @@ async def put_config(body: ConfigUpdate):
             setattr(row, key, value)
         if row.sma_fast >= row.sma_slow:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
+        if float(row.rsi_long_min) > float(row.rsi_long_max):
+            raise HTTPException(400, "Buy RSI low must be at or below the buy RSI high")
+        if float(row.rsi_short_min) > float(row.rsi_short_max):
+            raise HTTPException(400, "Sell RSI low must be at or below the sell RSI high")
         db.commit()
         db.refresh(row)
         return _config_dict(row)

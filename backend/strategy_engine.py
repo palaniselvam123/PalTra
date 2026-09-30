@@ -28,7 +28,7 @@ import pandas as pd
 from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
-from indicators import closed_candle_cross, enrich, round_to_nse_tick
+from indicators import closed_candle_cross, enrich, entry_filter_reason, round_to_nse_tick
 from models import BotConfig, TradeLog
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -97,6 +97,25 @@ def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
     return BotConfig(**data)
 
 
+def _entry_block(frame: pd.DataFrame, direction: str, cfg: BotConfig, price: float | None = None) -> str | None:
+    """Checked entry filters only. An unchecked box is not read."""
+    return entry_filter_reason(
+        frame,
+        direction,
+        use_vwap=bool(getattr(cfg, "use_vwap", False)),
+        use_volume=bool(getattr(cfg, "use_volume", False)),
+        use_density=bool(getattr(cfg, "use_density", False)),
+        use_rsi=bool(getattr(cfg, "use_rsi", False)),
+        volume_min_ratio=float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0),
+        density_min_pct=float(getattr(cfg, "density_min_pct", 50.0) or 50.0),
+        rsi_long_min=float(getattr(cfg, "rsi_long_min", 40.0) or 40.0),
+        rsi_long_max=float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
+        rsi_short_min=float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
+        rsi_short_max=float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        price=price,
+    )
+
+
 class StrategyEngine:
     def __init__(self, broker: GrowwClient | None = None):
         self.broker = broker or GrowwClient(mode="PAPER")
@@ -117,8 +136,6 @@ class StrategyEngine:
         self._skip_cross_until: dict[str, int | None] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
-        # Symbols already sold for the current approach of a bearish cross.
-        self._early_sold: set[tuple] = set()
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -223,7 +240,6 @@ class StrategyEngine:
             self.realized_net = 0.0
             self.trades_today = 0
             self._warned.clear()
-            self._early_sold.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -355,9 +371,6 @@ class StrategyEngine:
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
         self._warn_upcoming(symbol, frame, cfg, now)
-        # The Telegram heads-up is the sell. A buy still waits for the cross.
-        if await self._sell_before_cross(symbol, frame, cfg, now):
-            return
         cross = closed_candle_cross(frame)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -389,6 +402,7 @@ class StrategyEngine:
         cross_price = round_to_nse_tick(float(curr["close"]))
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
+        entry_block = _entry_block(frame, "LONG" if signal == "BULLISH" else "SHORT", cfg)
 
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
@@ -402,6 +416,7 @@ class StrategyEngine:
                     cross_price=cross_price,
                     atr=atr,
                     adx_blocks_entry=adx_blocks_entry,
+                    entry_block=entry_block,
                     cfg=cfg,
                     now=now,
                 )
@@ -423,6 +438,7 @@ class StrategyEngine:
         adx_blocks_entry: bool,
         cfg: BotConfig,
         now: dt.datetime,
+        entry_block: str | None = None,
     ) -> str:
         want = "LONG" if signal == "BULLISH" else "SHORT"
         pos = self.position
@@ -437,6 +453,8 @@ class StrategyEngine:
             self.position = None
             if adx_blocks_entry:
                 return f"closed on {signal} — ADX filter blocked the reverse"
+            if entry_block:
+                return f"closed on {signal} — {entry_block}"
             if self.trades_today >= int(cfg.max_trades_per_day):
                 self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
@@ -446,6 +464,8 @@ class StrategyEngine:
         # FLAT
         if adx_blocks_entry:
             return f"{signal} ignored — ADX below {cfg.adx_threshold}"
+        if entry_block:
+            return f"{signal} ignored — {entry_block}"
         if self.trades_today >= int(cfg.max_trades_per_day):
             self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
@@ -494,11 +514,6 @@ class StrategyEngine:
         cfg = self.load_config()
         if (cfg.trading_mode or "").upper() == "LIVE" and _ist_now().time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
-        if self.status != "RUNNING":
-            self.status = "RUNNING"
-            self.halt_reason = ""
-            # Other armed stocks keep waiting for a cross that prints after this start.
-            self.hold_for_next_cross([item for item in trade_names(cfg) if item != name])
         frame = self._frames.get(name)
         if frame is None or getattr(frame, "empty", True):
             try:
@@ -523,6 +538,14 @@ class StrategyEngine:
         atr = _latest_atr(enriched)
         if atr is None:
             raise ForceRefused(f"{name} ATR is not ready")
+        blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", cfg, price=price)
+        if blocked:
+            raise ForceRefused(blocked)
+        if self.status != "RUNNING":
+            self.status = "RUNNING"
+            self.halt_reason = ""
+            # Other armed stocks keep waiting for a cross that prints after this start.
+            self.hold_for_next_cross([item for item in trade_names(cfg) if item != name])
         # The bar we just looked at stays ignored, so this manual fill is not
         # reversed by a cross that was already printed.
         self.hold_for_next_cross([name])
@@ -1071,114 +1094,11 @@ class StrategyEngine:
         self.ltp = ltp
         return net <= -abs(float(cfg.max_daily_loss))
 
-    def _bearish_sell_due(self, frame: pd.DataFrame) -> bool:
-        """True when the same 3-minute window that warns Telegram is a bearish cross."""
-        side, minutes, _gap = minutes_until_cross(frame)
-        if side != "BEARISH" or minutes is None or not (0 < minutes <= _WARN_MINUTES):
-            return False
-        return closed_candle_cross(frame) is None
-
-    def _early_sell_allowed(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig) -> bool:
-        """A long can be sold out. A flat book can be sold short. A short is already sold."""
-        pos = self.positions.get(symbol)
-        if pos is not None:
-            return pos.direction == "LONG"
-        atr = _latest_atr(frame)
-        if atr is None or atr <= 0:
-            return False
-        if self.trades_today >= int(cfg.max_trades_per_day):
-            return False
-        if bool(cfg.use_adx_filter):
-            adx = _finite(frame.iloc[-2].get("adx_14")) if len(frame) >= 2 else None
-            if adx is None or adx < float(cfg.adx_threshold):
-                return False
-        return True
-
-    async def _sell_before_cross(
-        self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime
-    ) -> bool:
-        """Sell when the heads-up says a bearish cross is inside 3 minutes."""
-        key = (symbol, "early-sell")
-        if not self._bearish_sell_due(frame):
-            side, minutes, _gap = minutes_until_cross(frame)
-            if side != "BEARISH" or minutes is None or minutes > _WARN_CLEAR_MINUTES:
-                self._early_sold.discard(key)
-            return False
-        if key in self._early_sold or not self._early_sell_allowed(symbol, frame, cfg):
-            return False
-        price = float(self._ltps.get(symbol) or self.ltp or 0)
-        if price <= 0:
-            try:
-                price = float(frame.iloc[-2]["close"])
-            except (TypeError, ValueError, KeyError, IndexError):
-                return False
-        if price <= 0:
-            return False
-        price = round_to_nse_tick(price)
-        self._focus = symbol
-        pos = self.positions.get(symbol)
-        if pos is not None:
-            ok = await self._close_before_cross(symbol, price, cfg, now)
-        else:
-            atr = _latest_atr(frame) or 0
-            ok = await self._open_before_cross(symbol, price, atr, cfg, now)
-        if ok:
-            self._early_sold.add(key)
-        return ok
-
-    async def _close_before_cross(self, symbol: str, price: float, cfg: BotConfig, now: dt.datetime) -> bool:
-        async with self.lock:
-            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
-                return False
-            if self.position is None or self.position.direction != "LONG":
-                return False
-            self.inflight = "TRANSIT"
-            try:
-                await self._cancel_sl_verified(self.position)
-                await self._close_position(self.position, price, "MA_APPROACH", now, cfg)
-                self.position = None
-                text = f"{symbol} sold before the MA cross"
-                self.last_signal = text
-                self._signals[symbol] = text
-                return True
-            except SlCancelFailed as exc:
-                self._note_broker_block(exc, symbol)
-                return False
-            finally:
-                self.inflight = None
-
-    async def _open_before_cross(
-        self, symbol: str, price: float, atr: float, cfg: BotConfig, now: dt.datetime
-    ) -> bool:
-        async with self.lock:
-            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
-                return False
-            if self.position is not None:
-                return False
-            self.inflight = "TRANSIT"
-            try:
-                await self._open("SHORT", price, atr, cfg, now)
-                text = f"{symbol} opened SHORT before the MA cross"
-                self.last_signal = text
-                self._signals[symbol] = text
-                return True
-            except SlCancelFailed as exc:
-                self._note_broker_block(exc, symbol)
-                return False
-            finally:
-                self.inflight = None
-
     def _warn_upcoming(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
-        """Telegram before an entry, and before a close. A bearish heads-up is also the sell."""
+        """Telegram before an entry or a close. The order itself waits for the cross."""
         pos = self.positions.get(symbol)
         mode = (cfg.trading_mode or "PAPER").upper()
         side, minutes, gap_pct = minutes_until_cross(frame)
-        selling = (
-            side == "BEARISH"
-            and self._bearish_sell_due(frame)
-            and (symbol, "early-sell") not in self._early_sold
-            and self._early_sell_allowed(symbol, frame, cfg)
-        )
         if side is None:
             self._gate_warning((symbol, "cross", "BULLISH"), None, "")
             self._gate_warning((symbol, "cross", "BEARISH"), None, "")
@@ -1196,7 +1116,6 @@ class StrategyEngine:
                     side=side,
                     minutes=minutes or 0,
                     gap_pct=gap_pct or 0,
-                    selling=selling,
                 )
             elif closes:
                 text = upcoming_close_alert(
@@ -1206,7 +1125,6 @@ class StrategyEngine:
                     side=side,
                     minutes=minutes or 0,
                     gap_pct=gap_pct or 0,
-                    selling=selling,
                 )
             else:
                 text = ""
@@ -1702,16 +1620,9 @@ def _gap_text(gap_pct: float) -> str:
 
 
 def upcoming_entry_alert(
-    *, mode: str, symbol: str, side: str, minutes: float, gap_pct: float, selling: bool = False
+    *, mode: str, symbol: str, side: str, minutes: float, gap_pct: float
 ) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
-    if selling:
-        return (
-            f"PalTra heads-up\n"
-            f"{symbol} sell is placed now, before the MA cross\n"
-            f"SMA 9 is {_gap_text(gap_pct)}, about {_about(minutes)} min from the cross.\n"
-            f"{mode}"
-        )
     return (
         f"PalTra heads-up\n"
         f"{symbol} may be ordered in about {_about(minutes)} min\n"
@@ -1728,16 +1639,8 @@ def upcoming_close_alert(
     side: str,
     minutes: float,
     gap_pct: float,
-    selling: bool = False,
 ) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
-    if selling:
-        return (
-            f"PalTra heads-up\n"
-            f"{position} {symbol} is sold now, before the MA cross\n"
-            f"SMA 9 is {_gap_text(gap_pct)}, about {_about(minutes)} min from the cross.\n"
-            f"{mode}"
-        )
     return (
         f"PalTra heads-up\n"
         f"{position} {symbol} may close in about {_about(minutes)} min\n"

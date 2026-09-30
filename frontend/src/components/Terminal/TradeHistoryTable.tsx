@@ -21,7 +21,7 @@ const BOOKS: { id: Book; title: string; note: string }[] = [
   {
     id: "PAPER",
     title: "Simulation",
-    note: "Paper fills only. After the close this tape walks forward from the last NSE price. A buy waits for the next SMA cross. A sell goes out with the heads-up, before a bearish cross.",
+    note: "Paper fills only. After the close this tape walks forward from the last NSE price. Buy and sell both wait for the next SMA cross.",
   },
   {
     id: "LIVE",

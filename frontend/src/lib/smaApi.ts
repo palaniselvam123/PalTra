@@ -31,6 +31,16 @@ export type SmaConfig = {
   use_adx_filter: boolean;
   use_stop?: boolean;
   adx_threshold: number;
+  use_vwap?: boolean;
+  use_volume?: boolean;
+  volume_min_ratio?: number;
+  use_density?: boolean;
+  density_min_pct?: number;
+  use_rsi?: boolean;
+  rsi_long_min?: number;
+  rsi_long_max?: number;
+  rsi_short_min?: number;
+  rsi_short_max?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;

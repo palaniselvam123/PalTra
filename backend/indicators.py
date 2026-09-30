@@ -100,6 +100,150 @@ def closed_candle_bias(df: pd.DataFrame) -> str | None:
     return None
 
 
+def rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder RSI. NaN until `period` changes exist."""
+    delta = close.diff()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta).clip(lower=0.0)
+    alpha = 1 / int(period)
+    avg_gain = gain.ewm(alpha=alpha, min_periods=int(period), adjust=False).mean()
+    avg_loss = loss.ewm(alpha=alpha, min_periods=int(period), adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), 50.0)
+    return rsi
+
+
+def entry_filter_reason(
+    df: pd.DataFrame,
+    direction: str,
+    *,
+    use_vwap: bool = False,
+    use_volume: bool = False,
+    use_density: bool = False,
+    use_rsi: bool = False,
+    volume_lookback: int = 20,
+    volume_min_ratio: float = 1.0,
+    density_min_pct: float = 50.0,
+    rsi_period: int = 14,
+    rsi_long_min: float = 40.0,
+    rsi_long_max: float = 70.0,
+    rsi_short_min: float = 30.0,
+    rsi_short_max: float = 60.0,
+    price: float | None = None,
+) -> str | None:
+    """Why this entry must wait. None when every checked filter agrees.
+
+    An unchecked filter is not read. The decision uses the last closed candle
+    (`iloc[-2]`). `price` overrides that close for the VWAP comparison only,
+    so a manual order can be judged at the price about to be sent.
+    """
+    if not any((use_vwap, use_volume, use_density, use_rsi)):
+        return None
+    if df is None or len(df) < 3:
+        return "filters need more candles"
+    closed = df.iloc[:-1]
+    bar = closed.iloc[-1]
+    reasons: list[str] = []
+    side = (direction or "").upper()
+
+    if use_vwap:
+        vwap = _session_vwap(closed)
+        px = float(bar["close"] if price is None else price)
+        if vwap is None:
+            reasons.append("VWAP is not ready")
+        elif side == "LONG" and px < vwap:
+            reasons.append(f"VWAP: {px:.2f} is below {vwap:.2f}")
+        elif side == "SHORT" and px > vwap:
+            reasons.append(f"VWAP: {px:.2f} is above {vwap:.2f}")
+
+    if use_volume:
+        reasons.extend(_volume_reason(closed, int(volume_lookback), float(volume_min_ratio)))
+
+    if use_density:
+        reasons.extend(_density_reason(bar, float(density_min_pct)))
+
+    if use_rsi:
+        reasons.extend(
+            _rsi_reason(
+                closed["close"],
+                side,
+                int(rsi_period),
+                float(rsi_long_min),
+                float(rsi_long_max),
+                float(rsi_short_min),
+                float(rsi_short_max),
+            )
+        )
+
+    if not reasons:
+        return None
+    return "; ".join(reasons)
+
+
+def _session_vwap(closed: pd.DataFrame) -> float | None:
+    if "volume" not in closed.columns:
+        return None
+    typical = (closed["high"] + closed["low"] + closed["close"]) / 3
+    vol = pd.to_numeric(closed["volume"], errors="coerce").fillna(0).clip(lower=0)
+    if "ts" in closed.columns:
+        dates = pd.to_datetime(closed["ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
+        mask = dates == dates.iloc[-1]
+        typical = typical[mask]
+        vol = vol[mask]
+    total = float(vol.sum())
+    if total <= 0:
+        return None
+    return float((typical * vol).sum() / total)
+
+
+def _volume_reason(closed: pd.DataFrame, lookback: int, ratio: float) -> list[str]:
+    if "volume" not in closed.columns:
+        return ["volume is not on these candles"]
+    lookback = max(1, lookback)
+    if len(closed) < lookback + 1:
+        return [f"volume needs {lookback} earlier candles"]
+    hist = pd.to_numeric(closed["volume"].iloc[-(lookback + 1) : -1], errors="coerce").fillna(0)
+    current = float(pd.to_numeric(closed["volume"].iloc[-1], errors="coerce") or 0)
+    average = float(hist.mean())
+    need = ratio * average
+    if average <= 0 or current < need:
+        return [f"volume {current:.0f} is below {ratio:g}× the {lookback}-candle average {average:.0f}"]
+    return []
+
+
+def _density_reason(bar: pd.Series, min_pct: float) -> list[str]:
+    span = float(bar["high"]) - float(bar["low"])
+    body = abs(float(bar["close"]) - float(bar["open"]))
+    density = 0.0 if span <= 0 else body / span * 100
+    if density + 1e-9 < min_pct:
+        return [f"density {density:.0f}% is below {min_pct:.0f}%"]
+    return []
+
+
+def _rsi_reason(
+    close: pd.Series,
+    side: str,
+    period: int,
+    long_min: float,
+    long_max: float,
+    short_min: float,
+    short_max: float,
+) -> list[str]:
+    value = rsi_wilder(close, period).iloc[-1]
+    if pd.isna(value):
+        return ["RSI is not ready"]
+    rsi = float(value)
+    if side == "LONG":
+        lo, hi = long_min, long_max
+    else:
+        lo, hi = short_min, short_max
+    if rsi < lo or rsi > hi:
+        return [f"RSI {rsi:.1f} is outside {lo:.0f}–{hi:.0f}"]
+    return []
+
+
 def closed_candle_cross(df: pd.DataFrame) -> str | None:
     """Bullish / bearish SMA cross on closed candles only.
 

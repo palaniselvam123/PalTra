@@ -240,10 +240,8 @@ async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_a_bearish_heads_up_sells_before_the_cross(engine, monkeypatch):
-    from models import TradeLog
+async def test_a_bearish_heads_up_does_not_order_before_the_cross(engine, monkeypatch):
     from strategy_engine import OpenPosition
-    import database
 
     notes: list[str] = []
     monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
@@ -260,32 +258,11 @@ async def test_a_bearish_heads_up_sells_before_the_cross(engine, monkeypatch):
 
     await engine.on_minute(now, cfg, bearish)
     await engine.on_minute(now + dt.timedelta(minutes=1), cfg, bearish)
-    assert engine.positions["SHIPROCKET"].direction == "SHORT"
-    assert engine.broker.events.count("ENTRY SELL") == 1
-    assert any("sell is placed now" in note for note in notes)
-    assert engine.last_signal == "SHIPROCKET holding"
-
-    far = _gap_frame([1.5, 1.4, 1.3])
-    engine.positions.clear()
-    engine.broker.events.clear()
-    engine._early_sold.clear()
-    engine._warned.clear()
-    notes.clear()
-    await engine.on_minute(now, cfg, far)
     assert "SHIPROCKET" not in engine.positions
     assert engine.broker.events == []
-
-    cfg.use_adx_filter = True
-    engine._warned.clear()
-    await engine.on_minute(now, cfg, bearish)
-    assert "SHIPROCKET" not in engine.positions
     assert any("no order yet" in note for note in notes)
-    cfg.use_adx_filter = False
+    assert not any("placed now" in note or "sold now" in note for note in notes)
 
-    notes.clear()
-    engine._warned.clear()
-    engine._early_sold.clear()
-    engine.broker.events.clear()
     trade_id = _seed_open_trade()
     engine.positions["SHIPROCKET"] = OpenPosition(
         direction="LONG",
@@ -300,33 +277,12 @@ async def test_a_bearish_heads_up_sells_before_the_cross(engine, monkeypatch):
         trade_id=trade_id,
         mode="PAPER",
     )
-    await engine.on_minute(now, cfg, bearish)
-    await engine.on_minute(now + dt.timedelta(minutes=1), cfg, bearish)
-    assert "SHIPROCKET" not in engine.positions
-    assert engine.broker.events.count("EXIT SELL") == 1
-    assert engine.broker.events.count("ENTRY SELL") == 0
-    assert any("is sold now" in note for note in notes)
-    with database.session_factory()() as db:
-        closed = db.get(TradeLog, trade_id)
-        assert closed.exit_reason == "MA_APPROACH"
-
+    notes.clear()
     engine._warned.clear()
-    engine._early_sold.clear()
-    engine.positions["SHIPROCKET"] = OpenPosition(
-        direction="LONG",
-        qty=1,
-        entry_price=100.0,
-        ma_cross_price=100.0,
-        atr_at_entry=1.0,
-        sl_trigger=98.0,
-        sl_order_id="",
-        entry_order_id="E",
-        entry_time=now,
-        trade_id=trade_id,
-        mode="PAPER",
-    )
-    await engine.on_minute(now, cfg, _gap_frame([-1.5, -1.0, -0.5]))
+    await engine.on_minute(now, cfg, bearish)
     assert engine.positions["SHIPROCKET"].direction == "LONG"
+    assert engine.broker.events == []
+    assert any("no close yet" in note for note in notes)
 
 
 def test_groww_charge_breakdown_matches_schedule():
@@ -1469,3 +1425,110 @@ def test_close_without_a_position_is_refused(api):
     response = api.post("/api/bot/close", json={"symbol": "SUNTV"})
     assert response.status_code == 400
     assert "no open position" in response.json()["detail"]
+
+
+def _tape(closes: list[float], volumes: list[int] | None = None, body: float = 0.4) -> pd.DataFrame:
+    rows = []
+    for i, close in enumerate(closes):
+        rows.append(
+            {
+                "ts": 1_758_600_000 + i * 60,
+                "open": close - body,
+                "high": close + 0.5,
+                "low": close - 0.5,
+                "close": close,
+                "volume": 1000 if volumes is None else volumes[i],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_unchecked_entry_filters_are_ignored():
+    from indicators import entry_filter_reason
+
+    quiet = _tape([100.0] * 5, [1, 1, 1, 1, 1], body=0.0)
+    assert entry_filter_reason(quiet, "LONG") is None
+
+
+def test_each_checked_filter_can_block_and_can_pass():
+    from indicators import entry_filter_reason
+
+    below = _tape([200.0] * 24 + [100.0, 100.0])
+    assert "below" in (entry_filter_reason(below, "LONG", use_vwap=True) or "")
+    assert entry_filter_reason(below, "SHORT", use_vwap=True) is None
+    assert entry_filter_reason(below, "LONG", use_vwap=False) is None
+
+    thin = _tape([100.0] * 30, [1000] * 28 + [10, 10])
+    assert "volume" in (entry_filter_reason(thin, "LONG", use_volume=True, volume_min_ratio=1) or "")
+    thick = _tape([100.0] * 30, [1000] * 30)
+    assert entry_filter_reason(thick, "LONG", use_volume=True, volume_min_ratio=1) is None
+
+    doji = _tape([100.0] * 8, body=0.0)
+    assert "density" in (entry_filter_reason(doji, "LONG", use_density=True, density_min_pct=50) or "")
+    solid = _tape([100.0] * 8, body=0.8)
+    assert entry_filter_reason(solid, "LONG", use_density=True, density_min_pct=50) is None
+
+    stretched = _tape([100.0 + i for i in range(40)])
+    assert "RSI" in (entry_filter_reason(stretched, "LONG", use_rsi=True, rsi_long_max=70) or "")
+    calm = _tape([100.0 + (0.2 if i % 2 else -0.2) for i in range(40)])
+    assert entry_filter_reason(calm, "LONG", use_rsi=True, rsi_long_min=30, rsi_long_max=70) is None
+
+
+@pytest.mark.asyncio
+async def test_a_checked_vwap_blocks_the_new_order_and_still_closes_the_old_one(engine):
+    from strategy_engine import OpenPosition
+
+    cfg = engine.load_config()
+    cfg.use_adx_filter = False
+    cfg.use_vwap = True
+    frame = enrich(_tape([200.0] * 24 + [100.0, 100.0]))
+    now = dt.datetime(2026, 9, 30, 11, 0, tzinfo=IST)
+    result = await engine.apply_signal("BULLISH", frame, cfg, now)
+    assert "VWAP" in result
+    assert engine.broker.events == []
+
+    cfg.use_vwap = False
+    opened = await engine.apply_signal("BULLISH", frame, cfg, now)
+    assert "opened LONG" in opened
+
+    cfg.use_vwap = True
+    engine.broker.events.clear()
+    engine.position = OpenPosition(
+        direction="SHORT",
+        qty=1,
+        entry_price=100,
+        ma_cross_price=100,
+        atr_at_entry=1,
+        sl_trigger=102,
+        sl_order_id="",
+        entry_order_id="E",
+        entry_time=now,
+        trade_id=_seed_open_trade(),
+        mode="PAPER",
+    )
+    reversed_ = await engine.apply_signal("BULLISH", frame, cfg, now)
+    assert "closed on BULLISH" in reversed_
+    assert "VWAP" in reversed_
+    assert engine.position is None
+    assert engine.broker.events.count("ENTRY BUY") == 0
+
+
+@pytest.mark.asyncio
+async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine):
+    from models import BotConfig
+    import database
+    from strategy_engine import ForceRefused
+
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.use_vwap = True
+        row.symbol = "SUNTV"
+        db.commit()
+    frame = enrich(_tape([100.0 + i for i in range(30)]))
+    engine._frames["SUNTV"] = frame
+    engine._ltps["SUNTV"] = 50.0
+    engine.status = "STOPPED"
+    with pytest.raises(ForceRefused, match="VWAP"):
+        await engine.force_order("SUNTV")
+    assert engine.status == "STOPPED"
+    assert engine.broker.events == []

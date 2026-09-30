@@ -63,6 +63,21 @@ def _ensure_bot_config_columns(engine) -> None:
                 "UPDATE bot_config SET trade_symbols = symbol "
                 "WHERE trade_symbols IS NULL OR trade_symbols = ''"
             )
+        additions = {
+            "use_vwap": "BOOLEAN DEFAULT 0",
+            "use_volume": "BOOLEAN DEFAULT 0",
+            "volume_min_ratio": "FLOAT DEFAULT 1",
+            "use_density": "BOOLEAN DEFAULT 0",
+            "density_min_pct": "FLOAT DEFAULT 50",
+            "use_rsi": "BOOLEAN DEFAULT 0",
+            "rsi_long_min": "FLOAT DEFAULT 40",
+            "rsi_long_max": "FLOAT DEFAULT 70",
+            "rsi_short_min": "FLOAT DEFAULT 30",
+            "rsi_short_max": "FLOAT DEFAULT 60",
+        }
+        for column, decl in additions.items():
+            if column not in names:
+                conn.exec_driver_sql(f"ALTER TABLE bot_config ADD COLUMN {column} {decl}")
 
 
 def init_db() -> BotConfig:

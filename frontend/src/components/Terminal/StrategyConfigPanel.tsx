@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { smaApi, type SmaConfig } from "@/lib/smaApi";
 
 type Props = { config: SmaConfig | null; onChanged: () => void };
@@ -16,8 +16,10 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
   const set = (key: keyof SmaConfig, value: string | boolean) => {
     setForm((prev) => {
       if (!prev) return prev;
-      if (typeof prev[key] === "boolean") return { ...prev, [key]: Boolean(value) };
-      if (typeof prev[key] === "number") return { ...prev, [key]: Number(value) };
+      if (typeof value === "boolean" || typeof prev[key] === "boolean") {
+        return { ...prev, [key]: Boolean(value) };
+      }
+      // Keep the typed text, including a trailing decimal, until Save parses it.
       return { ...prev, [key]: value };
     });
     setMsg(null);
@@ -38,6 +40,16 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         use_adx_filter: form.use_adx_filter,
         use_stop: form.use_stop !== false,
         adx_threshold: Number(form.adx_threshold),
+        use_vwap: Boolean(form.use_vwap),
+        use_volume: Boolean(form.use_volume),
+        volume_min_ratio: Number(form.volume_min_ratio ?? 1),
+        use_density: Boolean(form.use_density),
+        density_min_pct: Number(form.density_min_pct ?? 50),
+        use_rsi: Boolean(form.use_rsi),
+        rsi_long_min: Number(form.rsi_long_min ?? 40),
+        rsi_long_max: Number(form.rsi_long_max ?? 70),
+        rsi_short_min: Number(form.rsi_short_min ?? 30),
+        rsi_short_max: Number(form.rsi_short_max ?? 60),
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
@@ -84,6 +96,62 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         />
         ADX trend filter (block entries when ADX is below the threshold)
       </label>
+      <p className="mt-3 text-[11px] leading-snug text-slate-500">
+        These apply only when checked, on a crossover and on Force order. An unchecked box is ignored. A
+        close still happens on the opposite cross.
+      </p>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_vwap)}
+          onChange={(e) => set("use_vwap", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        VWAP. Buy at or above today’s VWAP. Sell at or below it.
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_volume)}
+          onChange={(e) => set("use_volume", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        Volume. The closed candle must be at least this multiple of the previous 20 candles.
+      </label>
+      <Field
+        label="Volume multiple"
+        value={String(form.volume_min_ratio ?? 1)}
+        onChange={(v) => set("volume_min_ratio", v)}
+      />
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_density)}
+          onChange={(e) => set("use_density", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        Density. The candle body must cover at least this percent of its high-to-low range.
+      </label>
+      <Field
+        label="Density %"
+        value={String(form.density_min_pct ?? 50)}
+        onChange={(v) => set("density_min_pct", v)}
+      />
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_rsi)}
+          onChange={(e) => set("use_rsi", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        RSI(14). A buy must sit in the buy range. A sell must sit in the sell range.
+      </label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} />
+        <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} />
+        <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} />
+        <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} />
+      </div>
       <div className="mt-3 flex items-center gap-3">
         <button
           disabled={busy}
@@ -99,12 +167,28 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
 }
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(value);
+  }, [value]);
   return (
     <label className="block">
       <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
       <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        inputMode="decimal"
+        value={text}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          setText(value);
+        }}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(e.target.value);
+        }}
         className="mt-0.5 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none focus:border-[#10B981]/50"
       />
     </label>
