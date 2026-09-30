@@ -19,6 +19,18 @@ type Props = {
 
 const CANDLE_INTERVAL_SEC = 5;
 
+function istClock(time: unknown): string {
+  const sec = typeof time === "number" ? time : 0;
+  if (!sec) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(sec * 1000));
+}
+
 export function TradingChart({ symbol, tick, stopLoss, target }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -34,7 +46,17 @@ export function TradingChart({ symbol, tick, stopLoss, target }: Props) {
       grid: { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
       width: containerRef.current.clientWidth,
       height: 360,
-      timeScale: { timeVisible: true, secondsVisible: true },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: true,
+        tickMarkFormatter: (time: unknown) => istClock(time),
+      },
+      localization: {
+        timeFormatter: (time: unknown) => {
+          const clock = istClock(time);
+          return clock ? `${clock} IST` : "";
+        },
+      },
     });
     const series = chart.addCandlestickSeries({
       upColor: "#10b981",

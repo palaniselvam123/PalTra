@@ -27,6 +27,7 @@ import {
   type PriceAtResponse,
   type RecorderStatus,
 } from "@/lib/api";
+import { istDay } from "@/lib/format";
 
 const REFRESH_MS = 15_000;
 
@@ -116,7 +117,7 @@ export default function MoversPage() {
   const fetchWholeDay = async () => {
     setFetching("Starting…");
     try {
-      await api.moversFetchDay(day || new Date().toISOString().slice(0, 10), "5m");
+      await api.moversFetchDay(day || istDay(), "5m");
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000));
         const st = await api.moversFetchDayStatus();

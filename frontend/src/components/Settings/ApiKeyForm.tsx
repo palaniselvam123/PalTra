@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { CheckCircle2, XCircle, Loader2, LogIn } from "lucide-react";
 import { api } from "@/lib/api";
+import { istStamp, markIst } from "@/lib/format";
 
 type CredentialStatus = {
   broker: string;
@@ -75,7 +76,7 @@ export function ApiKeyForm() {
       const res = await api.login(broker);
       setLoginResult({
         ok: true,
-        message: `Connected. Token valid until ${new Date(res.token_expires_at).toLocaleString()}. You can now switch the data source to LIVE NSE.`,
+        message: `Connected. Token valid until ${markIst(istStamp(res.token_expires_at, true))}. You can now switch the data source to LIVE NSE.`,
       });
       await refreshSaved(broker);
     } catch (e: any) {
@@ -128,7 +129,7 @@ export function ApiKeyForm() {
             {saved.token_expires_at && (
               <span className="text-slate-500">
                 {" "}
-                · token expires {new Date(saved.token_expires_at).toLocaleString()}
+                · token expires {markIst(istStamp(saved.token_expires_at, true))}
               </span>
             )}
           </div>

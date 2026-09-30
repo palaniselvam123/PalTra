@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import clsx from "clsx";
 import { ArrowDownRight, ArrowUpRight, ShieldAlert, X } from "lucide-react";
 import { useNotifications, type TradeNotice } from "@/hooks/useNotifications";
-import { money, timeOnly } from "@/lib/format";
+import { markIst, money, timeOnly } from "@/lib/format";
 
 type Ctx = ReturnType<typeof useNotifications>;
 
@@ -104,7 +104,7 @@ function Toast({ notice, onDismiss }: { notice: TradeNotice; onDismiss: () => vo
             HDFCBANK" tells you nothing about why it happened. */}
         <p className="text-[11px] text-slate-400 leading-relaxed pl-6">{notice.reason}</p>
         <div className="text-[10px] text-slate-600 pl-6">
-          {notice.account === "MANUAL" ? "Manual desk" : "Strategy account"} · {timeOnly(notice.at)}
+          {notice.account === "MANUAL" ? "Manual desk" : "Strategy account"} · {markIst(timeOnly(notice.at))}
         </div>
       </div>
     </div>

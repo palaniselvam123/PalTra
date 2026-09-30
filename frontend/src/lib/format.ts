@@ -29,21 +29,90 @@ export function duration(seconds: number | null | undefined): string {
   return `${h}h ${m % 60}m`;
 }
 
-/** Backend timestamps are ISO with an offset already applied (IST). */
-export function timestamp(value: string | null | undefined): string {
+const IST = "Asia/Kolkata";
+
+const IST_TIME: Intl.DateTimeFormatOptions = {
+  timeZone: IST,
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+};
+
+const IST_DATE: Intl.DateTimeFormatOptions = {
+  timeZone: IST,
+  day: "2-digit",
+  month: "short",
+};
+
+const IST_STAMP: Intl.DateTimeFormatOptions = { ...IST_DATE, ...IST_TIME };
+
+function hasZone(value: string): boolean {
+  return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value.trim());
+}
+
+/** An instant from a backend clock.
+
+Naive strings are IST wall time, which is how the terminal stores a fill.
+Pass `utc` when the field is naive UTC (`datetime.utcnow` on the desk).
+A value that already carries Z or an offset is that absolute instant.
+*/
+export function parseClock(value: string, utc = false): Date | null {
+  const text = value.trim().replace(" ", "T");
+  if (!text) return null;
+  const iso = hasZone(text) ? text : utc ? `${text}Z` : `${text}+05:30`;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function istTime(value: string | null | undefined, utc = false): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString("en-IN", {
+  const date = parseClock(value, utc);
+  if (!date) return "—";
+  return date.toLocaleTimeString("en-IN", IST_TIME);
+}
+
+export function istDate(value: string | null | undefined, utc = false): string {
+  if (!value) return "—";
+  const date = parseClock(value, utc);
+  if (!date) return "—";
+  return date.toLocaleDateString("en-IN", IST_DATE);
+}
+
+export function istStamp(value: string | null | undefined, utc = false): string {
+  if (!value) return "—";
+  const date = parseClock(value, utc);
+  if (!date) return "—";
+  return date.toLocaleString("en-IN", IST_STAMP);
+}
+
+export function istNow(): string {
+  return new Date().toLocaleTimeString("en-IN", IST_TIME);
+}
+
+/** Calendar day in IST, as YYYY-MM-DD. `offsetDays` walks back from today. */
+export function istDay(offsetDays = 0): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST,
+    year: "numeric",
+    month: "2-digit",
     day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  }).format(new Date(Date.now() - offsetDays * 86_400_000));
+}
+
+/** Backend timestamps are shown in IST even when this browser is not. */
+export function timestamp(value: string | null | undefined): string {
+  return istStamp(value);
 }
 
 export function timeOnly(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return istTime(value);
+}
+
+/** Clock text with an IST label. A missing time stays a dash. */
+export function markIst(value: string): string {
+  if (!value || value === "—") return "—";
+  return value.endsWith(" IST") ? value : `${value} IST`;
 }
 
 export function pnlClass(value: number | null | undefined): string {

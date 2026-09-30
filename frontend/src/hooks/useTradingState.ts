@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AccountSummary, type BotStatus, type FeedStatus } from "@/lib/api";
+import { istNow } from "@/lib/format";
 import { useWebSocket } from "./useWebSocket";
 import { useNotificationCenter } from "@/components/Notifications/NotificationProvider";
 import type { ClosedTrade } from "@/components/Dashboard/TradeHistory";
@@ -183,7 +184,7 @@ export function useTradingState() {
         id: logIdRef.current,
         level: msg.data.level,
         message: msg.data.message,
-        at: new Date().toLocaleTimeString(),
+        at: istNow(),
       };
       setLogs((prev) => [entry, ...prev].slice(0, 200));
     } else if (msg.channel === "order_filled") {

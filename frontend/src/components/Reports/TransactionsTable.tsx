@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import clsx from "clsx";
 import { ChevronDown, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import { api, type Transaction } from "@/lib/api";
-import { duration, money, num, pct, pnlClass, timestamp } from "@/lib/format";
+import { duration, markIst, money, num, pct, pnlClass, timestamp } from "@/lib/format";
 
 const OUTCOME_STYLES: Record<string, string> = {
   WIN: "bg-profit/15 text-profit",
@@ -43,8 +43,8 @@ function ExpandedDetail({ trade }: { trade: Transaction }) {
   return (
     <div className="bg-base/60 px-4 py-3 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-3">
-        <Field label="Opened" value={timestamp(trade.opened_at)} />
-        <Field label="Closed" value={timestamp(trade.closed_at)} />
+        <Field label="Opened" value={markIst(timestamp(trade.opened_at))} />
+        <Field label="Closed" value={markIst(timestamp(trade.closed_at))} />
         <Field label="Holding" value={duration(trade.holding_sec)} />
         <Field label="Turnover" value={money(trade.turnover)} />
         <Field label="Stop Loss" value={money(trade.stop_loss)} />
@@ -216,7 +216,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-600">{t.id}</td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-400">
-                      {timestamp(t.closed_at ?? t.opened_at)}
+                      {markIst(timestamp(t.closed_at ?? t.opened_at))}
                     </td>
                     <td className="px-3 py-2 text-slate-100">{t.symbol}</td>
                     <td className={clsx("px-3 py-2 text-xs", t.side === "BUY" ? "text-profit" : "text-loss")}>

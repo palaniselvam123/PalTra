@@ -3,7 +3,7 @@
 import Link from "next/link";
 import clsx from "clsx";
 import { ArrowRight, FileBarChart } from "lucide-react";
-import { money } from "@/lib/format";
+import { istDate, istTime, money } from "@/lib/format";
 
 export type ClosedTrade = {
   id: number;
@@ -66,18 +66,8 @@ export function TradeHistory({ trades, emptyLabel }: { trades: ClosedTrade[]; em
                 <td className="px-4 py-2 font-mono text-xs text-slate-500">
                   {t.closed_at ? (
                     <span className="whitespace-nowrap">
-                      {new Date(t.closed_at + "Z").toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                      })}{" "}
-                      <span className="text-slate-400">
-                        {new Date(t.closed_at + "Z").toLocaleTimeString("en-IN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                          hour12: false,
-                        })}
-                      </span>
+                      {istDate(t.closed_at, true)}{" "}
+                      <span className="text-slate-400">{istTime(t.closed_at, true)} IST</span>
                     </span>
                   ) : (
                     "—"

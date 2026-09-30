@@ -70,7 +70,12 @@ function baseOptions(theme: "dark" | "light") {
       secondsVisible: false,
       tickMarkFormatter: (time: unknown) => istClock(time),
     },
-    localization: { timeFormatter: (time: unknown) => istClock(time) },
+    localization: {
+      timeFormatter: (time: unknown) => {
+        const clock = istClock(time);
+        return clock ? `${clock} IST` : "";
+      },
+    },
     crosshair: { mode: CrosshairMode.Normal },
   };
 }

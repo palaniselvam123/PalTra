@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { EquityPoint } from "@/lib/api";
-import { money, timestamp } from "@/lib/format";
+import { markIst, money, timestamp } from "@/lib/format";
 
 const W = 900;
 const H = 240;
@@ -128,7 +128,7 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
         </span>
         {active ? (
           <span className="text-slate-300">
-            Trade #{active.trade_id} · {timestamp(active.at)} · {money(active.pnl, true)} → cumulative{" "}
+            Trade #{active.trade_id} · {markIst(timestamp(active.at))} · {money(active.pnl, true)} → cumulative{" "}
             {money(active.cumulative, true)}
             {active.drawdown > 0 && ` · ${money(-active.drawdown)} below peak`}
           </span>

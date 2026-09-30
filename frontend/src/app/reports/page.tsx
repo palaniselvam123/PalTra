@@ -11,7 +11,7 @@ import { TransactionsTable } from "@/components/Reports/TransactionsTable";
 import { FiltersBar } from "@/components/Reports/FiltersBar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type FullReport, type ReportFilters } from "@/lib/api";
-import { timestamp } from "@/lib/format";
+import { markIst, timestamp } from "@/lib/format";
 
 type Tab = "overview" | "breakdowns" | "transactions";
 
@@ -149,7 +149,7 @@ export default function ReportsPage() {
                 </button>
               ))}
               <span className="ml-auto text-[11px] text-slate-600 pb-2">
-                generated {timestamp(report.generated_at)}
+                generated {markIst(timestamp(report.generated_at))}
               </span>
             </div>
 

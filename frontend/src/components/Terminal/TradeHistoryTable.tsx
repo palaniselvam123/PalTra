@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { istTime } from "@/lib/format";
 import { smaApi, inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 const REASON: Record<string, string> = {
@@ -146,7 +147,7 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
                 </td>
                 <td className="px-3 py-2 font-mono">
                   {px(t.entry_price)}
-                  <div className="text-slate-500">{fmtTime(t.entry_time)}</div>
+                  <div className="text-slate-500">{t.entry_time ? `${istTime(t.entry_time)} IST` : "—"}</div>
                 </td>
                 <td className="px-3 py-2 font-mono">
                   {market == null ? "—" : px(market)}
@@ -164,7 +165,7 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
                 <td className="px-3 py-2 font-mono">{px(t.atr_at_entry)}</td>
                 <td className="px-3 py-2 font-mono">{px(t.sl_trigger_price)}</td>
                 <td className="px-3 py-2 font-mono">
-                  {fmtTime(t.exit_time)}
+                  {t.exit_time ? `${istTime(t.exit_time)} IST` : "—"}
                   <div className="text-slate-400">{t.exit_price == null ? "open" : px(t.exit_price)}</div>
                 </td>
                 <td className="px-3 py-2">
@@ -209,9 +210,3 @@ export function markPnl(trade: TradeRow, market: number | null): { points: numbe
   return { points, pnl: points * trade.qty };
 }
 
-function fmtTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(11, 16);
-  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}

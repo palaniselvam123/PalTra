@@ -65,7 +65,12 @@ export function StrategyChart({ chart }: Props) {
         secondsVisible: false,
         tickMarkFormatter: (time: unknown) => istClock(time),
       },
-      localization: { timeFormatter: (time: unknown) => istClock(time) },
+      localization: {
+        timeFormatter: (time: unknown) => {
+          const clock = istClock(time);
+          return clock ? `${clock} IST` : "";
+        },
+      },
       crosshair: { mode: 1 },
       autoSize: true,
     });

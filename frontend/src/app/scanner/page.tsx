@@ -14,6 +14,7 @@ import {
   type ScanSignal,
   type ScanStatus,
 } from "@/lib/api";
+import { istDate, istTime } from "@/lib/format";
 
 const STATUS_STYLES: Record<string, string> = {
   SENT: "bg-profit/15 text-profit",
@@ -205,11 +206,7 @@ export default function ScannerPage() {
                 className="text-slate-400"
                 title={`Signals are only evaluated when a ${status.timeframe} bar closes. Nothing can fire before then.`}
               >
-                next {status.timeframe} bar closes{" "}
-                {new Date(status.next_bar_close).toLocaleTimeString("en-IN", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                next {status.timeframe} bar closes {istTime(status.next_bar_close)} IST
               </span>
             )}
             <span className={status?.feed_source === "live" ? "text-profit" : "text-amber-400"}>
@@ -719,13 +716,8 @@ export default function ScannerPage() {
                           )}
                           {s.created_at ? (
                             <>
-                              <span className="text-slate-400">
-                                {new Date(s.created_at + "Z").toLocaleDateString("en-IN", {
-                                  day: "2-digit",
-                                  month: "short",
-                                })}
-                              </span>{" "}
-                              {new Date(s.created_at + "Z").toLocaleTimeString("en-IN")}
+                              <span className="text-slate-400">{istDate(s.created_at, true)}</span>{" "}
+                              {istTime(s.created_at, true)} IST
                             </>
                           ) : (
                             "—"

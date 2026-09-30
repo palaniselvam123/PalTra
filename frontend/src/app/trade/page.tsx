@@ -9,7 +9,7 @@ import { AddSymbolSearch } from "@/components/Trade/AddSymbolSearch";
 import { OrderTicket } from "@/components/Trade/OrderTicket";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type DeskAccount, type DeskPosition, type WatchRow } from "@/lib/api";
-import { money, num, pct, pnlClass } from "@/lib/format";
+import { istTime, money, num, pct, pnlClass } from "@/lib/format";
 
 export default function TradePage() {
   const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks } =
@@ -599,7 +599,7 @@ export default function TradePage() {
                       title={voided ? t.exit_reason ?? undefined : undefined}
                     >
                       <td className="px-4 py-2 font-mono text-xs text-slate-500">
-                        {t.closed_at ? new Date(t.closed_at + "Z").toLocaleTimeString("en-IN") : "—"}
+                        {t.closed_at ? `${istTime(t.closed_at, true)} IST` : "—"}
                       </td>
                       <td className="px-3 py-2 text-slate-100">
                         {t.symbol}
