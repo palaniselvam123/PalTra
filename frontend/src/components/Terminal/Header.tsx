@@ -374,7 +374,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           <button
             disabled={busy}
             onClick={toggleBot}
-            title="Starts the bot. A cross that already happened is skipped. The next cross can order an armed stock."
+            title="Starts the bot. A cross that already happened is skipped. A sell goes out with the Telegram heads-up, before a bearish cross. A buy waits for the cross."
             className={clsx(
               "min-h-11 rounded-md px-3 py-2 text-xs font-semibold",
               running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
@@ -406,8 +406,9 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         </span>
       </div>
       <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
-        Chart only changes the stock on screen. Trade arms that stock even on another chart. Start
-        waits for the next SMA cross. Force order buys or sells the chart stock now and starts the bot.
+        Chart only changes the stock on screen. Trade arms that stock even on another chart. A buy
+        waits for the next SMA cross. A sell goes out with the Telegram heads-up, about 3 minutes
+        before a bearish cross. Force order buys or sells the chart stock now and starts the bot.
       </p>
       {(error || state?.halt_reason || state?.last_error) && (
         <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">

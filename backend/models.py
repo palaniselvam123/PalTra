@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | ATR_SL_HIT | EOD_SQUARE_OFF | KILL_SWITCH
+    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | EOD_SQUARE_OFF | KILL_SWITCH
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)

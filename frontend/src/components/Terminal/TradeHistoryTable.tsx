@@ -7,6 +7,7 @@ import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
+  MA_APPROACH: "SOLD BEFORE CROSS",
   ATR_SL_HIT: "ATR SL HIT",
   EOD_SQUARE_OFF: "EOD SQUARE-OFF",
   KILL_SWITCH: "KILL SWITCH",
@@ -18,7 +19,7 @@ const BOOKS: { id: Book; title: string; note: string }[] = [
   {
     id: "PAPER",
     title: "Simulation",
-    note: "Paper fills only. After the close this tape walks forward from the last NSE price, and an order still waits for the next SMA cross.",
+    note: "Paper fills only. After the close this tape walks forward from the last NSE price. A buy waits for the next SMA cross. A sell goes out with the heads-up, before a bearish cross.",
   },
   {
     id: "LIVE",

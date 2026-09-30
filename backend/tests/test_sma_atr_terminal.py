@@ -184,6 +184,7 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
     await engine.on_minute(now, cfg, frame)
     assert any("may close" in note for note in notes)
     assert not any("may be ordered" in note for note in notes)
+    assert engine.positions["SHIPROCKET"].direction == "SHORT"
 
     notes.clear()
     engine._warned.discard(("SHIPROCKET", "stop"))
@@ -199,6 +200,96 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
     engine._ltps["SHIPROCKET"] = 100.0
     await engine.on_minute(dt.datetime(2026, 9, 29, 15, 13, tzinfo=IST), cfg, tight)
     assert any("square-off in about" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_a_bearish_heads_up_sells_before_the_cross(engine, monkeypatch):
+    from models import TradeLog
+    from strategy_engine import OpenPosition
+    import database
+
+    notes: list[str] = []
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    now = dt.datetime(2026, 9, 29, 14, 0, tzinfo=IST)
+    bearish = _gap_frame([1.5, 1.0, 0.5])
+    engine.ltp = 100.0
+    engine._ltps["SHIPROCKET"] = 100.0
+
+    await engine.on_minute(now, cfg, bearish)
+    await engine.on_minute(now + dt.timedelta(minutes=1), cfg, bearish)
+    assert engine.positions["SHIPROCKET"].direction == "SHORT"
+    assert engine.broker.events.count("ENTRY SELL") == 1
+    assert any("sell is placed now" in note for note in notes)
+    assert engine.last_signal == "SHIPROCKET holding"
+
+    far = _gap_frame([1.5, 1.4, 1.3])
+    engine.positions.clear()
+    engine.broker.events.clear()
+    engine._early_sold.clear()
+    engine._warned.clear()
+    notes.clear()
+    await engine.on_minute(now, cfg, far)
+    assert "SHIPROCKET" not in engine.positions
+    assert engine.broker.events == []
+
+    cfg.use_adx_filter = True
+    engine._warned.clear()
+    await engine.on_minute(now, cfg, bearish)
+    assert "SHIPROCKET" not in engine.positions
+    assert any("no order yet" in note for note in notes)
+    cfg.use_adx_filter = False
+
+    notes.clear()
+    engine._warned.clear()
+    engine._early_sold.clear()
+    engine.broker.events.clear()
+    trade_id = _seed_open_trade()
+    engine.positions["SHIPROCKET"] = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=100.0,
+        ma_cross_price=100.0,
+        atr_at_entry=1.0,
+        sl_trigger=98.0,
+        sl_order_id="",
+        entry_order_id="E",
+        entry_time=now,
+        trade_id=trade_id,
+        mode="PAPER",
+    )
+    await engine.on_minute(now, cfg, bearish)
+    await engine.on_minute(now + dt.timedelta(minutes=1), cfg, bearish)
+    assert "SHIPROCKET" not in engine.positions
+    assert engine.broker.events.count("EXIT SELL") == 1
+    assert engine.broker.events.count("ENTRY SELL") == 0
+    assert any("is sold now" in note for note in notes)
+    with database.session_factory()() as db:
+        closed = db.get(TradeLog, trade_id)
+        assert closed.exit_reason == "MA_APPROACH"
+
+    engine._warned.clear()
+    engine._early_sold.clear()
+    engine.positions["SHIPROCKET"] = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=100.0,
+        ma_cross_price=100.0,
+        atr_at_entry=1.0,
+        sl_trigger=98.0,
+        sl_order_id="",
+        entry_order_id="E",
+        entry_time=now,
+        trade_id=trade_id,
+        mode="PAPER",
+    )
+    await engine.on_minute(now, cfg, _gap_frame([-1.5, -1.0, -0.5]))
+    assert engine.positions["SHIPROCKET"].direction == "LONG"
 
 
 def test_groww_charge_breakdown_matches_schedule():
