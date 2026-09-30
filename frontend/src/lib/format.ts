@@ -47,6 +47,17 @@ const IST_DATE: Intl.DateTimeFormatOptions = {
 
 const IST_STAMP: Intl.DateTimeFormatOptions = { ...IST_DATE, ...IST_TIME };
 
+const IST_DATETIME: Intl.DateTimeFormatOptions = {
+  timeZone: IST,
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+};
+
 function hasZone(value: string): boolean {
   return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value.trim());
 }
@@ -77,6 +88,13 @@ export function istDate(value: string | null | undefined, utc = false): string {
   const date = parseClock(value, utc);
   if (!date) return "—";
   return date.toLocaleDateString("en-IN", IST_DATE);
+}
+
+export function istDateTime(value: string | null | undefined, utc = false): string {
+  if (!value) return "—";
+  const date = parseClock(value, utc);
+  if (!date) return "—";
+  return date.toLocaleString("en-IN", IST_DATETIME);
 }
 
 export function istStamp(value: string | null | undefined, utc = false): string {

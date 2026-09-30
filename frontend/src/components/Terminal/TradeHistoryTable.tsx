@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { istTime, parseClock } from "@/lib/format";
+import { istDateTime, parseClock } from "@/lib/format";
 import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 const REASON: Record<string, string> = {
@@ -87,6 +87,8 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
     if (max != null && Number.isFinite(max) && (pnl == null || pnl > max)) return false;
     return true;
   });
+  const openRows = rows.filter((trade) => trade.exit_price == null);
+  const completedRows = rows.filter((trade) => trade.exit_price != null);
   const filteredPnl = rows.reduce((sum, trade) => {
     const pnl = shownPnl(trade, state);
     return pnl == null ? sum : sum + pnl;
@@ -268,26 +270,56 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
         </p>
       </div>
       <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
+      <OrderTable
+        title="Open"
+        rows={openRows}
+        state={state}
+        empty={
+          inBook.length === 0
+            ? simulation
+              ? "No simulated trades yet. Start the bot and wait for the next SMA cross."
+              : "No NSE live trades on this page."
+            : "No open orders."
+        }
+      />
+      {inBook.length > 0 && (
+        <OrderTable
+          title="Completed"
+          rows={completedRows}
+          state={state}
+          empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
+        />
+      )}
+    </section>
+  );
+}
+
+const COLUMNS = ["#", "Stock", "Side", "Executed", "Market", "P&L", "ATR", "SL", "Exit", "Trigger", "Charges", "Net"];
+
+function OrderTable({
+  title,
+  rows,
+  state,
+  empty,
+}: {
+  title: string;
+  rows: TradeRow[];
+  state: SmaState | null;
+  empty: string;
+}) {
+  return (
+    <div className="border-t border-white/5">
+      <h3 className="px-4 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        {title}
+        <span className="ml-2 font-normal text-slate-500">{rows.length}</span>
+      </h3>
       <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[960px] text-left text-xs">
+        <table className="w-full min-w-[1040px] text-left text-xs">
           <thead className="text-[10px] uppercase tracking-wider text-slate-500">
             <tr className="border-y border-white/5">
-              {[
-                "#",
-                "Stock",
-                "Side",
-                "Executed",
-                "Market",
-                "P&L",
-                "ATR",
-                "SL",
-                "Exit",
-                "Trigger",
-                "Charges",
-                "Net",
-              ].map((h) => (
-                <th key={h} className="px-3 py-2 font-medium">
-                  {h}
+              {COLUMNS.map((heading) => (
+                <th key={heading} className="px-3 py-2 font-medium">
+                  {heading}
                 </th>
               ))}
             </tr>
@@ -295,83 +327,83 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
-                  {inBook.length === 0
-                    ? simulation
-                      ? "No simulated trades yet. Start the bot and wait for the next SMA cross."
-                      : "No NSE live trades on this page."
-                    : "No trades match these filters."}
+                <td colSpan={COLUMNS.length} className="px-3 py-6 text-center text-slate-500">
+                  {empty}
                 </td>
               </tr>
             )}
-            {rows.map((t) => {
-              const market = marketPrice(t, state);
-              const live = markPnl(t, market);
-              const pnl = t.exit_price == null ? live?.pnl ?? null : t.gross_pnl;
-              return (
-              <tr key={t.id} className="border-b border-white/5 text-slate-200">
-                <td className="px-3 py-2 font-mono text-slate-500">{t.id}</td>
-                <td className="px-3 py-2">
-                  <div className="font-medium text-slate-100">{t.symbol}</div>
-                  <div className={clsx("font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-                    {pnl == null ? "P&L —" : inr(pnl)}
-                  </div>
-                </td>
-                <td className="px-3 py-2">
-                  <span
-                    className={clsx(
-                      "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                      t.direction === "LONG" ? "bg-[#10B981]/15 text-[#10B981]" : "bg-[#F43F5E]/15 text-[#F43F5E]"
-                    )}
-                  >
-                    {t.direction}
-                  </span>
-                </td>
-                <td className="px-3 py-2 font-mono">
-                  {px(t.entry_price)}
-                  <div className="text-slate-500">{t.entry_time ? `${istTime(t.entry_time)} IST` : "—"}</div>
-                </td>
-                <td className="px-3 py-2 font-mono">
-                  {market == null ? "—" : px(market)}
-                  <div className="text-slate-500">{t.exit_price == null ? "live" : "exit"}</div>
-                </td>
-                <td className={clsx("px-3 py-2 font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-                  {pnl == null ? "—" : inr(pnl)}
-                  {live && (
-                    <div className="text-slate-500">
-                      {live.points >= 0 ? "+" : ""}
-                      {live.points.toFixed(2)} pts
-                    </div>
-                  )}
-                </td>
-                <td className="px-3 py-2 font-mono">{px(t.atr_at_entry)}</td>
-                <td className="px-3 py-2 font-mono">{px(t.sl_trigger_price)}</td>
-                <td className="px-3 py-2 font-mono">
-                  {t.exit_time ? `${istTime(t.exit_time)} IST` : "—"}
-                  <div className="text-slate-400">{t.exit_price == null ? "open" : px(t.exit_price)}</div>
-                </td>
-                <td className="px-3 py-2">
-                  {t.exit_reason ? (
-                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-300">
-                      {REASON[t.exit_reason] ?? t.exit_reason}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-3 py-2 font-mono text-[#F59E0B]">
-                  {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
-                </td>
-                <td className={clsx("px-3 py-2 font-mono", (t.net_pnl ?? 0) >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-                  {t.net_pnl == null ? "—" : inr(t.net_pnl)}
-                </td>
-              </tr>
-              );
-            })}
+            {rows.map((trade) => (
+              <OrderRow key={trade.id} trade={trade} state={state} />
+            ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
+  );
+}
+
+function OrderRow({ trade: t, state }: { trade: TradeRow; state: SmaState | null }) {
+  const market = marketPrice(t, state);
+  const live = markPnl(t, market);
+  const pnl = t.exit_price == null ? live?.pnl ?? null : t.gross_pnl;
+  return (
+    <tr className="border-b border-white/5 text-slate-200">
+      <td className="px-3 py-2 font-mono text-slate-500">{t.id}</td>
+      <td className="px-3 py-2">
+        <div className="font-medium text-slate-100">{t.symbol}</div>
+        <div className={clsx("font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
+          {pnl == null ? "P&L —" : inr(pnl)}
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        <span
+          className={clsx(
+            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            t.direction === "LONG" ? "bg-[#10B981]/15 text-[#10B981]" : "bg-[#F43F5E]/15 text-[#F43F5E]"
+          )}
+        >
+          {t.direction}
+        </span>
+      </td>
+      <td className="px-3 py-2 font-mono">
+        {px(t.entry_price)}
+        <div className="text-slate-500">{t.entry_time ? `${istDateTime(t.entry_time)} IST` : "—"}</div>
+      </td>
+      <td className="px-3 py-2 font-mono">
+        {market == null ? "—" : px(market)}
+        <div className="text-slate-500">{t.exit_price == null ? "live" : "exit"}</div>
+      </td>
+      <td className={clsx("px-3 py-2 font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
+        {pnl == null ? "—" : inr(pnl)}
+        {live && (
+          <div className="text-slate-500">
+            {live.points >= 0 ? "+" : ""}
+            {live.points.toFixed(2)} pts
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2 font-mono">{px(t.atr_at_entry)}</td>
+      <td className="px-3 py-2 font-mono">{px(t.sl_trigger_price)}</td>
+      <td className="px-3 py-2 font-mono">
+        {t.exit_time ? `${istDateTime(t.exit_time)} IST` : "—"}
+        <div className="text-slate-400">{t.exit_price == null ? "open" : px(t.exit_price)}</div>
+      </td>
+      <td className="px-3 py-2">
+        {t.exit_reason ? (
+          <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-300">
+            {REASON[t.exit_reason] ?? t.exit_reason}
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
+      <td className="px-3 py-2 font-mono text-[#F59E0B]">
+        {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
+      </td>
+      <td className={clsx("px-3 py-2 font-mono", (t.net_pnl ?? 0) >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
+        {t.net_pnl == null ? "—" : inr(t.net_pnl)}
+      </td>
+    </tr>
   );
 }
 
