@@ -35,6 +35,7 @@ _QUOTE_RETRY_SEC = 20.0
 _SDK_TIMEOUT_SEC = 6
 _DESK_TOKEN_TTL_SEC = 30.0
 _desk_token_cache: tuple[float, str] | None = None
+_sma_broker: "GrowwClient | None" = None
 
 # Statuses that mean "do not place another order yet".
 IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
@@ -42,6 +43,37 @@ TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 # Groww's own word for a filled order is EXECUTED. Missing it left a long
 # on the terminal after the exchange stop had already sold the shares.
 TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED", "EXECUTED", "DELIVERY_AWAITED"})
+
+
+def _env_access_token() -> str:
+    return (get_settings().groww_access_token or "").strip()
+
+
+def preferred_quote_token() -> str:
+    """Desk login first. The Fly secret is only a fallback.
+
+    Connect Live Data writes a fresh access token. A copy stored as
+    GROWW_ACCESS_TOKEN goes stale and was being sent instead, so Groww
+    answered 401 while Settings still showed the session as active.
+    """
+    desk = desk_session_token().strip()
+    return desk or _env_access_token()
+
+
+def note_fresh_desk_token() -> None:
+    """Settings just saved a new access token. Quotes must use it now."""
+    global _desk_token_cache
+    _desk_token_cache = None
+    if _sma_broker is not None:
+        _sma_broker._rejected.clear()
+        _sma_broker.adopt_saved_session(force=True)
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    if type(exc).__name__ == "GrowwAPIAuthenticationException":
+        return True
+    text = str(exc).lower()
+    return "authentication failed" in text or "token has either expired" in text
 
 
 def desk_session_token() -> str:
@@ -230,8 +262,11 @@ class CandleSimulator:
 
 class GrowwClient:
     def __init__(self, mode: str = "PAPER", token: str = ""):
+        global _sma_broker
         self.mode = "LIVE" if (mode or "").upper() == "LIVE" else "PAPER"
-        self.token = token or get_settings().groww_access_token or desk_session_token()
+        self.token = (token or "").strip()
+        self._rejected: set[str] = set()
+        self._using_saved = False
         self.simulator = CandleSimulator()
         self.data_source = "SIMULATOR"
         self.last_error = ""
@@ -244,6 +279,8 @@ class GrowwClient:
         self._retry_after: dict[str, float] = {}
         self._simulators: dict[str, CandleSimulator] = {}
         self._sim_symbol = ""
+        _sma_broker = self
+        self.adopt_saved_session()
 
     def set_mode(self, mode: str, token: str | None = None) -> None:
         self.mode = "LIVE" if mode.upper() == "LIVE" else "PAPER"
@@ -251,12 +288,47 @@ class GrowwClient:
         if token and token != self.token:
             self._sdk = None
             self.token = token
+            self._using_saved = False
+        self.adopt_saved_session()
+
+    def adopt_saved_session(self, *, force: bool = False) -> None:
+        """Follow the desk access token whenever this client is not pinned.
+
+        A token passed in by a test stays put. The Fly secret does not: it
+        loses to the session Settings saved.
+        """
+        desk = desk_session_token().strip()
+        env = _env_access_token()
+        chosen = ""
+        for candidate in (desk, env):
+            if candidate and candidate not in self._rejected:
+                chosen = candidate
+                break
+        if not chosen:
+            return
+        follows_saved = force or self._using_saved or not self.token or self.token == env
+        if not follows_saved:
+            return
+        if chosen != self.token:
+            self._sdk = None
+            self.token = chosen
+        self._using_saved = True
+
+    def _recover_from_auth_failure(self) -> bool:
+        if self.token:
+            self._rejected.add(self.token)
+        self.token = ""
+        self._sdk = None
+        self._using_saved = True
+        self.adopt_saved_session(force=True)
+        return bool(self.token)
 
     def _next_id(self, prefix: str) -> str:
         self._seq += 1
         return f"{prefix}-{self._seq:06d}"
 
     def _require_sdk(self):
+        self.adopt_saved_session()
         if self._sdk is not None:
             return self._sdk
         if not self.token:
@@ -307,9 +379,7 @@ class GrowwClient:
                 now_m = time.monotonic()
                 if now_m >= self._retry_after.get(symbol, 0.0):
                     try:
-                        ltp, frame = await asyncio.wait_for(
-                            self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC
-                        )
+                        ltp, frame = await self._fetch_live(symbol)
                     except Exception as exc:  # noqa: BLE001
                         self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
                         if symbol not in self._quotes:
@@ -329,9 +399,7 @@ class GrowwClient:
         if self.token:
             if now_m >= self._retry_after.get(symbol, 0.0):
                 try:
-                    ltp, frame = await asyncio.wait_for(
-                        self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC
-                    )
+                    ltp, frame = await self._fetch_live(symbol)
                 except Exception as exc:  # noqa: BLE001
                     self._retry_after[symbol] = now_m + _QUOTE_RETRY_SEC
                     # A late download can still fill the cache after the wait.
@@ -354,12 +422,15 @@ class GrowwClient:
         return self._simulator_quote(symbol)
 
     def _ensure_quote_token(self) -> None:
-        if self.token:
-            return
-        loaded = desk_session_token()
-        if loaded:
-            self.token = loaded
-            self._sdk = None
+        self.adopt_saved_session()
+
+    async def _fetch_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
+        try:
+            return await asyncio.wait_for(self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC)
+        except Exception as exc:
+            if not _is_auth_error(exc) or not self._recover_from_auth_failure():
+                raise
+            return await asyncio.wait_for(self._refresh_live(symbol), timeout=_QUOTE_TIMEOUT_SEC)
 
     async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
         # The Groww SDK blocks with no HTTP timeout. Keep that off the event

@@ -19,8 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from config import get_settings
-from groww_client import desk_session_token
+from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
 from strategy_engine import (
@@ -47,7 +46,8 @@ def boot_engine() -> asyncio.Task | None:
     init_db()
     cfg = engine.load_config()
     engine.restore_open_books()
-    engine.broker.set_mode(cfg.trading_mode, get_settings().groww_access_token)
+    engine.broker.set_mode(cfg.trading_mode)
+    engine.broker.adopt_saved_session(force=True)
     _task = asyncio.create_task(engine.run())
     return _task
 
@@ -226,8 +226,8 @@ def _validate_hhmm(value: str) -> None:
 
 
 def _live_token() -> str:
-    """Env token, or the Groww session the desk already saved."""
-    return (get_settings().groww_access_token or desk_session_token() or "").strip()
+    """Desk login when Settings has one, otherwise the Fly secret."""
+    return preferred_quote_token()
 
 
 @app.post("/api/mode")

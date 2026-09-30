@@ -712,7 +712,7 @@ def test_empty_env_token_uses_the_saved_desk_session(monkeypatch):
     client = GrowwClient(mode="LIVE", token="unused")
     client.token = ""
     client.set_mode("LIVE", "")
-    assert client.token == ""
+    assert client.token == "desk-token"
     frame = pd.DataFrame(
         [{"ts": 1, "open": 1160.0, "high": 1166.0, "low": 1158.0, "close": 1159.45, "volume": 1}]
     )
@@ -1037,7 +1037,7 @@ def test_boots_in_paper_and_live_needs_confirmation(api, monkeypatch):
     assert state.json()["mode"] == "PAPER"
     refused = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": False})
     assert refused.status_code == 400
-    monkeypatch.setattr("main.desk_session_token", lambda: "")
+    monkeypatch.setattr("main.preferred_quote_token", lambda: "")
     no_token = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True})
     assert no_token.status_code == 503
     assert api.get("/api/config").json()["trading_mode"] == "PAPER"
@@ -1046,7 +1046,8 @@ def test_boots_in_paper_and_live_needs_confirmation(api, monkeypatch):
 def test_a_practice_halt_does_not_block_live_confirm(api, monkeypatch):
     from main import engine
 
-    monkeypatch.setattr("main.desk_session_token", lambda: "desk-token")
+    monkeypatch.setattr("main.preferred_quote_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
     engine.positions.clear()
     engine.status = "HALTED"
     engine.halt_reason = "max_trades_per_day (15) reached"
@@ -1064,7 +1065,8 @@ def test_a_live_halt_still_blocks_another_confirm(api, monkeypatch):
     from models import BotConfig
     from main import engine
 
-    monkeypatch.setattr("main.desk_session_token", lambda: "desk-token")
+    monkeypatch.setattr("main.preferred_quote_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
     engine.positions.clear()
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
@@ -1075,3 +1077,57 @@ def test_a_live_halt_still_blocks_another_confirm(api, monkeypatch):
     blocked = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True})
     assert blocked.status_code == 423
     assert engine.status == "HALTED"
+
+
+def test_desk_session_is_used_ahead_of_the_fly_secret(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client._env_access_token", lambda: "stale-env")
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: True)
+    client = GrowwClient(mode="LIVE", token="stale-env")
+    assert client.token == "desk-token"
+    frame = pd.DataFrame(
+        [{"ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "volume": 1}]
+    )
+
+    async def fake(symbol):
+        assert client.token == "desk-token"
+        return 10.0, frame
+
+    client._refresh_live = fake  # type: ignore[method-assign]
+    ltp, _, source = asyncio.run(client.refresh("RELIANCE"))
+    assert ltp == 10.0
+    assert source == "GROWW"
+
+
+def test_auth_failure_retries_with_the_desk_session(monkeypatch):
+    import asyncio
+
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client._env_access_token", lambda: "stale-env")
+    monkeypatch.setattr("groww_client.market_is_open", lambda now=None: True)
+    client = GrowwClient(mode="LIVE", token="bad-explicit")
+    client.token = "bad-explicit"
+    client._using_saved = False
+    frame = pd.DataFrame(
+        [{"ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0, "volume": 1}]
+    )
+    seen: list[str] = []
+
+    async def fake(_symbol):
+        seen.append(client.token)
+        if client.token != "desk-token":
+            raise RuntimeError("Authentication failed. Your API token has either expired or is invalid.")
+        return 10.0, frame
+
+    client._refresh_live = fake  # type: ignore[method-assign]
+    ltp, _, source = asyncio.run(client.refresh("RELIANCE"))
+    assert seen == ["bad-explicit", "desk-token"]
+    assert ltp == 10.0
+    assert source == "GROWW"
+    assert client.token == "desk-token"

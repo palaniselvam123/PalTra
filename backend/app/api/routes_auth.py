@@ -122,6 +122,12 @@ async def login(broker: str, session: AsyncSession = Depends(get_session)):
     row.token_expires_at = dt.datetime.combine(dt.date.today(), dt.time(23, 59))
     await session.commit()
     _active_clients[broker] = client
+    try:
+        from groww_client import note_fresh_desk_token
+
+        note_fresh_desk_token()
+    except Exception:
+        pass
     return {"ok": True, "token_expires_at": row.token_expires_at}
 
 
