@@ -404,8 +404,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                 <h2 className="text-base font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
                   Orders will be sent to Groww as NSE MIS limit orders with a 0.20% protection buffer,
-                  plus an exchange stop-loss. This needs <span className="text-slate-200">GROWW_ACCESS_TOKEN</span> in
-                  the backend environment. Paper mode stays the default until you confirm.
+                  plus an exchange stop-loss. This uses the Groww login already saved on the desk.
+                  Paper mode stays the default until you confirm.
                 </p>
               </div>
             </div>

@@ -1031,12 +1031,47 @@ def test_ltp_payload_accepts_a_single_unnamed_price():
     assert _parse_ltp({"payload": {"instrument": {"last_price": 1188.7}}}, "RELIANCE") == 1188.7
 
 
-def test_boots_in_paper_and_live_needs_confirmation(api):
+def test_boots_in_paper_and_live_needs_confirmation(api, monkeypatch):
     state = api.get("/api/state")
     assert state.status_code == 200
     assert state.json()["mode"] == "PAPER"
     refused = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": False})
     assert refused.status_code == 400
+    monkeypatch.setattr("main.desk_session_token", lambda: "")
     no_token = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True})
     assert no_token.status_code == 503
     assert api.get("/api/config").json()["trading_mode"] == "PAPER"
+
+
+def test_a_practice_halt_does_not_block_live_confirm(api, monkeypatch):
+    from main import engine
+
+    monkeypatch.setattr("main.desk_session_token", lambda: "desk-token")
+    engine.positions.clear()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_trades_per_day (15) reached"
+    engine.trades_today = 15
+    switched = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True})
+    assert switched.status_code == 200
+    assert switched.json()["trading_mode"] == "LIVE"
+    assert engine.status == "STOPPED"
+    assert engine.trades_today == 0
+    assert engine.halt_reason == ""
+
+
+def test_a_live_halt_still_blocks_another_confirm(api, monkeypatch):
+    from database import session_factory
+    from models import BotConfig
+    from main import engine
+
+    monkeypatch.setattr("main.desk_session_token", lambda: "desk-token")
+    engine.positions.clear()
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.trading_mode = "LIVE"
+        db.commit()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_daily_loss breached"
+    blocked = api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True})
+    assert blocked.status_code == 423
+    assert engine.status == "HALTED"

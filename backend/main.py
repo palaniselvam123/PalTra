@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import get_settings
+from groww_client import desk_session_token
 from database import init_db, session_factory
 from models import BotConfig
 from strategy_engine import (
@@ -224,38 +225,51 @@ def _validate_hhmm(value: str) -> None:
         raise HTTPException(400, "square_off_time must be HH:MM")
 
 
+def _live_token() -> str:
+    """Env token, or the Groww session the desk already saved."""
+    return (get_settings().groww_access_token or desk_session_token() or "").strip()
+
+
 @app.post("/api/mode")
 async def set_mode(body: ModeUpdate):
     """PAPER is the default. LIVE requires confirm_live and a Groww token."""
+    from strategy_engine import _ist_now
+
+    engine._roll_session(_ist_now())
     mode = body.mode.upper()
     if mode not in ("PAPER", "LIVE"):
         raise HTTPException(400, "mode must be PAPER or LIVE")
-    if engine.status == "HALTED":
-        raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
     if mode == "LIVE":
         if not body.confirm_live:
             raise HTTPException(
                 400,
                 "LIVE REAL MONEY requires explicit confirmation (confirm_live=true).",
             )
-        token = get_settings().groww_access_token
+        token = _live_token()
         if not token:
             raise HTTPException(
                 503,
-                "GROWW_ACCESS_TOKEN is not set. Refusing to enable LIVE.",
+                "No Groww session is saved. Connect Groww on the desk, then confirm LIVE again.",
             )
+        # Overnight practice can halt itself. That must not block this confirm.
+        engine.release_paper_halt()
+    if engine.status == "HALTED":
+        raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
     if _open_symbols():
         raise HTTPException(409, "Close the open position before switching execution mode")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
         row.trading_mode = mode
         db.commit()
-    engine.broker.set_mode(mode, get_settings().groww_access_token)
+    engine.broker.set_mode(mode, _live_token())
     return {"trading_mode": mode}
 
 
 @app.post("/api/bot/start")
 async def start_bot():
+    from strategy_engine import _ist_now
+
+    engine._roll_session(_ist_now())
     if engine.status == "HALTED":
         raise HTTPException(423, engine.halt_reason or "Halted for the day")
     if engine.status == "DAY_COMPLETED":

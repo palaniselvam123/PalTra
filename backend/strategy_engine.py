@@ -281,7 +281,7 @@ class StrategyEngine:
             return
 
         if self._loss_breached(cfg):
-            await self.kill(f"max_daily_loss ₹{cfg.max_daily_loss:.0f} breached")
+            await self._stop_for_loss(cfg)
             return
 
         for symbol in list(self.positions):
@@ -420,8 +420,7 @@ class StrategyEngine:
             if adx_blocks_entry:
                 return f"closed on {signal} — ADX filter blocked the reverse"
             if self.trades_today >= int(cfg.max_trades_per_day):
-                self.status = "HALTED"
-                self.halt_reason = f"max_trades_per_day ({cfg.max_trades_per_day}) reached"
+                self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
             await self._open(want, cross_price, atr, cfg, now)
             return f"reversed to {want}"
@@ -430,8 +429,7 @@ class StrategyEngine:
         if adx_blocks_entry:
             return f"{signal} ignored — ADX below {cfg.adx_threshold}"
         if self.trades_today >= int(cfg.max_trades_per_day):
-            self.status = "HALTED"
-            self.halt_reason = f"max_trades_per_day ({cfg.max_trades_per_day}) reached"
+            self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
         await self._open(want, cross_price, atr, cfg, now)
         return f"opened {want}"
@@ -708,7 +706,7 @@ class StrategyEngine:
             finally:
                 self.inflight = None
         if self._loss_breached(cfg):
-            await self.kill(f"max_daily_loss ₹{cfg.max_daily_loss:.0f} breached")
+            await self._stop_for_loss(cfg)
 
     async def _square_off(self, reason: str) -> None:
         async with self.lock:
@@ -942,6 +940,49 @@ class StrategyEngine:
             return
         if minutes is None or minutes > _WARN_CLEAR_MINUTES:
             self._warned.discard(key)
+
+    async def _stop_for_loss(self, cfg: BotConfig) -> None:
+        reason = f"max_daily_loss ₹{cfg.max_daily_loss:.0f} breached"
+        if self._practice_off_session(cfg):
+            await self._square_off("MAX_DAILY_LOSS")
+            self.status = "STOPPED"
+            self.halt_reason = ""
+            self.last_signal = reason
+            return
+        await self.kill(reason)
+
+    def _practice_off_session(self, cfg: BotConfig | None = None) -> bool:
+        """Paper tape outside the cash session. It must not lock the live morning."""
+        if cfg is None:
+            cfg = self._cfg_cache
+        mode = (cfg.trading_mode if cfg is not None else "PAPER") or "PAPER"
+        return mode.upper() != "LIVE" and not market_is_open()
+
+    def _cap_the_day(self, reason: str) -> None:
+        if self._practice_off_session():
+            self.status = "STOPPED"
+            self.halt_reason = ""
+            self.last_signal = reason
+            return
+        self.status = "HALTED"
+        self.halt_reason = reason
+
+    def release_paper_halt(self) -> bool:
+        """Drop a practice halt so confirming live is not blocked by the simulator."""
+        if self.status not in ("HALTED", "DAY_COMPLETED"):
+            return False
+        cfg = self._cfg_cache
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        mode = (cfg.trading_mode if cfg is not None else "PAPER") or "PAPER"
+        if mode.upper() == "LIVE":
+            return False
+        self.status = "STOPPED"
+        self.halt_reason = ""
+        self.trades_today = 0
+        return True
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
         if not market_is_open(now) and self.data_source != "GROWW":
