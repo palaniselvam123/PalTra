@@ -269,6 +269,12 @@ async def lifespan(app: FastAPI):
     if scanner_worker.running:
         await scanner_worker.stop()
     try:
+        from sma_terminal_main import engine as sma_engine
+
+        await sma_engine.announce_shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         from app.sma_host import stop_terminal
 
         stop_terminal()

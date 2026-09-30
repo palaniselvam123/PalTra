@@ -323,6 +323,7 @@ class StrategyEngine:
             await self._square_off("EOD_SQUARE_OFF")
             self.status = "DAY_COMPLETED"
             self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
+            self._announce_down("DAY_COMPLETED", self.halt_reason)
             return
 
         # A real last-close tape must not open a position after the bell.
@@ -746,6 +747,7 @@ class StrategyEngine:
         self.halt_reason = reason
         self.status = "HALTED"
         await self._square_off("KILL_SWITCH")
+        self._announce_down("HALTED", reason)
 
     async def _close_position(
         self,
@@ -1068,6 +1070,7 @@ class StrategyEngine:
             self.status = "STOPPED"
             self.halt_reason = ""
             self.last_signal = reason
+            self._announce_down("STOPPED", reason)
             return
         await self.kill(reason)
 
@@ -1086,6 +1089,25 @@ class StrategyEngine:
             return
         self.status = "HALTED"
         self.halt_reason = reason
+        self._announce_down("HALTED", reason)
+
+    def _announce_down(self, status: str, reason: str) -> None:
+        _schedule_whatsapp(bot_down_alert(status, reason, _ist_now()))
+
+    async def announce_shutdown(self) -> None:
+        """Tell Telegram before the process exits. A kill signal must not stay silent."""
+        if self.status not in ("RUNNING", "PAUSED") and not self.positions:
+            return
+        reason = "The app process is stopping. Press Start bot after it comes back."
+        if self.halt_reason:
+            reason = f"{self.halt_reason}. {reason}"
+        message = bot_down_alert(self.status, reason, _ist_now())
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await asyncio.wait_for(alert_notifier.send(message), timeout=5)
+        except Exception:  # noqa: BLE001
+            return
 
     def release_manual_panic(self) -> bool:
         """A panic flattens the book. Pressing Start again may trade the same day.
@@ -1353,6 +1375,12 @@ _ALERT_REASON = {
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
 }
+
+
+def bot_down_alert(status: str, reason: str, when: dt.datetime) -> str:
+    clock = when.strftime("%d %b %H:%M:%S")
+    why = (reason or "no reason recorded").strip()
+    return f"PalTra bot {status}\n{why}\n{clock} IST"
 
 
 def fill_alert(

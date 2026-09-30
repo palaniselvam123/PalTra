@@ -33,6 +33,11 @@ _QUOTE_TTL_CLOSED_SEC = 60.0
 _QUOTE_TIMEOUT_SEC = 8.0
 _QUOTE_RETRY_SEC = 20.0
 _SDK_TIMEOUT_SEC = 6
+# A full candle download on every price check was holding the bot for seconds
+# and letting the displayed price drift from Groww. History is refreshed once
+# a minute. The last trade is fetched on the normal quote interval.
+_CANDLE_REFRESH_SEC = 55.0
+_CANDLE_MIN_BARS = 30
 _DESK_TOKEN_TTL_SEC = 30.0
 _desk_token_cache: tuple[float, str] | None = None
 _sma_broker: "GrowwClient | None" = None
@@ -276,6 +281,8 @@ class GrowwClient:
         self._sdk = None
         self._positions: list[dict] = []
         self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
+        self._candle_frames: dict[str, pd.DataFrame] = {}
+        self._candle_at: dict[str, float] = {}
         self._retry_after: dict[str, float] = {}
         self._simulators: dict[str, CandleSimulator] = {}
         self._sim_symbol = ""
@@ -447,6 +454,16 @@ class GrowwClient:
         # Publish the last trade before the slower candle download. A caller
         # that stops waiting still has a real price instead of the practice tape.
         self._quotes[symbol] = (float(ltp), _one_bar(ltp), time.monotonic())
+        held = self._candle_frames.get(symbol)
+        if (
+            held is not None
+            and len(held) >= _CANDLE_MIN_BARS
+            and time.monotonic() - self._candle_at.get(symbol, 0.0) < _CANDLE_REFRESH_SEC
+        ):
+            frame = _apply_ltp(held, ltp)
+            self._candle_frames[symbol] = frame
+            self._quotes[symbol] = (float(ltp), frame, time.monotonic())
+            return float(ltp), frame
         end = dt.datetime.now(IST).replace(tzinfo=None)
         start = end - dt.timedelta(days=5)
         frame = pd.DataFrame()
@@ -465,33 +482,10 @@ class GrowwClient:
             frame = pd.DataFrame()
         if frame.empty:
             frame = _one_bar(ltp, _session_ohlc(sdk, symbol))
-        # Append a forming bar at the live LTP so iloc[-1] is never a closed bar
-        # the strategy might mistake for a signal.
-        last_ts = int(frame.iloc[-1]["ts"])
-        now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
-        if now_ts > last_ts:
-            frame = pd.concat(
-                [
-                    frame,
-                    pd.DataFrame(
-                        [
-                            {
-                                "ts": now_ts,
-                                "open": ltp,
-                                "high": ltp,
-                                "low": ltp,
-                                "close": ltp,
-                                "volume": 0,
-                            }
-                        ]
-                    ),
-                ],
-                ignore_index=True,
-            )
-        else:
-            frame.loc[frame.index[-1], "close"] = ltp
-            frame.loc[frame.index[-1], "high"] = max(float(frame.iloc[-1]["high"]), ltp)
-            frame.loc[frame.index[-1], "low"] = min(float(frame.iloc[-1]["low"]), ltp)
+        frame = _apply_ltp(frame, ltp)
+        if len(frame) >= _CANDLE_MIN_BARS:
+            self._candle_frames[symbol] = frame
+            self._candle_at[symbol] = time.monotonic()
         self._quotes[symbol] = (float(ltp), frame, time.monotonic())
         return float(ltp), frame
 
@@ -751,6 +745,38 @@ def _bar_price(ohlc: dict, name: str, fallback: float) -> float:
     if not math.isfinite(value) or value <= 0:
         return fallback
     return value
+
+
+def _apply_ltp(frame: pd.DataFrame, ltp: float) -> pd.DataFrame:
+    """Keep the forming bar on the live last trade. Closed bars stay put."""
+    if frame is None or getattr(frame, "empty", True):
+        return _one_bar(ltp)
+    frame = frame.copy()
+    last_ts = int(frame.iloc[-1]["ts"])
+    now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
+    if now_ts > last_ts:
+        return pd.concat(
+            [
+                frame,
+                pd.DataFrame(
+                    [
+                        {
+                            "ts": now_ts,
+                            "open": ltp,
+                            "high": ltp,
+                            "low": ltp,
+                            "close": ltp,
+                            "volume": 0,
+                        }
+                    ]
+                ),
+            ],
+            ignore_index=True,
+        )
+    frame.loc[frame.index[-1], "close"] = ltp
+    frame.loc[frame.index[-1], "high"] = max(float(frame.iloc[-1]["high"]), ltp)
+    frame.loc[frame.index[-1], "low"] = min(float(frame.iloc[-1]["low"]), ltp)
+    return frame
 
 
 def _one_bar(ltp: float, ohlc: dict | None = None) -> pd.DataFrame:

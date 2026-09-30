@@ -203,6 +203,43 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
 
 
 @pytest.mark.asyncio
+async def test_a_halt_and_the_square_off_tell_telegram(engine, monkeypatch):
+    notes: list[str] = []
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    await engine.kill("Manual PANIC SQUARE-OFF")
+    assert any(note.startswith("PalTra bot HALTED") and "Manual PANIC SQUARE-OFF" in note for note in notes)
+
+    notes.clear()
+    engine.status = "RUNNING"
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.square_off_time = "15:15"
+    await engine.on_minute(dt.datetime(2026, 9, 30, 15, 16, tzinfo=IST), cfg, _gap_frame([1.0, 1.0, 1.0]))
+    assert engine.status == "DAY_COMPLETED"
+    assert any("PalTra bot DAY_COMPLETED" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeypatch):
+    sent: list[str] = []
+
+    class Notifier:
+        async def send(self, message: str):
+            sent.append(message)
+
+    monkeypatch.setattr("app.services.alert_notifier.alert_notifier", Notifier())
+    engine.status = "STOPPED"
+    await engine.announce_shutdown()
+    assert sent == []
+    engine.status = "RUNNING"
+    await engine.announce_shutdown()
+    assert sent and "process is stopping" in sent[0] and "RUNNING" in sent[0]
+
+
+@pytest.mark.asyncio
 async def test_a_bearish_heads_up_sells_before_the_cross(engine, monkeypatch):
     from models import TradeLog
     from strategy_engine import OpenPosition
@@ -911,6 +948,32 @@ def test_session_open_fills_the_day_change_when_candles_are_missing():
     assert ltp == 120.9
     assert float(frame.iloc[-1]["open"]) == 126.19
     assert float(frame.iloc[-1]["close"]) == 120.9
+
+
+def test_a_fresh_price_does_not_download_candles_again():
+    from groww_client import GrowwClient
+
+    calls = {"candles": 0}
+
+    class Sdk:
+        def get_ltp(self, **_kwargs):
+            return {"NSE_SUNTV": 610.0}
+
+        def get_historical_candle_data(self, **_kwargs):
+            calls["candles"] += 1
+            start = 1_700_000_000
+            candles = [
+                [start + i * 60, 600 + i * 0.01, 601, 599, 600.5, 100]
+                for i in range(40)
+            ]
+            return {"candles": candles}
+
+    client = GrowwClient(mode="LIVE", token="test-token")
+    client._sdk = Sdk()
+    client._load_quote("SUNTV")
+    client._load_quote("SUNTV")
+    assert calls["candles"] == 1
+    assert float(client._quotes["SUNTV"][0]) == 610.0
 
 
 def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):
