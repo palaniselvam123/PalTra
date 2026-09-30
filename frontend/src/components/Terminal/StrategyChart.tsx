@@ -195,17 +195,17 @@ export function StrategyChart({ chart }: Props) {
   const sma21 = hover ? hover.sma21 : latest.sma21;
 
   return (
-    <section className="rounded-xl border border-white/5 bg-[#151921]">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-xl border border-white/5 bg-[#151921]">
+      <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <h2 className="text-sm font-medium text-slate-200">1-minute · SMA 9 / SMA 21 · ATR 14</h2>
-        <div className="flex flex-wrap justify-end gap-3 font-mono text-[11px]">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px]">
           <span className="text-[#F43F5E]">SMA 9 {px(sma9)}</span>
           <span className="text-[#3B82F6]">SMA 21 {px(sma21)}</span>
           <span className="text-[#A78BFA]">ATR</span>
           <span className="text-[#F59E0B]">Stop</span>
         </div>
       </div>
-      <div ref={rootRef} className="h-[520px] w-full" />
+      <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
     </section>
   );
 }

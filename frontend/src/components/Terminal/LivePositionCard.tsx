@@ -13,7 +13,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
         Live position{state?.symbol ? ` · ${state.symbol}` : ""}
       </div>
-      <div className={clsx("mt-1 font-mono text-lg font-semibold", tone)}>
+      <div className={clsx("mt-1 font-mono text-base font-semibold leading-snug sm:text-lg", tone)}>
         {state == null
           ? pending
             ? "Position did not load"

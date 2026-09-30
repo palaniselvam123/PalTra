@@ -53,10 +53,10 @@ export function ChatWidget() {
       <button
         onClick={() => setOpen(true)}
         aria-label="Ask the bot about its trades"
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-bot text-slate-900 font-semibold text-sm shadow-lg shadow-bot/20 hover:brightness-110 transition"
+        className="fixed bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center gap-2 rounded-full bg-bot text-sm font-semibold text-slate-900 shadow-lg shadow-bot/20 transition hover:brightness-110 sm:h-auto sm:w-auto sm:px-4 sm:py-3"
       >
         <MessageSquare size={16} />
-        Ask the bot
+        <span className="hidden sm:inline">Ask the bot</span>
       </button>
     );
   }

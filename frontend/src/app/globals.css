@@ -179,6 +179,11 @@ select {
 [data-theme="light"] .text-amber-400 { color: #a16207; }
 [data-theme="light"] .text-violet-300 { color: #6d28d9; }
 
+/* A wide blotter or chip row must not stretch the phone wider than the screen. */
+.terminal-dark {
+  max-width: 100%;
+}
+
 /* The SMA terminal stays a dark surface when the rest of the desk is light.
    Light theme turns slate text near-black, which hides the numbers typed
    into these fields. */
@@ -254,6 +259,19 @@ select {
   background-image: none;
   border-bottom-color: rgb(var(--c-border));
   box-shadow: 0 1px 3px rgb(15 28 51 / 0.06);
+}
+
+/* The terminal header is a dark control bar. Light mode must not paint it white,
+   or the price and buttons wash out on a phone. */
+[data-theme="light"] .terminal-dark header.sticky {
+  background-color: #0b0e14;
+  background-image: none;
+  border-bottom-color: rgb(255 255 255 / 0.06);
+  box-shadow: none;
+}
+
+[data-theme="light"] .terminal-dark thead tr {
+  background-color: transparent;
 }
 
 /* Table header rows: a soft tint so the head separates from the body without

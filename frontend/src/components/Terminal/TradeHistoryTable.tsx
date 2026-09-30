@@ -45,7 +45,7 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
   return (
     <section
       className={clsx(
-        "rounded-xl border bg-[#151921]",
+        "min-w-0 max-w-full rounded-xl border bg-[#151921]",
         simulation ? "border-[#F59E0B]/40" : "border-[#F43F5E]/40"
       )}
     >
@@ -88,7 +88,7 @@ export function TradeHistoryTable({ trades, state }: { trades: TradeRow[]; state
         </div>
       </div>
       <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
-      <div className="overflow-x-auto">
+      <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[960px] text-left text-xs">
           <thead className="text-[10px] uppercase tracking-wider text-slate-500">
             <tr className="border-y border-white/5">
