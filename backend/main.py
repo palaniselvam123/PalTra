@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from candle_history import HistoryError, load_history
 from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
@@ -165,6 +166,15 @@ async def state():
 @app.get("/api/chart")
 async def chart():
     return engine.chart_payload()
+
+
+@app.get("/api/history")
+async def history(symbol: str, start: str, end: str):
+    """Past 1-minute candles from Groww for the chart's From/To view. Read-only."""
+    try:
+        return await load_history(engine.broker, symbol, start, end, engine.load_config())
+    except HistoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/config")

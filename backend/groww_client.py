@@ -920,7 +920,7 @@ _MAX_CANDLES = 2500
 _CANDLE_READ_CAP = 20000
 
 
-def _parse_candles(raw) -> pd.DataFrame:
+def _parse_candles(raw, limit: int | None = _MAX_CANDLES) -> pd.DataFrame:
     data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
     rows = data.get("candles", data.get("data", [])) if isinstance(data, dict) else data
     out = []
@@ -950,8 +950,8 @@ def _parse_candles(raw) -> pd.DataFrame:
     if not out:
         return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
     frame = pd.DataFrame(out).sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
-    if len(frame) > _MAX_CANDLES:
-        frame = frame.iloc[-_MAX_CANDLES:].reset_index(drop=True)
+    if limit is not None and len(frame) > limit:
+        frame = frame.iloc[-limit:].reset_index(drop=True)
     return frame
 
 
