@@ -5,13 +5,13 @@ import { AlertTriangle, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
+import { StockCard } from "./StockCard";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
 
 function chipNote(note: string, symbol: string): string {
-  const trimmed = note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
-  return trimmed.length > 88 ? `${trimmed.slice(0, 86)}…` : trimmed;
+  return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
 }
 const SAVED_KEY = "sma.symbols";
 
@@ -118,6 +118,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   const armed = new Set(armedList);
   const books = state?.books ?? [];
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
+  // Armed first, then the rest, each alphabetically. A held stock is never dropped.
   const symbols = Array.from(
     new Set([
       ...armedList,
@@ -125,7 +126,9 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       ...DEFAULTS,
       ...saved,
     ])
-  ).slice(0, 24);
+  )
+    .slice(0, 24)
+    .sort((a, b) => Number(armed.has(b)) - Number(armed.has(a)) || a.localeCompare(b));
 
   const applySymbol = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
@@ -286,15 +289,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold">
-                <span className="uppercase tracking-wider text-slate-500">Stocks</span>
-                <span className="text-[#FBBF24]">Name</span>
-                <span className="text-[#38BDF8]">Chart</span>
-                <span className="text-[#C4B5FD]">Trade</span>
-              </div>
-              <div className="text-[11px] text-slate-400">
-                <span className="font-semibold text-[#34D399]">{armedList.length}</span>
-                {` of ${ARM_LIMIT} armed · ${state?.trades_today ?? 0}/${state?.max_trades ?? 40} trades`}
+              <h2 className="text-sm font-semibold text-slate-100">Stocks</h2>
+              <div className="text-xs text-slate-400">
+                <span className="font-semibold text-emerald-300">{armedList.length}</span>
+                {` of ${ARM_LIMIT} armed for trading`}
               </div>
             </div>
             <div className="relative border-b border-white/5">
@@ -344,69 +342,31 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                 {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
               </p>
             )}
-            <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-b-xl bg-white/5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
+            <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
               {symbols.map((s) => {
-                const selected = Boolean(config?.symbol) && symbol === s;
-                const trading = armed.has(s);
                 const book = bookBySymbol.get(s);
-                const position =
-                  book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : null;
-                const note = chipNote(book?.note || "", s);
+                const side = book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : "FLAT";
+                const onChart = Boolean(config?.symbol) && symbol === s;
+                const ltpOf = book?.ltp != null && book.ltp > 0 ? book.ltp : onChart ? ltp : null;
                 return (
-                  <li key={s} className="flex min-w-0 flex-col gap-1 bg-[#151921] px-3 py-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-wide text-[#FBBF24]" title={s}>
-                        {s}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => applySymbol(s)}
-                        title="Show this stock on the chart. Open orders on other stocks stay put."
-                        className={clsx(
-                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
-                          selected
-                            ? "bg-[#0284C7] text-white"
-                            : "bg-[#38BDF8]/15 text-[#38BDF8] ring-1 ring-[#38BDF8]/50 hover:bg-[#38BDF8]/25"
-                        )}
-                      >
-                        {selected ? "On chart" : "Chart"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || (!trading && armedList.length >= ARM_LIMIT)}
-                        onClick={() => toggleTrade(s)}
-                        title={
-                          trading
-                            ? "The bot can order this stock from any chart. Press again to take it off."
-                            : armedList.length >= ARM_LIMIT
-                              ? `Trade is limited to ${ARM_LIMIT} stocks. Turn one off before adding another.`
-                              : "Add this stock so the bot can order it from any chart"
-                        }
-                        className={clsx(
-                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
-                          trading
-                            ? "bg-[#059669] text-white"
-                            : "bg-[#8B5CF6]/15 text-[#C4B5FD] ring-1 ring-[#A78BFA]/55 hover:bg-[#8B5CF6]/25"
-                        )}
-                      >
-                        {trading ? "Trading" : "Trade"}
-                      </button>
-                    </div>
-                    <div className="flex min-w-0 items-center gap-2 text-[10px] leading-tight">
-                      <span
-                        className={clsx(
-                          "shrink-0 font-semibold uppercase",
-                          position === "LONG" && "text-[#10B981]",
-                          position === "SHORT" && "text-[#F43F5E]",
-                          !position && "text-slate-500"
-                        )}
-                      >
-                        {position ? `${position}${book?.qty ? ` ${book.qty}` : ""}` : "Flat"}
-                      </span>
-                      {note ? <span className="min-w-0 truncate text-slate-500">{note}</span> : null}
-                    </div>
-                  </li>
+                  <StockCard
+                    key={s}
+                    busy={busy}
+                    armLimitReached={armedList.length >= ARM_LIMIT}
+                    onToggleArmed={() => toggleTrade(s)}
+                    onShowOnChart={() => applySymbol(s)}
+                    stock={{
+                      symbol: s,
+                      ltp: ltpOf,
+                      changePct: onChart ? changePct ?? null : null,
+                      side,
+                      qty: book?.qty ?? 0,
+                      note: chipNote(book?.note || "", s),
+                      stopOff: book?.stop_active === false,
+                      armed: armed.has(s),
+                      onChart,
+                    }}
+                  />
                 );
               })}
             </ul>
