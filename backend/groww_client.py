@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from config import get_settings
-from indicators import round_to_nse_tick
+from tick_sizes import round_price
 
 IST = ZoneInfo("Asia/Kolkata")
 # A closed session does not need a new candle download every second.
@@ -555,7 +555,7 @@ class GrowwClient:
         """side is BUY or SELL. PAPER fills at the candle close / LTP."""
         if self.mode == "PAPER":
             oid = self._next_id("PAPER")
-            px = round_to_nse_tick(ltp)
+            px = round_price(symbol, ltp)
             self._orders[oid] = _SimOrder(oid, side, qty, "ENTRY", "FILLED", px)
             self._apply_paper_position(symbol, side, qty, px)
             return OrderAck(oid, "FILLED", px)
@@ -564,14 +564,14 @@ class GrowwClient:
     async def place_exit(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:
         if self.mode == "PAPER":
             oid = self._next_id("PAPER")
-            px = round_to_nse_tick(ltp)
+            px = round_price(symbol, ltp)
             self._orders[oid] = _SimOrder(oid, side, qty, "EXIT", "FILLED", px)
             self._positions = [p for p in self._positions if p.get("symbol") != symbol]
             return OrderAck(oid, "FILLED", px)
         return await self._live_limit(symbol, side, qty, ltp, kind="EXIT")
 
     async def place_sl(self, symbol: str, side: str, qty: int, trigger: float) -> OrderAck:
-        trigger = round_to_nse_tick(trigger)
+        trigger = round_price(symbol, trigger)
         if self.mode == "PAPER":
             oid = self._next_id("PAPERSL")
             self._orders[oid] = _SimOrder(oid, side, qty, "SL", "TRIGGER_PENDING", trigger=trigger)
@@ -580,9 +580,9 @@ class GrowwClient:
         # without a naked market order.
         buffer = get_settings().market_protection_pct / 100.0
         if side == "SELL":
-            limit = round_to_nse_tick(trigger * (1 - buffer))
+            limit = round_price(symbol, trigger * (1 - buffer))
         else:
-            limit = round_to_nse_tick(trigger * (1 + buffer))
+            limit = round_price(symbol, trigger * (1 + buffer))
         return await self._live_order(
             symbol=symbol,
             side=side,
@@ -696,9 +696,9 @@ class GrowwClient:
     async def _live_limit(self, symbol: str, side: str, qty: int, ltp: float, kind: str) -> OrderAck:
         buffer = get_settings().market_protection_pct / 100.0
         if side == "BUY":
-            price = round_to_nse_tick(ltp * (1 + buffer))
+            price = round_price(symbol, ltp * (1 + buffer))
         else:
-            price = round_to_nse_tick(ltp * (1 - buffer))
+            price = round_price(symbol, ltp * (1 - buffer))
         if price <= 0 or not math.isfinite(price):
             raise RuntimeError("Refusing live order with a non-positive limit")
         return await self._live_order(symbol, side, qty, "LIMIT", price, None)

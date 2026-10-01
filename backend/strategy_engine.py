@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import os
 import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -35,10 +36,11 @@ from indicators import (
     enrich,
     entry_filter_reason,
     format_signal_report,
-    round_to_nse_tick,
     sma_gap_pct,
 )
 from models import BotConfig, TradeLog
+import tick_sizes
+from tick_sizes import round_price
 
 logger = logging.getLogger("sma.strategy")
 
@@ -172,6 +174,8 @@ class StrategyEngine:
         self._session_date = _ist_now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
+        self._ticks_retry_at = 0.0
+        self._ticks_job = None
 
     def _position_key(self) -> str:
         if self._focus:
@@ -267,6 +271,7 @@ class StrategyEngine:
     async def run(self) -> None:
         """1-second loop. Candle logic fires once at second == 1 of each minute."""
         while not self._stop:
+            self._refresh_tick_sizes()
             try:
                 await self.tick(_ist_now())
             except asyncio.CancelledError:
@@ -277,6 +282,22 @@ class StrategyEngine:
             # That loop was keeping the only CPU busy while the desk waited.
             pause = 5.0 if (not market_is_open() and self.status != "RUNNING") else 0.5
             await self._sleep(pause)
+
+    def _refresh_tick_sizes(self) -> None:
+        """Load Groww's per-stock tick sizes in a worker thread, once a day.
+
+        The download is large, so the 1-second loop never waits on it. Until
+        it lands, prices round to the safe NSE price-band step.
+        """
+        if os.environ.get("SMA_TICK_SIZES", "").lower() == "off":
+            return
+        if self._ticks_job is not None and not self._ticks_job.done():
+            return
+        now_m = time.monotonic()
+        if not tick_sizes.is_stale() or now_m < self._ticks_retry_at:
+            return
+        self._ticks_retry_at = now_m + 600
+        self._ticks_job = asyncio.get_running_loop().run_in_executor(None, tick_sizes.load_from_groww)
 
     async def tick(self, now: dt.datetime) -> None:
         cfg = self.load_config()
@@ -485,7 +506,7 @@ class StrategyEngine:
                 self._signals[self._focus] = text
             self._log_decision(signal, frame, cfg, now, text)
             return text
-        cross_price = round_to_nse_tick(float(curr["close"]))
+        cross_price = round_price(cfg.symbol, float(curr["close"]))
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
         entry_block = _entry_block(frame, "LONG" if signal == "BULLISH" else "SHORT", cfg)
@@ -833,8 +854,8 @@ class StrategyEngine:
             ack = await self._require_live_fill(ack, cfg)
         elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE"):
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
-        fill = round_to_nse_tick(ack.fill_price or cross_price)
-        sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier))
+        fill = round_price(cfg.symbol, ack.fill_price or cross_price)
+        sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         if bool(getattr(cfg, "use_stop", True)):
@@ -875,10 +896,11 @@ class StrategyEngine:
             mode=cfg.trading_mode,
         )
 
-    def _sl_price(self, direction: str, entry: float, atr: float, mult: float) -> float:
+    def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
+        symbol = symbol or self._focus
         if direction == "LONG":
-            return round_to_nse_tick(entry - mult * atr)
-        return round_to_nse_tick(entry + mult * atr)
+            return round_price(symbol, entry - mult * atr)
+        return round_price(symbol, entry + mult * atr)
 
     async def _cancel_sl_verified(self, pos: OpenPosition) -> None:
         """Orphan-SL prevention: cancel, then confirm it is not still working."""
@@ -1060,7 +1082,7 @@ class StrategyEngine:
         cfg: BotConfig,
     ) -> None:
         exit_side = "SELL" if pos.direction == "LONG" else "BUY"
-        px = round_to_nse_tick(float(exit_price))
+        px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
         send_exit = not (live and reason == "ATR_SL_HIT")
@@ -1091,11 +1113,11 @@ class StrategyEngine:
                     raise
                 ack = None
             if ack is not None and ack.fill_price:
-                px = round_to_nse_tick(ack.fill_price)
+                px = round_price(cfg.symbol, ack.fill_price)
         elif send_exit:
             ack = await self.broker.place_exit(cfg.symbol, exit_side, pos.qty, px)
             if ack.fill_price:
-                px = round_to_nse_tick(ack.fill_price)
+                px = round_price(cfg.symbol, ack.fill_price)
         buy, sell = legs_for(pos.direction, pos.entry_price, px)
         costs = calculate_charges(buy, sell, pos.qty)
         self.realized_net += costs["net_pnl"]
