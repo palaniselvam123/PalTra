@@ -75,7 +75,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="ATR SL ×" value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
         <Field label="ADX threshold" value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
         <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
-        <Field label="Max trades" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+        <Field label="Max trades / day" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
         <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
       </div>
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">

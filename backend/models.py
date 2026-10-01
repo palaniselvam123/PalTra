@@ -65,6 +65,9 @@ class BotConfig(Base):
     rsi_short_min: Mapped[float] = mapped_column(Float, default=30.0)
     rsi_short_max: Mapped[float] = mapped_column(Float, default=60.0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
-    max_trades_per_day: Mapped[int] = mapped_column(Integer, default=15)
+    max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
+    # 1 after the one-time raise from the old default of 15. A later edit to
+    # 15 is kept.
+    max_trades_bumped: Mapped[int] = mapped_column(Integer, default=1)
     square_off_time: Mapped[str] = mapped_column(String, default="15:15")
     trading_mode: Mapped[str] = mapped_column(String, default="PAPER")

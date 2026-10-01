@@ -6,6 +6,12 @@ import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
+const ARM_LIMIT = 12;
+
+function chipNote(note: string, symbol: string): string {
+  const trimmed = note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
+  return trimmed.length > 48 ? `${trimmed.slice(0, 46)}…` : trimmed;
+}
 const SAVED_KEY = "sma.symbols";
 
 type Hit = { symbol: string; name: string };
@@ -37,8 +43,6 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
-  const symbols = Array.from(new Set([...DEFAULTS, ...saved]));
-
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
   }, [config?.symbol]);
@@ -109,7 +113,18 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   const live = (state?.mode ?? config?.trading_mode) === "LIVE";
   const running = state?.bot_status === "RUNNING";
 
-  const armed = new Set((config?.trade_symbols ?? []).map((s) => s.toUpperCase()));
+  const armedList = (config?.trade_symbols ?? []).map((s) => s.toUpperCase());
+  const armed = new Set(armedList);
+  const books = state?.books ?? [];
+  const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
+  const symbols = Array.from(
+    new Set([
+      ...armedList,
+      ...books.map((book) => book.symbol.toUpperCase()),
+      ...DEFAULTS,
+      ...saved,
+    ])
+  ).slice(0, 16);
 
   const applySymbol = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
@@ -295,6 +310,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
             {symbols.map((s) => {
               const selected = Boolean(config?.symbol) && symbol === s;
               const trading = armed.has(s);
+              const book = bookBySymbol.get(s);
+              const position =
+                book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : null;
+              const chip = position ?? (trading ? "Trading" : "Trade");
               return (
                 <span key={s} className="inline-flex shrink-0 items-center overflow-hidden rounded-full">
                   <button
@@ -313,16 +332,21 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                     disabled={busy}
                     onClick={() => toggleTrade(s)}
                     title={
-                      trading
-                        ? "Bot is allowed to order this stock even on another chart"
-                        : "Arm this stock so the bot can order it from any chart"
+                      book?.note
+                        ? book.note
+                        : trading
+                          ? "Bot is allowed to order this stock even on another chart"
+                          : "Arm this stock so the bot can order it from any chart"
                     }
                     className={clsx(
                       "border-l border-white/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide",
-                      trading ? "bg-[#10B981]/20 text-[#10B981]" : "text-slate-500 hover:text-slate-200"
+                      position === "LONG" && "bg-[#10B981]/25 text-[#10B981]",
+                      position === "SHORT" && "bg-[#F43F5E]/20 text-[#F43F5E]",
+                      !position && trading && "bg-[#10B981]/20 text-[#10B981]",
+                      !position && !trading && "text-slate-500 hover:text-slate-200"
                     )}
                   >
-                    {trading ? "Trading" : "Trade"}
+                    {chip}
                   </button>
                 </span>
               );
@@ -369,6 +393,33 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
             </div>
           )}
         </div>
+        {books.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Armed stocks">
+            {books.map((book) => {
+              const open = book.direction === "LONG" || book.direction === "SHORT";
+              const note = chipNote(book.note || "", book.symbol);
+              return (
+                <span
+                  key={book.symbol}
+                  title={book.note || book.symbol}
+                  className={clsx(
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px]",
+                    book.direction === "LONG" && "border-[#10B981]/40 bg-[#10B981]/10 text-[#10B981]",
+                    book.direction === "SHORT" && "border-[#F43F5E]/40 bg-[#F43F5E]/10 text-[#F43F5E]",
+                    !open && "border-white/10 text-slate-400"
+                  )}
+                >
+                  <span className="font-semibold text-slate-100">{book.symbol}</span>
+                  <span>{open ? `${book.direction} ${book.qty}` : "FLAT"}</span>
+                  {note ? <span className="max-w-[14rem] truncate text-slate-500">{note}</span> : null}
+                </span>
+              );
+            })}
+            <span className="inline-flex shrink-0 items-center rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-500">
+              {armedList.length}/{ARM_LIMIT} armed · {state?.trades_today ?? 0}/{state?.max_trades ?? 40} trades
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <button
