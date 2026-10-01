@@ -1665,21 +1665,21 @@ async def test_an_in_flight_order_does_not_drop_the_other_cross(engine, monkeypa
     assert engine.positions["KOTAKBANK"].direction == "LONG"
 
 
-def test_twelve_stocks_can_be_armed_and_the_thirteenth_cannot(api):
+def test_twenty_four_stocks_can_be_armed_and_the_twenty_fifth_cannot(api):
     from strategy_engine import MAX_TRADE_SYMBOLS
 
-    assert MAX_TRADE_SYMBOLS == 12
+    assert MAX_TRADE_SYMBOLS == 24
     current = api.get("/api/config").json()["trade_symbols"]
     for name in current:
         cleared = api.post("/api/trade-symbols", json={"symbol": name, "armed": False})
         assert cleared.status_code == 200, cleared.text
-    for i in range(12):
+    for i in range(24):
         res = api.post("/api/trade-symbols", json={"symbol": f"S{i}", "armed": True})
         assert res.status_code == 200, res.text
-    blocked = api.post("/api/trade-symbols", json={"symbol": "S12", "armed": True})
+    blocked = api.post("/api/trade-symbols", json={"symbol": "S24", "armed": True})
     assert blocked.status_code == 409
-    assert "12" in blocked.json()["detail"]
-    assert len(api.get("/api/config").json()["trade_symbols"]) == 12
+    assert "24" in blocked.json()["detail"]
+    assert len(api.get("/api/config").json()["trade_symbols"]) == 24
 
 
 def test_the_old_daily_trade_cap_is_raised_once(tmp_path, monkeypatch):

@@ -181,7 +181,7 @@ export default function TerminalPage() {
   return (
     <div className="terminal-dark min-h-screen w-full min-w-0 bg-[#0B0E14] text-slate-200">
       <Header state={state} config={config} connected={connected} loadNote={loadNote} onChanged={refresh} />
-      <main className="mx-auto w-full min-w-0 max-w-[1600px] space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <main className="mx-auto w-full min-w-0 space-y-4 px-3 py-3 sm:px-4 sm:py-4">
         {loadNote && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             {loadNote}

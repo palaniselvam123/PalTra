@@ -78,7 +78,7 @@ def _parse_hhmm(value: str) -> dt.time:
     return dt.time(int(hh), int(mm))
 
 
-MAX_TRADE_SYMBOLS = 12
+MAX_TRADE_SYMBOLS = 24
 
 
 def trade_names(cfg: BotConfig) -> list[str]:

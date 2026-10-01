@@ -203,7 +203,10 @@ async def set_trade_symbol(body: TradeSymbolUpdate):
         row.trade_symbols = ",".join(names)
         db.commit()
         db.refresh(row)
-        return _config_dict(row)
+        payload = _config_dict(row)
+        db.expunge(row)
+    engine._cfg_cache = row
+    return payload
 
 
 @app.put("/api/config")

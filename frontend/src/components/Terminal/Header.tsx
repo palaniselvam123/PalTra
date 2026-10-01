@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
-const ARM_LIMIT = 12;
+const ARM_LIMIT = 24;
 
 function chipNote(note: string, symbol: string): string {
   const trimmed = note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
@@ -52,7 +52,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       const raw = localStorage.getItem(SAVED_KEY);
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
       if (Array.isArray(parsed)) {
-        setSaved(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)).slice(0, 12));
+        setSaved(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)).slice(0, 24));
       }
     } catch {
       /* a private browser can refuse storage */
@@ -97,7 +97,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
     const cleaned = next.trim().toUpperCase();
     if (!cleaned || DEFAULTS.includes(cleaned)) return;
     setSaved((prev) => {
-      const list = [cleaned, ...prev.filter((s) => s !== cleaned)].slice(0, 12);
+      const list = [cleaned, ...prev.filter((s) => s !== cleaned)].slice(0, 24);
       try {
         localStorage.setItem(SAVED_KEY, JSON.stringify(list));
       } catch {
@@ -124,7 +124,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       ...DEFAULTS,
       ...saved,
     ])
-  ).slice(0, 16);
+  ).slice(0, 24);
 
   const applySymbol = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
@@ -164,6 +164,10 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
     const cleaned = next.trim().toUpperCase();
     if (!cleaned) return;
     const turningOn = !armed.has(cleaned);
+    if (turningOn && armedList.length >= ARM_LIMIT) {
+      setError(`Trade is limited to ${ARM_LIMIT} stocks at once. Turn one off before adding another.`);
+      return;
+    }
     if (turningOn && live) {
       const ok = window.confirm(
         `Arm ${cleaned} for live SMA orders? The bot can buy or sell it while this chart stays on ${symbol || "the stock you are viewing"}.`
@@ -242,7 +246,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-[#0B0E14]">
-      <div className="mx-auto flex w-full min-w-0 max-w-[1600px] flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
+      <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <nav className="flex min-w-0 items-center gap-3 overflow-x-auto text-[11px] uppercase tracking-[0.14em] text-slate-500">
             <a href="/" className="shrink-0 hover:text-slate-300">Dashboard</a>
@@ -300,126 +304,134 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         </div>
 
         <div ref={searchRef} className="relative min-w-0">
-          <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-white/10 bg-[#151921] px-2 py-1">
-            <span className="shrink-0 px-1 text-[10px] uppercase tracking-wider text-slate-500">NSE</span>
-            {!config?.symbol && (
-              <span className="shrink-0 px-2 text-xs text-slate-500">
-                {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
-              </span>
-            )}
-            {symbols.map((s) => {
-              const selected = Boolean(config?.symbol) && symbol === s;
-              const trading = armed.has(s);
-              const book = bookBySymbol.get(s);
-              const position =
-                book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : null;
-              const chip = position ?? (trading ? "Trading" : "Trade");
-              return (
-                <span key={s} className="inline-flex shrink-0 items-center overflow-hidden rounded-full">
-                  <button
-                    disabled={busy}
-                    onClick={() => applySymbol(s)}
-                    title="Show this stock on the chart. Open orders on other stocks stay put."
-                    className={clsx(
-                      "px-2 py-1 text-xs font-medium",
-                      selected ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
-                    )}
-                  >
-                    {selected ? <span className="mr-1 text-[10px] uppercase text-slate-500">Chart</span> : null}
-                    {s}
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => toggleTrade(s)}
-                    title={
-                      book?.note
-                        ? book.note
-                        : trading
-                          ? "Bot is allowed to order this stock even on another chart"
-                          : "Arm this stock so the bot can order it from any chart"
-                    }
-                    className={clsx(
-                      "border-l border-white/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide",
-                      position === "LONG" && "bg-[#10B981]/25 text-[#10B981]",
-                      position === "SHORT" && "bg-[#F43F5E]/20 text-[#F43F5E]",
-                      !position && trading && "bg-[#10B981]/20 text-[#10B981]",
-                      !position && !trading && "text-slate-500 hover:text-slate-200"
-                    )}
-                  >
-                    {chip}
-                  </button>
-                </span>
-              );
-            })}
+          <div className="rounded-xl border border-white/10 bg-[#151921]">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold">
+                <span className="uppercase tracking-wider text-slate-500">Stocks</span>
+                <span className="text-[#FBBF24]">Name</span>
+                <span className="text-[#38BDF8]">Chart</span>
+                <span className="text-[#C4B5FD]">Trade</span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                <span className="font-semibold text-[#34D399]">{armedList.length}</span>
+                {` of ${ARM_LIMIT} armed · ${state?.trades_today ?? 0}/${state?.max_trades ?? 40} trades`}
+              </div>
+            </div>
+            <div className="relative border-b border-white/5">
             <form
-              className="flex shrink-0 items-center"
+              className="flex items-center gap-2 px-3 py-1.5"
               onSubmit={(e) => {
                 e.preventDefault();
                 const typed = query.trim().toUpperCase();
                 if (typed) applySymbol(typed);
               }}
             >
-              <Search size={12} className="text-slate-500" />
+              <Search size={14} className="shrink-0 text-slate-500" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => hits.length > 0 && setOpen(true)}
                 placeholder="Find a stock"
-                className="w-24 bg-transparent px-2 py-1 text-xs uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-500 sm:w-28"
+                className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-500"
                 aria-label="Find an NSE stock"
               />
-              {searching && <Loader2 size={11} className="animate-spin text-slate-500" />}
+              {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-500" />}
             </form>
+            {open && query.trim() && !searching && hits.length === 0 && (
+              <div className="absolute left-3 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
+                No NSE match
+              </div>
+            )}
+            {open && hits.length > 0 && (
+              <div className="absolute left-3 top-full z-40 mt-1 max-h-72 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-white/10 bg-[#151921] shadow-xl">
+                {hits.map((hit) => (
+                  <button
+                    key={hit.symbol}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => applySymbol(hit.symbol)}
+                    className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
+                  >
+                    <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
+                    <span className="truncate text-[10px] text-slate-500">{hit.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            </div>
+            {!config?.symbol && (
+              <p className="px-3 py-2 text-xs text-slate-500">
+                {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
+              </p>
+            )}
+            <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-b-xl bg-white/5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
+              {symbols.map((s) => {
+                const selected = Boolean(config?.symbol) && symbol === s;
+                const trading = armed.has(s);
+                const book = bookBySymbol.get(s);
+                const position =
+                  book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : null;
+                const note = chipNote(book?.note || "", s);
+                return (
+                  <li key={s} className="flex min-w-0 flex-col gap-1 bg-[#151921] px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-wide text-[#FBBF24]" title={s}>
+                        {s}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => applySymbol(s)}
+                        title="Show this stock on the chart. Open orders on other stocks stay put."
+                        className={clsx(
+                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
+                          selected
+                            ? "bg-[#0284C7] text-white"
+                            : "bg-[#38BDF8]/15 text-[#38BDF8] ring-1 ring-[#38BDF8]/50 hover:bg-[#38BDF8]/25"
+                        )}
+                      >
+                        {selected ? "On chart" : "Chart"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || (!trading && armedList.length >= ARM_LIMIT)}
+                        onClick={() => toggleTrade(s)}
+                        title={
+                          trading
+                            ? "The bot can order this stock from any chart. Press again to take it off."
+                            : armedList.length >= ARM_LIMIT
+                              ? `Trade is limited to ${ARM_LIMIT} stocks. Turn one off before adding another.`
+                              : "Add this stock so the bot can order it from any chart"
+                        }
+                        className={clsx(
+                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
+                          trading
+                            ? "bg-[#059669] text-white"
+                            : "bg-[#8B5CF6]/15 text-[#C4B5FD] ring-1 ring-[#A78BFA]/55 hover:bg-[#8B5CF6]/25"
+                        )}
+                      >
+                        {trading ? "Trading" : "Trade"}
+                      </button>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-2 text-[10px] leading-tight">
+                      <span
+                        className={clsx(
+                          "shrink-0 font-semibold uppercase",
+                          position === "LONG" && "text-[#10B981]",
+                          position === "SHORT" && "text-[#F43F5E]",
+                          !position && "text-slate-500"
+                        )}
+                      >
+                        {position ? `${position}${book?.qty ? ` ${book.qty}` : ""}` : "Flat"}
+                      </span>
+                      {note ? <span className="min-w-0 truncate text-slate-500">{note}</span> : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
-          {open && query.trim() && !searching && hits.length === 0 && (
-            <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
-              No NSE match
-            </div>
-          )}
-          {open && hits.length > 0 && (
-            <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-white/10 bg-[#151921] shadow-xl">
-              {hits.map((hit) => (
-                <button
-                  key={hit.symbol}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => applySymbol(hit.symbol)}
-                  className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
-                >
-                  <span className="text-xs font-medium text-slate-100">{hit.symbol}</span>
-                  <span className="truncate text-[10px] text-slate-500">{hit.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
-        {books.length > 0 && (
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Armed stocks">
-            {books.map((book) => {
-              const open = book.direction === "LONG" || book.direction === "SHORT";
-              const note = chipNote(book.note || "", book.symbol);
-              return (
-                <span
-                  key={book.symbol}
-                  title={book.note || book.symbol}
-                  className={clsx(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px]",
-                    book.direction === "LONG" && "border-[#10B981]/40 bg-[#10B981]/10 text-[#10B981]",
-                    book.direction === "SHORT" && "border-[#F43F5E]/40 bg-[#F43F5E]/10 text-[#F43F5E]",
-                    !open && "border-white/10 text-slate-400"
-                  )}
-                >
-                  <span className="font-semibold text-slate-100">{book.symbol}</span>
-                  <span>{open ? `${book.direction} ${book.qty}` : "FLAT"}</span>
-                  {note ? <span className="max-w-[14rem] truncate text-slate-500">{note}</span> : null}
-                </span>
-              );
-            })}
-            <span className="inline-flex shrink-0 items-center rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-500">
-              {armedList.length}/{ARM_LIMIT} armed · {state?.trades_today ?? 0}/{state?.max_trades ?? 40} trades
-            </span>
-          </div>
-        )}
 
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <button
@@ -457,7 +469,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         </span>
       </div>
       <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
-        Chart only changes the stock on screen. Trade arms that stock even on another chart. Buy and
+        The amber name is the stock. Blue Chart only changes the stock on screen. Violet Trade adds
+        it, up to 24 at once, and green Trading means the bot can order it from any chart. Buy and
         sell both wait for the next SMA cross. Telegram warns about 3 minutes before that cross, and
         the order waits until the cross prints. Force order uses the current SMA side. Checked VWAP,
         volume, density, and RSI filters apply to both.
