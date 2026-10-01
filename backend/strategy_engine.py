@@ -809,9 +809,20 @@ class StrategyEngine:
         )
 
     def _book_not_on_groww(self, pos: OpenPosition, now: dt.datetime) -> None:
-        """The screen had a position Groww does not. Remove it without an order."""
+        """The screen had a position Groww does not. Remove it without an order.
+
+        It was never a fill, so it gives its slot back to the daily cap.
+        """
         costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
         self._finalize_trade(pos.trade_id, pos.entry_price, "NOT_ON_GROWW", now, costs)
+        self._uncount_trade(pos.trade_id)
+
+    def _uncount_trade(self, trade_id: int) -> None:
+        with session_factory()() as db:
+            row = db.get(TradeLog, trade_id)
+            day = row.date if row is not None else None
+        if day == self._session_date and self.trades_today > 0:
+            self.trades_today -= 1
 
     async def _drop_positions_groww_does_not_hold(self, cfg: BotConfig) -> None:
         """A local open row whose Groww book is flat is not a live position.
@@ -845,22 +856,43 @@ class StrategyEngine:
             self._signals[symbol] = text
 
     async def _open(self, direction: str, cross_price: float, atr: float, cfg: BotConfig, now: dt.datetime) -> None:
+        """Book a position only once the broker confirms the fill.
+
+        A refused, failed, or cancelled entry raises before anything is
+        booked or counted, so the stock stays FLAT and the daily trade cap
+        is not used up. Shares Groww did fill are always booked, even when
+        the stop that follows is refused, so a real position is never lost.
+        """
         side = "BUY" if direction == "LONG" else "SELL"
+        live = (cfg.trading_mode or "").upper() == "LIVE"
+        qty = int(cfg.qty)
         try:
-            ack = await self.broker.place_entry(cfg.symbol, side, int(cfg.qty), cross_price)
+            ack = await self.broker.place_entry(cfg.symbol, side, qty, cross_price)
         except Exception as exc:  # noqa: BLE001
             raise SlCancelFailed(str(exc) or "Groww did not accept the entry") from exc
-        if (cfg.trading_mode or "").upper() == "LIVE":
-            ack = await self._require_live_fill(ack, cfg)
-        elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE"):
+        if live:
+            try:
+                ack = await self._require_live_fill(ack, cfg)
+            except SlCancelFailed:
+                # A cancelled order can still have part-filled. Groww's book
+                # is the truth: book what it holds, otherwise stay FLAT.
+                held = await self._held_after_failed_entry(cfg.symbol, direction, qty)
+                if not held:
+                    raise
+                qty = held
+        elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE", "CANCELLED", "CANCELED"):
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
         fill = round_price(cfg.symbol, ack.fill_price or cross_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
+        sl_error = ""
         if bool(getattr(cfg, "use_stop", True)):
-            sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, int(cfg.qty), sl)
-            sl_id = sl_ack.order_id
+            try:
+                sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, qty, sl)
+                sl_id = sl_ack.order_id
+            except Exception as exc:  # noqa: BLE001
+                sl_error = str(exc) or "Groww refused the stop"
         trade_id = self._insert_open_trade(
             cfg=cfg,
             direction=direction,
@@ -869,6 +901,7 @@ class StrategyEngine:
             atr=atr,
             sl=sl,
             now=now,
+            qty=qty,
         )
         self.trades_today += 1
         _schedule_whatsapp(
@@ -876,7 +909,7 @@ class StrategyEngine:
                 mode=(cfg.trading_mode or "PAPER").upper(),
                 direction=direction,
                 symbol=cfg.symbol,
-                qty=int(cfg.qty),
+                qty=qty,
                 fill=fill,
                 stop=sl,
                 when=now,
@@ -884,7 +917,7 @@ class StrategyEngine:
         )
         self.position = OpenPosition(
             direction=direction,
-            qty=int(cfg.qty),
+            qty=qty,
             entry_price=fill,
             ma_cross_price=cross_price,
             atr_at_entry=atr,
@@ -895,6 +928,34 @@ class StrategyEngine:
             trade_id=trade_id,
             mode=cfg.trading_mode,
         )
+        if sl_error:
+            await self._exit_unprotected(cfg, now, sl_error)
+
+    async def _held_after_failed_entry(self, symbol: str, direction: str, qty: int) -> int:
+        """Shares Groww holds after an entry this bot treated as failed."""
+        net = await self._groww_net(symbol)
+        if not net:
+            return 0
+        if (direction == "LONG" and net > 0) or (direction == "SHORT" and net < 0):
+            return min(abs(int(net)), int(qty))
+        return 0
+
+    async def _exit_unprotected(self, cfg: BotConfig, now: dt.datetime, why: str) -> None:
+        """The entry filled but its stop was refused. Do not hold it naked."""
+        pos = self.position
+        symbol = (cfg.symbol or "").upper()
+        if pos is None:
+            return
+        try:
+            await self._close_position(pos, self._ltps.get(symbol) or pos.entry_price, "SL_REJECTED", now, cfg)
+        except SlCancelFailed as exc:
+            self.last_error = f"Stop refused ({why}) and the exit failed: {exc}. Close {symbol} by hand."
+            self._signals[symbol] = self.last_error
+            _schedule_whatsapp(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}")
+            return
+        self.position = None
+        self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
+        self._signals[symbol] = f"{symbol} closed — stop was refused"
 
     def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
         symbol = symbol or self._focus
@@ -968,6 +1029,7 @@ class StrategyEngine:
                 # open the other side.
                 costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
                 self._finalize_trade(trade_id, entry, "NOT_ON_GROWW", _ist_now(), costs)
+                self._uncount_trade(trade_id)
                 self.last_signal = "Not on Groww — removed here, no order sent"
 
     async def _watch_stop(self, cfg: BotConfig) -> None:
@@ -1133,13 +1195,14 @@ class StrategyEngine:
         atr: float,
         sl: float,
         now: dt.datetime,
+        qty: int | None = None,
     ) -> int:
         with session_factory()() as db:
             row = TradeLog(
                 date=now.date().isoformat(),
                 symbol=cfg.symbol,
                 direction=direction,
-                qty=int(cfg.qty),
+                qty=int(qty if qty is not None else cfg.qty),
                 entry_time=now.replace(tzinfo=None),
                 entry_price=fill,
                 ma_cross_price=cross_price,
@@ -1411,8 +1474,13 @@ class StrategyEngine:
         mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
         day = self._session_date
         with session_factory()() as db:
-            modes = db.query(TradeLog.mode).filter(TradeLog.date == day).all()
-        self.trades_today = sum(1 for (row_mode,) in modes if (row_mode or "PAPER").upper() == mode)
+            rows = db.query(TradeLog.mode, TradeLog.exit_reason).filter(TradeLog.date == day).all()
+        # A row Groww never held was not a trade, so it does not use the cap.
+        self.trades_today = sum(
+            1
+            for row_mode, reason in rows
+            if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"
+        )
         return self.trades_today
 
     def release_paper_halt(self) -> bool:
@@ -1675,6 +1743,7 @@ _ALERT_REASON = {
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
     "NOT_ON_GROWW": "not on Groww — no order sent",
+    "SL_REJECTED": "stop refused — closed at once",
     "MANUAL_CLOSE": "closed from the screen",
 }
 

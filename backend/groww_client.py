@@ -47,7 +47,9 @@ IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
 TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 # Groww's own word for a filled order is EXECUTED. Missing it left a long
 # on the terminal after the exchange stop had already sold the shares.
-TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED", "EXECUTED", "DELIVERY_AWAITED"})
+# TRIGGERED is not here: a triggered stop has only become a working limit
+# order. Reading it as a fill booked a position Groww did not hold.
+TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "EXECUTED", "DELIVERY_AWAITED"})
 _DEAD_ORDER = TERMINAL_CANCELLED | {"REJECTED", "FAILED", "FAILURE"}
 
 
