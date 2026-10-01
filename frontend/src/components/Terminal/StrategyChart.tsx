@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { History, Loader2, Maximize2, Minimize2, Radio } from "lucide-react";
+import { History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
 import clsx from "clsx";
 import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
 import { parseClock } from "@/lib/format";
@@ -111,6 +111,19 @@ function ohlcAt(rows: Candle[], index: number): Ohlc | null {
   const c = rows[index];
   if (!c) return null;
   return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, prevClose: index > 0 ? rows[index - 1].close : null };
+}
+
+/** One end of a measurement: a candle time and a price on it. */
+type MeasurePoint = { time: number; price: number };
+type Measure = { a: MeasurePoint | null; b: MeasurePoint | null };
+const NO_MEASURE: Measure = { a: null, b: null };
+
+function spanText(seconds: number): string {
+  const total = Math.round(Math.abs(seconds) / 60);
+  const d = Math.floor(total / 1440);
+  const h = Math.floor((total % 1440) / 60);
+  const m = total % 60;
+  return [d ? `${d}d` : "", h ? `${h}h` : "", `${m}m`].filter(Boolean).join(" ");
 }
 
 type Marker = {
@@ -299,6 +312,14 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   const sectionRef = useRef<HTMLElement>(null);
   const [full, setFull] = useState(false);
   const [bar, setBar] = useState<BarMinutes>(1);
+  const measureLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  const measuringRef = useRef(false);
+  measuringRef.current = measuring;
+  const [snapClose, setSnapClose] = useState(true);
+  const snapCloseRef = useRef(true);
+  snapCloseRef.current = snapClose;
+  const [measure, setMeasure] = useState<Measure>(NO_MEASURE);
   useEffect(() => {
     try {
       const saved = Number(localStorage.getItem(BAR_KEY));
@@ -369,6 +390,33 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         if (seq === pastSeq.current) setLoadingPast(false);
       });
   };
+  // Candle times change with the size, range or stock, so an old measurement no longer fits.
+  useEffect(() => {
+    setMeasure(NO_MEASURE);
+  }, [bar, past, symbol]);
+  useEffect(() => {
+    const line = measureLineRef.current;
+    if (!line) return;
+    const pts = [measure.a, measure.b].filter((p): p is MeasurePoint => p != null);
+    const byTime = new Map(pts.map((p) => [p.time, p]));
+    const data = Array.from(byTime.values()).sort((x, y) => x.time - y.time);
+    const up = measure.a && measure.b ? measure.b.price >= measure.a.price : true;
+    line.applyOptions({ color: up ? "#34D399" : "#FB7185" });
+    line.setData(data.map((p) => ({ time: p.time as never, value: p.price })));
+  }, [measure]);
+  useEffect(() => {
+    if (!measuring) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMeasure(NO_MEASURE);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [measuring]);
+  const toggleMeasure = () => {
+    setMeasuring((on) => !on);
+    setMeasure(NO_MEASURE);
+  };
+
   const pickBar = (next: BarMinutes) => {
     setBar(next);
     try {
@@ -478,6 +526,33 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     smaFastRef.current = fast;
     smaSlowRef.current = slow;
     atrRef.current = atr;
+    const measureLine = instance.addLineSeries({
+      color: "#FBBF24",
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+    });
+    measureLineRef.current = measureLine;
+
+    // Measure: first click is the start, second the end, a third starts again.
+    const onClick = (param: { time?: unknown; point?: { x: number; y: number } }) => {
+      if (!measuringRef.current || typeof param.time !== "number" || !param.point) return;
+      const t = param.time;
+      let price: number | null = null;
+      if (snapCloseRef.current) {
+        price = rowsRef.current.find((c) => c.time === t)?.close ?? null;
+      } else {
+        price = candles.coordinateToPrice(param.point.y);
+      }
+      if (price == null || !Number.isFinite(price)) return;
+      const pt = { time: t, price: Math.round(price * 100) / 100 };
+      setMeasure((cur) => (cur.a && !cur.b ? { a: cur.a, b: pt } : { a: pt, b: null }));
+    };
+    instance.subscribeClick(onClick);
 
     const onCrosshair = (param: { time?: unknown; seriesData: Map<unknown, unknown> }) => {
       if (param.time == null) {
@@ -501,6 +576,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     observer.observe(rootRef.current);
     return () => {
       instance.unsubscribeCrosshairMove(onCrosshair);
+      instance.unsubscribeClick(onClick);
       observer.disconnect();
       instance.remove();
       apiRef.current = null;
@@ -619,6 +695,19 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
           >
             {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
           </button>
+          <button
+            type="button"
+            onClick={toggleMeasure}
+            aria-pressed={measuring}
+            title="Measure profit or loss between two candles"
+            className={clsx(
+              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              measuring ? "bg-amber-400/20 font-semibold text-amber-100 ring-amber-400/50" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <Ruler size={14} aria-hidden />
+            Measure
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -644,6 +733,17 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         </ul>
       </div>
       <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
+      {measuring ? (
+        <MeasureBar
+          measure={measure}
+          rows={rows}
+          snapClose={snapClose}
+          defaultQty={state?.position?.qty ?? 1}
+          onSnap={setSnapClose}
+          onClear={() => setMeasure(NO_MEASURE)}
+          onClose={toggleMeasure}
+        />
+      ) : null}
       <RangeBar
         range={range}
         past={past}
@@ -654,7 +754,10 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         onLive={backToLive}
       />
       <div className={clsx("relative", full && "min-h-[240px] flex-1")}>
-        <div ref={rootRef} className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]")} />
+        <div
+          ref={rootRef}
+          className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]", measuring && "cursor-crosshair")}
+        />
         {!view && (
           <div aria-busy="true" aria-label="Loading chart" className="absolute inset-0 z-[5] flex flex-col justify-end gap-2 bg-[#151921] p-4">
             <Skeleton className="h-2/3 w-full opacity-60" />
@@ -784,6 +887,119 @@ function RangeBar({
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function MeasureBar({
+  measure,
+  rows,
+  snapClose,
+  defaultQty,
+  onSnap,
+  onClear,
+  onClose,
+}: {
+  measure: Measure;
+  rows: Candle[];
+  snapClose: boolean;
+  defaultQty: number;
+  onSnap: (on: boolean) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [qtyText, setQtyText] = useState(String(defaultQty || 1));
+  const qty = Math.max(0, Math.floor(Number(qtyText) || 0));
+  const { a, b } = measure;
+  let body: ReactNode;
+  if (!a) {
+    body = <span className="text-amber-200">Click the start candle on the chart.</span>;
+  } else if (!b) {
+    body = (
+      <span>
+        <span className="text-slate-400">Start</span> {istStamp(a.time)} · <span className="text-slate-100">{px(a.price)}</span>
+        <span className="text-amber-200"> — now click the end candle.</span>
+      </span>
+    );
+  } else {
+    const points = b.price - a.price;
+    const pct = a.price ? (points / a.price) * 100 : 0;
+    const ia = rows.findIndex((c) => c.time === a.time);
+    const ib = rows.findIndex((c) => c.time === b.time);
+    const bars = ia >= 0 && ib >= 0 ? Math.abs(ib - ia) : null;
+    const long = points * qty;
+    const short = -points * qty;
+    const tone = (v: number) => (v > 0 ? "text-emerald-300" : v < 0 ? "text-rose-300" : "text-slate-200");
+    const sign = (v: number) => (v > 0 ? "+" : "");
+    body = (
+      <>
+        <span className="whitespace-nowrap">
+          <span className="text-slate-400">Start</span> {istStamp(a.time)} · <span className="text-slate-100">{px(a.price)}</span>
+        </span>
+        <span className="whitespace-nowrap">
+          <span className="text-slate-400">End</span> {istStamp(b.time)} · <span className="text-slate-100">{px(b.price)}</span>
+        </span>
+        <span className={clsx("whitespace-nowrap font-semibold", tone(points))}>
+          {sign(points)}
+          {points.toFixed(2)} pts ({sign(pct)}
+          {pct.toFixed(2)}%)
+        </span>
+        <span className="whitespace-nowrap text-slate-300">
+          {bars != null ? `${bars} bar${bars === 1 ? "" : "s"} · ` : ""}
+          {spanText(b.time - a.time)}
+        </span>
+        <span className="whitespace-nowrap">
+          <span className="text-slate-400">Long</span> <span className={clsx("font-semibold", tone(long))}>{sign(long)}{inr(long)}</span>
+        </span>
+        <span className="whitespace-nowrap">
+          <span className="text-slate-400">Short</span> <span className={clsx("font-semibold", tone(short))}>{sign(short)}{inr(short)}</span>
+        </span>
+        <span className="whitespace-nowrap text-[11px] text-slate-400">gross, before charges</span>
+      </>
+    );
+  }
+  return (
+    <div
+      role="region"
+      aria-label="Measure"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-amber-400/20 bg-amber-400/[0.04] px-3 py-2 font-mono text-xs sm:px-4"
+    >
+      <span className="flex items-center gap-1 font-sans font-semibold text-amber-200">
+        <Ruler size={13} aria-hidden /> Measure
+      </span>
+      {body}
+      <span className="ml-auto flex flex-wrap items-center gap-2 font-sans">
+        <label className="flex items-center gap-1 text-slate-400">
+          Qty
+          <input
+            inputMode="numeric"
+            value={qtyText}
+            onChange={(e) => setQtyText(e.target.value.replace(/[^0-9]/g, ""))}
+            className="min-h-8 w-16 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-slate-100"
+            aria-label="Quantity for the P&L"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-slate-300" title="Use each candle's close, or the exact price where you click">
+          <input type="checkbox" checked={snapClose} onChange={(e) => onSnap(e.target.checked)} className="accent-amber-400" />
+          Use candle close
+        </label>
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={!a}
+          className="min-h-8 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close measure"
+          className="flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </span>
     </div>
   );
 }
