@@ -446,10 +446,14 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
             {running ? "PAUSE BOT" : "START BOT"}
           </button>
           <button
-            disabled={busy || !symbol}
+            disabled={busy || !symbol || !armed.has((symbol || "").toUpperCase())}
             onClick={forceOrder}
-            title="Order the chart stock now from the current SMA side, without waiting for a cross. Checked VWAP, volume, density, and RSI still apply. Starts the bot."
-            className="min-h-11 rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-[#1a1203]"
+            title={
+              symbol && !armed.has(symbol.toUpperCase())
+                ? `${symbol.toUpperCase()} is not on the Trade list. Press Trade on it first.`
+                : "Order the chart stock now from the current SMA side, without waiting for a cross. Checked VWAP, volume, density, and RSI still apply. Starts the bot."
+            }
+            className="min-h-11 rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-[#1a1203] disabled:cursor-not-allowed disabled:opacity-40"
           >
             FORCE ORDER
           </button>

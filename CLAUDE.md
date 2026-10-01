@@ -139,7 +139,10 @@ There are separate switches. All of them boot safe.
 - **Market hours apply to PAPER too.** No new entry (cross or force order)
   outside the cash session, before 09:20, or after `entry_cutoff_time`
   (default 15:00, never later than `square_off_time`). After the cut-off an
-  opposite cross still closes a position but does not open the reverse. Practice
+  opposite cross still closes a position but does not open the reverse.
+- **Only stocks on the Trade list (`trade_symbols`) are ordered.** The list is
+  re-read just before each entry, Force order refuses an unarmed stock, and a
+  removed stock is no longer quoted unless it is still held or on the chart. Practice
   positions are squared off at `square_off_time` even when the bot is paused,
   and a practice position from an earlier day is closed on the next tick.
 

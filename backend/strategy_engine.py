@@ -313,6 +313,7 @@ class StrategyEngine:
         # Armed names come first so a chart symbol cannot crowd one of them
         # out of the quote loop. Open books stay watched after they are disarmed.
         watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
+        self._forget_unwatched(set(watch))
         self._focus = view
         self._anchor_held_prices()
         await self._drop_positions_groww_does_not_hold(cfg)
@@ -403,6 +404,9 @@ class StrategyEngine:
                 continue
             if self._judged_bar.get(symbol) == closed_ts:
                 continue
+            if not self._still_armed(symbol):
+                # Taken off the Trade list while this pass fetched quotes.
+                continue
             enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
@@ -417,6 +421,23 @@ class StrategyEngine:
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
+
+    def _still_armed(self, symbol: str) -> bool:
+        """Read the Trade list now, not the copy taken at the top of the pass."""
+        try:
+            return (symbol or "").upper() in trade_names(self.load_config())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _forget_unwatched(self, watch: set[str]) -> None:
+        """Drop the loop state of stocks that are no longer armed, held, or shown.
+
+        A removed stock is no longer quoted or judged. If it is armed again,
+        hold_for_next_cross makes it wait for a fresh cross.
+        """
+        for table in (self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until):
+            for symbol in [key for key in table if key not in watch]:
+                table.pop(symbol, None)
 
     def _anchor_held_prices(self) -> None:
         """Give each held stock its own price when Groww has not quoted it."""
@@ -675,6 +696,8 @@ class StrategyEngine:
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
         if clock.time() >= _entry_cutoff(cfg):
             raise ForceRefused(f"No new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST.")
+        if name not in trade_names(cfg):
+            raise ForceRefused(f"{name} is not on the Trade list. Press Trade on {name} first.")
         frame = self._frames.get(name)
         if frame is None or getattr(frame, "empty", True):
             try:
