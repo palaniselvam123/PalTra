@@ -446,7 +446,7 @@ function OrderRow({
         )}
       </td>
       <td className="px-3 py-2 font-mono">{px(t.atr_at_entry)}</td>
-      <td className="px-3 py-2 font-mono">{px(t.sl_trigger_price)}</td>
+      <td className="px-3 py-2 font-mono">{t.stop_active === false ? "OFF" : px(t.sl_trigger_price)}</td>
       <td className="px-3 py-2 font-mono">
         {t.exit_time ? `${istDateTime(t.exit_time)} IST` : "—"}
         <div className="text-slate-400">{t.exit_price == null ? "open" : px(t.exit_price)}</div>

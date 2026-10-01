@@ -80,6 +80,9 @@ class OpenPosition:
     entry_time: dt.datetime
     trade_id: int
     mode: str
+    # False when entered with use_stop off. sl_trigger is then only the
+    # level a stop would have used, and nothing watches it.
+    stop_active: bool = True
 
 
 def _ist_now() -> dt.datetime:
@@ -223,10 +226,11 @@ class StrategyEngine:
                     row.entry_time,
                     int(row.id),
                     row.mode or "PAPER",
+                    row.stop_active is not False,
                 )
                 for row in rows
             ]
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active in pending:
             if not symbol or symbol in self.positions:
                 continue
             if when is not None and when.tzinfo is None:
@@ -243,6 +247,7 @@ class StrategyEngine:
                 entry_time=when or _ist_now(),
                 trade_id=trade_id,
                 mode=mode,
+                stop_active=stop_active,
             )
 
     def stop(self) -> None:
@@ -887,7 +892,8 @@ class StrategyEngine:
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
-        if bool(getattr(cfg, "use_stop", True)):
+        stop_active = bool(getattr(cfg, "use_stop", True))
+        if stop_active:
             try:
                 sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, qty, sl)
                 sl_id = sl_ack.order_id
@@ -902,6 +908,7 @@ class StrategyEngine:
             sl=sl,
             now=now,
             qty=qty,
+            stop_active=stop_active,
         )
         self.trades_today += 1
         _schedule_whatsapp(
@@ -911,7 +918,7 @@ class StrategyEngine:
                 symbol=cfg.symbol,
                 qty=qty,
                 fill=fill,
-                stop=sl,
+                stop=sl if stop_active else None,
                 when=now,
             )
         )
@@ -927,6 +934,7 @@ class StrategyEngine:
             entry_time=now,
             trade_id=trade_id,
             mode=cfg.trading_mode,
+            stop_active=stop_active,
         )
         if sl_error:
             await self._exit_unprotected(cfg, now, sl_error)
@@ -1036,9 +1044,10 @@ class StrategyEngine:
         pos = self.position
         if pos is None or self.status != "RUNNING":
             return
-        # No exchange stop and no resting order: nothing to watch. Square-off
-        # and an opposite cross still close the position.
-        if not bool(getattr(cfg, "use_stop", True)) and not pos.sl_order_id:
+        # Entered with no stop: nothing to watch. Square-off and an opposite
+        # cross still close the position. The position's own flag decides,
+        # not today's checkbox, so toggling it does not invent a stop.
+        if not pos.stop_active and not pos.sl_order_id:
             return
         hit = False
         fill_price = self.ltp
@@ -1067,7 +1076,7 @@ class StrategyEngine:
                 if age >= 20 and await self._groww_net(cfg.symbol) == 0:
                     hit = True
                     fill_price = pos.sl_trigger or self.ltp
-        elif bool(getattr(cfg, "use_stop", True)):
+        elif pos.stop_active:
             if pos.direction == "LONG" and self.ltp <= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
@@ -1196,6 +1205,7 @@ class StrategyEngine:
         sl: float,
         now: dt.datetime,
         qty: int | None = None,
+        stop_active: bool = True,
     ) -> int:
         with session_factory()() as db:
             row = TradeLog(
@@ -1209,6 +1219,7 @@ class StrategyEngine:
                 atr_at_entry=atr,
                 sl_trigger_price=sl,
                 mode=(cfg.trading_mode or "PAPER").upper(),
+                stop_active=bool(stop_active),
             )
             db.add(row)
             db.commit()
@@ -1332,7 +1343,7 @@ class StrategyEngine:
             return
         atr = _latest_atr(frame) or float(pos.atr_at_entry or 0)
         ltp = float(self._ltps.get(symbol) or self.ltp or 0)
-        stop_in = minutes_until_stop(pos.direction, ltp, float(pos.sl_trigger), atr)
+        stop_in = minutes_until_stop(pos.direction, ltp, float(pos.sl_trigger), atr) if pos.stop_active else None
         self._gate_warning(
             (symbol, "stop"),
             stop_in,
@@ -1515,11 +1526,15 @@ class StrategyEngine:
             buy, sell = self.ltp, pos.entry_price
         costs = calculate_charges(buy, sell, pos.qty)
         # Distance to the stop, signed so a positive number means "room left".
-        if pos.direction == "LONG":
-            room = self.ltp - pos.sl_trigger
-        else:
-            room = pos.sl_trigger - self.ltp
-        room_pct = (room / self.ltp * 100) if self.ltp else 0.0
+        # No stop, no distance.
+        room = None
+        room_pct = None
+        if pos.stop_active:
+            if pos.direction == "LONG":
+                room = self.ltp - pos.sl_trigger
+            else:
+                room = pos.sl_trigger - self.ltp
+            room_pct = (room / self.ltp * 100) if self.ltp else 0.0
         return {
             "gross": costs["gross_pnl"],
             "charges": costs["total_charges"],
@@ -1558,7 +1573,8 @@ class StrategyEngine:
                         "direction": book.direction if book else "FLAT",
                         "qty": book.qty if book else 0,
                         "entry_price": book.entry_price if book else None,
-                        "sl_trigger": book.sl_trigger if book else None,
+                        "sl_trigger": book.sl_trigger if book and book.stop_active else None,
+                        "stop_active": book.stop_active if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": self._signals.get(symbol, ""),
                     }
@@ -1576,6 +1592,8 @@ class StrategyEngine:
             "symbol": cfg.symbol if cfg else "",
             "trade_symbols": trade_names(cfg) if cfg else [],
             "books": books,
+            "stop_enabled": True if cfg is None or cfg.use_stop is None else bool(cfg.use_stop),
+            "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
             "day_open": day_open,
@@ -1599,12 +1617,13 @@ class StrategyEngine:
                 "entry_price": pos.entry_price,
                 "ma_cross_price": pos.ma_cross_price,
                 "atr_at_entry": pos.atr_at_entry,
-                "sl_trigger": pos.sl_trigger,
+                "sl_trigger": pos.sl_trigger if pos.stop_active else None,
                 "sl_order_id": pos.sl_order_id,
                 "entry_time": pos.entry_time.isoformat(),
                 "mode": pos.mode,
+                "stop_active": pos.stop_active,
             },
-            "active_sl_trigger": pos.sl_trigger if pos else None,
+            "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
             "estimated_charges": unreal["charges"] if unreal else 0.0,
             "unrealized_net_pnl": unreal["net"] if unreal else 0.0,
@@ -1672,7 +1691,8 @@ class StrategyEngine:
             "candles": candles,
             "markers": markers,
             "entry_price": pos.entry_price if pos else None,
-            "sl_trigger": pos.sl_trigger if pos else None,
+            "sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
+            "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
@@ -1761,16 +1781,17 @@ def fill_alert(
     symbol: str,
     qty: int,
     fill: float,
-    stop: float,
+    stop: float | None,
     when: dt.datetime,
 ) -> str:
     """WhatsApp text for a fill. No account numbers or order ids."""
     clock = when.strftime("%d %b %H:%M:%S")
+    stop_text = f"Stop {stop:,.2f}" if stop is not None else "Stop OFF — no stop order"
     return (
         f"PalTra Order placed\n"
         f"{mode} {direction} {symbol}\n"
         f"Filled {qty} @ {fill:,.2f}\n"
-        f"Stop {stop:,.2f}\n"
+        f"{stop_text}\n"
         f"{clock} IST"
     )
 
@@ -2089,7 +2110,8 @@ def _trade_dict(row: TradeLog) -> dict:
         "entry_price": row.entry_price,
         "ma_cross_price": row.ma_cross_price,
         "atr_at_entry": row.atr_at_entry,
-        "sl_trigger_price": row.sl_trigger_price,
+        "sl_trigger_price": row.sl_trigger_price if row.stop_active is not False else None,
+        "stop_active": row.stop_active is not False,
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
         "exit_reason": row.exit_reason,
