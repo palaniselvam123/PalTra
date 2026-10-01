@@ -113,6 +113,7 @@ class ConfigUpdate(BaseModel):
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
+    entry_cutoff_time: str | None = None
 
 
 class ModeUpdate(BaseModel):
@@ -146,6 +147,7 @@ def _config_dict(row: BotConfig) -> dict:
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,
+        "entry_cutoff_time": row.entry_cutoff_time or "15:00",
         "trading_mode": row.trading_mode,
     }
 
@@ -231,6 +233,8 @@ async def put_config(body: ConfigUpdate):
                 raise HTTPException(400, "Symbol must be an NSE trading symbol")
         if "square_off_time" in data:
             _validate_hhmm(data["square_off_time"])
+        if "entry_cutoff_time" in data:
+            _validate_hhmm(data["entry_cutoff_time"], "entry_cutoff_time")
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -253,16 +257,16 @@ async def put_config(body: ConfigUpdate):
     return payload
 
 
-def _validate_hhmm(value: str) -> None:
+def _validate_hhmm(value: str, field: str = "square_off_time") -> None:
     try:
         parts = (value or "").split(":")
         if len(parts) != 2:
             raise ValueError
         hh, mm = int(parts[0]), int(parts[1])
     except (TypeError, ValueError):
-        raise HTTPException(400, "square_off_time must be HH:MM") from None
+        raise HTTPException(400, f"{field} must be HH:MM") from None
     if not (0 <= hh <= 23 and 0 <= mm <= 59):
-        raise HTTPException(400, "square_off_time must be HH:MM")
+        raise HTTPException(400, f"{field} must be HH:MM")
 
 
 def _live_token() -> str:

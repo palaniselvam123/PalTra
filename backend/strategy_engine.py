@@ -80,6 +80,9 @@ class OpenPosition:
     entry_time: dt.datetime
     trade_id: int
     mode: str
+    # False when entered with use_stop off. sl_trigger is then only the
+    # level a stop would have used, and nothing watches it.
+    stop_active: bool = True
 
 
 def _ist_now() -> dt.datetime:
@@ -223,10 +226,11 @@ class StrategyEngine:
                     row.entry_time,
                     int(row.id),
                     row.mode or "PAPER",
+                    row.stop_active is not False,
                 )
                 for row in rows
             ]
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active in pending:
             if not symbol or symbol in self.positions:
                 continue
             if when is not None and when.tzinfo is None:
@@ -243,6 +247,7 @@ class StrategyEngine:
                 entry_time=when or _ist_now(),
                 trade_id=trade_id,
                 mode=mode,
+                stop_active=stop_active,
             )
 
     def stop(self) -> None:
@@ -309,6 +314,7 @@ class StrategyEngine:
         # out of the quote loop. Open books stay watched after they are disarmed.
         watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
         self._focus = view
+        self._anchor_held_prices()
         await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
         if view != self._quote_symbol:
@@ -359,6 +365,10 @@ class StrategyEngine:
         if view in self._ltps:
             self.ltp = self._ltps[view]
 
+        # Practice books close at square-off whether or not the bot is
+        # running, and never carry into the next session.
+        await self._close_finished_paper_books(now, cfg)
+
         if self.status != "RUNNING":
             return
 
@@ -408,25 +418,49 @@ class StrategyEngine:
         if view in self._ltps:
             self.ltp = self._ltps[view]
 
+    def _anchor_held_prices(self) -> None:
+        """Give each held stock its own price when Groww has not quoted it."""
+        anchor = getattr(self.broker, "anchor_price", None)
+        if anchor is None:
+            return
+        for symbol, pos in list(self.positions.items()):
+            if pos is not None:
+                anchor(symbol, self._ltps.get(symbol) or pos.entry_price)
+
+    def _exit_price(self, symbol: str, pos: OpenPosition) -> float:
+        """That stock's own last price. Never another stock's."""
+        ltp = self._ltps.get(symbol)
+        if ltp is not None and ltp > 0:
+            return float(ltp)
+        return float(pos.entry_price)
+
     async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> str:
         if self.status != "RUNNING":
             return ""
         if self._past_square_off(now, cfg):
             await self._square_off("EOD_SQUARE_OFF")
+            if now.time() < _parse_hhmm(cfg.square_off_time):
+                # Before the open: yesterday's books are closed, today has
+                # not started. Wait for the session instead of ending it.
+                self.last_signal = "market closed — no new orders until 09:20 IST"
+                return self.last_signal
             if self.status != "DAY_COMPLETED" and not self.positions:
                 self.status = "DAY_COMPLETED"
                 self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
                 self._announce_down("DAY_COMPLETED", self.halt_reason)
             return self.halt_reason or "square-off"
 
-        # A real last-close tape must not open a position after the bell.
-        # The simulator still demonstrates signals when no NSE quote exists.
-        if not market_is_open(now) and self.data_source != "SIMULATOR":
-            self.last_signal = "market closed — showing the last NSE price"
+        # No new position outside the cash session, in PAPER or LIVE. The
+        # practice tape keeps moving on screen, but it does not trade.
+        if not market_is_open(now):
+            self.last_signal = "market closed — no new orders until 09:20 IST"
+            symbol = (cfg.symbol or "").upper()
+            if symbol:
+                self._signals[symbol] = f"{symbol} {self.last_signal}"
             return self.last_signal
 
-        # Opening-auction buffer applies whenever we are inside a real session.
-        if market_is_open(now) and now.time() < dt.time(9, 20):
+        # Opening-auction buffer.
+        if now.time() < dt.time(9, 20):
             self.last_signal = "skipped — opening auction buffer (09:15–09:20)"
             return self.last_signal
 
@@ -554,6 +588,9 @@ class StrategyEngine:
     ) -> str:
         want = "LONG" if signal == "BULLISH" else "SHORT"
         pos = self.position
+        cutoff = _entry_cutoff(cfg)
+        past_cutoff = now.time() >= cutoff
+        cutoff_text = f"no new entries after {cutoff.strftime('%H:%M')} IST"
 
         if pos is not None and pos.direction == want:
             return f"already {want}"
@@ -563,6 +600,8 @@ class StrategyEngine:
             await self._cancel_sl_verified(pos)
             await self._close_position(pos, cross_price, "MA_CROSS", now, cfg)
             self.position = None
+            if past_cutoff:
+                return f"closed on {signal} — {cutoff_text}"
             if adx_blocks_entry:
                 return f"closed on {signal} — ADX filter blocked the reverse"
             if entry_block:
@@ -574,6 +613,8 @@ class StrategyEngine:
             return f"reversed to {want}"
 
         # FLAT
+        if past_cutoff:
+            return f"{signal} ignored — {cutoff_text}"
         if adx_blocks_entry:
             return f"{signal} ignored — ADX below {cfg.adx_threshold}"
         if entry_block:
@@ -627,8 +668,13 @@ class StrategyEngine:
             direction = self.positions[name].direction
             raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
         cfg = self.load_config()
-        if (cfg.trading_mode or "").upper() == "LIVE" and _ist_now().time() >= _parse_hhmm(cfg.square_off_time):
+        clock = _ist_now()
+        if not market_is_open(clock):
+            raise ForceRefused("Market is closed. No new order until 09:20 IST.")
+        if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
+        if clock.time() >= _entry_cutoff(cfg):
+            raise ForceRefused(f"No new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST.")
         frame = self._frames.get(name)
         if frame is None or getattr(frame, "empty", True):
             try:
@@ -728,7 +774,7 @@ class StrategyEngine:
                     raise ForceRefused(str(exc)) from exc
                 if self.position is None:
                     return f"{name} was already flat"
-                px = self._ltps.get(name) or self.position.entry_price
+                px = self._exit_price(name, self.position)
                 try:
                     await self._close_position(
                         self.position, px, "MANUAL_CLOSE", _ist_now(), _cfg_for(cfg, name)
@@ -809,9 +855,20 @@ class StrategyEngine:
         )
 
     def _book_not_on_groww(self, pos: OpenPosition, now: dt.datetime) -> None:
-        """The screen had a position Groww does not. Remove it without an order."""
+        """The screen had a position Groww does not. Remove it without an order.
+
+        It was never a fill, so it gives its slot back to the daily cap.
+        """
         costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
         self._finalize_trade(pos.trade_id, pos.entry_price, "NOT_ON_GROWW", now, costs)
+        self._uncount_trade(pos.trade_id)
+
+    def _uncount_trade(self, trade_id: int) -> None:
+        with session_factory()() as db:
+            row = db.get(TradeLog, trade_id)
+            day = row.date if row is not None else None
+        if day == self._session_date and self.trades_today > 0:
+            self.trades_today -= 1
 
     async def _drop_positions_groww_does_not_hold(self, cfg: BotConfig) -> None:
         """A local open row whose Groww book is flat is not a live position.
@@ -845,22 +902,44 @@ class StrategyEngine:
             self._signals[symbol] = text
 
     async def _open(self, direction: str, cross_price: float, atr: float, cfg: BotConfig, now: dt.datetime) -> None:
+        """Book a position only once the broker confirms the fill.
+
+        A refused, failed, or cancelled entry raises before anything is
+        booked or counted, so the stock stays FLAT and the daily trade cap
+        is not used up. Shares Groww did fill are always booked, even when
+        the stop that follows is refused, so a real position is never lost.
+        """
         side = "BUY" if direction == "LONG" else "SELL"
+        live = (cfg.trading_mode or "").upper() == "LIVE"
+        qty = int(cfg.qty)
         try:
-            ack = await self.broker.place_entry(cfg.symbol, side, int(cfg.qty), cross_price)
+            ack = await self.broker.place_entry(cfg.symbol, side, qty, cross_price)
         except Exception as exc:  # noqa: BLE001
             raise SlCancelFailed(str(exc) or "Groww did not accept the entry") from exc
-        if (cfg.trading_mode or "").upper() == "LIVE":
-            ack = await self._require_live_fill(ack, cfg)
-        elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE"):
+        if live:
+            try:
+                ack = await self._require_live_fill(ack, cfg)
+            except SlCancelFailed:
+                # A cancelled order can still have part-filled. Groww's book
+                # is the truth: book what it holds, otherwise stay FLAT.
+                held = await self._held_after_failed_entry(cfg.symbol, direction, qty)
+                if not held:
+                    raise
+                qty = held
+        elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE", "CANCELLED", "CANCELED"):
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
         fill = round_price(cfg.symbol, ack.fill_price or cross_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
-        if bool(getattr(cfg, "use_stop", True)):
-            sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, int(cfg.qty), sl)
-            sl_id = sl_ack.order_id
+        sl_error = ""
+        stop_active = bool(getattr(cfg, "use_stop", True))
+        if stop_active:
+            try:
+                sl_ack = await self.broker.place_sl(cfg.symbol, sl_side, qty, sl)
+                sl_id = sl_ack.order_id
+            except Exception as exc:  # noqa: BLE001
+                sl_error = str(exc) or "Groww refused the stop"
         trade_id = self._insert_open_trade(
             cfg=cfg,
             direction=direction,
@@ -869,6 +948,8 @@ class StrategyEngine:
             atr=atr,
             sl=sl,
             now=now,
+            qty=qty,
+            stop_active=stop_active,
         )
         self.trades_today += 1
         _schedule_whatsapp(
@@ -876,15 +957,15 @@ class StrategyEngine:
                 mode=(cfg.trading_mode or "PAPER").upper(),
                 direction=direction,
                 symbol=cfg.symbol,
-                qty=int(cfg.qty),
+                qty=qty,
                 fill=fill,
-                stop=sl,
+                stop=sl if stop_active else None,
                 when=now,
             )
         )
         self.position = OpenPosition(
             direction=direction,
-            qty=int(cfg.qty),
+            qty=qty,
             entry_price=fill,
             ma_cross_price=cross_price,
             atr_at_entry=atr,
@@ -894,7 +975,36 @@ class StrategyEngine:
             entry_time=now,
             trade_id=trade_id,
             mode=cfg.trading_mode,
+            stop_active=stop_active,
         )
+        if sl_error:
+            await self._exit_unprotected(cfg, now, sl_error)
+
+    async def _held_after_failed_entry(self, symbol: str, direction: str, qty: int) -> int:
+        """Shares Groww holds after an entry this bot treated as failed."""
+        net = await self._groww_net(symbol)
+        if not net:
+            return 0
+        if (direction == "LONG" and net > 0) or (direction == "SHORT" and net < 0):
+            return min(abs(int(net)), int(qty))
+        return 0
+
+    async def _exit_unprotected(self, cfg: BotConfig, now: dt.datetime, why: str) -> None:
+        """The entry filled but its stop was refused. Do not hold it naked."""
+        pos = self.position
+        symbol = (cfg.symbol or "").upper()
+        if pos is None:
+            return
+        try:
+            await self._close_position(pos, self._ltps.get(symbol) or pos.entry_price, "SL_REJECTED", now, cfg)
+        except SlCancelFailed as exc:
+            self.last_error = f"Stop refused ({why}) and the exit failed: {exc}. Close {symbol} by hand."
+            self._signals[symbol] = self.last_error
+            _schedule_whatsapp(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}")
+            return
+        self.position = None
+        self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
+        self._signals[symbol] = f"{symbol} closed — stop was refused"
 
     def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
         symbol = symbol or self._focus
@@ -968,15 +1078,17 @@ class StrategyEngine:
                 # open the other side.
                 costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
                 self._finalize_trade(trade_id, entry, "NOT_ON_GROWW", _ist_now(), costs)
+                self._uncount_trade(trade_id)
                 self.last_signal = "Not on Groww — removed here, no order sent"
 
     async def _watch_stop(self, cfg: BotConfig) -> None:
         pos = self.position
         if pos is None or self.status != "RUNNING":
             return
-        # No exchange stop and no resting order: nothing to watch. Square-off
-        # and an opposite cross still close the position.
-        if not bool(getattr(cfg, "use_stop", True)) and not pos.sl_order_id:
+        # Entered with no stop: nothing to watch. Square-off and an opposite
+        # cross still close the position. The position's own flag decides,
+        # not today's checkbox, so toggling it does not invent a stop.
+        if not pos.stop_active and not pos.sl_order_id:
             return
         hit = False
         fill_price = self.ltp
@@ -1005,7 +1117,7 @@ class StrategyEngine:
                 if age >= 20 and await self._groww_net(cfg.symbol) == 0:
                     hit = True
                     fill_price = pos.sl_trigger or self.ltp
-        elif bool(getattr(cfg, "use_stop", True)):
+        elif pos.stop_active:
             if pos.direction == "LONG" and self.ltp <= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
@@ -1029,14 +1141,17 @@ class StrategyEngine:
         if self._loss_breached(cfg):
             await self._stop_for_loss(cfg)
 
-    async def _square_off(self, reason: str) -> None:
+    async def _square_off(self, reason: str, symbols: list[str] | None = None) -> None:
         async with self.lock:
             if self.inflight:
                 return
             self.inflight = "TRANSIT"
+            saved_focus, saved_ltp = self._focus, self.ltp
             try:
                 cfg = self.load_config()
                 for symbol in list(self.positions):
+                    if symbols is not None and symbol not in symbols:
+                        continue
                     self._focus = symbol
                     if self.position is None:
                         continue
@@ -1048,7 +1163,8 @@ class StrategyEngine:
                         pass
                     if self.position is None:
                         continue
-                    px = self._ltps.get(symbol) or self.position.entry_price
+                    px = self._exit_price(symbol, self.position)
+                    self.ltp = px
                     try:
                         await self._close_position(
                             self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
@@ -1066,6 +1182,7 @@ class StrategyEngine:
                     self.position = None
             finally:
                 self.inflight = None
+                self._focus, self.ltp = saved_focus, saved_ltp
 
     async def kill(self, reason: str) -> None:
         self.halt_reason = reason
@@ -1133,19 +1250,22 @@ class StrategyEngine:
         atr: float,
         sl: float,
         now: dt.datetime,
+        qty: int | None = None,
+        stop_active: bool = True,
     ) -> int:
         with session_factory()() as db:
             row = TradeLog(
                 date=now.date().isoformat(),
                 symbol=cfg.symbol,
                 direction=direction,
-                qty=int(cfg.qty),
+                qty=int(qty if qty is not None else cfg.qty),
                 entry_time=now.replace(tzinfo=None),
                 entry_price=fill,
                 ma_cross_price=cross_price,
                 atr_at_entry=atr,
                 sl_trigger_price=sl,
                 mode=(cfg.trading_mode or "PAPER").upper(),
+                stop_active=bool(stop_active),
             )
             db.add(row)
             db.commit()
@@ -1241,7 +1361,11 @@ class StrategyEngine:
                 (pos.direction == "LONG" and side == "BEARISH")
                 or (pos.direction == "SHORT" and side == "BULLISH")
             )
-            if pos is None:
+            if pos is None and now.time() >= _entry_cutoff(cfg):
+                # No entry can follow, so no heads-up.
+                text = ""
+                minutes = None
+            elif pos is None:
                 text = upcoming_entry_alert(
                     mode=mode,
                     symbol=symbol,
@@ -1269,7 +1393,7 @@ class StrategyEngine:
             return
         atr = _latest_atr(frame) or float(pos.atr_at_entry or 0)
         ltp = float(self._ltps.get(symbol) or self.ltp or 0)
-        stop_in = minutes_until_stop(pos.direction, ltp, float(pos.sl_trigger), atr)
+        stop_in = minutes_until_stop(pos.direction, ltp, float(pos.sl_trigger), atr) if pos.stop_active else None
         self._gate_warning(
             (symbol, "stop"),
             stop_in,
@@ -1411,8 +1535,13 @@ class StrategyEngine:
         mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
         day = self._session_date
         with session_factory()() as db:
-            modes = db.query(TradeLog.mode).filter(TradeLog.date == day).all()
-        self.trades_today = sum(1 for (row_mode,) in modes if (row_mode or "PAPER").upper() == mode)
+            rows = db.query(TradeLog.mode, TradeLog.exit_reason).filter(TradeLog.date == day).all()
+        # A row Groww never held was not a trade, so it does not use the cap.
+        self.trades_today = sum(
+            1
+            for row_mode, reason in rows
+            if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"
+        )
         return self.trades_today
 
     def release_paper_halt(self) -> bool:
@@ -1433,9 +1562,41 @@ class StrategyEngine:
         return True
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
-        if not market_is_open(now) and self.data_source != "GROWW":
-            return False
-        return now.time() >= _parse_hhmm(cfg.square_off_time)
+        """True once the day's session is over for an open position.
+
+        LIVE: from square-off time while Groww still takes orders (MIS is
+        flattened by the broker after that). PAPER: from square-off time
+        until the next open, weekends included, so a practice book is
+        never carried overnight.
+        """
+        if (cfg.trading_mode or "").upper() == "LIVE":
+            if not market_is_open(now) and self.data_source != "GROWW":
+                return False
+            return now.time() >= _parse_hhmm(cfg.square_off_time)
+        if now.weekday() >= 5:
+            return True
+        t = now.time()
+        return t >= _parse_hhmm(cfg.square_off_time) or t < dt.time(9, 15)
+
+    async def _close_finished_paper_books(self, now: dt.datetime, cfg: BotConfig) -> None:
+        """Square off practice positions at the end of their session.
+
+        Runs even when the bot is paused or stopped. A position opened on
+        an earlier day (for example, held across a restart) closes at once.
+        """
+        if (cfg.trading_mode or "").upper() == "LIVE" or not self.positions:
+            return
+        today = now.astimezone(IST).date() if now.tzinfo else now.date()
+        if self._past_square_off(now, cfg):
+            due = [s for s, p in self.positions.items() if p is not None and (p.mode or "PAPER").upper() != "LIVE"]
+        else:
+            due = [
+                s
+                for s, p in self.positions.items()
+                if p is not None and (p.mode or "PAPER").upper() != "LIVE" and _entry_day(p) < today
+            ]
+        if due:
+            await self._square_off("EOD_SQUARE_OFF", symbols=due)
 
     def _unrealized(self) -> dict | None:
         pos = self.position
@@ -1447,11 +1608,15 @@ class StrategyEngine:
             buy, sell = self.ltp, pos.entry_price
         costs = calculate_charges(buy, sell, pos.qty)
         # Distance to the stop, signed so a positive number means "room left".
-        if pos.direction == "LONG":
-            room = self.ltp - pos.sl_trigger
-        else:
-            room = pos.sl_trigger - self.ltp
-        room_pct = (room / self.ltp * 100) if self.ltp else 0.0
+        # No stop, no distance.
+        room = None
+        room_pct = None
+        if pos.stop_active:
+            if pos.direction == "LONG":
+                room = self.ltp - pos.sl_trigger
+            else:
+                room = pos.sl_trigger - self.ltp
+            room_pct = (room / self.ltp * 100) if self.ltp else 0.0
         return {
             "gross": costs["gross_pnl"],
             "charges": costs["total_charges"],
@@ -1490,7 +1655,8 @@ class StrategyEngine:
                         "direction": book.direction if book else "FLAT",
                         "qty": book.qty if book else 0,
                         "entry_price": book.entry_price if book else None,
-                        "sl_trigger": book.sl_trigger if book else None,
+                        "sl_trigger": book.sl_trigger if book and book.stop_active else None,
+                        "stop_active": book.stop_active if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": self._signals.get(symbol, ""),
                     }
@@ -1508,6 +1674,8 @@ class StrategyEngine:
             "symbol": cfg.symbol if cfg else "",
             "trade_symbols": trade_names(cfg) if cfg else [],
             "books": books,
+            "stop_enabled": True if cfg is None or cfg.use_stop is None else bool(cfg.use_stop),
+            "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
             "day_open": day_open,
@@ -1531,12 +1699,13 @@ class StrategyEngine:
                 "entry_price": pos.entry_price,
                 "ma_cross_price": pos.ma_cross_price,
                 "atr_at_entry": pos.atr_at_entry,
-                "sl_trigger": pos.sl_trigger,
+                "sl_trigger": pos.sl_trigger if pos.stop_active else None,
                 "sl_order_id": pos.sl_order_id,
                 "entry_time": pos.entry_time.isoformat(),
                 "mode": pos.mode,
+                "stop_active": pos.stop_active,
             },
-            "active_sl_trigger": pos.sl_trigger if pos else None,
+            "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
             "estimated_charges": unreal["charges"] if unreal else 0.0,
             "unrealized_net_pnl": unreal["net"] if unreal else 0.0,
@@ -1604,7 +1773,8 @@ class StrategyEngine:
             "candles": candles,
             "markers": markers,
             "entry_price": pos.entry_price if pos else None,
-            "sl_trigger": pos.sl_trigger if pos else None,
+            "sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
+            "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
@@ -1675,6 +1845,7 @@ _ALERT_REASON = {
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
     "NOT_ON_GROWW": "not on Groww — no order sent",
+    "SL_REJECTED": "stop refused — closed at once",
     "MANUAL_CLOSE": "closed from the screen",
 }
 
@@ -1692,16 +1863,17 @@ def fill_alert(
     symbol: str,
     qty: int,
     fill: float,
-    stop: float,
+    stop: float | None,
     when: dt.datetime,
 ) -> str:
     """WhatsApp text for a fill. No account numbers or order ids."""
     clock = when.strftime("%d %b %H:%M:%S")
+    stop_text = f"Stop {stop:,.2f}" if stop is not None else "Stop OFF — no stop order"
     return (
         f"PalTra Order placed\n"
         f"{mode} {direction} {symbol}\n"
         f"Filled {qty} @ {fill:,.2f}\n"
-        f"Stop {stop:,.2f}\n"
+        f"{stop_text}\n"
         f"{clock} IST"
     )
 
@@ -1850,6 +2022,26 @@ def _schedule_whatsapp(message: str) -> None:
             return
 
     loop.create_task(_send())
+
+
+def _entry_cutoff(cfg: BotConfig) -> dt.time:
+    """Last minute a new position may open. Never after the square-off."""
+    try:
+        cutoff = _parse_hhmm(getattr(cfg, "entry_cutoff_time", None) or "15:00")
+    except (TypeError, ValueError):
+        cutoff = dt.time(15, 0)
+    try:
+        square = _parse_hhmm(getattr(cfg, "square_off_time", None) or "15:15")
+    except (TypeError, ValueError):
+        square = dt.time(15, 15)
+    return min(cutoff, square)
+
+
+def _entry_day(pos: OpenPosition) -> dt.date:
+    when = pos.entry_time
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=IST)
+    return when.astimezone(IST).date()
 
 
 def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
@@ -2020,7 +2212,8 @@ def _trade_dict(row: TradeLog) -> dict:
         "entry_price": row.entry_price,
         "ma_cross_price": row.ma_cross_price,
         "atr_at_entry": row.atr_at_entry,
-        "sl_trigger_price": row.sl_trigger_price,
+        "sl_trigger_price": row.sl_trigger_price if row.stop_active is not False else None,
+        "stop_active": row.stop_active is not False,
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
         "exit_reason": row.exit_reason,

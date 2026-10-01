@@ -74,6 +74,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "rsi_long_max": "FLOAT DEFAULT 70",
             "rsi_short_min": "FLOAT DEFAULT 30",
             "rsi_short_max": "FLOAT DEFAULT 60",
+            "entry_cutoff_time": "TEXT DEFAULT '15:00'",
         }
         for column, decl in additions.items():
             if column not in names:
@@ -90,11 +91,22 @@ def _ensure_bot_config_columns(engine) -> None:
         )
 
 
+def _ensure_trade_log_columns(engine) -> None:
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(trade_log)").fetchall()
+        if not rows:
+            return
+        names = {row[1] for row in rows}
+        if "stop_active" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_active BOOLEAN DEFAULT 1")
+
+
 def init_db() -> BotConfig:
     """Create tables and seed a single BotConfig row from settings."""
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_bot_config_columns(engine)
+    _ensure_trade_log_columns(engine)
     SessionLocal = session_factory()
     settings = get_settings()
     with SessionLocal() as db:
@@ -121,6 +133,7 @@ def init_db() -> BotConfig:
                 max_trades_per_day=40,
                 max_trades_bumped=1,
                 square_off_time="15:15",
+                entry_cutoff_time="15:00",
                 trading_mode="PAPER",
             )
             db.add(row)

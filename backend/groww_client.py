@@ -47,7 +47,9 @@ IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
 TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 # Groww's own word for a filled order is EXECUTED. Missing it left a long
 # on the terminal after the exchange stop had already sold the shares.
-TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED", "EXECUTED", "DELIVERY_AWAITED"})
+# TRIGGERED is not here: a triggered stop has only become a working limit
+# order. Reading it as a fill booked a position Groww did not hold.
+TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "EXECUTED", "DELIVERY_AWAITED"})
 _DEAD_ORDER = TERMINAL_CANCELLED | {"REJECTED", "FAILED", "FAILURE"}
 
 
@@ -218,14 +220,18 @@ class CandleSimulator:
         return self._cum
 
     def _seed(self, n: int) -> None:
+        anchor = self.price
         price = self.price
+        # Steps were sized for an 875 stock. Scale them so a 40 stock does
+        # not swing 10% and a 3,000 stock does not sit still.
+        scale = max(anchor, 1.0) / 875.0
         start = dt.datetime.now(IST) - dt.timedelta(minutes=n)
         start = start.replace(second=0, microsecond=0)
         for i in range(n):
             # Drift up, then roll over, so SMA9/SMA21 are populated and a
             # historical cross exists for the chart markers.
-            drift = 0.15 if i < int(n * 0.65) else -0.22
-            shock = self._rng.uniform(-0.6, 0.6)
+            drift = (0.15 if i < int(n * 0.65) else -0.22) * scale
+            shock = self._rng.uniform(-0.6, 0.6) * scale
             o = price
             c = max(1.0, price + drift + shock)
             h = max(o, c) + abs(shock) * 0.4
@@ -243,7 +249,13 @@ class CandleSimulator:
                 }
             )
             price = c
-        self.price = price
+        # Shift the history so it ends on the start price. The tape then
+        # continues from this stock's own price, not wherever the walk wandered.
+        shift = anchor - price
+        for bar in self.candles:
+            for key in ("open", "high", "low", "close"):
+                bar[key] = round(max(0.05, bar[key] + shift), 2)
+        self.price = anchor
         # Forming bar on top of the closed history. Its cumulative volume
         # matches the previous candle until this minute actually trades.
         now = dt.datetime.now(IST).replace(second=0, microsecond=0)
@@ -347,6 +359,11 @@ class GrowwClient:
         self._candle_at: dict[str, float] = {}
         self._retry_after: dict[str, float] = {}
         self._simulators: dict[str, CandleSimulator] = {}
+        # A stock's own price to start a practice tape from when Groww has
+        # not quoted it, such as the entry of a position held over a restart.
+        self._anchors: dict[str, float] = {}
+        # Tapes that started at the demo price because nothing was known.
+        self._unanchored: set[str] = set()
         self._sim_symbol = ""
         _sma_broker = self
         self.adopt_saved_session()
@@ -416,11 +433,37 @@ class GrowwClient:
         self.data_source = "GROWW" if live else "LAST CLOSE"
         return ltp, frame, self.data_source
 
+    def anchor_price(self, symbol: str, price: float | None) -> None:
+        """Start this stock's practice tape from its own price.
+
+        Every tape used to start at 875, so after a restart or without a
+        Groww session every stock was priced near 875, and a square-off
+        closed them all at that one price.
+        """
+        symbol = (symbol or "").upper()
+        try:
+            value = float(price or 0)
+        except (TypeError, ValueError):
+            return
+        if not symbol or not math.isfinite(value) or value <= 0:
+            return
+        self._anchors[symbol] = value
+        if symbol in self._unanchored:
+            # Its tape is still walking from the demo price. Drop it.
+            self._simulators.pop(symbol, None)
+            self._unanchored.discard(symbol)
+
     def _simulator_quote(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
         sim = self._simulators.get(symbol)
         cached = self._quotes.get(symbol)
         if sim is None:
-            start = float(cached[0]) if cached else 875.0
+            if cached:
+                start = float(cached[0])
+            elif symbol in self._anchors:
+                start = self._anchors[symbol]
+            else:
+                start = 875.0
+                self._unanchored.add(symbol)
             sim = CandleSimulator(start_price=start)
             if cached is not None and cached[1] is not None and not getattr(cached[1], "empty", True):
                 sim.adopt(cached[1], start)

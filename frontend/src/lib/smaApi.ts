@@ -44,6 +44,8 @@ export type SmaConfig = {
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;
+  /** HH:MM. No new entries from this time. */
+  entry_cutoff_time?: string;
   trading_mode: "PAPER" | "LIVE";
 };
 
@@ -72,9 +74,13 @@ export type SmaState = {
     qty: number;
     entry_price: number | null;
     sl_trigger: number | null;
+    stop_active?: boolean | null;
     ltp: number | null;
     note?: string;
   }[];
+  /** use_stop in the config. False means new entries get no stop order. */
+  stop_enabled?: boolean;
+  atr_multiplier?: number;
   exchange: string;
   ltp: number;
   day_open?: number | null;
@@ -96,10 +102,12 @@ export type SmaState = {
     entry_price: number;
     ma_cross_price: number;
     atr_at_entry: number;
-    sl_trigger: number;
+    /** null when this position was entered with no stop. */
+    sl_trigger: number | null;
     sl_order_id: string;
     entry_time: string;
     mode: string;
+    stop_active?: boolean;
   };
   active_sl_trigger: number | null;
   unrealized_gross_pnl: number;
@@ -139,6 +147,7 @@ export type ChartPayload = {
   markers: { time: number; direction: "LONG" | "SHORT"; price: number; kind: string }[];
   entry_price: number | null;
   sl_trigger: number | null;
+  atr_multiplier?: number;
 };
 
 export type TradeRow = {
@@ -151,7 +160,9 @@ export type TradeRow = {
   entry_price: number;
   ma_cross_price: number;
   atr_at_entry: number;
-  sl_trigger_price: number;
+  /** null when the trade had no stop. */
+  sl_trigger_price: number | null;
+  stop_active?: boolean;
   exit_time: string | null;
   exit_price: number | null;
   exit_reason: string | null;

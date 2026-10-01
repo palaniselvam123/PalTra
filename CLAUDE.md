@@ -136,6 +136,12 @@ There are separate switches. All of them boot safe.
   session/`GROWW_ACCESS_TOKEN`. In PAPER the client fills locally at the
   candle close/LTP, using real Groww candles when a token works and the market
   is open, otherwise the built-in `CandleSimulator`.
+- **Market hours apply to PAPER too.** No new entry (cross or force order)
+  outside the cash session, before 09:20, or after `entry_cutoff_time`
+  (default 15:00, never later than `square_off_time`). After the cut-off an
+  opposite cross still closes a position but does not open the reverse. Practice
+  positions are squared off at `square_off_time` even when the bot is paused,
+  and a practice position from an earlier day is closed on the next tick.
 
 Trades are tagged with their mode (`PAPER`/`LIVE`, `paper`/`live`) so the
 books stay separate in reports and CSV exports.

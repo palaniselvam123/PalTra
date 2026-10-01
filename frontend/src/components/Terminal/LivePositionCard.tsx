@@ -7,12 +7,25 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
   const pos = state?.position;
   const direction = pos?.direction;
   const tone = direction === "LONG" ? "text-[#10B981]" : direction === "SHORT" ? "text-[#F43F5E]" : "text-slate-400";
+  const mult = state?.atr_multiplier ?? 1.5;
+  // The open position decides. With no position, the setting for the next entry does.
+  const stopOff = pos ? pos.stop_active === false : state?.stop_enabled === false;
 
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
         Live position{state?.symbol ? ` · ${state.symbol}` : ""}
       </div>
+      {state != null && stopOff && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300"
+        >
+          {pos
+            ? "STOP-LOSS OFF — this position has no stop order. Only an opposite cross, square-off, or Kill closes it."
+            : "STOP-LOSS OFF — new entries will be sent with no stop order."}
+        </div>
+      )}
       <div className={clsx("mt-1 font-mono text-base font-semibold leading-snug sm:text-lg", tone)}>
         {state == null
           ? pending
@@ -38,13 +51,15 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         />
         <Row label="RSI 14" value={state?.rsi14 == null ? "—" : state.rsi14.toFixed(1)} />
         <Row label="ATR 14" value={px(state?.atr14)} />
-        <Row label="1.5× ATR stop" value={px(state?.active_sl_trigger)} />
+        <Row label={`${mult}× ATR stop`} value={stopOff ? "OFF" : px(state?.active_sl_trigger)} />
         <Row
           label="Distance to SL"
           value={
-            state?.sl_room == null
-              ? "—"
-              : `${state.sl_room >= 0 ? "" : "−"}₹${Math.abs(state.sl_room).toFixed(2)} (${state.sl_room_pct?.toFixed(2)}%)`
+            stopOff
+              ? "No stop"
+              : state?.sl_room == null
+                ? "—"
+                : `${state.sl_room >= 0 ? "" : "−"}₹${Math.abs(state.sl_room).toFixed(2)} (${state.sl_room_pct?.toFixed(2)}%)`
           }
         />
         <Row label="ADX 14" value={state?.adx14 == null ? "—" : state.adx14.toFixed(1)} />
@@ -69,7 +84,9 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
                       : "text-slate-500"
                 }
               >
-                {book.direction === "FLAT" ? "FLAT" : `${book.direction} ${book.qty}`}
+                {book.direction === "FLAT"
+                  ? "FLAT"
+                  : `${book.direction} ${book.qty}${book.stop_active === false ? " · NO STOP" : ""}`}
               </span>
             </div>
           ))}

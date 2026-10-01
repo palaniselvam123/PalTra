@@ -26,12 +26,15 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE
+    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
     net_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     mode: Mapped[str] = mapped_column(String, default="PAPER")  # PAPER | LIVE
+    # False when the trade was entered with no stop (use_stop off). The
+    # sl_trigger_price on such a row is only the level a stop would have used.
+    stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class BotConfig(Base):
@@ -70,4 +73,7 @@ class BotConfig(Base):
     # 15 is kept.
     max_trades_bumped: Mapped[int] = mapped_column(Integer, default=1)
     square_off_time: Mapped[str] = mapped_column(String, default="15:15")
+    # No new position from this time. Open ones still close on a cross,
+    # the stop, or the square-off.
+    entry_cutoff_time: Mapped[str] = mapped_column(String, default="15:00")
     trading_mode: Mapped[str] = mapped_column(String, default="PAPER")
