@@ -78,6 +78,16 @@ def _ensure_bot_config_columns(engine) -> None:
         for column, decl in additions.items():
             if column not in names:
                 conn.exec_driver_sql(f"ALTER TABLE bot_config ADD COLUMN {column} {decl}")
+        if "max_trades_bumped" not in names:
+            conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN max_trades_bumped INTEGER DEFAULT 0")
+        conn.exec_driver_sql(
+            "UPDATE bot_config SET max_trades_per_day = 40, max_trades_bumped = 1 "
+            "WHERE (max_trades_bumped IS NULL OR max_trades_bumped = 0) AND max_trades_per_day = 15"
+        )
+        conn.exec_driver_sql(
+            "UPDATE bot_config SET max_trades_bumped = 1 "
+            "WHERE max_trades_bumped IS NULL OR max_trades_bumped = 0"
+        )
 
 
 def init_db() -> BotConfig:
@@ -108,7 +118,8 @@ def init_db() -> BotConfig:
                 use_adx_filter=False,
                 adx_threshold=20.0,
                 max_daily_loss=5000.0,
-                max_trades_per_day=15,
+                max_trades_per_day=40,
+                max_trades_bumped=1,
                 square_off_time="15:15",
                 trading_mode="PAPER",
             )

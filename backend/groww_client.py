@@ -204,7 +204,18 @@ class CandleSimulator:
         self.candles: list[dict] = []
         self._minute_key: str | None = None
         self._rng = random.Random(21)
+        self._cum = 0
+        self._cum_day = None
         self._seed(120)
+
+    def _cumulative(self, ts: int, traded: int) -> int:
+        """Session running total. `volume` on these candles matches Groww."""
+        day = dt.datetime.fromtimestamp(int(ts), tz=IST).date()
+        if self._cum_day != day:
+            self._cum_day = day
+            self._cum = 0
+        self._cum += max(0, int(traded))
+        return self._cum
 
     def _seed(self, n: int) -> None:
         price = self.price
@@ -220,6 +231,7 @@ class CandleSimulator:
             h = max(o, c) + abs(shock) * 0.4
             l = min(o, c) - abs(shock) * 0.3
             ts = start + dt.timedelta(minutes=i)
+            traded = self._rng.randint(5_000, 40_000)
             self.candles.append(
                 {
                     "ts": int(ts.timestamp()),
@@ -227,12 +239,13 @@ class CandleSimulator:
                     "high": round(h, 2),
                     "low": round(l, 2),
                     "close": round(c, 2),
-                    "volume": self._rng.randint(5_000, 40_000),
+                    "volume": self._cumulative(int(ts.timestamp()), traded),
                 }
             )
             price = c
         self.price = price
-        # Forming bar on top of the closed history.
+        # Forming bar on top of the closed history. Its cumulative volume
+        # matches the previous candle until this minute actually trades.
         now = dt.datetime.now(IST).replace(second=0, microsecond=0)
         self._minute_key = now.strftime("%Y-%m-%d %H:%M")
         self.candles.append(
@@ -242,7 +255,7 @@ class CandleSimulator:
                 "high": round(self.price, 2),
                 "low": round(self.price, 2),
                 "close": round(self.price, 2),
-                "volume": 0,
+                "volume": self._cumulative(int(now.timestamp()), 0),
             }
         )
 
@@ -259,21 +272,22 @@ class CandleSimulator:
             # bar stays at [-2] once the new forming bar is appended — that
             # is the bar the strategy is allowed to read.
             self._minute_key = key
+            ts = int(now.replace(second=0, microsecond=0).timestamp())
             self.candles.append(
                 {
-                    "ts": int(now.replace(second=0, microsecond=0).timestamp()),
+                    "ts": ts,
                     "open": px,
                     "high": px,
                     "low": px,
                     "close": px,
-                    "volume": 1,
+                    "volume": self._cumulative(ts, 0),
                 }
             )
         else:
             bar["close"] = px
             bar["high"] = round(max(bar["high"], px), 2)
             bar["low"] = round(min(bar["low"], px), 2)
-            bar["volume"] = int(bar["volume"]) + self._rng.randint(10, 80)
+            bar["volume"] = self._cumulative(int(bar["ts"]), self._rng.randint(10, 80))
         return px
 
     def adopt(self, frame: pd.DataFrame, price: float) -> None:
@@ -305,6 +319,9 @@ class CandleSimulator:
         self.price = float(price) if price and price > 0 else float(rows[-1]["close"])
         last = dt.datetime.fromtimestamp(rows[-1]["ts"], tz=IST)
         self._minute_key = last.strftime("%Y-%m-%d %H:%M")
+        # Adopted Groww frames already store the session running total.
+        self._cum = int(float(rows[-1].get("volume") or 0))
+        self._cum_day = last.date()
 
     def frame(self) -> pd.DataFrame:
         return pd.DataFrame(self.candles)
@@ -806,6 +823,10 @@ def _apply_ltp(frame: pd.DataFrame, ltp: float) -> pd.DataFrame:
     last_ts = int(frame.iloc[-1]["ts"])
     now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
     if now_ts > last_ts:
+        # No shares have printed on the new minute yet, so the running
+        # total stays where the previous candle left it. A zero here would
+        # look like the cumulative counter fell.
+        carried = int(float(frame.iloc[-1]["volume"] or 0))
         return pd.concat(
             [
                 frame,
@@ -817,7 +838,7 @@ def _apply_ltp(frame: pd.DataFrame, ltp: float) -> pd.DataFrame:
                             "high": ltp,
                             "low": ltp,
                             "close": ltp,
-                            "volume": 0,
+                            "volume": carried,
                         }
                     ]
                 ),

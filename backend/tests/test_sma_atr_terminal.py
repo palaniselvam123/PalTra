@@ -1428,8 +1428,15 @@ def test_close_without_a_position_is_refused(api):
 
 
 def _tape(closes: list[float], volumes: list[int] | None = None, body: float = 0.4) -> pd.DataFrame:
+    """Build a frame whose `volume` column is a session running total.
+
+    `volumes` are the shares traded in each minute. The column stores the
+    cumulative sum, which is what Groww puts on a 1-minute candle.
+    """
     rows = []
+    running = 0
     for i, close in enumerate(closes):
+        running += 1000 if volumes is None else volumes[i]
         rows.append(
             {
                 "ts": 1_758_600_000 + i * 60,
@@ -1437,7 +1444,7 @@ def _tape(closes: list[float], volumes: list[int] | None = None, body: float = 0
                 "high": close + 0.5,
                 "low": close - 0.5,
                 "close": close,
-                "volume": 1000 if volumes is None else volumes[i],
+                "volume": running,
             }
         )
     return pd.DataFrame(rows)
@@ -1532,3 +1539,300 @@ async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine):
         await engine.force_order("SUNTV")
     assert engine.status == "STOPPED"
     assert engine.broker.events == []
+
+
+def _at_close(frame: pd.DataFrame, when: dt.datetime) -> pd.DataFrame:
+    """Put the last closed bar on `when`, floored to the minute."""
+    when = when.astimezone(IST).replace(second=0, microsecond=0)
+    out = frame.copy()
+    delta = int(when.timestamp()) - int(out.iloc[-2]["ts"])
+    out["ts"] = out["ts"] + delta
+    return out
+
+
+def _arm(symbols: list[str], chart: str | None = None) -> None:
+    from models import BotConfig
+    import database
+
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.trade_symbols = ",".join(symbols)
+        row.symbol = chart or symbols[0]
+        row.use_adx_filter = False
+        row.qty = 1
+        row.trading_mode = "PAPER"
+        db.commit()
+
+
+@pytest.mark.asyncio
+async def test_every_armed_symbol_can_open_on_the_same_cross(engine, monkeypatch):
+    """A cross on ADANIENSOL must not be dropped because ANTELOPUS ordered first."""
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    names = ["ANTELOPUS", "ADANIENSOL", "KOTAKBANK", "AZAD"]
+    _arm(names, "ADANIENSOL")
+    now = dt.datetime(2026, 10, 1, 12, 21, 5, tzinfo=IST)
+    raw = _at_close(_ohlcv([100.0] * 30 + [100, 100, 160, 100]), now - dt.timedelta(minutes=1))
+    frames = {name: raw.copy() for name in names}
+
+    async def refresh(symbol):
+        frame = frames[symbol]
+        return float(frame.iloc[-1]["close"]), frame.copy(), "GROWW"
+
+    engine.broker.refresh = refresh
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    await engine.tick(now)
+    assert set(engine.positions) == set(names)
+    for name in names:
+        assert engine.positions[name].direction == "LONG"
+
+
+@pytest.mark.asyncio
+async def test_a_late_candle_is_judged_when_it_arrives(engine, monkeypatch):
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    _arm(["ADANIENSOL"])
+    now = dt.datetime(2026, 10, 1, 12, 21, 5, tzinfo=IST)
+    stale = _at_close(_ohlcv([100.0] * 30 + [100, 100, 160, 100]), now - dt.timedelta(minutes=3))
+    frames = {"ADANIENSOL": stale}
+
+    async def refresh(symbol):
+        frame = frames[symbol]
+        return float(frame.iloc[-1]["close"]), frame.copy(), "GROWW"
+
+    engine.broker.refresh = refresh
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    await engine.tick(now)
+    assert "ADANIENSOL" not in engine.positions
+    assert "closed candle" in engine._signals["ADANIENSOL"]
+
+    frames["ADANIENSOL"] = _at_close(
+        _ohlcv([100.0] * 30 + [100, 100, 160, 100]), now - dt.timedelta(minutes=1)
+    )
+    await engine.tick(now)
+    assert engine.positions["ADANIENSOL"].direction == "LONG"
+
+
+@pytest.mark.asyncio
+async def test_a_cross_one_bar_late_still_orders(engine, monkeypatch):
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    from strategy_engine import _signal_on_unjudged_bars
+
+    # The cross completed on the previous closed bar. The newest bar did not cross again.
+    frame = _gap_frame([0, 0, 1, 1])
+    signal, signal_frame = _signal_on_unjudged_bars(frame, judged_ts=int(frame.iloc[-4]["ts"]))
+    assert signal == "BULLISH"
+    assert signal_frame is not None
+    assert int(signal_frame.iloc[-2]["ts"]) == int(frame.iloc[-3]["ts"])
+
+    missed = _gap_frame([0, 1, 1, 1, 1])
+    none_signal, _none_frame = _signal_on_unjudged_bars(missed, judged_ts=0)
+    assert none_signal is None
+
+    _arm(["AZAD"])
+    cfg = engine.load_config()
+    cfg.symbol = "AZAD"
+    cfg.use_adx_filter = False
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    engine._judged_bar["AZAD"] = int(frame.iloc[-4]["ts"])
+    now = dt.datetime(2026, 10, 1, 12, 21, 5, tzinfo=IST)
+    result = await engine.on_minute(now, cfg, frame)
+    assert "opened LONG" in result
+    assert engine.positions["AZAD"].direction == "LONG"
+
+    engine.positions.clear()
+    engine.broker.events.clear()
+    engine._judged_bar["AZAD"] = 0
+    quiet = await engine.on_minute(now, cfg, missed)
+    assert "waiting for a new cross" in quiet
+    assert "no order" in quiet
+    assert "RSI are off" in quiet
+    assert "SMA 9 is above SMA 21" in quiet
+    assert "AZAD" not in engine.positions
+
+
+@pytest.mark.asyncio
+async def test_an_in_flight_order_does_not_drop_the_other_cross(engine, monkeypatch):
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    _arm(["KOTAKBANK"])
+    now = dt.datetime(2026, 10, 1, 12, 21, 5, tzinfo=IST)
+    raw = _at_close(_ohlcv([100.0] * 30 + [100, 100, 160, 100]), now - dt.timedelta(minutes=1))
+
+    async def refresh(symbol):
+        return float(raw.iloc[-1]["close"]), raw.copy(), "GROWW"
+
+    engine.broker.refresh = refresh
+    engine.status = "RUNNING"
+    engine.data_source = "GROWW"
+    engine.inflight = "PENDING"
+    await engine.tick(now)
+    assert "KOTAKBANK" not in engine.positions
+    assert engine._judged_bar.get("KOTAKBANK") != int(raw.iloc[-2]["ts"])
+    engine.inflight = None
+    await engine.tick(now)
+    assert engine.positions["KOTAKBANK"].direction == "LONG"
+
+
+def test_twenty_four_stocks_can_be_armed_and_the_twenty_fifth_cannot(api):
+    from strategy_engine import MAX_TRADE_SYMBOLS
+
+    assert MAX_TRADE_SYMBOLS == 24
+    current = api.get("/api/config").json()["trade_symbols"]
+    for name in current:
+        cleared = api.post("/api/trade-symbols", json={"symbol": name, "armed": False})
+        assert cleared.status_code == 200, cleared.text
+    for i in range(24):
+        res = api.post("/api/trade-symbols", json={"symbol": f"S{i}", "armed": True})
+        assert res.status_code == 200, res.text
+    blocked = api.post("/api/trade-symbols", json={"symbol": "S24", "armed": True})
+    assert blocked.status_code == 409
+    assert "24" in blocked.json()["detail"]
+    assert len(api.get("/api/config").json()["trade_symbols"]) == 24
+
+
+def test_the_old_daily_trade_cap_is_raised_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/cap.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    from config import get_settings
+
+    get_settings.cache_clear()
+    import database
+    from models import BotConfig
+
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.max_trades_per_day = 15
+        row.max_trades_bumped = 0
+        db.commit()
+    database._ensure_bot_config_columns(database.get_engine())
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        assert row.max_trades_per_day == 40
+        assert row.max_trades_bumped == 1
+        row.max_trades_per_day = 15
+        db.commit()
+    database._ensure_bot_config_columns(database.get_engine())
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        assert row.max_trades_per_day == 15
+    database.reset_engine()
+    get_settings.cache_clear()
+
+
+def _open_book(symbol: str = "ADANIENSOL") -> None:
+    from strategy_engine import OpenPosition
+    from main import engine
+
+    engine.positions[symbol] = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=1340.9,
+        ma_cross_price=1340.9,
+        atr_at_entry=8.0,
+        sl_trigger=1328.0,
+        sl_order_id="SL-LIVE",
+        entry_order_id="E-LIVE",
+        entry_time=dt.datetime(2026, 10, 1, 12, 30, tzinfo=IST),
+        trade_id=1,
+        mode="LIVE",
+    )
+
+
+def test_raising_the_trade_cap_unlocks_start_and_keeps_the_open_order(api):
+    from database import session_factory
+    from models import BotConfig
+    from main import engine
+
+    engine.positions.clear()
+    _open_book()
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.max_trades_per_day = 15
+        row.max_trades_bumped = 1
+        row.qty = 1
+        db.commit()
+    engine.load_config()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_trades_per_day (15) reached"
+    engine.trades_today = 15
+
+    blocked = api.post("/api/bot/start")
+    assert blocked.status_code == 423
+    assert blocked.json()["detail"] == "max_trades_per_day (15) reached"
+    assert engine.positions["ADANIENSOL"].direction == "LONG"
+    assert engine.status == "HALTED"
+
+    saved = api.put("/api/config", json={"max_trades_per_day": 40, "qty": 1})
+    assert saved.status_code == 200
+    assert saved.json()["max_trades_per_day"] == 40
+    assert engine.status == "STOPPED"
+    assert engine.halt_reason == ""
+    assert engine.positions["ADANIENSOL"].entry_order_id == "E-LIVE"
+    assert engine.trades_today == 15
+
+    started = api.post("/api/bot/start")
+    assert started.status_code == 200
+    assert started.json()["bot_status"] == "RUNNING"
+    assert engine.positions["ADANIENSOL"].direction == "LONG"
+    assert engine.trades_today == 15
+
+
+def test_a_loss_halt_stays_locked_when_the_trade_cap_is_raised(api):
+    from main import engine
+
+    engine.positions.clear()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_daily_loss ₹5000 breached"
+    engine.trades_today = 3
+    saved = api.put("/api/config", json={"max_trades_per_day": 40})
+    assert saved.status_code == 200
+    assert engine.status == "HALTED"
+    blocked = api.post("/api/bot/start")
+    assert blocked.status_code == 423
+    assert "max_daily_loss" in blocked.json()["detail"]
+
+
+def test_restart_remembers_how_many_live_trades_were_taken(api):
+    from database import session_factory
+    from models import BotConfig, TradeLog
+    from main import engine
+
+    engine._session_date = "2026-10-01"
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.trading_mode = "LIVE"
+        db.commit()
+        for i in range(15):
+            db.add(
+                TradeLog(
+                    date="2026-10-01",
+                    symbol="KOTAKBANK",
+                    direction="LONG",
+                    qty=1,
+                    entry_time=dt.datetime(2026, 10, 1, 10, i % 60),
+                    entry_price=1900 + i,
+                    ma_cross_price=1900 + i,
+                    atr_at_entry=5,
+                    sl_trigger_price=1890,
+                    mode="LIVE",
+                )
+            )
+        db.add(
+            TradeLog(
+                date="2026-10-01",
+                symbol="KIRLOSFER",
+                direction="LONG",
+                qty=1,
+                entry_time=dt.datetime(2026, 10, 1, 10, 0),
+                entry_price=100,
+                ma_cross_price=100,
+                atr_at_entry=1,
+                sl_trigger_price=98,
+                mode="PAPER",
+            )
+        )
+        db.commit()
+    assert engine.restore_trades_today() == 15

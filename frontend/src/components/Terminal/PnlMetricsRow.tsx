@@ -8,7 +8,7 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
   const k = state?.kpis;
   const b = k?.charge_breakdown;
   const [open, setOpen] = useState(false);
-  const cap = state?.max_trades ?? 15;
+  const cap = state?.max_trades ?? 40;
   const book =
     state?.mode === "LIVE"
       ? "NSE live book"

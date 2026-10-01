@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -28,8 +29,18 @@ import pandas as pd
 from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
-from indicators import closed_candle_cross, enrich, entry_filter_reason, round_to_nse_tick
+from indicators import (
+    closed_candle_cross,
+    closed_technical_snapshot,
+    enrich,
+    entry_filter_reason,
+    format_signal_report,
+    round_to_nse_tick,
+    sma_gap_pct,
+)
 from models import BotConfig, TradeLog
+
+logger = logging.getLogger("sma.strategy")
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -78,7 +89,7 @@ def _parse_hhmm(value: str) -> dt.time:
     return dt.time(int(hh), int(mm))
 
 
-MAX_TRADE_SYMBOLS = 4
+MAX_TRADE_SYMBOLS = 24
 
 
 def trade_names(cfg: BotConfig) -> list[str]:
@@ -128,7 +139,9 @@ class StrategyEngine:
         self._unbound_position: OpenPosition | None = None
         self._frames: dict[str, pd.DataFrame] = {}
         self._ltps: dict[str, float] = {}
-        self._minutes: dict[str, str] = {}
+        # Closed-bar timestamp already judged for an entry. A bar is not
+        # marked here until its candle is actually on the tape.
+        self._judged_bar: dict[str, int] = {}
         self._signals: dict[str, str] = {}
         # symbol -> timestamp of the closed bar already on the tape when the
         # bot was started or the stock was armed. None means the first bar
@@ -141,6 +154,13 @@ class StrategyEngine:
         self.sma21 = None
         self.atr14 = None
         self.adx14 = None
+        self.sma_gap = None
+        self.sma_gap_pct = None
+        self.vwap = None
+        self.minute_volume = None
+        self.avg_minute_volume = None
+        self.volume_ratio = None
+        self.rsi14 = None
         self.data_source = "SIMULATOR"
         self.last_error = ""
         self.last_signal = ""
@@ -264,8 +284,9 @@ class StrategyEngine:
         self.broker.set_mode(cfg.trading_mode)
         view = (cfg.symbol or "").upper()
         armed = trade_names(cfg)
-        # The chart can be a stock the bot is not ordering. Open books stay watched.
-        watch = list(dict.fromkeys([*self.positions.keys(), *armed, view]))[: MAX_TRADE_SYMBOLS + 1]
+        # Armed names come first so a chart symbol cannot crowd one of them
+        # out of the quote loop. Open books stay watched after they are disarmed.
+        watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
         self._focus = view
         await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
@@ -297,12 +318,21 @@ class StrategyEngine:
             self.candles = enriched
             if not enriched.empty and len(enriched) >= 2:
                 # Display values from the last CLOSED bar so the UI does not
-                # repaint SMA/ATR with the forming tick.
+                # repaint SMA/ATR with the forming tick. These are the same
+                # readings the order path uses.
                 closed = enriched.iloc[-2]
                 self.sma9 = _finite(closed.get("sma_9"))
                 self.sma21 = _finite(closed.get("sma_21"))
                 self.atr14 = _finite(closed.get("atr_14"))
                 self.adx14 = _finite(closed.get("adx_14"))
+                snap = closed_technical_snapshot(enriched)
+                self.sma_gap = snap.sma_gap if snap else None
+                self.sma_gap_pct = snap.sma_gap_pct if snap else None
+                self.vwap = snap.vwap if snap else None
+                self.minute_volume = snap.minute_volume if snap else None
+                self.avg_minute_volume = snap.average_previous_20_volume if snap else None
+                self.volume_ratio = snap.volume_ratio if snap else None
+                self.rsi14 = snap.rsi14 if snap else None
 
         self._focus = view
         if view in self._ltps:
@@ -326,71 +356,122 @@ class StrategyEngine:
         if self.status != "RUNNING":
             return
 
-        minute_key = now.strftime("%Y-%m-%d %H:%M")
         for symbol in armed:
-            if self._minutes.get(symbol) == minute_key:
-                continue
             frame = self._frames.get(symbol)
             if frame is None or getattr(frame, "empty", True) or len(frame) < 3:
+                continue
+            closed_ts = _closed_bar_ts(frame)
+            if closed_ts is None:
+                continue
+            if _candle_is_behind(closed_ts, now):
+                # The bar that just closed is not in this frame yet. Judging
+                # now would burn the cross, and the next minute would no
+                # longer see it.
+                self._signals[symbol] = f"{symbol} waiting for the closed candle"
+                self.last_signal = self._signals[symbol]
+                continue
+            if self._judged_bar.get(symbol) == closed_ts:
                 continue
             enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
-            await self.on_minute(now, _cfg_for(cfg, symbol), enriched)
-            self._minutes[symbol] = minute_key
+            result = await self.on_minute(now, _cfg_for(cfg, symbol), enriched)
+            if (result or "").startswith("blocked — order PENDING"):
+                continue
+            judged = _closed_bar_ts(enriched) or closed_ts
+            if judged is not None:
+                self._judged_bar[symbol] = judged
             if self.status != "RUNNING":
                 break
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
 
-    async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> None:
+    async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> str:
         if self.status != "RUNNING":
-            return
+            return ""
         if self._past_square_off(now, cfg):
             await self._square_off("EOD_SQUARE_OFF")
             if self.status != "DAY_COMPLETED" and not self.positions:
                 self.status = "DAY_COMPLETED"
                 self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
                 self._announce_down("DAY_COMPLETED", self.halt_reason)
-            return
+            return self.halt_reason or "square-off"
 
         # A real last-close tape must not open a position after the bell.
         # The simulator still demonstrates signals when no NSE quote exists.
         if not market_is_open(now) and self.data_source != "SIMULATOR":
             self.last_signal = "market closed — showing the last NSE price"
-            return
+            return self.last_signal
 
         # Opening-auction buffer applies whenever we are inside a real session.
         if market_is_open(now) and now.time() < dt.time(9, 20):
             self.last_signal = "skipped — opening auction buffer (09:15–09:20)"
-            return
+            return self.last_signal
 
         if frame is None or frame.empty:
-            return
+            return ""
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
         self._warn_upcoming(symbol, frame, cfg, now)
-        cross = closed_candle_cross(frame)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
         # is the one that may trade. Being flat does not enter early.
         if self._cross_is_stale(symbol, frame):
-            text = f"{symbol} waiting for the next MA cross"
+            text = f"{symbol} no order — that cross already printed, waiting for a new cross. {_filter_note(cfg)}"
             self._signals[symbol] = text
             self.last_signal = text
-            return
-        signal = cross
-        if signal is None:
-            text = (
-                f"{symbol} holding"
-                if symbol in self.positions
-                else f"{symbol} flat — waiting for an SMA cross"
+            return text
+        signal, signal_frame = _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
+        if signal is None or signal_frame is None:
+            relation = _sma_side_text(frame)
+            if symbol in self.positions:
+                text = f"{symbol} holding"
+            elif relation:
+                text = (
+                    f"{symbol} no order — {relation} already, waiting for a new cross. {_filter_note(cfg)}"
+                )
+            else:
+                text = f"{symbol} no order — waiting for an SMA cross. {_filter_note(cfg)}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        return await self.apply_signal(signal, signal_frame, cfg, now)
+
+    def _log_decision(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, decision: str, note: str = "") -> None:
+        """Write the closed-candle readings once per entry evaluation.
+
+        A failure here must not change the order. The report is diagnostic.
+        """
+        try:
+            side = "LONG" if signal == "BULLISH" else "SHORT"
+            action = "BUY" if side == "LONG" else "SELL"
+            snap = closed_technical_snapshot(frame)
+            if side == "LONG":
+                rsi_min = float(getattr(cfg, "rsi_long_min", 40.0) or 40.0)
+                rsi_max = float(getattr(cfg, "rsi_long_max", 70.0) or 70.0)
+            else:
+                rsi_min = float(getattr(cfg, "rsi_short_min", 30.0) or 30.0)
+                rsi_max = float(getattr(cfg, "rsi_short_max", 60.0) or 60.0)
+            logger.info(
+                "\n%s",
+                format_signal_report(
+                    symbol=(cfg.symbol or "").upper(),
+                    evaluated_at=now.strftime("%Y-%m-%d %H:%M:%S IST"),
+                    action=action,
+                    snap=snap,
+                    use_vwap=bool(getattr(cfg, "use_vwap", False)),
+                    use_volume=bool(getattr(cfg, "use_volume", False)),
+                    volume_multiple=float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0),
+                    use_rsi=bool(getattr(cfg, "use_rsi", False)),
+                    rsi_min=rsi_min,
+                    rsi_max=rsi_max,
+                    decision=decision,
+                    note=note,
+                ),
             )
-            self._signals[symbol] = text
-            self.last_signal = text
-            return
-        await self.apply_signal(signal, frame, cfg, now)
+        except Exception:  # noqa: BLE001
+            logger.exception("signal report failed")
 
     async def apply_signal(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
         """Stop-and-reverse on a closed-candle cross. Returns a short status."""
@@ -398,7 +479,12 @@ class StrategyEngine:
         curr = frame.iloc[-2]
         atr = _finite(curr.get("atr_14"))
         if atr is None or atr <= 0:
-            return "skipped — ATR not ready"
+            text = "skipped — ATR not ready"
+            self.last_signal = text
+            if self._focus:
+                self._signals[self._focus] = text
+            self._log_decision(signal, frame, cfg, now, text)
+            return text
         cross_price = round_to_nse_tick(float(curr["close"]))
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
@@ -407,6 +493,9 @@ class StrategyEngine:
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
                 self.last_signal = "blocked — order PENDING/TRANSIT"
+                if self._focus:
+                    self._signals[self._focus] = self.last_signal
+                self._log_decision(signal, frame, cfg, now, self.last_signal)
                 return self.last_signal
             self.inflight = "PENDING"
             try:
@@ -422,9 +511,11 @@ class StrategyEngine:
                 )
                 self.last_signal = result
                 self._signals[self._focus] = result
+                self._log_decision(signal, frame, cfg, now, result)
                 return result
             except SlCancelFailed as exc:
                 self._note_broker_block(exc)
+                self._log_decision(signal, frame, cfg, now, self.last_signal)
                 return self.last_signal
             finally:
                 self.inflight = None
@@ -478,7 +569,10 @@ class StrategyEngine:
             name = (symbol or "").upper()
             if not name:
                 continue
-            self._skip_cross_until[name] = _closed_bar_ts(self._frames.get(name))
+            closed = _closed_bar_ts(self._frames.get(name))
+            self._skip_cross_until[name] = closed
+            if closed is not None:
+                self._judged_bar[name] = closed
 
     def _cross_is_stale(self, symbol: str, frame: pd.DataFrame) -> bool:
         if symbol not in self._skip_cross_until:
@@ -540,6 +634,14 @@ class StrategyEngine:
             raise ForceRefused(f"{name} ATR is not ready")
         blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", cfg, price=price)
         if blocked:
+            self._log_decision(
+                side,
+                enriched,
+                _cfg_for(cfg, name),
+                _ist_now(),
+                blocked,
+                note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
+            )
             raise ForceRefused(blocked)
         if self.status != "RUNNING":
             self.status = "RUNNING"
@@ -572,6 +674,14 @@ class StrategyEngine:
                 self.inflight = None
         self.last_signal = result
         self._signals[name] = result
+        self._log_decision(
+            side,
+            enriched,
+            _cfg_for(cfg, name),
+            now,
+            result,
+            note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
+        )
         return result
 
     async def close_symbol(self, symbol: str) -> str:
@@ -1235,7 +1345,8 @@ class StrategyEngine:
     def release_manual_panic(self) -> bool:
         """A panic flattens the book. Pressing Start again may trade the same day.
 
-        A loss-limit or trade-cap halt stays locked.
+        A loss-limit halt stays locked. A trade-cap halt is released only when
+        the saved cap is now above the trades already taken.
         """
         if self.status != "HALTED":
             return False
@@ -1244,6 +1355,43 @@ class StrategyEngine:
         self.status = "STOPPED"
         self.halt_reason = ""
         return True
+
+    def release_trade_cap(self, new_max: int | None = None) -> bool:
+        """Resume after a raised daily cap. Open positions are left alone.
+
+        A loss-limit halt is not this reason, so it stays locked.
+        """
+        if self.status != "HALTED":
+            return False
+        if not (self.halt_reason or "").startswith("max_trades_per_day"):
+            return False
+        cfg = self._cfg_cache
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        cap = int(new_max if new_max is not None else (cfg.max_trades_per_day if cfg else 0))
+        if self.trades_today >= cap:
+            self.halt_reason = f"max_trades_per_day ({cap}) reached"
+            return False
+        self.status = "STOPPED"
+        self.halt_reason = ""
+        self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
+        return True
+
+    def restore_trades_today(self) -> int:
+        """A restart must not forget how many entries this session already took."""
+        cfg = self._cfg_cache
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
+        day = self._session_date
+        with session_factory()() as db:
+            modes = db.query(TradeLog.mode).filter(TradeLog.date == day).all()
+        self.trades_today = sum(1 for (row_mode,) in modes if (row_mode or "PAPER").upper() == mode)
+        return self.trades_today
 
     def release_paper_halt(self) -> bool:
         """Drop a practice halt so confirming live is not blocked by the simulator."""
@@ -1344,6 +1492,13 @@ class StrategyEngine:
             "day_change_pct": day_change,
             "sma9": self.sma9,
             "sma21": self.sma21,
+            "sma_gap": self.sma_gap,
+            "sma_gap_pct": self.sma_gap_pct,
+            "vwap": self.vwap,
+            "minute_volume": self.minute_volume,
+            "avg_minute_volume": self.avg_minute_volume,
+            "volume_ratio": self.volume_ratio,
+            "rsi14": self.rsi14,
             "atr14": self.atr14,
             "adx14": self.adx14,
             "position": None
@@ -1368,7 +1523,7 @@ class StrategyEngine:
             "charge_estimate": unreal["breakdown"] if unreal else None,
             "realized_net_pnl": self.realized_net,
             "trades_today": self.trades_today,
-            "max_trades": cfg.max_trades_per_day if cfg else 15,
+            "max_trades": cfg.max_trades_per_day if cfg else 40,
             "max_daily_loss": cfg.max_daily_loss if cfg else 5000,
             "kpis": kpis,
             "connected": self.data_source != "ERROR",
@@ -1549,16 +1704,6 @@ def close_alert(
     )
 
 
-def sma_gap_pct(fast: float, slow: float) -> float | None:
-    """SMA 9 minus SMA 21, as a percent of SMA 21. A ₹1 gap is not the same on every stock."""
-    if pd.isna(fast) or pd.isna(slow):
-        return None
-    slow_f = float(slow)
-    if slow_f == 0:
-        return None
-    return (float(fast) - slow_f) / slow_f * 100.0
-
-
 def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None, float | None]:
     """How soon SMA 9 will cross SMA 21 if the last closed bars keep their pace.
 
@@ -1683,6 +1828,75 @@ def _schedule_whatsapp(message: str) -> None:
             return
 
     loop.create_task(_send())
+
+
+def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
+    """True when the frame is missing the bar that should already be closed."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=IST)
+    else:
+        now = now.astimezone(IST)
+    now_minute = int(now.replace(second=0, microsecond=0).timestamp())
+    return closed_ts < now_minute - 60
+
+
+def _filter_note(cfg: BotConfig) -> str:
+    """Say which entry checks are on. Unchecked checks are not read."""
+    checked: list[str] = []
+    if bool(getattr(cfg, "use_vwap", False)):
+        checked.append("VWAP")
+    if bool(getattr(cfg, "use_volume", False)):
+        checked.append("volume")
+    if bool(getattr(cfg, "use_density", False)):
+        checked.append("density")
+    if bool(getattr(cfg, "use_rsi", False)):
+        checked.append("RSI")
+    if bool(getattr(cfg, "use_adx_filter", False)):
+        checked.append("ADX")
+    if not checked:
+        return "VWAP, volume, density, and RSI are off."
+    return "Checked: " + ", ".join(checked) + "."
+
+
+def _sma_side_text(frame: pd.DataFrame) -> str:
+    if frame is None or getattr(frame, "empty", True) or len(frame) < 2:
+        return ""
+    row = frame.iloc[-2]
+    fast, slow = row.get("sma_9"), row.get("sma_21")
+    if pd.isna(fast) or pd.isna(slow):
+        return ""
+    if float(fast) > float(slow):
+        return "SMA 9 is above SMA 21"
+    if float(slow) > float(fast):
+        return "SMA 9 is below SMA 21"
+    return "SMA 9 is equal to SMA 21"
+
+
+def _signal_on_unjudged_bars(frame: pd.DataFrame, judged_ts: int | None) -> tuple[str | None, pd.DataFrame | None]:
+    """Newest unjudged cross on the last two closed bars.
+
+    The newest closed bar is the normal signal. The bar before it is included
+    only after this symbol has already been judged once, so a candle that
+    arrives a minute late can still order, and a cross from before the bot
+    was running cannot.
+    """
+    if frame is None or len(frame) < 3:
+        return None, None
+    newest_ts = _closed_bar_ts(frame)
+    choices: list[tuple[str, int, pd.DataFrame]] = []
+    if judged_ts is not None and len(frame) >= 4:
+        older = frame.iloc[:-1].reset_index(drop=True)
+        older_signal = closed_candle_cross(older)
+        older_ts = _closed_bar_ts(older)
+        if older_signal and older_ts is not None and older_ts > judged_ts:
+            choices.append((older_signal, older_ts, older))
+    newest_signal = closed_candle_cross(frame)
+    if newest_signal and newest_ts is not None and (judged_ts is None or newest_ts > judged_ts):
+        choices.append((newest_signal, newest_ts, frame))
+    if not choices:
+        return None, None
+    signal, _ts, signal_frame = choices[-1]
+    return signal, signal_frame
 
 
 def _closed_bar_ts(frame: pd.DataFrame | None) -> int | None:
