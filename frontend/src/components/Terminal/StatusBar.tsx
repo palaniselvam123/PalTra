@@ -103,7 +103,9 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
         {stopOn == null ? (
           <Skeleton className="h-4 w-12" />
         ) : stopOn ? (
-          <span className="text-emerald-300">ON · {mult}× ATR</span>
+          <span className="text-emerald-300">
+            ON<span className="hidden sm:inline"> · {mult}× ATR</span>
+          </span>
         ) : (
           <span className="font-bold text-amber-300">OFF</span>
         )}
