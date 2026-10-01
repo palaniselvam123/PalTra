@@ -198,6 +198,7 @@ export default function TerminalPage() {
             <StrategyChart
               chart={chart}
               state={state}
+              trades={trades}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
               onClose={() => {
                 const pos = state?.position;
