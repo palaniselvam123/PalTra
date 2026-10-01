@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import clsx from "clsx";
-import { istDateTime, parseClock } from "@/lib/format";
+import { istStamp, parseClock } from "@/lib/format";
 import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { Badge, SideBadge, pnlTone } from "./ui";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -183,7 +184,7 @@ export function TradeHistoryTable({
             {selected.title}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
           {BOOKS.map((item) => {
             const count = trades.filter((trade) => bookOf(trade) === item.id).length;
             const on = item.id === book;
@@ -196,7 +197,7 @@ export function TradeHistoryTable({
                   setBook(item.id);
                 }}
                 className={clsx(
-                  "rounded-md px-3 py-1.5 text-xs font-semibold",
+                  "min-h-11 whitespace-nowrap rounded-md px-3 text-xs font-semibold sm:min-h-9",
                   on && item.id === "PAPER" && "bg-[#F59E0B] text-[#1a1203]",
                   on && item.id === "LIVE" && "bg-[#F43F5E] text-white",
                   !on && "border border-white/10 text-slate-300 hover:bg-white/5"
@@ -209,14 +210,14 @@ export function TradeHistoryTable({
           <button
             type="button"
             onClick={toggleClosed}
-            className="rounded-md border border-white/10 px-2 py-1 text-xs font-semibold text-slate-200 hover:bg-white/5"
+            className="min-h-11 whitespace-nowrap rounded-md border border-white/15 px-3 text-xs font-semibold text-slate-200 hover:bg-white/5 sm:min-h-9"
           >
-            {closedFolded ? `Show closed orders · ${completedRows.length}` : "Shrink closed orders"}
+            {closedFolded ? `Show closed · ${completedRows.length}` : "Hide closed"}
           </button>
           <button
             type="button"
             onClick={downloadFiltered}
-            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/5"
+            className="min-h-11 whitespace-nowrap rounded-md border border-white/15 px-3 text-xs text-slate-200 hover:bg-white/5 sm:min-h-9"
           >
             Download CSV
           </button>
@@ -326,6 +327,7 @@ export function TradeHistoryTable({
       {inBook.length > 0 && !closedFolded && (
         <OrderTable
           title="Completed"
+          subtotals
           rows={completedRows}
           closingSymbol={null}
           onClose={onClose}
@@ -337,7 +339,92 @@ export function TradeHistoryTable({
   );
 }
 
-const COLUMNS = ["#", "Stock", "Side", "Executed", "Market", "P&L", "ATR", "SL", "Exit", "Trigger", "Charges", "Net", ""];
+type Col = { key: string; label: string; num?: boolean };
+const COLUMNS: Col[] = [
+  { key: "id", label: "#", num: true },
+  { key: "stock", label: "Stock" },
+  { key: "side", label: "Side" },
+  { key: "entry_time", label: "Entry time" },
+  { key: "entry", label: "Entry", num: true },
+  { key: "exit_time", label: "Exit time" },
+  { key: "exit", label: "Exit", num: true },
+  { key: "points", label: "Points", num: true },
+  { key: "reason", label: "Exit reason" },
+  { key: "charges", label: "Charges", num: true },
+  { key: "net", label: "Net P&L", num: true },
+  { key: "action", label: "" },
+];
+
+const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" | "slate"> = {
+  MA_CROSS: "sky",
+  MA_APPROACH: "sky",
+  ATR_SL_HIT: "amber",
+  EOD_SQUARE_OFF: "violet",
+  KILL_SWITCH: "red",
+  SL_REJECTED: "red",
+  MANUAL_CLOSE: "blue",
+  NOT_ON_GROWW: "slate",
+};
+
+const REASON_SHORT: Record<string, string> = {
+  MA_CROSS: "MA cross",
+  MA_APPROACH: "Before cross",
+  ATR_SL_HIT: "ATR SL",
+  EOD_SQUARE_OFF: "EOD",
+  KILL_SWITCH: "Kill switch",
+  SL_REJECTED: "Stop refused",
+  MANUAL_CLOSE: "Manual",
+  NOT_ON_GROWW: "Not on Groww",
+};
+
+function ReasonBadge({ trade }: { trade: TradeRow }) {
+  if (trade.exit_price == null) return <Badge color="green">Open</Badge>;
+  const reason = trade.exit_reason || "";
+  return (
+    <Badge color={REASON_COLOR[reason] ?? "slate"} title={REASON[reason] ?? reason}>
+      {REASON_SHORT[reason] ?? (reason || "Closed")}
+    </Badge>
+  );
+}
+
+/** One row's numbers. An open row is marked at the live price and says so. */
+function rowFigures(t: TradeRow, state: SmaState | null) {
+  const open = t.exit_price == null;
+  const market = marketPrice(t, state);
+  const mark = open ? markPnl(t, market) : null;
+  const points = open ? mark?.points ?? null : t.points;
+  const net = open ? mark?.pnl ?? null : t.net_pnl;
+  return { open, market, points, net };
+}
+
+type DayGroup = { day: string; rows: TradeRow[]; charges: number; net: number };
+
+function byDay(rows: TradeRow[]): DayGroup[] {
+  const groups: DayGroup[] = [];
+  for (const row of rows) {
+    const day = tradeDay(row) || "—";
+    let group = groups[groups.length - 1];
+    if (!group || group.day !== day) {
+      group = { day, rows: [], charges: 0, net: 0 };
+      groups.push(group);
+    }
+    group.rows.push(row);
+    group.charges += row.brokerage_and_taxes ?? 0;
+    group.net += row.net_pnl ?? 0;
+  }
+  return groups;
+}
+
+function dayLabel(day: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-IN", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  });
+}
 
 function OrderTable({
   title,
@@ -346,6 +433,7 @@ function OrderTable({
   empty,
   closingSymbol,
   onClose,
+  subtotals,
 }: {
   title: string;
   rows: TradeRow[];
@@ -353,34 +441,24 @@ function OrderTable({
   empty: string;
   closingSymbol: string | null;
   onClose: (trade: TradeRow) => void;
+  subtotals?: boolean;
 }) {
+  const groups = byDay(rows);
+  const showSubtotals = Boolean(subtotals) && groups.length > 1;
   return (
-    <div className="border-t border-white/5">
-      <h3 className="px-4 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+    <div className="border-t border-white/10">
+      <h3 className="flex items-baseline gap-2 px-4 pt-3 text-xs font-semibold uppercase tracking-wider text-slate-300">
         {title}
-        <span className="ml-2 font-normal text-slate-500">{rows.length}</span>
+        <span className="font-normal text-slate-400">{rows.length}</span>
       </h3>
-      <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-left text-xs">
-          <thead className="text-[10px] uppercase tracking-wider text-slate-500">
-            <tr className="border-y border-white/5">
-              {COLUMNS.map((heading) => (
-                <th key={heading} className="px-3 py-2 font-medium">
-                  {heading}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length} className="px-3 py-6 text-center text-slate-500">
-                  {empty}
-                </td>
-              </tr>
-            )}
-            {rows.map((trade) => (
-              <OrderRow
+
+      {/* Phone: one stacked card per trade. */}
+      <ul className="space-y-2 p-3 md:hidden">
+        {rows.length === 0 && <li className="py-4 text-center text-sm text-slate-400">{empty}</li>}
+        {groups.map((group) => (
+          <li key={group.day} className="space-y-2">
+            {group.rows.map((trade) => (
+              <TradeCard
                 key={trade.id}
                 trade={trade}
                 state={state}
@@ -388,10 +466,98 @@ function OrderTable({
                 onClose={onClose}
               />
             ))}
+            {showSubtotals && <DaySubtotal group={group} as="card" />}
+          </li>
+        ))}
+      </ul>
+
+      {/* Tablet and desktop: a table with a sticky header. */}
+      <div className="hidden max-h-[70vh] overflow-auto md:block">
+        <table className="w-full text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
+            <tr>
+              {COLUMNS.map((col) => (
+                <th key={col.key} scope="col" className={clsx("whitespace-nowrap px-3 py-2 font-medium", col.num && "text-right")}>
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-3 py-6 text-center text-slate-400">
+                  {empty}
+                </td>
+              </tr>
+            )}
+            {groups.map((group) => (
+              <Fragment key={group.day}>
+                {group.rows.map((trade) => (
+                  <OrderRow
+                    key={trade.id}
+                    trade={trade}
+                    state={state}
+                    closing={closingSymbol === trade.symbol.toUpperCase()}
+                    onClose={onClose}
+                  />
+                ))}
+                {showSubtotals && <DaySubtotal group={group} as="row" />}
+              </Fragment>
+            ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
+  const n = group.rows.length;
+  const label = `${dayLabel(group.day)} · ${n} trade${n === 1 ? "" : "s"}`;
+  if (as === "card") {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-white/[0.06] px-3 py-2 text-sm">
+        <span className="font-semibold text-slate-200">Subtotal · {label}</span>
+        <span className="font-mono">
+          <span className="text-amber-300">{inr(group.charges)}</span>
+          <span className={clsx("ml-3 font-semibold", pnlTone(group.net))}>{signedInr(group.net)}</span>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <tr className="border-y border-white/15 bg-white/[0.06] font-semibold">
+      <td colSpan={9} className="px-3 py-2 text-slate-200">
+        Subtotal · {label}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
+      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
+      <td />
+    </tr>
+  );
+}
+
+function signedInr(value: number | null | undefined): string {
+  if (value == null) return "—";
+  return `${value > 0 ? "+" : ""}${inr(value)}`;
+}
+
+function signedPts(value: number | null | undefined): string {
+  if (value == null) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function CloseButton({ trade, closing, onClose }: { trade: TradeRow; closing: boolean; onClose: (t: TradeRow) => void }) {
+  return (
+    <button
+      type="button"
+      disabled={closing}
+      onClick={() => onClose(trade)}
+      className="min-h-11 rounded-md px-3 text-xs font-semibold text-rose-200 ring-1 ring-inset ring-rose-400/50 hover:bg-rose-500/15 disabled:opacity-50 md:min-h-8"
+    >
+      {closing ? "Closing…" : "Close"}
+    </button>
   );
 }
 
@@ -406,81 +572,81 @@ function OrderRow({
   closing: boolean;
   onClose: (trade: TradeRow) => void;
 }) {
-  const market = marketPrice(t, state);
-  const live = markPnl(t, market);
-  const pnl = t.exit_price == null ? live?.pnl ?? null : t.gross_pnl;
+  const { open, market, points, net } = rowFigures(t, state);
   return (
-    <tr className="border-b border-white/5 text-slate-200">
-      <td className="px-3 py-2 font-mono text-slate-500">{t.id}</td>
+    <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
+      <td className="px-3 py-2 text-right font-mono text-slate-400">{t.id}</td>
+      <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
       <td className="px-3 py-2">
-        <div className="font-medium text-slate-100">{t.symbol}</div>
-        <div className={clsx("font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-          {pnl == null ? "P&L —" : inr(pnl)}
-        </div>
+        <SideBadge side={t.direction} />
+        <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
       </td>
+      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
+      <td className="px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
+      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
+      <td className="px-3 py-2 text-right font-mono">
+        {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
+      </td>
+      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
-        <span
-          className={clsx(
-            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-            t.direction === "LONG" ? "bg-[#10B981]/15 text-[#10B981]" : "bg-[#F43F5E]/15 text-[#F43F5E]"
-          )}
-        >
-          {t.direction}
-        </span>
+        <ReasonBadge trade={t} />
       </td>
-      <td className="px-3 py-2 font-mono">
-        {px(t.entry_price)}
-        <div className="text-slate-500">{t.entry_time ? `${istDateTime(t.entry_time)} IST` : "—"}</div>
-      </td>
-      <td className="px-3 py-2 font-mono">
-        {market == null ? "—" : px(market)}
-        <div className="text-slate-500">{t.exit_price == null ? "live" : "exit"}</div>
-      </td>
-      <td className={clsx("px-3 py-2 font-mono", pnl == null ? "text-slate-500" : pnl >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-        {pnl == null ? "—" : inr(pnl)}
-        {live && (
-          <div className="text-slate-500">
-            {live.points >= 0 ? "+" : ""}
-            {live.points.toFixed(2)} pts
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2 font-mono">{px(t.atr_at_entry)}</td>
-      <td className="px-3 py-2 font-mono">{t.stop_active === false ? "OFF" : px(t.sl_trigger_price)}</td>
-      <td className="px-3 py-2 font-mono">
-        {t.exit_time ? `${istDateTime(t.exit_time)} IST` : "—"}
-        <div className="text-slate-400">{t.exit_price == null ? "open" : px(t.exit_price)}</div>
-      </td>
-      <td className="px-3 py-2">
-        {t.exit_reason ? (
-          <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-300">
-            {REASON[t.exit_reason] ?? t.exit_reason}
-          </span>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className="px-3 py-2 font-mono text-[#F59E0B]">
+      <td className="px-3 py-2 text-right font-mono text-amber-300">
         {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
       </td>
-      <td className={clsx("px-3 py-2 font-mono", (t.net_pnl ?? 0) >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
-        {t.net_pnl == null ? "—" : inr(t.net_pnl)}
+      <td className={clsx("px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
+        {signedInr(net)}
       </td>
-      <td className="px-3 py-2">
-        {t.exit_price == null ? (
-          <button
-            type="button"
-            disabled={closing}
-            onClick={() => onClose(t)}
-            className="rounded-md border border-[#F43F5E]/50 bg-[#F43F5E]/15 px-2 py-1 text-[11px] font-semibold text-[#fda4af] hover:bg-[#F43F5E]/25 disabled:opacity-50"
-          >
-            {closing ? "Closing…" : "Close"}
-          </button>
-        ) : (
-          <span className="text-slate-600">—</span>
-        )}
-      </td>
+      <td className="px-3 py-1.5 text-right">{open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}</td>
     </tr>
+  );
+}
+
+function TradeCard({
+  trade: t,
+  state,
+  closing,
+  onClose,
+}: {
+  trade: TradeRow;
+  state: SmaState | null;
+  closing: boolean;
+  onClose: (trade: TradeRow) => void;
+}) {
+  const { open, market, points, net } = rowFigures(t, state);
+  return (
+    <article className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-inset ring-white/10">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold text-amber-300">{t.symbol}</span>
+          <SideBadge side={t.direction} />
+          <span className="font-mono text-xs text-slate-400">{t.qty}</span>
+        </div>
+        <span className={clsx("shrink-0 font-mono text-[17px] font-semibold", pnlTone(net))}>{signedInr(net)}</span>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+        <Field k="Entry" v={px(t.entry_price)} sub={istStamp(t.entry_time)} />
+        <Field k={open ? "Live price" : "Exit"} v={open ? px(market) : px(t.exit_price)} sub={open ? "open" : istStamp(t.exit_time)} />
+        <Field k="Points" v={signedPts(points)} tone={pnlTone(points)} />
+        <Field k="Charges" v={t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)} tone="text-amber-300" />
+      </dl>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-xs text-slate-400">
+          #{t.id} <ReasonBadge trade={t} />
+        </span>
+        {open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}
+      </div>
+    </article>
+  );
+}
+
+function Field({ k, v, sub, tone: color }: { k: string; v: string; sub?: string; tone?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] uppercase tracking-wider text-slate-400">{k}</dt>
+      <dd className={clsx("truncate font-mono text-sm text-slate-200", color)}>{v}</dd>
+      {sub ? <dd className="truncate font-mono text-[11px] text-slate-400">{sub}</dd> : null}
+    </div>
   );
 }
 
