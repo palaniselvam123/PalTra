@@ -9,12 +9,18 @@ Crossover decisions must use the last two *closed* candles only:
 """
 from __future__ import annotations
 
+import logging
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger("sma.indicators")
+
 NSE_TICK = 0.05
+# One warning per bad cumulative print. Enrich runs on every quote.
+_VOLUME_WARNED: set[tuple] = set()
 
 
 def round_to_nse_tick(price: float, tick: float = NSE_TICK) -> float:
@@ -63,11 +69,135 @@ def adx_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
 
+def _warn_volume_once(kind: str, ts: int, previous: float, current: float) -> None:
+    key = (kind, int(ts), round(float(previous), 4), round(float(current), 4))
+    if key in _VOLUME_WARNED:
+        return
+    if len(_VOLUME_WARNED) > 400:
+        _VOLUME_WARNED.clear()
+    _VOLUME_WARNED.add(key)
+    logger.warning(
+        "minute volume unavailable (%s) at ts=%s previous_cumulative=%s current_cumulative=%s",
+        kind,
+        int(ts),
+        previous,
+        current,
+    )
+
+
+def sma_gap_pct(fast: float, slow: float) -> float | None:
+    """SMA 9 minus SMA 21, as a percent of SMA 21."""
+    if pd.isna(fast) or pd.isna(slow):
+        return None
+    slow_f = float(slow)
+    if slow_f == 0:
+        return None
+    return (float(fast) - slow_f) / slow_f * 100.0
+
+
+def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
+    """Shares traded in each candle, from Groww's cumulative session volume.
+
+    `volume` on a Groww 1-minute candle is the running total since the IST
+    session open, not the shares printed in that minute. The first candle of
+    a session has no predecessor, so its minute volume is unavailable. A
+    falling counter is rejected, and so is the following candle: differencing
+    against a reset baseline would invent one huge bar. An unchanged counter
+    is a real zero. Missing values stay missing. They are never stored as 0.
+    """
+    if df is None or len(df) == 0:
+        return pd.Series(dtype="float64")
+    out = pd.Series(np.nan, index=df.index, dtype="float64")
+    if "volume" not in df.columns or "ts" not in df.columns:
+        return out
+
+    work = pd.DataFrame(
+        {
+            "_idx": df.index,
+            "_ts": pd.to_numeric(df["ts"], errors="coerce"),
+            "_vol": pd.to_numeric(df["volume"], errors="coerce"),
+        }
+    )
+    work = work.sort_values(["_ts", "_idx"], kind="mergesort")
+    dates = pd.to_datetime(work["_ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
+
+    prev_cum: float | None = None
+    prev_ts: float | None = None
+    prev_day = None
+    reject_next = False
+    for idx, ts, vol, day in zip(work["_idx"], work["_ts"], work["_vol"], dates):
+        if pd.isna(ts) or pd.isna(day):
+            continue
+        if day != prev_day:
+            prev_day = day
+            prev_cum = None
+            prev_ts = None
+            reject_next = False
+        if pd.isna(vol):
+            prev_cum = None
+            prev_ts = None
+            reject_next = False
+            continue
+        vol_f = float(vol)
+        ts_f = float(ts)
+        if prev_ts is not None and ts_f == prev_ts:
+            _warn_volume_once("duplicate timestamp", int(ts_f), prev_cum or 0.0, vol_f)
+            continue
+        if prev_cum is None:
+            prev_cum = vol_f
+            prev_ts = ts_f
+            continue
+        if reject_next:
+            _warn_volume_once("bar after a cumulative reset", int(ts_f), prev_cum, vol_f)
+            prev_cum = vol_f
+            prev_ts = ts_f
+            reject_next = False
+            continue
+        if vol_f < prev_cum:
+            _warn_volume_once("cumulative volume fell", int(ts_f), prev_cum, vol_f)
+            prev_cum = vol_f
+            prev_ts = ts_f
+            reject_next = True
+            continue
+        out.at[idx] = vol_f - prev_cum
+        prev_cum = vol_f
+        prev_ts = ts_f
+    return out
+
+
+def minute_volume_stats(
+    closed: pd.DataFrame, lookback: int = 20
+) -> tuple[float | None, float | None, float | None]:
+    """Current minute volume, the mean of the previous valid prints, and the ratio.
+
+    The average uses the last `lookback` available minute volumes before the
+    decision candle. Missing prints are skipped. They are not treated as zero.
+    """
+    if closed is None or len(closed) == 0:
+        return None, None, None
+    if "minute_volume" in closed.columns:
+        vol = pd.to_numeric(closed["minute_volume"], errors="coerce")
+    else:
+        vol = derive_minute_volume(closed)
+    lookback = max(1, int(lookback))
+    current = vol.iloc[-1]
+    current_f = None if pd.isna(current) else float(current)
+    prior = vol.iloc[:-1].dropna()
+    if len(prior) < lookback:
+        return current_f, None, None
+    average = float(prior.iloc[-lookback:].mean())
+    if current_f is None or average <= 0:
+        return current_f, average, None
+    return current_f, average, current_f / average
+
+
 def enrich(df: pd.DataFrame, sma_fast: int = 9, sma_slow: int = 21, atr_period: int = 14) -> pd.DataFrame:
-    """Return a copy with SMA, ATR, and ADX columns attached.
+    """Return a copy with SMA, ATR, ADX, and minute volume attached.
 
     `sma_9` / `sma_21` are the configured fast/slow series (defaults 9 and 21).
     `atr_14` / `adx_14` follow `atr_period` (default 14).
+    `volume` stays the raw cumulative counter. `minute_volume` is the shares
+    traded in that candle.
     """
     out = df.copy()
     out["sma_fast"] = out["close"].rolling(int(sma_fast)).mean()
@@ -78,6 +208,11 @@ def enrich(df: pd.DataFrame, sma_fast: int = 9, sma_slow: int = 21, atr_period: 
     out["tr"] = true_range(out)
     out["atr_14"] = atr_wilder(out, int(atr_period))
     out["adx_14"] = adx_wilder(out, int(atr_period))
+    if "volume" in out.columns:
+        out["cumulative_volume"] = pd.to_numeric(out["volume"], errors="coerce")
+    else:
+        out["cumulative_volume"] = np.nan
+    out["minute_volume"] = derive_minute_volume(out)
     return out
 
 
@@ -183,32 +318,44 @@ def entry_filter_reason(
 
 
 def _session_vwap(closed: pd.DataFrame) -> float | None:
-    if "volume" not in closed.columns:
+    """IST-session VWAP from completed candles, weighted by minute volume.
+
+    Typical price is (high + low + close) / 3. The weight is the shares traded
+    in that candle, not Groww's running total. The session is the IST date of
+    the last closed candle. A missing minute volume is left out. It is not
+    treated as zero.
+    """
+    if closed is None or len(closed) == 0:
+        return None
+    if not {"high", "low", "close"}.issubset(closed.columns):
         return None
     typical = (closed["high"] + closed["low"] + closed["close"]) / 3
-    vol = pd.to_numeric(closed["volume"], errors="coerce").fillna(0).clip(lower=0)
+    if "minute_volume" in closed.columns:
+        vol = pd.to_numeric(closed["minute_volume"], errors="coerce")
+    else:
+        vol = derive_minute_volume(closed)
+    mask = vol.notna()
     if "ts" in closed.columns:
         dates = pd.to_datetime(closed["ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
-        mask = dates == dates.iloc[-1]
-        typical = typical[mask]
-        vol = vol[mask]
-    total = float(vol.sum())
+        mask = mask & (dates == dates.iloc[-1])
+    typical = typical[mask]
+    vol = vol[mask]
+    total = float(vol.sum()) if len(vol) else 0.0
     if total <= 0:
         return None
     return float((typical * vol).sum() / total)
 
 
 def _volume_reason(closed: pd.DataFrame, lookback: int, ratio: float) -> list[str]:
-    if "volume" not in closed.columns:
+    if "volume" not in closed.columns and "minute_volume" not in closed.columns:
         return ["volume is not on these candles"]
-    lookback = max(1, lookback)
-    if len(closed) < lookback + 1:
+    current, average, _got = minute_volume_stats(closed, lookback)
+    if current is None:
+        return ["volume is not ready on the closed candle"]
+    if average is None:
         return [f"volume needs {lookback} earlier candles"]
-    hist = pd.to_numeric(closed["volume"].iloc[-(lookback + 1) : -1], errors="coerce").fillna(0)
-    current = float(pd.to_numeric(closed["volume"].iloc[-1], errors="coerce") or 0)
-    average = float(hist.mean())
     need = ratio * average
-    if average <= 0 or current < need:
+    if current < need:
         return [f"volume {current:.0f} is below {ratio:g}× the {lookback}-candle average {average:.0f}"]
     return []
 
@@ -242,6 +389,184 @@ def _rsi_reason(
     if rsi < lo or rsi > hi:
         return [f"RSI {rsi:.1f} is outside {lo:.0f}–{hi:.0f}"]
     return []
+
+
+def _num(value) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+@dataclass
+class TechnicalSnapshot:
+    """One closed candle, with the indicators the order path actually uses."""
+
+    timestamp: int | None
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    sma9: float | None
+    sma21: float | None
+    sma_gap: float | None
+    sma_gap_pct: float | None
+    vwap: float | None
+    cumulative_volume: float | None
+    minute_volume: float | None
+    average_previous_20_volume: float | None
+    volume_ratio: float | None
+    rsi14: float | None
+    atr14: float | None
+    adx14: float | None
+    candle_direction: str | None
+    candle_body: float | None
+    candle_range: float | None
+    density_pct: float | None
+
+
+def closed_technical_snapshot(df: pd.DataFrame, volume_lookback: int = 20) -> TechnicalSnapshot | None:
+    """Readings for the last completed candle. The forming bar at iloc[-1] is dropped."""
+    if df is None or len(df) < 2:
+        return None
+    closed = df.iloc[:-1]
+    bar = closed.iloc[-1]
+    sma9 = _num(bar.get("sma_9"))
+    sma21 = _num(bar.get("sma_21"))
+    gap = None if sma9 is None or sma21 is None else sma9 - sma21
+    o = _num(bar.get("open"))
+    h = _num(bar.get("high"))
+    low = _num(bar.get("low"))
+    c = _num(bar.get("close"))
+    body = None if o is None or c is None else c - o
+    span = None if h is None or low is None else h - low
+    if body is None or span is None:
+        direction = None
+        density = None
+    elif c > o:
+        direction = "BULLISH"
+    elif c < o:
+        direction = "BEARISH"
+    else:
+        direction = "DOJI"
+    density = 0.0 if span is not None and span <= 0 else (None if body is None or span is None else abs(body) / span * 100)
+    current, average, ratio = minute_volume_stats(closed, volume_lookback)
+    rsi = rsi_wilder(closed["close"], 14)
+    rsi_now = _num(rsi.iloc[-1]) if len(rsi) else None
+    ts = _num(bar.get("ts"))
+    return TechnicalSnapshot(
+        timestamp=None if ts is None else int(ts),
+        open=o,
+        high=h,
+        low=low,
+        close=c,
+        sma9=sma9,
+        sma21=sma21,
+        sma_gap=gap,
+        sma_gap_pct=sma_gap_pct(sma9, sma21) if sma9 is not None and sma21 is not None else None,
+        vwap=_session_vwap(closed),
+        cumulative_volume=_num(bar.get("cumulative_volume", bar.get("volume"))),
+        minute_volume=current,
+        average_previous_20_volume=average,
+        volume_ratio=ratio,
+        rsi14=rsi_now,
+        atr14=_num(bar.get("atr_14")),
+        adx14=_num(bar.get("adx_14")),
+        candle_direction=direction,
+        candle_body=body,
+        candle_range=span,
+        density_pct=density,
+    )
+
+
+def _fmt(value: float | None, digits: int = 2, signed: bool = False) -> str:
+    if value is None:
+        return "unavailable"
+    text = f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
+    return text
+
+
+def format_signal_report(
+    *,
+    symbol: str,
+    evaluated_at: str,
+    action: str,
+    snap: TechnicalSnapshot | None,
+    use_vwap: bool,
+    use_volume: bool,
+    volume_multiple: float,
+    use_rsi: bool,
+    rsi_min: float,
+    rsi_max: float,
+    decision: str,
+    note: str = "",
+) -> str:
+    """One block for a crossover or a force evaluation. Not for every tick."""
+    if snap is None:
+        return f"AUTOMATIC SIGNAL {symbol} {evaluated_at} {action}\nindicators unavailable\n{decision}"
+    if not use_vwap:
+        vwap_state = "DISABLED"
+    elif snap.vwap is None or snap.close is None:
+        vwap_state = "FAIL"
+    elif action == "SELL":
+        vwap_state = "PASS" if snap.close <= snap.vwap else "FAIL"
+    else:
+        vwap_state = "PASS" if snap.close >= snap.vwap else "FAIL"
+    if not use_volume:
+        volume_state = "DISABLED"
+    elif snap.volume_ratio is None:
+        volume_state = "FAIL"
+    elif snap.volume_ratio + 1e-12 >= volume_multiple:
+        volume_state = "PASS"
+    else:
+        volume_state = "FAIL"
+    if not use_rsi:
+        rsi_state = "DISABLED"
+    elif snap.rsi14 is None:
+        rsi_state = "FAIL"
+    elif rsi_min <= snap.rsi14 <= rsi_max:
+        rsi_state = "PASS"
+    else:
+        rsi_state = "FAIL"
+    distance = None if snap.close is None or snap.vwap is None else snap.close - snap.vwap
+    distance_pct = None if distance is None or not snap.vwap else distance / snap.vwap * 100
+    lines = [
+        "AUTOMATIC SIGNAL",
+        f"Symbol: {symbol}",
+        f"Time: {evaluated_at}",
+        f"Signal: {action}",
+        f"Signal candle ts: {snap.timestamp if snap.timestamp is not None else 'unavailable'}",
+        f"SMA9: {_fmt(snap.sma9)}",
+        f"SMA21: {_fmt(snap.sma21)}",
+        f"SMA Gap: {_fmt(snap.sma_gap, signed=True)}",
+        f"SMA Gap %: {_fmt(snap.sma_gap_pct, 3, signed=True)}%",
+        f"Close: {_fmt(snap.close)}",
+        f"VWAP: {_fmt(snap.vwap)}",
+        f"VWAP distance: {_fmt(distance, signed=True)} ({_fmt(distance_pct, 2, signed=True)}%)",
+        f"VWAP filter: {vwap_state}",
+        f"Cumulative volume: {_fmt(snap.cumulative_volume, 0)}",
+        f"Minute volume: {_fmt(snap.minute_volume, 0)}",
+        f"Previous 20-minute average: {_fmt(snap.average_previous_20_volume, 0)}",
+        f"Volume ratio: {_fmt(snap.volume_ratio, 2)}x",
+        f"Configured multiple: {volume_multiple:.2f}x",
+        f"Volume filter: {volume_state}",
+        f"RSI(14): {_fmt(snap.rsi14, 1)}",
+        f"RSI filter: {rsi_state}",
+        f"ATR(14): {_fmt(snap.atr14)}",
+        f"ADX(14): {_fmt(snap.adx14, 1)}",
+        f"Open: {_fmt(snap.open)} High: {_fmt(snap.high)} Low: {_fmt(snap.low)} Close: {_fmt(snap.close)}",
+        f"Direction: {snap.candle_direction or 'unavailable'}",
+        f"Body: {_fmt(snap.candle_body, signed=True)} Range: {_fmt(snap.candle_range)} Density: {_fmt(snap.density_pct, 0)}%",
+        f"FINAL DECISION: {decision}",
+    ]
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
 
 
 def closed_candle_cross(df: pd.DataFrame) -> str | None:

@@ -81,6 +81,13 @@ export type SmaState = {
   day_change_pct?: number | null;
   sma9: number | null;
   sma21: number | null;
+  sma_gap?: number | null;
+  sma_gap_pct?: number | null;
+  vwap?: number | null;
+  minute_volume?: number | null;
+  avg_minute_volume?: number | null;
+  volume_ratio?: number | null;
+  rsi14?: number | null;
   atr14: number | null;
   adx14: number | null;
   position: null | {
