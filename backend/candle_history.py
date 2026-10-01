@@ -25,6 +25,10 @@ MAX_RANGE_DAYS = 30
 WARMUP_DAYS = 4
 _REQUEST_TIMEOUT_SEC = 15
 _TOTAL_TIMEOUT_SEC = 60
+# Candle sizes the chart offers, in minutes. Bigger bars are built from the
+# 1-minute download, aligned to the 09:15 open like NSE charts.
+INTERVALS = (1, 5, 15, 30, 60)
+_SESSION_OPEN_MIN = 9 * 60 + 15
 _SYMBOL = re.compile(r"^[A-Z0-9&_-]{1,20}$")
 _FORMATS = ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
 
@@ -106,13 +110,35 @@ async def fetch_frame(broker, symbol: str, start: dt.datetime, end: dt.datetime)
         raise HistoryError(f"Groww did not send candles: {detail}"[:240]) from exc
 
 
+def resample(frame: pd.DataFrame, minutes: int) -> pd.DataFrame:
+    """Merge 1-minute bars into `minutes`-long bars that start at 09:15 IST + k·minutes."""
+    if minutes <= 1 or frame.empty:
+        return frame
+    ts = frame["ts"].astype("int64")
+    ist_min = ((ts + 19_800) % 86_400) // 60
+    offset = (ist_min - _SESSION_OPEN_MIN) % minutes
+    bucket = ts - ts % 60 - offset * 60
+    grouped = frame.assign(bucket=bucket).groupby("bucket", sort=True)
+    out = pd.DataFrame(
+        {
+            "ts": grouped["ts"].first().index.astype("int64"),
+            "open": grouped["open"].first().to_numpy(),
+            "high": grouped["high"].max().to_numpy(),
+            "low": grouped["low"].min().to_numpy(),
+            "close": grouped["close"].last().to_numpy(),
+            "volume": grouped["volume"].sum().to_numpy(),
+        }
+    )
+    return out.reset_index(drop=True)
+
+
 def _epoch(value: dt.datetime) -> int:
     if value.tzinfo is None:
         value = value.replace(tzinfo=IST)
     return int(value.timestamp())
 
 
-def _markers(symbol: str, first: int, last: int) -> list[dict]:
+def _markers(symbol: str, first: int, last: int, span: int = 60) -> list[dict]:
     """Entries and exits on this stock inside the shown bars."""
     out: list[dict] = []
     with session_factory()() as db:
@@ -120,11 +146,11 @@ def _markers(symbol: str, first: int, last: int) -> list[dict]:
     for row in rows:
         if row.entry_time is not None:
             t = _epoch(row.entry_time)
-            if first <= t <= last + 59:
+            if first <= t <= last + span - 1:
                 out.append({"time": t, "direction": row.direction, "price": row.entry_price, "kind": "ENTRY"})
         if row.exit_time is not None and row.exit_price is not None:
             t = _epoch(row.exit_time)
-            if first <= t <= last + 59:
+            if first <= t <= last + span - 1:
                 out.append(
                     {
                         "time": t,
@@ -145,14 +171,17 @@ def _finite(value) -> float | None:
     return None if pd.isna(number) else number
 
 
-def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.datetime, cfg) -> dict:
+def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.datetime, cfg, interval: int = 1) -> dict:
     sma_fast = getattr(cfg, "sma_fast", 9) or 9
     sma_slow = getattr(cfg, "sma_slow", 21) or 21
     atr_period = getattr(cfg, "atr_period", 14) or 14
     candles: list[dict] = []
     if not frame.empty:
-        enriched = enrich(frame, sma_fast, sma_slow, atr_period)
+        enriched = enrich(resample(frame, interval), sma_fast, sma_slow, atr_period)
         lo, hi = _epoch(start), _epoch(end)
+        # Keep the bar that holds From even when it opened a little earlier.
+        lo -= lo % 60
+        lo -= ((((lo + 19_800) % 86_400) // 60) - _SESSION_OPEN_MIN) % interval * 60
         shown = enriched[(enriched["ts"] >= lo) & (enriched["ts"] <= hi)]
         for row in shown.itertuples(index=False):
             candles.append(
@@ -167,9 +196,10 @@ def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.
                     "atr14": _finite(row.atr_14),
                 }
             )
-    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"]) if candles else []
+    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60) if candles else []
     return {
         "symbol": symbol,
+        "interval": interval,
         "from": start.strftime("%Y-%m-%d %H:%M"),
         "to": end.strftime("%Y-%m-%d %H:%M"),
         "candles": candles,
@@ -180,10 +210,14 @@ def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.
     }
 
 
-async def load_history(broker, symbol: str, start_text: str, end_text: str, cfg) -> dict:
+async def load_history(broker, symbol: str, start_text: str, end_text: str, cfg, interval: int = 1) -> dict:
+    if interval not in INTERVALS:
+        raise HistoryError(f"Candle size must be one of {', '.join(str(i) for i in INTERVALS)} minutes.")
     now = dt.datetime.now(IST).replace(tzinfo=None, second=0, microsecond=0)
     start = parse_ist(start_text)
     end = parse_ist(end_text, end_of_day=True)
     symbol, start, end = check_range(symbol, start, end, now)
-    frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=WARMUP_DAYS), end)
-    return build_payload(frame, symbol, start, end, cfg)
+    # 21 bars of 30 or 60 minutes need more than four days before From.
+    warmup = WARMUP_DAYS if interval <= 15 else 10
+    frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
+    return build_payload(frame, symbol, start, end, cfg, interval)

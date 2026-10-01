@@ -80,6 +80,12 @@ export default function TerminalPage() {
   const [closeNote, setCloseNote] = useState<string | null>(null);
   const [railFolded, toggleRail] = useFold("sma.rail");
   const busy = useRef(false);
+  const liveBars = useRef(240);
+  const askLiveBars = useCallback((count: number) => {
+    if (count === liveBars.current) return;
+    liveBars.current = count;
+    smaApi.chart(count).then(setChart).catch(() => {});
+  }, []);
 
   const refresh = useCallback(() => {
     if (busy.current) return;
@@ -103,7 +109,7 @@ export default function TerminalPage() {
         }
       })
       .finally(finish);
-    smaApi.chart().then(setChart).catch(() => {});
+    smaApi.chart(liveBars.current).then(setChart).catch(() => {});
     smaApi
       .trades()
       .then((rows) => {
@@ -128,7 +134,7 @@ export default function TerminalPage() {
       smaApi
         .closePosition(name)
         .then(() =>
-          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart()]).then(([next, rows, nextChart]) => {
+          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current)]).then(([next, rows, nextChart]) => {
             if (next.status === "fulfilled") {
               setState((prev) => (next.value.ltp > 0 || !prev || prev.ltp <= 0 ? next.value : prev));
             }
@@ -241,6 +247,7 @@ export default function TerminalPage() {
               state={state}
               trades={trades}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
+              onLiveBars={askLiveBars}
               onClose={() => {
                 const pos = state?.position;
                 if (!pos || !state?.symbol) return;

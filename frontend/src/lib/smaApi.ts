@@ -216,11 +216,11 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): 
 
 export const smaApi = {
   state: () => request<SmaState>("/api/state"),
-  chart: () => request<ChartPayload>("/api/chart"),
+  chart: (limit = 240) => request<ChartPayload>(limit === 240 ? "/api/chart" : `/api/chart?limit=${limit}`),
   /** Past 1-minute candles from Groww. Times are IST wall clock, YYYY-MM-DDTHH:MM. */
-  history: (symbol: string, start: string, end: string) =>
-    request<ChartPayload & { symbol: string; from: string; to: string }>(
-      `/api/history?${new URLSearchParams({ symbol, start, end }).toString()}`,
+  history: (symbol: string, start: string, end: string, interval = 1) =>
+    request<ChartPayload & { symbol: string; from: string; to: string; interval?: number }>(
+      `/api/history?${new URLSearchParams({ symbol, start, end, interval: String(interval) }).toString()}`,
       undefined,
       70000
     ),
