@@ -46,6 +46,7 @@ def boot_engine() -> asyncio.Task | None:
     init_db()
     cfg = engine.load_config()
     engine.restore_open_books()
+    engine.restore_trades_today()
     engine.broker.set_mode(cfg.trading_mode)
     engine.broker.adopt_saved_session(force=True)
     _task = asyncio.create_task(engine.run())
@@ -202,19 +203,27 @@ async def set_trade_symbol(body: TradeSymbolUpdate):
         row.trade_symbols = ",".join(names)
         db.commit()
         db.refresh(row)
-        return _config_dict(row)
+        payload = _config_dict(row)
+        db.expunge(row)
+    engine._cfg_cache = row
+    return payload
 
 
 @app.put("/api/config")
 async def put_config(body: ConfigUpdate):
     # The chart symbol can change while another stock stays open. Quantity is
-    # shared, so an open book still blocks a size change.
-    if body.qty is not None and any(pos.qty != body.qty for pos in engine.positions.values()):
-        raise HTTPException(409, "Close the open position before changing quantity")
+    # shared, so an open book still blocks a size change. Raising the trade
+    # cap must not be blocked by that check.
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
+        if (
+            body.qty is not None
+            and int(body.qty) != int(row.qty)
+            and any(pos.qty != body.qty for pos in engine.positions.values())
+        ):
+            raise HTTPException(409, "Close the open position before changing quantity")
         data = body.model_dump(exclude_none=True)
         if "symbol" in data:
             data["symbol"] = data["symbol"].upper().strip()
@@ -234,7 +243,14 @@ async def put_config(body: ConfigUpdate):
             raise HTTPException(400, "Sell RSI low must be at or below the sell RSI high")
         db.commit()
         db.refresh(row)
-        return _config_dict(row)
+        payload = _config_dict(row)
+        cap = int(row.max_trades_per_day)
+        changed_cap = "max_trades_per_day" in data
+        db.expunge(row)
+    engine._cfg_cache = row
+    if changed_cap:
+        engine.release_trade_cap(cap)
+    return payload
 
 
 def _validate_hhmm(value: str) -> None:
@@ -295,6 +311,7 @@ async def start_bot():
 
     engine._roll_session(_ist_now())
     engine.release_manual_panic()
+    engine.release_trade_cap()
     if engine.status == "HALTED":
         raise HTTPException(423, engine.halt_reason or "Halted for the day")
     if engine.status == "DAY_COMPLETED":
