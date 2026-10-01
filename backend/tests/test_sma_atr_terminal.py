@@ -1090,6 +1090,12 @@ async def test_force_order_uses_the_live_side_and_starts_the_bot(engine, monkeyp
     engine._ltps["SHIPROCKET"] = 200.0
     engine.status = "STOPPED"
     engine.data_source = "GROWW"
+    from models import BotConfig
+    import database
+
+    with database.session_factory()() as db:
+        db.get(BotConfig, 1).trade_symbols = "SHIPROCKET"  # Force needs an armed stock.
+        db.commit()
     result = await engine.force_order("SHIPROCKET")
     assert engine.status == "RUNNING"
     assert "opened LONG" in result
@@ -1538,6 +1544,7 @@ async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine, mon
         row = db.get(BotConfig, 1)
         row.use_vwap = True
         row.symbol = "SUNTV"
+        row.trade_symbols = "SUNTV"
         db.commit()
     frame = enrich(_tape([100.0 + i for i in range(30)]))
     engine._frames["SUNTV"] = frame

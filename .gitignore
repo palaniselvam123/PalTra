@@ -15,3 +15,6 @@ backend/.venv-win/
 backend/*.db
 __pycache__/
 backend/research_data/
+
+# Static export built for the Docker image (CI builds it for each deploy)
+frontend/out/

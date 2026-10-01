@@ -393,6 +393,7 @@ async def trades_csv(mode: str = ""):
         "market_price",
         "mark_pnl",
         "ma_cross_price",
+        "fill_lag_points",
         "atr_at_entry",
         "sl_trigger_price",
         "exit_time",

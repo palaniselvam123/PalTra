@@ -139,7 +139,10 @@ There are separate switches. All of them boot safe.
 - **Market hours apply to PAPER too.** No new entry (cross or force order)
   outside the cash session, before 09:20, or after `entry_cutoff_time`
   (default 15:00, never later than `square_off_time`). After the cut-off an
-  opposite cross still closes a position but does not open the reverse. Practice
+  opposite cross still closes a position but does not open the reverse.
+- **Only stocks on the Trade list (`trade_symbols`) are ordered.** The list is
+  re-read just before each entry, Force order refuses an unarmed stock, and a
+  removed stock is no longer quoted unless it is still held or on the chart. Practice
   positions are squared off at `square_off_time` even when the bot is paused,
   and a practice position from an earlier day is closed on the next tick.
 
@@ -160,8 +163,8 @@ scripts/run_sma_terminal.sh
 # Frontend (:3000; terminal UI at /terminal)
 cd frontend && npm install && cp .env.local.example .env.local && npm run dev
 
-# Tests
-cd backend && .venv/bin/python -m pytest -q
+# Tests (pytest-asyncio is required; without it every async test fails)
+cd backend && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
 ```
 
 No credentials are needed. The desk starts on the simulated feed.
@@ -186,15 +189,27 @@ No credentials are needed. The desk starts on the simulated feed.
   JS to `https://paltra.fly.dev/sma`.
 - `.dockerignore` keeps `.env` files, keys, databases, `node_modules`, tests,
   and `research_data/` out of the build context.
-- **There is no CI deploy.** The repo has no `.github/workflows`. Deploys are
-  manual from a developer machine:
+- **Deploys come from `main` only**, through
+  `.github/workflows/test-and-deploy.yml`:
+  - every pull request and push runs the backend tests (Python 3.13,
+    `requirements-dev.txt`) and the frontend typecheck plus static export
+  - a push to `main` that passes both runs `flyctl deploy --remote-only`
+    with the exported `frontend/out/` (built in CI, not committed)
+  - **no automatic deploy during NSE market hours** (09:00–15:45 IST,
+    Mon–Fri): the `market-hours-gate` job skips the deploy with a warning.
+    "Run workflow" (workflow_dispatch) on `main` deploys at any time, so use
+    it after 15:45 to ship a push that was held back
+  - it needs the repo secret `FLY_API_TOKEN`
+    (`fly tokens create deploy -a paltra`); the deploy job runs in the
+    `production` environment, which GitHub creates on first use (add required
+    reviewers there for a manual approval step)
+- Do not deploy from a laptop or a feature branch. If you must deploy by
+  hand, do it from a clean checkout of `main`:
 
   ```bash
   cd frontend && NEXT_OUTPUT=export npm run build   # produces frontend/out/
   cd .. && fly deploy
   ```
 
-  `frontend/out/` is not committed, so build it before every deploy or the
-  image ships a stale or missing UI. Secrets are set on the machine, never
-  baked into the image:
+  App secrets are set on the machine, never baked into the image:
   `fly secrets set ENCRYPTION_KEY=... FRONTEND_ORIGIN=https://paltra.fly.dev`.
