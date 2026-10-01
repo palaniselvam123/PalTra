@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
+  Activity,
   AlertTriangle,
   Bell,
   BellOff,
@@ -45,6 +46,7 @@ import { Badge, Button, StatusDot } from "@/components/ui";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/terminal", label: "SMA Terminal", icon: Activity },
   { href: "/chart", label: "Charts", icon: LineChart },
   { href: "/trade", label: "Trade", icon: CandlestickChart },
   { href: "/movers", label: "Movers", icon: Zap },

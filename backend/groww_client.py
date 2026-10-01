@@ -1,0 +1,457 @@
+"""Groww execution wrapper with PAPER and LIVE paths.
+
+PAPER fetches live 1-minute candles and LTP when a token and an open session
+are available, and otherwise runs an internal 1-minute simulator. Fills are
+booked locally; the exchange is never called.
+
+LIVE places MIS limit orders with a 0.20% protection buffer (not raw market
+orders) and a resting exchange SL for the ATR stop.
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import math
+import random
+from dataclasses import dataclass
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+
+from config import get_settings
+from indicators import round_to_nse_tick
+
+IST = ZoneInfo("Asia/Kolkata")
+
+# Statuses that mean "do not place another order yet".
+IN_FLIGHT = frozenset({"PENDING", "TRANSIT", "NEW", "OPEN", "PLACED"})
+TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
+TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "TRIGGERED"})
+
+
+def market_is_open(now: dt.datetime | None = None) -> bool:
+    now = now or dt.datetime.now(IST)
+    if now.weekday() >= 5:
+        return False
+    t = now.time()
+    return dt.time(9, 15) <= t <= dt.time(15, 30)
+
+
+@dataclass
+class OrderAck:
+    order_id: str
+    status: str
+    fill_price: float | None = None
+    message: str = ""
+
+
+@dataclass
+class _SimOrder:
+    order_id: str
+    side: str
+    qty: int
+    kind: str  # ENTRY | SL | EXIT
+    status: str
+    fill_price: float | None = None
+    trigger: float | None = None
+
+
+class CandleSimulator:
+    """Random-walk 1-minute tape so the terminal runs when NSE is closed."""
+
+    def __init__(self, start_price: float = 875.0):
+        self.price = start_price
+        self.candles: list[dict] = []
+        self._minute_key: str | None = None
+        self._rng = random.Random(21)
+        self._seed(120)
+
+    def _seed(self, n: int) -> None:
+        price = self.price
+        start = dt.datetime.now(IST) - dt.timedelta(minutes=n)
+        start = start.replace(second=0, microsecond=0)
+        for i in range(n):
+            # Drift up, then roll over, so SMA9/SMA21 are populated and a
+            # historical cross exists for the chart markers.
+            drift = 0.15 if i < int(n * 0.65) else -0.22
+            shock = self._rng.uniform(-0.6, 0.6)
+            o = price
+            c = max(1.0, price + drift + shock)
+            h = max(o, c) + abs(shock) * 0.4
+            l = min(o, c) - abs(shock) * 0.3
+            ts = start + dt.timedelta(minutes=i)
+            self.candles.append(
+                {
+                    "ts": int(ts.timestamp()),
+                    "open": round(o, 2),
+                    "high": round(h, 2),
+                    "low": round(l, 2),
+                    "close": round(c, 2),
+                    "volume": self._rng.randint(5_000, 40_000),
+                }
+            )
+            price = c
+        self.price = price
+        # Forming bar on top of the closed history.
+        now = dt.datetime.now(IST).replace(second=0, microsecond=0)
+        self._minute_key = now.strftime("%Y-%m-%d %H:%M")
+        self.candles.append(
+            {
+                "ts": int(now.timestamp()),
+                "open": round(self.price, 2),
+                "high": round(self.price, 2),
+                "low": round(self.price, 2),
+                "close": round(self.price, 2),
+                "volume": 0,
+            }
+        )
+
+    def advance(self, now: dt.datetime | None = None) -> float:
+        now = now or dt.datetime.now(IST)
+        key = now.strftime("%Y-%m-%d %H:%M")
+        bar = self.candles[-1]
+        shock = self._rng.uniform(-0.35, 0.35)
+        self.price = max(1.0, self.price + shock)
+        px = round(self.price, 2)
+        if key != self._minute_key:
+            # Close the previous forming bar and open a new one. The closed
+            # bar stays at [-2] once the new forming bar is appended — that
+            # is the bar the strategy is allowed to read.
+            self._minute_key = key
+            self.candles.append(
+                {
+                    "ts": int(now.replace(second=0, microsecond=0).timestamp()),
+                    "open": px,
+                    "high": px,
+                    "low": px,
+                    "close": px,
+                    "volume": 1,
+                }
+            )
+        else:
+            bar["close"] = px
+            bar["high"] = round(max(bar["high"], px), 2)
+            bar["low"] = round(min(bar["low"], px), 2)
+            bar["volume"] = int(bar["volume"]) + self._rng.randint(10, 80)
+        return px
+
+    def frame(self) -> pd.DataFrame:
+        return pd.DataFrame(self.candles)
+
+
+class GrowwClient:
+    def __init__(self, mode: str = "PAPER", token: str = ""):
+        self.mode = "LIVE" if (mode or "").upper() == "LIVE" else "PAPER"
+        self.token = token or get_settings().groww_access_token
+        self.simulator = CandleSimulator()
+        self.data_source = "SIMULATOR"
+        self.last_error = ""
+        self._orders: dict[str, _SimOrder] = {}
+        self._seq = 0
+        self._ltp = self.simulator.price
+        self._sdk = None
+        self._positions: list[dict] = []
+
+    def set_mode(self, mode: str, token: str | None = None) -> None:
+        self.mode = "LIVE" if mode.upper() == "LIVE" else "PAPER"
+        if token is not None:
+            self.token = token
+
+    def _next_id(self, prefix: str) -> str:
+        self._seq += 1
+        return f"{prefix}-{self._seq:06d}"
+
+    def _require_sdk(self):
+        if self._sdk is not None:
+            return self._sdk
+        if not self.token:
+            raise RuntimeError("GROWW_ACCESS_TOKEN is empty")
+        from growwapi import GrowwAPI
+
+        self._sdk = GrowwAPI(self.token)
+        return self._sdk
+
+    async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
+        """Update LTP + candle frame. Prefers Groww; falls back to the simulator."""
+        if self.token and (self.mode == "LIVE" or market_is_open()):
+            try:
+                ltp, frame = await self._refresh_live(symbol)
+                self._ltp = ltp
+                self.data_source = "GROWW"
+                self.last_error = ""
+                return ltp, frame, self.data_source
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = str(exc)
+                if self.mode == "LIVE":
+                    # Live must not silently trade the simulator.
+                    raise
+        ltp = self.simulator.advance()
+        self._ltp = ltp
+        self.data_source = "SIMULATOR"
+        return ltp, self.simulator.frame(), self.data_source
+
+    async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
+        sdk = self._require_sdk()
+        key = (f"NSE_{symbol}",)
+
+        def _ltp():
+            raw = sdk.get_ltp(exchange_trading_symbols=key, segment="CASH")
+            data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if symbol in str(k):
+                        if isinstance(v, dict):
+                            return float(v.get("ltp") or v.get("last_price"))
+                        return float(v)
+                if "ltp" in data:
+                    return float(data["ltp"])
+            raise RuntimeError(f"Unexpected LTP payload: {raw!r}"[:200])
+
+        ltp = await asyncio.to_thread(_ltp)
+        end = dt.datetime.now()
+        start = end - dt.timedelta(days=2)
+
+        def _candles():
+            return sdk.get_historical_candle_data(
+                trading_symbol=symbol,
+                exchange="NSE",
+                segment="CASH",
+                start_time=start.strftime("%Y-%m-%d %H:%M:%S"),
+                end_time=end.strftime("%Y-%m-%d %H:%M:%S"),
+                interval_in_minutes=1,
+            )
+
+        raw = await asyncio.to_thread(_candles)
+        frame = _parse_candles(raw)
+        if frame.empty:
+            raise RuntimeError("Groww returned no 1-minute candles")
+        # Append a forming bar at the live LTP so iloc[-1] is never a closed bar
+        # the strategy might mistake for a signal.
+        last_ts = int(frame.iloc[-1]["ts"])
+        now_ts = int(dt.datetime.now(IST).replace(second=0, microsecond=0).timestamp())
+        if now_ts > last_ts:
+            frame = pd.concat(
+                [
+                    frame,
+                    pd.DataFrame(
+                        [
+                            {
+                                "ts": now_ts,
+                                "open": ltp,
+                                "high": ltp,
+                                "low": ltp,
+                                "close": ltp,
+                                "volume": 0,
+                            }
+                        ]
+                    ),
+                ],
+                ignore_index=True,
+            )
+        else:
+            frame.loc[frame.index[-1], "close"] = ltp
+            frame.loc[frame.index[-1], "high"] = max(float(frame.iloc[-1]["high"]), ltp)
+            frame.loc[frame.index[-1], "low"] = min(float(frame.iloc[-1]["low"]), ltp)
+        return float(ltp), frame
+
+    async def place_entry(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:
+        """side is BUY or SELL. PAPER fills at the candle close / LTP."""
+        if self.mode == "PAPER":
+            oid = self._next_id("PAPER")
+            px = round_to_nse_tick(ltp)
+            self._orders[oid] = _SimOrder(oid, side, qty, "ENTRY", "FILLED", px)
+            self._apply_paper_position(symbol, side, qty, px)
+            return OrderAck(oid, "FILLED", px)
+        return await self._live_limit(symbol, side, qty, ltp, kind="ENTRY")
+
+    async def place_exit(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:
+        if self.mode == "PAPER":
+            oid = self._next_id("PAPER")
+            px = round_to_nse_tick(ltp)
+            self._orders[oid] = _SimOrder(oid, side, qty, "EXIT", "FILLED", px)
+            self._positions = [p for p in self._positions if p.get("symbol") != symbol]
+            return OrderAck(oid, "FILLED", px)
+        return await self._live_limit(symbol, side, qty, ltp, kind="EXIT")
+
+    async def place_sl(self, symbol: str, side: str, qty: int, trigger: float) -> OrderAck:
+        trigger = round_to_nse_tick(trigger)
+        if self.mode == "PAPER":
+            oid = self._next_id("PAPERSL")
+            self._orders[oid] = _SimOrder(oid, side, qty, "SL", "TRIGGER_PENDING", trigger=trigger)
+            return OrderAck(oid, "TRIGGER_PENDING", None)
+        # Exchange SL: limit sits 0.20% through the trigger so a touch can fill
+        # without a naked market order.
+        buffer = get_settings().market_protection_pct / 100.0
+        if side == "SELL":
+            limit = round_to_nse_tick(trigger * (1 - buffer))
+        else:
+            limit = round_to_nse_tick(trigger * (1 + buffer))
+        return await self._live_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type="SL",
+            price=limit,
+            trigger=trigger,
+        )
+
+    async def cancel_order(self, order_id: str) -> None:
+        if not order_id:
+            return
+        if self.mode == "PAPER" or order_id.startswith("PAPER"):
+            order = self._orders.get(order_id)
+            if order is None:
+                return
+            if order.status in TERMINAL_FILLED:
+                return
+            order.status = "CANCELLED"
+            return
+        sdk = self._require_sdk()
+        await asyncio.to_thread(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
+
+    async def get_order_status(self, order_id: str) -> str:
+        if not order_id:
+            return ""
+        local = self._orders.get(order_id)
+        if local is not None and (self.mode == "PAPER" or order_id.startswith("PAPER")):
+            return local.status
+        sdk = self._require_sdk()
+
+        def _status():
+            if hasattr(sdk, "get_order_status"):
+                raw = sdk.get_order_status(groww_order_id=order_id, segment="CASH")
+                data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+                if isinstance(data, dict):
+                    return str(data.get("order_status") or data.get("status") or "")
+            raw = sdk.get_order_list(segment="CASH")
+            orders = raw.get("payload", raw) if isinstance(raw, dict) else raw
+            for o in orders or []:
+                oid = str(o.get("groww_order_id") or o.get("order_id") or "")
+                if oid == order_id:
+                    return str(o.get("order_status") or o.get("status") or "")
+            return ""
+
+        try:
+            return (await asyncio.to_thread(_status)).upper()
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)
+            return "UNKNOWN"
+
+    async def get_positions(self) -> list[dict]:
+        if self.mode == "PAPER":
+            return list(self._positions)
+        sdk = self._require_sdk()
+
+        def _pos():
+            fn = getattr(sdk, "get_positions", None) or getattr(sdk, "get_positions_for_user")
+            return fn(segment="CASH")
+
+        raw = await asyncio.to_thread(_pos)
+        data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+        if isinstance(data, dict):
+            data = data.get("positions") or []
+        return list(data or [])
+
+    async def _live_limit(self, symbol: str, side: str, qty: int, ltp: float, kind: str) -> OrderAck:
+        buffer = get_settings().market_protection_pct / 100.0
+        if side == "BUY":
+            price = round_to_nse_tick(ltp * (1 + buffer))
+        else:
+            price = round_to_nse_tick(ltp * (1 - buffer))
+        if price <= 0 or not math.isfinite(price):
+            raise RuntimeError("Refusing live order with a non-positive limit")
+        return await self._live_order(symbol, side, qty, "LIMIT", price, None)
+
+    async def _live_order(
+        self,
+        symbol: str,
+        side: str,
+        qty: int,
+        order_type: str,
+        price: float,
+        trigger: float | None,
+    ) -> OrderAck:
+        sdk = self._require_sdk()
+
+        def _place():
+            kwargs = dict(
+                validity="DAY",
+                exchange="NSE",
+                segment="CASH",
+                trading_symbol=symbol,
+                transaction_type=side,
+                quantity=int(qty),
+                order_type=order_type,
+                product="MIS",
+                price=float(price),
+            )
+            if trigger is not None:
+                kwargs["trigger_price"] = float(trigger)
+            return sdk.place_order(**kwargs)
+
+        raw = await asyncio.to_thread(_place)
+        data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+        if not isinstance(data, dict):
+            data = {}
+        oid = str(data.get("groww_order_id") or data.get("order_id") or self._next_id("LIVE"))
+        status = str(data.get("order_status") or data.get("status") or "PENDING").upper()
+        fill = data.get("average_fill_price") or data.get("filled_price")
+        ack = OrderAck(oid, status, float(fill) if fill else None)
+        self._orders[oid] = _SimOrder(oid, side, qty, order_type, status, ack.fill_price, trigger)
+        return ack
+
+    def _apply_paper_position(self, symbol: str, side: str, qty: int, price: float) -> None:
+        self._positions = [
+            {
+                "symbol": symbol,
+                "net_quantity": qty if side == "BUY" else -qty,
+                "average_price": price,
+            }
+        ]
+
+
+def _parse_candles(raw) -> pd.DataFrame:
+    data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
+    rows = data.get("candles", data.get("data", [])) if isinstance(data, dict) else data
+    out = []
+    for row in rows or []:
+        if isinstance(row, (list, tuple)) and len(row) >= 6:
+            ts_raw, o, h, l, c, v = row[:6]
+        elif isinstance(row, dict):
+            ts_raw = row.get("timestamp") or row.get("time") or row.get("ts")
+            o, h, l, c, v = row.get("open"), row.get("high"), row.get("low"), row.get("close"), row.get("volume")
+        else:
+            continue
+        ts = _to_epoch(ts_raw)
+        if ts is None:
+            continue
+        out.append(
+            {
+                "ts": ts,
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": int(v or 0),
+            }
+        )
+    if not out:
+        return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+    frame = pd.DataFrame(out).sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
+    return frame
+
+
+def _to_epoch(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return int(v / 1000) if v > 10_000_000_000 else int(v)
+    text = str(value).replace("T", " ").replace("Z", "")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return int(dt.datetime.strptime(text[:19], fmt).replace(tzinfo=IST).timestamp())
+        except ValueError:
+            continue
+    return None
+
