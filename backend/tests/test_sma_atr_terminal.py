@@ -954,10 +954,13 @@ def test_real_tape_does_not_open_a_position_after_the_close(monkeypatch):
 
     class Config:
         square_off_time = "15:15"
+        trading_mode = "PAPER"
+        symbol = "RELIANCE"
 
     asyncio.run(engine.on_minute(now, Config(), frame))  # type: ignore[arg-type]
     assert called["entry"] is False
-    assert engine.last_signal == "market closed — showing the last NSE price"
+    # 19:00 is past square-off, so the practice day is complete; no entry either way.
+    assert engine.status == "DAY_COMPLETED"
 
 
 def test_day_change_uses_the_previous_close(monkeypatch):
@@ -1073,8 +1076,10 @@ async def test_start_ignores_a_cross_already_on_the_tape(engine, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_force_order_uses_the_live_side_and_starts_the_bot(engine, monkeypatch):
-    session = {"open": False}
+    # Force orders are refused outside the session, so this runs inside it.
+    session = {"open": True}
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: session["open"])
+    monkeypatch.setattr("strategy_engine._ist_now", lambda: dt.datetime(2026, 9, 29, 13, 59, tzinfo=IST))
     closes = [100.0] * 40
     closes[-2] = 40.0
     closes[-1] = 200.0
@@ -1521,10 +1526,13 @@ async def test_a_checked_vwap_blocks_the_new_order_and_still_closes_the_old_one(
 
 
 @pytest.mark.asyncio
-async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine):
+async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine, monkeypatch):
     from models import BotConfig
     import database
     from strategy_engine import ForceRefused
+
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    monkeypatch.setattr("strategy_engine._ist_now", lambda: dt.datetime(2026, 9, 29, 13, 59, tzinfo=IST))
 
     with database.session_factory()() as db:
         row = db.get(BotConfig, 1)

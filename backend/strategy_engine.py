@@ -365,6 +365,10 @@ class StrategyEngine:
         if view in self._ltps:
             self.ltp = self._ltps[view]
 
+        # Practice books close at square-off whether or not the bot is
+        # running, and never carry into the next session.
+        await self._close_finished_paper_books(now, cfg)
+
         if self.status != "RUNNING":
             return
 
@@ -435,20 +439,28 @@ class StrategyEngine:
             return ""
         if self._past_square_off(now, cfg):
             await self._square_off("EOD_SQUARE_OFF")
+            if now.time() < _parse_hhmm(cfg.square_off_time):
+                # Before the open: yesterday's books are closed, today has
+                # not started. Wait for the session instead of ending it.
+                self.last_signal = "market closed — no new orders until 09:20 IST"
+                return self.last_signal
             if self.status != "DAY_COMPLETED" and not self.positions:
                 self.status = "DAY_COMPLETED"
                 self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
                 self._announce_down("DAY_COMPLETED", self.halt_reason)
             return self.halt_reason or "square-off"
 
-        # A real last-close tape must not open a position after the bell.
-        # The simulator still demonstrates signals when no NSE quote exists.
-        if not market_is_open(now) and self.data_source != "SIMULATOR":
-            self.last_signal = "market closed — showing the last NSE price"
+        # No new position outside the cash session, in PAPER or LIVE. The
+        # practice tape keeps moving on screen, but it does not trade.
+        if not market_is_open(now):
+            self.last_signal = "market closed — no new orders until 09:20 IST"
+            symbol = (cfg.symbol or "").upper()
+            if symbol:
+                self._signals[symbol] = f"{symbol} {self.last_signal}"
             return self.last_signal
 
-        # Opening-auction buffer applies whenever we are inside a real session.
-        if market_is_open(now) and now.time() < dt.time(9, 20):
+        # Opening-auction buffer.
+        if now.time() < dt.time(9, 20):
             self.last_signal = "skipped — opening auction buffer (09:15–09:20)"
             return self.last_signal
 
@@ -649,7 +661,10 @@ class StrategyEngine:
             direction = self.positions[name].direction
             raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
         cfg = self.load_config()
-        if (cfg.trading_mode or "").upper() == "LIVE" and _ist_now().time() >= _parse_hhmm(cfg.square_off_time):
+        clock = _ist_now()
+        if not market_is_open(clock):
+            raise ForceRefused("Market is closed. No new order until 09:20 IST.")
+        if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
         frame = self._frames.get(name)
         if frame is None or getattr(frame, "empty", True):
@@ -1117,7 +1132,7 @@ class StrategyEngine:
         if self._loss_breached(cfg):
             await self._stop_for_loss(cfg)
 
-    async def _square_off(self, reason: str) -> None:
+    async def _square_off(self, reason: str, symbols: list[str] | None = None) -> None:
         async with self.lock:
             if self.inflight:
                 return
@@ -1126,6 +1141,8 @@ class StrategyEngine:
             try:
                 cfg = self.load_config()
                 for symbol in list(self.positions):
+                    if symbols is not None and symbol not in symbols:
+                        continue
                     self._focus = symbol
                     if self.position is None:
                         continue
@@ -1532,9 +1549,41 @@ class StrategyEngine:
         return True
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
-        if not market_is_open(now) and self.data_source != "GROWW":
-            return False
-        return now.time() >= _parse_hhmm(cfg.square_off_time)
+        """True once the day's session is over for an open position.
+
+        LIVE: from square-off time while Groww still takes orders (MIS is
+        flattened by the broker after that). PAPER: from square-off time
+        until the next open, weekends included, so a practice book is
+        never carried overnight.
+        """
+        if (cfg.trading_mode or "").upper() == "LIVE":
+            if not market_is_open(now) and self.data_source != "GROWW":
+                return False
+            return now.time() >= _parse_hhmm(cfg.square_off_time)
+        if now.weekday() >= 5:
+            return True
+        t = now.time()
+        return t >= _parse_hhmm(cfg.square_off_time) or t < dt.time(9, 15)
+
+    async def _close_finished_paper_books(self, now: dt.datetime, cfg: BotConfig) -> None:
+        """Square off practice positions at the end of their session.
+
+        Runs even when the bot is paused or stopped. A position opened on
+        an earlier day (for example, held across a restart) closes at once.
+        """
+        if (cfg.trading_mode or "").upper() == "LIVE" or not self.positions:
+            return
+        today = now.astimezone(IST).date() if now.tzinfo else now.date()
+        if self._past_square_off(now, cfg):
+            due = [s for s, p in self.positions.items() if p is not None and (p.mode or "PAPER").upper() != "LIVE"]
+        else:
+            due = [
+                s
+                for s, p in self.positions.items()
+                if p is not None and (p.mode or "PAPER").upper() != "LIVE" and _entry_day(p) < today
+            ]
+        if due:
+            await self._square_off("EOD_SQUARE_OFF", symbols=due)
 
     def _unrealized(self) -> dict | None:
         pos = self.position
@@ -1960,6 +2009,13 @@ def _schedule_whatsapp(message: str) -> None:
             return
 
     loop.create_task(_send())
+
+
+def _entry_day(pos: OpenPosition) -> dt.date:
+    when = pos.entry_time
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=IST)
+    return when.astimezone(IST).date()
 
 
 def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
