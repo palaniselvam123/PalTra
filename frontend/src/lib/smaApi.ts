@@ -235,6 +235,23 @@ function route(path: string): string {
   return path;
 }
 
+/** FastAPI validation errors arrive as a list; say which field and why. */
+function readableDetail(detail: unknown): string {
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (item && typeof item === "object" && "msg" in item) {
+          const loc = Array.isArray((item as { loc?: unknown[] }).loc) ? (item as { loc: unknown[] }).loc : [];
+          const field = String(loc[loc.length - 1] ?? "").replace(/_/g, " ");
+          return `${field ? `${field}: ` : ""}${String((item as { msg: unknown }).msg)}`;
+        }
+        return JSON.stringify(item);
+      })
+      .join("; ");
+  }
+  return JSON.stringify(detail);
+}
+
 async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): Promise<T> {
   path = route(path);
   const controller = new AbortController();
@@ -253,7 +270,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): 
       } catch {
         /* plain text */
       }
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      throw new Error(typeof detail === "string" ? detail : readableDetail(detail));
     }
     return res.json() as Promise<T>;
   } catch (err) {
