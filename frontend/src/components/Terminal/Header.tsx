@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Radio, Search } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { StatusBar } from "./StatusBar";
+import { Skeleton } from "./ui";
+import { StockCard } from "./StockCard";
+import { ControlBar } from "./ControlBar";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
 
 function chipNote(note: string, symbol: string): string {
-  const trimmed = note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
-  return trimmed.length > 88 ? `${trimmed.slice(0, 86)}…` : trimmed;
+  return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
 }
 const SAVED_KEY = "sma.symbols";
 
@@ -30,9 +33,11 @@ type Props = {
   connected: boolean;
   loadNote?: string | null;
   onChanged: () => void;
+  /** A page-level alert shown right under the sticky header. */
+  notice?: ReactNode;
 };
 
-export function Header({ state, config, connected, loadNote, onChanged }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged, notice }: Props) {
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -117,6 +122,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   const armed = new Set(armedList);
   const books = state?.books ?? [];
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
+  // Armed first, then the rest, each alphabetically. A held stock is never dropped.
   const symbols = Array.from(
     new Set([
       ...armedList,
@@ -124,7 +130,9 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       ...DEFAULTS,
       ...saved,
     ])
-  ).slice(0, 24);
+  )
+    .slice(0, 24)
+    .sort((a, b) => Number(armed.has(b)) - Number(armed.has(a)) || a.localeCompare(b));
 
   const applySymbol = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
@@ -188,14 +196,9 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   };
 
   const forceOrder = async () => {
+    // The ControlBar dialog has already named the stock and, in LIVE, had CONFIRM typed.
     const target = (symbol || config?.symbol || "").trim().toUpperCase();
     if (!target) return;
-    const ok = window.confirm(
-      live
-        ? `Force a live ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross or a closed candle. The bot will start.`
-        : `Force a practice ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross. The bot will start.`
-    );
-    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -235,86 +238,81 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
     }
   };
 
-  const quoteLabel =
-    state && state.ltp > 0
-      ? state.data_source || "QUOTES"
-      : connected
-        ? state?.bot_status ?? "CHECKING"
-        : loadNote
-          ? "NO REPLY"
-          : "CHECKING";
-
   return (
-    <header className="sticky top-0 z-30 border-b border-white/5 bg-[#0B0E14]">
-      <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <nav className="flex min-w-0 items-center gap-3 overflow-x-auto text-[11px] uppercase tracking-[0.14em] text-slate-500">
-            <a href="/" className="shrink-0 hover:text-slate-300">Dashboard</a>
-            <a href="/trade/" className="shrink-0 hover:text-slate-300">Trade</a>
-            <a href="/chart/" className="shrink-0 hover:text-slate-300">Charts</a>
-            <a href="/settings/" className="shrink-0 hover:text-slate-300">Settings</a>
-          </nav>
-          <div className="shrink-0 text-sm font-semibold tracking-tight text-slate-100">
-            <span className="sm:hidden">SMA</span>
-            <span className="hidden sm:inline">SMA × ATR Terminal</span>
-            {config?.symbol ? <span className="ml-2 hidden font-normal text-slate-400 md:inline">· {config.symbol}</span> : null}
+    <>
+      <nav
+        aria-label="Desk pages"
+        className="grid grid-cols-4 border-b border-white/10 bg-[#0B0E14] text-xs uppercase tracking-[0.12em] text-slate-300 sm:flex sm:gap-5 sm:px-4"
+      >
+        {[
+          ["/", "Dashboard"],
+          ["/trade/", "Trade"],
+          ["/chart/", "Charts"],
+          ["/settings/", "Settings"],
+        ].map(([href, label]) => (
+          <a key={href} href={href} className="flex min-h-11 items-center justify-center hover:text-white sm:min-h-9 sm:justify-start">
+            {label}
+          </a>
+        ))}
+      </nav>
+      <header
+        aria-label="SMA terminal"
+        className={clsx(
+          "sticky top-0 z-30 bg-[#0B0E14]",
+          live ? "border-2 border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]" : "border-b border-white/10"
+        )}
+      >
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <span className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</span>
+            <div className="flex shrink-0 items-baseline gap-2 text-sm">
+              {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}
+              <span className="font-mono text-slate-100">{px(ltp)}</span>
+              <span
+                className={clsx(
+                  "font-mono text-xs",
+                  changePct == null ? "text-slate-400" : changePct >= 0 ? "text-emerald-400" : "text-rose-400"
+                )}
+              >
+                {changePct == null ? "" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
+              </span>
+            </div>
           </div>
+          <StatusBar
+            state={state}
+            config={config}
+            connected={connected}
+            busy={busy}
+            onModeClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
+          />
         </div>
-
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="min-w-0 font-mono text-lg leading-none sm:text-sm">
-            <span className="text-slate-100">{px(ltp)}</span>
-            <span
-              className={clsx(
-                "ml-2 text-sm sm:text-xs",
-                changePct == null ? "text-slate-500" : changePct >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"
-              )}
-            >
-              {changePct == null ? "—" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
-            </span>
+        {(error || state?.halt_reason || state?.last_error) && (
+          <div role="alert" className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs text-rose-300">
+            {error || state?.halt_reason || state?.last_error}
           </div>
-          <button
-            disabled={busy}
-            onClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
-            title={live ? "Live Groww orders are on" : "Practice fills only. This does not send orders to Groww."}
-            className={clsx(
-              "shrink-0 rounded-full px-3 py-2 text-xs font-semibold",
-              live
-                ? "animate-pulse bg-[#F43F5E]/20 text-[#F43F5E] ring-1 ring-[#F43F5E]/50"
-                : "bg-[#F59E0B]/15 text-[#F59E0B] ring-1 ring-[#F59E0B]/40"
-            )}
-          >
-            {live ? (
-              <>
-                <span className="sm:hidden">LIVE</span>
-                <span className="hidden sm:inline">LIVE REAL MONEY</span>
-              </>
-            ) : state?.data_source === "SIMULATOR" ? (
-              <>
-                <span className="sm:hidden">SIM</span>
-                <span className="hidden sm:inline">SIMULATION · tape moving</span>
-              </>
-            ) : (
-              <>
-                <span className="sm:hidden">PAPER</span>
-                <span className="hidden sm:inline">PAPER · no Groww orders</span>
-              </>
-            )}
-          </button>
-        </div>
+        )}
+      </header>
 
+      <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
+        {notice}
+        <ControlBar
+          state={state}
+          live={live}
+          running={running}
+          busy={busy}
+          symbol={(symbol || config?.symbol || "").toUpperCase()}
+          symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+          onToggleBot={toggleBot}
+          onForce={forceOrder}
+          onPanic={panic}
+        />
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold">
-                <span className="uppercase tracking-wider text-slate-500">Stocks</span>
-                <span className="text-[#FBBF24]">Name</span>
-                <span className="text-[#38BDF8]">Chart</span>
-                <span className="text-[#C4B5FD]">Trade</span>
-              </div>
-              <div className="text-[11px] text-slate-400">
-                <span className="font-semibold text-[#34D399]">{armedList.length}</span>
-                {` of ${ARM_LIMIT} armed · ${state?.trades_today ?? 0}/${state?.max_trades ?? 40} trades`}
+              <h2 className="text-sm font-semibold text-slate-100">Stocks</h2>
+              <div className="text-xs text-slate-400">
+                <span className="font-semibold text-emerald-300">{armedList.length}</span>
+                {` of ${ARM_LIMIT} armed for trading`}
               </div>
             </div>
             <div className="relative border-b border-white/5">
@@ -326,16 +324,16 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                 if (typed) applySymbol(typed);
               }}
             >
-              <Search size={14} className="shrink-0 text-slate-500" />
+              <Search size={14} className="shrink-0 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => hits.length > 0 && setOpen(true)}
                 placeholder="Find a stock"
-                className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-500"
+                className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-400"
                 aria-label="Find an NSE stock"
               />
-              {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-500" />}
+              {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-400" />}
             </form>
             {open && query.trim() && !searching && hits.length === 0 && (
               <div className="absolute left-3 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
@@ -353,145 +351,64 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                     className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
                   >
                     <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
-                    <span className="truncate text-[10px] text-slate-500">{hit.name}</span>
+                    <span className="truncate text-[11px] text-slate-400">{hit.name}</span>
                   </button>
                 ))}
               </div>
             )}
             </div>
-            {!config?.symbol && (
-              <p className="px-3 py-2 text-xs text-slate-500">
-                {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
-              </p>
-            )}
-            <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-b-xl bg-white/5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
-              {symbols.map((s) => {
-                const selected = Boolean(config?.symbol) && symbol === s;
-                const trading = armed.has(s);
-                const book = bookBySymbol.get(s);
-                const position =
-                  book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : null;
-                const note = chipNote(book?.note || "", s);
-                return (
-                  <li key={s} className="flex min-w-0 flex-col gap-1 bg-[#151921] px-3 py-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-wide text-[#FBBF24]" title={s}>
-                        {s}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => applySymbol(s)}
-                        title="Show this stock on the chart. Open orders on other stocks stay put."
-                        className={clsx(
-                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
-                          selected
-                            ? "bg-[#0284C7] text-white"
-                            : "bg-[#38BDF8]/15 text-[#38BDF8] ring-1 ring-[#38BDF8]/50 hover:bg-[#38BDF8]/25"
-                        )}
-                      >
-                        {selected ? "On chart" : "Chart"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || (!trading && armedList.length >= ARM_LIMIT)}
-                        onClick={() => toggleTrade(s)}
-                        title={
-                          trading
-                            ? "The bot can order this stock from any chart. Press again to take it off."
-                            : armedList.length >= ARM_LIMIT
-                              ? `Trade is limited to ${ARM_LIMIT} stocks. Turn one off before adding another.`
-                              : "Add this stock so the bot can order it from any chart"
-                        }
-                        className={clsx(
-                          "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold",
-                          trading
-                            ? "bg-[#059669] text-white"
-                            : "bg-[#8B5CF6]/15 text-[#C4B5FD] ring-1 ring-[#A78BFA]/55 hover:bg-[#8B5CF6]/25"
-                        )}
-                      >
-                        {trading ? "Trading" : "Trade"}
-                      </button>
-                    </div>
-                    <div className="flex min-w-0 items-center gap-2 text-[10px] leading-tight">
-                      <span
-                        className={clsx(
-                          "shrink-0 font-semibold uppercase",
-                          position === "LONG" && "text-[#10B981]",
-                          position === "SHORT" && "text-[#F43F5E]",
-                          !position && "text-slate-500"
-                        )}
-                      >
-                        {position ? `${position}${book?.qty ? ` ${book.qty}` : ""}` : "Flat"}
-                      </span>
-                      {note ? <span className="min-w-0 truncate text-slate-500">{note}</span> : null}
-                    </div>
+            {!config?.symbol && loadNote && <p className="px-3 py-2 text-sm text-amber-200">The stock list did not load.</p>}
+            {!config ? (
+              <ul aria-busy="true" aria-label="Loading stocks" className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {[0, 1, 2].map((i) => (
+                  <li key={i} className="space-y-2 rounded-lg bg-[#151921] p-3 ring-1 ring-inset ring-white/10">
+                    <Skeleton className="h-5 w-28" />
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-11 w-full" />
                   </li>
+                ))}
+              </ul>
+            ) : (
+            <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
+              {symbols.map((s) => {
+                const book = bookBySymbol.get(s);
+                const side = book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : "FLAT";
+                const onChart = Boolean(config?.symbol) && symbol === s;
+                const ltpOf = book?.ltp != null && book.ltp > 0 ? book.ltp : onChart ? ltp : null;
+                return (
+                  <StockCard
+                    key={s}
+                    busy={busy}
+                    armLimitReached={armedList.length >= ARM_LIMIT}
+                    onToggleArmed={() => toggleTrade(s)}
+                    onShowOnChart={() => applySymbol(s)}
+                    stock={{
+                      symbol: s,
+                      ltp: ltpOf,
+                      changePct: onChart ? changePct ?? null : null,
+                      side,
+                      qty: book?.qty ?? 0,
+                      note: chipNote(book?.note || "", s),
+                      stopOff: book?.stop_active === false,
+                      armed: armed.has(s),
+                      onChart,
+                    }}
+                  />
                 );
               })}
             </ul>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <button
-            disabled={busy}
-            onClick={toggleBot}
-            title="Starts the bot. A cross that already happened is skipped. Buy and sell both wait until the SMA cross prints. Telegram only warns before that."
-            className={clsx(
-              "min-h-11 rounded-md px-3 py-2 text-xs font-semibold",
-              running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
-            )}
-          >
-            {running ? "PAUSE BOT" : "START BOT"}
-          </button>
-          <button
-            disabled={busy || !symbol || !armed.has((symbol || "").toUpperCase())}
-            onClick={forceOrder}
-            title={
-              symbol && !armed.has(symbol.toUpperCase())
-                ? `${symbol.toUpperCase()} is not on the Trade list. Press Trade on it first.`
-                : "Order the chart stock now from the current SMA side, without waiting for a cross. Checked VWAP, volume, density, and RSI still apply. Starts the bot."
-            }
-            className="min-h-11 rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-[#1a1203] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            FORCE ORDER
-          </button>
-          <button
-            disabled={busy}
-            onClick={panic}
-            className="col-span-2 min-h-11 rounded-md bg-[#F43F5E] px-3 py-2 text-xs font-bold tracking-wide text-white shadow-[0_0_24px_rgba(244,63,94,0.35)] sm:ml-auto sm:w-auto"
-          >
-            <span className="sm:hidden">PANIC SQUARE-OFF</span>
-            <span className="hidden sm:inline">PANIC SQUARE-OFF ALL</span>
-          </button>
-        </div>
-
-        <span className="flex items-center gap-1.5 text-[11px] text-slate-400" title={state?.data_source}>
-          <Radio size={12} className={connected ? "text-[#10B981]" : "text-[#F43F5E]"} />
-          {quoteLabel}
-        </span>
       </div>
-      <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
-        The amber name is the stock. Blue Chart only changes the stock on screen. Violet Trade adds
-        it, up to 24 at once, and green Trading means the bot can order it from any chart. Buy and
-        sell both wait for the next SMA cross. Telegram warns about 3 minutes before that cross, and
-        the order waits until the cross prints. Force order uses the current SMA side. Checked VWAP,
-        volume, density, and RSI filters apply to both.
-      </p>
-      {(error || state?.halt_reason || state?.last_error) && (
-        <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">
-          {error || state?.halt_reason || state?.last_error}
-        </div>
-      )}
-
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-5">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 text-[#F43F5E]" size={20} />
               <div>
-                <h2 className="text-base font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
+                <h2 className="text-[17px] font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
                   Orders will be sent to Groww as NSE MIS limit orders with a 0.20% protection buffer,
                   plus an exchange stop-loss. This uses the Groww login already saved on the desk.
@@ -517,6 +434,6 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }

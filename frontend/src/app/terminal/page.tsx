@@ -8,7 +8,7 @@ import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
-import { smaApi, type ChartPayload, type SmaConfig, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { SMA_API, smaApi, type ChartPayload, type SmaConfig, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 function useFold(key: string) {
   const [folded, setFolded] = useState(false);
@@ -48,17 +48,17 @@ function Fold({
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+        className="flex min-h-11 w-full items-center justify-between rounded-xl border border-white/10 bg-[#151921] px-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300"
       >
         <span>{title}</span>
-        <span className="font-normal normal-case tracking-normal text-slate-500">Show</span>
+        <span className="font-normal normal-case tracking-normal text-slate-400">Show</span>
       </button>
     );
   }
   return (
     <div>
       <div className="mb-1 flex justify-end">
-        <button type="button" onClick={toggle} className="text-[11px] text-slate-500 hover:text-slate-300">
+        <button type="button" onClick={toggle} className="min-h-11 px-2 text-xs text-slate-400 hover:text-slate-200 sm:min-h-8">
           Minimize {title.toLowerCase()}
         </button>
       </div>
@@ -72,6 +72,8 @@ export default function TerminalPage() {
   const [config, setConfig] = useState<SmaConfig | null>(null);
   const [chart, setChart] = useState<ChartPayload | null>(null);
   const [trades, setTrades] = useState<TradeRow[]>([]);
+  const [tradesLoaded, setTradesLoaded] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
   const [connected, setConnected] = useState(false);
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
@@ -94,13 +96,21 @@ export default function TerminalPage() {
         } else {
           setLoadNote("Terminal data did not load. This is not a flat position.");
         }
+        // Both calls failing means the engine itself is down, not one bad reply.
+        setUnreachable(cfg.status === "rejected" && next.status === "rejected");
         if (cfg.status === "rejected" && next.status === "rejected") {
-          setLoadNote("The saved symbol did not load.");
+          setLoadNote(null);
         }
       })
       .finally(finish);
     smaApi.chart().then(setChart).catch(() => {});
-    smaApi.trades().then(setTrades).catch(() => {});
+    smaApi
+      .trades()
+      .then((rows) => {
+        setTrades(rows);
+        setTradesLoaded(true);
+      })
+      .catch(() => {});
   }, []);
 
   const closePosition = useCallback(
@@ -180,15 +190,46 @@ export default function TerminalPage() {
 
   return (
     <div className="terminal-dark min-h-screen w-full min-w-0 bg-[#0B0E14] text-slate-200">
-      <Header state={state} config={config} connected={connected} loadNote={loadNote} onChanged={refresh} />
+      <Header
+        state={state}
+        config={config}
+        connected={connected}
+        loadNote={loadNote}
+        onChanged={refresh}
+        notice={
+          unreachable ? (
+              <div
+                role="alert"
+                className="flex flex-col gap-2 rounded-xl border border-rose-500/50 bg-rose-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="text-sm text-rose-100">
+                  <p className="font-semibold">Can&apos;t reach the trading engine.</p>
+                  <p className="text-rose-200/90">
+                    {state
+                      ? "Prices, positions and P&L below are from the last reply and may be out of date."
+                      : "Nothing has loaded yet. This is not a flat position."}{" "}
+                    Retrying every 15 s. <span className="break-all font-mono text-xs text-rose-200/70">{SMA_API}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  className="min-h-11 shrink-0 rounded-md bg-rose-600 px-4 text-sm font-semibold text-white hover:bg-rose-500"
+                >
+                  Retry now
+                </button>
+              </div>
+          ) : null
+        }
+      />
       <main className="mx-auto w-full min-w-0 space-y-4 px-3 py-3 sm:px-4 sm:py-4">
-        {loadNote && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        {loadNote && !unreachable && (
+          <div role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             {loadNote}
           </div>
         )}
         {closeNote && (
-          <div className="rounded-md border border-[#F43F5E]/40 bg-[#F43F5E]/10 px-3 py-2 text-xs text-[#fda4af]">
+          <div role="alert" className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
             {closeNote}
           </div>
         )}
@@ -198,6 +239,7 @@ export default function TerminalPage() {
             <StrategyChart
               chart={chart}
               state={state}
+              trades={trades}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
               onClose={() => {
                 const pos = state?.position;
@@ -210,7 +252,7 @@ export default function TerminalPage() {
             <button
               type="button"
               onClick={toggleRail}
-              className="self-start rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
+              className="min-h-11 self-start rounded-xl border border-white/10 bg-[#151921] px-3 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
             >
               Show side panel
             </button>
@@ -220,7 +262,7 @@ export default function TerminalPage() {
                 <button
                   type="button"
                   onClick={toggleRail}
-                  className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5"
+                  className="min-h-11 rounded-md border border-white/10 px-3 text-xs text-slate-300 hover:bg-white/5 sm:min-h-8"
                 >
                   Minimize side panel
                 </button>
@@ -238,6 +280,7 @@ export default function TerminalPage() {
           )}
         </div>
         <TradeHistoryTable
+          loading={!tradesLoaded}
           trades={trades}
           state={state}
           closingSymbol={closingSymbol}

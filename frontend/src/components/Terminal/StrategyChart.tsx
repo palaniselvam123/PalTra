@@ -1,15 +1,90 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
-import { inr, px, type ChartPayload, type SmaState } from "@/lib/smaApi";
+import { parseClock } from "@/lib/format";
+import { Skeleton } from "./ui";
+import { inr, px, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 type Props = {
   chart: ChartPayload | null;
   state: SmaState | null;
+  /** Trade rows already loaded for the blotter. Used only to mark exits. */
+  trades?: TradeRow[];
   closing: boolean;
   onClose: () => void;
 };
+
+const SESSION_OPEN_MIN = 9 * 60 + 15;
+const SESSION_CLOSE_MIN = 15 * 60 + 30;
+
+function istMinutes(sec: number): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(sec * 1000));
+  const hh = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const mm = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return hh * 60 + mm;
+}
+
+/** Drop bars outside 09:15–15:30 IST that carry no SMA. They are the practice
+tape after the close and only squash the real session on screen. */
+function sessionCandles(rows: Candle[]): Candle[] {
+  return rows.filter((c) => {
+    if (c.sma9 != null || c.sma21 != null) return true;
+    const m = istMinutes(c.time);
+    return m >= SESSION_OPEN_MIN && m <= SESSION_CLOSE_MIN;
+  });
+}
+
+type Marker = {
+  time: number;
+  position: "aboveBar" | "belowBar";
+  color: string;
+  shape: "arrowUp" | "arrowDown" | "circle";
+  text: string;
+};
+
+function compactPrice(value: number): string {
+  return value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+/** Entry markers from the API plus exit markers from closed trades on this stock. */
+function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], symbol: string): Marker[] {
+  if (rows.length === 0) return [];
+  const first = rows[0].time;
+  const last = rows[rows.length - 1].time;
+  const times = new Set(rows.map((c) => c.time));
+  const snap = (sec: number) => sec - (sec % 60);
+  const out: Marker[] = chart.markers
+    .filter((m) => times.has(m.time) || (m.time >= first && m.time <= last))
+    .map((m) => ({
+      time: snap(m.time),
+      position: m.direction === "LONG" ? "belowBar" : "aboveBar",
+      color: m.direction === "LONG" ? "#34D399" : "#FB7185",
+      shape: m.direction === "LONG" ? "arrowUp" : "arrowDown",
+      text: `${m.direction === "LONG" ? "BUY" : "SELL"} ${compactPrice(m.price)}`,
+    }));
+  for (const t of trades) {
+    if (t.symbol.toUpperCase() !== symbol || t.exit_price == null || !t.exit_time) continue;
+    const when = parseClock(t.exit_time);
+    if (!when) continue;
+    const sec = snap(Math.floor(when.getTime() / 1000));
+    if (sec < first || sec > last) continue;
+    const net = t.net_pnl ?? t.gross_pnl;
+    out.push({
+      time: sec,
+      position: t.direction === "LONG" ? "aboveBar" : "belowBar",
+      color: net == null ? "#CBD5E1" : net >= 0 ? "#34D399" : "#FB7185",
+      shape: "circle",
+      text: `EXIT ${compactPrice(t.exit_price)}`,
+    });
+  }
+  return out.sort((a, b) => a.time - b.time);
+}
 
 type SmaHover = { sma9: number | null; sma21: number | null };
 
@@ -60,7 +135,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, closing, onClose }: Props) {
+export function StrategyChart({ chart, state, trades = [], closing, onClose }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -70,6 +145,9 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const pnlGrossRef = useRef<number | null>(null);
+  const stopOn = state?.position ? state.position.stop_active !== false : state?.stop_enabled !== false;
+  const stopOnRef = useRef(stopOn);
+  stopOnRef.current = stopOn;
   const [hover, setHover] = useState<SmaHover | null>(null);
 
   useEffect(() => {
@@ -164,7 +242,7 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
 
   useEffect(() => {
     if (!chart || !candleRef.current || !smaFastRef.current || !smaSlowRef.current || !atrRef.current) return;
-    const rows = chart.candles;
+    const rows = sessionCandles(chart.candles);
     candleRef.current.setData(
       rows.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close }))
     );
@@ -178,13 +256,7 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
       rows.filter((c) => c.atr14 != null).map((c) => ({ time: c.time as never, value: c.atr14 as number }))
     );
     candleRef.current.setMarkers(
-      chart.markers.map((m) => ({
-        time: m.time as never,
-        position: m.direction === "LONG" ? "belowBar" : "aboveBar",
-        color: m.direction === "LONG" ? "#10B981" : "#F43F5E",
-        shape: m.direction === "LONG" ? "arrowUp" : "arrowDown",
-        text: m.direction === "LONG" ? "BUY" : "SELL",
-      }))
+      chartMarkers(chart, rows, trades, (state?.symbol ?? "").toUpperCase()).map((m) => ({ ...m, time: m.time as never }))
     );
 
     if (slLine.current) {
@@ -195,7 +267,8 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
       candleRef.current.removePriceLine(entryLine.current);
       entryLine.current = null;
     }
-    if (chart.sl_trigger) {
+    // The stop line is drawn only when this position really has a stop.
+    if (chart.sl_trigger && stopOnRef.current) {
       slLine.current = candleRef.current.createPriceLine({
         price: chart.sl_trigger,
         color: "#F59E0B",
@@ -214,7 +287,7 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
         title: look.title,
       });
     }
-  }, [chart]);
+  }, [chart, trades, state?.symbol, stopOn]);
 
   const pnl = livePnl(state);
   const pos = state?.position;
@@ -232,23 +305,37 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
   return (
     <section className="min-w-0 max-w-full overflow-hidden rounded-xl border border-white/5 bg-[#151921]">
       <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-        <h2 className="text-sm font-medium text-slate-200">1-minute · SMA 9 / SMA 21 · ATR 14</h2>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px]">
-          <span className="text-[#F43F5E]">SMA 9 {px(sma9)}</span>
-          <span className="text-[#3B82F6]">SMA 21 {px(sma21)}</span>
-          <span className="text-[#A78BFA]">ATR</span>
-          {pos && pos.stop_active === false ? (
-            <span className="font-semibold text-amber-300">Stop OFF</span>
-          ) : (
-            <span className="text-[#F59E0B]">Stop</span>
-          )}
-        </div>
+        <h2 className="text-sm font-semibold text-slate-100">
+          {state?.symbol ? <span className="text-amber-300">{state.symbol} </span> : null}
+          <span className="font-normal text-slate-300">1-minute</span>
+        </h2>
+        <ul aria-label="Chart legend" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
+          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#F43F5E]" />}>
+            SMA 9 <span className="font-mono text-slate-100">{px(sma9)}</span>
+          </LegendItem>
+          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#3B82F6]" />}>
+            SMA 21 <span className="font-mono text-slate-100">{px(sma21)}</span>
+          </LegendItem>
+          <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-amber-400" />}>
+            {stopOn ? `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR stop` : <span className="font-semibold text-amber-300">Stop OFF</span>}
+          </LegendItem>
+          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>
+          <LegendItem swatch={<span className="text-emerald-400">▲</span>}>Buy</LegendItem>
+          <LegendItem swatch={<span className="text-rose-400">▼</span>}>Sell</LegendItem>
+          <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
+        </ul>
       </div>
       <div className="relative">
         <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
+        {!chart && (
+          <div aria-busy="true" aria-label="Loading chart" className="absolute inset-0 z-[5] flex flex-col justify-end gap-2 bg-[#151921] p-4">
+            <Skeleton className="h-2/3 w-full opacity-60" />
+            <Skeleton className="h-1/6 w-full opacity-40" />
+          </div>
+        )}
         {pos && pnl && (
           <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[240px] rounded-lg border border-white/10 bg-[#0B0E14]/90 p-2.5 shadow-lg">
-            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
               {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
             </div>
             <div className={`mt-1 font-mono text-lg font-semibold ${pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}`}>
@@ -264,7 +351,7 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
               type="button"
               disabled={closing}
               onClick={onClose}
-              className="pointer-events-auto mt-2 w-full rounded-md border border-[#F43F5E]/50 bg-[#F43F5E]/15 px-2 py-1.5 text-xs font-semibold text-[#fda4af] hover:bg-[#F43F5E]/25 disabled:opacity-50"
+              className="pointer-events-auto mt-2 min-h-11 w-full rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
             >
               {closing ? "Closing…" : "Close position"}
             </button>
@@ -272,5 +359,16 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
         )}
       </div>
     </section>
+  );
+}
+
+function LegendItem({ swatch, children }: { swatch: ReactNode; children: ReactNode }) {
+  return (
+    <li className="flex items-center gap-1.5 whitespace-nowrap">
+      <span aria-hidden className="flex w-5 items-center justify-center">
+        {swatch}
+      </span>
+      {children}
+    </li>
   );
 }
