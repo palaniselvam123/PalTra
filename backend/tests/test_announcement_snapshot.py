@@ -151,8 +151,13 @@ def test_baseline_is_write_once_and_read_only(tmp_path):
 
     with pytest.raises(FileExistsError):
         write_snapshot(path, _snap([_rec(2)]))
-    with pytest.raises(PermissionError):
-        open(path, "wb").close()
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        # root ignores permission bits, so the OS cannot refuse this write.
+        # The read-only mode bit asserted above is what protects the file.
+        pass
+    else:
+        with pytest.raises(PermissionError):
+            open(path, "wb").close()
 
     # The refused second write must not have altered the first.
     assert [r["seq_id"] for r in read_snapshot(path)["records"]] == ["1"]
@@ -162,7 +167,8 @@ def test_baseline_is_write_once_and_read_only(tmp_path):
 def test_read_snapshot_rejects_a_tampered_file(tmp_path):
     path = tmp_path / "baseline.json"
     write_snapshot(path, _snap([_rec(1)]))
-    os.chmod(path, stat.S_IWRITE)
+    # Read and write. Write-only (S_IWRITE alone) is unreadable for anyone but root.
+    os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
 
     snap = json.loads(path.read_bytes())
     snap["records"][0]["exchdisstime"] = "04-Jun-2026 23:59:59"
