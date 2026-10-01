@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -51,6 +51,12 @@ class BotConfig(Base):
     sma_slow: Mapped[int] = mapped_column(Integer, default=21)
     atr_period: Mapped[int] = mapped_column(Integer, default=14)
     atr_multiplier: Mapped[float] = mapped_column(Float, default=1.5)
+    # ATR = fixed stop at atr_multiplier × ATR (default). SMA_GAP = moving
+    # stop and target from the SMA 9/21 gap %, PAPER only (gap_trail.py).
+    stop_type: Mapped[str] = mapped_column(String, default="ATR")
+    gap_sl_mult: Mapped[float] = mapped_column(Float, default=1.0)
+    gap_tp_mult: Mapped[float] = mapped_column(Float, default=2.0)
+    gap_min_pct: Mapped[float] = mapped_column(Float, default=0.2)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
     # When false, entries are sent without an exchange stop. Square-off, the
     # panic button, and an opposite crossover still close the position.

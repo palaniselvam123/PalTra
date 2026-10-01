@@ -98,6 +98,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_entry_block`), stop-and-reverse (`apply_signal`, `_apply_locked`), ATR
   stop placement (`_open`, `_sl_price`, `_watch_stop`), daily loss / trade
   caps, square-off at `square_off_time`, and the kill switch.
+- `backend/gap_trail.py` – optional SMA-gap moving stop and target
+  (`stop_type = "SMA_GAP"`, PAPER only): levels from the SMA 9/21 gap % ×
+  `gap_sl_mult` / `gap_tp_mult` (floored at `gap_min_pct`), recalculated each
+  closed candle by `StrategyEngine._trail_gap_levels`; the stop only tightens.
+  Exits are `GAP_SL_HIT` / `TARGET_HIT`. LIVE always uses the ATR stop.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

@@ -302,6 +302,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
+  const targetLine = useRef<IPriceLine | null>(null);
   const pnlGrossRef = useRef<number | null>(null);
   const stopOn = state?.position ? state.position.stop_active !== false : state?.stop_enabled !== false;
   const stopOnRef = useRef(stopOn);
@@ -614,6 +615,19 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       candleRef.current.removePriceLine(entryLine.current);
       entryLine.current = null;
     }
+    if (targetLine.current) {
+      candleRef.current.removePriceLine(targetLine.current);
+      targetLine.current = null;
+    }
+    if (!past && chart.trailing && chart.target) {
+      targetLine.current = candleRef.current.createPriceLine({
+        price: chart.target,
+        color: "#34D399",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        title: "Target (SMA gap)",
+      });
+    }
     // The stop line is drawn only when this position really has a stop.
     if (!past && chart.sl_trigger && stopOnRef.current) {
       slLine.current = candleRef.current.createPriceLine({
@@ -621,7 +635,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         color: "#F59E0B",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        title: `${chart.atr_multiplier ?? 1.5}× ATR SL`,
+        title: chart.trailing ? "Moving SL (SMA gap)" : `${chart.atr_multiplier ?? 1.5}× ATR SL`,
       });
     }
     if (!past && chart.entry_price) {
@@ -726,7 +740,13 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
           </LegendItem>
           {past ? null : (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-amber-400" />}>
-              {stopOn ? `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR stop` : <span className="font-semibold text-amber-300">Stop OFF</span>}
+              {!stopOn ? (
+                <span className="font-semibold text-amber-300">Stop OFF</span>
+              ) : chart?.trailing ? (
+                "Moving stop · target"
+              ) : (
+                `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR stop`
+              )}
             </LegendItem>
           )}
           <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>

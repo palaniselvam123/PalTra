@@ -30,6 +30,11 @@ export type SmaConfig = {
   atr_multiplier: number;
   use_adx_filter: boolean;
   use_stop?: boolean;
+  /** ATR = fixed stop at atr_multiplier × ATR. SMA_GAP = moving stop and target (PAPER only). */
+  stop_type?: "ATR" | "SMA_GAP";
+  gap_sl_mult?: number;
+  gap_tp_mult?: number;
+  gap_min_pct?: number;
   adx_threshold: number;
   use_vwap?: boolean;
   use_volume?: boolean;
@@ -75,12 +80,15 @@ export type SmaState = {
     entry_price: number | null;
     sl_trigger: number | null;
     stop_active?: boolean | null;
+    target?: number | null;
+    trailing?: boolean | null;
     ltp: number | null;
     note?: string;
   }[];
   /** use_stop in the config. False means new entries get no stop order. */
   stop_enabled?: boolean;
   atr_multiplier?: number;
+  stop_type?: "ATR" | "SMA_GAP";
   exchange: string;
   ltp: number;
   day_open?: number | null;
@@ -108,6 +116,9 @@ export type SmaState = {
     entry_time: string;
     mode: string;
     stop_active?: boolean;
+    /** True when this practice position uses the SMA-gap moving stop and target. */
+    trailing?: boolean;
+    target?: number | null;
   };
   active_sl_trigger: number | null;
   unrealized_gross_pnl: number;
@@ -154,6 +165,8 @@ export type ChartPayload = {
   }[];
   entry_price: number | null;
   sl_trigger: number | null;
+  target?: number | null;
+  trailing?: boolean;
   atr_multiplier?: number;
 };
 
