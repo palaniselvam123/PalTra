@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { StockCard } from "./StockCard";
+import { ControlBar } from "./ControlBar";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -192,14 +193,9 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
   };
 
   const forceOrder = async () => {
+    // The ControlBar dialog has already named the stock and, in LIVE, had CONFIRM typed.
     const target = (symbol || config?.symbol || "").trim().toUpperCase();
     if (!target) return;
-    const ok = window.confirm(
-      live
-        ? `Force a live ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross or a closed candle. The bot will start.`
-        : `Force a practice ${target} order now? It uses SMA 9 versus SMA 21 and does not wait for a cross. The bot will start.`
-    );
-    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -286,6 +282,17 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       </header>
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
+        <ControlBar
+          state={state}
+          live={live}
+          running={running}
+          busy={busy}
+          symbol={(symbol || config?.symbol || "").toUpperCase()}
+          symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+          onToggleBot={toggleBot}
+          onForce={forceOrder}
+          onPanic={panic}
+        />
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
@@ -373,48 +380,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <button
-            disabled={busy}
-            onClick={toggleBot}
-            title="Starts the bot. A cross that already happened is skipped. Buy and sell both wait until the SMA cross prints. Telegram only warns before that."
-            className={clsx(
-              "min-h-11 rounded-md px-3 py-2 text-xs font-semibold",
-              running ? "bg-white/10 text-slate-100" : "bg-[#10B981] text-[#04140d]"
-            )}
-          >
-            {running ? "PAUSE BOT" : "START BOT"}
-          </button>
-          <button
-            disabled={busy || !symbol || !armed.has((symbol || "").toUpperCase())}
-            onClick={forceOrder}
-            title={
-              symbol && !armed.has(symbol.toUpperCase())
-                ? `${symbol.toUpperCase()} is not on the Trade list. Press Trade on it first.`
-                : "Order the chart stock now from the current SMA side, without waiting for a cross. Checked VWAP, volume, density, and RSI still apply. Starts the bot."
-            }
-            className="min-h-11 rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-[#1a1203] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            FORCE ORDER
-          </button>
-          <button
-            disabled={busy}
-            onClick={panic}
-            className="col-span-2 min-h-11 rounded-md bg-[#F43F5E] px-3 py-2 text-xs font-bold tracking-wide text-white shadow-[0_0_24px_rgba(244,63,94,0.35)] sm:ml-auto sm:w-auto"
-          >
-            <span className="sm:hidden">PANIC SQUARE-OFF</span>
-            <span className="hidden sm:inline">PANIC SQUARE-OFF ALL</span>
-          </button>
-        </div>
-
       </div>
-      <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
-        The amber name is the stock. Blue Chart only changes the stock on screen. Violet Trade adds
-        it, up to 24 at once, and green Trading means the bot can order it from any chart. Buy and
-        sell both wait for the next SMA cross. Telegram warns about 3 minutes before that cross, and
-        the order waits until the cross prints. Force order uses the current SMA side. Checked VWAP,
-        volume, density, and RSI filters apply to both.
-      </p>
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-5">
