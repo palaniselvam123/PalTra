@@ -277,6 +277,9 @@ async def put_config(body: ConfigUpdate):
     engine._cfg_cache = row
     if changed_cap:
         engine.release_trade_cap(cap)
+        # A replay halted on the same cap resumes from the same Save.
+        if replay.engine is not None:
+            replay.engine.release_trade_cap(cap)
     return payload
 
 
@@ -466,9 +469,10 @@ async def replay_chart(limit: int = 240):
 @app.post("/api/replay/bot/start")
 async def replay_bot_start():
     eng = _replay_engine()
+    eng.release_manual_panic()
+    eng.release_trade_cap()
     if eng.status in ("HALTED", "DAY_COMPLETED"):
         raise HTTPException(423, eng.halt_reason or "This replay day is finished")
-    eng.release_manual_panic()
     eng.hold_for_next_cross(eng.replay_symbols)
     eng.status = "RUNNING"
     eng.halt_reason = ""

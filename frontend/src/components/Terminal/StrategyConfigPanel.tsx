@@ -31,6 +31,11 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
 
   const save = async () => {
     if (!form) return;
+    const cap = Number(form.max_trades_per_day);
+    if (!Number.isInteger(cap) || cap < 1 || cap > 100) {
+      setMsg("Max trades / day must be a whole number from 1 to 100.");
+      return;
+    }
     setBusy(true);
     setMsg(null);
     try {
@@ -85,7 +90,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="ATR SL ×" value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
         <Field label="ADX threshold" value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
         <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
-        <Field label="Max trades / day" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+        <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
         <Field
           label="No new entries after"
           value={form.entry_cutoff_time || "15:00"}
@@ -207,7 +212,11 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         >
           Save
         </button>
-        {msg && <span className="text-xs text-slate-400">{msg}</span>}
+        {msg && (
+          <span role="status" className={msg.startsWith("Saved") ? "text-xs text-slate-400" : "text-xs font-semibold text-amber-300"}>
+            {msg}
+          </span>
+        )}
       </div>
     </section>
   );

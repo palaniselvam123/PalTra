@@ -249,3 +249,43 @@ def test_api_refuses_replay_in_live_and_without_login(tmp_path, monkeypatch):
         assert res.status_code == 409 and "PAPER" in res.json()["detail"]
     database.reset_engine()
     get_settings.cache_clear()
+
+
+def test_raising_the_cap_resumes_a_replay_halted_on_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/cap.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    from config import get_settings
+
+    get_settings.cache_clear()
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    with TestClient(main.app) as client:
+        clock = dt.datetime.combine(DAY, dt.time(11, 0), tzinfo=IST)
+        eng = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"])
+        eng.trades_today = 40
+        eng.status = "HALTED"
+        eng.halt_reason = "max_trades_per_day (40) reached"
+        monkeypatch.setattr(main.replay, "engine", eng)
+        monkeypatch.setattr(main.replay, "status", "PAUSED")
+
+        # Over the 1-100 limit: refused with a field error, the replay stays halted.
+        assert client.put("/api/config", json={"max_trades_per_day": 400}).status_code == 422
+        assert eng.status == "HALTED"
+        # Still at the cap: Start explains why.
+        res = client.post("/api/replay/bot/start")
+        assert res.status_code == 423 and "max_trades_per_day" in res.json()["detail"]
+
+        # A higher cap on Save unlocks the replay too, and Start runs it.
+        assert client.put("/api/config", json={"max_trades_per_day": 60}).status_code == 200
+        assert eng.status == "STOPPED"
+        assert client.post("/api/replay/bot/start").json()["bot_status"] == "RUNNING"
+        monkeypatch.setattr(main.replay, "engine", None)
+        monkeypatch.setattr(main.replay, "status", "IDLE")
+    database.reset_engine()
+    get_settings.cache_clear()
