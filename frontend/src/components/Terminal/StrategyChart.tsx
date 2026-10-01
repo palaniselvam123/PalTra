@@ -201,7 +201,7 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
         color: "#F59E0B",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        title: "1.5× ATR SL",
+        title: `${chart.atr_multiplier ?? 1.5}× ATR SL`,
       });
     }
     if (chart.entry_price) {
@@ -237,7 +237,11 @@ export function StrategyChart({ chart, state, closing, onClose }: Props) {
           <span className="text-[#F43F5E]">SMA 9 {px(sma9)}</span>
           <span className="text-[#3B82F6]">SMA 21 {px(sma21)}</span>
           <span className="text-[#A78BFA]">ATR</span>
-          <span className="text-[#F59E0B]">Stop</span>
+          {pos && pos.stop_active === false ? (
+            <span className="font-semibold text-amber-300">Stop OFF</span>
+          ) : (
+            <span className="text-[#F59E0B]">Stop</span>
+          )}
         </div>
       </div>
       <div className="relative">

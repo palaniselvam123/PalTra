@@ -94,7 +94,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_stop", e.target.checked)}
           className="accent-[#10B981]"
         />
-        Exchange stop-loss at 1.5× ATR. Uncheck to enter with no stop order.
+        Exchange stop-loss at {form.atr_multiplier}× ATR. Uncheck to enter with no stop order.
       </label>
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
         <input

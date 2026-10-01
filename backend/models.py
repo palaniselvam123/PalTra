@@ -32,6 +32,9 @@ class TradeLog(Base):
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
     net_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     mode: Mapped[str] = mapped_column(String, default="PAPER")  # PAPER | LIVE
+    # False when the trade was entered with no stop (use_stop off). The
+    # sl_trigger_price on such a row is only the level a stop would have used.
+    stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class BotConfig(Base):
