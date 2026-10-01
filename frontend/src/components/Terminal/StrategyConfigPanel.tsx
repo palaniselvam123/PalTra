@@ -9,11 +9,15 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
   const [form, setForm] = useState<SmaConfig | null>(config);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dirty = useRef(false);
 
-  useEffect(() => setForm(config), [config]);
+  useEffect(() => {
+    if (!dirty.current) setForm(config);
+  }, [config]);
   if (!form) return null;
 
   const set = (key: keyof SmaConfig, value: string | boolean) => {
+    dirty.current = true;
     setForm((prev) => {
       if (!prev) return prev;
       if (typeof value === "boolean" || typeof prev[key] === "boolean") {
@@ -54,7 +58,8 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
       });
-      setMsg("Saved");
+      dirty.current = false;
+      setMsg("Saved. Press Start bot. Open positions stay open.");
       onChanged();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -78,6 +83,10 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="Max trades / day" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
         <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
       </div>
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">
+        If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
+        stay open. A loss-limit stop stays locked.
+      </p>
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
         <input
           type="checkbox"
@@ -183,7 +192,6 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
         }}
         onBlur={() => {
           focused.current = false;
-          setText(value);
         }}
         onChange={(e) => {
           setText(e.target.value);

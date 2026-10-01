@@ -1711,3 +1711,119 @@ def test_the_old_daily_trade_cap_is_raised_once(tmp_path, monkeypatch):
         assert row.max_trades_per_day == 15
     database.reset_engine()
     get_settings.cache_clear()
+
+
+def _open_book(symbol: str = "ADANIENSOL") -> None:
+    from strategy_engine import OpenPosition
+    from main import engine
+
+    engine.positions[symbol] = OpenPosition(
+        direction="LONG",
+        qty=1,
+        entry_price=1340.9,
+        ma_cross_price=1340.9,
+        atr_at_entry=8.0,
+        sl_trigger=1328.0,
+        sl_order_id="SL-LIVE",
+        entry_order_id="E-LIVE",
+        entry_time=dt.datetime(2026, 10, 1, 12, 30, tzinfo=IST),
+        trade_id=1,
+        mode="LIVE",
+    )
+
+
+def test_raising_the_trade_cap_unlocks_start_and_keeps_the_open_order(api):
+    from database import session_factory
+    from models import BotConfig
+    from main import engine
+
+    engine.positions.clear()
+    _open_book()
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.max_trades_per_day = 15
+        row.max_trades_bumped = 1
+        row.qty = 1
+        db.commit()
+    engine.load_config()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_trades_per_day (15) reached"
+    engine.trades_today = 15
+
+    blocked = api.post("/api/bot/start")
+    assert blocked.status_code == 423
+    assert blocked.json()["detail"] == "max_trades_per_day (15) reached"
+    assert engine.positions["ADANIENSOL"].direction == "LONG"
+    assert engine.status == "HALTED"
+
+    saved = api.put("/api/config", json={"max_trades_per_day": 40, "qty": 1})
+    assert saved.status_code == 200
+    assert saved.json()["max_trades_per_day"] == 40
+    assert engine.status == "STOPPED"
+    assert engine.halt_reason == ""
+    assert engine.positions["ADANIENSOL"].entry_order_id == "E-LIVE"
+    assert engine.trades_today == 15
+
+    started = api.post("/api/bot/start")
+    assert started.status_code == 200
+    assert started.json()["bot_status"] == "RUNNING"
+    assert engine.positions["ADANIENSOL"].direction == "LONG"
+    assert engine.trades_today == 15
+
+
+def test_a_loss_halt_stays_locked_when_the_trade_cap_is_raised(api):
+    from main import engine
+
+    engine.positions.clear()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_daily_loss ₹5000 breached"
+    engine.trades_today = 3
+    saved = api.put("/api/config", json={"max_trades_per_day": 40})
+    assert saved.status_code == 200
+    assert engine.status == "HALTED"
+    blocked = api.post("/api/bot/start")
+    assert blocked.status_code == 423
+    assert "max_daily_loss" in blocked.json()["detail"]
+
+
+def test_restart_remembers_how_many_live_trades_were_taken(api):
+    from database import session_factory
+    from models import BotConfig, TradeLog
+    from main import engine
+
+    engine._session_date = "2026-10-01"
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.trading_mode = "LIVE"
+        db.commit()
+        for i in range(15):
+            db.add(
+                TradeLog(
+                    date="2026-10-01",
+                    symbol="KOTAKBANK",
+                    direction="LONG",
+                    qty=1,
+                    entry_time=dt.datetime(2026, 10, 1, 10, i % 60),
+                    entry_price=1900 + i,
+                    ma_cross_price=1900 + i,
+                    atr_at_entry=5,
+                    sl_trigger_price=1890,
+                    mode="LIVE",
+                )
+            )
+        db.add(
+            TradeLog(
+                date="2026-10-01",
+                symbol="KIRLOSFER",
+                direction="LONG",
+                qty=1,
+                entry_time=dt.datetime(2026, 10, 1, 10, 0),
+                entry_price=100,
+                ma_cross_price=100,
+                atr_at_entry=1,
+                sl_trigger_price=98,
+                mode="PAPER",
+            )
+        )
+        db.commit()
+    assert engine.restore_trades_today() == 15

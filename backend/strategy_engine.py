@@ -1261,7 +1261,8 @@ class StrategyEngine:
     def release_manual_panic(self) -> bool:
         """A panic flattens the book. Pressing Start again may trade the same day.
 
-        A loss-limit or trade-cap halt stays locked.
+        A loss-limit halt stays locked. A trade-cap halt is released only when
+        the saved cap is now above the trades already taken.
         """
         if self.status != "HALTED":
             return False
@@ -1270,6 +1271,43 @@ class StrategyEngine:
         self.status = "STOPPED"
         self.halt_reason = ""
         return True
+
+    def release_trade_cap(self, new_max: int | None = None) -> bool:
+        """Resume after a raised daily cap. Open positions are left alone.
+
+        A loss-limit halt is not this reason, so it stays locked.
+        """
+        if self.status != "HALTED":
+            return False
+        if not (self.halt_reason or "").startswith("max_trades_per_day"):
+            return False
+        cfg = self._cfg_cache
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        cap = int(new_max if new_max is not None else (cfg.max_trades_per_day if cfg else 0))
+        if self.trades_today >= cap:
+            self.halt_reason = f"max_trades_per_day ({cap}) reached"
+            return False
+        self.status = "STOPPED"
+        self.halt_reason = ""
+        self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
+        return True
+
+    def restore_trades_today(self) -> int:
+        """A restart must not forget how many entries this session already took."""
+        cfg = self._cfg_cache
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
+        day = self._session_date
+        with session_factory()() as db:
+            modes = db.query(TradeLog.mode).filter(TradeLog.date == day).all()
+        self.trades_today = sum(1 for (row_mode,) in modes if (row_mode or "PAPER").upper() == mode)
+        return self.trades_today
 
     def release_paper_halt(self) -> bool:
         """Drop a practice halt so confirming live is not blocked by the simulator."""
