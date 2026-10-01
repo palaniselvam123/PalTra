@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Wallet, TrendingUp, Layers } from "lucide-react";
 import type { AccountSummary } from "@/lib/api";
@@ -13,9 +13,11 @@ const signed = (n: number) => `${n < 0 ? "−" : "+"}${money(n)}`;
 
 export function AccountBalance({
   account,
+  loadState = "loading",
   onCapitalChanged,
 }: {
   account: AccountSummary | null;
+  loadState?: "loading" | "ok" | "error";
   onCapitalChanged?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -34,8 +36,19 @@ export function AccountBalance({
       setBusy(false);
     }
   };
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (account || loadState === "error") return;
+    const id = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(id);
+  }, [account, loadState]);
   if (!account) {
-    return <div className="rounded-card border border-border bg-surface p-4 text-xs text-slate-500">Loading balance…</div>;
+    const failed = loadState === "error" || slow;
+    return (
+      <div className="rounded-card border border-border bg-surface p-4 text-xs text-slate-500">
+        {failed ? "Balance did not load. This is not a zero balance." : "Loading balance…"}
+      </div>
+    );
   }
 
   const grew = account.balance >= account.starting_capital;

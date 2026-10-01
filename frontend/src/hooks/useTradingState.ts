@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AccountSummary, type BotStatus, type FeedStatus } from "@/lib/api";
+import { istNow } from "@/lib/format";
 import { useWebSocket } from "./useWebSocket";
 import { useNotificationCenter } from "@/components/Notifications/NotificationProvider";
 import type { ClosedTrade } from "@/components/Dashboard/TradeHistory";
@@ -36,6 +37,12 @@ export type Summary = {
 
 const EMPTY_SUMMARY: Summary = { total_pnl: 0, trades_closed: 0, win_rate_pct: 0, profit_factor: 0, max_drawdown: 0 };
 
+export type LoadState = "loading" | "ok" | "error";
+
+function keepOk(prev: LoadState): LoadState {
+  return prev === "ok" ? "ok" : "error";
+}
+
 export function useTradingState() {
   const [connected, setConnected] = useState(false);
   const [ticks, setTicks] = useState<Record<string, Tick>>({});
@@ -49,25 +56,55 @@ export function useTradingState() {
   const [history, setHistory] = useState<ClosedTrade[]>([]);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [positionsLoad, setPositionsLoad] = useState<LoadState>("loading");
+  const [historyLoad, setHistoryLoad] = useState<LoadState>("loading");
+  const [accountLoad, setAccountLoad] = useState<LoadState>("loading");
+  const [summaryLoad, setSummaryLoad] = useState<LoadState>("loading");
   const logIdRef = useRef(0);
   const noticeIdRef = useRef(0);
   const { notify } = useNotificationCenter();
 
   const refreshPositions = useCallback(() => {
-    api.getPositions().then(setPositions).catch(() => {});
+    api
+      .getPositions()
+      .then((rows) => {
+        setPositions(rows);
+        setPositionsLoad("ok");
+      })
+      .catch(() => setPositionsLoad(keepOk));
   }, []);
 
   // Every P&L figure on the dashboard is scoped to the feed currently
   // selected. Blending a synthetic price series with the real market into one
   // number is the most misleading thing this screen could do — a strategy can
   // read as profitable purely because the simulator drifted upward.
+  const feedRef = useRef(feed);
+  feedRef.current = feed;
   const feedScope = feed?.source;
 
   const refreshSummary = useCallback(() => {
-    api.getSummary(feedScope).then(setSummary).catch(() => {});
-    api.getHistory().then(setHistory).catch(() => {});
-    api.getAccount(feedScope).then(setAccount).catch(() => {});
-  }, []);
+    api
+      .getSummary(feedScope)
+      .then((row) => {
+        setSummary(row);
+        setSummaryLoad("ok");
+      })
+      .catch(() => setSummaryLoad(keepOk));
+    api
+      .getHistory()
+      .then((rows) => {
+        setHistory(rows);
+        setHistoryLoad("ok");
+      })
+      .catch(() => setHistoryLoad(keepOk));
+    api
+      .getAccount(feedScope)
+      .then((row) => {
+        setAccount(row);
+        setAccountLoad("ok");
+      })
+      .catch(() => setAccountLoad(keepOk));
+  }, [feedScope]);
 
   const refreshBot = useCallback(() => {
     api.getBotStatus().then(setBot).catch(() => {});
@@ -78,22 +115,61 @@ export function useTradingState() {
   }, []);
 
   useEffect(() => {
-    api.getMode().then((m) => {
-      setModeState(m.mode as "paper" | "live");
-      setKillSwitchActive(m.kill_switch_active);
-    }).catch(() => {});
+    let stop = false;
+    let busy = false;
+    const run = async () => {
+      if (stop || busy) return;
+      busy = true;
+      try {
+        // Status first. These stay fast, and the heavy reads must not keep
+        // the header on "Offline" by occupying every connection.
+        const [modeRes, feedRes] = await Promise.allSettled([api.getMode(), api.getFeedStatus()]);
+        if (stop) return;
+        if (modeRes.status === "fulfilled") {
+          setModeState(modeRes.value.mode as "paper" | "live");
+          setKillSwitchActive(modeRes.value.kill_switch_active);
+        }
+        if (feedRes.status === "fulfilled") {
+          feedRef.current = feedRes.value;
+          setFeed(feedRes.value);
+        }
+        const [posRes, sumRes, histRes, acctRes, botRes] = await Promise.allSettled([
+          api.getPositions(),
+          api.getSummary(feedRef.current?.source),
+          api.getHistory(),
+          api.getAccount(feedRef.current?.source),
+          api.getBotStatus(),
+        ]);
+        if (stop) return;
+        if (posRes.status === "fulfilled") {
+          setPositions(posRes.value);
+          setPositionsLoad("ok");
+        } else setPositionsLoad(keepOk);
+        if (sumRes.status === "fulfilled") {
+          setSummary(sumRes.value);
+          setSummaryLoad("ok");
+        } else setSummaryLoad(keepOk);
+        if (histRes.status === "fulfilled") {
+          setHistory(histRes.value);
+          setHistoryLoad("ok");
+        } else setHistoryLoad(keepOk);
+        if (acctRes.status === "fulfilled") {
+          setAccount(acctRes.value);
+          setAccountLoad("ok");
+        } else setAccountLoad(keepOk);
+        if (botRes.status === "fulfilled") setBot(botRes.value);
+      } finally {
+        busy = false;
+      }
+    };
     api.getRiskConfig().then((c) => setAccountCapital(c.account_capital)).catch(() => {});
-    refreshPositions();
-    refreshSummary();
-    refreshBot();
-    refreshFeed();
-    const interval = setInterval(() => {
-      refreshPositions();
-      refreshSummary();
-      refreshBot();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [refreshPositions, refreshSummary, refreshBot, refreshFeed]);
+    void run();
+    const interval = setInterval(() => void run(), 15000);
+    return () => {
+      stop = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   const { connected: wsConnected } = useWebSocket((msg) => {
     if (msg.channel === "tick") {
@@ -108,7 +184,7 @@ export function useTradingState() {
         id: logIdRef.current,
         level: msg.data.level,
         message: msg.data.message,
-        at: new Date().toLocaleTimeString(),
+        at: istNow(),
       };
       setLogs((prev) => [entry, ...prev].slice(0, 200));
     } else if (msg.channel === "order_filled") {
@@ -164,6 +240,10 @@ export function useTradingState() {
     setBot,
     history,
     account,
+    positionsLoad,
+    historyLoad,
+    accountLoad,
+    summaryLoad,
     feed,
     setFeed,
     refreshFeed,

@@ -27,6 +27,7 @@ import {
   type PriceAtResponse,
   type RecorderStatus,
 } from "@/lib/api";
+import { istDay } from "@/lib/format";
 
 const REFRESH_MS = 15_000;
 
@@ -40,7 +41,7 @@ type Query = {
 };
 
 export default function MoversPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
 
   const [recorder, setRecorder] = useState<RecorderStatus | null>(null);
@@ -116,7 +117,7 @@ export default function MoversPage() {
   const fetchWholeDay = async () => {
     setFetching("Starting…");
     try {
-      await api.moversFetchDay(day || new Date().toISOString().slice(0, 10), "5m");
+      await api.moversFetchDay(day || istDay(), "5m");
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000));
         const st = await api.moversFetchDayStatus();
@@ -213,7 +214,7 @@ export default function MoversPage() {
     <div className="min-h-screen bg-bg text-slate-100">
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}

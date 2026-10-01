@@ -147,6 +147,56 @@ class PaperEngine:
         )
         return result, fill
 
+    def open_at_price(self, order: OrderRequest, filled_price: float, order_id: str) -> PaperFill:
+        """Record a fill that already happened at the broker, with no extra slippage."""
+        filled_price = round(float(filled_price), 2)
+        charges = estimate_charges(order.side, filled_price, order.quantity)
+        self.positions[order.symbol] = PaperPosition(
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            entry_price=filled_price,
+            stop_loss=order.stop_loss or 0.0,
+            target=order.target or 0.0,
+            opened_at=dt.datetime.utcnow(),
+            order_id=order_id,
+        )
+        return PaperFill(
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            requested_price=filled_price,
+            filled_price=filled_price,
+            charges=charges,
+        )
+
+    def close_at_price(self, symbol: str, exit_price: float) -> PaperCloseResult | None:
+        """Square off at a broker-reported price. Does not add simulated slippage."""
+        pos = self.positions.pop(symbol, None)
+        if pos is None:
+            return None
+        exit_price = round(float(exit_price), 2)
+        gross = (
+            (exit_price - pos.entry_price) * pos.quantity
+            if pos.side == "BUY"
+            else (pos.entry_price - exit_price) * pos.quantity
+        )
+        entry_charges = estimate_charges(pos.side, pos.entry_price, pos.quantity)
+        exit_side = "SELL" if pos.side == "BUY" else "BUY"
+        exit_charges = estimate_charges(exit_side, exit_price, pos.quantity)
+        return PaperCloseResult(
+            symbol=symbol,
+            side=pos.side,
+            quantity=pos.quantity,
+            entry_price=pos.entry_price,
+            exit_price=exit_price,
+            pnl=round(gross - entry_charges - exit_charges, 2),
+            trade_id=pos.trade_id,
+            entry_charges=entry_charges,
+            exit_charges=exit_charges,
+        )
+
     def close_position(self, symbol: str, ltp: float) -> PaperCloseResult | None:
         """Squares off a paper position at the current tick and returns net
         realized P&L (after simulated slippage + charges on both legs), or

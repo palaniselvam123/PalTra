@@ -40,6 +40,17 @@ const OSCILLATORS = [
 /** lightweight-charts paints onto its own canvas, so CSS variables cannot
  *  reach it — axis, grid and label colours have to be passed in explicitly and
  *  re-applied when the theme changes. */
+function istClock(time: unknown): string {
+  const sec = typeof time === "number" ? time : 0;
+  if (!sec) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(sec * 1000));
+}
+
 function baseOptions(theme: "dark" | "light") {
   const light = theme === "light";
   return {
@@ -53,7 +64,18 @@ function baseOptions(theme: "dark" | "light") {
       horzLines: { color: light ? "#e8edf4" : "#1e293b55" },
     },
     rightPriceScale: { borderColor: light ? "#dbe2ec" : "#1e293b" },
-    timeScale: { borderColor: light ? "#dbe2ec" : "#1e293b", timeVisible: true, secondsVisible: false },
+    timeScale: {
+      borderColor: light ? "#dbe2ec" : "#1e293b",
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: (time: unknown) => istClock(time),
+    },
+    localization: {
+      timeFormatter: (time: unknown) => {
+        const clock = istClock(time);
+        return clock ? `${clock} IST` : "";
+      },
+    },
     crosshair: { mode: CrosshairMode.Normal },
   };
 }
@@ -111,6 +133,7 @@ export function AdvancedChart({
   const [patterns, setPatterns] = useState<CandlePattern[]>([]);
   const [showPatterns, setShowPatterns] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [chartError, setChartError] = useState<string | null>(null);
   const [legend, setLegend] = useState<Legend>(null);
 
   const activeKey = useMemo(() => [...active].sort().join(","), [active]);
@@ -215,11 +238,18 @@ export function AdvancedChart({
   // ---- load candles, indicators and markers -----------------------------
   const load = useCallback(async () => {
     setLoading(true);
+    setChartError(null);
     try {
       const names = [...active];
       if (osc) names.push(osc);
-      const [data, marks, pats] = await Promise.all([
+      const candles = Promise.race([
         api.chartCandles(symbol, interval, names, 500),
+        new Promise<ChartPayload>((_, reject) =>
+          setTimeout(() => reject(new Error("Candles did not load")), 15000)
+        ),
+      ]);
+      const [data, marks, pats] = await Promise.all([
+        candles,
         api.chartMarkers(symbol).catch(() => [] as ChartMarker[]),
         showPatterns
           ? api.chartPatterns(symbol, interval).then((r) => r.patterns).catch(() => [] as CandlePattern[])
@@ -228,8 +258,8 @@ export function AdvancedChart({
       setPayload(data);
       setMarkers(marks);
       setPatterns(pats);
-    } catch {
-      setPayload(null);
+    } catch (e: unknown) {
+      setChartError(e instanceof Error ? e.message : "Candles did not load");
     } finally {
       setLoading(false);
     }
@@ -577,7 +607,9 @@ export function AdvancedChart({
             <span className="text-slate-600">Vol {legend.v.toLocaleString("en-IN")}</span>
           </>
         ) : (
-          <span className="text-slate-600">hover for OHLC · {bars} bars</span>
+          <span className={chartError ? "text-loss" : "text-slate-600"}>
+            {loading ? "Loading candles…" : chartError ? chartError : `hover for OHLC · ${bars} bars`}
+          </span>
         )}
         {loading && <Loader2 size={11} className="animate-spin text-slate-600 ml-auto" />}
       </div>

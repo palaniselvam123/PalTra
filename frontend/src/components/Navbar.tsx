@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   AlertTriangle,
@@ -64,7 +65,7 @@ const SESSION_TONE: Record<string, "profit" | "warn" | "neutral"> = {
 
 type Props = {
   connected: boolean;
-  totalPnl: number;
+  totalPnl: number | null;
   killSwitchActive: boolean;
   onKillSwitch: () => void;
   onResetKillSwitch: () => void;
@@ -89,16 +90,76 @@ export function Navbar({
   const [switching, setSwitching] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuBox, setMenuBox] = useState<{ top: number; right: number } | null>(null);
+  const [feedSlow, setFeedSlow] = useState(false);
+  const [deskLive, setDeskLive] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (feed) return;
+    const id = setTimeout(() => setFeedSlow(true), 8000);
+    return () => clearTimeout(id);
+  }, [feed]);
+
+  useEffect(() => {
+    let stop = false;
+    const pull = () => {
+      api
+        .deskAccount()
+        .then((row) => {
+          if (!stop) setDeskLive(row.execution === "groww");
+        })
+        .catch(() => undefined);
+    };
+    pull();
+    const id = setInterval(pull, 15000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
+
+  const signOut = () => {
+    fetch("/api/session/logout", { method: "POST" }).finally(() => {
+      window.location.href = "/login/";
+    });
+  };
+
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const rect = menuButtonRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuBox({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
+    }
+    setMenuOpen(true);
+  };
+
+  const linkLabel = !feed
+    ? feedSlow
+      ? "No reply"
+      : "Checking…"
+    : feed.source === "simulated"
+      ? "Sim"
+      : feed.market_open && connected
+        ? "Live"
+        : "Quotes";
+  const linkTone =
+    linkLabel === "Live" ? "info" : linkLabel === "Quotes" || linkLabel === "Sim" ? "warn" : linkLabel === "No reply" ? "loss" : "neutral";
 
   const switchSource = async (source: "simulated" | "live") => {
     if (feed?.source === source) return;
@@ -113,7 +174,8 @@ export function Navbar({
     }
   };
 
-  const pnlColor = totalPnl > 0 ? "text-profit" : totalPnl < 0 ? "text-loss" : "text-slate-400";
+  const pnlColor =
+    totalPnl == null ? "text-slate-500" : totalPnl > 0 ? "text-profit" : totalPnl < 0 ? "text-loss" : "text-slate-400";
   const sourceLocked = switching || botRunning;
 
   return (
@@ -129,13 +191,14 @@ export function Navbar({
           <span className="grad-text hidden text-title font-bold sm:inline">ORB Desk</span>
         </Link>
 
-        <nav className="hidden min-w-0 items-center gap-6 self-stretch lg:flex">
+        <nav className="hidden min-w-0 items-center gap-4 self-stretch xl:flex">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={clsx(
                   "relative px-1 py-5 text-body font-medium transition-colors",
                   active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
@@ -151,11 +214,12 @@ export function Navbar({
         </nav>
 
         {/* Compact nav for narrow viewports — icons only, no wrapping. */}
-        <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto lg:hidden">
+        <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto xl:hidden">
           {NAV.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
+              prefetch={false}
               title={label}
               className={clsx(
                 "rounded-md p-1.5 transition-colors",
@@ -169,13 +233,29 @@ export function Navbar({
 
         {/* --- Zone 2: live state, deliberately quiet -------------------- */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <div className="hidden items-center gap-3 md:flex">
-            <span className="flex items-center gap-1.5" title={connected ? "Live updates connected" : "Reconnecting…"}>
-              <StatusDot tone={connected ? "info" : "loss"} pulse={connected} />
-              <span className="text-caption text-slate-400">{connected ? "Live" : "Offline"}</span>
+          <div className="flex items-center gap-3">
+            <span
+              className="flex items-center gap-1.5"
+              title={
+                linkLabel === "Live"
+                  ? "Market is open and NSE quotes are connected"
+                  : linkLabel === "Sim"
+                    ? "These prices are simulated. Switch to NSE for the real tape."
+                  : linkLabel === "Quotes"
+                    ? feed?.market_open
+                      ? "Prices are loaded. The live socket is still reconnecting."
+                      : "Quotes are the last close. The market is not in session."
+                    : linkLabel === "No reply"
+                      ? "Status did not answer. This is not a disconnected broker."
+                      : "Checking the market status…"
+              }
+            >
+              <StatusDot tone={linkTone} pulse={linkLabel === "Live"} />
+              <span className="text-caption text-slate-400">{linkLabel}</span>
             </span>
 
-            <span className="h-3 w-px bg-border" />
+            <span className="hidden h-3 w-px bg-border xl:block" />
+            <div className="hidden items-center gap-3 xl:flex">
 
             {/* Data source is a real choice, so it stays a control — but as a
                 quiet segmented pair rather than two competing colour chips. */}
@@ -215,15 +295,20 @@ export function Navbar({
                 </span>
               </>
             )}
+            </div>
           </div>
 
           <Badge
-            tone="profit"
+            tone={deskLive ? "loss" : "profit"}
             icon={<ShieldCheck size={11} />}
             className="hidden xl:inline-flex"
-            title="Orders are always simulated. No real money is ever sent to the broker."
+            title={
+              deskLive
+                ? "The next order on the Trade page is sent to Groww. A practice position already on the desk is not."
+                : "Practice orders until you confirm Send orders to Groww on the Trade page. Groww cash can still be shown."
+            }
           >
-            VIRTUAL
+            {deskLive ? "LIVE ORDERS" : "PRACTICE"}
           </Badge>
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
@@ -231,8 +316,7 @@ export function Navbar({
             <div className="text-right leading-tight">
               <div className="text-[9px] uppercase tracking-[0.08em] text-slate-500">P&amp;L</div>
               <div className={clsx("font-mono text-body font-semibold tabular-nums", pnlColor)}>
-                {totalPnl >= 0 ? "+" : ""}
-                {totalPnl.toFixed(2)}
+                {totalPnl == null ? "—" : `${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}`}
               </div>
             </div>
 
@@ -246,45 +330,70 @@ export function Navbar({
               </Button>
             )}
 
-            {/* Overflow: preferences, not per-session controls. */}
-            <div className="relative" ref={menuRef}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setMenuOpen((v) => !v)}
-                aria-label="More options"
-                className="px-1.5"
-              >
-                <MoreHorizontal size={16} />
-              </Button>
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-md px-2 py-1 text-caption font-medium text-slate-200 hover:bg-white/10"
+            >
+              Sign out
+            </button>
 
-              {menuOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1.5 w-52 overflow-hidden rounded-card border border-border bg-surface shadow-pop">
-                  <MenuItem
-                    icon={notif.enabled ? <Bell size={14} /> : <BellOff size={14} />}
-                    label={notif.enabled ? "Trade alerts on" : "Trade alerts off"}
-                    hint={
-                      notif.permission === "unsupported"
-                        ? "Not supported in this browser"
-                        : notif.enabled && notif.permission !== "granted"
-                          ? "Browser blocked desktop popups"
-                          : undefined
-                    }
-                    disabled={notif.permission === "unsupported"}
-                    onClick={() => (notif.enabled ? notif.disable() : notif.enable())}
-                  />
-                  <MenuItem
-                    icon={theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-                    label={theme === "dark" ? "Light theme" : "Dark theme"}
-                    onClick={toggle}
-                  />
-                  <div className="border-t border-border px-3 py-2 xl:hidden">
-                    <Badge tone="profit" icon={<ShieldCheck size={11} />}>
-                      VIRTUAL MONEY
-                    </Badge>
-                  </div>
-                </div>
-              )}
+            {/* Overflow: preferences, not per-session controls. The menu is
+                portaled so a short header cannot clip it. */}
+            <div className="relative">
+              <span ref={menuButtonRef} className="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={toggleMenu}
+                  aria-label="More options"
+                  aria-expanded={menuOpen}
+                  className="px-1.5"
+                >
+                  <MoreHorizontal size={16} />
+                </Button>
+              </span>
+
+              {menuOpen &&
+                menuBox &&
+                createPortal(
+                  <div
+                    ref={menuRef}
+                    style={{ position: "fixed", top: menuBox.top, right: menuBox.right, zIndex: 80 }}
+                    className="w-52 overflow-hidden rounded-card border border-border bg-surface shadow-pop"
+                  >
+                    <MenuItem
+                      icon={notif.enabled ? <Bell size={14} /> : <BellOff size={14} />}
+                      label={notif.enabled ? "Trade alerts on" : "Trade alerts off"}
+                      hint={
+                        notif.permission === "unsupported"
+                          ? "Not supported in this browser"
+                          : notif.enabled && notif.permission !== "granted"
+                            ? "Browser blocked desktop popups"
+                            : undefined
+                      }
+                      disabled={notif.permission === "unsupported"}
+                      onClick={() => (notif.enabled ? notif.disable() : notif.enable())}
+                    />
+                    <MenuItem
+                      icon={theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+                      label={theme === "dark" ? "Light theme" : "Dark theme"}
+                      onClick={toggle}
+                    />
+                    <MenuItem
+                      icon={<ShieldCheck size={14} />}
+                      label="Sign out"
+                      hint="Locks the desk on this browser"
+                      onClick={signOut}
+                    />
+                    <div className="border-t border-border px-3 py-2 xl:hidden">
+                      <Badge tone={deskLive ? "loss" : "profit"} icon={<ShieldCheck size={11} />}>
+                        {deskLive ? "LIVE ORDERS" : "PRACTICE"}
+                      </Badge>
+                    </div>
+                  </div>,
+                  document.body
+                )}
             </div>
           </div>
         </div>
@@ -307,8 +416,8 @@ export function Navbar({
 
       {feed?.source === "live" && !feed.market_open && (
         <FeedBanner tone="warn">
-          Market is {feed.session.replace("_", "-").toLowerCase()} — quotes are frozen at last close, so new
-          entries are blocked until 09:15 IST. Existing brackets still track.
+          Market is {feed.session.replace("_", "-").toLowerCase()} — quotes are the last close. Practice buys
+          still fill here. Real Groww orders wait until 09:15 IST.
         </FeedBanner>
       )}
 

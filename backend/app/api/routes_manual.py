@@ -29,6 +29,11 @@ class CapitalRequest(BaseModel):
     starting_capital: float = Field(gt=0)
 
 
+class ExecutionRequest(BaseModel):
+    mode: str  # paper | groww
+    confirm_live: bool = False
+
+
 @router.get("/watchlist")
 async def watchlist():
     return manual_desk.watchlist()
@@ -84,6 +89,8 @@ async def place(body: PlaceRequest):
         "filled_price": fill.filled_price,
         "charges": fill.charges,
         "trade_id": fill.trade_id,
+        "sent_to_groww": fill.sent_to_groww,
+        "status": fill.status,
     }
 
 
@@ -98,6 +105,26 @@ async def close(symbol: str):
 @router.post("/square-off-all")
 async def square_off_all():
     return {"closed": await manual_desk.square_off_all()}
+
+
+@router.post("/execution")
+async def set_execution(body: ExecutionRequest):
+    """Paper is the boot default. Groww orders require an explicit confirm."""
+    mode = body.mode.lower()
+    if mode not in ("paper", "groww"):
+        raise HTTPException(400, "mode must be 'paper' or 'groww'")
+    if mode == "groww":
+        if not body.confirm_live:
+            raise HTTPException(400, "Real Groww orders require confirm_live=true.")
+        from app.services.groww_funds import groww_client
+
+        client = groww_client()
+        if client is None or not await client.is_token_valid():
+            raise HTTPException(409, "Groww is not connected. Save credentials and log in from Settings first.")
+        state.manual_live = True
+    else:
+        state.manual_live = False
+    return await manual_desk.margin_snapshot()
 
 
 @router.post("/capital")

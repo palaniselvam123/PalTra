@@ -7,12 +7,14 @@ import { EmptyState } from "@/components/ui";
 import { money } from "@/lib/format";
 
 type Props = {
-  positions: Position[];
+  positions: (Position & { ltp?: number })[];
   ticks: Record<string, Tick>;
   onClose: (symbol: string) => void;
+  emptyTitle?: string;
+  emptyHint?: string;
 };
 
-export function PositionsTable({ positions, ticks, onClose }: Props) {
+export function PositionsTable({ positions, ticks, onClose, emptyTitle, emptyHint }: Props) {
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
@@ -45,14 +47,17 @@ export function PositionsTable({ positions, ticks, onClose }: Props) {
                 <td colSpan={10}>
                   <EmptyState
                     icon={<Layers size={20} />}
-                    title="No open positions"
-                    hint="Entries opened by the bot or the manual desk appear here with live P&L and their bracket levels."
+                    title={emptyTitle ?? "No open positions"}
+                    hint={
+                      emptyHint ??
+                      "Entries opened by the bot or the manual desk appear here with live P&L and their bracket levels."
+                    }
                   />
                 </td>
               </tr>
             )}
             {positions.map((p) => {
-              const ltp = ticks[p.symbol]?.ltp ?? p.entry_price;
+              const ltp = ticks[p.symbol]?.ltp ?? p.ltp ?? p.entry_price;
               const pnl = p.side === "BUY" ? (ltp - p.entry_price) * p.quantity : (p.entry_price - ltp) * p.quantity;
               const amount = p.entry_price * p.quantity;
               return (

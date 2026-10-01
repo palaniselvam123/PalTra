@@ -1,9 +1,27 @@
-/** Client for the SMA + ATR terminal (`uvicorn main:app --port 8001`). */
+/** Client for the SMA + ATR terminal.
 
-export const SMA_API = process.env.NEXT_PUBLIC_SMA_API_URL || "http://127.0.0.1:8001";
+Locally that is `uvicorn main:app --port 8001`. On the deployed site the same
+routes are mounted at `/sma` on this host, so the browser must not call
+127.0.0.1.
+*/
+
+function resolveSmaApi(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_SMA_API_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return `${window.location.origin}/sma`;
+    }
+  }
+  return "http://127.0.0.1:8001";
+}
+
+export const SMA_API = resolveSmaApi();
 
 export type SmaConfig = {
   symbol: string;
+  trade_symbols?: string[];
   exchange: string;
   qty: number;
   sma_fast: number;
@@ -11,7 +29,18 @@ export type SmaConfig = {
   atr_period: number;
   atr_multiplier: number;
   use_adx_filter: boolean;
+  use_stop?: boolean;
   adx_threshold: number;
+  use_vwap?: boolean;
+  use_volume?: boolean;
+  volume_min_ratio?: number;
+  use_density?: boolean;
+  density_min_pct?: number;
+  use_rsi?: boolean;
+  rsi_long_min?: number;
+  rsi_long_max?: number;
+  rsi_short_min?: number;
+  rsi_short_max?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;
@@ -36,6 +65,16 @@ export type SmaState = {
   last_error: string;
   last_signal: string;
   symbol: string;
+  trade_symbols?: string[];
+  books?: {
+    symbol: string;
+    direction: "LONG" | "SHORT" | "FLAT";
+    qty: number;
+    entry_price: number | null;
+    sl_trigger: number | null;
+    ltp: number | null;
+    note?: string;
+  }[];
   exchange: string;
   ltp: number;
   day_open?: number | null;
@@ -109,6 +148,8 @@ export type TradeRow = {
   exit_time: string | null;
   exit_price: number | null;
   exit_reason: string | null;
+  market_price?: number | null;
+  mark_pnl?: number | null;
   gross_pnl: number | null;
   brokerage_and_taxes: number | null;
   net_pnl: number | null;
@@ -117,21 +158,33 @@ export type TradeRow = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${SMA_API}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-  });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body.detail || detail;
-    } catch {
-      /* plain text */
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(`${SMA_API}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail || detail;
+      } catch {
+        /* plain text */
+      }
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("The terminal did not answer. This is not a flat book.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 export const smaApi = {
@@ -140,16 +193,32 @@ export const smaApi = {
   config: () => request<SmaConfig>("/api/config"),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
+  setTradeSymbol: (symbol: string, armed: boolean) =>
+    request<SmaConfig>("/api/trade-symbols", {
+      method: "POST",
+      body: JSON.stringify({ symbol, armed }),
+    }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {
       method: "POST",
       body: JSON.stringify({ mode, confirm_live: confirmLive }),
     }),
   start: () => request<{ bot_status: string }>("/api/bot/start", { method: "POST" }),
+  forceOrder: (symbol: string) =>
+    request<{ bot_status: string; last_signal: string }>("/api/bot/force", {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    }),
   pause: () => request<{ bot_status: string }>("/api/bot/pause", { method: "POST" }),
   kill: () => request<{ bot_status: string; halt_reason: string }>("/api/bot/kill", { method: "POST" }),
+  closePosition: (symbol: string) =>
+    request<{ bot_status: string; last_signal: string }>("/api/bot/close", {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    }),
   trades: () => request<TradeRow[]>("/api/trades"),
-  csvUrl: () => `${SMA_API}/api/trades.csv`,
+  csvUrl: (mode?: "PAPER" | "LIVE") =>
+    `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",
 };
 

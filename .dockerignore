@@ -34,8 +34,10 @@
 backend/research_data/
 backend/trading.db
 
-# Not needed to run the backend on Fly
-frontend/
+# Not needed to run the backend on Fly.
+# frontend/out is the exported site copied to /app/static.
+frontend/node_modules
+frontend/.next
 backend/tests/
 **/*.md
 **/tsconfig.tsbuildinfo

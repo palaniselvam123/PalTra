@@ -28,6 +28,7 @@ from app.api import (
     routes_ws,
 )
 from app.core.config import get_settings
+from app.core.desk_lock import install_desk_lock
 from app.core.market_clock import ist_now
 from app.models.database import init_db
 from app.services.broadcaster import broadcaster
@@ -224,6 +225,42 @@ async def lifespan(app: FastAPI):
     from app.services.market_recorder import market_recorder
     await market_recorder.start()
 
+    sma_task = None
+    try:
+        from app.sma_host import boot_terminal, rewrite_terminal_bundle
+
+        rewrite_terminal_bundle()
+        sma_task = boot_terminal()
+    except Exception as exc:  # noqa: BLE001
+        print("sma terminal unavailable", exc)
+
+    # A restart used to boot the simulator, then refuse NSE because the open
+    # WIPRO practice position was still on the book. That position was filled
+    # on NSE prices, so the desk should come back on NSE when Groww is connected.
+    if "groww" in restored:
+        from app.services.groww_funds import groww_client
+        from app.services.market_data import switch_is_safe
+
+        client = groww_client()
+        if client is not None:
+            try:
+                feeds = await routes_marketdata._open_position_feeds()
+                if all(switch_is_safe(feed, "live") for feed in feeds.values()):
+                    await market_data.use_live(client)
+                    await broadcaster.publish(
+                        "log",
+                        {
+                            "level": "INFO",
+                            "message": "Market data source → LIVE Groww quotes. "
+                            "Orders stay on the practice book until you confirm Send orders to Groww.",
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                await broadcaster.publish(
+                    "log",
+                    {"level": "WARN", "message": f"Could not resume NSE quotes after restart: {exc}"},
+                )
+
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())
@@ -231,6 +268,20 @@ async def lifespan(app: FastAPI):
     yield
     if scanner_worker.running:
         await scanner_worker.stop()
+    try:
+        from sma_terminal_main import engine as sma_engine
+
+        await sma_engine.announce_shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.sma_host import stop_terminal
+
+        stop_terminal()
+    except Exception:  # noqa: BLE001
+        pass
+    if sma_task is not None:
+        sma_task.cancel()
     tick_task.cancel()
     square_off_task.cancel()
     health_task.cancel()
@@ -261,10 +312,55 @@ app.include_router(routes_chart.router)
 app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
+# These routers live on the deployed image and are not in this checkout.
+# Skipping a missing module keeps a local run working.
+for _extra in ("routes_volatility", "routes_scalp", "routes_order_book"):
+    try:
+        _mod = __import__(f"app.api.{_extra}", fromlist=["router"])
+        app.include_router(_mod.router)
+    except Exception as exc:  # noqa: BLE001
+        print(_extra, "skipped", exc)
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
+install_desk_lock(app)
+
+try:
+    from app.sma_host import mount_terminal
+
+    mount_terminal(app)
+except Exception as exc:  # noqa: BLE001
+    print("sma mount skipped", exc)
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "mode": state.mode}
+
+
+def _mount_exported_ui() -> None:
+    """Serve the Next.js static export at `/` when the image includes it.
+
+    Registered last so `/api/*` and `/sma` keep their own routes. `html=True`
+    serves each folder's `index.html`.
+    """
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    class NoStoreStatic(StaticFiles):
+        async def get_response(self, path: str, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+    candidates = (
+        Path("/app/static"),
+        Path(__file__).resolve().parent.parent / "static",
+    )
+    for directory in candidates:
+        if (directory / "index.html").is_file():
+            app.mount("/", NoStoreStatic(directory=str(directory), html=True), name="ui")
+            return
+
+
+_mount_exported_ui()

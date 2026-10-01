@@ -9,16 +9,22 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
   const b = k?.charge_breakdown;
   const [open, setOpen] = useState(false);
   const cap = state?.max_trades ?? 15;
+  const book =
+    state?.mode === "LIVE"
+      ? "NSE live book"
+      : state?.data_source === "SIMULATOR"
+        ? "Simulation book"
+        : "Paper book";
 
   return (
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Card label="Theoretical MA-cross gross" value={k?.theoretical_gross ?? 0} hint="Signal-candle price vs exit" />
-      <Card label="Actual candle-fill gross" value={k?.actual_gross ?? 0} hint="Includes fill lag vs the cross" />
+      <Card label="Theoretical MA-cross gross" value={state ? (k?.theoretical_gross ?? 0) : null} hint={`${book} · signal-candle price vs exit`} />
+      <Card label="Actual candle-fill gross" value={state ? (k?.actual_gross ?? 0) : null} hint={`${book} · includes fill lag vs the cross`} />
       <div className="relative rounded-xl border border-white/5 bg-[#151921] p-4">
         <button className="text-left" onClick={() => setOpen((v) => !v)}>
           <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Brokerage & statutory taxes</div>
-          <div className="mt-1 font-mono text-xl text-[#F59E0B]">{inr(k?.total_charges ?? 0)}</div>
-          <div className="mt-1 text-[11px] text-slate-500">Groww · STT · NSE · stamp · GST</div>
+          <div className="mt-1 font-mono text-xl text-[#F59E0B]">{state ? inr(k?.total_charges ?? 0) : "—"}</div>
+          <div className="mt-1 text-[11px] text-slate-500">{book} · Groww · STT · NSE · stamp · GST</div>
         </button>
         {open && b && (
           <ul className="absolute left-0 right-0 top-full z-20 mt-1 rounded-lg border border-white/10 bg-[#0B0E14] p-3 text-xs text-slate-300 shadow-xl">
@@ -33,18 +39,25 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
       </div>
       <Card
         label="Realistic net P&L"
-        value={k?.net ?? 0}
-        hint={`Win rate ${((k?.win_rate ?? 0)).toFixed(0)}% · ${k?.trades ?? 0} / ${cap} trades`}
+        value={state ? (k?.net ?? 0) : null}
+        hint={
+          state
+            ? `${book} · win rate ${(k?.win_rate ?? 0).toFixed(0)}% · ${k?.trades ?? 0} taken, limit ${cap}`
+            : "Terminal totals did not load"
+        }
       />
     </section>
   );
 }
 
-function Card({ label, value, hint }: { label: string; value: number; hint: string }) {
+function Card({ label, value, hint }: { label: string; value: number | null; hint: string }) {
+  const up = (value ?? 0) >= 0;
   return (
     <div className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className={clsx("mt-1 font-mono text-xl", value >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>{inr(value)}</div>
+      <div className={clsx("mt-1 font-mono text-xl", value == null ? "text-slate-500" : up ? "text-[#10B981]" : "text-[#F43F5E]")}>
+        {value == null ? "—" : inr(value)}
+      </div>
       <div className="mt-1 text-[11px] text-slate-500">{hint}</div>
     </div>
   );

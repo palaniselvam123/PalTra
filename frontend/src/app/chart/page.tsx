@@ -10,16 +10,42 @@ import { api, type WatchRow } from "@/lib/api";
 import { money, num, pct, pnlClass } from "@/lib/format";
 
 export default function ChartPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot, ticks, positions } =
-    useTradingState();
+  const {
+    connected,
+    summary,
+    summaryLoad,
+    killSwitchActive,
+    killSwitch,
+    resetKillSwitch,
+    feed,
+    setFeed,
+    bot,
+    ticks,
+    positions,
+  } = useTradingState();
 
   const [watch, setWatch] = useState<WatchRow[]>([]);
+  const [watchLoad, setWatchLoad] = useState<"loading" | "ok" | "error">("loading");
   const [symbol, setSymbol] = useState("RELIANCE");
 
   useEffect(() => {
-    const load = () => api.deskWatchlist().then(setWatch).catch(() => {});
+    let busy = false;
+    const load = () => {
+      if (busy) return;
+      busy = true;
+      api
+        .deskWatchlist()
+        .then((rows) => {
+          setWatch(rows);
+          setWatchLoad("ok");
+        })
+        .catch(() => setWatchLoad((prev) => (prev === "ok" ? "ok" : "error")))
+        .finally(() => {
+          busy = false;
+        });
+    };
     load();
-    const id = setInterval(load, 5000);
+    const id = setInterval(load, 15000);
     return () => clearInterval(id);
   }, []);
 
@@ -43,7 +69,7 @@ export default function ChartPage() {
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}
@@ -60,7 +86,15 @@ export default function ChartPage() {
               Watchlist <span className="text-slate-600">({rows.length})</span>
             </div>
             <div className="max-h-[560px] overflow-y-auto">
-              {rows.length === 0 && <div className="px-3 py-6 text-center text-[11px] text-slate-600">Waiting…</div>}
+              {rows.length === 0 && (
+                <div className="px-3 py-6 text-center text-[11px] text-slate-600">
+                  {watchLoad === "error"
+                    ? "The watchlist did not load."
+                    : watchLoad === "loading"
+                      ? "Loading the watchlist…"
+                      : "No symbols on the desk watchlist."}
+                </div>
+              )}
               {rows.map((r) => (
                 <button
                   key={r.symbol}

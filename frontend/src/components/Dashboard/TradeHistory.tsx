@@ -3,7 +3,7 @@
 import Link from "next/link";
 import clsx from "clsx";
 import { ArrowRight, FileBarChart } from "lucide-react";
-import { money } from "@/lib/format";
+import { istDate, istTime, money } from "@/lib/format";
 
 export type ClosedTrade = {
   id: number;
@@ -19,7 +19,7 @@ export type ClosedTrade = {
   closed_at: string | null;
 };
 
-export function TradeHistory({ trades }: { trades: ClosedTrade[] }) {
+export function TradeHistory({ trades, emptyLabel }: { trades: ClosedTrade[]; emptyLabel?: string }) {
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
@@ -57,7 +57,7 @@ export function TradeHistory({ trades }: { trades: ClosedTrade[] }) {
             {trades.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-6 text-center text-slate-500 text-sm">
-                  No closed trades yet.
+                  {emptyLabel ?? "No closed trades yet."}
                 </td>
               </tr>
             )}
@@ -66,18 +66,8 @@ export function TradeHistory({ trades }: { trades: ClosedTrade[] }) {
                 <td className="px-4 py-2 font-mono text-xs text-slate-500">
                   {t.closed_at ? (
                     <span className="whitespace-nowrap">
-                      {new Date(t.closed_at + "Z").toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                      })}{" "}
-                      <span className="text-slate-400">
-                        {new Date(t.closed_at + "Z").toLocaleTimeString("en-IN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                          hour12: false,
-                        })}
-                      </span>
+                      {istDate(t.closed_at, true)}{" "}
+                      <span className="text-slate-400">{istTime(t.closed_at, true)} IST</span>
                     </span>
                   ) : (
                     "—"

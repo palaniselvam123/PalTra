@@ -207,7 +207,7 @@ export function RiskSettings() {
 
       {dayState && (
         <div className="border-t border-border pt-3 text-xs space-y-1 font-mono">
-          <div className="text-slate-400">Trades taken today: {dayState.trades_taken}</div>
+          <div className="text-slate-400">Bot entries today: {dayState.trades_taken}</div>
           <div className={dayState.realized_pnl < 0 ? "text-loss" : "text-profit"}>
             Realized P&amp;L: ₹{dayState.realized_pnl.toFixed(2)}
           </div>

@@ -19,29 +19,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from config import get_settings
+from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
-from strategy_engine import StrategyEngine
+from strategy_engine import (
+    MAX_TRADE_SYMBOLS,
+    ForceRefused,
+    StrategyEngine,
+    attach_market_prices,
+    trade_names,
+)
 
 engine = StrategyEngine()
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
+_booted = False
+_task: asyncio.Task | None = None
+
+
+def boot_engine() -> asyncio.Task | None:
+    """Start the 1-second loop once. Safe if both the standalone app and a mount call it."""
+    global _booted, _task
+    if _booted:
+        return _task
+    _booted = True
     init_db()
     cfg = engine.load_config()
-    engine.broker.set_mode(cfg.trading_mode, get_settings().groww_access_token)
-    task = asyncio.create_task(engine.run())
+    engine.restore_open_books()
+    engine.broker.set_mode(cfg.trading_mode)
+    engine.broker.adopt_saved_session(force=True)
+    _task = asyncio.create_task(engine.run())
+    return _task
+
+
+def stop_engine() -> None:
+    engine.stop()
+    if _task is not None and not _task.done():
+        _task.cancel()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = boot_engine()
     try:
         yield
     finally:
-        engine.stop()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        stop_engine()
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="SMA ATR Intraday Terminal", lifespan=lifespan)
@@ -69,7 +97,18 @@ class ConfigUpdate(BaseModel):
     atr_period: int | None = Field(default=None, ge=2, le=100)
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
+    use_stop: bool | None = None
     adx_threshold: float | None = Field(default=None, ge=0, le=100)
+    use_vwap: bool | None = None
+    use_volume: bool | None = None
+    volume_min_ratio: float | None = Field(default=None, gt=0, le=10)
+    use_density: bool | None = None
+    density_min_pct: float | None = Field(default=None, ge=1, le=100)
+    use_rsi: bool | None = None
+    rsi_long_min: float | None = Field(default=None, ge=0, le=100)
+    rsi_long_max: float | None = Field(default=None, ge=0, le=100)
+    rsi_short_min: float | None = Field(default=None, ge=0, le=100)
+    rsi_short_max: float | None = Field(default=None, ge=0, le=100)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
@@ -83,6 +122,7 @@ class ModeUpdate(BaseModel):
 def _config_dict(row: BotConfig) -> dict:
     return {
         "symbol": row.symbol,
+        "trade_symbols": trade_names(row),
         "exchange": row.exchange,
         "qty": row.qty,
         "sma_fast": row.sma_fast,
@@ -90,7 +130,18 @@ def _config_dict(row: BotConfig) -> dict:
         "atr_period": row.atr_period,
         "atr_multiplier": row.atr_multiplier,
         "use_adx_filter": row.use_adx_filter,
+        "use_stop": True if row.use_stop is None else bool(row.use_stop),
         "adx_threshold": row.adx_threshold,
+        "use_vwap": bool(getattr(row, "use_vwap", False)),
+        "use_volume": bool(getattr(row, "use_volume", False)),
+        "volume_min_ratio": float(getattr(row, "volume_min_ratio", 1.0) or 1.0),
+        "use_density": bool(getattr(row, "use_density", False)),
+        "density_min_pct": float(getattr(row, "density_min_pct", 50.0) or 50.0),
+        "use_rsi": bool(getattr(row, "use_rsi", False)),
+        "rsi_long_min": float(getattr(row, "rsi_long_min", 40.0) or 40.0),
+        "rsi_long_max": float(getattr(row, "rsi_long_max", 70.0) or 70.0),
+        "rsi_short_min": float(getattr(row, "rsi_short_min", 30.0) or 30.0),
+        "rsi_short_max": float(getattr(row, "rsi_short_max", 60.0) or 60.0),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,
@@ -118,12 +169,47 @@ async def get_config():
     return _config_dict(engine.load_config())
 
 
+class TradeSymbolUpdate(BaseModel):
+    symbol: str
+    armed: bool
+
+
+def _open_symbols() -> set[str]:
+    return {symbol for symbol, pos in engine.positions.items() if pos is not None}
+
+
+@app.post("/api/trade-symbols")
+async def set_trade_symbol(body: TradeSymbolUpdate):
+    """Arm or disarm a stock without changing the chart on screen."""
+    symbol = (body.symbol or "").upper().strip()
+    if not symbol or not symbol.isalnum():
+        raise HTTPException(400, "Symbol must be an NSE trading symbol")
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        names = trade_names(row)
+        if body.armed:
+            if symbol not in names:
+                if len(names) >= MAX_TRADE_SYMBOLS:
+                    raise HTTPException(409, f"Trade is limited to {MAX_TRADE_SYMBOLS} stocks at once")
+                names.append(symbol)
+                engine.hold_for_next_cross([symbol])
+        else:
+            if symbol in _open_symbols():
+                raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
+            names = [name for name in names if name != symbol]
+        row.trade_symbols = ",".join(names)
+        db.commit()
+        db.refresh(row)
+        return _config_dict(row)
+
+
 @app.put("/api/config")
 async def put_config(body: ConfigUpdate):
-    if engine.position is not None and body.symbol:
-        if body.symbol.upper().strip() != engine.load_config().symbol:
-            raise HTTPException(409, "Close the open position before changing symbol")
-    if engine.position is not None and body.qty is not None and body.qty != engine.position.qty:
+    # The chart symbol can change while another stock stays open. Quantity is
+    # shared, so an open book still blocks a size change.
+    if body.qty is not None and any(pos.qty != body.qty for pos in engine.positions.values()):
         raise HTTPException(409, "Close the open position before changing quantity")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
@@ -142,6 +228,10 @@ async def put_config(body: ConfigUpdate):
             setattr(row, key, value)
         if row.sma_fast >= row.sma_slow:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
+        if float(row.rsi_long_min) > float(row.rsi_long_max):
+            raise HTTPException(400, "Buy RSI low must be at or below the buy RSI high")
+        if float(row.rsi_short_min) > float(row.rsi_short_max):
+            raise HTTPException(400, "Sell RSI low must be at or below the sell RSI high")
         db.commit()
         db.refresh(row)
         return _config_dict(row)
@@ -159,45 +249,76 @@ def _validate_hhmm(value: str) -> None:
         raise HTTPException(400, "square_off_time must be HH:MM")
 
 
+def _live_token() -> str:
+    """Desk login when Settings has one, otherwise the Fly secret."""
+    return preferred_quote_token()
+
+
 @app.post("/api/mode")
 async def set_mode(body: ModeUpdate):
     """PAPER is the default. LIVE requires confirm_live and a Groww token."""
+    from strategy_engine import _ist_now
+
+    engine._roll_session(_ist_now())
     mode = body.mode.upper()
     if mode not in ("PAPER", "LIVE"):
         raise HTTPException(400, "mode must be PAPER or LIVE")
-    if engine.status == "HALTED":
-        raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
     if mode == "LIVE":
         if not body.confirm_live:
             raise HTTPException(
                 400,
                 "LIVE REAL MONEY requires explicit confirmation (confirm_live=true).",
             )
-        token = get_settings().groww_access_token
+        token = _live_token()
         if not token:
             raise HTTPException(
                 503,
-                "GROWW_ACCESS_TOKEN is not set. Refusing to enable LIVE.",
+                "No Groww session is saved. Connect Groww on the desk, then confirm LIVE again.",
             )
-    if engine.position is not None:
+        # Overnight practice can halt itself. That must not block this confirm.
+        engine.release_paper_halt()
+    if engine.status == "HALTED":
+        raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
+    if _open_symbols():
         raise HTTPException(409, "Close the open position before switching execution mode")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
         row.trading_mode = mode
         db.commit()
-    engine.broker.set_mode(mode, get_settings().groww_access_token)
+    engine.broker.set_mode(mode, _live_token())
     return {"trading_mode": mode}
 
 
 @app.post("/api/bot/start")
 async def start_bot():
+    from strategy_engine import _ist_now
+
+    engine._roll_session(_ist_now())
+    engine.release_manual_panic()
     if engine.status == "HALTED":
         raise HTTPException(423, engine.halt_reason or "Halted for the day")
     if engine.status == "DAY_COMPLETED":
         raise HTTPException(423, engine.halt_reason or "Session already squared off")
+    # A cross already on the tape is not an order. The next cross is.
+    engine.hold_for_next_cross(trade_names(engine.load_config()))
     engine.status = "RUNNING"
     engine.halt_reason = ""
     return {"bot_status": engine.status}
+
+
+class ForceOrder(BaseModel):
+    symbol: str = ""
+
+
+@app.post("/api/bot/force")
+async def force_order(body: ForceOrder):
+    """Manual check order. Starts the bot. Does not wait for a cross."""
+    try:
+        result = await engine.force_order(body.symbol)
+    except ForceRefused as exc:
+        code = 423 if engine.status in ("HALTED", "DAY_COMPLETED") else 400
+        raise HTTPException(code, str(exc)) from exc
+    return {"bot_status": engine.status, "last_signal": result}
 
 
 @app.post("/api/bot/pause")
@@ -205,6 +326,20 @@ async def pause_bot():
     if engine.status == "RUNNING":
         engine.status = "PAUSED"
     return {"bot_status": engine.status}
+
+
+class CloseOrder(BaseModel):
+    symbol: str = ""
+
+
+@app.post("/api/bot/close")
+async def close_position(body: CloseOrder):
+    """Close one open stock. Does not halt the bot."""
+    try:
+        result = await engine.close_symbol(body.symbol)
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"bot_status": engine.status, "last_signal": result}
 
 
 @app.post("/api/bot/kill")
@@ -216,12 +351,15 @@ async def kill_bot():
 
 @app.get("/api/trades")
 async def trades():
-    return engine.trades()
+    return attach_market_prices(engine.trades(), engine._ltps)
 
 
 @app.get("/api/trades.csv")
-async def trades_csv():
-    rows = engine.trades()
+async def trades_csv(mode: str = ""):
+    rows = attach_market_prices(engine.trades(), engine._ltps)
+    book = (mode or "").upper()
+    if book in ("PAPER", "LIVE"):
+        rows = [row for row in rows if (row.get("mode") or "PAPER").upper() == book]
     buffer = io.StringIO()
     fields = [
         "id",
@@ -231,6 +369,8 @@ async def trades_csv():
         "qty",
         "entry_time",
         "entry_price",
+        "market_price",
+        "mark_pnl",
         "ma_cross_price",
         "atr_at_entry",
         "sl_trigger_price",

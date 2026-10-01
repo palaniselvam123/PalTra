@@ -12,9 +12,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.encryption import get_vault
-from app.core.market_clock import ist_now
 from app.models.database import AlertChannel, ScannerConfig, async_session
-from app.services.alert_notifier import CALLMEBOT, TWILIO, alert_notifier, format_message
+from app.services.alert_notifier import (
+    CALLMEBOT,
+    TELEGRAM,
+    TWILIO,
+    TelegramSetupError,
+    alert_notifier,
+)
 from app.services import patterns as candle_patterns
 from app.services.candle_store import INTERVALS
 from app.services.scanner_worker import scanner_worker
@@ -58,7 +63,8 @@ class ChannelRequest(BaseModel):
     enabled: bool = True
     # CallMeBot: target = phone, secret = apikey.
     # Twilio: target = destination number, secret = "account_sid:auth_token", extra = from number.
-    target: str
+    # Telegram: target = chat id (optional; discovered from the bot), secret = bot token.
+    target: str = ""
     secret: str
     extra: str = ""
 
@@ -198,9 +204,19 @@ async def channels():
 @router.post("/channels")
 async def save_channel(body: ChannelRequest):
     provider = body.provider.lower()
-    if provider not in (CALLMEBOT, TWILIO):
-        raise HTTPException(400, f"provider must be '{CALLMEBOT}' or '{TWILIO}'")
-    if not body.target or not body.secret:
+    if provider not in (CALLMEBOT, TWILIO, TELEGRAM):
+        raise HTTPException(400, f"provider must be '{CALLMEBOT}', '{TWILIO}', or '{TELEGRAM}'")
+    target = body.target.strip()
+    secret = body.secret.strip()
+    if provider == TELEGRAM:
+        if not secret:
+            raise HTTPException(400, "Paste the bot token from BotFather")
+        if not target:
+            try:
+                target = await alert_notifier.discover_telegram_chat(secret)
+            except TelegramSetupError as exc:
+                raise HTTPException(400, str(exc)) from exc
+    elif not target or not secret:
         raise HTTPException(400, "target and secret are both required")
     if provider == TWILIO and ":" not in body.secret:
         raise HTTPException(400, "For Twilio, secret must be 'account_sid:auth_token'")
@@ -215,8 +231,8 @@ async def save_channel(body: ChannelRequest):
         if row is None:
             row = AlertChannel(provider=provider)
             session.add(row)
-        row.target_encrypted = vault.encrypt(body.target)
-        row.secret_encrypted = vault.encrypt(body.secret)
+        row.target_encrypted = vault.encrypt(target)
+        row.secret_encrypted = vault.encrypt(secret)
         row.extra_encrypted = vault.encrypt(body.extra) if body.extra else ""
         row.enabled = body.enabled
         row.updated_at = dt.datetime.utcnow()
@@ -253,16 +269,7 @@ async def test_alert():
     """Sends a real message through the enabled channel, so credentials are
     proven before a live signal depends on them.
     """
-    message = format_message(
-        side="BUY",
-        symbol="TEST",
-        timeframe="5m",
-        price=1234.56,
-        fast_label="EMA9",
-        slow_label="EMA21",
-        when=ist_now(),
-        extra_reasons=["This is a test message from your scanner — no real signal fired."],
-    )
+    message = "PalTra test\nAlerts are connected. No order was placed."
     result = await alert_notifier.send(message)
     if not result.ok:
         raise HTTPException(400, result.error or result.skipped_reason or "Send failed")

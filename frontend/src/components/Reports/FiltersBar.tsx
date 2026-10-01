@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { Download, RotateCcw, Search } from "lucide-react";
 import type { ReportFilters } from "@/lib/api";
+import { istDay } from "@/lib/format";
 
 type Options = {
   symbols: string[];
@@ -21,9 +22,7 @@ const PRESETS: { label: string; days: number | null }[] = [
 ];
 
 function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return istDay(days);
 }
 
 const inputClass =

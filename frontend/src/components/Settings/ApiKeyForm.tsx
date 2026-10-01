@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { CheckCircle2, XCircle, Loader2, LogIn } from "lucide-react";
 import { api } from "@/lib/api";
+import { istStamp, markIst } from "@/lib/format";
 
 type CredentialStatus = {
   broker: string;
@@ -25,15 +26,20 @@ export function ApiKeyForm() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginResult, setLoginResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saved, setSaved] = useState<CredentialStatus | null>(null);
+  const [check, setCheck] = useState<"loading" | "ok" | "error">("loading");
 
   // Without this the form always renders blank, so stored credentials look
   // lost after every refresh — the fields are write-only by design (the API
   // never returns a decrypted key), so the badge is the only evidence.
+  // A failed check must not say the keys are missing.
   const refreshSaved = (which: string) =>
     api
       .getCredentialStatus(which)
-      .then(setSaved)
-      .catch(() => setSaved(null));
+      .then((row) => {
+        setSaved(row);
+        setCheck("ok");
+      })
+      .catch(() => setCheck("error"));
 
   useEffect(() => {
     refreshSaved(broker);
@@ -70,7 +76,7 @@ export function ApiKeyForm() {
       const res = await api.login(broker);
       setLoginResult({
         ok: true,
-        message: `Connected. Token valid until ${new Date(res.token_expires_at).toLocaleString()}. You can now switch the data source to LIVE NSE.`,
+        message: `Connected. Token valid until ${markIst(istStamp(res.token_expires_at, true))}. You can now switch the data source to LIVE NSE.`,
       });
       await refreshSaved(broker);
     } catch (e: any) {
@@ -90,10 +96,22 @@ export function ApiKeyForm() {
             saved?.configured ? "bg-profit/15 text-profit" : "bg-slate-700/40 text-slate-400"
           )}
         >
-          {saved?.configured ? "KEYS SAVED" : "NOT CONFIGURED"}
+          {check === "loading"
+            ? "CHECKING…"
+            : check === "error"
+              ? "COULD NOT CHECK"
+              : saved?.configured
+                ? "KEYS SAVED"
+                : "NOT CONFIGURED"}
         </span>
       </div>
 
+      {check === "error" && (
+        <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+          The key check did not answer. This does not mean the keys are missing, and you do not need to type them
+          again. Market status can still show Groww as connected.
+        </div>
+      )}
       {saved?.configured && (
         <div className="text-[11px] text-slate-400 bg-base border border-border rounded-md px-3 py-2 space-y-0.5">
           <div>
@@ -111,7 +129,7 @@ export function ApiKeyForm() {
             {saved.token_expires_at && (
               <span className="text-slate-500">
                 {" "}
-                · token expires {new Date(saved.token_expires_at).toLocaleString()}
+                · token expires {markIst(istStamp(saved.token_expires_at, true))}
               </span>
             )}
           </div>
@@ -122,8 +140,8 @@ export function ApiKeyForm() {
         with a live adapter — Zerodha/Angel One store credentials but have no login implementation yet.
       </p>
       <p className="text-xs text-slate-500">
-        These keys are used for <span className="text-slate-300">market data only</span>. Order placement stays
-        simulated: the app never sends an order to your broker, so a valid key cannot spend real money here.
+        These keys read market data and the Groww cash balance. Orders stay on the practice book until you confirm
+        Send orders to Groww on the Trade page, and a real order still waits until 09:15 IST.
       </p>
 
       <div className="grid grid-cols-2 gap-3">

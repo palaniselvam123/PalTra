@@ -11,7 +11,7 @@ import { TransactionsTable } from "@/components/Reports/TransactionsTable";
 import { FiltersBar } from "@/components/Reports/FiltersBar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type FullReport, type ReportFilters } from "@/lib/api";
-import { timestamp } from "@/lib/format";
+import { markIst, timestamp } from "@/lib/format";
 
 type Tab = "overview" | "breakdowns" | "transactions";
 
@@ -22,7 +22,8 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function ReportsPage() {
-  const { connected, summary, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } = useTradingState();
+  const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
+    useTradingState();
 
   const [filters, setFilters] = useState<ReportFilters>({});
   const [options, setOptions] = useState<any>(null);
@@ -62,7 +63,7 @@ export default function ReportsPage() {
     <div>
       <Navbar
         connected={connected}
-        totalPnl={summary.total_pnl}
+        totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
         killSwitchActive={killSwitchActive}
         onKillSwitch={killSwitch}
         onResetKillSwitch={resetKillSwitch}
@@ -123,7 +124,7 @@ export default function ReportsPage() {
 
         {loading && !report ? (
           <div className="rounded-card border border-border bg-surface px-4 py-10 flex items-center justify-center gap-2 text-sm text-slate-500">
-            <Loader2 size={16} className="animate-spin" /> Building report…
+            <Loader2 size={16} className="animate-spin" /> Building report… If this stays, the report did not load.
           </div>
         ) : report ? (
           <>
@@ -148,7 +149,7 @@ export default function ReportsPage() {
                 </button>
               ))}
               <span className="ml-auto text-[11px] text-slate-600 pb-2">
-                generated {timestamp(report.generated_at)}
+                generated {markIst(timestamp(report.generated_at))}
               </span>
             </div>
 

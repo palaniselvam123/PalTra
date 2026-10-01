@@ -99,6 +99,35 @@ def _to_epoch_seconds(value) -> int | None:
     return None
 
 
+def parse_margin_payload(raw: dict) -> dict:
+    """Normalise Groww's `/margins/detail/user` body.
+
+    The SDK returns either the payload itself or `{status, payload}`.
+    `clear_cash` is unlevered cash. `mis_balance_available` is what an
+    intraday MIS order can still use — Groww has already applied leverage,
+    so the desk must not multiply it again.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("Groww margin response was not an object")
+    data = raw
+    if "clear_cash" not in data and isinstance(raw.get("payload"), dict):
+        data = raw["payload"]
+    equity = data.get("equity_margin_details") or {}
+
+    def num(value: object) -> float:
+        try:
+            return round(float(value), 2)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "clear_cash": num(data.get("clear_cash")),
+        "mis_balance_available": num(equity.get("mis_balance_available")),
+        "cnc_balance_available": num(equity.get("cnc_balance_available")),
+        "net_margin_used": num(data.get("net_margin_used")),
+    }
+
+
 class GrowwClient(BrokerClient):
     name = "groww"
 
@@ -216,7 +245,15 @@ class GrowwClient(BrokerClient):
         sdk = self._require_session()
         keys = tuple(f"{self.EXCHANGE}_{s}" for s in symbols)
         try:
-            raw = await asyncio.to_thread(sdk.get_ltp, exchange_trading_symbols=keys, segment=self.SEGMENT)
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_ltp,
+                    exchange_trading_symbols=keys,
+                    segment=self.SEGMENT,
+                    timeout=6,
+                ),
+                timeout=8,
+            )
         except Exception as exc:  # noqa: BLE001
             if _is_forbidden(exc):
                 raise BrokerDataForbidden(_FORBIDDEN_HINT) from exc
@@ -243,8 +280,15 @@ class GrowwClient(BrokerClient):
         """Quote including bid/ask depth, used by the spread guard."""
         sdk = self._require_session()
         try:
-            raw = await asyncio.to_thread(
-                sdk.get_quote, trading_symbol=symbol, exchange=self.EXCHANGE, segment=self.SEGMENT
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_quote,
+                    trading_symbol=symbol,
+                    exchange=self.EXCHANGE,
+                    segment=self.SEGMENT,
+                    timeout=6,
+                ),
+                timeout=8,
             )
         except Exception as exc:  # noqa: BLE001
             if _is_forbidden(exc):
@@ -390,32 +434,89 @@ class GrowwClient(BrokerClient):
     async def get_quote(self, symbol: str) -> Quote:
         return await self.get_full_quote(symbol)
 
-    # ---- orders (live dispatch stays disabled at the app layer) --------
+    async def get_available_margin(self) -> dict:
+        """Cash and MIS buying power from Groww. Raises BrokerOrderError."""
+        sdk = self._require_session()
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(sdk.get_available_margin_details, timeout=6),
+                timeout=8,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerOrderError(f"Could not read Groww margin: {exc}") from exc
+        try:
+            return parse_margin_payload(raw if isinstance(raw, dict) else {})
+        except ValueError as exc:
+            raise BrokerOrderError(str(exc)) from exc
+
+    async def get_order_fill(self, broker_order_id: str) -> tuple[str, float | None]:
+        """One status read after a place. Price is None until Groww reports a fill."""
+        sdk = self._require_session()
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_order_status, self.SEGMENT, broker_order_id, timeout=6
+                ),
+                timeout=8,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerOrderError(f"Could not read Groww order {broker_order_id}: {exc}") from exc
+        data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
+        if not isinstance(data, dict):
+            return "", None
+        status = str(_pick(data, "order_status", "status", default="") or "")
+        price = _pick(data, "average_fill_price", "filled_price")
+        try:
+            filled = float(price) if price not in (None, "", 0, 0.0) else None
+        except (TypeError, ValueError):
+            filled = None
+        return status, filled
+
+    # ---- orders -------------------------------------------------------
 
     async def place_order(self, order: OrderRequest) -> OrderResult:
         sdk = self._require_session()
         try:
-            resp = await asyncio.to_thread(
-                sdk.place_order,
-                validity="DAY",
-                exchange=self.EXCHANGE,
-                segment=self.SEGMENT,
-                trading_symbol=order.symbol,
-                transaction_type=order.side,
-                quantity=order.quantity,
-                order_type=order.order_type,
-                product="MIS",
-                price=order.price or 0.0,
-                trigger_price=order.trigger_price,
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.place_order,
+                    validity="DAY",
+                    exchange=self.EXCHANGE,
+                    segment=self.SEGMENT,
+                    trading_symbol=order.symbol,
+                    transaction_type=order.side,
+                    quantity=order.quantity,
+                    order_type=order.order_type,
+                    product="MIS",
+                    price=order.price or 0.0,
+                    trigger_price=order.trigger_price,
+                    timeout=6,
+                ),
+                timeout=8,
             )
         except Exception as exc:  # noqa: BLE001
             raise BrokerOrderError(f"Order placement failed for {order.symbol}: {exc}") from exc
 
         data = resp.get("payload", resp) if isinstance(resp, dict) and "payload" in resp else resp
+        if not isinstance(data, dict):
+            data = {}
+        # A FAILURE body is not an order. Defaulting the status to PLACED
+        # booked a desk fill for a request Groww refused.
+        top_status = str(resp.get("status") or "") if isinstance(resp, dict) else ""
+        if top_status.upper() == "FAILURE":
+            err = resp.get("error") if isinstance(resp, dict) else None
+            message = ""
+            if isinstance(err, dict):
+                message = str(err.get("message") or err.get("code") or "")
+            elif err:
+                message = str(err)
+            raise BrokerOrderError(message or "Groww refused the order.")
+        remark = str(_pick(data, "remark", "message", default="") or "")
         return OrderResult(
-            broker_order_id=str(_pick(data, "groww_order_id", "order_id", "orderId", default="")),
-            status=str(_pick(data, "order_status", "status", default="PLACED")),
+            broker_order_id=str(_pick(data, "groww_order_id", "order_id", "orderId", default="") or ""),
+            status=str(_pick(data, "order_status", "status", default="") or ""),
             filled_price=_pick(data, "average_fill_price", "filled_price"),
+            message=remark,
         )
 
     async def cancel_order(self, broker_order_id: str) -> None:

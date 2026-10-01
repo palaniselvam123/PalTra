@@ -16,7 +16,7 @@ import pytest
 
 from app.services.alert_notifier import (
     ACCEPTED, CALLMEBOT, FAILED, MAX_ATTEMPTS, REJECTED, UNKNOWN, AlertNotifier,
-    DeliveryResult, classify_response, mask_phone, mask_secret, sanitize,
+    DeliveryResult, chat_id_from_updates, classify_response, mask_phone, mask_secret, sanitize,
 )
 
 FAKE_KEY = "TESTKEY123456"
@@ -168,6 +168,22 @@ class TestDeliveryPath:
         blob = f"{result.error} {result.provider_message}"
         assert FAKE_KEY not in blob
         assert FAKE_PHONE not in blob
+
+
+class TestTelegram:
+    def test_chat_id_comes_from_the_latest_message(self):
+        payload = {
+            "ok": True,
+            "result": [
+                {"update_id": 1, "message": {"chat": {"id": 111}, "text": "old"}},
+                {"update_id": 2, "message": {"chat": {"id": 222}, "text": "hi"}},
+            ],
+        }
+        assert chat_id_from_updates(payload) == "222"
+
+    def test_empty_updates_have_no_chat(self):
+        assert chat_id_from_updates({"ok": True, "result": []}) is None
+        assert chat_id_from_updates({}) is None
 
 
 class TestConfiguration:

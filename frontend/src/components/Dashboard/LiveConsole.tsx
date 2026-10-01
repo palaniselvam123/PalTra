@@ -42,7 +42,7 @@ export function LiveConsole({ logs }: { logs: LogEntry[] }) {
                 key={log.id}
                 className="flex gap-2 rounded px-1 py-0.5 font-mono text-[11px] leading-relaxed hover:bg-white/[0.03]"
               >
-                <span className="shrink-0 tabular-nums text-slate-600">{log.at}</span>
+                <span className="shrink-0 tabular-nums text-slate-600">{log.at} IST</span>
                 <span className={clsx("w-11 shrink-0", LEVEL_STYLE[log.level])}>{log.level}</span>
                 <span className="break-all text-slate-300">{log.message}</span>
               </div>

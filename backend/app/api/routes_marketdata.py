@@ -4,13 +4,15 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app import state
 from app.api.routes_auth import _active_clients
 from app.brokers.groww_client import GrowwClient
 from app.core.market_clock import seconds_until_open, session_state
+from app.models.database import Trade, async_session
 from app.services.broadcaster import broadcaster
-from app.services.market_data import market_data
+from app.services.market_data import market_data, switch_is_safe
 from app.services.strategy_runner import strategy_runner
 
 router = APIRouter(prefix="/api/marketdata", tags=["marketdata"])
@@ -19,6 +21,16 @@ router = APIRouter(prefix="/api/marketdata", tags=["marketdata"])
 class SourceRequest(BaseModel):
     source: str                       # simulated | live
     poll_interval_sec: float = 2.0
+
+
+async def _open_position_feeds() -> dict[str, str]:
+    """Symbol to the price series it was filled on. Engine-only rows are unknown."""
+    async with async_session() as session:
+        rows = (await session.execute(select(Trade.symbol, Trade.feed_source).where(Trade.status == "OPEN"))).all()
+    found = {symbol: (feed or "unknown") for symbol, feed in rows}
+    for symbol in list(state.paper_engine.positions) + list(state.manual_engine.positions):
+        found.setdefault(symbol, "unknown")
+    return found
 
 
 @router.get("/status")
@@ -66,16 +78,20 @@ async def set_source(body: SourceRequest):
     # Open positions are priced against whichever series they were opened on.
     # Switching underneath them means the eventual close reads a completely
     # unrelated price — the mechanism behind exits like SHIPROCKET 136 -> 3309.
-    # The close path voids such trades as a safety net, but losing a position
-    # is a poor outcome; refusing the switch keeps it tradeable instead.
-    open_positions = list(state.paper_engine.positions) + list(state.manual_engine.positions)
-    if open_positions and body.source != market_data.source.value:
-        raise HTTPException(
-            409,
-            f"Close your open position(s) first: {', '.join(sorted(set(open_positions)))}. "
-            "They were opened against the current price feed, and switching underneath them means any "
-            "exit would be priced off an unrelated series.",
-        )
+    # Returning to the series they were filled on is allowed. A restart boots
+    # on the simulator, and that must not trap an NSE position there.
+    if body.source != market_data.source.value:
+        blocked = [
+            symbol
+            for symbol, opened_on in (await _open_position_feeds()).items()
+            if not switch_is_safe(opened_on, body.source)
+        ]
+        if blocked:
+            raise HTTPException(
+                409,
+                f"Close your open position(s) first: {', '.join(sorted(blocked))}. "
+                "They were opened on a different price series, and an exit would be priced off the wrong tape.",
+            )
 
     if body.source == "simulated":
         await market_data.use_simulated()

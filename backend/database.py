@@ -23,10 +23,20 @@ def reset_engine() -> None:
     get_settings.cache_clear()
 
 
+def database_url() -> str:
+    """Persist the terminal on the Fly volume when that volume is mounted."""
+    configured = os.environ.get("SMA_DATABASE_URL")
+    if configured:
+        return configured
+    if os.path.isfile("/data/trading.db"):
+        return "sqlite:////data/sma_terminal.db"
+    return get_settings().sma_database_url
+
+
 def get_engine():
     global _engine, _Session
     if _engine is None:
-        url = os.environ.get("SMA_DATABASE_URL", get_settings().sma_database_url)
+        url = database_url()
         _engine = create_engine(url, connect_args={"check_same_thread": False})
         _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
@@ -38,10 +48,43 @@ def session_factory() -> sessionmaker[Session]:
     return _Session
 
 
+def _ensure_bot_config_columns(engine) -> None:
+    """create_all does not add a column to a table that already exists."""
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(bot_config)").fetchall()
+        if not rows:
+            return
+        names = {row[1] for row in rows}
+        if "use_stop" not in names:
+            conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN use_stop BOOLEAN DEFAULT 1")
+        if "trade_symbols" not in names:
+            conn.exec_driver_sql("ALTER TABLE bot_config ADD COLUMN trade_symbols TEXT DEFAULT ''")
+            conn.exec_driver_sql(
+                "UPDATE bot_config SET trade_symbols = symbol "
+                "WHERE trade_symbols IS NULL OR trade_symbols = ''"
+            )
+        additions = {
+            "use_vwap": "BOOLEAN DEFAULT 0",
+            "use_volume": "BOOLEAN DEFAULT 0",
+            "volume_min_ratio": "FLOAT DEFAULT 1",
+            "use_density": "BOOLEAN DEFAULT 0",
+            "density_min_pct": "FLOAT DEFAULT 50",
+            "use_rsi": "BOOLEAN DEFAULT 0",
+            "rsi_long_min": "FLOAT DEFAULT 40",
+            "rsi_long_max": "FLOAT DEFAULT 70",
+            "rsi_short_min": "FLOAT DEFAULT 30",
+            "rsi_short_max": "FLOAT DEFAULT 60",
+        }
+        for column, decl in additions.items():
+            if column not in names:
+                conn.exec_driver_sql(f"ALTER TABLE bot_config ADD COLUMN {column} {decl}")
+
+
 def init_db() -> BotConfig:
     """Create tables and seed a single BotConfig row from settings."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _ensure_bot_config_columns(engine)
     SessionLocal = session_factory()
     settings = get_settings()
     with SessionLocal() as db:
@@ -55,6 +98,7 @@ def init_db() -> BotConfig:
             row = BotConfig(
                 id=1,
                 symbol=(settings.default_symbol or "KIRLOSFER").upper(),
+                trade_symbols=(settings.default_symbol or "KIRLOSFER").upper(),
                 exchange="NSE",
                 qty=int(settings.default_qty or 1000),
                 sma_fast=9,

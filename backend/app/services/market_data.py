@@ -84,12 +84,16 @@ class LiveGrowwFeed:
 
     async def stream(self):
         while True:
+            open_now = is_market_open()
             try:
-                if self._poll_count % self.depth_every == 0:
+                # Bid/ask for every name is dozens of Groww calls. After the
+                # close the spread does not matter, and that loop was filling
+                # the only CPU so positions and the terminal stopped answering.
+                if broker_poll_due(open_now) and self._poll_count % self.depth_every == 0:
                     await self._refresh_depth()
                 self._poll_count += 1
 
-                ltps = await self.client.get_ltp_batch(self.symbols)
+                ltps = await asyncio.wait_for(self.client.get_ltp_batch(self.symbols), timeout=8)
                 self.last_error = None
 
                 for symbol, ltp in ltps.items():
@@ -106,9 +110,28 @@ class LiveGrowwFeed:
             except Exception as exc:  # noqa: BLE001
                 # Never let a transient broker error kill the feed task.
                 self.last_error = str(exc)
-                await asyncio.sleep(5)
+                await asyncio.sleep(5 if open_now else 60)
+                continue
 
-            await asyncio.sleep(self.poll_interval_sec)
+            await asyncio.sleep(self.poll_interval_sec if open_now else 60)
+
+
+def broker_poll_due(market_open: bool) -> bool:
+    """Full depth quotes run only while the NSE session is open."""
+    return bool(market_open)
+
+
+def switch_is_safe(opened_on: str, target: str) -> bool:
+    """An open position may move onto the series it was filled on.
+
+    A row with no recorded series may take NSE prices. It must not be marked
+    to the simulator, which is a new random walk after every restart.
+    """
+    opened = (opened_on or "unknown").lower()
+    dest = (target or "").lower()
+    if opened == dest:
+        return True
+    return opened == "unknown" and dest == "live"
 
 
 class MarketDataManager:
@@ -126,6 +149,10 @@ class MarketDataManager:
         self.last_tick_at: dt.datetime | None = None
         self.last_change_at: dt.datetime | None = None
         self._last_prices: dict[str, float] = {}
+
+    def interactive_symbols(self) -> list[str]:
+        """Names the desk and scanner can show. Same list the feed is streaming."""
+        return list(self.symbols)
 
     def add_symbol(self, symbol: str) -> bool:
         """Adds a symbol to live streaming beyond the bot's fixed 20-name

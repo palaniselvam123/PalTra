@@ -56,7 +56,11 @@ export function OrderTicket({
         stop_loss: useBracket && stopLoss ? Number(stopLoss) : null,
         target: useBracket && target ? Number(target) : null,
       });
-      setDone(`${side} ${res.quantity} ${res.symbol} filled at ₹${res.filled_price}`);
+      setDone(
+        res.sent_to_groww
+          ? `Sent to Groww. Order ${res.order_id} is ${res.status || "OPEN"} at ₹${res.filled_price}. It should appear on Groww's Orders page.`
+          : `Practice fill. ${side} ${res.quantity} ${res.symbol} at ₹${res.filled_price}. This was not sent to Groww.`
+      );
       onFilled();
     } catch (e: any) {
       setError(e.message ?? "Order rejected");
@@ -202,12 +206,14 @@ export function OrderTicket({
           )}
         >
           {busy && <Loader2 size={14} className="animate-spin" />}
-          {side} {quantity.toLocaleString("en-IN")} {row.symbol}
+          {account?.execution === "groww" ? `${side} on Groww` : side}{" "}
+          {quantity.toLocaleString("en-IN")} {row.symbol}
         </button>
 
         <p className="text-[10px] text-slate-600">
-          Virtual money. This desk has its own wallet and its own reports — nothing here touches the strategy
-          account or your broker.
+          {account?.execution === "groww"
+            ? "This button sends a real NSE MIS order to your Groww account."
+            : "Practice money until you turn on “Send orders to Groww”. The balance above is your Groww cash when the broker is connected."}
         </p>
       </div>
     </div>
