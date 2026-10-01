@@ -44,6 +44,8 @@ export type SmaConfig = {
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;
+  /** HH:MM. No new entries from this time. */
+  entry_cutoff_time?: string;
   trading_mode: "PAPER" | "LIVE";
 };
 

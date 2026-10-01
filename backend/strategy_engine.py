@@ -588,6 +588,9 @@ class StrategyEngine:
     ) -> str:
         want = "LONG" if signal == "BULLISH" else "SHORT"
         pos = self.position
+        cutoff = _entry_cutoff(cfg)
+        past_cutoff = now.time() >= cutoff
+        cutoff_text = f"no new entries after {cutoff.strftime('%H:%M')} IST"
 
         if pos is not None and pos.direction == want:
             return f"already {want}"
@@ -597,6 +600,8 @@ class StrategyEngine:
             await self._cancel_sl_verified(pos)
             await self._close_position(pos, cross_price, "MA_CROSS", now, cfg)
             self.position = None
+            if past_cutoff:
+                return f"closed on {signal} — {cutoff_text}"
             if adx_blocks_entry:
                 return f"closed on {signal} — ADX filter blocked the reverse"
             if entry_block:
@@ -608,6 +613,8 @@ class StrategyEngine:
             return f"reversed to {want}"
 
         # FLAT
+        if past_cutoff:
+            return f"{signal} ignored — {cutoff_text}"
         if adx_blocks_entry:
             return f"{signal} ignored — ADX below {cfg.adx_threshold}"
         if entry_block:
@@ -666,6 +673,8 @@ class StrategyEngine:
             raise ForceRefused("Market is closed. No new order until 09:20 IST.")
         if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
+        if clock.time() >= _entry_cutoff(cfg):
+            raise ForceRefused(f"No new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST.")
         frame = self._frames.get(name)
         if frame is None or getattr(frame, "empty", True):
             try:
@@ -1352,7 +1361,11 @@ class StrategyEngine:
                 (pos.direction == "LONG" and side == "BEARISH")
                 or (pos.direction == "SHORT" and side == "BULLISH")
             )
-            if pos is None:
+            if pos is None and now.time() >= _entry_cutoff(cfg):
+                # No entry can follow, so no heads-up.
+                text = ""
+                minutes = None
+            elif pos is None:
                 text = upcoming_entry_alert(
                     mode=mode,
                     symbol=symbol,
@@ -2009,6 +2022,19 @@ def _schedule_whatsapp(message: str) -> None:
             return
 
     loop.create_task(_send())
+
+
+def _entry_cutoff(cfg: BotConfig) -> dt.time:
+    """Last minute a new position may open. Never after the square-off."""
+    try:
+        cutoff = _parse_hhmm(getattr(cfg, "entry_cutoff_time", None) or "15:00")
+    except (TypeError, ValueError):
+        cutoff = dt.time(15, 0)
+    try:
+        square = _parse_hhmm(getattr(cfg, "square_off_time", None) or "15:15")
+    except (TypeError, ValueError):
+        square = dt.time(15, 15)
+    return min(cutoff, square)
 
 
 def _entry_day(pos: OpenPosition) -> dt.date:

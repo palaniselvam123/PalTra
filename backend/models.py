@@ -73,4 +73,7 @@ class BotConfig(Base):
     # 15 is kept.
     max_trades_bumped: Mapped[int] = mapped_column(Integer, default=1)
     square_off_time: Mapped[str] = mapped_column(String, default="15:15")
+    # No new position from this time. Open ones still close on a cross,
+    # the stop, or the square-off.
+    entry_cutoff_time: Mapped[str] = mapped_column(String, default="15:00")
     trading_mode: Mapped[str] = mapped_column(String, default="PAPER")
