@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Loader2, Search } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
@@ -16,6 +16,7 @@ function chipNote(note: string, symbol: string): string {
   return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
 }
 const SAVED_KEY = "sma.symbols";
+const FOLD_KEY = "sma.stocks.folded";
 
 type Hit = { symbol: string; name: string };
 
@@ -47,6 +48,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [folded, setFolded] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
@@ -62,7 +64,25 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
     } catch {
       /* a private browser can refuse storage */
     }
+    try {
+      setFolded(localStorage.getItem(FOLD_KEY) === "1");
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  const toggleFold = () => {
+    setFolded((was) => {
+      const next = !was;
+      try {
+        localStorage.setItem(FOLD_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      if (next) setOpen(false);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const q = query.trim();
@@ -122,6 +142,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
   const armed = new Set(armedList);
   const books = state?.books ?? [];
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
+  const openCount = books.filter((b) => b.direction === "LONG" || b.direction === "SHORT").length;
   // Armed first, then the rest, each alphabetically. A held stock is never dropped.
   const symbols = Array.from(
     new Set([
@@ -308,13 +329,49 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
         />
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
-              <h2 className="text-sm font-semibold text-slate-100">Stocks</h2>
-              <div className="text-xs text-slate-400">
-                <span className="font-semibold text-emerald-300">{armedList.length}</span>
-                {` of ${ARM_LIMIT} armed for trading`}
-              </div>
-            </div>
+            <h2 className={clsx(!folded && "border-b border-white/10")}>
+              <button
+                type="button"
+                aria-expanded={!folded}
+                aria-controls="stock-list-body"
+                onClick={toggleFold}
+                title={folded ? "Show the stock list" : "Shrink the stock list to one line"}
+                className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 text-left hover:bg-white/[0.03]"
+              >
+                <ChevronDown
+                  size={16}
+                  aria-hidden
+                  className={clsx("shrink-0 text-slate-400 transition-transform", folded && "-rotate-90")}
+                />
+                <span className="shrink-0 text-sm font-semibold text-slate-100">Stocks</span>
+                <span className="ml-auto shrink-0 text-xs font-normal text-slate-400">
+                  <span className="font-semibold text-emerald-300">{armedList.length}</span>
+                  {folded ? " armed" : ` of ${ARM_LIMIT} armed for trading`}
+                  {folded && openCount > 0 ? (
+                    <>
+                      {" · "}
+                      <span className="font-semibold text-amber-300">{openCount}</span> open
+                    </>
+                  ) : null}
+                </span>
+              </button>
+            </h2>
+            {folded && armedList.length > 0 && (
+              <p className="-mt-1 truncate px-3 pb-2 pl-9 text-xs text-slate-400" title={armedList.join(", ")}>
+                {armedList.map((s, i) => {
+                  const dir = bookBySymbol.get(s)?.direction;
+                  return (
+                    <span key={s}>
+                      {i > 0 && ", "}
+                      <span className={dir === "LONG" ? "text-emerald-300" : dir === "SHORT" ? "text-rose-300" : "text-slate-300"}>
+                        {s}
+                      </span>
+                    </span>
+                  );
+                })}
+              </p>
+            )}
+            <div id="stock-list-body" hidden={folded}>
             <div className="relative border-b border-white/5">
             <form
               className="flex items-center gap-2 px-3 py-1.5"
@@ -398,6 +455,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
               })}
             </ul>
             )}
+            </div>
           </div>
         </div>
 
