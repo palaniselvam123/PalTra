@@ -314,6 +314,7 @@ class StrategyEngine:
         # out of the quote loop. Open books stay watched after they are disarmed.
         watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
         self._focus = view
+        self._anchor_held_prices()
         await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
         if view != self._quote_symbol:
@@ -412,6 +413,22 @@ class StrategyEngine:
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
+
+    def _anchor_held_prices(self) -> None:
+        """Give each held stock its own price when Groww has not quoted it."""
+        anchor = getattr(self.broker, "anchor_price", None)
+        if anchor is None:
+            return
+        for symbol, pos in list(self.positions.items()):
+            if pos is not None:
+                anchor(symbol, self._ltps.get(symbol) or pos.entry_price)
+
+    def _exit_price(self, symbol: str, pos: OpenPosition) -> float:
+        """That stock's own last price. Never another stock's."""
+        ltp = self._ltps.get(symbol)
+        if ltp is not None and ltp > 0:
+            return float(ltp)
+        return float(pos.entry_price)
 
     async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> str:
         if self.status != "RUNNING":
@@ -733,7 +750,7 @@ class StrategyEngine:
                     raise ForceRefused(str(exc)) from exc
                 if self.position is None:
                     return f"{name} was already flat"
-                px = self._ltps.get(name) or self.position.entry_price
+                px = self._exit_price(name, self.position)
                 try:
                     await self._close_position(
                         self.position, px, "MANUAL_CLOSE", _ist_now(), _cfg_for(cfg, name)
@@ -1105,6 +1122,7 @@ class StrategyEngine:
             if self.inflight:
                 return
             self.inflight = "TRANSIT"
+            saved_focus, saved_ltp = self._focus, self.ltp
             try:
                 cfg = self.load_config()
                 for symbol in list(self.positions):
@@ -1119,7 +1137,8 @@ class StrategyEngine:
                         pass
                     if self.position is None:
                         continue
-                    px = self._ltps.get(symbol) or self.position.entry_price
+                    px = self._exit_price(symbol, self.position)
+                    self.ltp = px
                     try:
                         await self._close_position(
                             self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
@@ -1137,6 +1156,7 @@ class StrategyEngine:
                     self.position = None
             finally:
                 self.inflight = None
+                self._focus, self.ltp = saved_focus, saved_ltp
 
     async def kill(self, reason: str) -> None:
         self.halt_reason = reason
