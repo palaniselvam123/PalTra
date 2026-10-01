@@ -1,8 +1,10 @@
 name: Test and deploy
 
-# Every pull request and every push runs the tests. Only a push to main that
-# passes them deploys to Fly.io. Tests never place orders: they use fake
-# brokers, PAPER mode, and no Groww credentials exist in this workflow.
+# Every pull request and every push runs the tests. A push to main that passes
+# them deploys to Fly.io, except inside NSE market hours (09:00-15:45 IST,
+# Mon-Fri). "Run workflow" (workflow_dispatch) on main deploys at any time.
+# Tests never place orders: they use fake brokers, PAPER mode, and no Groww
+# credentials exist in this workflow.
 
 on:
   pull_request:
@@ -67,10 +69,52 @@ jobs:
           path: frontend/out
           retention-days: 3
 
-  deploy:
-    name: Deploy to Fly.io
+  market-hours-gate:
+    name: Market-hours deploy gate
     needs: [backend-tests, frontend-build]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      # A restart while NSE is trading drops the bot's in-memory state and
+      # quotes mid-session. Pushes to main inside 09:00-15:45 IST, Mon-Fri,
+      # do not deploy. A manual "Run workflow" always may.
+      - id: check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          day=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" +%u)     # 1=Mon .. 7=Sun
+          hhmm=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" +%H%M)
+          clock=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" '+%a %d %b %H:%M IST')
+          in_hours=false
+          if [ "$day" -le 5 ] && [ "$((10#$hhmm))" -ge 900 ] && [ "$((10#$hhmm))" -le 1545 ]; then
+            in_hours=true
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            if [ "$in_hours" = true ]; then
+              msg="Manual deploy at $clock, inside NSE market hours. Allowed because it was started by hand."
+              echo "::warning title=Deploying during market hours::$msg"
+            else
+              msg="Manual deploy at $clock."
+              echo "::notice title=Deploy allowed::$msg"
+            fi
+          elif [ "$in_hours" = true ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            msg="Deploy skipped: $clock is inside NSE market hours (09:00-15:45 IST, Mon-Fri). Tests passed; nothing was deployed. Deploy after 15:45 with Actions > Test and deploy > Run workflow on main, or push again outside market hours."
+            echo "::warning title=Deploy skipped (market hours)::$msg"
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            msg="Outside NSE market hours ($clock). Deploying."
+            echo "::notice title=Deploy allowed::$msg"
+          fi
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to Fly.io
+    needs: [backend-tests, frontend-build, market-hours-gate]
+    if: needs.market-hours-gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     environment: production
     # One deploy at a time; a newer push waits instead of cancelling a rollout.

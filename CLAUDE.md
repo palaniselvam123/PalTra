@@ -195,6 +195,10 @@ No credentials are needed. The desk starts on the simulated feed.
     `requirements-dev.txt`) and the frontend typecheck plus static export
   - a push to `main` that passes both runs `flyctl deploy --remote-only`
     with the exported `frontend/out/` (built in CI, not committed)
+  - **no automatic deploy during NSE market hours** (09:00–15:45 IST,
+    Mon–Fri): the `market-hours-gate` job skips the deploy with a warning.
+    "Run workflow" (workflow_dispatch) on `main` deploys at any time, so use
+    it after 15:45 to ship a push that was held back
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required
