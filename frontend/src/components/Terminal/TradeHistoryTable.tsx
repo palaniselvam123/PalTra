@@ -76,6 +76,25 @@ export function TradeHistoryTable({
   const [pnlSide, setPnlSide] = useState<PnlSide>("all");
   const [minPnl, setMinPnl] = useState("");
   const [maxPnl, setMaxPnl] = useState("");
+  const [closedFolded, setClosedFolded] = useState(false);
+  useEffect(() => {
+    try {
+      setClosedFolded(localStorage.getItem("sma.blotter.closed") === "1");
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const toggleClosed = () => {
+    setClosedFolded((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem("sma.blotter.closed", next ? "1" : "0");
+      } catch {
+        /* private mode */
+      }
+      return next;
+    });
+  };
   useEffect(() => {
     if (picked || !state?.mode) return;
     setBook(state.mode === "LIVE" ? "LIVE" : "PAPER");
@@ -188,6 +207,13 @@ export function TradeHistoryTable({
           })}
           <button
             type="button"
+            onClick={toggleClosed}
+            className="rounded-md border border-white/10 px-2 py-1 text-xs font-semibold text-slate-200 hover:bg-white/5"
+          >
+            {closedFolded ? `Show closed orders · ${completedRows.length}` : "Shrink closed orders"}
+          </button>
+          <button
+            type="button"
             onClick={downloadFiltered}
             className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/5"
           >
@@ -296,7 +322,7 @@ export function TradeHistoryTable({
             : "No open orders."
         }
       />
-      {inBook.length > 0 && (
+      {inBook.length > 0 && !closedFolded && (
         <OrderTable
           title="Completed"
           rows={completedRows}

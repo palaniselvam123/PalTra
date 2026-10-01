@@ -391,7 +391,7 @@ class StrategyEngine:
         # stock was armed, is skipped. The next cross on a newer closed bar
         # is the one that may trade. Being flat does not enter early.
         if self._cross_is_stale(symbol, frame):
-            text = f"{symbol} waiting for the next MA cross"
+            text = f"{symbol} no order — that cross already printed, waiting for a new cross. {_filter_note(cfg)}"
             self._signals[symbol] = text
             self.last_signal = text
             return text
@@ -401,9 +401,11 @@ class StrategyEngine:
             if symbol in self.positions:
                 text = f"{symbol} holding"
             elif relation:
-                text = f"{symbol} flat — {relation}, waiting for a new cross"
+                text = (
+                    f"{symbol} no order — {relation} already, waiting for a new cross. {_filter_note(cfg)}"
+                )
             else:
-                text = f"{symbol} flat — waiting for an SMA cross"
+                text = f"{symbol} no order — waiting for an SMA cross. {_filter_note(cfg)}"
             self._signals[symbol] = text
             self.last_signal = text
             return text
@@ -1757,6 +1759,24 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
         now = now.astimezone(IST)
     now_minute = int(now.replace(second=0, microsecond=0).timestamp())
     return closed_ts < now_minute - 60
+
+
+def _filter_note(cfg: BotConfig) -> str:
+    """Say which entry checks are on. Unchecked checks are not read."""
+    checked: list[str] = []
+    if bool(getattr(cfg, "use_vwap", False)):
+        checked.append("VWAP")
+    if bool(getattr(cfg, "use_volume", False)):
+        checked.append("volume")
+    if bool(getattr(cfg, "use_density", False)):
+        checked.append("density")
+    if bool(getattr(cfg, "use_rsi", False)):
+        checked.append("RSI")
+    if bool(getattr(cfg, "use_adx_filter", False)):
+        checked.append("ADX")
+    if not checked:
+        return "VWAP, volume, density, and RSI are off."
+    return "Checked: " + ", ".join(checked) + "."
 
 
 def _sma_side_text(frame: pd.DataFrame) -> str:

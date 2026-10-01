@@ -10,7 +10,7 @@ const ARM_LIMIT = 24;
 
 function chipNote(note: string, symbol: string): string {
   const trimmed = note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
-  return trimmed.length > 48 ? `${trimmed.slice(0, 46)}…` : trimmed;
+  return trimmed.length > 88 ? `${trimmed.slice(0, 86)}…` : trimmed;
 }
 const SAVED_KEY = "sma.symbols";
 
