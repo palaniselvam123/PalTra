@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, load_history
+from replay import SPEEDS, ReplaySession, close_orphan_replay_rows, parse_replay_day, parse_start
 from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
@@ -33,6 +34,7 @@ from strategy_engine import (
 )
 
 engine = StrategyEngine()
+replay = ReplaySession()
 
 
 _booted = False
@@ -46,6 +48,7 @@ def boot_engine() -> asyncio.Task | None:
         return _task
     _booted = True
     init_db()
+    close_orphan_replay_rows()
     cfg = engine.load_config()
     engine.restore_open_books()
     engine.restore_trades_today()
@@ -390,6 +393,123 @@ async def kill_bot():
     return {"bot_status": engine.status, "halt_reason": engine.halt_reason}
 
 
+class ReplayStart(BaseModel):
+    date: str
+    start: str = "09:15"
+    speed: int = 60
+
+
+class ReplayControl(BaseModel):
+    action: Literal["play", "pause", "stop", "speed"]
+    speed: int | None = None
+
+
+def _replay_engine():
+    eng = replay.engine
+    if eng is None:
+        raise HTTPException(409, "No replay is playing. Start one first.")
+    return eng
+
+
+@app.get("/api/replay")
+async def replay_info():
+    return replay.info()
+
+
+@app.post("/api/replay/start")
+async def replay_start(body: ReplayStart):
+    """Practice on a past day's Groww candles. Never sends an order."""
+    cfg = engine.load_config()
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, "Switch to PAPER before starting a replay.")
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    try:
+        day = parse_replay_day(body.date)
+        start = parse_start(body.start)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    symbols = trade_names(cfg)
+    if not symbols:
+        raise HTTPException(400, "Arm at least one stock in the Stocks panel first.")
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
+    await replay.begin(engine.broker, symbols, day, start, body.speed)
+    return replay.info()
+
+
+@app.post("/api/replay/control")
+async def replay_control(body: ReplayControl):
+    if body.action == "stop":
+        await replay.stop()
+        return replay.info()
+    try:
+        replay.control(body.action, body.speed)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return replay.info()
+
+
+@app.get("/api/replay/state")
+async def replay_state():
+    eng = _replay_engine()
+    return {**eng.snapshot(), "replay": replay.info()}
+
+
+@app.get("/api/replay/chart")
+async def replay_chart(limit: int = 240):
+    return _replay_engine().chart_payload(limit=max(30, min(int(limit), 2500)))
+
+
+@app.post("/api/replay/bot/start")
+async def replay_bot_start():
+    eng = _replay_engine()
+    if eng.status in ("HALTED", "DAY_COMPLETED"):
+        raise HTTPException(423, eng.halt_reason or "This replay day is finished")
+    eng.release_manual_panic()
+    eng.hold_for_next_cross(eng.replay_symbols)
+    eng.status = "RUNNING"
+    eng.halt_reason = ""
+    return {"bot_status": eng.status}
+
+
+@app.post("/api/replay/bot/pause")
+async def replay_bot_pause():
+    eng = _replay_engine()
+    if eng.status == "RUNNING":
+        eng.status = "PAUSED"
+    return {"bot_status": eng.status}
+
+
+@app.post("/api/replay/bot/force")
+async def replay_bot_force(body: ForceOrder):
+    eng = _replay_engine()
+    try:
+        result = await eng.force_order(body.symbol)
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"bot_status": eng.status, "last_signal": result}
+
+
+@app.post("/api/replay/bot/close")
+async def replay_bot_close(body: CloseOrder):
+    eng = _replay_engine()
+    try:
+        result = await eng.close_symbol(body.symbol)
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"bot_status": eng.status, "last_signal": result}
+
+
+@app.post("/api/replay/bot/kill")
+async def replay_bot_kill():
+    eng = _replay_engine()
+    await eng.kill("Manual PANIC SQUARE-OFF (replay)")
+    return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
+
+
 @app.get("/api/trades")
 async def trades():
     return attach_market_prices(engine.trades(), engine._ltps)
@@ -399,7 +519,7 @@ async def trades():
 async def trades_csv(mode: str = ""):
     rows = attach_market_prices(engine.trades(), engine._ltps)
     book = (mode or "").upper()
-    if book in ("PAPER", "LIVE"):
+    if book in ("PAPER", "LIVE", "REPLAY"):
         rows = [row for row in rows if (row.get("mode") or "PAPER").upper() == book]
     buffer = io.StringIO()
     fields = [

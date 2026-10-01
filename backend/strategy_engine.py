@@ -181,12 +181,20 @@ class StrategyEngine:
         self._sleep = asyncio.sleep
         self.realized_net = 0.0
         self.trades_today = 0
-        self._session_date = _ist_now().date().isoformat()
+        self._session_date = self._now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
         self._ticks_retry_at = 0.0
         self._ticks_job = None
         self._realized_mode: str | None = None
+
+    def _now(self) -> dt.datetime:
+        """The engine's clock. A replay engine runs on the replayed day instead."""
+        return _ist_now()
+
+    def _alert(self, message: str) -> None:
+        """Telegram/WhatsApp alert. A replay engine sends none."""
+        _schedule_whatsapp(message)
 
     def _position_key(self) -> str:
         if self._focus:
@@ -222,6 +230,8 @@ class StrategyEngine:
         """A restart must remember a live position or the next cross orders again."""
         with session_factory()() as db:
             rows = db.query(TradeLog).filter(TradeLog.exit_time.is_(None)).all()
+            # A replay's practice rows belong to the replay, never to this book.
+            rows = [row for row in rows if (row.mode or "PAPER").upper() != "REPLAY"]
             pending = [
                 (
                     str(row.symbol or "").upper(),
@@ -263,7 +273,7 @@ class StrategyEngine:
                 sl_trigger=sl,
                 sl_order_id="",
                 entry_order_id="",
-                entry_time=when or _ist_now(),
+                entry_time=when or self._now(),
                 trade_id=trade_id,
                 mode=mode,
                 stop_active=stop_active,
@@ -299,14 +309,14 @@ class StrategyEngine:
         while not self._stop:
             self._refresh_tick_sizes()
             try:
-                await self.tick(_ist_now())
+                await self.tick(self._now())
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
             # A stopped book after the close does not need two quotes a second.
             # That loop was keeping the only CPU busy while the desk waited.
-            pause = 5.0 if (not market_is_open() and self.status != "RUNNING") else 0.5
+            pause = 5.0 if (not market_is_open(self._now()) and self.status != "RUNNING") else 0.5
             await self._sleep(pause)
 
     def _refresh_tick_sizes(self) -> None:
@@ -721,7 +731,7 @@ class StrategyEngine:
             direction = self.positions[name].direction
             raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
         cfg = self.load_config()
-        clock = _ist_now()
+        clock = self._now()
         if not market_is_open(clock):
             raise ForceRefused("Market is closed. No new order until 09:20 IST.")
         if clock.time() >= _parse_hhmm(cfg.square_off_time):
@@ -765,7 +775,7 @@ class StrategyEngine:
                 side,
                 enriched,
                 _cfg_for(cfg, name),
-                _ist_now(),
+                self._now(),
                 blocked,
                 note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
             )
@@ -780,7 +790,7 @@ class StrategyEngine:
         self.hold_for_next_cross([name])
         self._focus = name
         self.ltp = price
-        now = _ist_now()
+        now = self._now()
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
                 raise ForceRefused("blocked — order PENDING/TRANSIT")
@@ -837,7 +847,7 @@ class StrategyEngine:
                 px = self._exit_price(name, self.position)
                 try:
                     await self._close_position(
-                        self.position, px, "MANUAL_CLOSE", _ist_now(), _cfg_for(cfg, name)
+                        self.position, px, "MANUAL_CLOSE", self._now(), _cfg_for(cfg, name)
                     )
                 except SlCancelFailed as exc:
                     self.last_error = str(exc)
@@ -949,13 +959,13 @@ class StrategyEngine:
             opened = pos.entry_time
             if opened is not None and opened.tzinfo is None:
                 opened = opened.replace(tzinfo=IST)
-            if opened is not None and (_ist_now() - opened).total_seconds() < 20:
+            if opened is not None and (self._now() - opened).total_seconds() < 20:
                 continue
             net = await self._groww_net(symbol)
             if net != 0:
                 continue
             self._focus = symbol
-            self._book_not_on_groww(pos, _ist_now())
+            self._book_not_on_groww(pos, self._now())
             self.position = None
             text = f"{symbol} is not on Groww. Removed it here. No order was sent."
             self.last_signal = text
@@ -1029,7 +1039,7 @@ class StrategyEngine:
             stop_active=stop_active,
         )
         self.trades_today += 1
-        _schedule_whatsapp(
+        self._alert(
             fill_alert(
                 mode=(cfg.trading_mode or "PAPER").upper(),
                 direction=direction,
@@ -1083,7 +1093,7 @@ class StrategyEngine:
         except SlCancelFailed as exc:
             self.last_error = f"Stop refused ({why}) and the exit failed: {exc}. Close {symbol} by hand."
             self._signals[symbol] = self.last_error
-            _schedule_whatsapp(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}")
+            self._alert(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}")
             return
         self.position = None
         self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
@@ -1207,7 +1217,7 @@ class StrategyEngine:
                 # Close the row here. Do not send an order: that order would
                 # open the other side.
                 costs = {"gross_pnl": 0.0, "total_charges": 0.0, "net_pnl": 0.0}
-                self._finalize_trade(trade_id, entry, "NOT_ON_GROWW", _ist_now(), costs)
+                self._finalize_trade(trade_id, entry, "NOT_ON_GROWW", self._now(), costs)
                 self._uncount_trade(trade_id)
                 self.last_signal = "Not on Groww — removed here, no order sent"
 
@@ -1243,7 +1253,7 @@ class StrategyEngine:
                 opened = pos.entry_time
                 if opened.tzinfo is None:
                     opened = opened.replace(tzinfo=IST)
-                age = (_ist_now() - opened).total_seconds()
+                age = (self._now() - opened).total_seconds()
                 if age >= 20 and await self._groww_net(cfg.symbol) == 0:
                     hit = True
                     fill_price = pos.sl_trigger or self.ltp
@@ -1271,7 +1281,7 @@ class StrategyEngine:
             try:
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
-                await self._close_position(self.position, fill_price, reason, _ist_now(), cfg)
+                await self._close_position(self.position, fill_price, reason, self._now(), cfg)
                 self.position = None
                 self.last_signal = {
                     "TARGET_HIT": "target hit — flat",
@@ -1308,7 +1318,7 @@ class StrategyEngine:
                     self.ltp = px
                     try:
                         await self._close_position(
-                            self.position, px, reason, _ist_now(), _cfg_for(cfg, symbol)
+                            self.position, px, reason, self._now(), _cfg_for(cfg, symbol)
                         )
                     except SlCancelFailed as exc:
                         self.last_error = str(exc)
@@ -1432,7 +1442,7 @@ class StrategyEngine:
         name = (symbol or "").upper()
         if name:
             self._signals[name] = f"{name} flat — {_ALERT_REASON.get(reason, reason or 'closed')}"
-        _schedule_whatsapp(
+        self._alert(
             close_alert(
                 direction=direction,
                 symbol=symbol,
@@ -1466,7 +1476,7 @@ class StrategyEngine:
         frame = self.candles
         if frame is None or getattr(frame, "empty", True) or self.ltp <= 0:
             return None, None
-        today = _ist_now().date()
+        today = self._now().date()
         today_start = int(dt.datetime(today.year, today.month, today.day, tzinfo=IST).timestamp())
         ts = frame["ts"]
         if not ts.is_monotonic_increasing:
@@ -1584,7 +1594,7 @@ class StrategyEngine:
             if key in self._warned:
                 return
             self._warned.add(key)
-            _schedule_whatsapp(message)
+            self._alert(message)
             return
         if minutes is None or minutes > _WARN_CLEAR_MINUTES:
             self._warned.discard(key)
@@ -1605,7 +1615,7 @@ class StrategyEngine:
         if cfg is None:
             cfg = self._cfg_cache
         mode = (cfg.trading_mode if cfg is not None else "PAPER") or "PAPER"
-        return mode.upper() != "LIVE" and not market_is_open()
+        return mode.upper() != "LIVE" and not market_is_open(self._now())
 
     def _cap_the_day(self, reason: str) -> None:
         if self._practice_off_session():
@@ -1629,7 +1639,7 @@ class StrategyEngine:
             self._announce_down("DAY_COMPLETED", self.halt_reason)
 
     def _announce_down(self, status: str, reason: str) -> None:
-        _schedule_whatsapp(bot_down_alert(status, reason, _ist_now()))
+        self._alert(bot_down_alert(status, reason, self._now()))
 
     async def announce_shutdown(self) -> None:
         """Tell Telegram before the process exits. A kill signal must not stay silent."""
@@ -1638,7 +1648,7 @@ class StrategyEngine:
         reason = "The app process is stopping. Press Start bot after it comes back."
         if self.halt_reason:
             reason = f"{self.halt_reason}. {reason}"
-        message = bot_down_alert(self.status, reason, _ist_now())
+        message = bot_down_alert(self.status, reason, self._now())
         try:
             from app.services.alert_notifier import alert_notifier
 
@@ -1951,6 +1961,10 @@ class StrategyEngine:
         with session_factory()() as db:
             rows = db.query(TradeLog).filter(TradeLog.date == day, TradeLog.exit_price.isnot(None)).all()
         rows = [row for row in rows if (row.mode or "PAPER").upper() == book]
+        # A replay counts only its own run, not earlier replays of that date.
+        floor_id = int(getattr(self, "_min_trade_id", 0) or 0)
+        if floor_id:
+            rows = [row for row in rows if int(row.id) > floor_id]
         theoretical = 0.0
         actual = 0.0
         charges = 0.0
@@ -2012,6 +2026,7 @@ _ALERT_REASON = {
     "ATR_SL_HIT": "ATR stop",
     "GAP_SL_HIT": "moving stop (SMA gap)",
     "TARGET_HIT": "target hit",
+    "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
     "NOT_ON_GROWW": "not on Groww — no order sent",

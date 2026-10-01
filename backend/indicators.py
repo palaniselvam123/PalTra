@@ -125,6 +125,9 @@ def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
     prev_ts: float | None = None
     prev_day = None
     reject_next = False
+    # Collected, then written once: a per-row .at write was most of enrich()'s
+    # time on every quote.
+    found: dict = {}
     for idx, ts, vol, day in zip(work["_idx"], work["_ts"], work["_vol"], dates):
         if pd.isna(ts) or pd.isna(day):
             continue
@@ -159,9 +162,11 @@ def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
             prev_ts = ts_f
             reject_next = True
             continue
-        out.at[idx] = vol_f - prev_cum
+        found[idx] = vol_f - prev_cum
         prev_cum = vol_f
         prev_ts = ts_f
+    if found:
+        out.loc[list(found.keys())] = list(found.values())
     return out
 
 

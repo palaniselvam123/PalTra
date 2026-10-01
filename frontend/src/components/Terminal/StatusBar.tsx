@@ -18,6 +18,7 @@ const SOURCE: Record<string, string> = {
   "LAST CLOSE": "Last close",
   SIMULATOR: "Simulator",
   ERROR: "No quotes",
+  REPLAY: "Groww replay",
 };
 
 type Props = {
@@ -32,6 +33,7 @@ type Props = {
 export function StatusBar({ state, config, connected, busy, onModeClick }: Props) {
   const mode = state?.mode ?? config?.trading_mode ?? null;
   const live = mode === "LIVE";
+  const replaying = mode === "REPLAY";
   const bot = state ? BOT[state.bot_status] ?? { label: state.bot_status, dot: "bg-slate-400", text: "text-slate-200" } : null;
   const source = state ? SOURCE[state.data_source] ?? state.data_source : null;
   const stopOn = state?.stop_enabled ?? config?.use_stop;
@@ -46,17 +48,30 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
     <div role="status" aria-label="Terminal status" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-stretch">
       <button
         type="button"
-        disabled={busy || mode == null}
+        disabled={busy || mode == null || replaying}
         onClick={onModeClick}
-        title={live ? "Real Groww orders are on. Press to go back to PAPER." : "Practice fills only. Press to review switching to LIVE."}
+        title={
+          replaying
+            ? "Replaying a past day with practice money. Stop the replay to change mode."
+            : live
+              ? "Real Groww orders are on. Press to go back to PAPER."
+              : "Practice fills only. Press to review switching to LIVE."
+        }
         className={clsx(
           "col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-bold tracking-wide ring-1 ring-inset sm:col-span-1 sm:min-w-[9rem]",
-          live ? "bg-rose-600 text-white ring-rose-300/60" : "bg-blue-600/20 text-blue-200 ring-blue-400/50",
+          live
+            ? "bg-rose-600 text-white ring-rose-300/60"
+            : replaying
+              ? "bg-violet-600/30 text-violet-100 ring-violet-400/60"
+              : "bg-blue-600/20 text-blue-200 ring-blue-400/50",
           mode == null && "bg-white/5 text-slate-400 ring-white/10"
         )}
       >
-        <span aria-hidden className={clsx("h-2 w-2 rounded-full", live ? "animate-pulse bg-white" : "bg-blue-300")} />
-        {mode == null ? "Mode…" : live ? "LIVE MONEY" : "PAPER"}
+        <span
+          aria-hidden
+          className={clsx("h-2 w-2 rounded-full", live ? "animate-pulse bg-white" : replaying ? "bg-violet-300" : "bg-blue-300")}
+        />
+        {mode == null ? "Mode…" : live ? "LIVE MONEY" : replaying ? "REPLAY" : "PAPER"}
       </button>
       <Cell label="Net today" title="Closed trades today, after charges">
         {net == null ? (
