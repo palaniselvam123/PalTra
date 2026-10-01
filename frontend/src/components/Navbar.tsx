@@ -180,7 +180,7 @@ export function Navbar({
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-[1720px] items-center gap-6 px-5">
+      <div className="mx-auto flex h-14 max-w-[1720px] items-center gap-2 px-3 sm:h-16 sm:gap-6 sm:px-5">
         {/* --- Zone 1: identity + navigation ---------------------------- */}
         <Link href="/" className="flex shrink-0 items-center gap-2">
           <span
@@ -211,24 +211,6 @@ export function Navbar({
               </Link>
             );
           })}
-        </nav>
-
-        {/* Compact nav for narrow viewports — icons only, no wrapping. */}
-        <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto xl:hidden">
-          {NAV.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              prefetch={false}
-              title={label}
-              className={clsx(
-                "rounded-md p-1.5 transition-colors",
-                pathname === href ? "bg-bot/15 text-bot" : "text-slate-400 hover:text-slate-200"
-              )}
-            >
-              <Icon size={16} />
-            </Link>
-          ))}
         </nav>
 
         {/* --- Zone 2: live state, deliberately quiet -------------------- */}
@@ -398,6 +380,32 @@ export function Navbar({
           </div>
         </div>
       </div>
+
+      {/* Phone and tablet: the icon strip used to share one row with P&L,
+          Kill, and Sign out, so it shrank to a single icon. The pages get
+          their own scroll row instead. */}
+      <nav
+        aria-label="Pages"
+        className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 xl:hidden"
+      >
+        {NAV.map(({ href, label, icon: Icon }) => {
+          const active = pathname === href;
+          return (
+            <Link
+              key={href}
+              href={href}
+              prefetch={false}
+              className={clsx(
+                "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-caption font-medium transition-colors",
+                active ? "bg-bot/15 text-bot" : "text-slate-300 hover:bg-white/[0.05] hover:text-slate-100"
+              )}
+            >
+              <Icon size={14} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
 
       {(feedError || feed?.error) && (
         <div className="border-t border-loss/30 bg-loss/10 px-4 py-1.5">
