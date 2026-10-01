@@ -144,7 +144,14 @@ export type Candle = {
 
 export type ChartPayload = {
   candles: Candle[];
-  markers: { time: number; direction: "LONG" | "SHORT"; price: number; kind: string }[];
+  markers: {
+    time: number;
+    direction: "LONG" | "SHORT";
+    price: number;
+    kind: "ENTRY" | "EXIT" | string;
+    /** Only on EXIT markers from /api/history. */
+    net_pnl?: number | null;
+  }[];
   entry_price: number | null;
   sl_trigger: number | null;
   atr_multiplier?: number;
@@ -177,9 +184,9 @@ export type TradeRow = {
   mode: string;
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${SMA_API}${path}`, {
       ...init,
@@ -210,6 +217,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const smaApi = {
   state: () => request<SmaState>("/api/state"),
   chart: () => request<ChartPayload>("/api/chart"),
+  /** Past 1-minute candles from Groww. Times are IST wall clock, YYYY-MM-DDTHH:MM. */
+  history: (symbol: string, start: string, end: string) =>
+    request<ChartPayload & { symbol: string; from: string; to: string }>(
+      `/api/history?${new URLSearchParams({ symbol, start, end }).toString()}`,
+      undefined,
+      70000
+    ),
   config: () => request<SmaConfig>("/api/config"),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
