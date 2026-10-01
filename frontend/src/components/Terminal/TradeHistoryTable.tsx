@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
 import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { Badge, SideBadge, pnlTone } from "./ui";
+import { Badge, SideBadge, Skeleton, pnlTone } from "./ui";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -64,7 +64,9 @@ export function TradeHistoryTable({
   state,
   closingSymbol,
   onClose,
+  loading = false,
 }: {
+  loading?: boolean;
   trades: TradeRow[];
   state: SmaState | null;
   closingSymbol: string | null;
@@ -179,7 +181,7 @@ export function TradeHistoryTable({
     >
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Trade blotter</div>
+          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
           <h2 className={clsx("text-sm font-medium", simulation ? "text-[#F59E0B]" : "text-[#F43F5E]")}>
             {selected.title}
           </h2>
@@ -224,12 +226,12 @@ export function TradeHistoryTable({
         </div>
       </div>
       <div className="flex flex-wrap items-end gap-2 px-4 pb-3">
-        <label className="flex min-w-[8.5rem] flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex min-w-[8.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           Stock
           <select
             value={stockFilter}
             onChange={(e) => setStock(e.target.value)}
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           >
             <option value="ALL">All stocks</option>
             {symbols.map((name) => (
@@ -239,30 +241,30 @@ export function TradeHistoryTable({
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           From
           <input
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           To
           <input
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex min-w-[7.5rem] flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex min-w-[7.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           P&L
           <select
             value={pnlSide}
             onChange={(e) => setPnlSide(e.target.value as PnlSide)}
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           >
             <option value="all">Any</option>
             <option value="profit">Profit</option>
@@ -270,31 +272,31 @@ export function TradeHistoryTable({
             <option value="open">Open only</option>
           </select>
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex w-24 flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           Min ₹
           <input
             inputMode="decimal"
             value={minPnl}
             onChange={(e) => setMinPnl(e.target.value)}
             placeholder="−500"
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+        <label className="flex w-24 flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           Max ₹
           <input
             inputMode="decimal"
             value={maxPnl}
             onChange={(e) => setMaxPnl(e.target.value)}
             placeholder="500"
-            className="rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs normal-case tracking-normal text-slate-100"
+            className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
         {filtersOn && (
           <button
             type="button"
             onClick={clearFilters}
-            className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/5"
+            className="min-h-11 rounded-md border border-white/15 px-3 text-xs text-slate-200 hover:bg-white/5 sm:min-h-9"
           >
             Clear
           </button>
@@ -310,6 +312,14 @@ export function TradeHistoryTable({
         </p>
       </div>
       <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
+      {loading ? (
+        <div aria-busy="true" aria-label="Loading trades" className="space-y-2 border-t border-white/10 p-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      ) : (
+      <>
       <OrderTable
         title="Open"
         rows={openRows}
@@ -334,6 +344,8 @@ export function TradeHistoryTable({
           state={state}
           empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
         />
+      )}
+      </>
       )}
     </section>
   );

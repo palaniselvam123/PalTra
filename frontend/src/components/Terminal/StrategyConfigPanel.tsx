@@ -71,7 +71,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
 
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Strategy & risk</div>
+      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Field label="Symbol" value={form.symbol} onChange={(v) => set("symbol", v.toUpperCase())} />
         <Field label="Quantity" value={String(form.qty)} onChange={(v) => set("qty", v)} />
@@ -89,7 +89,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         />
         <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-slate-500">
+      <p className="mt-2 text-[11px] leading-snug text-slate-400">
         If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
         stay open. A loss-limit stop stays locked.
       </p>
@@ -111,7 +111,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         />
         ADX trend filter (block entries when ADX is below the threshold)
       </label>
-      <p className="mt-3 text-[11px] leading-snug text-slate-500">
+      <p className="mt-3 text-[11px] leading-snug text-slate-400">
         These apply only when checked, on a crossover and on Force order. An unchecked box is ignored. A
         close still happens on the opposite cross.
       </p>
@@ -189,7 +189,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
   }, [value]);
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
+      <span className="text-[11px] uppercase tracking-wider text-slate-400">{label}</span>
       <input
         inputMode="decimal"
         value={text}

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
+import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
 
@@ -32,9 +33,11 @@ type Props = {
   connected: boolean;
   loadNote?: string | null;
   onChanged: () => void;
+  /** A page-level alert shown right under the sticky header. */
+  notice?: ReactNode;
 };
 
-export function Header({ state, config, connected, loadNote, onChanged }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged, notice }: Props) {
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -237,6 +240,21 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
 
   return (
     <>
+      <nav
+        aria-label="Desk pages"
+        className="grid grid-cols-4 border-b border-white/10 bg-[#0B0E14] text-xs uppercase tracking-[0.12em] text-slate-300 sm:flex sm:gap-5 sm:px-4"
+      >
+        {[
+          ["/", "Dashboard"],
+          ["/trade/", "Trade"],
+          ["/chart/", "Charts"],
+          ["/settings/", "Settings"],
+        ].map(([href, label]) => (
+          <a key={href} href={href} className="flex min-h-11 items-center justify-center hover:text-white sm:min-h-9 sm:justify-start">
+            {label}
+          </a>
+        ))}
+      </nav>
       <header
         aria-label="SMA terminal"
         className={clsx(
@@ -246,14 +264,8 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       >
         <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
           <div className="flex min-w-0 items-center justify-between gap-2">
-            <nav className="flex min-w-0 items-center gap-3 overflow-x-auto text-[11px] uppercase tracking-[0.14em] text-slate-400">
-              <a href="/" className="shrink-0 hover:text-slate-200">Dashboard</a>
-              <a href="/trade/" className="shrink-0 hover:text-slate-200">Trade</a>
-              <a href="/chart/" className="shrink-0 hover:text-slate-200">Charts</a>
-              <a href="/settings/" className="shrink-0 hover:text-slate-200">Settings</a>
-            </nav>
+            <span className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
-              <span className="hidden font-semibold tracking-tight text-slate-100 lg:inline">SMA × ATR Terminal</span>
               {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}
               <span className="font-mono text-slate-100">{px(ltp)}</span>
               <span
@@ -282,6 +294,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
       </header>
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
+        {notice}
         <ControlBar
           state={state}
           live={live}
@@ -311,16 +324,16 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                 if (typed) applySymbol(typed);
               }}
             >
-              <Search size={14} className="shrink-0 text-slate-500" />
+              <Search size={14} className="shrink-0 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => hits.length > 0 && setOpen(true)}
                 placeholder="Find a stock"
-                className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-500"
+                className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-400"
                 aria-label="Find an NSE stock"
               />
-              {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-500" />}
+              {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-400" />}
             </form>
             {open && query.trim() && !searching && hits.length === 0 && (
               <div className="absolute left-3 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
@@ -338,17 +351,24 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                     className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
                   >
                     <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
-                    <span className="truncate text-[10px] text-slate-500">{hit.name}</span>
+                    <span className="truncate text-[11px] text-slate-400">{hit.name}</span>
                   </button>
                 ))}
               </div>
             )}
             </div>
-            {!config?.symbol && (
-              <p className="px-3 py-2 text-xs text-slate-500">
-                {loadNote ? "Symbol did not load" : "Loading saved symbol…"}
-              </p>
-            )}
+            {!config?.symbol && loadNote && <p className="px-3 py-2 text-sm text-amber-200">The stock list did not load.</p>}
+            {!config ? (
+              <ul aria-busy="true" aria-label="Loading stocks" className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {[0, 1, 2].map((i) => (
+                  <li key={i} className="space-y-2 rounded-lg bg-[#151921] p-3 ring-1 ring-inset ring-white/10">
+                    <Skeleton className="h-5 w-28" />
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-11 w-full" />
+                  </li>
+                ))}
+              </ul>
+            ) : (
             <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
               {symbols.map((s) => {
                 const book = bookBySymbol.get(s);
@@ -377,6 +397,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
                 );
               })}
             </ul>
+            )}
           </div>
         </div>
 
@@ -387,7 +408,7 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 text-[#F43F5E]" size={20} />
               <div>
-                <h2 className="text-base font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
+                <h2 className="text-[17px] font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
                   Orders will be sent to Groww as NSE MIS limit orders with a 0.20% protection buffer,
                   plus an exchange stop-loss. This uses the Groww login already saved on the desk.

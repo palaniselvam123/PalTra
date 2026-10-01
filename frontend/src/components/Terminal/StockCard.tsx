@@ -82,7 +82,7 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
             aria-hidden
             className={clsx(
               "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-              armed ? "bg-emerald-500" : "bg-slate-600"
+              armed ? "bg-emerald-500" : "bg-slate-500"
             )}
           >
             <span

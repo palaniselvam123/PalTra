@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
 import { parseClock } from "@/lib/format";
+import { Skeleton } from "./ui";
 import { inr, px, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 type Props = {
@@ -326,9 +327,15 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
       </div>
       <div className="relative">
         <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
+        {!chart && (
+          <div aria-busy="true" aria-label="Loading chart" className="absolute inset-0 z-[5] flex flex-col justify-end gap-2 bg-[#151921] p-4">
+            <Skeleton className="h-2/3 w-full opacity-60" />
+            <Skeleton className="h-1/6 w-full opacity-40" />
+          </div>
+        )}
         {pos && pnl && (
           <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[240px] rounded-lg border border-white/10 bg-[#0B0E14]/90 p-2.5 shadow-lg">
-            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
               {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
             </div>
             <div className={`mt-1 font-mono text-lg font-semibold ${pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}`}>
@@ -344,7 +351,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
               type="button"
               disabled={closing}
               onClick={onClose}
-              className="pointer-events-auto mt-2 w-full rounded-md border border-[#F43F5E]/50 bg-[#F43F5E]/15 px-2 py-1.5 text-xs font-semibold text-[#fda4af] hover:bg-[#F43F5E]/25 disabled:opacity-50"
+              className="pointer-events-auto mt-2 min-h-11 w-full rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
             >
               {closing ? "Closing…" : "Close position"}
             </button>
