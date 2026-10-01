@@ -74,6 +74,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "rsi_long_max": "FLOAT DEFAULT 70",
             "rsi_short_min": "FLOAT DEFAULT 30",
             "rsi_short_max": "FLOAT DEFAULT 60",
+            "entry_cutoff_time": "TEXT DEFAULT '15:00'",
         }
         for column, decl in additions.items():
             if column not in names:
@@ -132,6 +133,7 @@ def init_db() -> BotConfig:
                 max_trades_per_day=40,
                 max_trades_bumped=1,
                 square_off_time="15:15",
+                entry_cutoff_time="15:00",
                 trading_mode="PAPER",
             )
             db.add(row)

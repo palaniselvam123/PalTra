@@ -57,6 +57,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
+        entry_cutoff_time: form.entry_cutoff_time || "15:00",
       });
       dirty.current = false;
       setMsg("Saved. Press Start bot. Open positions stay open.");
@@ -81,6 +82,11 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="ADX threshold" value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
         <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
         <Field label="Max trades / day" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+        <Field
+          label="No new entries after"
+          value={form.entry_cutoff_time || "15:00"}
+          onChange={(v) => set("entry_cutoff_time", v)}
+        />
         <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
       </div>
       <p className="mt-2 text-[11px] leading-snug text-slate-500">
