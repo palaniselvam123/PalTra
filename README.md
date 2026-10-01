@@ -1,33 +1,62 @@
 # ORB Intraday Trading Bot
 
 An intraday algorithmic trading app built for **forward paper trading**: real
-NSE market data from Groww, but entirely virtual money. Orders are simulated
-locally and **never** sent to your broker, so you can measure whether a
-strategy actually makes money before risking any.
+NSE market data from Groww, with virtual money by default. Orders are simulated
+locally unless you explicitly switch one of the two real-order paths on (see
+[Where real orders can come from](#where-real-orders-can-come-from)), so you
+can measure whether a strategy actually makes money before risking any.
 
 Design priority throughout is capital preservation: a server-side risk engine
 gates every entry, brackets are enforced tick-by-tick, and a daily loss
 circuit breaker squares everything off and locks the platform.
 
-## The two independent switches
+## The independent switches
 
-These are separate on purpose — this is the core safety model:
+These are separate on purpose — this is the core safety model. Every one of
+them boots in its safe position:
 
 | Switch | Options | What it controls |
 |---|---|---|
-| **Data source** | `SIMULATED` / `LIVE NSE` | Where prices come from |
-| **Execution** | `VIRTUAL MONEY` (locked) | Always simulated. Not user-changeable |
+| **Data source** | `SIMULATED` / `LIVE NSE` | Where prices come from. Never causes an order |
+| **ORB bot execution** | `VIRTUAL MONEY` (locked) | Always simulated. Not user-changeable |
+| **Manual desk execution** | practice (default) / **Send orders to Groww** | Whether a desk order is sent to Groww |
+| **SMA terminal mode** | `PAPER` (default) / `LIVE` | Whether the SMA bot sends Groww orders |
 
-Connecting your Groww API key changes only the prices. It cannot cause a real
-order: `place_paper_entry()` is the sole entry path and it fills against the
-local paper engine. There is no code path from a strategy signal to
-`GrowwClient.place_order()`.
+Connecting your Groww API key and switching the feed to LIVE NSE changes only
+the prices. The ORB bot cannot cause a real order: `place_paper_entry()` is
+its sole entry path and it fills against the local paper engine. There is no
+code path from an ORB strategy signal to `GrowwClient.place_order()`.
+
+## Where real orders can come from
+
+Real Groww orders are possible in exactly two places, and both are off until
+you turn them on with an explicit confirmation:
+
+1. **Manual desk, "Send orders to Groww"** — `/trade`. Turning it on calls
+   `POST /api/manual/execution` with `confirm_live=true` and sets
+   `state.manual_live`. Desk orders then go through
+   `app/services/manual_desk.py` → `_send_groww_order` →
+   `app/brokers/groww_client.py` `GrowwClient.place_order` (square-off and
+   cancel too). A real order is refused on simulated prices, without Groww
+   margin, and a fill is booked only after Groww returns an order id.
+2. **SMA terminal in LIVE mode** — `/terminal`. `POST /api/mode` with
+   `mode=LIVE` needs `confirm_live=true` from the confirmation dialog and a
+   saved Groww session. The SMA bot then sends MIS limit orders (0.20%
+   protection buffer) and a resting exchange stop through
+   `backend/groww_client.py` (`place_entry`, `place_exit`, `place_sl`). In
+   PAPER those calls fill locally and never touch the Groww SDK. See
+   [SMA_TERMINAL.md](SMA_TERMINAL.md).
+
+Everything else — the ORB bot, the scanner, the AI gate, the course coach —
+has no route to an order. `CLAUDE.md` is the maintained reference for these
+paths; keep the two in step.
 
 ## Stack
 
 - **Backend:** FastAPI (async) + SQLAlchemy 2.0 (SQLite) + WebSockets, Python 3.13
 - **Frontend:** Next.js 15 (App Router) + React 19 + Tailwind + TradingView `lightweight-charts`
-- **Broker:** `growwapi` 1.5.0 — used for market data and auth only
+- **Broker:** `growwapi` 1.5.0 — market data and auth, plus real orders on the
+  two opt-in paths above
 
 ## Setup
 
@@ -393,7 +422,10 @@ the reason. Failed sends are `FAILED` with the provider error attached.
 ## Manual Trading Desk
 
 **Trade** in the nav opens `/trade`: a broker-style order ticket over a second,
-completely independent virtual wallet.
+completely independent virtual wallet. It stays on practice money unless you
+press **Send orders to Groww** and confirm; from then on desk orders are real
+Groww MIS orders until you press **Stop real orders** (see
+[Where real orders can come from](#where-real-orders-can-come-from)).
 
 Two accounts, never mixed:
 
@@ -591,7 +623,7 @@ be ephemeral, which made any decision unexplainable once the page refreshed.
 
 - **RVOL on the simulated feed is cross-sectional** (a symbol's range volume vs the universe median), not a true 20-day RVOL, because the synthetic feed has no history. `GrowwClient.get_daily_volumes()` fetches real 20-day volumes and is ready to wire into the scanner for live sessions; the scanner does not call it yet.
 - **Depth is polled, not streamed.** Bid/ask refreshes every ~10 poll cycles, so the spread guard can act on slightly stale depth. LTP refreshes every poll (2s default).
-- **Live order dispatch is disabled by design** and returns 501. Enabling it is a deliberate code change in `app/services/execution.py`, not a toggle.
+- **Live order dispatch for the ORB bot is disabled by design** and returns 501. Enabling it is a deliberate code change in `app/services/execution.py`, not a toggle. (The manual desk and the SMA terminal have their own confirmed real-order switches — see above.)
 - **Zerodha / Angel One** store credentials but have no adapter — Groww only.
 - **Telegram alerts** are not implemented; alert lines only appear in the in-app console.
 - **The AI expert is an opinion, not a datafeed.** It reports what its search returns; coverage of mid- and small-caps is thinner than large-caps, and a confident-sounding view on a quiet name is exactly the failure mode the prompt tries to suppress but cannot eliminate. Read the cited sources before weighting a view. Its conviction number is not a probability.
@@ -638,7 +670,7 @@ keeps its rows across an upgrade.
 - Credentials are Fernet-encrypted at rest — broker keys and the OpenAI key alike. The Fernet key lives in `backend/.env` (gitignored) — back it up; losing it makes stored credentials unrecoverable.
 - The OpenAI key buys analysis only. It is never sent anywhere but OpenAI, and no code path connects a model response to an order.
 - `backend/.env` and `backend/trading.db` are gitignored. Never commit them.
-- Treat your Groww API key as a live credential even though this app only reads with it.
+- Treat your Groww API key as a live credential: with the manual desk's **Send orders to Groww** or the SMA terminal's **LIVE** mode on, this app places real orders with it.
 
 - **The daily risk lock does not survive a restart.** It lives in memory; the `daily_risk_state` table exists but nothing writes to it. Restarting the backend clears a loss-limit lock and the kill switch.
 
