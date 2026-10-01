@@ -189,15 +189,23 @@ No credentials are needed. The desk starts on the simulated feed.
   JS to `https://paltra.fly.dev/sma`.
 - `.dockerignore` keeps `.env` files, keys, databases, `node_modules`, tests,
   and `research_data/` out of the build context.
-- **There is no CI deploy.** The repo has no `.github/workflows`. Deploys are
-  manual from a developer machine:
+- **Deploys come from `main` only**, through
+  `.github/workflows/test-and-deploy.yml`:
+  - every pull request and push runs the backend tests (Python 3.13,
+    `requirements-dev.txt`) and the frontend typecheck plus static export
+  - a push to `main` that passes both runs `flyctl deploy --remote-only`
+    with the exported `frontend/out/` (built in CI, not committed)
+  - it needs the repo secret `FLY_API_TOKEN`
+    (`fly tokens create deploy -a paltra`); the deploy job runs in the
+    `production` environment, which GitHub creates on first use (add required
+    reviewers there for a manual approval step)
+- Do not deploy from a laptop or a feature branch. If you must deploy by
+  hand, do it from a clean checkout of `main`:
 
   ```bash
   cd frontend && NEXT_OUTPUT=export npm run build   # produces frontend/out/
   cd .. && fly deploy
   ```
 
-  `frontend/out/` is not committed, so build it before every deploy or the
-  image ships a stale or missing UI. Secrets are set on the machine, never
-  baked into the image:
+  App secrets are set on the machine, never baked into the image:
   `fly secrets set ENCRYPTION_KEY=... FRONTEND_ORIGIN=https://paltra.fly.dev`.
