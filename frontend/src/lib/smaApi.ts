@@ -159,6 +159,8 @@ export type TradeRow = {
   entry_time: string | null;
   entry_price: number;
   ma_cross_price: number;
+  /** Entry versus the cross price, in points. Positive means a worse fill. */
+  fill_lag_points?: number | null;
   atr_at_entry: number;
   /** null when the trade had no stop. */
   sl_trigger_price: number | null;

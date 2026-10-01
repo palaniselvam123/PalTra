@@ -179,6 +179,7 @@ class StrategyEngine:
         self._cfg_cache = None
         self._ticks_retry_at = 0.0
         self._ticks_job = None
+        self._realized_mode: str | None = None
 
     def _position_key(self) -> str:
         if self._focus:
@@ -267,6 +268,7 @@ class StrategyEngine:
         if day != self._session_date:
             self._session_date = day
             self.realized_net = 0.0
+            self._realized_mode = None
             self.trades_today = 0
             self._warned.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
@@ -307,6 +309,8 @@ class StrategyEngine:
     async def tick(self, now: dt.datetime) -> None:
         cfg = self.load_config()
         self._roll_session(now)
+        if getattr(self, "_realized_mode", None) != (cfg.trading_mode or "PAPER").upper():
+            self._refresh_realized((cfg.trading_mode or "PAPER").upper())
         self.broker.set_mode(cfg.trading_mode)
         view = (cfg.symbol or "").upper()
         armed = trade_names(cfg)
@@ -421,6 +425,13 @@ class StrategyEngine:
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
+
+    def _market_price(self, symbol: str | None, fallback: float) -> float:
+        """Latest quote for this stock, else the given price."""
+        ltp = self._ltps.get((symbol or "").upper())
+        if ltp is not None and ltp > 0:
+            return float(ltp)
+        return float(fallback)
 
     def _still_armed(self, symbol: str) -> bool:
         """Read the Trade list now, not the copy taken at the top of the pass."""
@@ -619,7 +630,7 @@ class StrategyEngine:
         if pos is not None and pos.direction != want:
             # Opposite cross: cancel SL, verify, flatten, then maybe reverse.
             await self._cancel_sl_verified(pos)
-            await self._close_position(pos, cross_price, "MA_CROSS", now, cfg)
+            await self._close_position(pos, self._market_price(cfg.symbol, cross_price), "MA_CROSS", now, cfg)
             self.position = None
             if past_cutoff:
                 return f"closed on {signal} — {cutoff_text}"
@@ -719,6 +730,11 @@ class StrategyEngine:
         price = float(self._ltps.get(name) or enriched.iloc[-1]["close"] or 0)
         if price <= 0:
             raise ForceRefused(f"{name} has no price")
+        self._ltps[name] = price
+        # No cross here. The reference is the last closed candle, so the
+        # report still shows how far the fill was from it.
+        reference = _finite(enriched.iloc[-2]["close"]) if len(enriched) >= 2 else None
+        reference = round_price(name, reference) if reference else price
         atr = _latest_atr(enriched)
         if atr is None:
             raise ForceRefused(f"{name} ATR is not ready")
@@ -751,7 +767,7 @@ class StrategyEngine:
             try:
                 result = await self._apply_locked(
                     signal=side,
-                    cross_price=price,
+                    cross_price=reference,
                     atr=atr,
                     adx_blocks_entry=False,
                     cfg=_cfg_for(cfg, name),
@@ -935,8 +951,11 @@ class StrategyEngine:
         side = "BUY" if direction == "LONG" else "SELL"
         live = (cfg.trading_mode or "").upper() == "LIVE"
         qty = int(cfg.qty)
+        # The order goes out at the market price now. cross_price stays the
+        # signal candle's close, so entry minus cross is the real fill lag.
+        order_price = self._market_price(cfg.symbol, cross_price)
         try:
-            ack = await self.broker.place_entry(cfg.symbol, side, qty, cross_price)
+            ack = await self.broker.place_entry(cfg.symbol, side, qty, order_price)
         except Exception as exc:  # noqa: BLE001
             raise SlCancelFailed(str(exc) or "Groww did not accept the entry") from exc
         if live:
@@ -951,7 +970,7 @@ class StrategyEngine:
                 qty = held
         elif (ack.status or "").upper() in ("REJECTED", "FAILED", "FAILURE", "CANCELLED", "CANCELED"):
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
-        fill = round_price(cfg.symbol, ack.fill_price or cross_price)
+        fill = round_price(cfg.symbol, ack.fill_price or order_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
@@ -1260,7 +1279,6 @@ class StrategyEngine:
                 px = round_price(cfg.symbol, ack.fill_price)
         buy, sell = legs_for(pos.direction, pos.entry_price, px)
         costs = calculate_charges(buy, sell, pos.qty)
-        self.realized_net += costs["net_pnl"]
         self._finalize_trade(pos.trade_id, px, reason, now, costs)
 
     def _insert_open_trade(
@@ -1310,6 +1328,11 @@ class StrategyEngine:
             direction = row.direction
             db.commit()
         self._trades_cache = None
+        self._refresh_realized()
+        # The note must not keep saying "holding" once the book is flat.
+        name = (symbol or "").upper()
+        if name:
+            self._signals[name] = f"{name} flat — {_ALERT_REASON.get(reason, reason or 'closed')}"
         _schedule_whatsapp(
             close_alert(
                 direction=direction,
@@ -1321,6 +1344,19 @@ class StrategyEngine:
                 when=now,
             )
         )
+
+    def _refresh_realized(self, mode: str | None = None) -> float:
+        """Realized net = the KPI net: today's closed rows of the current book.
+
+        A running sum drifted from the KPI: it restarted at zero after a
+        reboot, mixed PAPER and LIVE closes, and counted by exit day.
+        """
+        if mode is None:
+            cfg = self._cfg_cache
+            mode = (cfg.trading_mode if cfg is not None else None) or "PAPER"
+        self._realized_mode = mode.upper()
+        self.realized_net = float(self._kpis(self._realized_mode)["net"])
+        return self.realized_net
 
     def _day_open_and_change(self) -> tuple[float | None, float | None]:
         """Percent versus the previous session's last close.
@@ -1565,6 +1601,8 @@ class StrategyEngine:
             for row_mode, reason in rows
             if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"
         )
+        # A restart must not forget today's realized P&L either.
+        self._refresh_realized(mode)
         return self.trades_today
 
     def release_paper_halt(self) -> bool:
@@ -1681,7 +1719,7 @@ class StrategyEngine:
                         "sl_trigger": book.sl_trigger if book and book.stop_active else None,
                         "stop_active": book.stop_active if book else None,
                         "ltp": self._ltps.get(symbol),
-                        "note": self._signals.get(symbol, ""),
+                        "note": _book_note(symbol, book, self._signals.get(symbol, "")),
                     }
                 )
         finally:
@@ -1735,7 +1773,8 @@ class StrategyEngine:
             "sl_room": unreal["room"] if unreal else None,
             "sl_room_pct": unreal["room_pct"] if unreal else None,
             "charge_estimate": unreal["breakdown"] if unreal else None,
-            "realized_net_pnl": self.realized_net,
+            # Same number as kpis.net, by construction.
+            "realized_net_pnl": kpis["net"],
             "trades_today": self.trades_today,
             "max_trades": cfg.max_trades_per_day if cfg else 40,
             "max_daily_loss": cfg.max_daily_loss if cfg else 5000,
@@ -2047,6 +2086,15 @@ def _schedule_whatsapp(message: str) -> None:
     loop.create_task(_send())
 
 
+def _book_note(symbol: str, book: OpenPosition | None, note: str) -> str:
+    """Drop a note that contradicts the book, such as "holding" while FLAT."""
+    if book is None and "holding" in (note or ""):
+        return f"{symbol} flat"
+    if book is not None and " flat" in (note or ""):
+        return f"{symbol} holding {book.direction}"
+    return note
+
+
 def _entry_cutoff(cfg: BotConfig) -> dt.time:
     """Last minute a new position may open. Never after the square-off."""
     try:
@@ -2234,6 +2282,7 @@ def _trade_dict(row: TradeLog) -> dict:
         "entry_time": row.entry_time.isoformat() if row.entry_time else None,
         "entry_price": row.entry_price,
         "ma_cross_price": row.ma_cross_price,
+        "fill_lag_points": _fill_lag(row.direction, row.entry_price, row.ma_cross_price),
         "atr_at_entry": row.atr_at_entry,
         "sl_trigger_price": row.sl_trigger_price if row.stop_active is not False else None,
         "stop_active": row.stop_active is not False,
@@ -2246,6 +2295,14 @@ def _trade_dict(row: TradeLog) -> dict:
         "points": points,
         "mode": row.mode,
     }
+
+
+def _fill_lag(direction: str, entry: float | None, cross: float | None) -> float | None:
+    """Points paid versus the cross price. Positive means a worse fill."""
+    if entry is None or cross is None:
+        return None
+    lag = float(entry) - float(cross)
+    return round(lag if (direction or "").upper() == "LONG" else -lag, 4)
 
 
 def _finite(value) -> float | None:
