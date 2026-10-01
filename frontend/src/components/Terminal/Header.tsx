@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Radio, Search } from "lucide-react";
+import { AlertTriangle, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { StatusBar } from "./StatusBar";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -235,74 +236,53 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
     }
   };
 
-  const quoteLabel =
-    state && state.ltp > 0
-      ? state.data_source || "QUOTES"
-      : connected
-        ? state?.bot_status ?? "CHECKING"
-        : loadNote
-          ? "NO REPLY"
-          : "CHECKING";
-
   return (
-    <header className="sticky top-0 z-30 border-b border-white/5 bg-[#0B0E14]">
-      <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <nav className="flex min-w-0 items-center gap-3 overflow-x-auto text-[11px] uppercase tracking-[0.14em] text-slate-500">
-            <a href="/" className="shrink-0 hover:text-slate-300">Dashboard</a>
-            <a href="/trade/" className="shrink-0 hover:text-slate-300">Trade</a>
-            <a href="/chart/" className="shrink-0 hover:text-slate-300">Charts</a>
-            <a href="/settings/" className="shrink-0 hover:text-slate-300">Settings</a>
-          </nav>
-          <div className="shrink-0 text-sm font-semibold tracking-tight text-slate-100">
-            <span className="sm:hidden">SMA</span>
-            <span className="hidden sm:inline">SMA × ATR Terminal</span>
-            {config?.symbol ? <span className="ml-2 hidden font-normal text-slate-400 md:inline">· {config.symbol}</span> : null}
+    <>
+      <header
+        aria-label="SMA terminal"
+        className={clsx(
+          "sticky top-0 z-30 bg-[#0B0E14]",
+          live ? "border-2 border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]" : "border-b border-white/10"
+        )}
+      >
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <nav className="flex min-w-0 items-center gap-3 overflow-x-auto text-[11px] uppercase tracking-[0.14em] text-slate-400">
+              <a href="/" className="shrink-0 hover:text-slate-200">Dashboard</a>
+              <a href="/trade/" className="shrink-0 hover:text-slate-200">Trade</a>
+              <a href="/chart/" className="shrink-0 hover:text-slate-200">Charts</a>
+              <a href="/settings/" className="shrink-0 hover:text-slate-200">Settings</a>
+            </nav>
+            <div className="flex shrink-0 items-baseline gap-2 text-sm">
+              <span className="hidden font-semibold tracking-tight text-slate-100 lg:inline">SMA × ATR Terminal</span>
+              {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}
+              <span className="font-mono text-slate-100">{px(ltp)}</span>
+              <span
+                className={clsx(
+                  "font-mono text-xs",
+                  changePct == null ? "text-slate-400" : changePct >= 0 ? "text-emerald-400" : "text-rose-400"
+                )}
+              >
+                {changePct == null ? "" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
+              </span>
+            </div>
           </div>
+          <StatusBar
+            state={state}
+            config={config}
+            connected={connected}
+            busy={busy}
+            onModeClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
+          />
         </div>
-
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="min-w-0 font-mono text-lg leading-none sm:text-sm">
-            <span className="text-slate-100">{px(ltp)}</span>
-            <span
-              className={clsx(
-                "ml-2 text-sm sm:text-xs",
-                changePct == null ? "text-slate-500" : changePct >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"
-              )}
-            >
-              {changePct == null ? "—" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
-            </span>
+        {(error || state?.halt_reason || state?.last_error) && (
+          <div role="alert" className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs text-rose-300">
+            {error || state?.halt_reason || state?.last_error}
           </div>
-          <button
-            disabled={busy}
-            onClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
-            title={live ? "Live Groww orders are on" : "Practice fills only. This does not send orders to Groww."}
-            className={clsx(
-              "shrink-0 rounded-full px-3 py-2 text-xs font-semibold",
-              live
-                ? "animate-pulse bg-[#F43F5E]/20 text-[#F43F5E] ring-1 ring-[#F43F5E]/50"
-                : "bg-[#F59E0B]/15 text-[#F59E0B] ring-1 ring-[#F59E0B]/40"
-            )}
-          >
-            {live ? (
-              <>
-                <span className="sm:hidden">LIVE</span>
-                <span className="hidden sm:inline">LIVE REAL MONEY</span>
-              </>
-            ) : state?.data_source === "SIMULATOR" ? (
-              <>
-                <span className="sm:hidden">SIM</span>
-                <span className="hidden sm:inline">SIMULATION · tape moving</span>
-              </>
-            ) : (
-              <>
-                <span className="sm:hidden">PAPER</span>
-                <span className="hidden sm:inline">PAPER · no Groww orders</span>
-              </>
-            )}
-          </button>
-        </div>
+        )}
+      </header>
 
+      <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-3 py-2">
@@ -467,10 +447,6 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           </button>
         </div>
 
-        <span className="flex items-center gap-1.5 text-[11px] text-slate-400" title={state?.data_source}>
-          <Radio size={12} className={connected ? "text-[#10B981]" : "text-[#F43F5E]"} />
-          {quoteLabel}
-        </span>
       </div>
       <p className="px-3 pb-2 text-[11px] leading-snug text-slate-500 sm:px-4">
         The amber name is the stock. Blue Chart only changes the stock on screen. Violet Trade adds
@@ -479,12 +455,6 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
         the order waits until the cross prints. Force order uses the current SMA side. Checked VWAP,
         volume, density, and RSI filters apply to both.
       </p>
-      {(error || state?.halt_reason || state?.last_error) && (
-        <div className="border-t border-[#F43F5E]/30 bg-[#F43F5E]/10 px-4 py-1.5 text-xs text-[#F43F5E]">
-          {error || state?.halt_reason || state?.last_error}
-        </div>
-      )}
-
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-5">
@@ -517,6 +487,6 @@ export function Header({ state, config, connected, loadNote, onChanged }: Props)
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }
