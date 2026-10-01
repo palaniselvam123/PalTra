@@ -26,6 +26,23 @@ Groww market data. Two trading engines live in this repo and share one frontend:
   with no Groww credentials on the simulated feed. Run the backend tests and
   open the app on the simulated feed before you call a change done.
 
+## Merging rules
+
+- **UI-only or docs-only changes** (only files under `frontend/`, or `.md`
+  files): once CI is green (backend tests and the frontend typecheck plus
+  static export), merge to `main` yourself without asking.
+- **Anything touching order placement, the strategy engine, risk limits,
+  stop-loss, or LIVE mode**: open a PR and wait for the owner's OK before
+  merging. This includes a `frontend/` change that alters a LIVE or order
+  safeguard, such as the LIVE confirmation, CONFIRM typing, or the
+  kill-switch dialog.
+- When a change fits both, the stricter rule wins. Changes that fit neither
+  (CI, tests, other backend code) also wait for the owner's OK.
+- **Never stack PRs.** Every PR targets `main` directly. Merge with a merge
+  commit, and delete the branch after it is merged.
+- A merge to `main` deploys (outside 09:00–15:45 IST, Mon–Fri), so only merge
+  what is ready to run in production.
+
 ## Tech stack
 
 - **Backend:** Python 3.13, FastAPI (async), SQLAlchemy 2.0 on SQLite
