@@ -75,6 +75,10 @@ def _ensure_bot_config_columns(engine) -> None:
             "rsi_short_min": "FLOAT DEFAULT 30",
             "rsi_short_max": "FLOAT DEFAULT 60",
             "entry_cutoff_time": "TEXT DEFAULT '15:00'",
+            "stop_type": "TEXT DEFAULT 'ATR'",
+            "gap_sl_mult": "FLOAT DEFAULT 1",
+            "gap_tp_mult": "FLOAT DEFAULT 2",
+            "gap_min_pct": "FLOAT DEFAULT 0.2",
         }
         for column, decl in additions.items():
             if column not in names:

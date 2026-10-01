@@ -43,6 +43,10 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         atr_multiplier: Number(form.atr_multiplier),
         use_adx_filter: form.use_adx_filter,
         use_stop: form.use_stop !== false,
+        stop_type: form.stop_type === "SMA_GAP" ? "SMA_GAP" : "ATR",
+        gap_sl_mult: Number(form.gap_sl_mult ?? 1),
+        gap_tp_mult: Number(form.gap_tp_mult ?? 2),
+        gap_min_pct: Number(form.gap_min_pct ?? 0.2),
         adx_threshold: Number(form.adx_threshold),
         use_vwap: Boolean(form.use_vwap),
         use_volume: Boolean(form.use_volume),
@@ -100,8 +104,36 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_stop", e.target.checked)}
           className="accent-[#10B981]"
         />
-        Exchange stop-loss at {form.atr_multiplier}× ATR. Uncheck to enter with no stop order.
+        {form.stop_type === "SMA_GAP"
+          ? "Stop-loss on new entries (moving, from the SMA gap). Uncheck to enter with no stop."
+          : `Exchange stop-loss at ${form.atr_multiplier}× ATR. Uncheck to enter with no stop order.`}
       </label>
+      <label className="mt-3 block text-sm text-slate-300">
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">Stop type</span>
+        <select
+          value={form.stop_type === "SMA_GAP" ? "SMA_GAP" : "ATR"}
+          onChange={(e) => set("stop_type", e.target.value)}
+          className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+        >
+          <option value="ATR">ATR — fixed stop at {String(form.atr_multiplier)}× ATR</option>
+          <option value="SMA_GAP">SMA gap — moving stop + target</option>
+        </select>
+      </label>
+      {form.stop_type === "SMA_GAP" ? (
+        <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} />
+            <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} />
+            <Field label="Min gap %" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} />
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-slate-400">
+            Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
+            gap × stop multiple and target = price + gap × target multiple; a sell is the mirror. Recalculated every
+            closed 1-minute candle: the stop only moves in your favour, the target follows the gap both ways.
+            PAPER only — in LIVE the bot keeps the {String(form.atr_multiplier)}× ATR exchange stop.
+          </p>
+        </div>
+      ) : null}
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
         <input
           type="checkbox"

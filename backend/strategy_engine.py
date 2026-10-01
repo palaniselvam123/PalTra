@@ -38,6 +38,7 @@ from indicators import (
     format_signal_report,
     sma_gap_pct,
 )
+from gap_trail import gap_levels, tighten, uses_gap_stop
 from models import BotConfig, TradeLog
 import tick_sizes
 from tick_sizes import round_price
@@ -83,6 +84,10 @@ class OpenPosition:
     # False when entered with use_stop off. sl_trigger is then only the
     # level a stop would have used, and nothing watches it.
     stop_active: bool = True
+    # SMA-gap moving stop (PAPER only): sl_trigger trails each closed candle
+    # and the position also exits at `target`.
+    trailing: bool = False
+    target: float | None = None
 
 
 def _ist_now() -> dt.datetime:
@@ -147,6 +152,8 @@ class StrategyEngine:
         # Closed-bar timestamp already judged for an entry. A bar is not
         # marked here until its candle is actually on the tape.
         self._judged_bar: dict[str, int] = {}
+        # Last closed candle each moving stop/target was recalculated on.
+        self._trail_bar: dict[str, int] = {}
         self._signals: dict[str, str] = {}
         # symbol -> timestamp of the closed bar already on the tape when the
         # bot was started or the stock was armed. None means the first bar
@@ -231,9 +238,20 @@ class StrategyEngine:
                 )
                 for row in rows
             ]
+        try:
+            cfg = self.load_config()
+        except Exception:  # noqa: BLE001
+            cfg = None
         for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active in pending:
             if not symbol or symbol in self.positions:
                 continue
+            # A practice book on the moving stop keeps trailing from the saved
+            # stop; its target comes back on the next closed candle.
+            trailing = bool(
+                stop_active
+                and cfg is not None
+                and uses_gap_stop(cfg, live=(mode or "PAPER").upper() == "LIVE")
+            )
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
             self.positions[symbol] = OpenPosition(
@@ -249,6 +267,7 @@ class StrategyEngine:
                 trade_id=trade_id,
                 mode=mode,
                 stop_active=stop_active,
+                trailing=trailing,
             )
 
     def stop(self) -> None:
@@ -384,7 +403,9 @@ class StrategyEngine:
         for symbol in list(self.positions):
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, 0.0)
-            await self._watch_stop(_cfg_for(cfg, symbol))
+            symbol_cfg = _cfg_for(cfg, symbol)
+            self._trail_gap_levels(symbol_cfg)
+            await self._watch_stop(symbol_cfg)
 
         self._focus = view
         if view in self._ltps:
@@ -972,6 +993,20 @@ class StrategyEngine:
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
         fill = round_price(cfg.symbol, ack.fill_price or order_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
+        trailing = uses_gap_stop(cfg, live)
+        target = None
+        if trailing:
+            gap_now = self._closed_gap_pct(cfg.symbol, cfg)
+            sl_gap, tp_gap = gap_levels(
+                direction,
+                fill,
+                gap_now,
+                float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
+                float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
+                float(getattr(cfg, "gap_min_pct", 0.2) or 0.0),
+            )
+            sl = round_price(cfg.symbol, sl_gap)
+            target = round_price(cfg.symbol, tp_gap)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -1018,7 +1053,13 @@ class StrategyEngine:
             trade_id=trade_id,
             mode=cfg.trading_mode,
             stop_active=stop_active,
+            trailing=trailing,
+            target=target,
         )
+        if trailing:
+            closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
+            if closed_ts is not None:
+                self._trail_bar[(cfg.symbol or "").upper()] = closed_ts
         if sl_error:
             await self._exit_unprotected(cfg, now, sl_error)
 
@@ -1047,6 +1088,53 @@ class StrategyEngine:
         self.position = None
         self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
         self._signals[symbol] = f"{symbol} closed — stop was refused"
+
+    def _closed_gap_pct(self, symbol: str, cfg: BotConfig) -> float | None:
+        """SMA 9 vs SMA 21 gap % on this stock's last closed candle."""
+        frame = self._frames.get((symbol or "").upper())
+        if frame is None or getattr(frame, "empty", True) or len(frame) < 2:
+            return None
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        closed = enriched.iloc[-2]
+        return sma_gap_pct(closed.get("sma_9"), closed.get("sma_21"))
+
+    def _trail_gap_levels(self, cfg: BotConfig) -> None:
+        """Once per closed candle: move a practice stop (tighter only) and target."""
+        pos = self.position
+        if pos is None or not pos.trailing or not pos.stop_active:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE":
+            return
+        symbol = (cfg.symbol or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or self._trail_bar.get(symbol) == closed_ts:
+            return
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        closed = enriched.iloc[-2]
+        gap = sma_gap_pct(closed.get("sma_9"), closed.get("sma_21"))
+        price = _finite(closed.get("close"))
+        self._trail_bar[symbol] = closed_ts
+        if price is None or price <= 0:
+            return
+        sl_new, tp_new = gap_levels(
+            pos.direction,
+            price,
+            gap,
+            float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
+            float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
+            float(getattr(cfg, "gap_min_pct", 0.2) or 0.0),
+        )
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, sl_new))
+        pos.target = round_price(symbol, tp_new)
+        if moved != pos.sl_trigger:
+            pos.sl_trigger = moved
+            # Saved so a restart keeps the trailed stop, not the entry one.
+            with session_factory()() as db:
+                row = db.get(TradeLog, pos.trade_id)
+                if row is not None and row.exit_time is None:
+                    row.sl_trigger_price = moved
+                    db.commit()
 
     def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
         symbol = symbol or self._focus
@@ -1166,6 +1254,14 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
+        reason = "GAP_SL_HIT" if pos.trailing else "ATR_SL_HIT"
+        if not hit and pos.trailing and pos.target is not None and self.ltp > 0:
+            if (pos.direction == "LONG" and self.ltp >= pos.target) or (
+                pos.direction == "SHORT" and self.ltp <= pos.target
+            ):
+                hit = True
+                fill_price = self.ltp
+                reason = "TARGET_HIT"
         if not hit:
             return
         async with self.lock:
@@ -1175,9 +1271,12 @@ class StrategyEngine:
             try:
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
-                await self._close_position(self.position, fill_price, "ATR_SL_HIT", _ist_now(), cfg)
+                await self._close_position(self.position, fill_price, reason, _ist_now(), cfg)
                 self.position = None
-                self.last_signal = "ATR stop hit — flat"
+                self.last_signal = {
+                    "TARGET_HIT": "target hit — flat",
+                    "GAP_SL_HIT": "moving stop hit — flat",
+                }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
         if self._loss_breached(cfg):
@@ -1718,6 +1817,8 @@ class StrategyEngine:
                         "entry_price": book.entry_price if book else None,
                         "sl_trigger": book.sl_trigger if book and book.stop_active else None,
                         "stop_active": book.stop_active if book else None,
+                        "target": book.target if book else None,
+                        "trailing": book.trailing if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": _book_note(symbol, book, self._signals.get(symbol, "")),
                     }
@@ -1737,6 +1838,7 @@ class StrategyEngine:
             "books": books,
             "stop_enabled": True if cfg is None or cfg.use_stop is None else bool(cfg.use_stop),
             "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
+            "stop_type": (getattr(cfg, "stop_type", None) or "ATR") if cfg else "ATR",
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
             "day_open": day_open,
@@ -1765,6 +1867,8 @@ class StrategyEngine:
                 "entry_time": pos.entry_time.isoformat(),
                 "mode": pos.mode,
                 "stop_active": pos.stop_active,
+                "trailing": pos.trailing,
+                "target": pos.target,
             },
             "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
@@ -1836,6 +1940,8 @@ class StrategyEngine:
             "markers": markers,
             "entry_price": pos.entry_price if pos else None,
             "sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
+            "target": pos.target if pos else None,
+            "trailing": bool(pos.trailing) if pos else False,
             "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
         }
 
@@ -1904,6 +2010,8 @@ _ALERT_REASON = {
     "MA_CROSS": "MA cross",
     "MA_APPROACH": "sold before the MA cross",
     "ATR_SL_HIT": "ATR stop",
+    "GAP_SL_HIT": "moving stop (SMA gap)",
+    "TARGET_HIT": "target hit",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
     "NOT_ON_GROWW": "not on Groww — no order sent",

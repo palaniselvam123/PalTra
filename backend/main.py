@@ -13,6 +13,7 @@ import asyncio
 import csv
 import io
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -100,6 +101,10 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
+    stop_type: Literal["ATR", "SMA_GAP"] | None = None
+    gap_sl_mult: float | None = Field(default=None, gt=0, le=10)
+    gap_tp_mult: float | None = Field(default=None, gt=0, le=20)
+    gap_min_pct: float | None = Field(default=None, ge=0.01, le=5)
     adx_threshold: float | None = Field(default=None, ge=0, le=100)
     use_vwap: bool | None = None
     use_volume: bool | None = None
@@ -134,6 +139,10 @@ def _config_dict(row: BotConfig) -> dict:
         "atr_multiplier": row.atr_multiplier,
         "use_adx_filter": row.use_adx_filter,
         "use_stop": True if row.use_stop is None else bool(row.use_stop),
+        "stop_type": (getattr(row, "stop_type", None) or "ATR").upper(),
+        "gap_sl_mult": float(getattr(row, "gap_sl_mult", 1.0) or 1.0),
+        "gap_tp_mult": float(getattr(row, "gap_tp_mult", 2.0) or 2.0),
+        "gap_min_pct": float(getattr(row, "gap_min_pct", 0.2) or 0.2),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),
