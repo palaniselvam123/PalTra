@@ -57,6 +57,7 @@ backend/
   strategy_engine.py      SMA/ATR bot logic
   groww_client.py         SMA Terminal broker wrapper (PAPER + LIVE paths, simulator)
   indicators.py           SMA, Wilder ATR/ADX/RSI, entry filters
+  tick_sizes.py           Per-stock Groww tick size; every order/SL price is rounded here
   config.py, database.py, models.py, charges.py   SMA Terminal settings, DB, cost model
   tests/                  pytest suite (both engines)
 frontend/src/
