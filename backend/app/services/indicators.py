@@ -108,12 +108,15 @@ def ema(candles: list[OHLCV], period: int = 20) -> Series:
 
 
 def vwap(candles: list[OHLCV], session_seconds: int = 86400) -> Series:
-    """Session-anchored VWAP: cumulative typical-price x volume over volume,
-    reset at each session boundary.
+    """Chart-only session VWAP. This is not the SMA terminal's order VWAP.
 
-    Anchoring matters — a VWAP that never resets drifts uselessly far from
-    price after a few days, and intraday traders read VWAP specifically as
-    "the average price paid so far TODAY".
+    `OHLCV.volume` on this path is already the shares traded in the candle
+    (`volume_contract` derives that from Groww's running total before the
+    candle is stored). Do not difference it again.
+
+    The reset is `ts // session_seconds` (UTC day buckets at the default
+    86,400). The order engine's VWAP resets on the Asia/Kolkata date and
+    lives in `backend/indicators.py`.
     """
     out: Series = [None] * len(candles)
     cum_pv = 0.0

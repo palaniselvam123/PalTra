@@ -27,6 +27,16 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         <Row label="LTP" value={px(state?.ltp)} />
         <Row label="SMA 9" value={px(state?.sma9)} />
         <Row label="SMA 21" value={px(state?.sma21)} />
+        <Row
+          label="SMA gap %"
+          value={state?.sma_gap_pct == null ? "—" : `${state.sma_gap_pct >= 0 ? "+" : ""}${state.sma_gap_pct.toFixed(3)}%`}
+        />
+        <Row label="VWAP" value={px(state?.vwap)} />
+        <Row
+          label="Volume ratio"
+          value={state?.volume_ratio == null ? "—" : `${state.volume_ratio.toFixed(2)}×`}
+        />
+        <Row label="RSI 14" value={state?.rsi14 == null ? "—" : state.rsi14.toFixed(1)} />
         <Row label="ATR 14" value={px(state?.atr14)} />
         <Row label="1.5× ATR stop" value={px(state?.active_sl_trigger)} />
         <Row

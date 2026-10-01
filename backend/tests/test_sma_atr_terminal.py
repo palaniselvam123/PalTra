@@ -1428,8 +1428,15 @@ def test_close_without_a_position_is_refused(api):
 
 
 def _tape(closes: list[float], volumes: list[int] | None = None, body: float = 0.4) -> pd.DataFrame:
+    """Build a frame whose `volume` column is a session running total.
+
+    `volumes` are the shares traded in each minute. The column stores the
+    cumulative sum, which is what Groww puts on a 1-minute candle.
+    """
     rows = []
+    running = 0
     for i, close in enumerate(closes):
+        running += 1000 if volumes is None else volumes[i]
         rows.append(
             {
                 "ts": 1_758_600_000 + i * 60,
@@ -1437,7 +1444,7 @@ def _tape(closes: list[float], volumes: list[int] | None = None, body: float = 0
                 "high": close + 0.5,
                 "low": close - 0.5,
                 "close": close,
-                "volume": 1000 if volumes is None else volumes[i],
+                "volume": running,
             }
         )
     return pd.DataFrame(rows)

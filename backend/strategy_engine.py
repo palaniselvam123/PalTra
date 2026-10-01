@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import time
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -28,8 +29,18 @@ import pandas as pd
 from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
-from indicators import closed_candle_cross, enrich, entry_filter_reason, round_to_nse_tick
+from indicators import (
+    closed_candle_cross,
+    closed_technical_snapshot,
+    enrich,
+    entry_filter_reason,
+    format_signal_report,
+    round_to_nse_tick,
+    sma_gap_pct,
+)
 from models import BotConfig, TradeLog
+
+logger = logging.getLogger("sma.strategy")
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -141,6 +152,13 @@ class StrategyEngine:
         self.sma21 = None
         self.atr14 = None
         self.adx14 = None
+        self.sma_gap = None
+        self.sma_gap_pct = None
+        self.vwap = None
+        self.minute_volume = None
+        self.avg_minute_volume = None
+        self.volume_ratio = None
+        self.rsi14 = None
         self.data_source = "SIMULATOR"
         self.last_error = ""
         self.last_signal = ""
@@ -297,12 +315,21 @@ class StrategyEngine:
             self.candles = enriched
             if not enriched.empty and len(enriched) >= 2:
                 # Display values from the last CLOSED bar so the UI does not
-                # repaint SMA/ATR with the forming tick.
+                # repaint SMA/ATR with the forming tick. These are the same
+                # readings the order path uses.
                 closed = enriched.iloc[-2]
                 self.sma9 = _finite(closed.get("sma_9"))
                 self.sma21 = _finite(closed.get("sma_21"))
                 self.atr14 = _finite(closed.get("atr_14"))
                 self.adx14 = _finite(closed.get("adx_14"))
+                snap = closed_technical_snapshot(enriched)
+                self.sma_gap = snap.sma_gap if snap else None
+                self.sma_gap_pct = snap.sma_gap_pct if snap else None
+                self.vwap = snap.vwap if snap else None
+                self.minute_volume = snap.minute_volume if snap else None
+                self.avg_minute_volume = snap.average_previous_20_volume if snap else None
+                self.volume_ratio = snap.volume_ratio if snap else None
+                self.rsi14 = snap.rsi14 if snap else None
 
         self._focus = view
         if view in self._ltps:
@@ -392,13 +419,50 @@ class StrategyEngine:
             return
         await self.apply_signal(signal, frame, cfg, now)
 
+    def _log_decision(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, decision: str, note: str = "") -> None:
+        """Write the closed-candle readings once per entry evaluation.
+
+        A failure here must not change the order. The report is diagnostic.
+        """
+        try:
+            side = "LONG" if signal == "BULLISH" else "SHORT"
+            action = "BUY" if side == "LONG" else "SELL"
+            snap = closed_technical_snapshot(frame)
+            if side == "LONG":
+                rsi_min = float(getattr(cfg, "rsi_long_min", 40.0) or 40.0)
+                rsi_max = float(getattr(cfg, "rsi_long_max", 70.0) or 70.0)
+            else:
+                rsi_min = float(getattr(cfg, "rsi_short_min", 30.0) or 30.0)
+                rsi_max = float(getattr(cfg, "rsi_short_max", 60.0) or 60.0)
+            logger.info(
+                "\n%s",
+                format_signal_report(
+                    symbol=(cfg.symbol or "").upper(),
+                    evaluated_at=now.strftime("%Y-%m-%d %H:%M:%S IST"),
+                    action=action,
+                    snap=snap,
+                    use_vwap=bool(getattr(cfg, "use_vwap", False)),
+                    use_volume=bool(getattr(cfg, "use_volume", False)),
+                    volume_multiple=float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0),
+                    use_rsi=bool(getattr(cfg, "use_rsi", False)),
+                    rsi_min=rsi_min,
+                    rsi_max=rsi_max,
+                    decision=decision,
+                    note=note,
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("signal report failed")
+
     async def apply_signal(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
         """Stop-and-reverse on a closed-candle cross. Returns a short status."""
         self._focus = (cfg.symbol or "").upper()
         curr = frame.iloc[-2]
         atr = _finite(curr.get("atr_14"))
         if atr is None or atr <= 0:
-            return "skipped — ATR not ready"
+            text = "skipped — ATR not ready"
+            self._log_decision(signal, frame, cfg, now, text)
+            return text
         cross_price = round_to_nse_tick(float(curr["close"]))
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
@@ -407,6 +471,7 @@ class StrategyEngine:
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
                 self.last_signal = "blocked — order PENDING/TRANSIT"
+                self._log_decision(signal, frame, cfg, now, self.last_signal)
                 return self.last_signal
             self.inflight = "PENDING"
             try:
@@ -422,9 +487,11 @@ class StrategyEngine:
                 )
                 self.last_signal = result
                 self._signals[self._focus] = result
+                self._log_decision(signal, frame, cfg, now, result)
                 return result
             except SlCancelFailed as exc:
                 self._note_broker_block(exc)
+                self._log_decision(signal, frame, cfg, now, self.last_signal)
                 return self.last_signal
             finally:
                 self.inflight = None
@@ -540,6 +607,14 @@ class StrategyEngine:
             raise ForceRefused(f"{name} ATR is not ready")
         blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", cfg, price=price)
         if blocked:
+            self._log_decision(
+                side,
+                enriched,
+                _cfg_for(cfg, name),
+                _ist_now(),
+                blocked,
+                note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
+            )
             raise ForceRefused(blocked)
         if self.status != "RUNNING":
             self.status = "RUNNING"
@@ -572,6 +647,14 @@ class StrategyEngine:
                 self.inflight = None
         self.last_signal = result
         self._signals[name] = result
+        self._log_decision(
+            side,
+            enriched,
+            _cfg_for(cfg, name),
+            now,
+            result,
+            note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
+        )
         return result
 
     async def close_symbol(self, symbol: str) -> str:
@@ -1344,6 +1427,13 @@ class StrategyEngine:
             "day_change_pct": day_change,
             "sma9": self.sma9,
             "sma21": self.sma21,
+            "sma_gap": self.sma_gap,
+            "sma_gap_pct": self.sma_gap_pct,
+            "vwap": self.vwap,
+            "minute_volume": self.minute_volume,
+            "avg_minute_volume": self.avg_minute_volume,
+            "volume_ratio": self.volume_ratio,
+            "rsi14": self.rsi14,
             "atr14": self.atr14,
             "adx14": self.adx14,
             "position": None
@@ -1547,16 +1637,6 @@ def close_alert(
         f"P&L {gross:+,.2f}  net {net:+,.2f}\n"
         f"{clock} IST"
     )
-
-
-def sma_gap_pct(fast: float, slow: float) -> float | None:
-    """SMA 9 minus SMA 21, as a percent of SMA 21. A ₹1 gap is not the same on every stock."""
-    if pd.isna(fast) or pd.isna(slow):
-        return None
-    slow_f = float(slow)
-    if slow_f == 0:
-        return None
-    return (float(fast) - slow_f) / slow_f * 100.0
 
 
 def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None, float | None]:
