@@ -164,15 +164,16 @@ async def state():
 
 
 @app.get("/api/chart")
-async def chart():
-    return engine.chart_payload()
+async def chart(limit: int = 240):
+    # The 5/15/30/60-minute views build their bars from more 1-minute candles.
+    return engine.chart_payload(limit=max(30, min(int(limit), 2500)))
 
 
 @app.get("/api/history")
-async def history(symbol: str, start: str, end: str):
-    """Past 1-minute candles from Groww for the chart's From/To view. Read-only."""
+async def history(symbol: str, start: str, end: str, interval: int = 1):
+    """Past candles from Groww for the chart's From/To view. Read-only."""
     try:
-        return await load_history(engine.broker, symbol, start, end, engine.load_config())
+        return await load_history(engine.broker, symbol, start, end, engine.load_config(), interval)
     except HistoryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

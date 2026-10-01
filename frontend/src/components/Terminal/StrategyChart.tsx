@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { History, Loader2, Radio } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { History, Loader2, Maximize2, Minimize2, Radio } from "lucide-react";
 import clsx from "clsx";
 import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
 import { parseClock } from "@/lib/format";
@@ -15,7 +15,22 @@ type Props = {
   trades?: TradeRow[];
   closing: boolean;
   onClose: () => void;
+  /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
+  onLiveBars?: (count: number) => void;
 };
+
+export const BAR_MINUTES = [1, 5, 15, 30, 60] as const;
+export type BarMinutes = (typeof BAR_MINUTES)[number];
+const BAR_KEY = "sma.chart.interval";
+
+/** 1-minute bars the live chart needs so SMA 21 is formed on the bigger candles. */
+export function liveBarsFor(bar: number): number {
+  return bar <= 1 ? 240 : Math.min(2500, bar * 120);
+}
+
+function barLabel(bar: number): string {
+  return bar === 60 ? "1h" : `${bar}m`;
+}
 
 const SESSION_OPEN_MIN = 9 * 60 + 15;
 const SESSION_CLOSE_MIN = 15 * 60 + 30;
@@ -42,6 +57,62 @@ function sessionCandles(rows: Candle[]): Candle[] {
   });
 }
 
+/** Start of the `bar`-minute candle holding `sec`, counted from the 09:15 IST open. */
+function bucketStart(sec: number, bar: number): number {
+  const minute = sec - (sec % 60);
+  if (bar <= 1) return minute;
+  const ist = Math.floor(((minute + 19_800) % 86_400) / 60);
+  const offset = (((ist - SESSION_OPEN_MIN) % bar) + bar) % bar;
+  return minute - offset * 60;
+}
+
+function resampleCandles(rows: Candle[], bar: number): Candle[] {
+  const out: Candle[] = [];
+  for (const c of rows) {
+    const t = bucketStart(c.time, bar);
+    const last = out[out.length - 1];
+    if (last && last.time === t) {
+      last.high = Math.max(last.high, c.high);
+      last.low = Math.min(last.low, c.low);
+      last.close = c.close;
+    } else {
+      out.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, sma9: null, sma21: null, atr14: null });
+    }
+  }
+  return out;
+}
+
+/** SMA 9, SMA 21 and Wilder ATR 14, the same maths as the backend's enrich(). */
+function withIndicators(rows: Candle[], formingLast: boolean): Candle[] {
+  const sma = (i: number, n: number) => {
+    if (i + 1 < n) return null;
+    let sum = 0;
+    for (let k = i - n + 1; k <= i; k += 1) sum += rows[k].close;
+    return sum / n;
+  };
+  let atr: number | null = null;
+  const out = rows.map((c, i) => {
+    const prev = i > 0 ? rows[i - 1].close : null;
+    const tr = prev == null ? c.high - c.low : Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));
+    atr = atr == null ? tr : atr + (tr - atr) / 14;
+    return { ...c, sma9: sma(i, 9), sma21: sma(i, 21), atr14: i >= 13 ? atr : null };
+  });
+  // The forming candle's lines would repaint, so they stop on the last closed one.
+  if (formingLast && out.length) {
+    const last = out[out.length - 1];
+    out[out.length - 1] = { ...last, sma9: null, sma21: null, atr14: null };
+  }
+  return out;
+}
+
+type Ohlc = { time: number; open: number; high: number; low: number; close: number; prevClose: number | null };
+
+function ohlcAt(rows: Candle[], index: number): Ohlc | null {
+  const c = rows[index];
+  if (!c) return null;
+  return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, prevClose: index > 0 ? rows[index - 1].close : null };
+}
+
 type Marker = {
   time: number;
   position: "aboveBar" | "belowBar";
@@ -55,14 +126,14 @@ function compactPrice(value: number): string {
 }
 
 /** Entry markers from the API plus exit markers from closed trades on this stock. */
-function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], symbol: string): Marker[] {
+function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], symbol: string, bar = 1): Marker[] {
   if (rows.length === 0) return [];
   const first = rows[0].time;
   const last = rows[rows.length - 1].time;
   const times = new Set(rows.map((c) => c.time));
-  const snap = (sec: number) => sec - (sec % 60);
+  const snap = (sec: number) => bucketStart(sec, bar);
   const out: Marker[] = chart.markers
-    .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time <= last))
+    .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time < last + bar * 60))
     .map((m): Marker => {
       if (m.kind === "EXIT") {
         const net = m.net_pnl;
@@ -102,8 +173,7 @@ function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], s
 
 type SmaHover = { sma9: number | null; sma21: number | null };
 
-function latestSma(chart: ChartPayload | null): SmaHover {
-  const rows = chart?.candles ?? [];
+function latestSma(rows: Candle[]): SmaHover {
   let sma9: number | null = null;
   let sma21: number | null = null;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -210,7 +280,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], closing, onClose }: Props) {
+export function StrategyChart({ chart, state, trades = [], closing, onClose, onLiveBars }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -224,9 +294,25 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
   const stopOnRef = useRef(stopOn);
   stopOnRef.current = stopOn;
   const [hover, setHover] = useState<SmaHover | null>(null);
+  const [hoverOhlc, setHoverOhlc] = useState<Ohlc | null>(null);
+  const rowsRef = useRef<Candle[]>([]);
+  const sectionRef = useRef<HTMLElement>(null);
+  const [full, setFull] = useState(false);
+  const [bar, setBar] = useState<BarMinutes>(1);
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(BAR_KEY));
+      if ((BAR_MINUTES as readonly number[]).includes(saved)) setBar(saved as BarMinutes);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  useEffect(() => {
+    onLiveBars?.(liveBarsFor(bar));
+  }, [bar, onLiveBars]);
   const symbol = (state?.symbol ?? "").toUpperCase();
   const [range, setRange] = useState(() => presetRange(0));
-  const [past, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string }) | null>(null);
+  const [past, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string; interval?: number }) | null>(null);
   const [loadingPast, setLoadingPast] = useState(false);
   const [pastError, setPastError] = useState<string | null>(null);
   const pastSeq = useRef(0);
@@ -239,7 +325,19 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
   }, [symbol]);
   const view = past ?? chart;
 
-  const loadPast = (next: { from: string; to: string }) => {
+  // Candles as drawn: live 1-minute bars merged into the chosen size, or the
+  // past range Groww already built at that size.
+  const rows = useMemo(() => {
+    if (!view) return [];
+    const base = sessionCandles(view.candles);
+    const source = past ? past.interval ?? 1 : 1;
+    if (bar === source) return base;
+    if (bar > source && bar % source === 0) return withIndicators(resampleCandles(base, bar), !past);
+    return base;
+  }, [view, past, bar]);
+  rowsRef.current = rows;
+
+  const loadPast = (next: { from: string; to: string }, size: number = bar) => {
     setRange(next);
     const problem = rangeProblem(next.from, next.to);
     if (problem) {
@@ -254,11 +352,11 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
     setLoadingPast(true);
     setPastError(null);
     smaApi
-      .history(symbol, next.from, next.to)
+      .history(symbol, next.from, next.to, size)
       .then((payload) => {
         if (seq !== pastSeq.current) return;
         if (payload.candles.length === 0) {
-          setPastError("Groww has no 1-minute candles in that range. Markets may have been closed.");
+          setPastError("Groww has no candles in that range. Markets may have been closed.");
           return;
         }
         setPast(payload);
@@ -271,6 +369,42 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
         if (seq === pastSeq.current) setLoadingPast(false);
       });
   };
+  const pickBar = (next: BarMinutes) => {
+    setBar(next);
+    try {
+      localStorage.setItem(BAR_KEY, String(next));
+    } catch {
+      /* private mode */
+    }
+    if (past) loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, next);
+  };
+
+  const toggleFull = () => {
+    if (full) {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      setFull(false);
+      return;
+    }
+    setFull(true);
+    // Phones without the Fullscreen API still get the chart filling the window.
+    sectionRef.current?.requestFullscreen?.().catch(() => {});
+  };
+  useEffect(() => {
+    if (!full) return;
+    const onChange = () => {
+      if (!document.fullscreenElement) setFull(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [full]);
+
   const backToLive = () => {
     pastSeq.current += 1;
     setPast(null);
@@ -348,8 +482,12 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
     const onCrosshair = (param: { time?: unknown; seriesData: Map<unknown, unknown> }) => {
       if (param.time == null) {
         setHover(null);
+        setHoverOhlc(null);
         return;
       }
+      const list = rowsRef.current;
+      const at = list.findIndex((c) => c.time === param.time);
+      setHoverOhlc(at >= 0 ? ohlcAt(list, at) : null);
       setHover({
         sma9: lineValue(param.seriesData.get(fast)),
         sma21: lineValue(param.seriesData.get(slow)),
@@ -372,7 +510,6 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
   useEffect(() => {
     const chart = view;
     if (!chart || !candleRef.current || !smaFastRef.current || !smaSlowRef.current || !atrRef.current) return;
-    const rows = sessionCandles(chart.candles);
     candleRef.current.setData(
       rows.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close }))
     );
@@ -387,7 +524,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
     );
     // Past candles carry their own exit markers; the blotter only covers recent trades.
     candleRef.current.setMarkers(
-      chartMarkers(chart, rows, past ? [] : trades, symbol).map((m) => ({ ...m, time: m.time as never }))
+      chartMarkers(chart, rows, past ? [] : trades, symbol, bar).map((m) => ({ ...m, time: m.time as never }))
     );
 
     if (slLine.current) {
@@ -418,15 +555,16 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
         title: look.title,
       });
     }
-  }, [view, past, trades, symbol, stopOn]);
+  }, [view, rows, bar, past, trades, symbol, stopOn]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
-    if (past) api.timeScale().fitContent();
+    // A short live series (few big candles) fills the width instead of hugging the right edge.
+    if (past || rowsRef.current.length <= 150) api.timeScale().fitContent();
     else api.timeScale().scrollToRealTime();
-  }, [past]);
+  }, [past, bar]);
 
   const pnl = livePnl(state);
   const pos = state?.position;
@@ -437,16 +575,50 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
     entryLine.current.applyOptions(entryLook(pnlGross));
   }, [pnlGross]);
 
-  const latest = latestSma(view);
+  const latest = latestSma(rows);
+  const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
 
   return (
-    <section className="min-w-0 max-w-full overflow-hidden rounded-xl border border-white/5 bg-[#151921]">
+    <section
+      ref={sectionRef}
+      aria-label="Price chart"
+      className={clsx(
+        "min-w-0 max-w-full overflow-hidden border-white/5 bg-[#151921]",
+        full ? "fixed inset-0 z-[60] flex flex-col overflow-y-auto" : "rounded-xl border"
+      )}
+    >
       <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <h2 className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-slate-100">
           {state?.symbol ? <span className="text-amber-300">{state.symbol}</span> : null}
-          <span className="font-normal text-slate-300">1-minute</span>
+          <span className="font-normal text-slate-300">{bar === 60 ? "1-hour" : `${bar}-minute`}</span>
+          <span role="group" aria-label="Candle size" className="ml-1 inline-flex rounded-md ring-1 ring-inset ring-white/10">
+            {BAR_MINUTES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={bar === m}
+                disabled={loadingPast}
+                onClick={() => pickBar(m)}
+                className={clsx(
+                  "min-h-8 min-w-9 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
+                  bar === m ? "bg-sky-500/25 font-semibold text-sky-100" : "font-normal text-slate-300 hover:bg-white/5"
+                )}
+              >
+                {barLabel(m)}
+              </button>
+            ))}
+          </span>
+          <button
+            type="button"
+            onClick={toggleFull}
+            aria-label={full ? "Exit full screen" : "Full screen"}
+            title={full ? "Exit full screen (Esc)" : "Full screen"}
+            className="flex min-h-8 min-w-9 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+          >
+            {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -471,6 +643,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
           <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
         </ul>
       </div>
+      <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
       <RangeBar
         range={range}
         past={past}
@@ -480,8 +653,8 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose }: P
         onLoad={loadPast}
         onLive={backToLive}
       />
-      <div className="relative">
-        <div ref={rootRef} className="h-[320px] w-full sm:h-[460px] lg:h-[520px]" />
+      <div className={clsx("relative", full && "min-h-[240px] flex-1")}>
+        <div ref={rootRef} className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]")} />
         {!view && (
           <div aria-busy="true" aria-label="Loading chart" className="absolute inset-0 z-[5] flex flex-col justify-end gap-2 bg-[#151921] p-4">
             <Skeleton className="h-2/3 w-full opacity-60" />
@@ -611,6 +784,39 @@ function RangeBar({
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function OhlcLine({ ohlc, hovering }: { ohlc: Ohlc | null; hovering: boolean }) {
+  if (!ohlc) return null;
+  const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
+  const base = ohlc.prevClose ?? ohlc.open;
+  const pct = base ? (change / base) * 100 : 0;
+  const tone = ohlc.close >= ohlc.open ? "text-emerald-300" : "text-rose-300";
+  const cell = (label: string, value: number) => (
+    <span className="whitespace-nowrap">
+      <span className="text-slate-400">{label}</span> <span className={tone}>{px(value)}</span>
+    </span>
+  );
+  return (
+    <div
+      aria-live="off"
+      className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-white/5 px-3 py-1.5 font-mono text-xs sm:px-4"
+    >
+      <span className="whitespace-nowrap text-slate-300">
+        {istStamp(ohlc.time)}
+        {hovering ? "" : " · latest"}
+      </span>
+      {cell("O", ohlc.open)}
+      {cell("H", ohlc.high)}
+      {cell("L", ohlc.low)}
+      {cell("C", ohlc.close)}
+      <span className={clsx("whitespace-nowrap", change >= 0 ? "text-emerald-300" : "text-rose-300")}>
+        {change >= 0 ? "+" : ""}
+        {change.toFixed(2)} ({pct >= 0 ? "+" : ""}
+        {pct.toFixed(2)}%)
+      </span>
     </div>
   );
 }

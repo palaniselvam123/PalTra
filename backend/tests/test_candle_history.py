@@ -184,3 +184,40 @@ def test_history_endpoint_needs_groww_login(tmp_path, monkeypatch):
     assert engine.broker.mode == "PAPER"
     database.reset_engine()
     get_settings.cache_clear()
+
+
+def test_resample_builds_bars_from_the_0915_open():
+    from candle_history import resample
+    import pandas as pd
+
+    base = int(dt.datetime(2026, 9, 29, 9, 15, tzinfo=IST).timestamp())
+    rows = [
+        {"ts": base + 60 * i, "open": 100 + i, "high": 101 + i, "low": 99 + i, "close": 100.5 + i, "volume": 10}
+        for i in range(31)
+    ]
+    out = resample(pd.DataFrame(rows), 15)
+    assert list(out["ts"]) == [base, base + 900, base + 1800]
+    first = out.iloc[0]
+    assert (first["open"], first["high"], first["low"], first["close"], first["volume"]) == (100, 115, 99, 114.5, 150)
+    # 60-minute bars also start at 09:15, then 10:15.
+    hourly = resample(pd.DataFrame(rows), 60)
+    assert list(hourly["ts"]) == [base]
+
+
+@pytest.mark.parametrize("interval", [5, 15, 30, 60])
+def test_history_at_bigger_intervals_has_formed_indicators(db, interval):
+    broker = _Broker()
+    out = asyncio.run(
+        load_history(broker, "TCS", "2026-09-28T09:15", "2026-09-29T15:30", _CFG, interval)
+    )
+    assert out["interval"] == interval
+    times = [c["time"] for c in out["candles"]]
+    assert all(b - a >= interval * 60 for a, b in zip(times, times[1:]))
+    first = dt.datetime.fromtimestamp(times[0], IST).replace(tzinfo=None)
+    assert first == dt.datetime(2026, 9, 28, 9, 15)
+    assert out["candles"][0]["sma21"] is not None
+
+
+def test_unknown_interval_is_refused(db):
+    with pytest.raises(HistoryError, match="Candle size"):
+        asyncio.run(load_history(_Broker(), "TCS", "2026-09-29T09:15", "2026-09-29T15:30", _CFG, 7))
