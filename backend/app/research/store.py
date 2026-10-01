@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -46,7 +47,12 @@ from app.services.volume_contract import FIRST_BAR, OK, UNKNOWN, derive_session
 
 # Separate file from trading.db on purpose: a research backfill must never be
 # able to lock, bloat or corrupt the database the live app writes trades to.
-DB_PATH = Path(__file__).resolve().parents[2] / "research_data" / "research.db"
+# RESEARCH_DB_PATH moves it (tests point it at a throwaway file, because the
+# module-level store below writes its schema on import).
+DB_PATH = Path(
+    os.environ.get("RESEARCH_DB_PATH")
+    or Path(__file__).resolve().parents[2] / "research_data" / "research.db"
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS research_candles (

@@ -163,8 +163,8 @@ scripts/run_sma_terminal.sh
 # Frontend (:3000; terminal UI at /terminal)
 cd frontend && npm install && cp .env.local.example .env.local && npm run dev
 
-# Tests
-cd backend && .venv/bin/python -m pytest -q
+# Tests (pytest-asyncio is required; without it every async test fails)
+cd backend && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
 ```
 
 No credentials are needed. The desk starts on the simulated feed.
