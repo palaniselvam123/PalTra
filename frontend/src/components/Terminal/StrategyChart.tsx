@@ -316,8 +316,8 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   const [measuring, setMeasuring] = useState(false);
   const measuringRef = useRef(false);
   measuringRef.current = measuring;
-  const [snapClose, setSnapClose] = useState(true);
-  const snapCloseRef = useRef(true);
+  const [snapClose, setSnapClose] = useState(false);
+  const snapCloseRef = useRef(false);
   snapCloseRef.current = snapClose;
   const [measure, setMeasure] = useState<Measure>(NO_MEASURE);
   useEffect(() => {
@@ -542,10 +542,13 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     const onClick = (param: { time?: unknown; point?: { x: number; y: number } }) => {
       if (!measuringRef.current || typeof param.time !== "number" || !param.point) return;
       const t = param.time;
-      let price: number | null = null;
+      const candle = rowsRef.current.find((c) => c.time === t);
+      if (!candle) return;
+      let price: number | null;
       if (snapCloseRef.current) {
-        price = rowsRef.current.find((c) => c.time === t)?.close ?? null;
+        price = candle.close;
       } else {
+        // The exact price where you clicked: on the body, a wick, or anywhere in that candle's column.
         price = candles.coordinateToPrice(param.point.y);
       }
       if (price == null || !Number.isFinite(price)) return;
@@ -979,9 +982,12 @@ function MeasureBar({
             aria-label="Quantity for the P&L"
           />
         </label>
-        <label className="flex items-center gap-1 text-slate-300" title="Use each candle's close, or the exact price where you click">
+        <label
+          className="flex items-center gap-1 text-slate-300"
+          title="Off: the exact price where you click. On: the clicked candle's close."
+        >
           <input type="checkbox" checked={snapClose} onChange={(e) => onSnap(e.target.checked)} className="accent-amber-400" />
-          Use candle close
+          Snap to close
         </label>
         <button
           type="button"
