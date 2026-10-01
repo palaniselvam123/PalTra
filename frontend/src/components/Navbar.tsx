@@ -344,6 +344,39 @@ export function Navbar({
                     style={{ position: "fixed", top: menuBox.top, right: menuBox.right, zIndex: 80 }}
                     className="w-52 overflow-hidden rounded-card border border-border bg-surface shadow-pop"
                   >
+                    {/* Phones and tablets: the Sim / NSE switch is hidden in the bar. */}
+                    <div className="border-b border-border px-3 py-2 xl:hidden">
+                      <div className="mb-1.5 text-caption text-slate-500">Data source</div>
+                      <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Data source">
+                        {(["simulated", "live"] as const).map((src) => (
+                          <button
+                            key={src}
+                            type="button"
+                            aria-pressed={feed?.source === src}
+                            onClick={() => switchSource(src)}
+                            disabled={sourceLocked}
+                            className={clsx(
+                              "flex min-h-11 items-center justify-center gap-1.5 rounded-md text-body font-medium transition-colors",
+                              feed?.source === src
+                                ? "bg-bot/15 text-bot ring-1 ring-inset ring-bot/40"
+                                : "text-slate-300 ring-1 ring-inset ring-border hover:bg-white/[0.05]",
+                              sourceLocked && "cursor-not-allowed opacity-50"
+                            )}
+                          >
+                            {src === "simulated" ? <FlaskConical size={14} /> : <Radio size={14} />}
+                            {src === "simulated" ? "Sim" : "NSE"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-1.5 text-caption tracking-normal text-slate-500">
+                        {botRunning
+                          ? "Stop the bot before switching."
+                          : feed?.source === "live"
+                            ? "Real NSE quotes from Groww."
+                            : "Made-up prices that work any hour."}
+                      </div>
+                      {feedError ? <div className="mt-1 text-caption text-loss">{feedError}</div> : null}
+                    </div>
                     <MenuItem
                       icon={notif.enabled ? <Bell size={14} /> : <BellOff size={14} />}
                       label={notif.enabled ? "Trade alerts on" : "Trade alerts off"}
