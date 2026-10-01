@@ -8,7 +8,22 @@ import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
-import { SMA_API, smaApi, type ChartPayload, type SmaConfig, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { ReplayBar } from "@/components/Terminal/ReplayBar";
+import {
+  SMA_API,
+  setReplayRouting,
+  smaApi,
+  type ChartPayload,
+  type ReplayInfo,
+  type SmaConfig,
+  type SmaState,
+  type TradeRow,
+} from "@/lib/smaApi";
+
+/** A replay engine exists to read from (not while its candles are still loading). */
+function replayRouted(info: ReplayInfo | null): boolean {
+  return !!info && ["PLAYING", "PAUSED", "FINISHED"].includes(info.status);
+}
 
 function useFold(key: string) {
   const [folded, setFolded] = useState(false);
@@ -80,6 +95,8 @@ export default function TerminalPage() {
   const [closeNote, setCloseNote] = useState<string | null>(null);
   const [railFolded, toggleRail] = useFold("sma.rail");
   const busy = useRef(false);
+  const [replay, setReplay] = useState<ReplayInfo | null>(null);
+  const replayOn = useRef(false);
   const liveBars = useRef(240);
   const askLiveBars = useCallback((count: number) => {
     if (count === liveBars.current) return;
@@ -154,6 +171,55 @@ export default function TerminalPage() {
     return () => clearInterval(poll);
   }, [refresh]);
 
+  // Replay: poll its status; while it plays, state/chart/bot buttons follow the
+  // replay engine (smaApi routes them) and update every second.
+  const onReplay = useCallback(
+    (info: ReplayInfo) => {
+      setReplay(info);
+      const on = replayRouted(info);
+      if (on !== replayOn.current) {
+        replayOn.current = on;
+        setReplayRouting(on);
+        setState(null);
+        setChart(null);
+        refresh();
+      }
+    },
+    [refresh]
+  );
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      smaApi
+        .replayInfo()
+        .then((info) => {
+          if (!stop) onReplay(info);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!stop) timer = setTimeout(tick, replayOn.current || replay?.status === "LOADING" ? 1000 : 10000);
+        });
+    };
+    tick();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [onReplay, replay?.status]);
+  const routed = replayRouted(replay);
+  useEffect(() => {
+    if (!routed) return;
+    let n = 0;
+    const poll = setInterval(() => {
+      n += 1;
+      smaApi.state().then(setState).catch(() => {});
+      smaApi.chart(liveBars.current).then(setChart).catch(() => {});
+      if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
+    }, 1000);
+    return () => clearInterval(poll);
+  }, [routed]);
+
   useEffect(() => {
     let ws: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout>;
@@ -179,6 +245,8 @@ export default function TerminalPage() {
       ws.onerror = () => ws?.close();
       ws.onmessage = (ev) => {
         try {
+          // The stream is the live engine. During a replay the page polls instead.
+          if (replayOn.current) return;
           const next = JSON.parse(ev.data) as SmaState;
           setState((prev) => (next.ltp > 0 || !prev || prev.ltp <= 0 ? next : prev));
         } catch {
@@ -239,6 +307,12 @@ export default function TerminalPage() {
             {closeNote}
           </div>
         )}
+        <ReplayBar
+          info={replay}
+          live={config?.trading_mode === "LIVE"}
+          armedCount={config?.trade_symbols?.length ?? 0}
+          onChanged={onReplay}
+        />
         <PnlMetricsRow state={state} />
         <div className="flex flex-col gap-4 xl:flex-row">
           <div className="min-w-0 flex-1">

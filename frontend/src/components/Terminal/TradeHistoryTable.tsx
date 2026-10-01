@@ -12,6 +12,7 @@ const REASON: Record<string, string> = {
   ATR_SL_HIT: "ATR SL HIT",
   GAP_SL_HIT: "MOVING SL HIT",
   TARGET_HIT: "TARGET HIT",
+  REPLAY_STOPPED: "REPLAY STOPPED",
   EOD_SQUARE_OFF: "EOD SQUARE-OFF",
   KILL_SWITCH: "KILL SWITCH",
   NOT_ON_GROWW: "NOT ON GROWW",
@@ -19,7 +20,7 @@ const REASON: Record<string, string> = {
   MANUAL_CLOSE: "MANUAL CLOSE",
 };
 
-type Book = "PAPER" | "LIVE";
+type Book = "PAPER" | "LIVE" | "REPLAY";
 
 const BOOKS: { id: Book; title: string; note: string }[] = [
   {
@@ -32,10 +33,16 @@ const BOOKS: { id: Book; title: string; note: string }[] = [
     title: "NSE live",
     note: "Fills that were sent to Groww on the NSE tape.",
   },
+  {
+    id: "REPLAY",
+    title: "Replay",
+    note: "Practice trades on a replayed past day (Groww candles). No order was ever sent; dates are the replayed day.",
+  },
 ];
 
 function bookOf(trade: TradeRow): Book {
-  return (trade.mode || "PAPER").toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+  const mode = (trade.mode || "PAPER").toUpperCase();
+  return mode === "LIVE" ? "LIVE" : mode === "REPLAY" ? "REPLAY" : "PAPER";
 }
 
 type PnlSide = "all" | "profit" | "loss" | "open";
@@ -103,7 +110,7 @@ export function TradeHistoryTable({
   };
   useEffect(() => {
     if (picked || !state?.mode) return;
-    setBook(state.mode === "LIVE" ? "LIVE" : "PAPER");
+    setBook(state.mode === "LIVE" ? "LIVE" : state.mode === "REPLAY" ? "REPLAY" : "PAPER");
   }, [picked, state?.mode]);
   const inBook = trades.filter((trade) => bookOf(trade) === book);
   const symbols = Array.from(new Set(inBook.map((trade) => trade.symbol.toUpperCase()))).sort();
@@ -178,13 +185,18 @@ export function TradeHistoryTable({
     <section
       className={clsx(
         "min-w-0 max-w-full rounded-xl border bg-[#151921]",
-        simulation ? "border-[#F59E0B]/40" : "border-[#F43F5E]/40"
+        simulation ? "border-[#F59E0B]/40" : book === "REPLAY" ? "border-violet-400/40" : "border-[#F43F5E]/40"
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
           <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
-          <h2 className={clsx("text-sm font-medium", simulation ? "text-[#F59E0B]" : "text-[#F43F5E]")}>
+          <h2
+            className={clsx(
+              "text-sm font-medium",
+              simulation ? "text-[#F59E0B]" : book === "REPLAY" ? "text-violet-300" : "text-[#F43F5E]"
+            )}
+          >
             {selected.title}
           </h2>
         </div>
@@ -204,6 +216,7 @@ export function TradeHistoryTable({
                   "min-h-11 whitespace-nowrap rounded-md px-3 text-xs font-semibold sm:min-h-9",
                   on && item.id === "PAPER" && "bg-[#F59E0B] text-[#1a1203]",
                   on && item.id === "LIVE" && "bg-[#F43F5E] text-white",
+                  on && item.id === "REPLAY" && "bg-violet-500 text-white",
                   !on && "border border-white/10 text-slate-300 hover:bg-white/5"
                 )}
               >
@@ -332,7 +345,9 @@ export function TradeHistoryTable({
           inBook.length === 0
             ? simulation
               ? "No simulated trades yet. Start the bot and wait for the next SMA cross."
-              : "No NSE live trades on this page."
+              : book === "REPLAY"
+                ? "No replay trades yet. Use “Replay a past day” above."
+                : "No NSE live trades on this page."
             : "No open orders."
         }
       />

@@ -67,8 +67,11 @@ export type ChargeBreakdown = {
 export type SmaState = {
   bot_status: string;
   halt_reason: string;
-  mode: "PAPER" | "LIVE";
+  /** REPLAY while a past day is replaying (practice only). */
+  mode: "PAPER" | "LIVE" | "REPLAY";
   data_source: string;
+  /** Present only on /api/replay/state. */
+  replay?: ReplayInfo;
   last_error: string;
   last_signal: string;
   symbol: string;
@@ -197,7 +200,43 @@ export type TradeRow = {
   mode: string;
 };
 
+export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
+
+export type ReplayInfo = {
+  status: ReplayStatus;
+  date: string | null;
+  start: string;
+  /** ISO time on the replayed day. */
+  clock: string | null;
+  speed: number;
+  effective_speed: number;
+  speeds: number[];
+  symbols: string[];
+  skipped: string[];
+  loaded: number;
+  total: number;
+  error: string;
+};
+
+export function replayActive(info: ReplayInfo | null | undefined): boolean {
+  return !!info && ["LOADING", "PLAYING", "PAUSED", "FINISHED"].includes(info.status);
+}
+
+/** While a replay plays, state, chart and bot buttons talk to the replay engine. */
+let replayRouting = false;
+export function setReplayRouting(on: boolean): void {
+  replayRouting = on;
+}
+function route(path: string): string {
+  if (!replayRouting) return path;
+  if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
+  if (path.startsWith("/api/chart")) return path.replace("/api/chart", "/api/replay/chart");
+  if (path.startsWith("/api/bot/")) return path.replace("/api/bot/", "/api/replay/bot/");
+  return path;
+}
+
 async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): Promise<T> {
+  path = route(path);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -264,7 +303,12 @@ export const smaApi = {
       body: JSON.stringify({ symbol }),
     }),
   trades: () => request<TradeRow[]>("/api/trades"),
-  csvUrl: (mode?: "PAPER" | "LIVE") =>
+  replayInfo: () => request<ReplayInfo>("/api/replay"),
+  replayStart: (date: string, start: string, speed: number) =>
+    request<ReplayInfo>("/api/replay/start", { method: "POST", body: JSON.stringify({ date, start, speed }) }, 20000),
+  replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
+    request<ReplayInfo>("/api/replay/control", { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
+  csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",
 };
