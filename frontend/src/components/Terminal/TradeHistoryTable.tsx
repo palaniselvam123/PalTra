@@ -1,11 +1,12 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
-import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { Badge, SideBadge, Skeleton, pnlTone } from "./ui";
-import { BacktestRuns } from "./BacktestRuns";
+import { inr, px, smaApi, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { Badge, Skeleton, pnlTone } from "./ui";
+import { BacktestRuns, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -48,6 +49,135 @@ function bookOf(trade: TradeRow): Book {
 }
 
 type PnlSide = "all" | "profit" | "loss" | "open";
+type SideFilter = "ALL" | "LONG" | "SHORT";
+
+/** What a row is sorted on. `null` keeps the API order (newest first). */
+type SortKey =
+  | "id"
+  | "stock"
+  | "side"
+  | "entry_time"
+  | "entry"
+  | "exit_time"
+  | "exit"
+  | "points"
+  | "reason"
+  | "strategy"
+  | "charges"
+  | "net";
+type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
+
+const SORT_CHOICES: { key: SortKey; label: string }[] = [
+  { key: "entry_time", label: "Entry time" },
+  { key: "exit_time", label: "Exit time" },
+  { key: "net", label: "Net P&L" },
+  { key: "points", label: "Points" },
+  { key: "charges", label: "Charges" },
+  { key: "stock", label: "Stock" },
+  { key: "side", label: "Side" },
+  { key: "reason", label: "Exit reason" },
+  { key: "strategy", label: "Strategy" },
+  { key: "entry", label: "Entry price" },
+  { key: "exit", label: "Exit price" },
+  { key: "id", label: "Trade #" },
+];
+
+/** Sorts that keep a day's trades together, so day subtotals still make sense. */
+const BY_TIME: (SortKey | undefined)[] = [undefined, "id", "entry_time", "exit_time"];
+
+const NOT_RECORDED = "__none__";
+
+type RunSettings = Map<number, Settings>;
+
+/** Settings the trade ran with: its own record, else its replay run's snapshot. */
+function settingsOf(trade: TradeRow, runs: RunSettings): Settings | null {
+  if (trade.strategy && Object.keys(trade.strategy).length) return trade.strategy;
+  if (trade.run_id != null) return runs.get(trade.run_id) ?? null;
+  return null;
+}
+
+function strategyOf(trade: TradeRow, runs: RunSettings): string | null {
+  const settings = settingsOf(trade, runs);
+  return settings ? strategyLabel(settings) : null;
+}
+
+function epoch(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const date = parseClock(value);
+  return date ? date.getTime() : null;
+}
+
+function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: RunSettings): number | string | null {
+  switch (key) {
+    case "id":
+      return trade.id;
+    case "stock":
+      return trade.symbol.toUpperCase();
+    case "side":
+      return trade.direction;
+    case "entry_time":
+      return epoch(trade.entry_time);
+    case "entry":
+      return trade.entry_price;
+    case "exit_time":
+      return epoch(trade.exit_time);
+    case "exit":
+      return marketPrice(trade, state);
+    case "points":
+      return rowFigures(trade, state).points;
+    case "reason":
+      return trade.exit_price == null ? "Open" : REASON_SHORT[trade.exit_reason || ""] ?? (trade.exit_reason || "");
+    case "strategy":
+      return strategyOf(trade, runs);
+    case "charges":
+      return trade.brokerage_and_taxes;
+    case "net":
+      return rowFigures(trade, state).net;
+  }
+}
+
+/** Sorted copy; rows without a value always go last. */
+function sortRows(rows: TradeRow[], sort: Sort, state: SmaState | null, runs: RunSettings): TradeRow[] {
+  if (!sort) return rows;
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return rows
+    .map((trade, i) => ({ trade, i, v: sortValue(trade, sort.key, state, runs) }))
+    .sort((a, b) => {
+      if (a.v == null || b.v == null) return a.v == null ? (b.v == null ? a.i - b.i : 1) : -1;
+      const diff = typeof a.v === "number" && typeof b.v === "number" ? a.v - b.v : String(a.v).localeCompare(String(b.v));
+      return diff === 0 ? a.i - b.i : sign * diff;
+    })
+    .map((row) => row.trade);
+}
+
+/** Replay-run settings for the run ids in this list, fetched once per new run. */
+function useRunSettings(trades: TradeRow[]): RunSettings {
+  const [runs, setRuns] = useState<RunSettings>(() => new Map());
+  const wanted = Array.from(
+    new Set(trades.filter((t) => t.run_id != null && !t.strategy).map((t) => t.run_id as number))
+  )
+    .sort((a, b) => a - b)
+    .join(",");
+  useEffect(() => {
+    if (!wanted) return;
+    const missing = wanted.split(",").some((id) => !runs.has(Number(id)));
+    if (!missing) return;
+    let live = true;
+    smaApi
+      .replayRuns()
+      .then((rows) => {
+        if (live) setRuns(new Map(rows.map((run) => [run.id, run.settings])));
+      })
+      .catch(() => {
+        /* the column shows "—" until the next try */
+      });
+    return () => {
+      live = false;
+    };
+    // `runs` is read only to skip a fetch we do not need.
+  }, [wanted]);
+  return runs;
+}
 
 function tradeDay(trade: TradeRow): string {
   if (trade.date && /^\d{4}-\d{2}-\d{2}/.test(trade.date)) return trade.date.slice(0, 10);
@@ -93,6 +223,11 @@ export function TradeHistoryTable({
   const [pnlSide, setPnlSide] = useState<PnlSide>("all");
   const [minPnl, setMinPnl] = useState("");
   const [maxPnl, setMaxPnl] = useState("");
+  const [side, setSide] = useState<SideFilter>("ALL");
+  const [reason, setReason] = useState("ALL");
+  const [strategy, setStrategy] = useState("ALL");
+  const [sort, setSort] = useState<Sort>(null);
+  const runs = useRunSettings(trades);
   const [closedFolded, setClosedFolded] = useState(false);
   useEffect(() => {
     try {
@@ -119,10 +254,21 @@ export function TradeHistoryTable({
   const inBook = trades.filter((trade) => bookOf(trade) === book);
   const symbols = Array.from(new Set(inBook.map((trade) => trade.symbol.toUpperCase()))).sort();
   const stockFilter = symbols.includes(stock) ? stock : "ALL";
+  const reasons = Array.from(
+    new Set(inBook.filter((t) => t.exit_price != null).map((t) => t.exit_reason || ""))
+  ).sort((a, b) => (REASON_SHORT[a] ?? a).localeCompare(REASON_SHORT[b] ?? b));
+  const reasonFilter = reasons.includes(reason) ? reason : "ALL";
+  const strategies = Array.from(new Set(inBook.map((t) => strategyOf(t, runs) ?? NOT_RECORDED))).sort((a, b) =>
+    a === NOT_RECORDED ? 1 : b === NOT_RECORDED ? -1 : a.localeCompare(b)
+  );
+  const strategyFilter = strategies.includes(strategy) ? strategy : "ALL";
   const min = minPnl.trim() === "" ? null : Number(minPnl);
   const max = maxPnl.trim() === "" ? null : Number(maxPnl);
   const rows = inBook.filter((trade) => {
     if (stockFilter !== "ALL" && trade.symbol.toUpperCase() !== stockFilter) return false;
+    if (side !== "ALL" && trade.direction !== side) return false;
+    if (reasonFilter !== "ALL" && (trade.exit_price == null || (trade.exit_reason || "") !== reasonFilter)) return false;
+    if (strategyFilter !== "ALL" && (strategyOf(trade, runs) ?? NOT_RECORDED) !== strategyFilter) return false;
     const day = tradeDay(trade);
     if (from && (!day || day < from)) return false;
     if (to && (!day || day > to)) return false;
@@ -135,8 +281,15 @@ export function TradeHistoryTable({
     if (max != null && Number.isFinite(max) && (pnl == null || pnl > max)) return false;
     return true;
   });
-  const openRows = rows.filter((trade) => trade.exit_price == null);
-  const completedRows = rows.filter((trade) => trade.exit_price != null);
+  const openRows = sortRows(rows.filter((trade) => trade.exit_price == null), sort, state, runs);
+  const completedRows = sortRows(rows.filter((trade) => trade.exit_price != null), sort, state, runs);
+  // Click a header: high to low first for numbers, A to Z for words; a third click resets.
+  const sortBy = (key: SortKey) => {
+    const first: "asc" | "desc" = ["stock", "side", "reason", "strategy"].includes(key) ? "asc" : "desc";
+    setSort((current) =>
+      current?.key !== key ? { key, dir: first } : current.dir === first ? { key, dir: first === "asc" ? "desc" : "asc" } : null
+    );
+  };
   const filteredPnl = rows.reduce((sum, trade) => {
     const pnl = shownPnl(trade, state);
     return pnl == null ? sum : sum + pnl;
@@ -161,12 +314,24 @@ export function TradeHistoryTable({
     },
     { wins: 0, losses: 0, flat: 0, profit: 0, loss: 0, charges: 0, net: 0 }
   );
-  const filtersOn = stockFilter !== "ALL" || from !== "" || to !== "" || pnlSide !== "all" || minPnl !== "" || maxPnl !== "";
+  const filtersOn =
+    stockFilter !== "ALL" ||
+    side !== "ALL" ||
+    reasonFilter !== "ALL" ||
+    strategyFilter !== "ALL" ||
+    from !== "" ||
+    to !== "" ||
+    pnlSide !== "all" ||
+    minPnl !== "" ||
+    maxPnl !== "";
   const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
   const simulation = book === "PAPER";
 
   const clearFilters = () => {
     setStock("ALL");
+    setSide("ALL");
+    setReason("ALL");
+    setStrategy("ALL");
     setFrom("");
     setTo("");
     setPnlSide("all");
@@ -191,9 +356,9 @@ export function TradeHistoryTable({
       "net_pnl",
       "mode",
     ] as const;
-    const lines = [fields.join(",")];
-    for (const trade of rows) {
-      lines.push(fields.map((key) => csvCell(trade[key])).join(","));
+    const lines = [[...fields, "strategy"].join(",")];
+    for (const trade of [...openRows, ...completedRows]) {
+      lines.push([...fields.map((key) => csvCell(trade[key])), csvCell(strategyOf(trade, runs))].join(","));
     }
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -299,6 +464,36 @@ export function TradeHistoryTable({
             ))}
           </select>
         </label>
+        <label className="flex min-w-[6.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+          Side
+          <select value={side} onChange={(e) => setSide(e.target.value as SideFilter)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
+            <option value="ALL">Both</option>
+            <option value="LONG">Long (buy)</option>
+            <option value="SHORT">Short (sell)</option>
+          </select>
+        </label>
+        <label className="flex min-w-[8.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+          Exit reason
+          <select value={reasonFilter} onChange={(e) => setReason(e.target.value)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
+            <option value="ALL">Any reason</option>
+            {reasons.map((code) => (
+              <option key={code} value={code}>
+                {REASON_SHORT[code] ?? (code || "Closed")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-w-[9rem] max-w-[16rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+          Strategy
+          <select value={strategyFilter} onChange={(e) => setStrategy(e.target.value)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
+            <option value="ALL">Any strategy</option>
+            {strategies.map((label) => (
+              <option key={label} value={label}>
+                {label === NOT_RECORDED ? "Not recorded" : label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           From
           <input
@@ -350,6 +545,34 @@ export function TradeHistoryTable({
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
+        <div className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+          <label htmlFor="blotter-sort">Sort</label>
+          <div className="flex gap-1">
+            <select
+              id="blotter-sort"
+              value={sort?.key ?? ""}
+              onChange={(e) => setSort(e.target.value ? { key: e.target.value as SortKey, dir: sort?.dir ?? "desc" } : null)}
+              className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
+            >
+              <option value="">Newest first</option>
+              {SORT_CHOICES.map((choice) => (
+                <option key={choice.key} value={choice.key}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {sort ? (
+              <button
+                type="button"
+                aria-label={sort.dir === "asc" ? "Ascending, switch to descending" : "Descending, switch to ascending"}
+                onClick={() => setSort({ key: sort.key, dir: sort.dir === "asc" ? "desc" : "asc" })}
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-white/15 text-slate-200 hover:bg-white/5 sm:min-h-9 sm:min-w-9"
+              >
+                {sort.dir === "asc" ? <ArrowUp size={14} aria-hidden /> : <ArrowDown size={14} aria-hidden />}
+              </button>
+            ) : null}
+          </div>
+        </div>
         {filtersOn && (
           <button
             type="button"
@@ -390,6 +613,9 @@ export function TradeHistoryTable({
         state={state}
         closingSymbol={closingSymbol}
         onClose={onClose}
+        sort={sort}
+        onSort={sortBy}
+        runs={runs}
         empty={
           inBook.length === 0
             ? simulation
@@ -407,6 +633,9 @@ export function TradeHistoryTable({
           rows={completedRows}
           closingSymbol={null}
           onClose={onClose}
+          sort={sort}
+          onSort={sortBy}
+          runs={runs}
           state={state}
           empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
         />
@@ -419,7 +648,7 @@ export function TradeHistoryTable({
   );
 }
 
-type Col = { key: string; label: string; num?: boolean };
+type Col = { key: SortKey | "action"; label: string; num?: boolean };
 const COLUMNS: Col[] = [
   { key: "id", label: "#", num: true },
   { key: "stock", label: "Stock" },
@@ -430,6 +659,7 @@ const COLUMNS: Col[] = [
   { key: "exit", label: "Exit", num: true },
   { key: "points", label: "Points", num: true },
   { key: "reason", label: "Exit reason" },
+  { key: "strategy", label: "Strategy" },
   { key: "charges", label: "Charges", num: true },
   { key: "net", label: "Net P&L", num: true },
   { key: "action", label: "" },
@@ -544,6 +774,37 @@ function ReasonBadge({ trade }: { trade: TradeRow }) {
   );
 }
 
+/** Long / Short in green when the trade made money, red when it lost, grey while open. */
+function ResultSideBadge({ trade, net }: { trade: TradeRow; net: number | null }) {
+  const word = trade.direction === "LONG" ? "Long" : trade.direction === "SHORT" ? "Short" : "Flat";
+  const open = trade.exit_price == null;
+  const color = open || net == null || net === 0 ? "slate" : net > 0 ? "green" : "red";
+  const result = open ? "open" : net == null || net === 0 ? "flat" : net > 0 ? "profit" : "loss";
+  return (
+    <Badge color={color} title={`${trade.direction === "LONG" ? "Bought" : "Sold"} first · ${result}`}>
+      {word}
+    </Badge>
+  );
+}
+
+function StrategyCell({ settings }: { settings: Settings | null }) {
+  if (!settings) {
+    return (
+      <span className="text-slate-500" title="This trade was booked before the strategy was recorded on each trade.">
+        —
+      </span>
+    );
+  }
+  return (
+    <div className="min-w-0 leading-tight" title={strategyLabel(settings)}>
+      <div className="truncate text-xs text-slate-200">
+        SMA {settings.sma_fast ?? 9}/{settings.sma_slow ?? 21} · {stopShort(settings)}
+      </div>
+      <div className="truncate text-[11px] text-slate-400">{filtersShort(settings)}</div>
+    </div>
+  );
+}
+
 /** One row's numbers. An open row is marked at the live price and says so. */
 function rowFigures(t: TradeRow, state: SmaState | null) {
   const open = t.exit_price == null;
@@ -591,6 +852,9 @@ function OrderTable({
   closingSymbol,
   onClose,
   subtotals,
+  sort,
+  onSort,
+  runs,
 }: {
   title: string;
   rows: TradeRow[];
@@ -599,9 +863,14 @@ function OrderTable({
   closingSymbol: string | null;
   onClose: (trade: TradeRow) => void;
   subtotals?: boolean;
+  sort: Sort;
+  onSort: (key: SortKey) => void;
+  runs: RunSettings;
 }) {
-  const groups = byDay(rows);
-  const showSubtotals = Boolean(subtotals) && groups.length > 1;
+  // Day subtotals only while the rows stay in date order.
+  const byTime = BY_TIME.includes(sort?.key);
+  const groups = byTime ? byDay(rows) : [{ day: "all", rows, charges: 0, net: 0 }];
+  const showSubtotals = Boolean(subtotals) && byTime && groups.length > 1;
   return (
     <div className="border-t border-white/10">
       <h3 className="flex items-baseline gap-2 px-4 pt-3 text-xs font-semibold uppercase tracking-wider text-slate-300">
@@ -618,6 +887,7 @@ function OrderTable({
               <TradeCard
                 key={trade.id}
                 trade={trade}
+                runs={runs}
                 state={state}
                 closing={closingSymbol === trade.symbol.toUpperCase()}
                 onClose={onClose}
@@ -633,11 +903,34 @@ function OrderTable({
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
             <tr>
-              {COLUMNS.map((col) => (
-                <th key={col.key} scope="col" className={clsx("whitespace-nowrap px-3 py-2 font-medium", col.num && "text-right")}>
-                  {col.label}
-                </th>
-              ))}
+              {COLUMNS.map((col) => {
+                if (col.key === "action") return <th key={col.key} scope="col" className="px-3 py-2" />;
+                const key = col.key;
+                const on = sort?.key === key;
+                const Icon = !on ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+                return (
+                  <th
+                    key={key}
+                    scope="col"
+                    aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right")}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSort(key)}
+                      title={`Sort by ${col.label === "#" ? "trade number" : col.label.toLowerCase()}`}
+                      className={clsx(
+                        "inline-flex min-h-8 items-center gap-1 rounded px-1.5 uppercase tracking-wider hover:bg-white/5 hover:text-white",
+                        col.num && "flex-row-reverse",
+                        on ? "text-white" : "text-slate-300"
+                      )}
+                    >
+                      {col.label}
+                      <Icon size={12} aria-hidden className={on ? "text-sky-300" : "text-slate-500"} />
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -654,6 +947,7 @@ function OrderTable({
                   <OrderRow
                     key={trade.id}
                     trade={trade}
+                    runs={runs}
                     state={state}
                     closing={closingSymbol === trade.symbol.toUpperCase()}
                     onClose={onClose}
@@ -685,7 +979,7 @@ function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
   }
   return (
     <tr className="border-y border-white/15 bg-white/[0.06] font-semibold">
-      <td colSpan={9} className="px-3 py-2 text-slate-200">
+      <td colSpan={10} className="px-3 py-2 text-slate-200">
         Subtotal · {label}
       </td>
       <td className="px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
@@ -720,11 +1014,13 @@ function CloseButton({ trade, closing, onClose }: { trade: TradeRow; closing: bo
 
 function OrderRow({
   trade: t,
+  runs,
   state,
   closing,
   onClose,
 }: {
   trade: TradeRow;
+  runs: RunSettings;
   state: SmaState | null;
   closing: boolean;
   onClose: (trade: TradeRow) => void;
@@ -735,7 +1031,7 @@ function OrderRow({
       <td className="px-3 py-2 text-right font-mono text-slate-400">{t.id}</td>
       <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
       <td className="px-3 py-2">
-        <SideBadge side={t.direction} />
+        <ResultSideBadge trade={t} net={net} />
         <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
       </td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
@@ -747,6 +1043,9 @@ function OrderRow({
       <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
         <ReasonBadge trade={t} />
+      </td>
+      <td className="max-w-[13rem] px-3 py-2">
+        <StrategyCell settings={settingsOf(t, runs)} />
       </td>
       <td className="px-3 py-2 text-right font-mono text-amber-300">
         {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
@@ -761,11 +1060,13 @@ function OrderRow({
 
 function TradeCard({
   trade: t,
+  runs,
   state,
   closing,
   onClose,
 }: {
   trade: TradeRow;
+  runs: RunSettings;
   state: SmaState | null;
   closing: boolean;
   onClose: (trade: TradeRow) => void;
@@ -776,7 +1077,7 @@ function TradeCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-semibold text-amber-300">{t.symbol}</span>
-          <SideBadge side={t.direction} />
+          <ResultSideBadge trade={t} net={net} />
           <span className="font-mono text-xs text-slate-400">{t.qty}</span>
         </div>
         <span className={clsx("shrink-0 font-mono text-[17px] font-semibold", pnlTone(net))}>{signedInr(net)}</span>
@@ -787,6 +1088,10 @@ function TradeCard({
         <Field k="Points" v={signedPts(points)} tone={pnlTone(points)} />
         <Field k="Charges" v={t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)} tone="text-amber-300" />
       </dl>
+      <div className="mt-2 text-xs">
+        <div className="text-[11px] uppercase tracking-wider text-slate-400">Strategy</div>
+        <StrategyCell settings={settingsOf(t, runs)} />
+      </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-xs text-slate-400">
           #{t.id} <ReasonBadge trade={t} />

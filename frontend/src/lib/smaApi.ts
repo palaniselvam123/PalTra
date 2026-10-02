@@ -177,7 +177,7 @@ export type ChartPayload = {
     direction: "LONG" | "SHORT";
     price: number;
     kind: "ENTRY" | "EXIT" | string;
-    /** Only on EXIT markers from /api/history. */
+    /** The trade's net P&L once it has closed, when the API sends it. */
     net_pnl?: number | null;
     /** Only on EXIT markers from /api/history: why the trade closed. */
     reason?: string | null;
@@ -217,6 +217,8 @@ export type TradeRow = {
   mode: string;
   /** The replay run a REPLAY trade belongs to. */
   run_id?: number | null;
+  /** Settings the bot used for this trade, when the API records them. */
+  strategy?: Record<string, string | number | boolean | null> | null;
 };
 
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";

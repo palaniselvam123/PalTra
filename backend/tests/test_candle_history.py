@@ -156,6 +156,7 @@ def test_markers_show_entries_and_exits_inside_the_range(db):
     kinds = [(m["kind"], m["direction"], m["price"]) for m in out["markers"]]
     assert kinds == [("ENTRY", "LONG", 101.0), ("EXIT", "LONG", 104.0)]
     assert out["markers"][1]["net_pnl"] == 12.0
+    assert out["markers"][0]["net_pnl"] == 12.0  # the entry is coloured by the trade's result too
     assert out["markers"][1]["reason"] == "MA_CROSS"  # the chart colours stop exits from this
     assert out["entry_price"] is None and out["sl_trigger"] is None
 

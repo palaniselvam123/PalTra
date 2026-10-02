@@ -550,3 +550,36 @@ async def test_the_same_day_gives_the_same_trades_at_any_speed(db, monkeypatch):
     assert slow == fast
     # Every fill happened on the 10-second grid.
     assert all(t[1].second % 10 == 0 and t[1].microsecond == 0 for t in slow)
+
+
+def test_each_trade_keeps_the_strategy_it_was_entered_with(db):
+    """The blotter's Strategy column reads the settings saved on the trade at entry."""
+    from database import session_factory
+    from models import BotConfig, TradeLog
+    from strategy_engine import StrategyEngine
+
+    with session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.stop_type, row.tsl_sl_points, row.tsl_trail_points, row.use_vwap = "TSL", 7.0, 2.0, True
+        s.commit()
+    clock = dt.datetime.combine(DAY, dt.time(10, 0), tzinfo=IST)
+    engine = StrategyEngine(broker=ReplayBroker(ReplayFeed(_frames(), clock)))
+    cfg = engine.load_config()
+    trade_id = engine._insert_open_trade(
+        cfg=cfg, direction="LONG", fill=100.0, cross_price=100.0, atr=1.0, sl=93.0, now=clock, qty=5
+    )
+    # A later settings change does not rewrite what the open trade used.
+    with session_factory()() as s:
+        s.get(BotConfig, 1).stop_type = "ATR"
+        s.commit()
+    saved = next(t for t in engine.trades() if t["id"] == trade_id)["strategy"]
+    assert saved["stop_type"] == "TSL"
+    assert (saved["tsl_sl_points"], saved["tsl_trail_points"], saved["use_vwap"]) == (7.0, 2.0, True)
+    assert saved["qty"] == 5  # the trade's own size, not the configured default
+
+    # Trades booked before this was recorded have no strategy, and say so.
+    with session_factory()() as s:
+        s.get(TradeLog, trade_id).strategy = None
+        s.commit()
+    engine._trades_cache = None  # trades() caches for a few seconds
+    assert next(t for t in engine.trades() if t["id"] == trade_id)["strategy"] is None

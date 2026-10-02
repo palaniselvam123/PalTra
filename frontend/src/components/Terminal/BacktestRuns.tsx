@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { inr, smaApi, type ReplayRun } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 
-type Settings = ReplayRun["settings"];
+export type Settings = ReplayRun["settings"];
 
 function signed(v: number): string {
   return `${v > 0 ? "+" : ""}${inr(v)}`;
@@ -50,6 +50,28 @@ export function strategyLabel(s: Settings): string {
   parts.push(filters.length ? filters.join(", ") : "no filters");
   parts.push(`qty ${s.qty ?? "—"}`);
   return parts.join(" · ");
+}
+
+/** The stop part of a strategy in a few words, e.g. "1.5× ATR" or "TSL ₹20 / ₹10". */
+export function stopShort(s: Settings): string {
+  if (s.use_stop === false) return "No stop";
+  if (s.stop_type === "SMA_GAP") return `SMA-gap ×${s.gap_sl_mult}/×${s.gap_tp_mult}`;
+  if (s.stop_type === "TSL") {
+    const target = Number(s.tsl_target_points ?? 0) > 0 ? ` · T ₹${s.tsl_target_points}` : "";
+    return `TSL ₹${s.tsl_sl_points ?? 20} / ₹${s.tsl_trail_points ?? 10}${target}`;
+  }
+  return `${s.atr_multiplier ?? 1.5}× ATR`;
+}
+
+/** The entry filters that were on, e.g. "VWAP, RSI", or "no filters". */
+export function filtersShort(s: Settings): string {
+  const on: string[] = [];
+  if (s.use_vwap) on.push("VWAP");
+  if (s.use_volume) on.push("Vol");
+  if (s.use_density) on.push("Density");
+  if (s.use_rsi) on.push("RSI");
+  if (s.use_adx_filter) on.push("ADX");
+  return on.length ? on.join(", ") : "no filters";
 }
 
 const SETTING_ROWS: [string, (s: Settings) => string][] = [

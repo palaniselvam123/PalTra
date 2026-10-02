@@ -159,7 +159,40 @@ function compactPrice(value: number): string {
 }
 
 /** Entry markers from the API plus exit markers from closed trades on this stock. */
-function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], symbol: string, bar = 1): Marker[] {
+/** Green for a trade that made money, red for a loss, grey while it is open or unknown. */
+const ENTRY_OPEN_COLOR = "#CBD5E1";
+
+function resultColor(net: number | null | undefined): string {
+  return net == null ? ENTRY_OPEN_COLOR : net >= 0 ? "#34D399" : "#FB7185";
+}
+
+/** The closed trade an entry marker belongs to: same stock, side, fill price and bar. */
+function entryResult(
+  m: { time: number; direction: string; price: number; net_pnl?: number | null },
+  lookup: TradeRow[],
+  symbol: string,
+  snap: (sec: number) => number
+): number | null {
+  if (m.net_pnl != null) return m.net_pnl;
+  const bar = snap(m.time);
+  for (const t of lookup) {
+    if (t.exit_price == null || t.symbol.toUpperCase() !== symbol || t.direction !== m.direction) continue;
+    if (Math.abs(t.entry_price - m.price) > 1e-6) continue;
+    const when = t.entry_time ? parseClock(t.entry_time) : null;
+    if (!when || snap(Math.floor(when.getTime() / 1000)) !== bar) continue;
+    return t.net_pnl ?? t.gross_pnl ?? null;
+  }
+  return null;
+}
+
+function chartMarkers(
+  chart: ChartPayload,
+  rows: Candle[],
+  trades: TradeRow[],
+  symbol: string,
+  bar = 1,
+  lookup: TradeRow[] = trades
+): Marker[] {
   if (rows.length === 0) return [];
   const first = rows[0].time;
   const last = rows[rows.length - 1].time;
@@ -181,7 +214,7 @@ function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], s
       return {
         time: snap(m.time),
         position: m.direction === "LONG" ? "belowBar" : "aboveBar",
-        color: m.direction === "LONG" ? "#34D399" : "#FB7185",
+        color: resultColor(entryResult(m, lookup, symbol, snap)),
         shape: m.direction === "LONG" ? "arrowUp" : "arrowDown",
         text: `${m.direction === "LONG" ? "BUY" : "SELL"} ${compactPrice(m.price)}`,
       };
@@ -686,7 +719,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     );
     // Past candles carry their own exit markers; the blotter only covers recent trades.
     candleRef.current.setMarkers(
-      chartMarkers(chart, rows, past ? [] : trades, symbol, bar).map((m) => ({ ...m, time: m.time as never }))
+      chartMarkers(chart, rows, past ? [] : trades, symbol, bar, trades).map((m) => ({ ...m, time: m.time as never }))
     );
 
     if (entryLine.current) {
@@ -847,8 +880,13 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
             </LegendItem>
           )}
           <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>
-          <LegendItem swatch={<span className="text-emerald-400">▲</span>}>Buy</LegendItem>
-          <LegendItem swatch={<span className="text-rose-400">▼</span>}>Sell</LegendItem>
+          <LegendItem swatch={<span className="text-slate-300">▲▼</span>}>Buy / Sell</LegendItem>
+          <LegendItem swatch={<span className="block h-2.5 w-2.5 rounded-full bg-emerald-400" />}>
+            <span className="text-emerald-300">Profit</span>
+          </LegendItem>
+          <LegendItem swatch={<span className="block h-2.5 w-2.5 rounded-full bg-rose-400" />}>
+            <span className="text-rose-300">Loss</span>
+          </LegendItem>
           <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
           <LegendItem swatch={<span className="text-[#FACC15]">●</span>}>
             <span className="text-[#FACC15]">Stop exit</span>
