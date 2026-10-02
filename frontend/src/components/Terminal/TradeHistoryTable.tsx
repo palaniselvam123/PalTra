@@ -138,6 +138,25 @@ export function TradeHistoryTable({
     return pnl == null ? sum : sum + pnl;
   }, 0);
   const filteredNet = rows.reduce((sum, trade) => (trade.net_pnl == null ? sum : sum + trade.net_pnl), 0);
+  // Closed trades split into winners and losers by gross P&L, e.g. +₹15 and −₹20 → −₹5.
+  const summary = completedRows.reduce(
+    (acc, trade) => {
+      const gross = trade.gross_pnl ?? 0;
+      if (gross > 0) {
+        acc.wins += 1;
+        acc.profit += gross;
+      } else if (gross < 0) {
+        acc.losses += 1;
+        acc.loss += gross;
+      } else {
+        acc.flat += 1;
+      }
+      acc.charges += trade.brokerage_and_taxes ?? 0;
+      acc.net += trade.net_pnl ?? gross;
+      return acc;
+    },
+    { wins: 0, losses: 0, flat: 0, profit: 0, loss: 0, charges: 0, net: 0 }
+  );
   const filtersOn = stockFilter !== "ALL" || from !== "" || to !== "" || pnlSide !== "all" || minPnl !== "" || maxPnl !== "";
   const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
   const simulation = book === "PAPER";
@@ -327,6 +346,12 @@ export function TradeHistoryTable({
         </p>
       </div>
       <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
+      <BookSummary
+        closed={completedRows.length}
+        open={openRows.length}
+        {...summary}
+        filtered={filtersOn}
+      />
       {loading ? (
         <div aria-busy="true" aria-label="Loading trades" className="space-y-2 border-t border-white/10 p-4">
           {[0, 1, 2, 3].map((i) => (
@@ -409,6 +434,77 @@ const REASON_SHORT: Record<string, string> = {
   MANUAL_CLOSE: "Manual",
   NOT_ON_GROWW: "Not on Groww",
 };
+
+function BookSummary({
+  closed,
+  open,
+  wins,
+  losses,
+  flat,
+  profit,
+  loss,
+  charges,
+  net,
+  filtered,
+}: {
+  closed: number;
+  open: number;
+  wins: number;
+  losses: number;
+  flat: number;
+  profit: number;
+  loss: number;
+  charges: number;
+  net: number;
+  filtered: boolean;
+}) {
+  const gross = profit + loss;
+  const signed = (v: number) => `${v > 0 ? "+" : ""}${inr(v)}`;
+  const tile = "min-w-0 rounded-lg bg-black/25 px-3 py-2 ring-1 ring-inset ring-white/10";
+  const label = "text-[11px] uppercase tracking-wider text-slate-400";
+  return (
+    <section aria-label="Closed trades summary" className="border-t border-white/10 px-4 py-3">
+      <div className="mb-2 text-[11px] text-slate-400">
+        Closed trades{filtered ? " matching the filters" : " in this book"}
+        {open ? ` · ${open} still open (not counted)` : ""}
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className={tile}>
+          <div className={label}>Trades</div>
+          <div className="font-mono text-[16px] font-semibold text-slate-100">{closed}</div>
+          <div className="text-[11px] text-slate-400">
+            {wins} W · {losses} L{flat ? ` · ${flat} flat` : ""}
+          </div>
+        </div>
+        <div className={tile}>
+          <div className={label}>Total profit</div>
+          <div className="font-mono text-[16px] font-semibold text-emerald-300">{signed(profit)}</div>
+          <div className="text-[11px] text-slate-400">from {wins} winning</div>
+        </div>
+        <div className={tile}>
+          <div className={label}>Total loss</div>
+          <div className="font-mono text-[16px] font-semibold text-rose-300">{signed(loss)}</div>
+          <div className="text-[11px] text-slate-400">from {losses} losing</div>
+        </div>
+        <div className={tile}>
+          <div className={label}>Gross P&amp;L</div>
+          <div className={clsx("font-mono text-[16px] font-semibold", pnlTone(gross))}>{signed(gross)}</div>
+          <div className="text-[11px] text-slate-400">profit + loss</div>
+        </div>
+        <div className={tile}>
+          <div className={label}>Charges</div>
+          <div className="font-mono text-[16px] font-semibold text-amber-300">{inr(charges)}</div>
+          <div className="text-[11px] text-slate-400">brokerage &amp; taxes</div>
+        </div>
+        <div className={tile}>
+          <div className={label}>Net P&amp;L</div>
+          <div className={clsx("font-mono text-[16px] font-semibold", pnlTone(net))}>{signed(net)}</div>
+          <div className="text-[11px] text-slate-400">after charges</div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function ReasonBadge({ trade }: { trade: TradeRow }) {
   if (trade.exit_price == null) return <Badge color="green">Open</Badge>;
