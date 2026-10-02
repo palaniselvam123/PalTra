@@ -282,6 +282,15 @@ function entryLook(gross: number | null): { title: string; color: string } {
   };
 }
 
+/** ₹ the open position makes (+) or loses (−) if it closes at `level`. */
+function pnlAt(direction: "LONG" | "SHORT", entry: number, qty: number, level: number): number {
+  return (direction === "LONG" ? level - entry : entry - level) * qty;
+}
+
+function signedInr(value: number): string {
+  return `${value >= 0 ? "+" : "−"}${inr(Math.abs(value))}`;
+}
+
 function livePnl(state: SmaState | null): { gross: number; pct: number; points: number } | null {
   const pos = state?.position;
   if (!pos || !state || state.ltp <= 0 || pos.entry_price <= 0) return null;
@@ -304,9 +313,9 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
   const pnlGrossRef = useRef<number | null>(null);
+  // Entry, stop and target of the open position, kept in view by autoscale.
+  const levelsRef = useRef<number[]>([]);
   const stopOn = state?.position ? state.position.stop_active !== false : state?.stop_enabled !== false;
-  const stopOnRef = useRef(stopOn);
-  stopOnRef.current = stopOn;
   const [hover, setHover] = useState<SmaHover | null>(null);
   const [hoverOhlc, setHoverOhlc] = useState<Ohlc | null>(null);
   const rowsRef = useRef<Candle[]>([]);
@@ -498,6 +507,22 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       wickDownColor: "#F43F5E",
     });
     candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.28 } });
+    // Stretch the price scale so the open position's entry, stop and target
+    // lines stay on screen instead of being cut off above or below the candles.
+    candles.applyOptions({
+      autoscaleInfoProvider: (original: () => { priceRange: { minValue: number; maxValue: number } } | null) => {
+        const res = original();
+        const levels = levelsRef.current;
+        if (!res || levels.length === 0) return res;
+        return {
+          ...res,
+          priceRange: {
+            minValue: Math.min(res.priceRange.minValue, ...levels),
+            maxValue: Math.max(res.priceRange.maxValue, ...levels),
+          },
+        };
+      },
+    });
     const fast = instance.addLineSeries({
       color: "#F43F5E",
       lineWidth: 2,
@@ -607,40 +632,9 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       chartMarkers(chart, rows, past ? [] : trades, symbol, bar).map((m) => ({ ...m, time: m.time as never }))
     );
 
-    if (slLine.current) {
-      candleRef.current.removePriceLine(slLine.current);
-      slLine.current = null;
-    }
     if (entryLine.current) {
       candleRef.current.removePriceLine(entryLine.current);
       entryLine.current = null;
-    }
-    if (targetLine.current) {
-      candleRef.current.removePriceLine(targetLine.current);
-      targetLine.current = null;
-    }
-    if (!past && chart.target && (chart.trailing || chart.tsl_step)) {
-      targetLine.current = candleRef.current.createPriceLine({
-        price: chart.target,
-        color: "#34D399",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        title: chart.tsl_step ? "Target" : "Target (SMA gap)",
-      });
-    }
-    // The stop line is drawn only when this position really has a stop.
-    if (!past && chart.sl_trigger && stopOnRef.current) {
-      slLine.current = candleRef.current.createPriceLine({
-        price: chart.sl_trigger,
-        color: "#F59E0B",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        title: chart.trailing
-          ? "Moving SL (SMA gap)"
-          : chart.tsl_step
-            ? `Trailing SL (every ₹${chart.tsl_step})`
-            : `${chart.atr_multiplier ?? 1.5}× ATR SL`,
-      });
     }
     if (!past && chart.entry_price) {
       const look = entryLook(pnlGrossRef.current);
@@ -652,7 +646,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         title: look.title,
       });
     }
-  }, [view, rows, bar, past, trades, symbol, stopOn]);
+  }, [view, rows, bar, past, trades, symbol]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
@@ -671,6 +665,44 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     if (!entryLine.current) return;
     entryLine.current.applyOptions(entryLook(pnlGross));
   }, [pnlGross]);
+
+  // Stop and target follow the live position (about every second), so a
+  // trailing stop slides on the chart as it moves. The chart payload only
+  // refreshes every 15 s, so it is the fallback.
+  const stopKind = pos?.trailing
+    ? "Moving SL"
+    : pos?.tsl_step || chart?.tsl_step
+      ? "Trailing SL"
+      : `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR SL`;
+  const slLevel = past || !pos || !stopOn ? null : (pos.sl_trigger ?? chart?.sl_trigger ?? null);
+  const targetLevel = past || !pos ? null : (pos.target ?? chart?.target ?? null);
+  const slCash = pos && slLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, slLevel) : null;
+  const targetCash = pos && targetLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, targetLevel) : null;
+  const slTitle = slLevel == null || slCash == null ? "" : `${stopKind} · ${signedInr(slCash)}`;
+  const targetTitle = targetLevel == null || targetCash == null ? "" : `Target · ${signedInr(targetCash)}`;
+  levelsRef.current =
+    past || !pos ? [] : [pos.entry_price, slLevel, targetLevel].filter((v): v is number => v != null && v > 0);
+
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series) return;
+    const place = (
+      ref: { current: IPriceLine | null },
+      price: number | null,
+      color: string,
+      title: string
+    ) => {
+      if (price == null || price <= 0) {
+        if (ref.current) series.removePriceLine(ref.current);
+        ref.current = null;
+        return;
+      }
+      if (ref.current) ref.current.applyOptions({ price, title });
+      else ref.current = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, title });
+    };
+    place(slLine, slLevel, "#F59E0B", slTitle);
+    place(targetLine, targetLevel, "#34D399", targetTitle);
+  }, [slLevel, targetLevel, slTitle, targetTitle]);
 
   const latest = latestSma(rows);
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
@@ -809,6 +841,36 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
               {pnl.points.toFixed(2)} pts · {pnl.pct >= 0 ? "+" : ""}
               {pnl.pct.toFixed(2)}%
             </div>
+            <dl className="mt-2 space-y-0.5 border-t border-white/10 pt-1.5 font-mono text-[11px]">
+              <div className="flex justify-between gap-3">
+                <dt className="font-sans text-amber-300">{pos.tsl_step ? "Trailing stop" : pos.trailing ? "Moving stop" : "Stop"}</dt>
+                <dd className="text-right text-slate-200">
+                  {slLevel == null ? (
+                    <span className="font-sans font-semibold text-amber-300">OFF</span>
+                  ) : (
+                    <>
+                      {px(slLevel)}
+                      {slCash != null ? (
+                        <span className={slCash >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}> {signedInr(slCash)}</span>
+                      ) : null}
+                    </>
+                  )}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="font-sans text-emerald-300">Target</dt>
+                <dd className="text-right text-slate-200">
+                  {targetLevel == null ? (
+                    <span className="font-sans text-slate-400">none</span>
+                  ) : (
+                    <>
+                      {px(targetLevel)}
+                      {targetCash != null ? <span className="text-[#10B981]"> {signedInr(targetCash)}</span> : null}
+                    </>
+                  )}
+                </dd>
+              </div>
+            </dl>
             <button
               type="button"
               disabled={closing}
