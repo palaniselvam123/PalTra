@@ -218,6 +218,14 @@ export default function TerminalPage() {
     };
   }, [onReplay, replay?.status]);
   const routed = replayRouted(replay);
+  // The chart marks only the book on screen: this replay run, or the PAPER /
+  // LIVE book. Each earlier replay of the same day would otherwise add its own
+  // EXIT at the same time and price.
+  const chartTrades = trades.filter((t) => {
+    const mode = (t.mode || "PAPER").toUpperCase();
+    if (routed) return mode === "REPLAY" && (replay?.run_id == null || t.run_id === replay.run_id);
+    return mode === (config?.trading_mode || "PAPER").toUpperCase();
+  });
   useEffect(() => {
     if (!routed) return;
     let n = 0;
@@ -344,7 +352,7 @@ export default function TerminalPage() {
             <StrategyChart
               chart={chart}
               state={state}
-              trades={trades}
+              trades={chartTrades}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
               onLiveBars={askLiveBars}
               onClose={() => {

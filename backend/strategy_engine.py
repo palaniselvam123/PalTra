@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from sqlalchemy import or_
 
 from charges import calculate_charges, legs_for
 from database import session_factory
@@ -1897,6 +1898,17 @@ class StrategyEngine:
             "connected": self.data_source != "ERROR",
         }
 
+    def _marker_book(self, cfg: BotConfig | None):
+        """Chart markers come from this engine's own book only.
+
+        Practice, real and replay trades share one table. Without this, every
+        replay of the same day drew its entries again on the chart.
+        """
+        mode = ((cfg.trading_mode if cfg else None) or "PAPER").upper()
+        if mode == "PAPER":
+            return or_(TradeLog.mode == "PAPER", TradeLog.mode.is_(None))
+        return TradeLog.mode == mode
+
     def chart_payload(self, limit: int = 240) -> dict:
         frame = self.candles
         candles = []
@@ -1930,7 +1942,13 @@ class StrategyEngine:
                 cfg = None
         view = (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
-            rows = db.query(TradeLog).order_by(TradeLog.id.desc()).limit(40).all()
+            rows = (
+                db.query(TradeLog)
+                .filter(self._marker_book(cfg))
+                .order_by(TradeLog.id.desc())
+                .limit(40)
+                .all()
+            )
         for row in reversed(rows):
             if view and (row.symbol or "").upper() != view:
                 continue
@@ -2418,6 +2436,7 @@ def _trade_dict(row: TradeLog) -> dict:
         "net_pnl": row.net_pnl,
         "points": points,
         "mode": row.mode,
+        "run_id": getattr(row, "run_id", None),
     }
 
 

@@ -222,6 +222,12 @@ class ReplayEngine(StrategyEngine):
     def _refresh_tick_sizes(self) -> None:
         return None
 
+    def _marker_book(self, cfg: BotConfig | None):  # noqa: ARG002
+        """Only this run's trades. Replaying the same day again must not stack markers."""
+        if self.run_id is not None:
+            return TradeLog.run_id == self.run_id
+        return (TradeLog.mode == "REPLAY") & (TradeLog.id > self._min_trade_id)
+
     def snapshot(self) -> dict:
         snap = super().snapshot()
         snap["max_trades"] = None  # no cap on a replay
