@@ -471,3 +471,35 @@ def test_runs_api_lists_details_and_deletes(tmp_path, monkeypatch):
         assert s.query(TradeLog).count() == 0
     database.reset_engine()
     get_settings.cache_clear()
+
+
+def test_chart_markers_come_from_this_book_only(db):
+    """Replaying the same day again must not stack its entries on the chart."""
+    from database import session_factory
+    from models import TradeLog
+    from strategy_engine import StrategyEngine
+
+    def trade(price: float, mode: str, run_id: int | None) -> TradeLog:
+        return TradeLog(
+            date=DAY.isoformat(), symbol="TCS", direction="LONG", qty=10,
+            entry_time=dt.datetime(2026, 9, 29, 10, 0), entry_price=price, ma_cross_price=price,
+            atr_at_entry=1.0, sl_trigger_price=price - 2, exit_time=dt.datetime(2026, 9, 29, 10, 30),
+            exit_price=price + 1, exit_reason="MA_CROSS", mode=mode, run_id=run_id,
+        )
+
+    with session_factory()() as s:
+        s.add_all([trade(1000.0, "REPLAY", 1), trade(1001.0, "REPLAY", 2), trade(1002.0, "PAPER", None)])
+        s.commit()
+    clock = dt.datetime.combine(DAY, dt.time(11, 0), tzinfo=IST)
+    feed = ReplayFeed(_frames(), clock)
+
+    run2 = ReplayEngine(feed, ["TCS"], run_id=2)
+    run2.load_config()
+    assert [m["price"] for m in run2.chart_payload()["markers"]] == [1001.0]
+
+    paper = StrategyEngine(broker=ReplayBroker(feed))
+    paper.load_config()
+    assert [m["price"] for m in paper.chart_payload()["markers"]] == [1002.0]
+
+    # The trade list says which run a replay trade belongs to, so the page can match it.
+    assert {t["entry_price"]: t["run_id"] for t in paper.trades()} == {1000.0: 1, 1001.0: 2, 1002.0: None}

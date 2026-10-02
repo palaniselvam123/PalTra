@@ -199,6 +199,8 @@ export type TradeRow = {
   net_pnl: number | null;
   points: number | null;
   mode: string;
+  /** The replay run a REPLAY trade belongs to. */
+  run_id?: number | null;
 };
 
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
