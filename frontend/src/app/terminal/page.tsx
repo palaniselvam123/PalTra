@@ -11,6 +11,7 @@ import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
 import {
   SMA_API,
+  ApiError,
   answered,
   setReplayRouting,
   smaApi,
@@ -231,12 +232,18 @@ export default function TerminalPage() {
           setUnreachable(false);
           setLoadNote(null);
         })
-        .catch(() => {});
+        .catch((err: unknown) => {
+          // 409: the server has no replay (it ended or the server restarted).
+          // Re-read the replay status now so the page stops showing it.
+          if (err instanceof ApiError && err.status === 409) {
+            smaApi.replayInfo().then(onReplay).catch(() => {});
+          }
+        });
       if (n % 2 === 0) smaApi.chart(liveBars.current).then(setChart).catch(() => {});
       if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
     }, 1000);
     return () => clearInterval(poll);
-  }, [routed]);
+  }, [routed, onReplay]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
