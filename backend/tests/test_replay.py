@@ -289,3 +289,172 @@ def test_raising_the_cap_resumes_a_replay_halted_on_it(tmp_path, monkeypatch):
         monkeypatch.setattr(main.replay, "status", "IDLE")
     database.reset_engine()
     get_settings.cache_clear()
+
+
+# --- multi-day runs -------------------------------------------------------
+
+
+def test_replay_range_rules():
+    from replay import parse_replay_range
+
+    late = dt.datetime(2026, 10, 1, 20, 0, tzinfo=IST)
+    assert parse_replay_range("2026-09-29", None, late) == (DAY, DAY)
+    assert parse_replay_range("2026-09-01", "2026-09-30", late) == (dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+    # A weekend start moves to Monday; a weekend end moves back to Friday.
+    assert parse_replay_range("2026-09-26", "2026-10-04", dt.datetime(2026, 10, 6, 20, tzinfo=IST)) == (
+        dt.date(2026, 9, 28),
+        dt.date(2026, 10, 2),
+    )
+    with pytest.raises(ValueError, match="one month"):
+        parse_replay_range("2026-08-01", "2026-09-30", late)
+    with pytest.raises(ValueError, match="on or after"):
+        parse_replay_range("2026-09-29", "2026-09-28", late)
+    with pytest.raises(ValueError, match="already closed"):
+        parse_replay_range("2026-09-29", "2026-10-02", late)
+
+
+def _wave_day(day: dt.date, base: float = 1000.0) -> pd.DataFrame:
+    """A quick wave (a cross every ~20 minutes) with a running volume total."""
+    rows = []
+    t0 = dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST)
+    for i in range(375):
+        mid = base + 6 * math.sin(i / 6.0)
+        o, c = mid - 0.3, mid + (0.5 if math.cos(i / 6.0) >= 0 else -0.5)
+        rows.append(
+            {
+                "ts": int((t0 + dt.timedelta(minutes=i)).timestamp()),
+                "open": o,
+                "high": max(o, c) + 0.4,
+                "low": min(o, c) - 0.4,
+                "close": c,
+                "volume": 1000 * (i + 1),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.asyncio
+async def test_a_multi_day_run_plays_each_day_and_records_the_run(db, monkeypatch):
+    import replay as replay_mod
+    from database import session_factory
+    from models import ReplayRun, TradeLog
+    from replay import get_run, list_runs
+
+    mon, tue, wed = dt.date(2026, 9, 28), dt.date(2026, 9, 29), dt.date(2026, 9, 30)
+    warm = dt.date(2026, 9, 25)  # Friday before
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.concat([_wave_day(d) for d in (warm, mon, tue, wed)]).reset_index(drop=True)
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    # Keep the test quick: each replayed day ends at 10:30, minute steps.
+    monkeypatch.setattr(replay_mod, "SESSION_END", dt.time(10, 30))
+    monkeypatch.setattr(replay_mod, "STEP_SECONDS", 60)
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+
+    session = ReplaySession()
+    await session.begin(
+        object(), ["TCS"], mon, dt.time(9, 15), 1_000_000, end_day=wed, settings={"qty": 10, "stop_type": "ATR"}
+    )
+    for _ in range(600):
+        await asyncio.sleep(0.05)
+        if session.status in ("FINISHED", "ERROR"):
+            break
+    assert session.status == "FINISHED", session.error
+    info = session.info()
+    assert info["days"] == [mon.isoformat(), tue.isoformat(), wed.isoformat()]
+    assert info["days_total"] == 3 and info["day_index"] == 2
+
+    with session_factory()() as s:
+        run = s.get(ReplayRun, info["run_id"])
+        assert (run.status, run.days_total, run.days_done) == ("FINISHED", 3, 3)
+        trades = s.query(TradeLog).filter(TradeLog.run_id == run.id).all()
+    assert trades and {t.mode for t in trades} == {"REPLAY"}
+    assert {t.date for t in trades} <= {mon.isoformat(), tue.isoformat(), wed.isoformat()}
+    assert len({t.date for t in trades}) >= 2  # trades on more than one replayed day
+    assert all(t.exit_time is not None for t in trades)  # each day squared off
+
+    detail = get_run(info["run_id"])
+    assert detail["settings"] == {"qty": 10, "stop_type": "ATR"}
+    assert [d["date"] for d in detail["days"]] == sorted(d["date"] for d in detail["days"])
+    assert detail["days"][-1]["cumulative"] == pytest.approx(detail["totals"]["net"], abs=0.05)
+    assert detail["totals"]["trades"] == len(trades)
+    assert list_runs()[0]["id"] == info["run_id"]
+    # Going back to today, or starting the next run, keeps this one FINISHED.
+    await session.stop()
+    await session.stop()
+    with session_factory()() as s:
+        assert s.get(ReplayRun, info["run_id"]).status == "FINISHED"
+
+
+def test_day_rows_split_profit_loss_and_drawdown():
+    from types import SimpleNamespace as NS
+    from replay import _day_rows, _totals
+
+    rows = [
+        NS(date="2026-09-28", exit_price=1.0, gross_pnl=15.0, brokerage_and_taxes=2.0, net_pnl=13.0),
+        NS(date="2026-09-28", exit_price=1.0, gross_pnl=-20.0, brokerage_and_taxes=2.0, net_pnl=-22.0),
+        NS(date="2026-09-29", exit_price=1.0, gross_pnl=-30.0, brokerage_and_taxes=1.0, net_pnl=-31.0),
+        NS(date="2026-09-30", exit_price=1.0, gross_pnl=50.0, brokerage_and_taxes=1.0, net_pnl=49.0),
+        NS(date="2026-09-30", exit_price=None, gross_pnl=None, brokerage_and_taxes=None, net_pnl=None),
+    ]
+    days = _day_rows(rows)
+    assert [(d["date"], d["trades"], d["profit"], d["loss"], d["gross"], d["net"]) for d in days] == [
+        ("2026-09-28", 2, 15.0, -20.0, -5.0, -9.0),
+        ("2026-09-29", 1, 0.0, -30.0, -30.0, -31.0),
+        ("2026-09-30", 1, 50.0, 0.0, 50.0, 49.0),
+    ]
+    assert [d["cumulative"] for d in days] == [-9.0, -40.0, 9.0]
+    total = _totals(days)
+    assert (total["trades"], total["wins"], total["losses"]) == (4, 2, 2)
+    assert (total["profit"], total["loss"], total["gross"], total["net"]) == (65.0, -50.0, 15.0, 9.0)
+    assert total["max_drawdown"] == -40.0
+    assert (total["green_days"], total["red_days"]) == (1, 2)
+
+
+def test_runs_api_lists_details_and_deletes(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/runs.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    from config import get_settings
+
+    get_settings.cache_clear()
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+    from models import ReplayRun, TradeLog
+
+    with database.session_factory()() as s:
+        run = ReplayRun(
+            created_at=dt.datetime(2026, 10, 1, 20), start_date="2026-09-28", end_date="2026-09-29",
+            symbols="TCS", settings='{"stop_type": "SMA_GAP"}', status="FINISHED", days_total=2, days_done=2,
+        )
+        s.add(run)
+        s.commit()
+        rid = run.id
+        s.add(
+            TradeLog(
+                date="2026-09-28", symbol="TCS", direction="LONG", qty=10, entry_time=dt.datetime(2026, 9, 28, 10),
+                entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger_price=99.0,
+                exit_time=dt.datetime(2026, 9, 28, 11), exit_price=101.0, gross_pnl=10.0,
+                brokerage_and_taxes=1.0, net_pnl=9.0, mode="REPLAY", run_id=rid,
+            )
+        )
+        s.commit()
+    with TestClient(main.app) as client:
+        runs = client.get("/api/replay/runs").json()
+        assert runs[0]["id"] == rid and runs[0]["totals"]["net"] == 9.0
+        assert runs[0]["settings"]["stop_type"] == "SMA_GAP"
+        detail = client.get(f"/api/replay/runs/{rid}").json()
+        assert detail["days"][0]["date"] == "2026-09-28"
+        assert client.get("/api/replay/runs/9999").status_code == 404
+        assert client.delete(f"/api/replay/runs/{rid}").status_code == 200
+        assert client.get("/api/replay/runs").json() == []
+    with database.session_factory()() as s:
+        assert s.query(TradeLog).count() == 0
+    database.reset_engine()
+    get_settings.cache_clear()

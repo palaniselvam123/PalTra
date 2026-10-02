@@ -216,6 +216,57 @@ export type ReplayInfo = {
   loaded: number;
   total: number;
   error: string;
+  /** Last day of the run (same as `date` for a one-day replay). */
+  end_date?: string | null;
+  /** Trading days the run plays, in order. */
+  days?: string[];
+  day_index?: number;
+  days_total?: number;
+  run_id?: number | null;
+};
+
+export type ReplayDayRow = {
+  date: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  profit: number;
+  loss: number;
+  gross: number;
+  charges: number;
+  net: number;
+  cumulative: number;
+};
+
+export type ReplayRunTotals = {
+  trades: number;
+  wins: number;
+  losses: number;
+  profit: number;
+  loss: number;
+  gross: number;
+  charges: number;
+  net: number;
+  win_rate: number;
+  max_drawdown: number;
+  green_days: number;
+  red_days: number;
+};
+
+export type ReplayRun = {
+  id: number;
+  created_at: string | null;
+  start_date: string;
+  end_date: string;
+  start_time: string;
+  symbols: string[];
+  /** Snapshot of the strategy settings the run used. */
+  settings: Record<string, string | number | boolean | null>;
+  status: "RUNNING" | "FINISHED" | "STOPPED";
+  days_total: number;
+  days_done: number;
+  totals: ReplayRunTotals;
+  days?: ReplayDayRow[];
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {
@@ -321,8 +372,15 @@ export const smaApi = {
     }),
   trades: () => request<TradeRow[]>("/api/trades"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
-  replayStart: (date: string, start: string, speed: number) =>
-    request<ReplayInfo>("/api/replay/start", { method: "POST", body: JSON.stringify({ date, start, speed }) }, 20000),
+  replayStart: (date: string, start: string, speed: number, endDate?: string) =>
+    request<ReplayInfo>(
+      "/api/replay/start",
+      { method: "POST", body: JSON.stringify({ date, end_date: endDate || null, start, speed }) },
+      20000
+    ),
+  replayRuns: () => request<ReplayRun[]>("/api/replay/runs"),
+  replayRun: (id: number) => request<ReplayRun>(`/api/replay/runs/${id}`),
+  deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
     request<ReplayInfo>("/api/replay/control", { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
   csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY") =>

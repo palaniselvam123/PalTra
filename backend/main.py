@@ -21,7 +21,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, load_history
-from replay import SPEEDS, ReplaySession, close_orphan_replay_rows, parse_replay_day, parse_start
+from replay import (
+    SPEEDS,
+    ReplaySession,
+    close_orphan_replay_rows,
+    delete_run,
+    get_run,
+    list_runs,
+    parse_replay_range,
+    parse_start,
+    settings_snapshot,
+)
 from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
@@ -398,6 +408,8 @@ async def kill_bot():
 
 class ReplayStart(BaseModel):
     date: str
+    #: Last day of a multi-day run. Empty or equal to `date` replays one day.
+    end_date: str | None = None
     start: str = "09:15"
     speed: int = 60
 
@@ -428,7 +440,7 @@ async def replay_start(body: ReplayStart):
     if body.speed not in SPEEDS:
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
-        day = parse_replay_day(body.date)
+        day, end_day = parse_replay_range(body.date, body.end_date)
         start = parse_start(body.start)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -439,8 +451,34 @@ async def replay_start(body: ReplayStart):
         engine.broker.adopt_saved_session()
     if not engine.broker.token:
         raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
-    await replay.begin(engine.broker, symbols, day, start, body.speed)
+    await replay.begin(
+        engine.broker, symbols, day, start, body.speed, end_day=end_day, settings=settings_snapshot(cfg)
+    )
     return replay.info()
+
+
+@app.get("/api/replay/runs")
+async def replay_runs():
+    """Every replay run with its totals and the settings it used."""
+    return list_runs()
+
+
+@app.get("/api/replay/runs/{run_id}")
+async def replay_run(run_id: int):
+    """One run: day-wise P&L and the settings it used."""
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(404, "No such replay run")
+    return run
+
+
+@app.delete("/api/replay/runs/{run_id}")
+async def replay_run_delete(run_id: int):
+    if replay.run_id == run_id and replay.active:
+        raise HTTPException(409, "Stop this replay before deleting it.")
+    if not delete_run(run_id):
+        raise HTTPException(404, "No such replay run")
+    return {"deleted": run_id}
 
 
 @app.post("/api/replay/control")
