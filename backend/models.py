@@ -73,10 +73,16 @@ class BotConfig(Base):
     atr_multiplier: Mapped[float] = mapped_column(Float, default=1.5)
     # ATR = fixed stop at atr_multiplier × ATR (default). SMA_GAP = moving
     # stop and target from the SMA 9/21 gap %, PAPER only (gap_trail.py).
+    # TSL = trailing stop in ₹ steps, PAPER and LIVE (tsl.py).
     stop_type: Mapped[str] = mapped_column(String, default="ATR")
     gap_sl_mult: Mapped[float] = mapped_column(Float, default=1.0)
     gap_tp_mult: Mapped[float] = mapped_column(Float, default=2.0)
     gap_min_pct: Mapped[float] = mapped_column(Float, default=0.2)
+    # TSL = Groww-style trailing stop (tsl.py): stop ₹ from entry, moved ₹ step
+    # by step as price gains; optional ₹ target (0 = none).
+    tsl_sl_points: Mapped[float] = mapped_column(Float, default=20.0)
+    tsl_trail_points: Mapped[float] = mapped_column(Float, default=10.0)
+    tsl_target_points: Mapped[float] = mapped_column(Float, default=0.0)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
     # When false, entries are sent without an exchange stop. Square-off, the
     # panic button, and an opposite crossover still close the position.

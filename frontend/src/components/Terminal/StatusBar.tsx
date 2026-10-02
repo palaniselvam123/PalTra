@@ -123,7 +123,11 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
             ON
             <span className="hidden sm:inline">
               {" · "}
-              {(state?.stop_type ?? config?.stop_type) === "SMA_GAP" && !live ? "SMA gap" : `${mult}× ATR`}
+              {(state?.stop_type ?? config?.stop_type) === "TSL"
+                ? `TSL ₹${config?.tsl_sl_points ?? 20} / ₹${config?.tsl_trail_points ?? 10}`
+                : (state?.stop_type ?? config?.stop_type) === "SMA_GAP" && !live
+                  ? "SMA gap"
+                  : `${mult}× ATR`}
             </span>
           </span>
         ) : (

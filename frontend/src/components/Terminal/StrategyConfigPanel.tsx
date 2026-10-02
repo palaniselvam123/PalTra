@@ -48,7 +48,10 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         atr_multiplier: Number(form.atr_multiplier),
         use_adx_filter: form.use_adx_filter,
         use_stop: form.use_stop !== false,
-        stop_type: form.stop_type === "SMA_GAP" ? "SMA_GAP" : "ATR",
+        stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR",
+        tsl_sl_points: Number(form.tsl_sl_points ?? 20),
+        tsl_trail_points: Number(form.tsl_trail_points ?? 10),
+        tsl_target_points: Number(form.tsl_target_points ?? 0),
         gap_sl_mult: Number(form.gap_sl_mult ?? 1),
         gap_tp_mult: Number(form.gap_tp_mult ?? 2),
         gap_min_pct: Number(form.gap_min_pct ?? 0.2),
@@ -111,17 +114,20 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         />
         {form.stop_type === "SMA_GAP"
           ? "Stop-loss on new entries (moving, from the SMA gap). Uncheck to enter with no stop."
-          : `Exchange stop-loss at ${form.atr_multiplier}× ATR. Uncheck to enter with no stop order.`}
+          : form.stop_type === "TSL"
+            ? "Trailing stop-loss on new entries. Uncheck to enter with no stop order."
+            : `Exchange stop-loss at ${form.atr_multiplier}× ATR. Uncheck to enter with no stop order.`}
       </label>
       <label className="mt-3 block text-sm text-slate-300">
         <span className="text-[11px] uppercase tracking-wider text-slate-400">Stop type</span>
         <select
-          value={form.stop_type === "SMA_GAP" ? "SMA_GAP" : "ATR"}
+          value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR"}
           onChange={(e) => set("stop_type", e.target.value)}
           className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
         >
           <option value="ATR">ATR — fixed stop at {String(form.atr_multiplier)}× ATR</option>
           <option value="SMA_GAP">SMA gap — moving stop + target</option>
+          <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
         </select>
       </label>
       {form.stop_type === "SMA_GAP" ? (
@@ -136,6 +142,25 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
             gap × stop multiple and target = price + gap × target multiple; a sell is the mirror. Recalculated every
             closed 1-minute candle: the stop only moves in your favour, the target follows the gap both ways.
             PAPER only — in LIVE the bot keeps the {String(form.atr_multiplier)}× ATR exchange stop.
+          </p>
+        </div>
+      ) : null}
+      {form.stop_type === "TSL" ? (
+        <div className="mt-2 rounded-md border border-emerald-400/20 bg-emerald-400/[0.04] p-2">
+          <div className="grid grid-cols-3 items-end gap-2">
+            <Field label="Stop ₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} />
+            <Field label="Trail every ₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} />
+            <Field label="Target ₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} />
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-slate-400">
+            Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
+            {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
+            {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
+            price gains past its best so far moves the stop up ₹{String(form.tsl_trail_points ?? 10)}; it never moves back. A
+            sell is the mirror. {Number(form.tsl_target_points ?? 0) > 0
+              ? `The trade also closes at ₹${String(form.tsl_target_points)} profit per share.`
+              : "No target: the trailing stop, an opposite cross or square-off closes the trade."}{" "}
+            In LIVE the bot moves your Groww stop order in place, so the position always has a stop.
           </p>
         </div>
       ) : null}

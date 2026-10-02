@@ -40,6 +40,7 @@ from indicators import (
     sma_gap_pct,
 )
 from gap_trail import gap_levels, tighten, uses_gap_stop
+from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, TradeLog
 import tick_sizes
 from tick_sizes import round_price
@@ -89,6 +90,14 @@ class OpenPosition:
     # and the position also exits at `target`.
     trailing: bool = False
     target: float | None = None
+    # Groww-style trailing stop (tsl.py), PAPER and LIVE: the stop sits
+    # tsl_points from entry and moves tsl_step for each tsl_step the price
+    # gains past tsl_best, its most favourable LTP since entry.
+    tsl_step: float | None = None
+    tsl_points: float | None = None
+    tsl_best: float | None = None
+    # LIVE: monotonic time of the last stop modify sent to Groww.
+    tsl_modified_at: float = 0.0
 
 
 def _ist_now() -> dt.datetime:
@@ -263,6 +272,13 @@ class StrategyEngine:
                 and cfg is not None
                 and uses_gap_stop(cfg, live=(mode or "PAPER").upper() == "LIVE")
             )
+            tsl_points = tsl_step = None
+            target = None
+            if stop_active and cfg is not None and not trailing and uses_tsl(cfg):
+                # The trailed stop was saved on each move. It never loosens,
+                # so trailing resumes from it with the best price reset to entry.
+                tsl_points, tsl_step, tgt_points = tsl_settings(cfg)
+                _sl, target = tsl_entry_levels(direction, entry, tsl_points, tgt_points)
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
             self.positions[symbol] = OpenPosition(
@@ -279,6 +295,10 @@ class StrategyEngine:
                 mode=mode,
                 stop_active=stop_active,
                 trailing=trailing,
+                target=target,
+                tsl_step=tsl_step,
+                tsl_points=tsl_points,
+                tsl_best=entry if tsl_step else None,
             )
 
     def stop(self) -> None:
@@ -416,6 +436,7 @@ class StrategyEngine:
             self.ltp = self._ltps.get(symbol, 0.0)
             symbol_cfg = _cfg_for(cfg, symbol)
             self._trail_gap_levels(symbol_cfg)
+            await self._trail_tsl(symbol_cfg)
             await self._watch_stop(symbol_cfg)
 
         self._focus = view
@@ -1018,6 +1039,12 @@ class StrategyEngine:
             )
             sl = round_price(cfg.symbol, sl_gap)
             target = round_price(cfg.symbol, tp_gap)
+        tsl_points = tsl_step = None
+        if uses_tsl(cfg):
+            tsl_points, tsl_step, tgt_points = tsl_settings(cfg)
+            sl_tsl, tp_tsl = tsl_entry_levels(direction, fill, tsl_points, tgt_points)
+            sl = round_price(cfg.symbol, sl_tsl)
+            target = round_price(cfg.symbol, tp_tsl) if tp_tsl is not None else None
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -1066,6 +1093,9 @@ class StrategyEngine:
             stop_active=stop_active,
             trailing=trailing,
             target=target,
+            tsl_step=tsl_step,
+            tsl_points=tsl_points,
+            tsl_best=fill if tsl_step else None,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -1146,6 +1176,49 @@ class StrategyEngine:
                 if row is not None and row.exit_time is None:
                     row.sl_trigger_price = moved
                     db.commit()
+
+    async def _trail_tsl(self, cfg: BotConfig) -> None:
+        """Every tick: move a TSL stop toward profit in whole ₹ steps.
+
+        LIVE moves the exchange stop with Groww's modify, which keeps the
+        position protected throughout. A refused modify leaves the old stop
+        in place (still live) and is tried again on a later tick.
+        """
+        pos = self.position
+        if pos is None or not pos.tsl_step or not pos.stop_active or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        best = pos.tsl_best if pos.tsl_best is not None else pos.entry_price
+        best = max(best, self.ltp) if pos.direction == "LONG" else min(best, self.ltp)
+        pos.tsl_best = best
+        proposed = tsl_stop(pos.direction, pos.entry_price, float(pos.tsl_points or 0.0), pos.tsl_step, best)
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, proposed))
+        if moved == pos.sl_trigger:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE":
+            if not pos.sl_order_id:
+                # Restored after a restart: the exchange stop id is unknown,
+                # so it stays where it is.
+                return
+            if time.monotonic() - pos.tsl_modified_at < 2.0:
+                return
+            pos.tsl_modified_at = time.monotonic()
+            modify = getattr(self.broker, "modify_sl", None)
+            if modify is None:
+                return
+            side = "SELL" if pos.direction == "LONG" else "BUY"
+            try:
+                await modify(pos.sl_order_id, symbol, side, pos.qty, moved)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = f"Trailing stop not moved ({exc}). The stop at {pos.sl_trigger} is still live."
+                return
+        pos.sl_trigger = moved
+        # Saved so a restart keeps the trailed stop, not the entry one.
+        with session_factory()() as db:
+            row = db.get(TradeLog, pos.trade_id)
+            if row is not None and row.exit_time is None:
+                row.sl_trigger_price = moved
+                db.commit()
 
     def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
         symbol = symbol or self._focus
@@ -1265,8 +1338,8 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
-        reason = "GAP_SL_HIT" if pos.trailing else "ATR_SL_HIT"
-        if not hit and pos.trailing and pos.target is not None and self.ltp > 0:
+        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else "ATR_SL_HIT")
+        if not hit and pos.target is not None and self.ltp > 0:
             if (pos.direction == "LONG" and self.ltp >= pos.target) or (
                 pos.direction == "SHORT" and self.ltp <= pos.target
             ):
@@ -1280,6 +1353,15 @@ class StrategyEngine:
                 return
             self.inflight = "TRANSIT"
             try:
+                if reason == "TARGET_HIT" and self.position.sl_order_id:
+                    # The stop is still working on Groww. Cancel it first so
+                    # it cannot fill after the exit and open a reverse.
+                    try:
+                        await self._cancel_sl_verified(self.position)
+                    except SlCancelFailed:
+                        # It filled as we cancelled: the stop closed the trade.
+                        reason = "TSL_HIT" if self.position.tsl_step else "ATR_SL_HIT"
+                        fill_price = self.position.sl_trigger or fill_price
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
                 await self._close_position(self.position, fill_price, reason, self._now(), cfg)
@@ -1287,6 +1369,7 @@ class StrategyEngine:
                 self.last_signal = {
                     "TARGET_HIT": "target hit — flat",
                     "GAP_SL_HIT": "moving stop hit — flat",
+                    "TSL_HIT": "trailing stop hit — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -1354,7 +1437,7 @@ class StrategyEngine:
         px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-        send_exit = not (live and reason == "ATR_SL_HIT")
+        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT"))
         if send_exit and live:
             net = await self._groww_net(cfg.symbol)
             if net is None:
@@ -1831,6 +1914,7 @@ class StrategyEngine:
                         "stop_active": book.stop_active if book else None,
                         "target": book.target if book else None,
                         "trailing": book.trailing if book else None,
+                        "tsl_step": book.tsl_step if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": _book_note(symbol, book, self._signals.get(symbol, "")),
                     }
@@ -1881,6 +1965,8 @@ class StrategyEngine:
                 "stop_active": pos.stop_active,
                 "trailing": pos.trailing,
                 "target": pos.target,
+                "tsl_step": pos.tsl_step,
+                "tsl_points": pos.tsl_points,
             },
             "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
@@ -1971,6 +2057,7 @@ class StrategyEngine:
             "sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "target": pos.target if pos else None,
             "trailing": bool(pos.trailing) if pos else False,
+            "tsl_step": pos.tsl_step if pos else None,
             "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
         }
 
@@ -2044,6 +2131,7 @@ _ALERT_REASON = {
     "MA_APPROACH": "sold before the MA cross",
     "ATR_SL_HIT": "ATR stop",
     "GAP_SL_HIT": "moving stop (SMA gap)",
+    "TSL_HIT": "trailing stop",
     "TARGET_HIT": "target hit",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",

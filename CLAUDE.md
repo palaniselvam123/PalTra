@@ -14,7 +14,7 @@ Groww market data. Two trading engines live in this repo and share one frontend:
   keep the manual desk on `paper` execution, and use the simulated feed or a
   stub broker in tests. Never send `confirm_live=true` to `/api/mode` or
   `/api/manual/execution`. Never call `GrowwClient.place_order`,
-  `place_entry`, `place_exit`, or `place_sl` against a real session.
+  `place_entry`, `place_exit`, `place_sl`, or `modify_sl` against a real session.
 - **Keep API keys out of code.** Groww API keys, secrets, TOTP seeds, access
   tokens, `ENCRYPTION_KEY`, and Telegram tokens come from `backend/.env`
   (gitignored), the encrypted DB row, or `fly secrets`. Never hard-code them,
@@ -103,6 +103,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `gap_sl_mult` / `gap_tp_mult` (floored at `gap_min_pct`), recalculated each
   closed candle by `StrategyEngine._trail_gap_levels`; the stop only tightens.
   Exits are `GAP_SL_HIT` / `TARGET_HIT`. LIVE always uses the ATR stop.
+- `backend/tsl.py` – Groww-style trailing stop (`stop_type = "TSL"`, PAPER
+  and LIVE): stop `tsl_sl_points` ₹ from entry, moved `tsl_trail_points` ₹
+  for each full step the price gains past its best since entry (never back);
+  optional `tsl_target_points` ₹ target (0 = none). Trailed every tick by
+  `StrategyEngine._trail_tsl`. In LIVE the exchange stop is moved in place
+  with `GrowwClient.modify_sl` (Groww `modify_order`); a refused modify keeps
+  the old stop, and a position restored after a restart (no stop id) stays at
+  its saved stop. A LIVE target cancels the exchange stop before the exit.
+  Exits are `TSL_HIT` / `TARGET_HIT`.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -134,6 +143,7 @@ Real orders reach Groww in only two places:
 
 1. **SMA Terminal, LIVE mode** – `backend/groww_client.py`, `GrowwClient`:
    `place_entry`, `place_exit`, `place_sl` → `_live_limit` / `_live_order`
+   (and `modify_sl`, which moves an open stop for the trailing stop)
    (MIS limit orders with a 0.20% protection buffer, plus an exchange `SL`).
    In PAPER these return local `PAPER…` ids and never touch the SDK.
    Called from `strategy_engine.py` (`_open`, `_close_position`,
