@@ -1416,6 +1416,7 @@ class StrategyEngine:
                 sl_trigger_price=sl,
                 mode=(cfg.trading_mode or "PAPER").upper(),
                 stop_active=bool(stop_active),
+                run_id=getattr(self, "run_id", None),
             )
             db.add(row)
             db.commit()

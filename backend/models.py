@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -35,6 +35,26 @@ class TradeLog(Base):
     # False when the trade was entered with no stop (use_stop off). The
     # sl_trigger_price on such a row is only the level a stop would have used.
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # The replay run (ReplayRun.id) a REPLAY trade belongs to. None otherwise.
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+
+class ReplayRun(Base):
+    """One replay over one or more past days, with the settings it used."""
+
+    __tablename__ = "replay_run"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    start_date: Mapped[str] = mapped_column(String)  # YYYY-MM-DD
+    end_date: Mapped[str] = mapped_column(String)
+    start_time: Mapped[str] = mapped_column(String, default="09:15")
+    symbols: Mapped[str] = mapped_column(String, default="")  # comma-separated
+    settings: Mapped[str] = mapped_column(Text, default="{}")  # JSON snapshot of BotConfig
+    status: Mapped[str] = mapped_column(String, default="RUNNING")  # RUNNING | FINISHED | STOPPED
+    days_total: Mapped[int] = mapped_column(Integer, default=0)
+    days_done: Mapped[int] = mapped_column(Integer, default=0)
+    days: Mapped[str] = mapped_column(String, default="")  # comma-separated trading days played
 
 
 class BotConfig(Base):

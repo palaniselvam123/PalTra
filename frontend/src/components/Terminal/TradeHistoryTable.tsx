@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
 import { inr, px, type SmaState, type TradeRow } from "@/lib/smaApi";
 import { Badge, SideBadge, Skeleton, pnlTone } from "./ui";
+import { BacktestRuns } from "./BacktestRuns";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -82,6 +83,8 @@ export function TradeHistoryTable({
   onClose: (trade: TradeRow) => void;
 }) {
   const [book, setBook] = useState<Book>("PAPER");
+  // The Backtests tab shows replay runs instead of a trade book.
+  const [backtests, setBacktests] = useState(false);
   const [picked, setPicked] = useState(false);
   const [stock, setStock] = useState("ALL");
   const [from, setFrom] = useState("");
@@ -216,13 +219,13 @@ export function TradeHistoryTable({
               simulation ? "text-[#F59E0B]" : book === "REPLAY" ? "text-violet-300" : "text-[#F43F5E]"
             )}
           >
-            {selected.title}
+            {backtests ? "Backtests" : selected.title}
           </h2>
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
           {BOOKS.map((item) => {
             const count = trades.filter((trade) => bookOf(trade) === item.id).length;
-            const on = item.id === book;
+            const on = !backtests && item.id === book;
             return (
               <button
                 key={item.id}
@@ -230,6 +233,7 @@ export function TradeHistoryTable({
                 onClick={() => {
                   setPicked(true);
                   setBook(item.id);
+                  setBacktests(false);
                 }}
                 className={clsx(
                   "min-h-11 whitespace-nowrap rounded-md px-3 text-xs font-semibold sm:min-h-9",
@@ -245,6 +249,19 @@ export function TradeHistoryTable({
           })}
           <button
             type="button"
+            aria-pressed={backtests}
+            onClick={() => setBacktests((v) => !v)}
+            className={clsx(
+              "min-h-11 whitespace-nowrap rounded-md px-3 text-xs font-semibold sm:min-h-9",
+              backtests ? "bg-sky-500 text-white" : "border border-white/10 text-slate-300 hover:bg-white/5"
+            )}
+          >
+            Backtests
+          </button>
+          {backtests ? null : (
+          <>
+          <button
+            type="button"
             onClick={toggleClosed}
             className="min-h-11 whitespace-nowrap rounded-md border border-white/15 px-3 text-xs font-semibold text-slate-200 hover:bg-white/5 sm:min-h-9"
           >
@@ -257,8 +274,14 @@ export function TradeHistoryTable({
           >
             Download CSV
           </button>
+          </>
+          )}
         </div>
       </div>
+      {backtests ? (
+        <BacktestRuns />
+      ) : (
+      <>
       <div className="flex flex-wrap items-end gap-2 px-4 pb-3">
         <label className="flex min-w-[8.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
           Stock
@@ -386,6 +409,8 @@ export function TradeHistoryTable({
           state={state}
           empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
         />
+      )}
+      </>
       )}
       </>
       )}
