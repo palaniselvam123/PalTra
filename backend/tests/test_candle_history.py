@@ -223,3 +223,27 @@ def test_history_at_bigger_intervals_has_formed_indicators(db, interval):
 def test_unknown_interval_is_refused(db):
     with pytest.raises(HistoryError, match="Candle size"):
         asyncio.run(load_history(_Broker(), "TCS", "2026-09-29T09:15", "2026-09-29T15:30", _CFG, 7))
+
+
+def test_markers_show_one_replay_run_not_every_replay_of_the_day(db):
+    """Replaying a day twice must not stack its markers on the past chart."""
+    from models import TradeLog
+
+    def trade(price: float, mode: str, run_id: int | None) -> TradeLog:
+        return TradeLog(
+            date="2026-09-29", symbol="TCS", direction="LONG", qty=10,
+            entry_time=dt.datetime(2026, 9, 29, 10, 5), entry_price=price, ma_cross_price=price,
+            atr_at_entry=1.0, sl_trigger_price=price - 1, exit_time=dt.datetime(2026, 9, 29, 11, 0),
+            exit_price=price + 1, exit_reason="TSL_HIT", gross_pnl=10.0, net_pnl=5.0, mode=mode, run_id=run_id,
+        )
+
+    with db.session_factory()() as s:
+        s.add_all([trade(101.0, "REPLAY", 1), trade(102.0, "REPLAY", 2), trade(103.0, "PAPER", None)])
+        s.commit()
+
+    def entries(**kw) -> list[float]:
+        out = asyncio.run(load_history(_Broker(), "TCS", "2026-09-29T09:15", "2026-09-29T15:30", _CFG, **kw))
+        return sorted(m["price"] for m in out["markers"] if m["kind"] == "ENTRY")
+
+    assert entries() == [102.0, 103.0]  # practice trades + the latest replay run only
+    assert entries(run_id=1) == [101.0]  # one named run

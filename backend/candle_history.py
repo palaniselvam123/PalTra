@@ -138,12 +138,33 @@ def _epoch(value: dt.datetime) -> int:
     return int(value.timestamp())
 
 
-def _markers(symbol: str, first: int, last: int, span: int = 60) -> list[dict]:
+def _one_book(rows: list, first: int, last: int, run_id: int | None) -> list:
+    """The trades to mark: one book, never every replay of the same day.
+
+    With `run_id`: that replay run only. Otherwise the practice/real trades
+    plus the most recent replay run that traded inside the shown range, so
+    replaying a day several times does not stack its markers.
+    """
+    if run_id is not None:
+        return [r for r in rows if r.run_id == run_id]
+    own = [r for r in rows if (r.mode or "PAPER").upper() != "REPLAY"]
+    shown = [
+        r
+        for r in rows
+        if (r.mode or "").upper() == "REPLAY" and r.entry_time is not None and first <= _epoch(r.entry_time) <= last
+    ]
+    if not shown:
+        return own
+    latest = max(shown, key=lambda r: (r.run_id is not None, r.run_id or 0, r.id))
+    return own + [r for r in rows if (r.mode or "").upper() == "REPLAY" and r.run_id == latest.run_id]
+
+
+def _markers(symbol: str, first: int, last: int, span: int = 60, run_id: int | None = None) -> list[dict]:
     """Entries and exits on this stock inside the shown bars."""
     out: list[dict] = []
     with session_factory()() as db:
         rows = db.query(TradeLog).filter(TradeLog.symbol == symbol).order_by(TradeLog.id).all()
-    for row in rows:
+    for row in _one_book(rows, first, last + span - 1, run_id):
         if row.entry_time is not None:
             t = _epoch(row.entry_time)
             if first <= t <= last + span - 1:
@@ -181,7 +202,15 @@ def _finite(value) -> float | None:
     return None if pd.isna(number) else number
 
 
-def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.datetime, cfg, interval: int = 1) -> dict:
+def build_payload(
+    frame: pd.DataFrame,
+    symbol: str,
+    start: dt.datetime,
+    end: dt.datetime,
+    cfg,
+    interval: int = 1,
+    run_id: int | None = None,
+) -> dict:
     sma_fast = getattr(cfg, "sma_fast", 9) or 9
     sma_slow = getattr(cfg, "sma_slow", 21) or 21
     atr_period = getattr(cfg, "atr_period", 14) or 14
@@ -206,7 +235,7 @@ def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.
                     "atr14": _finite(row.atr_14),
                 }
             )
-    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60) if candles else []
+    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60, run_id) if candles else []
     return {
         "symbol": symbol,
         "interval": interval,
@@ -220,7 +249,9 @@ def build_payload(frame: pd.DataFrame, symbol: str, start: dt.datetime, end: dt.
     }
 
 
-async def load_history(broker, symbol: str, start_text: str, end_text: str, cfg, interval: int = 1) -> dict:
+async def load_history(
+    broker, symbol: str, start_text: str, end_text: str, cfg, interval: int = 1, run_id: int | None = None
+) -> dict:
     if interval not in INTERVALS:
         raise HistoryError(f"Candle size must be one of {', '.join(str(i) for i in INTERVALS)} minutes.")
     now = dt.datetime.now(IST).replace(tzinfo=None, second=0, microsecond=0)
@@ -230,4 +261,4 @@ async def load_history(broker, symbol: str, start_text: str, end_text: str, cfg,
     # 21 bars of 30 or 60 minutes need more than four days before From.
     warmup = WARMUP_DAYS if interval <= 15 else 10
     frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
-    return build_payload(frame, symbol, start, end, cfg, interval)
+    return build_payload(frame, symbol, start, end, cfg, interval, run_id)

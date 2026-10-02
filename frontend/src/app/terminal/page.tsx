@@ -99,6 +99,13 @@ export default function TerminalPage() {
   const busy = useRef(false);
   const [replay, setReplay] = useState<ReplayInfo | null>(null);
   const replayOn = useRef(false);
+  // The day, run and stock the replay was last showing, so the chart can stay
+  // on that day after the replay ends instead of jumping to today.
+  const lastPlayed = useRef<{ date: string; runId: number | null; symbol: string | null } | null>(null);
+  const pinSeq = useRef(0);
+  const [pin, setPin] = useState<{ seq: number; date: string | null; runId: number | null; symbol: string | null } | null>(
+    null
+  );
   const liveBars = useRef(240);
   const askLiveBars = useCallback((count: number) => {
     if (count === liveBars.current) return;
@@ -185,9 +192,21 @@ export default function TerminalPage() {
     (info: ReplayInfo) => {
       setReplay(info);
       const on = replayRouted(info);
+      if (on && info.date) {
+        lastPlayed.current = {
+          date: info.date,
+          runId: info.run_id ?? null,
+          symbol: lastPlayed.current?.symbol ?? info.symbols?.[0] ?? null,
+        };
+      }
       if (on !== replayOn.current) {
         replayOn.current = on;
         setReplayRouting(on);
+        // Starting a replay shows its chart; ending one keeps the day it played.
+        pinSeq.current += 1;
+        const held = on ? null : lastPlayed.current;
+        setPin({ seq: pinSeq.current, date: held?.date ?? null, runId: held?.runId ?? null, symbol: held?.symbol ?? null });
+        if (on) lastPlayed.current = null;
         setState(null);
         setChart(null);
         refresh();
@@ -239,6 +258,7 @@ export default function TerminalPage() {
           setState(next);
           setUnreachable(false);
           setLoadNote(null);
+          if (lastPlayed.current && next.symbol) lastPlayed.current.symbol = next.symbol;
         })
         .catch((err: unknown) => {
           // 409: the server has no replay (it ended or the server restarted).
@@ -353,6 +373,7 @@ export default function TerminalPage() {
               chart={chart}
               state={state}
               trades={chartTrades}
+              pin={pin}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
               onLiveBars={askLiveBars}
               onClose={() => {
