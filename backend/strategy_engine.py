@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import logging
 import os
 import time
@@ -110,6 +111,33 @@ def _parse_hhmm(value: str) -> dt.time:
 
 
 MAX_TRADE_SYMBOLS = 24
+
+# The settings that decide a trade. Each trade keeps a copy of them from its
+# entry (TradeLog.strategy), and each replay run keeps one for the whole run.
+SNAPSHOT_FIELDS = (
+    "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
+    "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
+    "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
+    "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
+    "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
+    "rsi_short_min", "rsi_short_max", "max_daily_loss",
+    "entry_cutoff_time", "square_off_time",
+)
+
+
+def settings_snapshot(cfg: BotConfig) -> dict:
+    return {name: getattr(cfg, name, None) for name in SNAPSHOT_FIELDS}
+
+
+def _strategy_of(row: TradeLog) -> dict | None:
+    raw = getattr(row, "strategy", None)
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def trade_names(cfg: BotConfig) -> list[str]:
@@ -1501,6 +1529,7 @@ class StrategyEngine:
                 mode=(cfg.trading_mode or "PAPER").upper(),
                 stop_active=bool(stop_active),
                 run_id=getattr(self, "run_id", None),
+                strategy=json.dumps({**settings_snapshot(cfg), "qty": int(qty if qty is not None else cfg.qty)}),
             )
             db.add(row)
             db.commit()
@@ -2047,6 +2076,7 @@ class StrategyEngine:
                         "direction": row.direction,
                         "price": row.entry_price,
                         "kind": "ENTRY",
+                        "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
                     }
                 )
         pos = self.position
@@ -2525,6 +2555,7 @@ def _trade_dict(row: TradeLog) -> dict:
         "points": points,
         "mode": row.mode,
         "run_id": getattr(row, "run_id", None),
+        "strategy": _strategy_of(row),
     }
 
 

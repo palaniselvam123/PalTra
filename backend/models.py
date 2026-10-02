@@ -37,6 +37,9 @@ class TradeLog(Base):
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # The replay run (ReplayRun.id) a REPLAY trade belongs to. None otherwise.
     run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # JSON copy of the strategy settings at entry (strategy_engine.SNAPSHOT_FIELDS).
+    # None on trades booked before this was recorded.
+    strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ReplayRun(Base):

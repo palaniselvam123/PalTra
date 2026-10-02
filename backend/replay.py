@@ -31,7 +31,7 @@ from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, TradeLog
-from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, trade_names
+from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
 
 SPEEDS = (1, 10, 60, 300)
@@ -39,15 +39,6 @@ SPEEDS = (1, 10, 60, 300)
 MAX_RANGE_DAYS = 31
 # Settings saved with each run, so runs with different strategies compare.
 # No trade cap: a replay has none (REPLAY_TRADE_CAP).
-SNAPSHOT_FIELDS = (
-    "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
-    "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
-    "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
-    "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
-    "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
-    "rsi_short_min", "rsi_short_max", "max_daily_loss",
-    "entry_cutoff_time", "square_off_time",
-)
 SESSION_OPEN = dt.time(9, 15)
 SESSION_END = dt.time(15, 30)
 # Days of candles before the replayed day so SMA 21, ATR 14 and the day
@@ -266,10 +257,6 @@ def close_orphan_replay_rows() -> int:
             run.status = "STOPPED"
         db.commit()
         return len(rows)
-
-
-def settings_snapshot(cfg: BotConfig) -> dict:
-    return {name: getattr(cfg, name, None) for name in SNAPSHOT_FIELDS}
 
 
 def _day_rows(trades: list[TradeLog]) -> list[dict]:
