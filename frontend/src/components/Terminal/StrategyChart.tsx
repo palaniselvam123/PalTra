@@ -619,13 +619,13 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       candleRef.current.removePriceLine(targetLine.current);
       targetLine.current = null;
     }
-    if (!past && chart.trailing && chart.target) {
+    if (!past && chart.target && (chart.trailing || chart.tsl_step)) {
       targetLine.current = candleRef.current.createPriceLine({
         price: chart.target,
         color: "#34D399",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        title: "Target (SMA gap)",
+        title: chart.tsl_step ? "Target" : "Target (SMA gap)",
       });
     }
     // The stop line is drawn only when this position really has a stop.
@@ -635,7 +635,11 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         color: "#F59E0B",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        title: chart.trailing ? "Moving SL (SMA gap)" : `${chart.atr_multiplier ?? 1.5}× ATR SL`,
+        title: chart.trailing
+          ? "Moving SL (SMA gap)"
+          : chart.tsl_step
+            ? `Trailing SL (every ₹${chart.tsl_step})`
+            : `${chart.atr_multiplier ?? 1.5}× ATR SL`,
       });
     }
     if (!past && chart.entry_price) {
@@ -744,6 +748,10 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
                 <span className="font-semibold text-amber-300">Stop OFF</span>
               ) : chart?.trailing ? (
                 "Moving stop · target"
+              ) : chart?.tsl_step ? (
+                `Trailing stop · every ₹${chart.tsl_step}`
+              ) : (state?.stop_type ?? "ATR") === "TSL" && !chart?.sl_trigger ? (
+                "Trailing stop"
               ) : (
                 `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR stop`
               )}

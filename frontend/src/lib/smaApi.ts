@@ -19,6 +19,8 @@ function resolveSmaApi(): string {
 
 export const SMA_API = resolveSmaApi();
 
+export type StopType = "ATR" | "SMA_GAP" | "TSL";
+
 export type SmaConfig = {
   symbol: string;
   trade_symbols?: string[];
@@ -30,8 +32,15 @@ export type SmaConfig = {
   atr_multiplier: number;
   use_adx_filter: boolean;
   use_stop?: boolean;
-  /** ATR = fixed stop at atr_multiplier × ATR. SMA_GAP = moving stop and target (PAPER only). */
-  stop_type?: "ATR" | "SMA_GAP";
+  /**
+   * ATR = fixed stop at atr_multiplier × ATR. SMA_GAP = moving stop and target (PAPER only).
+   * TSL = trailing stop in ₹ steps, like Groww (PAPER and LIVE).
+   */
+  stop_type?: StopType;
+  /** TSL: stop ₹ from entry, trail step ₹, target ₹ (0 = none). */
+  tsl_sl_points?: number;
+  tsl_trail_points?: number;
+  tsl_target_points?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -85,13 +94,14 @@ export type SmaState = {
     stop_active?: boolean | null;
     target?: number | null;
     trailing?: boolean | null;
+    tsl_step?: number | null;
     ltp: number | null;
     note?: string;
   }[];
   /** use_stop in the config. False means new entries get no stop order. */
   stop_enabled?: boolean;
   atr_multiplier?: number;
-  stop_type?: "ATR" | "SMA_GAP";
+  stop_type?: StopType;
   exchange: string;
   ltp: number;
   day_open?: number | null;
@@ -122,6 +132,9 @@ export type SmaState = {
     /** True when this practice position uses the SMA-gap moving stop and target. */
     trailing?: boolean;
     target?: number | null;
+    /** Set when this position uses the ₹-step trailing stop. */
+    tsl_step?: number | null;
+    tsl_points?: number | null;
   };
   active_sl_trigger: number | null;
   unrealized_gross_pnl: number;
@@ -171,6 +184,7 @@ export type ChartPayload = {
   sl_trigger: number | null;
   target?: number | null;
   trailing?: boolean;
+  tsl_step?: number | null;
   atr_multiplier?: number;
 };
 

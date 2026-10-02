@@ -114,7 +114,10 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL"] | None = None
+    tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
+    tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
+    tsl_target_points: float | None = Field(default=None, ge=0, le=100000)
     gap_sl_mult: float | None = Field(default=None, gt=0, le=10)
     gap_tp_mult: float | None = Field(default=None, gt=0, le=20)
     gap_min_pct: float | None = Field(default=None, ge=0.01, le=5)
@@ -156,6 +159,9 @@ def _config_dict(row: BotConfig) -> dict:
         "gap_sl_mult": float(getattr(row, "gap_sl_mult", 1.0) or 1.0),
         "gap_tp_mult": float(getattr(row, "gap_tp_mult", 2.0) or 2.0),
         "gap_min_pct": float(getattr(row, "gap_min_pct", 0.2) or 0.2),
+        "tsl_sl_points": float(getattr(row, "tsl_sl_points", 20.0) or 20.0),
+        "tsl_trail_points": float(getattr(row, "tsl_trail_points", 10.0) or 10.0),
+        "tsl_target_points": float(getattr(row, "tsl_target_points", 0.0) or 0.0),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),

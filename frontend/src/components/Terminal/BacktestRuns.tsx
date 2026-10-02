@@ -35,6 +35,11 @@ export function strategyLabel(s: Settings): string {
   const parts: string[] = [`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`];
   if (s.use_stop === false) parts.push("no stop");
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
+  else if (s.stop_type === "TSL")
+    parts.push(
+      `TSL ₹${s.tsl_sl_points ?? 20} · trail ₹${s.tsl_trail_points ?? 10}` +
+        (Number(s.tsl_target_points ?? 0) > 0 ? ` · target ₹${s.tsl_target_points}` : "")
+    );
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   const filters: string[] = [];
   if (s.use_vwap) filters.push("VWAP");
@@ -56,6 +61,10 @@ const SETTING_ROWS: [string, (s: Settings) => string][] = [
         ? "Off"
         : s.stop_type === "SMA_GAP"
           ? `SMA gap: stop ×${s.gap_sl_mult}, target ×${s.gap_tp_mult}, min gap ${s.gap_min_pct}%`
+          : s.stop_type === "TSL"
+            ? `Trailing: ₹${s.tsl_sl_points ?? 20} from entry, every ₹${s.tsl_trail_points ?? 10}, target ${
+                Number(s.tsl_target_points ?? 0) > 0 ? `₹${s.tsl_target_points}` : "none"
+              }`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   ["Quantity", (s) => String(s.qty)],

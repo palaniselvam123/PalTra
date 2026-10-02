@@ -42,6 +42,7 @@ MAX_RANGE_DAYS = 31
 SNAPSHOT_FIELDS = (
     "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
+    "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "max_daily_loss",

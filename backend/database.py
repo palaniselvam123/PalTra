@@ -79,6 +79,9 @@ def _ensure_bot_config_columns(engine) -> None:
             "gap_sl_mult": "FLOAT DEFAULT 1",
             "gap_tp_mult": "FLOAT DEFAULT 2",
             "gap_min_pct": "FLOAT DEFAULT 0.2",
+            "tsl_sl_points": "FLOAT DEFAULT 20",
+            "tsl_trail_points": "FLOAT DEFAULT 10",
+            "tsl_target_points": "FLOAT DEFAULT 0",
         }
         for column, decl in additions.items():
             if column not in names:

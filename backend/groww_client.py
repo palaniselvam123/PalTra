@@ -635,6 +635,39 @@ class GrowwClient:
             trigger=trigger,
         )
 
+    async def modify_sl(self, order_id: str, symbol: str, side: str, qty: int, trigger: float) -> None:
+        """Move an open exchange stop to a new trigger (trailing stop).
+
+        Groww modifies the order in place, so the position is never without a
+        stop. Raises when Groww refuses: the old stop is then still live.
+        """
+        trigger = round_price(symbol, trigger)
+        if self.mode == "PAPER" or order_id.startswith("PAPER"):
+            order = self._orders.get(order_id)
+            if order is not None and order.status not in TERMINAL_FILLED:
+                order.trigger = trigger
+            return
+        if not order_id:
+            raise RuntimeError("No exchange stop id to modify")
+        buffer = get_settings().market_protection_pct / 100.0
+        if side == "SELL":
+            limit = round_price(symbol, trigger * (1 - buffer))
+        else:
+            limit = round_price(symbol, trigger * (1 + buffer))
+        sdk = self._require_sdk()
+        await asyncio.to_thread(
+            sdk.modify_order,
+            order_type="SL",
+            segment="CASH",
+            groww_order_id=order_id,
+            quantity=int(qty),
+            price=float(limit),
+            trigger_price=float(trigger),
+        )
+        order = self._orders.get(order_id)
+        if order is not None:
+            order.trigger = trigger
+
     async def cancel_order(self, order_id: str) -> None:
         if not order_id:
             return

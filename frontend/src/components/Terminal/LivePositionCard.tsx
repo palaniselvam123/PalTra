@@ -52,10 +52,17 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         <Row label="RSI 14" value={state?.rsi14 == null ? "—" : state.rsi14.toFixed(1)} />
         <Row label="ATR 14" value={px(state?.atr14)} />
         <Row
-          label={pos?.trailing ? "Moving stop (SMA gap)" : `${mult}× ATR stop`}
+          label={
+            pos?.trailing
+              ? "Moving stop (SMA gap)"
+              : pos?.tsl_step
+                ? `Trailing stop (every ₹${pos.tsl_step})`
+                : `${mult}× ATR stop`
+          }
           value={stopOff ? "OFF" : px(state?.active_sl_trigger)}
         />
         {pos?.trailing ? <Row label="Target (SMA gap)" value={px(pos.target)} /> : null}
+        {pos?.tsl_step ? <Row label="Target" value={pos.target == null ? "none" : px(pos.target)} /> : null}
         <Row
           label="Distance to SL"
           value={
