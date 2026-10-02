@@ -134,6 +134,20 @@ type Marker = {
   text: string;
 };
 
+/** Exits a stop closed. Drawn in yellow so they stand apart from crosses and targets. */
+const STOP_EXIT_LABEL: Record<string, string> = {
+  ATR_SL_HIT: "SL EXIT",
+  TSL_HIT: "TSL EXIT",
+  GAP_SL_HIT: "SL EXIT",
+};
+const STOP_EXIT_COLOR = "#FACC15";
+
+function exitLook(reason: string | null | undefined, net: number | null | undefined): { color: string; label: string } {
+  const stop = reason ? STOP_EXIT_LABEL[reason] : undefined;
+  if (stop) return { color: STOP_EXIT_COLOR, label: stop };
+  return { color: net == null ? "#CBD5E1" : net >= 0 ? "#34D399" : "#FB7185", label: "EXIT" };
+}
+
 function compactPrice(value: number): string {
   return value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
@@ -149,13 +163,13 @@ function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], s
     .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time < last + bar * 60))
     .map((m): Marker => {
       if (m.kind === "EXIT") {
-        const net = m.net_pnl;
+        const look = exitLook(m.reason, m.net_pnl);
         return {
           time: snap(m.time),
           position: m.direction === "LONG" ? "aboveBar" : "belowBar",
-          color: net == null ? "#CBD5E1" : net >= 0 ? "#34D399" : "#FB7185",
+          color: look.color,
           shape: "circle",
-          text: `EXIT ${compactPrice(m.price)}`,
+          text: `${look.label} ${compactPrice(m.price)}`,
         };
       }
       return {
@@ -172,13 +186,13 @@ function chartMarkers(chart: ChartPayload, rows: Candle[], trades: TradeRow[], s
     if (!when) continue;
     const sec = snap(Math.floor(when.getTime() / 1000));
     if (sec < first || sec > last) continue;
-    const net = t.net_pnl ?? t.gross_pnl;
+    const look = exitLook(t.exit_reason, t.net_pnl ?? t.gross_pnl);
     out.push({
       time: sec,
       position: t.direction === "LONG" ? "aboveBar" : "belowBar",
-      color: net == null ? "#CBD5E1" : net >= 0 ? "#34D399" : "#FB7185",
+      color: look.color,
       shape: "circle",
-      text: `EXIT ${compactPrice(t.exit_price)}`,
+      text: `${look.label} ${compactPrice(t.exit_price)}`,
     });
   }
   return out.sort((a, b) => a.time - b.time);
@@ -793,6 +807,9 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
           <LegendItem swatch={<span className="text-emerald-400">▲</span>}>Buy</LegendItem>
           <LegendItem swatch={<span className="text-rose-400">▼</span>}>Sell</LegendItem>
           <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
+          <LegendItem swatch={<span className="text-[#FACC15]">●</span>}>
+            <span className="text-[#FACC15]">Stop exit</span>
+          </LegendItem>
         </ul>
       </div>
       <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
