@@ -11,6 +11,7 @@ import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
 import {
   SMA_API,
+  answered,
   setReplayRouting,
   smaApi,
   type ChartPayload,
@@ -119,9 +120,15 @@ export default function TerminalPage() {
         } else {
           setLoadNote("Terminal data did not load. This is not a flat position.");
         }
-        // Both calls failing means the engine itself is down, not one bad reply.
-        setUnreachable(cfg.status === "rejected" && next.status === "rejected");
-        if (cfg.status === "rejected" && next.status === "rejected") {
+        // Down means neither call got an answer. An error reply (a 409 while a
+        // replay loads, say) still came from the engine, so it is reachable.
+        const down =
+          cfg.status === "rejected" &&
+          next.status === "rejected" &&
+          !answered(cfg.reason) &&
+          !answered(next.reason);
+        setUnreachable(down);
+        if (down) {
           setLoadNote(null);
         }
       })
@@ -194,7 +201,9 @@ export default function TerminalPage() {
       smaApi
         .replayInfo()
         .then((info) => {
-          if (!stop) onReplay(info);
+          if (stop) return;
+          setUnreachable(false);
+          onReplay(info);
         })
         .catch(() => {})
         .finally(() => {
@@ -212,9 +221,18 @@ export default function TerminalPage() {
     if (!routed) return;
     let n = 0;
     const poll = setInterval(() => {
+      // A hidden tab needs no replay frames; each one costs the server CPU.
+      if (typeof document !== "undefined" && document.hidden) return;
       n += 1;
-      smaApi.state().then(setState).catch(() => {});
-      smaApi.chart(liveBars.current).then(setChart).catch(() => {});
+      smaApi
+        .state()
+        .then((next) => {
+          setState(next);
+          setUnreachable(false);
+          setLoadNote(null);
+        })
+        .catch(() => {});
+      if (n % 2 === 0) smaApi.chart(liveBars.current).then(setChart).catch(() => {});
       if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
     }, 1000);
     return () => clearInterval(poll);

@@ -304,6 +304,19 @@ function readableDetail(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
+/** The terminal answered, but with an error status: it is reachable. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** True when the error means the terminal answered (an HTTP error), not that it is down. */
+export function answered(err: unknown): boolean {
+  return err instanceof ApiError;
+}
+
 async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): Promise<T> {
   path = route(path);
   const controller = new AbortController();
@@ -322,9 +335,10 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): 
       } catch {
         /* plain text */
       }
-      throw new Error(typeof detail === "string" ? detail : readableDetail(detail));
+      throw new ApiError(typeof detail === "string" ? detail : readableDetail(detail), res.status);
     }
-    return res.json() as Promise<T>;
+    // Awaited here so the timeout also covers a body that stalls.
+    return (await res.json()) as T;
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("The terminal did not answer. This is not a flat book.");
