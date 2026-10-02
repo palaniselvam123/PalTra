@@ -158,6 +158,7 @@ def _markers(symbol: str, first: int, last: int, span: int = 60) -> list[dict]:
                         "price": row.exit_price,
                         "kind": "EXIT",
                         "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                        "reason": row.exit_reason,
                     }
                 )
     return sorted(out, key=lambda m: m["time"])

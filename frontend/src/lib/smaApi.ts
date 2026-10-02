@@ -179,6 +179,8 @@ export type ChartPayload = {
     kind: "ENTRY" | "EXIT" | string;
     /** Only on EXIT markers from /api/history. */
     net_pnl?: number | null;
+    /** Only on EXIT markers from /api/history: why the trade closed. */
+    reason?: string | null;
   }[];
   entry_price: number | null;
   sl_trigger: number | null;
