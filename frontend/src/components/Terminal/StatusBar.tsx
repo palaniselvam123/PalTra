@@ -40,7 +40,8 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
   const mult = state?.atr_multiplier ?? config?.atr_multiplier ?? 1.5;
   const cutoff = config?.entry_cutoff_time ?? (config ? "15:00" : null);
   const used = state?.trades_today ?? null;
-  const cap = state?.max_trades ?? config?.max_trades_per_day ?? null;
+  const noCap = state?.mode === "REPLAY";
+  const cap = noCap ? null : state?.max_trades ?? config?.max_trades_per_day ?? null;
   const nearCap = used != null && cap != null && cap > 0 && used / cap >= 0.9;
   const net = state ? state.kpis?.net ?? state.realized_net_pnl ?? 0 : null;
 
@@ -132,8 +133,12 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
       <Cell label="Cut-off" title="No new entries from this time">
         {cutoff ? <span className="text-slate-100">{cutoff}</span> : <Skeleton className="h-4 w-12" />}
       </Cell>
-      <Cell label="Trades" className="col-span-2 sm:col-span-1">
-        {used == null || cap == null ? (
+      <Cell label="Trades" className="col-span-2 sm:col-span-1" title={noCap ? "A replay has no daily trade cap" : undefined}>
+        {noCap && used != null ? (
+          <span className="font-mono text-slate-100">
+            {used} <span className="font-sans text-xs font-normal text-slate-400">· no cap</span>
+          </span>
+        ) : used == null || cap == null ? (
           <Skeleton className="h-4 w-10" />
         ) : (
           <span className={clsx("font-mono", nearCap ? "text-amber-300" : "text-slate-100")}>

@@ -38,12 +38,13 @@ SPEEDS = (1, 10, 60, 300)
 # Longest range one run may cover, in calendar days (about 22 trading days).
 MAX_RANGE_DAYS = 31
 # Settings saved with each run, so runs with different strategies compare.
+# No trade cap: a replay has none (REPLAY_TRADE_CAP).
 SNAPSHOT_FIELDS = (
     "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
-    "rsi_short_min", "rsi_short_max", "max_daily_loss", "max_trades_per_day",
+    "rsi_short_min", "rsi_short_max", "max_daily_loss",
     "entry_cutoff_time", "square_off_time",
 )
 SESSION_OPEN = dt.time(9, 15)
@@ -62,6 +63,9 @@ LOOP_SECONDS = 0.2
 # Replay seconds per engine tick. Six ticks a minute land on the candle's
 # open, both extremes and its close.
 STEP_SECONDS = 10
+# A replay has no daily trade cap: it is practice on a past day, and the cap
+# exists to protect a real session. The daily loss limit still applies.
+REPLAY_TRADE_CAP = 1_000_000
 COLUMNS = ("ts", "open", "high", "low", "close", "volume")
 
 
@@ -207,6 +211,7 @@ class ReplayEngine(StrategyEngine):
         row = super().load_config()
         data = {col.name: getattr(row, col.name) for col in BotConfig.__table__.columns}
         data["trading_mode"] = "REPLAY"
+        data["max_trades_per_day"] = REPLAY_TRADE_CAP
         data["trade_symbols"] = ",".join(self.replay_symbols)
         view = (data.get("symbol") or "").upper()
         data["symbol"] = view if view in self.replay_symbols else (self.replay_symbols[0] if self.replay_symbols else "")
@@ -216,6 +221,11 @@ class ReplayEngine(StrategyEngine):
 
     def _refresh_tick_sizes(self) -> None:
         return None
+
+    def snapshot(self) -> dict:
+        snap = super().snapshot()
+        snap["max_trades"] = None  # no cap on a replay
+        return snap
 
 
 def close_orphan_replay_rows() -> int:
