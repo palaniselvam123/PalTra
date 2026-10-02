@@ -1,0 +1,344 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Trash2 } from "lucide-react";
+import clsx from "clsx";
+import { inr, smaApi, type ReplayRun } from "@/lib/smaApi";
+import { Badge, Skeleton, pnlTone } from "./ui";
+
+type Settings = ReplayRun["settings"];
+
+function signed(v: number): string {
+  return `${v > 0 ? "+" : ""}${inr(v)}`;
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00+05:30`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short" }).format(d);
+}
+
+function dayLabel(iso: string): string {
+  const d = new Date(`${iso}T00:00:00+05:30`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+}
+
+/** One line naming the strategy a run used. */
+export function strategyLabel(s: Settings): string {
+  const parts: string[] = [`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`];
+  if (s.use_stop === false) parts.push("no stop");
+  else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
+  else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
+  const filters: string[] = [];
+  if (s.use_vwap) filters.push("VWAP");
+  if (s.use_volume) filters.push(`Vol ≥${s.volume_min_ratio}×`);
+  if (s.use_density) filters.push(`Density ≥${s.density_min_pct}%`);
+  if (s.use_rsi) filters.push(`RSI ${s.rsi_long_min}–${s.rsi_long_max}/${s.rsi_short_min}–${s.rsi_short_max}`);
+  if (s.use_adx_filter) filters.push(`ADX ≥${s.adx_threshold}`);
+  parts.push(filters.length ? filters.join(", ") : "no filters");
+  parts.push(`qty ${s.qty ?? "—"}`);
+  return parts.join(" · ");
+}
+
+const SETTING_ROWS: [string, (s: Settings) => string][] = [
+  ["SMA", (s) => `${s.sma_fast} / ${s.sma_slow}`],
+  [
+    "Stop",
+    (s) =>
+      s.use_stop === false
+        ? "Off"
+        : s.stop_type === "SMA_GAP"
+          ? `SMA gap: stop ×${s.gap_sl_mult}, target ×${s.gap_tp_mult}, min gap ${s.gap_min_pct}%`
+          : `${s.atr_multiplier}× ATR (${s.atr_period})`,
+  ],
+  ["Quantity", (s) => String(s.qty)],
+  ["VWAP filter", (s) => (s.use_vwap ? "On" : "Off")],
+  ["Volume filter", (s) => (s.use_volume ? `≥ ${s.volume_min_ratio}× avg of 20` : "Off")],
+  ["Density filter", (s) => (s.use_density ? `≥ ${s.density_min_pct}%` : "Off")],
+  [
+    "RSI filter",
+    (s) => (s.use_rsi ? `buy ${s.rsi_long_min}–${s.rsi_long_max}, sell ${s.rsi_short_min}–${s.rsi_short_max}` : "Off"),
+  ],
+  ["ADX filter", (s) => (s.use_adx_filter ? `≥ ${s.adx_threshold}` : "Off")],
+  ["Daily loss limit", (s) => inr(Number(s.max_daily_loss ?? 0))],
+  ["No new entries after", (s) => String(s.entry_cutoff_time ?? "15:00")],
+  ["Square-off", (s) => String(s.square_off_time ?? "15:15")],
+];
+
+/** Replay runs side by side, and one run's day-wise P&L. */
+export function BacktestRuns() {
+  const [runs, setRuns] = useState<ReplayRun[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<ReplayRun | null>(null);
+
+  const load = useCallback(() => {
+    smaApi
+      .replayRuns()
+      .then((rows) => {
+        setRuns(rows);
+        setError(null);
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Runs did not load"));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const poll = setInterval(load, 5000);
+    return () => clearInterval(poll);
+  }, [load]);
+
+  useEffect(() => {
+    if (openId == null) {
+      setDetail(null);
+      return;
+    }
+    let stop = false;
+    const fetchOne = () =>
+      smaApi
+        .replayRun(openId)
+        .then((run) => {
+          if (!stop) setDetail(run);
+        })
+        .catch(() => {});
+    fetchOne();
+    const poll = setInterval(fetchOne, 5000);
+    return () => {
+      stop = true;
+      clearInterval(poll);
+    };
+  }, [openId]);
+
+  const remove = (run: ReplayRun) => {
+    if (!window.confirm(`Delete run #${run.id} (${run.start_date} → ${run.end_date}) and its replay trades?`)) return;
+    smaApi
+      .deleteReplayRun(run.id)
+      .then(() => {
+        if (openId === run.id) setOpenId(null);
+        load();
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Delete failed"));
+  };
+
+  if (runs == null) {
+    return (
+      <div aria-busy="true" className="space-y-2 border-t border-white/10 p-4">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  const best = runs.filter((r) => r.totals.trades > 0).reduce<ReplayRun | null>(
+    (top, r) => (top == null || r.totals.net > top.totals.net ? r : top),
+    null
+  );
+
+  return (
+    <div className="border-t border-white/10">
+      <p className="px-4 pt-3 text-xs text-slate-400">
+        Each replay run with the strategy settings it used. Run the same days again with other settings to compare. P&amp;L
+        is practice money on Groww&apos;s past candles.
+      </p>
+      {error ? (
+        <p role="alert" className="px-4 pt-2 text-xs text-rose-300">
+          {error}
+        </p>
+      ) : null}
+      {runs.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-slate-400">
+          No runs yet. Use “Replay past days” above: pick a From and To date and press Start.
+        </p>
+      ) : (
+        <div className="overflow-x-auto px-2 py-3 sm:px-4">
+          <table className="w-full min-w-[860px] whitespace-nowrap text-left text-xs">
+            <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-2 py-2">Run</th>
+                <th className="px-2 py-2">Days</th>
+                <th className="px-2 py-2">Strategy</th>
+                <th className="px-2 py-2 text-right">Trades</th>
+                <th className="px-2 py-2 text-right">Win %</th>
+                <th className="px-2 py-2 text-right">Profit</th>
+                <th className="px-2 py-2 text-right">Loss</th>
+                <th className="px-2 py-2 text-right">Net</th>
+                <th className="px-2 py-2 text-right">Max DD</th>
+                <th className="px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {runs.map((run) => {
+                const t = run.totals;
+                const on = openId === run.id;
+                return (
+                  <tr
+                    key={run.id}
+                    className={clsx("cursor-pointer hover:bg-white/[0.03]", on && "bg-sky-500/[0.07]")}
+                    onClick={() => setOpenId(on ? null : run.id)}
+                  >
+                    <td className="px-2 py-2 align-top">
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-100">
+                        #{run.id}
+                        {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
+                        {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}
+                        {run.status === "STOPPED" ? <Badge color="slate">Stopped</Badge> : null}
+                      </div>
+                      <div className="text-slate-400">
+                        {shortDate(run.start_date)}
+                        {run.end_date !== run.start_date ? ` → ${shortDate(run.end_date)}` : ""}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 align-top font-mono text-slate-200">
+                      {run.days_done}/{run.days_total}
+                      <div className="font-sans text-[11px] text-slate-400">
+                        {t.green_days}↑ {t.red_days}↓
+                      </div>
+                    </td>
+                    <td className="max-w-[22rem] px-2 py-2 align-top text-slate-300">
+                      <div className="truncate" title={strategyLabel(run.settings)}>
+                        {strategyLabel(run.settings)}
+                      </div>
+                      <div className="truncate text-[11px] text-slate-400" title={run.symbols.join(", ")}>
+                        {run.symbols.join(", ")}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.trades}</td>
+                    <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.win_rate.toFixed(1)}%</td>
+                    <td className="px-2 py-2 text-right align-top font-mono text-emerald-300">{signed(t.profit)}</td>
+                    <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.loss)}</td>
+                    <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
+                      {signed(t.net)}
+                    </td>
+                    <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
+                    <td className="px-2 py-2 text-right align-top">
+                      <button
+                        type="button"
+                        aria-label={`Delete run ${run.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          remove(run);
+                        }}
+                        className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/5 hover:text-rose-300"
+                      >
+                        <Trash2 size={14} aria-hidden />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {openId != null ? <RunDetail run={detail} /> : null}
+    </div>
+  );
+}
+
+function RunDetail({ run }: { run: ReplayRun | null }) {
+  if (!run) {
+    return (
+      <div aria-busy="true" className="border-t border-white/10 p-4">
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+  const t = run.totals;
+  const days = run.days ?? [];
+  return (
+    <section aria-label={`Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-2">
+        <h3 className="text-sm font-semibold text-slate-100">
+          Run #{run.id} · day-wise P&amp;L
+          <span className="ml-2 font-normal text-slate-400">
+            {dayLabel(run.start_date)}
+            {run.end_date !== run.start_date ? ` → ${dayLabel(run.end_date)}` : ""} · start {run.start_time}
+          </span>
+        </h3>
+        <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>Net {signed(t.net)}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
+          <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-2 py-2">Day</th>
+              <th className="px-2 py-2 text-right">Trades</th>
+              <th className="px-2 py-2 text-right">W / L</th>
+              <th className="px-2 py-2 text-right">Profit</th>
+              <th className="px-2 py-2 text-right">Loss</th>
+              <th className="px-2 py-2 text-right">Gross</th>
+              <th className="px-2 py-2 text-right">Charges</th>
+              <th className="px-2 py-2 text-right">Net</th>
+              <th className="px-2 py-2 text-right">Running total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5 font-mono">
+            {days.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-2 py-4 font-sans text-slate-400">
+                  No closed trades in this run yet.
+                </td>
+              </tr>
+            ) : (
+              days.map((d) => (
+                <tr key={d.date}>
+                  <td className="px-2 py-1.5 font-sans text-slate-200">{dayLabel(d.date)}</td>
+                  <td className="px-2 py-1.5 text-right text-slate-200">{d.trades}</td>
+                  <td className="px-2 py-1.5 text-right text-slate-300">
+                    {d.wins} / {d.losses}
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-emerald-300">{signed(d.profit)}</td>
+                  <td className="px-2 py-1.5 text-right text-rose-300">{signed(d.loss)}</td>
+                  <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>
+                  <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>
+                  <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>
+                  <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          {days.length > 0 ? (
+            <tfoot className="border-t border-white/15 font-mono text-slate-100">
+              <tr>
+                <td className="px-2 py-2 font-sans font-semibold">Total · {days.length} days</td>
+                <td className="px-2 py-2 text-right">{t.trades}</td>
+                <td className="px-2 py-2 text-right">
+                  {t.wins} / {t.losses}
+                </td>
+                <td className="px-2 py-2 text-right text-emerald-300">{signed(t.profit)}</td>
+                <td className="px-2 py-2 text-right text-rose-300">{signed(t.loss)}</td>
+                <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>
+                <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>
+                <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>
+                <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
+              </tr>
+            </tfoot>
+          ) : null}
+        </table>
+      </div>
+      <div className="mt-3 px-2">
+        <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">Settings used</div>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+          {SETTING_ROWS.map(([label, fmt]) => (
+            <div key={label} className="flex justify-between gap-3 border-b border-white/5 py-1">
+              <dt className="text-slate-400">{label}</dt>
+              <dd className="text-right text-slate-200">{fmt(run.settings)}</dd>
+            </div>
+          ))}
+          <div className="flex justify-between gap-3 border-b border-white/5 py-1">
+            <dt className="text-slate-400">Stocks</dt>
+            <dd className="text-right text-slate-200">{run.symbols.join(", ")}</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  );
+}

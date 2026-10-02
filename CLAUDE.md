@@ -109,7 +109,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   locally and has no Groww SDK path. Trades are tagged `REPLAY` (own book
   and P&L; no daily trade cap, the loss limit still applies), no alerts are
   sent, and the live engine keeps running.
-  API: `/api/replay*`. Refused in LIVE mode.
+  A run covers one day or a range up to a month (`parse_replay_range`), one
+  fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
+  settings it used, and its trades carry `run_id` (day-wise P&L in
+  `get_run`, shown in the blotter's Backtests tab).
+  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused in LIVE mode.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

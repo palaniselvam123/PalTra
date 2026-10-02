@@ -69,6 +69,7 @@ type Props = {
 /** Practise on a past day's real Groww candles. Never sends an order. */
 export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
   const [day, setDay] = useState(lastTradingDay);
+  const [endDay, setEndDay] = useState(lastTradingDay);
   const [start, setStart] = useState("09:15");
   const [speed, setSpeed] = useState(60);
   const [busy, setBusy] = useState(false);
@@ -90,7 +91,7 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    void run(() => smaApi.replayStart(day, start, speed));
+    void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined));
   };
 
   if (!active) {
@@ -103,20 +104,33 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
           className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm"
         >
           <History size={16} aria-hidden className="text-violet-300" />
-          <span className="font-semibold text-violet-100">Replay a past day</span>
+          <span className="font-semibold text-violet-100">Replay past days</span>
           <span className="hidden text-xs text-slate-400 sm:inline">
-            — practise on real Groww candles from an earlier date. Practice money only.
+            — practise on real Groww candles from one day or a range up to a month. Practice money only.
           </span>
           <span className="ml-auto text-xs text-violet-300">{open ? "Hide" : "Set up"}</span>
         </button>
         {open || info?.status === "ERROR" ? (
           <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t border-violet-400/15 px-3 py-2">
             <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
-              Date
+              From
               <input
                 type="date"
                 value={day}
-                onChange={(e) => setDay(e.target.value)}
+                onChange={(e) => {
+                  setDay(e.target.value);
+                  if (!endDay || endDay < e.target.value) setEndDay(e.target.value);
+                }}
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+              To
+              <input
+                type="date"
+                value={endDay}
+                min={day}
+                onChange={(e) => setEndDay(e.target.value)}
                 className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
               />
             </label>
@@ -150,7 +164,7 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
               className="flex min-h-9 items-center gap-1.5 rounded-md bg-violet-500 px-3 text-sm font-semibold text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? <Loader2 size={14} aria-hidden className="animate-spin" /> : <Play size={14} aria-hidden />}
-              Start replay
+              {endDay && endDay !== day ? "Start multi-day replay" : "Start replay"}
             </button>
             <p className="basis-full text-[11px] leading-snug text-slate-400">
               {live
@@ -158,7 +172,9 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
                 : armedCount === 0
                   ? "Arm at least one stock in the Stocks panel first. "
                   : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with your current settings. `}
-              The bot trades the day as it would live (crosses, filters, stop, target, 15:00 cut-off, 15:15 square-off).
+              The bot trades each day as it would live (crosses, filters, stop, target, 15:00 cut-off, 15:15
+              square-off), then moves to the next trading day; weekends and holidays are skipped. A range is up to one
+              month. Each run, with the settings it used, is saved in the Backtests tab of the trade blotter.
               Replay trades go to a separate REPLAY book and never touch today’s PAPER or LIVE results. Needs a Groww
               login for the candles; nothing is ever sent to Groww.
             </p>
@@ -174,7 +190,12 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
   }
 
   const clock = clockParts(info?.clock ?? null);
-  const progress = clock ? Math.min(1, Math.max(0, (clock.minute - SESSION_START) / (SESSION_END - SESSION_START))) : 0;
+  const dayProgress = clock ? Math.min(1, Math.max(0, (clock.minute - SESSION_START) / (SESSION_END - SESSION_START))) : 0;
+  const daysTotal = info?.days_total ?? 1;
+  const multi = daysTotal > 1;
+  const dayIndex = info?.day_index ?? 0;
+  const progress =
+    info?.status === "FINISHED" ? 1 : multi ? Math.min(1, (dayIndex + dayProgress) / daysTotal) : dayProgress;
   const playing = info?.status === "PLAYING";
   const lagging = playing && info && info.effective_speed > 0 && info.effective_speed < info.speed * 0.8;
 
@@ -197,8 +218,15 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
             {clock?.label ?? "—"} IST
           </span>
         )}
+        {multi && info?.status !== "LOADING" ? (
+          <span className="rounded-md bg-violet-400/20 px-2 py-0.5 text-xs font-semibold text-violet-100">
+            Day {Math.min(dayIndex + 1, daysTotal)} of {daysTotal}
+          </span>
+        ) : null}
         {info?.status === "FINISHED" ? (
-          <span className="text-xs font-semibold text-emerald-300">Day finished</span>
+          <span className="text-xs font-semibold text-emerald-300">
+            {multi ? "Run finished — results in the Backtests tab" : "Day finished"}
+          </span>
         ) : null}
         {lagging ? (
           <span className="text-[11px] text-amber-300" title="The server is busy; the replay plays as fast as it can.">
@@ -253,7 +281,7 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
         <span>
           {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
         </span>
-        <span>09:15 → 15:30</span>
+        <span>{multi && info?.date && info?.end_date ? `${info.days?.[0] ?? info.date} → ${info.end_date}` : "09:15 → 15:30"}</span>
       </div>
       {msg || info?.error ? (
         <p role="alert" className="mt-1 text-xs text-amber-300">

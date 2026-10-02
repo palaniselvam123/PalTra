@@ -103,6 +103,8 @@ def _ensure_trade_log_columns(engine) -> None:
         names = {row[1] for row in rows}
         if "stop_active" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_active BOOLEAN DEFAULT 1")
+        if "run_id" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN run_id INTEGER")
 
 
 def init_db() -> BotConfig:

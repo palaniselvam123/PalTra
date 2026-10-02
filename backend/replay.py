@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import time
 from dataclasses import dataclass, field
 
@@ -29,11 +30,23 @@ import pandas as pd
 from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
-from models import BotConfig, TradeLog
+from models import BotConfig, ReplayRun, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, trade_names
 from tick_sizes import round_price
 
 SPEEDS = (1, 10, 60, 300)
+# Longest range one run may cover, in calendar days (about 22 trading days).
+MAX_RANGE_DAYS = 31
+# Settings saved with each run, so runs with different strategies compare.
+# No trade cap: a replay has none (REPLAY_TRADE_CAP).
+SNAPSHOT_FIELDS = (
+    "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
+    "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
+    "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
+    "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
+    "rsi_short_min", "rsi_short_max", "max_daily_loss",
+    "entry_cutoff_time", "square_off_time",
+)
 SESSION_OPEN = dt.time(9, 15)
 SESSION_END = dt.time(15, 30)
 # Days of candles before the replayed day so SMA 21, ATR 14 and the day
@@ -178,8 +191,9 @@ class ReplayBroker:
 class ReplayEngine(StrategyEngine):
     """The SMA bot on a replayed day: its own clock, books and broker."""
 
-    def __init__(self, feed: ReplayFeed, symbols: list[str]):
+    def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None):
         self.feed = feed
+        self.run_id = run_id
         self.replay_symbols = [s.upper() for s in symbols][:MAX_TRADE_SYMBOLS]
         super().__init__(broker=ReplayBroker(feed))
         self._session_date = feed.clock.date().isoformat()
@@ -230,26 +244,135 @@ def close_orphan_replay_rows() -> int:
             row.gross_pnl = 0.0
             row.brokerage_and_taxes = 0.0
             row.net_pnl = 0.0
+        # A run that was playing when the server stopped did not finish.
+        for run in db.query(ReplayRun).filter(ReplayRun.status == "RUNNING").all():
+            run.status = "STOPPED"
         db.commit()
         return len(rows)
 
 
+def settings_snapshot(cfg: BotConfig) -> dict:
+    return {name: getattr(cfg, name, None) for name in SNAPSHOT_FIELDS}
+
+
+def _day_rows(trades: list[TradeLog]) -> list[dict]:
+    days: dict[str, dict] = {}
+    for row in trades:
+        if row.exit_price is None:
+            continue
+        d = days.setdefault(
+            row.date,
+            {"date": row.date, "trades": 0, "wins": 0, "losses": 0, "profit": 0.0, "loss": 0.0, "charges": 0.0, "net": 0.0},
+        )
+        gross = float(row.gross_pnl or 0.0)
+        d["trades"] += 1
+        if gross > 0:
+            d["wins"] += 1
+            d["profit"] += gross
+        elif gross < 0:
+            d["losses"] += 1
+            d["loss"] += gross
+        d["charges"] += float(row.brokerage_and_taxes or 0.0)
+        d["net"] += float(row.net_pnl if row.net_pnl is not None else gross)
+    out = []
+    running = 0.0
+    for key in sorted(days):
+        d = days[key]
+        d["gross"] = d["profit"] + d["loss"]
+        running += d["net"]
+        d["cumulative"] = running
+        out.append({k: round(v, 2) if isinstance(v, float) else v for k, v in d.items()})
+    return out
+
+
+def _totals(day_rows: list[dict]) -> dict:
+    keys = ("trades", "wins", "losses", "profit", "loss", "charges", "net")
+    total = {k: sum(d[k] for d in day_rows) for k in keys}
+    total["gross"] = total["profit"] + total["loss"]
+    total["win_rate"] = round(100.0 * total["wins"] / total["trades"], 1) if total["trades"] else 0.0
+    peak = 0.0
+    worst = 0.0
+    for d in day_rows:
+        peak = max(peak, d["cumulative"])
+        worst = min(worst, d["cumulative"] - peak)
+    total["max_drawdown"] = round(worst, 2)
+    total["green_days"] = sum(1 for d in day_rows if d["net"] > 0)
+    total["red_days"] = sum(1 for d in day_rows if d["net"] < 0)
+    return {k: round(v, 2) if isinstance(v, float) else v for k, v in total.items()}
+
+
+def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
+    day_rows = _day_rows(trades)
+    out = {
+        "id": run.id,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "start_date": run.start_date,
+        "end_date": run.end_date,
+        "start_time": run.start_time,
+        "symbols": [s for s in (run.symbols or "").split(",") if s],
+        "settings": json.loads(run.settings or "{}"),
+        "status": run.status,
+        "days_total": run.days_total,
+        "days_done": run.days_done,
+        "totals": _totals(day_rows),
+    }
+    if with_days:
+        out["days"] = day_rows
+    return out
+
+
+def list_runs(limit: int = 50) -> list[dict]:
+    with session_factory()() as db:
+        runs = db.query(ReplayRun).order_by(ReplayRun.id.desc()).limit(limit).all()
+        ids = [r.id for r in runs]
+        trades = db.query(TradeLog).filter(TradeLog.run_id.in_(ids)).all() if ids else []
+        by_run: dict[int, list[TradeLog]] = {}
+        for t in trades:
+            by_run.setdefault(int(t.run_id), []).append(t)
+        return [_run_dict(r, by_run.get(r.id, []), with_days=False) for r in runs]
+
+
+def get_run(run_id: int) -> dict | None:
+    with session_factory()() as db:
+        run = db.get(ReplayRun, run_id)
+        if run is None:
+            return None
+        trades = db.query(TradeLog).filter(TradeLog.run_id == run_id).all()
+        return _run_dict(run, trades, with_days=True)
+
+
+def delete_run(run_id: int) -> bool:
+    with session_factory()() as db:
+        run = db.get(ReplayRun, run_id)
+        if run is None:
+            return False
+        db.query(TradeLog).filter(TradeLog.run_id == run_id).delete()
+        db.delete(run)
+        db.commit()
+        return True
+
+
 @dataclass
 class ReplaySession:
-    """One replay at a time: download, then play the day at the chosen speed."""
+    """One replay at a time: download the range, then play each day in turn."""
 
     status: str = "IDLE"  # IDLE | LOADING | PLAYING | PAUSED | FINISHED | ERROR
     day: dt.date | None = None
+    end_day: dt.date | None = None
     start: dt.time = SESSION_OPEN
     speed: int = 60
     symbols: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    days: list[dt.date] = field(default_factory=list)
+    day_index: int = 0
+    run_id: int | None = None
     loaded: int = 0
     error: str = ""
     effective_speed: float = 0.0
     engine: ReplayEngine | None = None
     _task: asyncio.Task | None = None
     _stop: bool = False
+    _want: int = 0
 
     @property
     def active(self) -> bool:
@@ -261,6 +384,7 @@ class ReplaySession:
         return {
             "status": self.status,
             "date": self.day.isoformat() if self.day else None,
+            "end_date": self.end_day.isoformat() if self.end_day else None,
             "start": self.start.strftime("%H:%M"),
             "clock": clock.isoformat() if clock else None,
             "speed": self.speed,
@@ -268,30 +392,44 @@ class ReplaySession:
             "speeds": list(SPEEDS),
             "symbols": self.symbols,
             "skipped": self.skipped,
+            "days": [d.isoformat() for d in self.days],
+            "day_index": self.day_index,
+            "days_total": len(self.days),
+            "run_id": self.run_id,
             "loaded": self.loaded,
             "total": len(self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
             "error": self.error,
         }
 
-    _want: int = 0
-
-    async def begin(self, broker, symbols: list[str], day: dt.date, start: dt.time, speed: int) -> None:
+    async def begin(
+        self,
+        broker,
+        symbols: list[str],
+        day: dt.date,
+        start: dt.time,
+        speed: int,
+        end_day: dt.date | None = None,
+        settings: dict | None = None,
+    ) -> None:
         await self.stop("REPLAY_STOPPED")
         self.status = "LOADING"
-        self.day, self.start, self.speed = day, start, speed
+        self.day, self.end_day, self.start, self.speed = day, end_day or day, start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
+        self.days, self.day_index, self.run_id = [], 0, None
         self._want = len(symbols)
         self.engine = None
         self._stop = False
-        self._task = asyncio.create_task(self._load_and_play(broker, symbols))
+        self._task = asyncio.create_task(self._load_and_play(broker, symbols, settings or {}))
 
-    async def _load_and_play(self, broker, symbols: list[str]) -> None:
-        assert self.day is not None
-        day = self.day
+    async def _load_and_play(self, broker, symbols: list[str], settings: dict) -> None:
+        assert self.day is not None and self.end_day is not None
+        first_day, last_day = self.day, self.end_day
         frames: dict[str, pd.DataFrame] = {}
-        first = dt.datetime.combine(day - dt.timedelta(days=WARMUP_DAYS), dt.time(9, 0))
-        last = dt.datetime.combine(day, SESSION_END)
-        day_start = int(dt.datetime.combine(day, dt.time(0, 0), tzinfo=IST).timestamp())
+        first = dt.datetime.combine(first_day - dt.timedelta(days=WARMUP_DAYS), dt.time(9, 0))
+        last = dt.datetime.combine(last_day, SESSION_END)
+        range_start = int(dt.datetime.combine(first_day, dt.time(0, 0), tzinfo=IST).timestamp())
+        range_end = int(dt.datetime.combine(last_day, dt.time(0, 0), tzinfo=IST).timestamp()) + 86_400
+        traded_days: set[dt.date] = set()
         try:
             for symbol in symbols:
                 if self._stop:
@@ -304,35 +442,88 @@ class ReplaySession:
                     self.skipped.append(symbol)
                     self.error = str(exc)
                     continue
-                if frame.empty or not (frame["ts"] >= day_start).any():
+                inside = frame[(frame["ts"] >= range_start) & (frame["ts"] < range_end)] if not frame.empty else frame
+                if inside.empty:
                     self.skipped.append(symbol)
                     continue
-                frames[symbol] = frame[frame["ts"] < day_start + 86_400].reset_index(drop=True)
+                for ts in inside["ts"].astype("int64").unique():
+                    traded_days.add(dt.datetime.fromtimestamp(int(ts), IST).date())
+                frames[symbol] = frame[frame["ts"] < range_end].reset_index(drop=True)
                 self.loaded += 1
-            if not frames:
+            days = sorted(d for d in traded_days if d.weekday() < 5)
+            if not frames or not days:
+                span = f"{first_day:%d %b %Y}" + ("" if first_day == last_day else f" to {last_day:%d %b %Y}")
                 raise HistoryError(
-                    f"Groww has no 1-minute candles for {day:%d %b %Y}. Pick a trading day "
-                    "(not a weekend or holiday) within the last few months."
+                    f"Groww has no 1-minute candles for {span}. Pick trading days "
+                    "(not weekends or holidays) within the last few months."
                 )
         except HistoryError as exc:
             self.status = "ERROR"
             self.error = str(exc)
             return
         self.symbols = list(frames)
-        clock = dt.datetime.combine(day, self.start, tzinfo=IST)
-        feed = ReplayFeed(frames, clock)
-        engine = ReplayEngine(feed, self.symbols)
-        engine.load_config()
-        # Read the tape at the start time, then trade only crosses after it.
-        await engine.tick(clock)
-        engine.hold_for_next_cross(self.symbols)
-        engine.status = "RUNNING"
-        self.engine = engine
-        self.error = "" if not self.skipped else f"No candles for {', '.join(self.skipped)} on that day."
-        self.status = "PLAYING"
-        await self._play()
+        self.days = days
+        with session_factory()() as db:
+            run = ReplayRun(
+                created_at=dt.datetime.now(IST).replace(tzinfo=None),
+                start_date=days[0].isoformat(),
+                end_date=days[-1].isoformat(),
+                start_time=self.start.strftime("%H:%M"),
+                symbols=",".join(self.symbols),
+                settings=json.dumps(settings, default=str),
+                status="RUNNING",
+                days_total=len(days),
+                days_done=0,
+                days=",".join(d.isoformat() for d in days),
+            )
+            db.add(run)
+            db.commit()
+            self.run_id = int(run.id)
+        notes = []
+        if self.skipped:
+            notes.append(f"No candles for {', '.join(self.skipped)}.")
+        self.error = " ".join(notes)
+        feed = ReplayFeed(frames, dt.datetime.combine(days[0], self.start, tzinfo=IST))
+        bot_paused = False
+        for index, day in enumerate(days):
+            if self._stop:
+                return
+            self.day_index, self.day = index, day
+            start = self.start if index == 0 else SESSION_OPEN
+            clock = dt.datetime.combine(day, start, tzinfo=IST)
+            feed.clock = clock
+            # A fresh engine per day: its own trade count, loss limit and P&L.
+            engine = ReplayEngine(feed, self.symbols, run_id=self.run_id)
+            engine.load_config()
+            await engine.tick(clock)
+            engine.hold_for_next_cross(self.symbols)
+            engine.status = "PAUSED" if bot_paused else "RUNNING"
+            self.engine = engine
+            if self.status not in ("PLAYING", "PAUSED"):
+                self.status = "PLAYING"
+            await self._play()
+            if self._stop:
+                return
+            bot_paused = engine.status == "PAUSED"
+            self._mark_run(days_done=index + 1)
+        self._mark_run(status="FINISHED")
+        self.status = "FINISHED"
+
+    def _mark_run(self, *, days_done: int | None = None, status: str | None = None) -> None:
+        if self.run_id is None:
+            return
+        with session_factory()() as db:
+            run = db.get(ReplayRun, self.run_id)
+            if run is None:
+                return
+            if days_done is not None:
+                run.days_done = days_done
+            if status is not None:
+                run.status = status
+            db.commit()
 
     async def _play(self) -> None:
+        """Play the current day until 15:30, then square it off."""
         eng = self.engine
         assert eng is not None and self.day is not None
         end = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST)
@@ -358,7 +549,7 @@ class ReplaySession:
                 except Exception as exc:  # noqa: BLE001
                     eng.last_error = str(exc)
                 if eng.feed.clock >= end:
-                    await self._finish()
+                    await self._finish_day()
                     return
                 # Let the live engine and the API run between ticks.
                 await asyncio.sleep(0)
@@ -368,14 +559,14 @@ class ReplaySession:
             sample = played / spent if spent > 0 else 0.0
             self.effective_speed = sample if self.effective_speed == 0 else 0.7 * self.effective_speed + 0.3 * sample
 
-    async def _finish(self) -> None:
+    async def _finish_day(self) -> None:
         eng = self.engine
         if eng is not None and eng.positions:
             await eng._square_off("EOD_SQUARE_OFF")
-        if eng is not None and eng.status == "RUNNING":
-            eng.status = "DAY_COMPLETED"
-            eng.halt_reason = "Replay finished at 15:30"
-        self.status = "FINISHED"
+        if eng is not None and eng.status in ("RUNNING", "PAUSED"):
+            keep = eng.status
+            eng.status = "DAY_COMPLETED" if keep == "RUNNING" else keep
+            eng.halt_reason = "Replay day finished at 15:30"
 
     def control(self, action: str, speed: int | None = None) -> None:
         if speed is not None:
@@ -404,8 +595,12 @@ class ReplaySession:
                 await eng._square_off(reason)
             except Exception:  # noqa: BLE001
                 pass
+        # Only a run still playing is cut short; a finished one keeps FINISHED.
+        if self.status in ("LOADING", "PLAYING", "PAUSED"):
+            self._mark_run(status="STOPPED")
         close_orphan_replay_rows()
         self.engine = None
+        self.run_id = None
         self.status = "IDLE"
 
 
@@ -421,6 +616,33 @@ def parse_replay_day(text: str, now: dt.datetime | None = None) -> dt.date:
     if day > now.date() or (day == now.date() and (market_is_open(now) or now.time() < SESSION_END)):
         raise ValueError("Pick a day that has already closed. Today replays after 15:30 IST.")
     return day
+
+
+def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime | None = None) -> tuple[dt.date, dt.date]:
+    """From/To for a run: both finished days, To on or after From, at most a month."""
+    if not end_text or end_text.strip() == (start_text or "").strip():
+        first = parse_replay_day(start_text, now)
+        return first, first
+    try:
+        first = dt.date.fromisoformat((start_text or "").strip())
+        last = dt.date.fromisoformat(end_text.strip())
+    except ValueError as exc:
+        raise ValueError("Pick the dates as YYYY-MM-DD.") from exc
+    if last < first:
+        raise ValueError("To must be on or after From.")
+    # A range may start on a weekend: it begins on the next trading day.
+    while first.weekday() >= 5 and first < last:
+        first += dt.timedelta(days=1)
+    first = parse_replay_day(first.isoformat(), now)
+    if last < first:
+        raise ValueError("To must be on or after From.")
+    if (last - first).days > MAX_RANGE_DAYS:
+        raise ValueError("Pick a range of one month or less.")
+    # The last day must have closed too; weekends inside the range are skipped.
+    while last.weekday() >= 5 and last > first:
+        last -= dt.timedelta(days=1)
+    parse_replay_day(last.isoformat(), now)
+    return first, last
 
 
 def parse_start(text: str) -> dt.time:
