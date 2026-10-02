@@ -131,7 +131,8 @@ export type SmaState = {
   sl_room_pct: number | null;
   realized_net_pnl: number;
   trades_today: number;
-  max_trades: number;
+  /** null during a replay: replays have no daily trade cap. */
+  max_trades: number | null;
   max_daily_loss: number;
   kpis: {
     theoretical_gross: number;

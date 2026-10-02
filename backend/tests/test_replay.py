@@ -251,7 +251,27 @@ def test_api_refuses_replay_in_live_and_without_login(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_raising_the_cap_resumes_a_replay_halted_on_it(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_a_replay_has_no_daily_trade_cap(db):
+    from models import BotConfig
+    import database
+
+    with database.session_factory()() as s:
+        s.get(BotConfig, 1).max_trades_per_day = 2
+        s.commit()
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"])
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    await _run_day(engine, dt.time(15, 0))
+    assert engine.trades_today > 2
+    assert not (engine.halt_reason or "").startswith("max_trades_per_day")
+    assert engine.snapshot()["max_trades"] is None
+
+
+def test_a_replay_halted_on_an_old_cap_starts_again(tmp_path, monkeypatch):
     monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/cap.db")
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
@@ -274,16 +294,9 @@ def test_raising_the_cap_resumes_a_replay_halted_on_it(tmp_path, monkeypatch):
         monkeypatch.setattr(main.replay, "engine", eng)
         monkeypatch.setattr(main.replay, "status", "PAUSED")
 
-        # Over the 1-100 limit: refused with a field error, the replay stays halted.
+        # The setting itself still takes 1-100 (it guards PAPER and LIVE).
         assert client.put("/api/config", json={"max_trades_per_day": 400}).status_code == 422
-        assert eng.status == "HALTED"
-        # Still at the cap: Start explains why.
-        res = client.post("/api/replay/bot/start")
-        assert res.status_code == 423 and "max_trades_per_day" in res.json()["detail"]
-
-        # A higher cap on Save unlocks the replay too, and Start runs it.
-        assert client.put("/api/config", json={"max_trades_per_day": 60}).status_code == 200
-        assert eng.status == "STOPPED"
+        # A replay has no cap, so one halted on the old cap simply starts again.
         assert client.post("/api/replay/bot/start").json()["bot_status"] == "RUNNING"
         monkeypatch.setattr(main.replay, "engine", None)
         monkeypatch.setattr(main.replay, "status", "IDLE")

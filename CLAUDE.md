@@ -106,8 +106,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
-  locally and has no Groww SDK path. Trades are tagged `REPLAY` (own book,
-  caps and P&L), no alerts are sent, and the live engine keeps running.
+  locally and has no Groww SDK path. Trades are tagged `REPLAY` (own book
+  and P&L; no daily trade cap, the loss limit still applies), no alerts are
+  sent, and the live engine keeps running.
   API: `/api/replay*`. Refused in LIVE mode.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
