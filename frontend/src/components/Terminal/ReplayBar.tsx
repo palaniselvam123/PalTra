@@ -266,11 +266,11 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
             type="button"
             disabled={busy}
             onClick={() => void run(() => smaApi.replayControl("stop"))}
-            title="End the replay and go back to today. Open replay positions close at the replay price."
+            title="End the replay. The chart stays on the replayed day; use Back to live on the chart for today. Open replay positions close at the replay price."
             className="flex min-h-8 items-center gap-1 rounded-md bg-white/10 px-2.5 text-xs font-semibold text-white hover:bg-white/15 disabled:opacity-50"
           >
             <Square size={12} aria-hidden />
-            {info?.status === "FINISHED" ? "Back to today" : "Stop replay"}
+            {info?.status === "FINISHED" ? "End replay" : "Stop replay"}
           </button>
         </span>
       </div>

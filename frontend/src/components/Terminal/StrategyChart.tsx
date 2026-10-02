@@ -17,6 +17,12 @@ type Props = {
   onClose: () => void;
   /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
   onLiveBars?: (count: number) => void;
+  /**
+   * Set by the page when a replay starts or ends. `date` holds the chart on that
+   * past day (with `runId`'s trades) until the user changes it; null goes live.
+   * A new `seq` applies it again.
+   */
+  pin?: { seq: number; date: string | null; runId: number | null; symbol: string | null } | null;
 };
 
 export const BAR_MINUTES = [1, 5, 15, 30, 60] as const;
@@ -316,7 +322,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], closing, onClose, onLiveBars }: Props) {
+export function StrategyChart({ chart, state, trades = [], closing, onClose, onLiveBars, pin }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -362,7 +368,18 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   const [pastError, setPastError] = useState<string | null>(null);
   const pastSeq = useRef(0);
   // A different chart stock leaves the past view; its candles belong to the old stock.
+  // A blank symbol (the page reloading its state) is not a change of stock.
+  const pastSymbolRef = useRef<string | null>(null);
+  // Set when a replay pins the chart: the page then reloads its live state, and
+  // that first symbol it reports is not the user picking another stock.
+  const pinHoldRef = useRef(false);
   useEffect(() => {
+    if (!symbol || pastSymbolRef.current === symbol) return;
+    if (pinHoldRef.current) {
+      pinHoldRef.current = false;
+      return;
+    }
+    pastSymbolRef.current = null;
     pastSeq.current += 1;
     setPast(null);
     setPastError(null);
@@ -382,14 +399,22 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
   }, [view, past, bar]);
   rowsRef.current = rows;
 
-  const loadPast = (next: { from: string; to: string }, size: number = bar) => {
+  // The replay run whose trades the past view marks; null = the default book.
+  const pastRunRef = useRef<number | null>(null);
+  const loadPast = (
+    next: { from: string; to: string },
+    size: number = bar,
+    runId: number | null = null,
+    stock: string = symbol
+  ) => {
+    pastRunRef.current = runId;
     setRange(next);
     const problem = rangeProblem(next.from, next.to);
     if (problem) {
       setPastError(problem);
       return;
     }
-    if (!symbol) {
+    if (!stock) {
       setPastError("Pick a stock first.");
       return;
     }
@@ -397,13 +422,14 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     setLoadingPast(true);
     setPastError(null);
     smaApi
-      .history(symbol, next.from, next.to, size)
+      .history(stock, next.from, next.to, size, runId)
       .then((payload) => {
         if (seq !== pastSeq.current) return;
         if (payload.candles.length === 0) {
           setPastError("Groww has no candles in that range. Markets may have been closed.");
           return;
         }
+        pastSymbolRef.current = stock.toUpperCase();
         setPast(payload);
       })
       .catch((err: unknown) => {
@@ -448,7 +474,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     } catch {
       /* private mode */
     }
-    if (past) loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, next);
+    if (past) loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, next, pastRunRef.current);
   };
 
   const toggleFull = () => {
@@ -479,10 +505,27 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
 
   const backToLive = () => {
     pastSeq.current += 1;
+    pastRunRef.current = null;
+    pastSymbolRef.current = null;
     setPast(null);
     setPastError(null);
     setLoadingPast(false);
   };
+
+  // A replay that ends (finished, stopped, or gone after a server restart)
+  // leaves the chart on the day it was playing, not today. A new replay
+  // shows its own chart again.
+  const pinSeq = pin?.seq;
+  useEffect(() => {
+    if (pinSeq == null || !pin) return;
+    if (pin.date && (pin.symbol || symbol)) {
+      pinHoldRef.current = true;
+      loadPast({ from: `${pin.date}T09:15`, to: `${pin.date}T15:30` }, bar, pin.runId, (pin.symbol || symbol).toUpperCase());
+    }
+    else backToLive();
+    // Only a new pin applies; later chart changes are the user's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinSeq]);
 
   useEffect(() => {
     if (!rootRef.current) return;

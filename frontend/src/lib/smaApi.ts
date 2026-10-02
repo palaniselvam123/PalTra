@@ -371,9 +371,16 @@ export const smaApi = {
   state: () => request<SmaState>("/api/state"),
   chart: (limit = 240) => request<ChartPayload>(limit === 240 ? "/api/chart" : `/api/chart?limit=${limit}`),
   /** Past 1-minute candles from Groww. Times are IST wall clock, YYYY-MM-DDTHH:MM. */
-  history: (symbol: string, start: string, end: string, interval = 1) =>
+  /** runId marks one replay run's trades; without it, the practice/real book plus the latest run. */
+  history: (symbol: string, start: string, end: string, interval = 1, runId?: number | null) =>
     request<ChartPayload & { symbol: string; from: string; to: string; interval?: number }>(
-      `/api/history?${new URLSearchParams({ symbol, start, end, interval: String(interval) }).toString()}`,
+      `/api/history?${new URLSearchParams({
+        symbol,
+        start,
+        end,
+        interval: String(interval),
+        ...(runId != null ? { run_id: String(runId) } : {}),
+      }).toString()}`,
       undefined,
       70000
     ),

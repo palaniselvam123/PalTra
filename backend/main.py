@@ -198,10 +198,14 @@ async def chart(limit: int = 240):
 
 
 @app.get("/api/history")
-async def history(symbol: str, start: str, end: str, interval: int = 1):
-    """Past candles from Groww for the chart's From/To view. Read-only."""
+async def history(symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
+    """Past candles from Groww for the chart's From/To view. Read-only.
+
+    `run_id` marks one replay run's trades; without it, the practice/real
+    trades plus the latest replay run in the range.
+    """
     try:
-        return await load_history(engine.broker, symbol, start, end, engine.load_config(), interval)
+        return await load_history(engine.broker, symbol, start, end, engine.load_config(), interval, run_id)
     except HistoryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
