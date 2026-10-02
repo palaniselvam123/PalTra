@@ -503,3 +503,50 @@ def test_chart_markers_come_from_this_book_only(db):
 
     # The trade list says which run a replay trade belongs to, so the page can match it.
     assert {t["entry_price"]: t["run_id"] for t in paper.trades()} == {1000.0: 1, 1001.0: 2, 1002.0: None}
+
+
+@pytest.mark.asyncio
+async def test_the_same_day_gives_the_same_trades_at_any_speed(db, monkeypatch):
+    """Ticks sit on a fixed grid, so speed and server load cannot change the result."""
+    import replay as replay_mod
+    from database import session_factory
+    from models import BotConfig, TradeLog
+
+    day, warm = dt.date(2026, 9, 29), dt.date(2026, 9, 28)
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.concat([_wave_day(warm), _wave_day(day)]).reset_index(drop=True)
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "SESSION_END", dt.time(10, 30))
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+    with session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        # A trailing stop reads every tick, so it shows any change in where ticks land.
+        row.stop_type, row.tsl_sl_points, row.tsl_trail_points = "TSL", 3.0, 1.0
+        s.commit()
+
+    async def play(speed: int) -> list[tuple]:
+        session = ReplaySession()
+        await session.begin(object(), ["TCS"], day, dt.time(9, 15), speed, settings={})
+        for _ in range(2000):
+            await asyncio.sleep(0.01)
+            if session.status in ("FINISHED", "ERROR"):
+                break
+        assert session.status == "FINISHED", session.error
+        with session_factory()() as s:
+            rows = s.query(TradeLog).filter(TradeLog.run_id == session.run_id).order_by(TradeLog.id).all()
+            out = [
+                (t.direction, t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.exit_reason, t.net_pnl)
+                for t in rows
+            ]
+        await session.stop()
+        return out
+
+    slow = await play(1_237)
+    fast = await play(9_871)
+    assert slow, "the wave should trade"
+    assert slow == fast
+    # Every fill happened on the 10-second grid.
+    assert all(t[1].second % 10 == 0 and t[1].microsecond == 0 for t in slow)

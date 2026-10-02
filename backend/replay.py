@@ -83,6 +83,16 @@ def _path_price(o: float, h: float, low: float, c: float, f: float) -> tuple[flo
     return price, max(visited), min(visited)
 
 
+def _to_next_grid(clock: dt.datetime) -> float:
+    """Replay seconds from `clock` to the next STEP_SECONDS grid point.
+
+    The grid is anchored on whole minutes (:00, :10, … for a 10 s step), so
+    every replay of a day samples each candle at the same instants.
+    """
+    into = (clock.second + clock.microsecond / 1_000_000) % STEP_SECONDS
+    return float(STEP_SECONDS) - into
+
+
 class ReplayFeed:
     """Candles for each replayed stock, cut at the replay clock."""
 
@@ -530,11 +540,20 @@ class ReplaySession:
             db.commit()
 
     async def _play(self) -> None:
-        """Play the current day until 15:30, then square it off."""
+        """Play the current day until 15:30, then square it off.
+
+        The engine ticks only on a fixed grid of replay time (every
+        STEP_SECONDS, on :00/:10/…/:50 of each minute), whatever the speed or
+        the server's load. Speed only sets how fast real time walks that grid,
+        so the same day with the same settings always sees the same prices and
+        gives the same trades. When the server falls behind, owed time is
+        dropped: the replay plays slower, never on a different grid.
+        """
         eng = self.engine
         assert eng is not None and self.day is not None
         end = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST)
         last = time.monotonic()
+        owed = 0.0  # replay seconds earned but not yet played
         while not self._stop:
             await asyncio.sleep(LOOP_SECONDS)
             now_m = time.monotonic()
@@ -543,14 +562,16 @@ class ReplaySession:
             if self.status != "PLAYING":
                 self.effective_speed = 0.0
                 continue
-            budget = real * self.speed
+            owed += real * self.speed
             played = 0.0
             began = time.monotonic()
-            while budget > 0 and not self._stop and self.status == "PLAYING":
-                step = min(STEP_SECONDS, budget)
-                budget -= step
-                played += step
-                eng.feed.clock = min(end, eng.feed.clock + dt.timedelta(seconds=step))
+            while not self._stop and self.status == "PLAYING":
+                gap = _to_next_grid(eng.feed.clock)
+                if owed < gap:
+                    break
+                owed -= gap
+                played += gap
+                eng.feed.clock = min(end, eng.feed.clock + dt.timedelta(seconds=gap))
                 try:
                     await eng.tick(eng.feed.clock)
                 except Exception as exc:  # noqa: BLE001
@@ -561,7 +582,8 @@ class ReplaySession:
                 # Let the live engine and the API run between ticks.
                 await asyncio.sleep(0)
                 if time.monotonic() - began > CPU_SHARE * max(real, LOOP_SECONDS):
-                    break  # behind: drop the rest, play slower instead of piling up
+                    owed = 0.0  # behind: drop the rest, play slower instead of piling up
+                    break
             spent = time.monotonic() - now_m + LOOP_SECONDS
             sample = played / spent if spent > 0 else 0.0
             self.effective_speed = sample if self.effective_speed == 0 else 0.7 * self.effective_speed + 0.3 * sample
