@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { inr, smaApi, type ReplayRun } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -79,12 +79,18 @@ export function BacktestRuns() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReplayRun | null>(null);
 
+  // The newest run opens by itself once, so its day-wise P&L shows without a click.
+  const autoOpened = useRef(false);
   const load = useCallback(() => {
     smaApi
       .replayRuns()
       .then((rows) => {
         setRuns(rows);
         setError(null);
+        if (!autoOpened.current && rows.length > 0) {
+          autoOpened.current = true;
+          setOpenId(rows[0].id);
+        }
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Runs did not load"));
   }, []);
@@ -179,66 +185,92 @@ export function BacktestRuns() {
                 const t = run.totals;
                 const on = openId === run.id;
                 return (
-                  <tr
-                    key={run.id}
-                    className={clsx("cursor-pointer hover:bg-white/[0.03]", on && "bg-sky-500/[0.07]")}
-                    onClick={() => setOpenId(on ? null : run.id)}
-                  >
-                    <td className="px-2 py-2 align-top">
-                      <div className="flex items-center gap-1.5 font-semibold text-slate-100">
-                        #{run.id}
-                        {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
-                        {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}
-                        {run.status === "STOPPED" ? <Badge color="slate">Stopped</Badge> : null}
-                      </div>
-                      <div className="text-slate-400">
-                        {shortDate(run.start_date)}
-                        {run.end_date !== run.start_date ? ` → ${shortDate(run.end_date)}` : ""}
-                      </div>
-                    </td>
-                    <td className="px-2 py-2 align-top font-mono text-slate-200">
-                      {run.days_done}/{run.days_total}
-                      <div className="font-sans text-[11px] text-slate-400">
-                        {t.green_days}↑ {t.red_days}↓
-                      </div>
-                    </td>
-                    <td className="max-w-[22rem] px-2 py-2 align-top text-slate-300">
-                      <div className="truncate" title={strategyLabel(run.settings)}>
-                        {strategyLabel(run.settings)}
-                      </div>
-                      <div className="truncate text-[11px] text-slate-400" title={run.symbols.join(", ")}>
-                        {run.symbols.join(", ")}
-                      </div>
-                    </td>
-                    <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.trades}</td>
-                    <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.win_rate.toFixed(1)}%</td>
-                    <td className="px-2 py-2 text-right align-top font-mono text-emerald-300">{signed(t.profit)}</td>
-                    <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.loss)}</td>
-                    <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
-                      {signed(t.net)}
-                    </td>
-                    <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
-                    <td className="px-2 py-2 text-right align-top">
-                      <button
-                        type="button"
-                        aria-label={`Delete run ${run.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          remove(run);
-                        }}
-                        className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/5 hover:text-rose-300"
-                      >
-                        <Trash2 size={14} aria-hidden />
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={run.id}>
+                    <tr
+                      className={clsx("cursor-pointer hover:bg-white/[0.03]", on && "bg-sky-500/[0.07]")}
+                      onClick={() => setOpenId(on ? null : run.id)}
+                    >
+                      <td className="px-2 py-2 align-top">
+                        <div className="flex items-center gap-1.5 font-semibold text-slate-100">
+                          #{run.id}
+                          {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
+                          {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}
+                          {run.status === "STOPPED" ? <Badge color="slate">Stopped</Badge> : null}
+                        </div>
+                        <div className="text-slate-400">
+                          {shortDate(run.start_date)}
+                          {run.end_date !== run.start_date ? ` → ${shortDate(run.end_date)}` : ""}
+                        </div>
+                        <button
+                          type="button"
+                          aria-expanded={on}
+                          aria-controls={`run-${run.id}-days`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenId(on ? null : run.id);
+                          }}
+                          className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10"
+                        >
+                          {on ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+                          Day-wise P&amp;L
+                        </button>
+                      </td>
+                      <td className="px-2 py-2 align-top font-mono text-slate-200">
+                        {run.days_done}/{run.days_total}
+                        <div className="font-sans text-[11px] text-slate-400">
+                          {t.green_days}↑ {t.red_days}↓
+                        </div>
+                      </td>
+                      <td className="max-w-[22rem] px-2 py-2 align-top text-slate-300">
+                        <div className="truncate" title={strategyLabel(run.settings)}>
+                          {strategyLabel(run.settings)}
+                        </div>
+                        <div className="truncate text-[11px] text-slate-400" title={run.symbols.join(", ")}>
+                          {run.symbols.join(", ")}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.trades}</td>
+                      <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.win_rate.toFixed(1)}%</td>
+                      <td className="px-2 py-2 text-right align-top font-mono text-emerald-300">{signed(t.profit)}</td>
+                      <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.loss)}</td>
+                      <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
+                        {signed(t.net)}
+                      </td>
+                      <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
+                      <td className="px-2 py-2 text-right align-top">
+                        <button
+                          type="button"
+                          aria-label={`Delete run ${run.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            remove(run);
+                          }}
+                          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/5 hover:text-rose-300"
+                        >
+                          <Trash2 size={14} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                    {on ? (
+                      <tr id={`run-${run.id}-days`} className="hidden bg-white/[0.015] sm:table-row">
+                        <td colSpan={10} className="p-0 whitespace-normal">
+                          <RunDetail run={detail?.id === run.id ? detail : null} />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
       )}
-      {openId != null ? <RunDetail run={detail} /> : null}
+      {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width. */}
+      {openId != null ? (
+        <div className="sm:hidden">
+          <RunDetail run={detail?.id === openId ? detail : null} />
+        </div>
+      ) : null}
     </div>
   );
 }
