@@ -498,15 +498,23 @@ class TestFetchOnMiss:
         assert saturday.weekday() == 5
         assert "weekend" in price_fetch.fetch_blocked_reason("AAA", saturday)
 
-    def test_a_fetch_is_refused_for_todays_simulated_prices(self):
+    def test_a_fetch_is_refused_for_todays_simulated_prices(self, monkeypatch):
         """Answering a question about the synthetic feed with real NSE data
         would swap one world for the other."""
-        import datetime as dt2
+        import types
 
         from app.research import price_fetch
 
-        today = dt2.datetime.now(IST).date()
-        reason = price_fetch.fetch_blocked_reason("AAA", today, source="simulated")
+        # Pin "today" to a Monday: on a real weekend the weekend reason wins.
+        monday = dt.datetime(2026, 6, 15, 11, 0, tzinfo=IST)
+
+        class _Clock(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return monday.astimezone(tz) if tz else monday
+
+        monkeypatch.setattr(price_fetch, "dt", types.SimpleNamespace(datetime=_Clock, date=dt.date, timedelta=dt.timedelta))
+        reason = price_fetch.fetch_blocked_reason("AAA", monday.date(), source="simulated")
         assert "SIMULATED" in reason
 
     def test_no_broker_session_is_reported_as_such(self, monkeypatch):
