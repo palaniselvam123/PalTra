@@ -147,7 +147,16 @@ def _markers(symbol: str, first: int, last: int, span: int = 60) -> list[dict]:
         if row.entry_time is not None:
             t = _epoch(row.entry_time)
             if first <= t <= last + span - 1:
-                out.append({"time": t, "direction": row.direction, "price": row.entry_price, "kind": "ENTRY"})
+                out.append(
+                    {
+                        "time": t,
+                        "direction": row.direction,
+                        "price": row.entry_price,
+                        "kind": "ENTRY",
+                        # Lets the chart colour the entry by the trade's result.
+                        "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                    }
+                )
         if row.exit_time is not None and row.exit_price is not None:
             t = _epoch(row.exit_time)
             if first <= t <= last + span - 1:
