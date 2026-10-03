@@ -373,6 +373,7 @@ export default function TerminalPage() {
               chart={chart}
               state={state}
               trades={chartTrades}
+              allTrades={trades}
               pin={pin}
               closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
               onLiveBars={askLiveBars}
