@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { inr, smaApi, type ReplayRun } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
+import { REASON_SHORT } from "./TradeHistoryTable";
 
 export type Settings = ReplayRun["settings"];
 
@@ -74,7 +75,7 @@ export function filtersShort(s: Settings): string {
   return on.length ? on.join(", ") : "no filters";
 }
 
-const SETTING_ROWS: [string, (s: Settings) => string][] = [
+export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["SMA", (s) => `${s.sma_fast} / ${s.sma_slow}`],
   [
     "Stop",
@@ -109,6 +110,28 @@ export function BacktestRuns() {
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReplayRun | null>(null);
+  const [printing, setPrinting] = useState<number | null>(null);
+
+  /** One run as a PDF: its settings, totals, day-wise P&L and every trade. */
+  const downloadPdf = useCallback(async (run: ReplayRun) => {
+    setPrinting(run.id);
+    try {
+      const [full, book] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY")]);
+      const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
+      await downloadBacktestPdf({
+        run: full,
+        trades: book.rows.filter((trade) => trade.run_id === run.id),
+        strategy: strategyLabel(full.settings),
+        settings: SETTING_ROWS.map(([label, value]) => [label, value(full.settings)]),
+        reasons: REASON_SHORT,
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? `PDF for run #${run.id} failed: ${err.message}` : "PDF failed");
+    } finally {
+      setPrinting(null);
+    }
+  }, []);
 
   // The newest run opens by itself once, so its day-wise P&L shows without a click.
   const autoOpened = useRef(false);
@@ -269,6 +292,24 @@ export function BacktestRuns() {
                       </td>
                       <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
                       <td className="px-2 py-2 text-right align-top">
+                        <button
+                          type="button"
+                          aria-label={`Download run ${run.id} as PDF`}
+                          title="Download PDF: settings, totals, day-wise P&L and every trade"
+                          disabled={printing === run.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void downloadPdf(run);
+                          }}
+                          className="mr-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-60"
+                        >
+                          {printing === run.id ? (
+                            <Loader2 size={13} aria-hidden className="animate-spin" />
+                          ) : (
+                            <FileDown size={13} aria-hidden />
+                          )}
+                          PDF
+                        </button>
                         <button
                           type="button"
                           aria-label={`Delete run ${run.id}`}

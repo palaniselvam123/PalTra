@@ -797,7 +797,7 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   NOT_ON_GROWW: "slate",
 };
 
-const REASON_SHORT: Record<string, string> = {
+export const REASON_SHORT: Record<string, string> = {
   MA_CROSS: "MA cross",
   MA_APPROACH: "Before cross",
   ATR_SL_HIT: "ATR SL",
