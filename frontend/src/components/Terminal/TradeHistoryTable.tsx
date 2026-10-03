@@ -1,10 +1,10 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
-import { inr, px, smaApi, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { inr, px, smaApi, type SmaState, type TradeBook, type TradeRow } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { BacktestRuns, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 
@@ -96,9 +96,18 @@ function settingsOf(trade: TradeRow, runs: RunSettings): Settings | null {
   return null;
 }
 
+// Thousands of rows share a few settings objects; build each label once.
+const LABELS = new WeakMap<Settings, string>();
+
 function strategyOf(trade: TradeRow, runs: RunSettings): string | null {
   const settings = settingsOf(trade, runs);
-  return settings ? strategyLabel(settings) : null;
+  if (!settings) return null;
+  let label = LABELS.get(settings);
+  if (label === undefined) {
+    label = strategyLabel(settings);
+    LABELS.set(settings, label);
+  }
+  return label;
 }
 
 function epoch(value: string | null | undefined): number | null {
@@ -148,6 +157,60 @@ function sortRows(rows: TradeRow[], sort: Sort, state: SmaState | null, runs: Ru
       return diff === 0 ? a.i - b.i : sign * diff;
     })
     .map((row) => row.trade);
+}
+
+/** How often the whole book is read again; live changes come from the page's poll meanwhile. */
+const BOOK_REFRESH_MS = 60_000;
+
+/**
+ * The selected book in full (up to 20,000 trades), with the page's newest-200
+ * poll laid over it so open trades and fresh fills show without a reload.
+ */
+function useTradeBook(book: Book, polled: TradeRow[], active: boolean) {
+  const [books, setBooks] = useState<Partial<Record<Book, TradeBook>>>({});
+  const [counts, setCounts] = useState<Partial<Record<Book, number>>>({});
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    let live = true;
+    const load = () => {
+      setLoading(true);
+      Promise.allSettled([smaApi.tradeBook(book), smaApi.tradeCounts()])
+        .then(([full, perBook]) => {
+          if (!live) return;
+          if (full.status === "fulfilled") setBooks((prev) => ({ ...prev, [book]: full.value }));
+          if (perBook.status === "fulfilled") setCounts(perBook.value);
+        })
+        .finally(() => {
+          if (live) setLoading(false);
+        });
+    };
+    load();
+    const timer = setInterval(load, BOOK_REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [book, active]);
+
+  const loaded = books[book];
+  const rows = useMemo(() => {
+    const fresh = polled.filter((trade) => bookOf(trade) === book);
+    if (!loaded) return fresh;
+    const byId = new Map(loaded.rows.map((trade) => [trade.id, trade]));
+    let added = 0;
+    for (const trade of fresh) {
+      if (!byId.has(trade.id)) added += 1;
+      byId.set(trade.id, trade);
+    }
+    const merged = Array.from(byId.values());
+    if (added) merged.sort((a, b) => b.id - a.id);
+    return merged;
+  }, [loaded, polled, book]);
+  const total = loaded ? Math.max(rows.length, loaded.total + (rows.length - loaded.rows.length)) : rows.length;
+  const countOf = (id: Book) =>
+    Math.max(id === book ? total : counts[id] ?? 0, polled.filter((trade) => bookOf(trade) === id).length);
+  return { rows, total, countOf, loading: loading && !loaded };
 }
 
 /** Replay-run settings for the run ids in this list, fetched once per new run. */
@@ -227,7 +290,8 @@ export function TradeHistoryTable({
   const [reason, setReason] = useState("ALL");
   const [strategy, setStrategy] = useState("ALL");
   const [sort, setSort] = useState<Sort>(null);
-  const runs = useRunSettings(trades);
+  const full = useTradeBook(book, trades, !backtests);
+  const runs = useRunSettings(full.rows);
   const [closedFolded, setClosedFolded] = useState(false);
   useEffect(() => {
     try {
@@ -251,20 +315,37 @@ export function TradeHistoryTable({
     if (picked || !state?.mode) return;
     setBook(state.mode === "LIVE" ? "LIVE" : state.mode === "REPLAY" ? "REPLAY" : "PAPER");
   }, [picked, state?.mode]);
-  const inBook = trades.filter((trade) => bookOf(trade) === book);
-  const symbols = Array.from(new Set(inBook.map((trade) => trade.symbol.toUpperCase()))).sort();
+  const inBook = full.rows;
+  // The lists below cover the whole book (up to 20,000 trades), so they are
+  // rebuilt only when the book changes, not on every price tick.
+  const { closedInBook, openInBook, symbols, reasons, strategies } = useMemo(() => {
+    const closed: TradeRow[] = [];
+    const open: TradeRow[] = [];
+    const names = new Set<string>();
+    const why = new Set<string>();
+    const labels = new Set<string>();
+    for (const trade of inBook) {
+      (trade.exit_price == null ? open : closed).push(trade);
+      names.add(trade.symbol.toUpperCase());
+      if (trade.exit_price != null) why.add(trade.exit_reason || "");
+      labels.add(strategyOf(trade, runs) ?? NOT_RECORDED);
+    }
+    return {
+      closedInBook: closed,
+      openInBook: open,
+      symbols: Array.from(names).sort(),
+      reasons: Array.from(why).sort((a, b) => (REASON_SHORT[a] ?? a).localeCompare(REASON_SHORT[b] ?? b)),
+      strategies: Array.from(labels).sort((a, b) =>
+        a === NOT_RECORDED ? 1 : b === NOT_RECORDED ? -1 : a.localeCompare(b)
+      ),
+    };
+  }, [inBook, runs]);
   const stockFilter = symbols.includes(stock) ? stock : "ALL";
-  const reasons = Array.from(
-    new Set(inBook.filter((t) => t.exit_price != null).map((t) => t.exit_reason || ""))
-  ).sort((a, b) => (REASON_SHORT[a] ?? a).localeCompare(REASON_SHORT[b] ?? b));
   const reasonFilter = reasons.includes(reason) ? reason : "ALL";
-  const strategies = Array.from(new Set(inBook.map((t) => strategyOf(t, runs) ?? NOT_RECORDED))).sort((a, b) =>
-    a === NOT_RECORDED ? 1 : b === NOT_RECORDED ? -1 : a.localeCompare(b)
-  );
   const strategyFilter = strategies.includes(strategy) ? strategy : "ALL";
   const min = minPnl.trim() === "" ? null : Number(minPnl);
   const max = maxPnl.trim() === "" ? null : Number(maxPnl);
-  const rows = inBook.filter((trade) => {
+  const keep = (trade: TradeRow, pnl: number | null): boolean => {
     if (stockFilter !== "ALL" && trade.symbol.toUpperCase() !== stockFilter) return false;
     if (side !== "ALL" && trade.direction !== side) return false;
     if (reasonFilter !== "ALL" && (trade.exit_price == null || (trade.exit_reason || "") !== reasonFilter)) return false;
@@ -273,16 +354,28 @@ export function TradeHistoryTable({
     if (from && (!day || day < from)) return false;
     if (to && (!day || day > to)) return false;
     const open = trade.exit_price == null;
-    const pnl = shownPnl(trade, state);
     if (pnlSide === "open" && !open) return false;
     if (pnlSide === "profit" && !(pnl != null && pnl > 0)) return false;
     if (pnlSide === "loss" && !(pnl != null && pnl < 0)) return false;
     if (min != null && Number.isFinite(min) && (pnl == null || pnl < min)) return false;
     if (max != null && Number.isFinite(max) && (pnl == null || pnl > max)) return false;
     return true;
-  });
-  const openRows = sortRows(rows.filter((trade) => trade.exit_price == null), sort, state, runs);
-  const completedRows = sortRows(rows.filter((trade) => trade.exit_price != null), sort, state, runs);
+  };
+  // Closed trades do not move with the price: filter and sort them once per change.
+  const completedRows = useMemo(
+    () => sortRows(closedInBook.filter((trade) => keep(trade, trade.gross_pnl)), sort, null, runs),
+    // `keep` reads exactly these values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [closedInBook, runs, sort, stockFilter, side, reasonFilter, strategyFilter, from, to, pnlSide, min, max]
+  );
+  // Open trades are few and are marked at the live price on every tick.
+  const openRows = sortRows(
+    openInBook.filter((trade) => keep(trade, shownPnl(trade, state))),
+    sort,
+    state,
+    runs
+  );
+  const rows = openRows.length ? [...openRows, ...completedRows] : completedRows;
   // Click a header: high to low first for numbers, A to Z for words; a third click resets.
   const sortBy = (key: SortKey) => {
     const first: "asc" | "desc" = ["stock", "side", "reason", "strategy"].includes(key) ? "asc" : "desc";
@@ -290,13 +383,22 @@ export function TradeHistoryTable({
       current?.key !== key ? { key, dir: first } : current.dir === first ? { key, dir: first === "asc" ? "desc" : "asc" } : null
     );
   };
-  const filteredPnl = rows.reduce((sum, trade) => {
+  const closedTotals = useMemo(() => {
+    let gross = 0;
+    let net = 0;
+    for (const trade of completedRows) {
+      gross += trade.gross_pnl ?? 0;
+      net += trade.net_pnl ?? 0;
+    }
+    return { gross, net };
+  }, [completedRows]);
+  const filteredPnl = openRows.reduce((sum, trade) => {
     const pnl = shownPnl(trade, state);
     return pnl == null ? sum : sum + pnl;
-  }, 0);
-  const filteredNet = rows.reduce((sum, trade) => (trade.net_pnl == null ? sum : sum + trade.net_pnl), 0);
+  }, closedTotals.gross);
+  const filteredNet = openRows.reduce((sum, trade) => (trade.net_pnl == null ? sum : sum + trade.net_pnl), closedTotals.net);
   // Closed trades split into winners and losers by gross P&L, e.g. +₹15 and −₹20 → −₹5.
-  const summary = completedRows.reduce(
+  const summary = useMemo(() => completedRows.reduce(
     (acc, trade) => {
       const gross = trade.gross_pnl ?? 0;
       if (gross > 0) {
@@ -313,7 +415,7 @@ export function TradeHistoryTable({
       return acc;
     },
     { wins: 0, losses: 0, flat: 0, profit: 0, loss: 0, charges: 0, net: 0 }
-  );
+  ), [completedRows]);
   const filtersOn =
     stockFilter !== "ALL" ||
     side !== "ALL" ||
@@ -325,6 +427,7 @@ export function TradeHistoryTable({
     minPnl !== "" ||
     maxPnl !== "";
   const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
+  const resetKey = [book, stockFilter, side, reasonFilter, strategyFilter, from, to, pnlSide, minPnl, maxPnl, sort?.key, sort?.dir].join("|");
   const simulation = book === "PAPER";
 
   const clearFilters = () => {
@@ -390,7 +493,7 @@ export function TradeHistoryTable({
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
           {BOOKS.map((item) => {
-            const count = trades.filter((trade) => bookOf(trade) === item.id).length;
+            const count = full.countOf(item.id);
             const on = !backtests && item.id === book;
             return (
               <button
@@ -409,7 +512,7 @@ export function TradeHistoryTable({
                   !on && "border border-white/10 text-slate-300 hover:bg-white/5"
                 )}
               >
-                {item.title} · {count}
+                {item.title} · {count.toLocaleString("en-IN")}
               </button>
             );
           })}
@@ -583,7 +686,8 @@ export function TradeHistoryTable({
           </button>
         )}
         <p className="pb-1 text-xs text-slate-400">
-          {rows.length} of {inBook.length}
+          {rows.length.toLocaleString("en-IN")} of {full.total.toLocaleString("en-IN")}
+          {full.total > inBook.length ? ` (newest ${inBook.length.toLocaleString("en-IN")} loaded)` : ""}
           {rows.length > 0 && (
             <>
               {" "}
@@ -599,7 +703,7 @@ export function TradeHistoryTable({
         {...summary}
         filtered={filtersOn}
       />
-      {loading ? (
+      {loading || full.loading ? (
         <div aria-busy="true" aria-label="Loading trades" className="space-y-2 border-t border-white/10 p-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-9 w-full" />
@@ -616,6 +720,7 @@ export function TradeHistoryTable({
         sort={sort}
         onSort={sortBy}
         runs={runs}
+        resetKey={resetKey}
         empty={
           inBook.length === 0
             ? simulation
@@ -636,7 +741,8 @@ export function TradeHistoryTable({
           sort={sort}
           onSort={sortBy}
           runs={runs}
-          state={state}
+          resetKey={resetKey}
+          state={null}
           empty={rows.length === 0 ? "No trades match these filters." : "No completed orders."}
         />
       )}
@@ -815,7 +921,8 @@ function rowFigures(t: TradeRow, state: SmaState | null) {
   return { open, market, points, net };
 }
 
-type DayGroup = { day: string; rows: TradeRow[]; charges: number; net: number };
+/** `count`, `charges` and `net` cover the whole day, even when a page shows part of it. */
+type DayGroup = { day: string; rows: TradeRow[]; count: number; charges: number; net: number };
 
 function byDay(rows: TradeRow[]): DayGroup[] {
   const groups: DayGroup[] = [];
@@ -823,15 +930,18 @@ function byDay(rows: TradeRow[]): DayGroup[] {
     const day = tradeDay(row) || "—";
     let group = groups[groups.length - 1];
     if (!group || group.day !== day) {
-      group = { day, rows: [], charges: 0, net: 0 };
+      group = { day, rows: [], count: 0, charges: 0, net: 0 };
       groups.push(group);
     }
     group.rows.push(row);
+    group.count += 1;
     group.charges += row.brokerage_and_taxes ?? 0;
     group.net += row.net_pnl ?? 0;
   }
   return groups;
 }
+
+const PAGE_SIZES = [100, 250, 500];
 
 function dayLabel(day: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
@@ -855,6 +965,7 @@ function OrderTable({
   sort,
   onSort,
   runs,
+  resetKey,
 }: {
   title: string;
   rows: TradeRow[];
@@ -866,17 +977,44 @@ function OrderTable({
   sort: Sort;
   onSort: (key: SortKey) => void;
   runs: RunSettings;
+  /** Changes when the book, filters or sort change: back to page 1. */
+  resetKey: string;
 }) {
+  // Thousands of rows are drawn a page at a time; totals still cover them all.
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
+  useEffect(() => setPage(0), [resetKey, pageSize]);
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const current = Math.min(page, pages - 1);
+  const pageRows = rows.length > pageSize ? rows.slice(current * pageSize, (current + 1) * pageSize) : rows;
   // Day subtotals only while the rows stay in date order.
   const byTime = BY_TIME.includes(sort?.key);
-  const groups = byTime ? byDay(rows) : [{ day: "all", rows, charges: 0, net: 0 }];
-  const showSubtotals = Boolean(subtotals) && byTime && groups.length > 1;
+  const allDays = useMemo(() => (byTime ? byDay(rows) : []), [byTime, rows]);
+  const groups: DayGroup[] = byTime
+    ? byDay(pageRows).map((group) => {
+        const whole = allDays.find((day) => day.day === group.day);
+        return whole ? { ...group, count: whole.count, charges: whole.charges, net: whole.net } : group;
+      })
+    : [{ day: "all", rows: pageRows, count: pageRows.length, charges: 0, net: 0 }];
+  const showSubtotals = Boolean(subtotals) && byTime && allDays.length > 1;
+  const pager =
+    rows.length > PAGE_SIZES[0] ? (
+      <Pager
+        page={current}
+        pages={pages}
+        size={pageSize}
+        total={rows.length}
+        onPage={setPage}
+        onSize={setPageSize}
+      />
+    ) : null;
   return (
     <div className="border-t border-white/10">
       <h3 className="flex items-baseline gap-2 px-4 pt-3 text-xs font-semibold uppercase tracking-wider text-slate-300">
         {title}
-        <span className="font-normal text-slate-400">{rows.length}</span>
+        <span className="font-normal text-slate-400">{rows.length.toLocaleString("en-IN")}</span>
       </h3>
+      {pager}
 
       {/* Phone: one stacked card per trade. */}
       <ul className="space-y-2 p-3 md:hidden">
@@ -959,12 +1097,72 @@ function OrderTable({
           </tbody>
         </table>
       </div>
+      {pager}
     </div>
   );
 }
 
+function Pager({
+  page,
+  pages,
+  size,
+  total,
+  onPage,
+  onSize,
+}: {
+  page: number;
+  pages: number;
+  size: number;
+  total: number;
+  onPage: (page: number) => void;
+  onSize: (size: number) => void;
+}) {
+  const first = page * size + 1;
+  const last = Math.min(total, (page + 1) * size);
+  const button =
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-white/15 px-2 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40 sm:min-h-8 sm:min-w-8";
+  return (
+    <nav aria-label="Pages" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs text-slate-400">
+      <span>
+        {first.toLocaleString("en-IN")}–{last.toLocaleString("en-IN")} of {total.toLocaleString("en-IN")}
+      </span>
+      <span className="flex items-center gap-1">
+        <button type="button" className={button} disabled={page === 0} onClick={() => onPage(0)} aria-label="First page">
+          «
+        </button>
+        <button type="button" className={button} disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page">
+          ‹
+        </button>
+        <span className="px-1 text-slate-300">
+          Page {page + 1} of {pages}
+        </span>
+        <button type="button" className={button} disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="Next page">
+          ›
+        </button>
+        <button type="button" className={button} disabled={page >= pages - 1} onClick={() => onPage(pages - 1)} aria-label="Last page">
+          »
+        </button>
+      </span>
+      <label className="ml-auto flex items-center gap-1.5">
+        Rows per page
+        <select
+          value={size}
+          onChange={(e) => onSize(Number(e.target.value))}
+          className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-slate-100 sm:min-h-8"
+        >
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+    </nav>
+  );
+}
+
 function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
-  const n = group.rows.length;
+  const n = group.count;
   const label = `${dayLabel(group.day)} · ${n} trade${n === 1 ? "" : "s"}`;
   if (as === "card") {
     return (
@@ -1012,7 +1210,23 @@ function CloseButton({ trade, closing, onClose }: { trade: TradeRow; closing: bo
   );
 }
 
-function OrderRow({
+const OrderRow = memo(OrderRowView, sameRow);
+const TradeCard = memo(TradeCardView, sameRow);
+
+type RowProps = {
+  trade: TradeRow;
+  runs: RunSettings;
+  state: SmaState | null;
+  closing: boolean;
+  onClose: (trade: TradeRow) => void;
+};
+
+/** A closed row only changes with its own data; the page passes it no live state. */
+function sameRow(a: RowProps, b: RowProps): boolean {
+  return a.trade === b.trade && a.runs === b.runs && a.state === b.state && a.closing === b.closing;
+}
+
+function OrderRowView({
   trade: t,
   runs,
   state,
@@ -1058,7 +1272,7 @@ function OrderRow({
   );
 }
 
-function TradeCard({
+function TradeCardView({
   trade: t,
   runs,
   state,
