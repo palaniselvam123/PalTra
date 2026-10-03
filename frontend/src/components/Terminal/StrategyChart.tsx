@@ -3,7 +3,19 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
 import clsx from "clsx";
-import { ColorType, LineStyle, createChart, type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
+import {
+  ColorType,
+  LineStyle,
+  createChart,
+  type IChartApi,
+  type IPriceLine,
+  type ISeriesApi,
+  type ISeriesPrimitive,
+  type ISeriesPrimitivePaneView,
+  type SeriesAttachedParameter,
+  type Time,
+} from "lightweight-charts";
+import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { parseClock } from "@/lib/format";
 import { Skeleton } from "./ui";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
@@ -13,6 +25,8 @@ type Props = {
   state: SmaState | null;
   /** Trade rows already loaded for the blotter. Used only to mark exits. */
   trades?: TradeRow[];
+  /** Every loaded trade (all books); a past day picks its own from these for the high/low lines. */
+  allTrades?: TradeRow[];
   closing: boolean;
   onClose: () => void;
   /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
@@ -185,6 +199,121 @@ function entryResult(
   return null;
 }
 
+const MAX_HIGH_COLOR = "#34D399";
+const MAX_LOW_COLOR = "#FB7185";
+
+/** One trade's highest and lowest price, drawn across the bars it was open. */
+type RangeSegment = { from: number; to: number; high: number; low: number };
+
+/** Bar time at or after `sec` (or the last bar), so a line always lands on a candle. */
+function barAtOrAfter(times: number[], sec: number): number {
+  let lo = 0;
+  let hi = times.length - 1;
+  if (sec >= times[hi]) return times[hi];
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < sec) lo = mid + 1;
+    else hi = mid;
+  }
+  return times[lo];
+}
+
+/** Bar time at or before `sec` (or the first bar). */
+function barAtOrBefore(times: number[], sec: number): number {
+  if (sec <= times[0]) return times[0];
+  let lo = 0;
+  let hi = times.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (times[mid] > sec) hi = mid - 1;
+    else lo = mid;
+  }
+  return times[lo];
+}
+
+function rangeSegments(trades: TradeRow[], rows: Candle[], symbol: string, bar: number): RangeSegment[] {
+  if (rows.length === 0) return [];
+  const times = rows.map((c) => c.time);
+  const first = times[0];
+  const last = times[times.length - 1] + bar * 60 - 1;
+  const out: RangeSegment[] = [];
+  for (const t of trades) {
+    if (t.symbol.toUpperCase() !== symbol || t.max_high == null || t.max_low == null) continue;
+    const opened = t.entry_time ? parseClock(t.entry_time) : null;
+    if (!opened) continue;
+    const closed = t.exit_time ? parseClock(t.exit_time) : null;
+    const start = Math.floor(opened.getTime() / 1000);
+    const end = closed ? Math.floor(closed.getTime() / 1000) : last;
+    if (end < first || start > last) continue;
+    const from = barAtOrBefore(times, bucketStart(Math.max(start, first), bar));
+    const to = barAtOrBefore(times, bucketStart(Math.min(end, last), bar));
+    out.push({ from, to: Math.max(from, to), high: t.max_high, low: t.max_low });
+  }
+  return out;
+}
+
+/**
+ * Draws each trade's max high (green) and max low (red) as short lines over
+ * the candles the trade was open, on the candle series' own canvas.
+ */
+class TradeRangeLines implements ISeriesPrimitive<Time> {
+  private segments: RangeSegment[] = [];
+  private host: SeriesAttachedParameter<Time> | null = null;
+  private readonly views: ISeriesPrimitivePaneView[];
+
+  constructor() {
+    this.views = [{ renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>): void {
+    this.host = param;
+  }
+
+  detached(): void {
+    this.host = null;
+  }
+
+  paneViews(): readonly ISeriesPrimitivePaneView[] {
+    return this.views;
+  }
+
+  set(segments: RangeSegment[]): void {
+    this.segments = segments;
+    this.host?.requestUpdate();
+  }
+
+  private draw(target: CanvasRenderingTarget2D): void {
+    const host = this.host;
+    if (!host || this.segments.length === 0) return;
+    const scale = host.chart.timeScale();
+    const half = Math.max(2, (scale.options().barSpacing || 6) * 0.4);
+    target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      ctx.lineWidth = Math.max(1, Math.round(2 * vr));
+      ctx.lineCap = "round";
+      for (const seg of this.segments) {
+        const x1 = scale.timeToCoordinate(seg.from as Time);
+        const x2 = scale.timeToCoordinate(seg.to as Time);
+        if (x1 == null || x2 == null) continue;
+        const left = Math.round((x1 - half) * hr);
+        const right = Math.round((x2 + half) * hr);
+        for (const [price, color] of [
+          [seg.high, MAX_HIGH_COLOR],
+          [seg.low, MAX_LOW_COLOR],
+        ] as const) {
+          const y = host.series.priceToCoordinate(price);
+          if (y == null) continue;
+          const yy = Math.round(y * vr) + 0.5;
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(left, yy);
+          ctx.lineTo(right, yy);
+          ctx.stroke();
+        }
+      }
+    });
+  }
+}
+
 function chartMarkers(
   chart: ChartPayload,
   rows: Candle[],
@@ -355,10 +484,11 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], closing, onClose, onLiveBars, pin }: Props) {
+export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onLiveBars, pin }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const rangesRef = useRef<TradeRangeLines | null>(null);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -597,6 +727,9 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       wickDownColor: "#F43F5E",
     });
     candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.28 } });
+    const ranges = new TradeRangeLines();
+    candles.attachPrimitive(ranges);
+    rangesRef.current = ranges;
     // Stretch the price scale so the open position's entry, stop and target
     // lines stay on screen instead of being cut off above or below the candles.
     candles.applyOptions({
@@ -697,6 +830,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
       instance.unsubscribeCrosshairMove(onCrosshair);
       instance.unsubscribeClick(onClick);
       observer.disconnect();
+      rangesRef.current = null;
       instance.remove();
       apiRef.current = null;
     };
@@ -721,6 +855,14 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
     candleRef.current.setMarkers(
       chartMarkers(chart, rows, past ? [] : trades, symbol, bar, trades).map((m) => ({ ...m, time: m.time as never }))
     );
+    // A past day shows the replay run it was pinned to, else the practice/real book.
+    const runId = pastRunRef.current;
+    const ranged = past
+      ? (allTrades ?? trades).filter((t) =>
+          runId != null ? t.run_id === runId : (t.mode || "PAPER").toUpperCase() !== "REPLAY"
+        )
+      : trades;
+    rangesRef.current?.set(rangeSegments(ranged, rows, symbol, bar));
 
     if (entryLine.current) {
       candleRef.current.removePriceLine(entryLine.current);
@@ -736,7 +878,7 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
         title: look.title,
       });
     }
-  }, [view, rows, bar, past, trades, symbol]);
+  }, [view, rows, bar, past, trades, allTrades, symbol]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
@@ -888,6 +1030,8 @@ export function StrategyChart({ chart, state, trades = [], closing, onClose, onL
             <span className="text-rose-300">Loss</span>
           </LegendItem>
           <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
+          <LegendItem swatch={<span className="block h-0.5 w-3 rounded bg-[#34D399]" />}>Max high</LegendItem>
+          <LegendItem swatch={<span className="block h-0.5 w-3 rounded bg-[#FB7185]" />}>Max low</LegendItem>
           <LegendItem swatch={<span className="text-[#FACC15]">●</span>}>
             <span className="text-[#FACC15]">Stop exit</span>
           </LegendItem>
