@@ -4,7 +4,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
-import { inr, px, smaApi, type SmaState, type TradeBook, type TradeRow } from "@/lib/smaApi";
+import { inr, pnlAtPrice, px, smaApi, type SmaState, type TradeBook, type TradeRow } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { BacktestRuns, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 
@@ -137,9 +137,9 @@ function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: 
     case "exit":
       return marketPrice(trade, state);
     case "high":
-      return trade.max_high ?? null;
+      return pnlAtPrice(trade, trade.max_high);
     case "low":
-      return trade.max_low ?? null;
+      return pnlAtPrice(trade, trade.max_low);
     case "points":
       return rowFigures(trade, state).points;
     case "reason":
@@ -469,9 +469,20 @@ export function TradeHistoryTable({
       "net_pnl",
       "mode",
     ] as const;
-    const lines = [[...fields, "strategy"].join(",")];
+    const lines = [[...fields, "pnl_at_max_high", "pnl_at_max_low", "strategy"].join(",")];
+    const amount = (trade: TradeRow, price: number | null | undefined) => {
+      const value = pnlAtPrice(trade, price);
+      return value == null ? "" : value.toFixed(2);
+    };
     for (const trade of [...openRows, ...completedRows]) {
-      lines.push([...fields.map((key) => csvCell(trade[key])), csvCell(strategyOf(trade, runs))].join(","));
+      lines.push(
+        [
+          ...fields.map((key) => csvCell(trade[key])),
+          amount(trade, trade.max_high),
+          amount(trade, trade.max_low),
+          csvCell(strategyOf(trade, runs)),
+        ].join(",")
+      );
     }
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -920,15 +931,25 @@ function Extreme({ trade, which, left }: { trade: TradeRow; which: "high" | "low
     );
   }
   const move = price - trade.entry_price;
-  const favour = trade.direction === "LONG" ? move : -move;
-  const label = favour > 0 ? "best price for this trade" : favour < 0 ? "worst price for this trade" : "never moved past the entry";
+  const amount = pnlAtPrice(trade, price) ?? 0;
+  const tone = amount > 0 ? "text-emerald-300" : amount < 0 ? "text-rose-300" : "text-slate-400";
+  const label =
+    amount > 0
+      ? `best moment: ${signedInr(amount)} if closed there`
+      : amount < 0
+        ? `worst moment: ${signedInr(amount)} if closed there`
+        : "never moved past the entry";
   return (
-    <span className={clsx("inline-flex flex-col leading-tight", left ? "items-start" : "items-end")} title={`${which === "high" ? "Highest" : "Lowest"} price while open: ${label}`}>
+    <span
+      className={clsx("inline-flex flex-col leading-tight", left ? "items-start" : "items-end")}
+      title={`${which === "high" ? "Highest" : "Lowest"} price while open (${label}, before charges)`}
+    >
       <span className="font-mono">{px(price)}</span>
-      <span className={clsx("font-mono text-[11px]", favour > 0 ? "text-emerald-300" : favour < 0 ? "text-rose-300" : "text-slate-400")}>
+      <span className={clsx("font-mono text-[11px]", tone)}>
         {move > 0 ? "+" : ""}
-        {move.toFixed(2)}
+        {move.toFixed(2)} pts
       </span>
+      <span className={clsx("font-mono text-[11px] font-semibold", tone)}>{signedInr(amount)}</span>
     </span>
   );
 }
