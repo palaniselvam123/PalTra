@@ -552,6 +552,46 @@ async def test_the_same_day_gives_the_same_trades_at_any_speed(db, monkeypatch):
     assert all(t[1].second % 10 == 0 and t[1].microsecond == 0 for t in slow)
 
 
+@pytest.mark.asyncio
+async def test_each_closed_trade_records_its_highest_and_lowest_price(db, monkeypatch):
+    """max_high / max_low span every price the trade saw, entry and exit included."""
+    import replay as replay_mod
+    from database import session_factory
+    from models import TradeLog
+
+    day, warm = dt.date(2026, 9, 29), dt.date(2026, 9, 28)
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.concat([_wave_day(warm), _wave_day(day)]).reset_index(drop=True)
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "SESSION_END", dt.time(10, 30))
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+    session = ReplaySession()
+    await session.begin(object(), ["TCS"], day, dt.time(9, 15), 5_000, settings={})
+    for _ in range(2000):
+        await asyncio.sleep(0.01)
+        if session.status in ("FINISHED", "ERROR"):
+            break
+    assert session.status == "FINISHED", session.error
+    bars = _wave_day(day)
+    with session_factory()() as s:
+        rows = s.query(TradeLog).filter(TradeLog.run_id == session.run_id, TradeLog.exit_price.isnot(None)).all()
+        assert rows, "the wave should trade"
+        for t in rows:
+            assert t.max_high >= max(t.entry_price, t.exit_price)
+            assert t.max_low <= min(t.entry_price, t.exit_price)
+            # Never outside what the market printed while the trade was open.
+            start, end = t.entry_time.replace(tzinfo=IST), t.exit_time.replace(tzinfo=IST)
+            window = bars[(bars["ts"] >= int(start.timestamp()) - 60) & (bars["ts"] <= int(end.timestamp()))]
+            assert t.max_high <= float(window["high"].max()) + 1e-6
+            assert t.max_low >= float(window["low"].min()) - 1e-6
+        # Ticks between entry and exit widen the range past the two fills.
+        assert any(t.max_high > max(t.entry_price, t.exit_price) or t.max_low < min(t.entry_price, t.exit_price) for t in rows)
+    await session.stop()
+
+
 def test_each_trade_keeps_the_strategy_it_was_entered_with(db):
     """The blotter's Strategy column reads the settings saved on the trade at entry."""
     from database import session_factory
@@ -583,3 +623,29 @@ def test_each_trade_keeps_the_strategy_it_was_entered_with(db):
         s.commit()
     engine._trades_cache = None  # trades() caches for a few seconds
     assert next(t for t in engine.trades() if t["id"] == trade_id)["strategy"] is None
+
+
+def test_an_open_trade_shows_its_high_and_low_so_far(db):
+    from strategy_engine import OpenPosition, StrategyEngine
+
+    clock = dt.datetime.combine(DAY, dt.time(10, 0), tzinfo=IST)
+    engine = StrategyEngine(broker=ReplayBroker(ReplayFeed(_frames(), clock)))
+    cfg = engine.load_config()
+    trade_id = engine._insert_open_trade(
+        cfg=cfg, direction="SHORT", fill=100.0, cross_price=100.0, atr=1.0, sl=103.0, now=clock, qty=5
+    )
+    pos = OpenPosition(
+        direction="SHORT", qty=5, entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0,
+        sl_trigger=103.0, sl_order_id="", entry_order_id="", entry_time=clock, trade_id=trade_id,
+        mode="PAPER", high=100.0, low=100.0,
+    )
+    for price in (101.5, 98.25, 0.0, 99.0):  # a zero quote is ignored
+        pos.note_price(price)
+    engine.positions["TCS"] = pos
+    row = next(t for t in engine.trades() if t["id"] == trade_id)
+    assert (row["max_high"], row["max_low"]) == (101.5, 98.25)
+    # Nothing is written to the trade until it closes.
+    engine.positions.clear()
+    engine._trades_cache = None
+    row = next(t for t in engine.trades() if t["id"] == trade_id)
+    assert (row["max_high"], row["max_low"]) == (None, None)
