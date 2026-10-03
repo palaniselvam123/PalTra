@@ -68,6 +68,30 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
   const tone = (value: number | null | undefined) => (value == null || value === 0 ? INK : value > 0 ? GREEN : RED);
   const after = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
+  // What the run would have made had every trade closed at its max high, its
+  // max low, its best price or its worst price (before charges).
+  const ranged = trades.filter((r) => r.max_high != null && r.max_low != null);
+  const sum = (pick: (r: TradeRow) => number | null) => ranged.reduce((acc, r) => acc + (pick(r) ?? 0), 0);
+  const atHigh = sum((r) => pnlAtPrice(r, r.max_high));
+  const atLow = sum((r) => pnlAtPrice(r, r.max_low));
+  const best = sum((r) => Math.max(pnlAtPrice(r, r.max_high) ?? 0, pnlAtPrice(r, r.max_low) ?? 0));
+  const worst = sum((r) => Math.min(pnlAtPrice(r, r.max_high) ?? 0, pnlAtPrice(r, r.max_low) ?? 0));
+  const rangeNote = ranged.length === trades.length ? "" : ` (${ranged.length} of ${trades.length} trades have a range)`;
+  const rangeRows: [string, string][] = ranged.length
+    ? [
+        [`All closed at max high, before charges${rangeNote}`, pdfMoney(atHigh)],
+        ["All closed at max low", pdfMoney(atLow)],
+        ["Best case (each at its best price)", pdfMoney(best)],
+        ["Worst case (each at its worst price)", pdfMoney(worst)],
+      ]
+    : [["Max high / low amounts", "not recorded for these trades"]];
+  const rangeTone: Record<string, number> = {
+    [`All closed at max high, before charges${rangeNote}`]: atHigh,
+    "All closed at max low": atLow,
+    "Best case (each at its best price)": best,
+    "Worst case (each at its worst price)": worst,
+  };
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(...INK);
@@ -110,6 +134,7 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
       ["Net P&L (after charges)", pdfMoney(t.net)],
       ["Max drawdown", pdfMoney(t.max_drawdown)],
       ["Green / red days", `${t.green_days} / ${t.red_days}`],
+      ...rangeRows,
     ],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [30, 41, 59] },
@@ -120,6 +145,7 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
       if (label.startsWith("Net")) cell.cell.styles.textColor = tone(t.net);
       if (label === "Total profit") cell.cell.styles.textColor = GREEN;
       if (label === "Total loss" || label === "Max drawdown") cell.cell.styles.textColor = RED;
+      if (label in rangeTone) cell.cell.styles.textColor = tone(rangeTone[label]);
     },
   });
   const resultEnd = after();
