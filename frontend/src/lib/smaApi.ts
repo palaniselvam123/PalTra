@@ -224,6 +224,16 @@ export type TradeRow = {
   max_low?: number | null;
 };
 
+/**
+ * Rupee P&L the trade would have shown at `price` (before charges): the
+ * points in its favour times its quantity. Used for the max high / max low.
+ */
+export function pnlAtPrice(trade: Pick<TradeRow, "direction" | "entry_price" | "qty">, price: number | null | undefined): number | null {
+  if (price == null || !Number.isFinite(price) || !Number.isFinite(trade.entry_price)) return null;
+  const points = trade.direction === "SHORT" ? trade.entry_price - price : price - trade.entry_price;
+  return points * (trade.qty || 0);
+}
+
 export type TradeBookMode = "PAPER" | "LIVE" | "REPLAY";
 
 /** Each distinct strategy is sent once; rows point at it by index. */

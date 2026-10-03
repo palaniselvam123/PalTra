@@ -286,16 +286,17 @@ class TradeRangeLines implements ISeriesPrimitive<Time> {
     const host = this.host;
     if (!host || this.segments.length === 0) return;
     const scale = host.chart.timeScale();
-    const half = Math.max(2, (scale.options().barSpacing || 6) * 0.4);
+    // A short mark (14 px) in the middle of the trade, outlined so it shows on any candle.
+    const half = 7;
     target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
-      ctx.lineWidth = Math.max(1, Math.round(2 * vr));
       ctx.lineCap = "round";
       for (const seg of this.segments) {
         const x1 = scale.timeToCoordinate(seg.from as Time);
         const x2 = scale.timeToCoordinate(seg.to as Time);
         if (x1 == null || x2 == null) continue;
-        const left = Math.round((x1 - half) * hr);
-        const right = Math.round((x2 + half) * hr);
+        const mid = (x1 + x2) / 2;
+        const left = Math.round((mid - half) * hr);
+        const right = Math.round((mid + half) * hr);
         for (const [price, color] of [
           [seg.high, MAX_HIGH_COLOR],
           [seg.low, MAX_LOW_COLOR],
@@ -303,7 +304,15 @@ class TradeRangeLines implements ISeriesPrimitive<Time> {
           const y = host.series.priceToCoordinate(price);
           if (y == null) continue;
           const yy = Math.round(y * vr) + 0.5;
+          // Dark edge first, then the colour on top.
+          ctx.strokeStyle = "rgba(2, 6, 23, 0.85)";
+          ctx.lineWidth = Math.max(3, Math.round(4.5 * vr));
+          ctx.beginPath();
+          ctx.moveTo(left, yy);
+          ctx.lineTo(right, yy);
+          ctx.stroke();
           ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(2, Math.round(2.5 * vr));
           ctx.beginPath();
           ctx.moveTo(left, yy);
           ctx.lineTo(right, yy);

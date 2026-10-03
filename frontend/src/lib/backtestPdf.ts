@@ -3,7 +3,7 @@
  * every trade. Built in the browser; jsPDF loads only when asked for.
  */
 import { istStamp } from "@/lib/format";
-import type { ReplayRun, TradeRow } from "@/lib/smaApi";
+import { pnlAtPrice, type ReplayRun, type TradeRow } from "@/lib/smaApi";
 
 /** The PDF's built-in font has no ₹, ≥ or arrows; spell them out. */
 export function pdfText(value: string): string {
@@ -185,7 +185,7 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["#", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high", "Max low", "Points", "Exit reason", "Charges", "Net P&L"]],
+    head: [["#", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "Net P&L"]],
     body: rows.length
       ? rows.map((r) => [
           r.id,
@@ -196,8 +196,8 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
           price(r.entry_price),
           pdfText(r.exit_time ? istStamp(r.exit_time) : "open"),
           price(r.exit_price),
-          price(r.max_high),
-          price(r.max_low),
+          r.max_high == null ? "-" : `${price(r.max_high)}\n${pdfMoney(pnlAtPrice(r, r.max_high))}`,
+          r.max_low == null ? "-" : `${price(r.max_low)}\n${pdfMoney(pnlAtPrice(r, r.max_low))}`,
           signedPts(r.points),
           r.exit_price == null ? "Open" : reasons[r.exit_reason || ""] ?? (r.exit_reason || "Closed"),
           r.brokerage_and_taxes == null ? "-" : pdfMoney(r.brokerage_and_taxes).replace("+", ""),
@@ -213,6 +213,8 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
       const r = rows[cell.row.index];
       if (cell.column.index === 13 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
       if (cell.column.index === 10) cell.cell.styles.textColor = tone(r.points);
+      if (cell.column.index === 8) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_high));
+      if (cell.column.index === 9) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));
     },
   });
 
