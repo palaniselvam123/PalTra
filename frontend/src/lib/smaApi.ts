@@ -219,6 +219,9 @@ export type TradeRow = {
   run_id?: number | null;
   /** Settings the bot used for this trade, when the API records them. */
   strategy?: Record<string, string | number | boolean | null> | null;
+  /** Highest / lowest price while the trade was open (so far, while it is). */
+  max_high?: number | null;
+  max_low?: number | null;
 };
 
 export type TradeBookMode = "PAPER" | "LIVE" | "REPLAY";

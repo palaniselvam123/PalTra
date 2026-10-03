@@ -584,7 +584,7 @@ async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT):
 
     def build() -> str:
         data = engine.book(book, limit)
-        rows, strategies = pack_strategies(attach_market_prices(data["rows"], ltps))
+        rows, strategies = pack_strategies(attach_market_prices(engine.with_open_extremes(data["rows"]), ltps))
         return json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies})
 
     # Thousands of rows take a moment; build them off the event loop so the
@@ -620,6 +620,8 @@ async def trades_csv(mode: str = ""):
         "exit_time",
         "exit_price",
         "exit_reason",
+        "max_high",
+        "max_low",
         "points",
         "gross_pnl",
         "brokerage_and_taxes",

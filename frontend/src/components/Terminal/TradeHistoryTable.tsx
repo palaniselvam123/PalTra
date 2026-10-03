@@ -60,6 +60,8 @@ type SortKey =
   | "entry"
   | "exit_time"
   | "exit"
+  | "high"
+  | "low"
   | "points"
   | "reason"
   | "strategy"
@@ -79,6 +81,8 @@ const SORT_CHOICES: { key: SortKey; label: string }[] = [
   { key: "strategy", label: "Strategy" },
   { key: "entry", label: "Entry price" },
   { key: "exit", label: "Exit price" },
+  { key: "high", label: "Max high" },
+  { key: "low", label: "Max low" },
   { key: "id", label: "Trade #" },
 ];
 
@@ -132,6 +136,10 @@ function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: 
       return epoch(trade.exit_time);
     case "exit":
       return marketPrice(trade, state);
+    case "high":
+      return trade.max_high ?? null;
+    case "low":
+      return trade.max_low ?? null;
     case "points":
       return rowFigures(trade, state).points;
     case "reason":
@@ -454,6 +462,8 @@ export function TradeHistoryTable({
       "exit_time",
       "exit_price",
       "exit_reason",
+      "max_high",
+      "max_low",
       "gross_pnl",
       "brokerage_and_taxes",
       "net_pnl",
@@ -763,6 +773,8 @@ const COLUMNS: Col[] = [
   { key: "entry", label: "Entry", num: true },
   { key: "exit_time", label: "Exit time" },
   { key: "exit", label: "Exit", num: true },
+  { key: "high", label: "Max high", num: true },
+  { key: "low", label: "Max low", num: true },
   { key: "points", label: "Points", num: true },
   { key: "reason", label: "Exit reason" },
   { key: "strategy", label: "Strategy" },
@@ -890,6 +902,34 @@ function ResultSideBadge({ trade, net }: { trade: TradeRow; net: number | null }
     <Badge color={color} title={`${trade.direction === "LONG" ? "Bought" : "Sold"} first · ${result}`}>
       {word}
     </Badge>
+  );
+}
+
+/**
+ * The trade's highest or lowest price, with its distance from the entry in
+ * points: green when it was in the trade's favour (high for a long, low for a
+ * short), red when against it.
+ */
+function Extreme({ trade, which, left }: { trade: TradeRow; which: "high" | "low"; left?: boolean }) {
+  const price = which === "high" ? trade.max_high : trade.max_low;
+  if (price == null) {
+    return (
+      <span className="font-mono text-slate-500" title="Recorded for trades closed after this was added.">
+        —
+      </span>
+    );
+  }
+  const move = price - trade.entry_price;
+  const favour = trade.direction === "LONG" ? move : -move;
+  const label = favour > 0 ? "best price for this trade" : favour < 0 ? "worst price for this trade" : "never moved past the entry";
+  return (
+    <span className={clsx("inline-flex flex-col leading-tight", left ? "items-start" : "items-end")} title={`${which === "high" ? "Highest" : "Lowest"} price while open: ${label}`}>
+      <span className="font-mono">{px(price)}</span>
+      <span className={clsx("font-mono text-[11px]", favour > 0 ? "text-emerald-300" : favour < 0 ? "text-rose-300" : "text-slate-400")}>
+        {move > 0 ? "+" : ""}
+        {move.toFixed(2)}
+      </span>
+    </span>
   );
 }
 
@@ -1177,7 +1217,7 @@ function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
   }
   return (
     <tr className="border-y border-white/15 bg-white/[0.06] font-semibold">
-      <td colSpan={10} className="px-3 py-2 text-slate-200">
+      <td colSpan={12} className="px-3 py-2 text-slate-200">
         Subtotal · {label}
       </td>
       <td className="px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
@@ -1244,7 +1284,7 @@ function OrderRowView({
     <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
       <td className="px-3 py-2 text-right font-mono text-slate-400">{t.id}</td>
       <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
-      <td className="px-3 py-2">
+      <td className="whitespace-nowrap px-3 py-2">
         <ResultSideBadge trade={t} net={net} />
         <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
       </td>
@@ -1253,6 +1293,12 @@ function OrderRowView({
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
       <td className="px-3 py-2 text-right font-mono">
         {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
+      </td>
+      <td className="px-3 py-2 text-right">
+        <Extreme trade={t} which="high" />
+      </td>
+      <td className="px-3 py-2 text-right">
+        <Extreme trade={t} which="low" />
       </td>
       <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
@@ -1301,6 +1347,18 @@ function TradeCardView({
         <Field k={open ? "Live price" : "Exit"} v={open ? px(market) : px(t.exit_price)} sub={open ? "open" : istStamp(t.exit_time)} />
         <Field k="Points" v={signedPts(points)} tone={pnlTone(points)} />
         <Field k="Charges" v={t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)} tone="text-amber-300" />
+        <div className="min-w-0">
+          <dt className="text-[11px] uppercase tracking-wider text-slate-400">Max high</dt>
+          <dd className="text-sm text-slate-200">
+            <Extreme trade={t} which="high" left />
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[11px] uppercase tracking-wider text-slate-400">Max low</dt>
+          <dd className="text-sm text-slate-200">
+            <Extreme trade={t} which="low" left />
+          </dd>
+        </div>
       </dl>
       <div className="mt-2 text-xs">
         <div className="text-[11px] uppercase tracking-wider text-slate-400">Strategy</div>

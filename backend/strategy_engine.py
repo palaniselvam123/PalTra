@@ -99,6 +99,16 @@ class OpenPosition:
     tsl_best: float | None = None
     # LIVE: monotonic time of the last stop modify sent to Groww.
     tsl_modified_at: float = 0.0
+    # Highest and lowest price seen while the trade is open (every tick's
+    # LTP, the entry and the exit). Saved as TradeLog.max_high / max_low.
+    high: float | None = None
+    low: float | None = None
+
+    def note_price(self, price: float) -> None:
+        if price <= 0:
+            return
+        self.high = price if self.high is None else max(self.high, price)
+        self.low = price if self.low is None else min(self.low, price)
 
 
 def _ist_now() -> dt.datetime:
@@ -370,6 +380,9 @@ class StrategyEngine:
                 tsl_step=tsl_step,
                 tsl_points=tsl_points,
                 tsl_best=entry if tsl_step else None,
+                # Ticks before a restart are not kept; the range restarts at entry.
+                high=entry,
+                low=entry,
             )
 
     def stop(self) -> None:
@@ -490,6 +503,10 @@ class StrategyEngine:
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
+
+        # Every open trade remembers its highest and lowest price, paused or not.
+        for symbol, pos in self.positions.items():
+            pos.note_price(float(self._ltps.get(symbol, 0.0) or 0.0))
 
         # Practice books close at square-off whether or not the bot is
         # running, and never carry into the next session.
@@ -1167,6 +1184,8 @@ class StrategyEngine:
             tsl_step=tsl_step,
             tsl_points=tsl_points,
             tsl_best=fill if tsl_step else None,
+            high=fill,
+            low=fill,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -1543,7 +1562,7 @@ class StrategyEngine:
                 px = round_price(cfg.symbol, ack.fill_price)
         buy, sell = legs_for(pos.direction, pos.entry_price, px)
         costs = calculate_charges(buy, sell, pos.qty)
-        self._finalize_trade(pos.trade_id, px, reason, now, costs)
+        self._finalize_trade(pos.trade_id, px, reason, now, costs, extremes=(pos.high, pos.low))
 
     def _insert_open_trade(
         self,
@@ -1579,13 +1598,26 @@ class StrategyEngine:
             db.refresh(row)
             return int(row.id)
 
-    def _finalize_trade(self, trade_id: int, exit_price: float, reason: str, now: dt.datetime, costs: dict) -> None:
+    def _finalize_trade(
+        self,
+        trade_id: int,
+        exit_price: float,
+        reason: str,
+        now: dt.datetime,
+        costs: dict,
+        extremes: tuple[float | None, float | None] = (None, None),
+    ) -> None:
         with session_factory()() as db:
             row = db.get(TradeLog, trade_id)
             if row is None:
                 return
             row.exit_time = now.replace(tzinfo=None)
             row.exit_price = exit_price
+            # The entry and exit fills bound the range even when no tick was seen.
+            seen = [p for p in (*extremes, row.entry_price, exit_price) if p is not None and p > 0]
+            if seen:
+                row.max_high = max(seen)
+                row.max_low = min(seen)
             row.exit_reason = reason
             row.gross_pnl = costs["gross_pnl"]
             row.brokerage_and_taxes = costs["total_charges"]
@@ -2209,12 +2241,25 @@ class StrategyEngine:
         now = time.monotonic()
         cached = getattr(self, "_trades_cache", None)
         if cached is not None and now - cached[0] < 8:
-            return cached[1]
+            return self.with_open_extremes(cached[1])
         with session_factory()() as db:
             rows = db.query(TradeLog).order_by(TradeLog.id.desc()).limit(200).all()
         payload = [_trade_dict(r) for r in rows]
         self._trades_cache = (now, payload)
-        return payload
+        return self.with_open_extremes(payload)
+
+    def with_open_extremes(self, rows: list[dict]) -> list[dict]:
+        """Open trades show the high and low so far; they are saved at the close."""
+        live = {pos.trade_id: pos for pos in self.positions.values()}
+        if not live:
+            return rows
+        out = []
+        for row in rows:
+            pos = live.get(row.get("id")) if row.get("exit_price") is None else None
+            if pos is not None and pos.high is not None:
+                row = {**row, "max_high": pos.high, "max_low": pos.low}
+            out.append(row)
+        return out
 
 
 _WARN_MINUTES = 3
@@ -2620,6 +2665,8 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "mode": row.mode,
         "run_id": getattr(row, "run_id", None),
         "strategy": _strategy_of(row, parsed),
+        "max_high": getattr(row, "max_high", None),
+        "max_low": getattr(row, "max_low", None),
     }
 
 

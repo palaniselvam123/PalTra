@@ -110,6 +110,10 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN run_id INTEGER")
         if "strategy" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN strategy TEXT")
+        if "max_high" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN max_high FLOAT")
+        if "max_low" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN max_low FLOAT")
 
 
 def init_db() -> BotConfig:

@@ -40,6 +40,10 @@ class TradeLog(Base):
     # JSON copy of the strategy settings at entry (strategy_engine.SNAPSHOT_FIELDS).
     # None on trades booked before this was recorded.
     strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Highest / lowest price while the trade was open (ticks, entry, exit).
+    # Written at the close; None on trades booked before this was recorded.
+    max_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_low: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ReplayRun(Base):
