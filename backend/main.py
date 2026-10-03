@@ -10,6 +10,7 @@ stop, P&L, bot status). REST lives under `/api`.
 from __future__ import annotations
 
 import asyncio
+import json
 import csv
 import io
 from contextlib import asynccontextmanager
@@ -17,7 +18,8 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, load_history
@@ -36,6 +38,9 @@ from groww_client import preferred_quote_token
 from database import init_db, session_factory
 from models import BotConfig
 from strategy_engine import (
+    BOOK_LIMIT,
+    BOOKS,
+    pack_strategies,
     MAX_TRADE_SYMBOLS,
     ForceRefused,
     StrategyEngine,
@@ -89,6 +94,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="SMA ATR Intraday Terminal", lifespan=lifespan)
+# A full trade book is a few MB of repetitive JSON; gzip cuts it ~10x.
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -567,12 +574,34 @@ async def trades():
     return attach_market_prices(engine.trades(), engine._ltps)
 
 
+@app.get("/api/trades/book")
+async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT):
+    """One book's newest trades, up to 20,000, for the blotter."""
+    book = (mode or "PAPER").upper()
+    if book not in BOOKS:
+        raise HTTPException(status_code=422, detail=f"mode must be one of {', '.join(BOOKS)}")
+    ltps = dict(engine._ltps)
+
+    def build() -> str:
+        data = engine.book(book, limit)
+        rows, strategies = pack_strategies(attach_market_prices(data["rows"], ltps))
+        return json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies})
+
+    # Thousands of rows take a moment; build them off the event loop so the
+    # bot keeps ticking, and skip FastAPI's per-value encoder (plain values only).
+    return Response(await asyncio.to_thread(build), media_type="application/json")
+
+
+@app.get("/api/trades/counts")
+async def trades_counts():
+    return engine.book_counts()
+
+
 @app.get("/api/trades.csv")
 async def trades_csv(mode: str = ""):
-    rows = attach_market_prices(engine.trades(), engine._ltps)
     book = (mode or "").upper()
-    if book in ("PAPER", "LIVE", "REPLAY"):
-        rows = [row for row in rows if (row.get("mode") or "PAPER").upper() == book]
+    data = engine.book(book if book in BOOKS else None)
+    rows = attach_market_prices(data["rows"], engine._ltps)
     buffer = io.StringIO()
     fields = [
         "id",

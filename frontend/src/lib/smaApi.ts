@@ -221,6 +221,18 @@ export type TradeRow = {
   strategy?: Record<string, string | number | boolean | null> | null;
 };
 
+export type TradeBookMode = "PAPER" | "LIVE" | "REPLAY";
+
+/** Each distinct strategy is sent once; rows point at it by index. */
+type TradeBookPayload = {
+  mode: TradeBookMode;
+  total: number;
+  rows: (Omit<TradeRow, "strategy"> & { strategy_ref: number | null })[];
+  strategies: NonNullable<TradeRow["strategy"]>[];
+};
+
+export type TradeBook = { total: number; rows: TradeRow[] };
+
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
 
 export type ReplayInfo = {
@@ -412,7 +424,20 @@ export const smaApi = {
       method: "POST",
       body: JSON.stringify({ symbol }),
     }),
+  /** Newest 200 trades across all books; the page polls this. */
   trades: () => request<TradeRow[]>("/api/trades"),
+  /** One whole book, newest first, up to 20,000 trades. */
+  tradeBook: (mode: TradeBookMode) =>
+    request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(
+      (body): TradeBook => ({
+        total: body.total,
+        rows: body.rows.map(({ strategy_ref, ...row }) => ({
+          ...row,
+          strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
+        })),
+      })
+    ),
+  tradeCounts: () => request<Record<TradeBookMode, number>>("/api/trades/counts"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
   replayStart: (date: string, start: string, speed: number, endDate?: string) =>
     request<ReplayInfo>(

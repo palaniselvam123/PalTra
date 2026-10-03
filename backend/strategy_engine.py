@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import or_
+from sqlalchemy import func, or_, select, true
 
 from charges import calculate_charges, legs_for
 from database import session_factory
@@ -129,15 +129,58 @@ def settings_snapshot(cfg: BotConfig) -> dict:
     return {name: getattr(cfg, name, None) for name in SNAPSHOT_FIELDS}
 
 
-def _strategy_of(row: TradeLog) -> dict | None:
+# Most trades the blotter loads for one book. /api/trades stays at the newest
+# 200 across all books, because the page polls it every few seconds.
+BOOK_LIMIT = 20000
+BOOKS = ("PAPER", "LIVE", "REPLAY")
+
+
+def _mode_filter(mode: str):
+    """Rows of one book. Old rows with no mode belong to the practice book."""
+    if mode == "PAPER":
+        return or_(TradeLog.mode == "PAPER", TradeLog.mode.is_(None))
+    return TradeLog.mode == mode
+
+
+def pack_strategies(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Send each distinct strategy once and point rows at it.
+
+    Thousands of trades usually share a handful of settings; repeating the
+    full snapshot on every row would make the response many times larger.
+    """
+    strategies: list[dict] = []
+    # book() hands rows with the same stored settings the same dict, so the
+    # object identity is enough to spot a repeat.
+    seen: dict[int, int] = {}
+    packed: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        settings = item.pop("strategy", None)
+        ref = None
+        if settings:
+            ref = seen.get(id(settings))
+            if ref is None:
+                ref = seen[id(settings)] = len(strategies)
+                strategies.append(settings)
+        item["strategy_ref"] = ref
+        packed.append(item)
+    return packed, strategies
+
+
+def _strategy_of(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> dict | None:
     raw = getattr(row, "strategy", None)
     if not raw:
         return None
+    if parsed is not None and raw in parsed:
+        return parsed[raw]
     try:
         value = json.loads(raw)
     except (TypeError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
+        value = None
+    value = value if isinstance(value, dict) else None
+    if parsed is not None:
+        parsed[raw] = value
+    return value
 
 
 def trade_names(cfg: BotConfig) -> list[str]:
@@ -2141,6 +2184,27 @@ class StrategyEngine:
             "wins": wins,
         }
 
+    def book(self, mode: str | None, limit: int = BOOK_LIMIT) -> dict:
+        """One book's newest trades (all books when mode is None), up to `limit`.
+
+        `total` is how many the book holds, so the page can say when it shows
+        only the newest part of it.
+        """
+        limit = max(1, min(int(limit), BOOK_LIMIT))
+        table = TradeLog.__table__
+        where = _mode_filter(mode) if mode is not None else true()
+        with session_factory()() as db:
+            total = db.execute(select(func.count()).select_from(table).where(where)).scalar_one()
+            # Plain rows, not ORM objects: about 3x faster for thousands of trades.
+            rows = db.execute(select(table).where(where).order_by(table.c.id.desc()).limit(limit)).all()
+        parsed: dict[str, dict | None] = {}
+        return {"total": total, "rows": [_trade_dict(r, parsed) for r in rows]}
+
+    def book_counts(self) -> dict[str, int]:
+        """How many trades each book holds."""
+        with session_factory()() as db:
+            return {mode: db.query(TradeLog).filter(_mode_filter(mode)).count() for mode in BOOKS}
+
     def trades(self) -> list[dict]:
         now = time.monotonic()
         cached = getattr(self, "_trades_cache", None)
@@ -2528,7 +2592,7 @@ def attach_market_prices(rows: list[dict], ltps: dict[str, float]) -> list[dict]
     return stamped
 
 
-def _trade_dict(row: TradeLog) -> dict:
+def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> dict:
     points = None
     if row.exit_price is not None:
         raw = float(row.exit_price) - float(row.entry_price)
@@ -2555,7 +2619,7 @@ def _trade_dict(row: TradeLog) -> dict:
         "points": points,
         "mode": row.mode,
         "run_id": getattr(row, "run_id", None),
-        "strategy": _strategy_of(row),
+        "strategy": _strategy_of(row, parsed),
     }
 
 
