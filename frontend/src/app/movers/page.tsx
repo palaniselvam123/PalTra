@@ -73,7 +73,7 @@ export default function MoversPage() {
   const [peak, setPeak] = useState(false);
   // Fast-mover thresholds. The API defaults (0.1%/min, 0.75% from open) are
   // strict on a quiet day, so both are adjustable here; alerts keep their own.
-  const SPEED_STOPS = [0.02, 0.03, 0.05, 0.1, 0.15, 0.2];
+  const SPEED_STOPS = [0, 0.01, 0.02, 0.03, 0.05, 0.1, 0.15, 0.2];
   const MOVE_STOPS = [0, 0.25, 0.5, 0.75, 1, 1.5];
   const [minSpeed, setMinSpeed] = useState(0.1);
   const [minMove, setMinMove] = useState(0.75);
