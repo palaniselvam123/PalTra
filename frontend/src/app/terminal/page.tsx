@@ -91,6 +91,9 @@ export default function TerminalPage() {
   const [trades, setTrades] = useState<TradeRow[]>([]);
   const [tradesLoaded, setTradesLoaded] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
+  // Polls in a row with no answer. One slow moment (a restart, a busy
+  // server) is not an outage, so the banner waits for a second miss.
+  const misses = useRef(0);
   const [connected, setConnected] = useState(false);
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
@@ -135,7 +138,8 @@ export default function TerminalPage() {
           next.status === "rejected" &&
           !answered(cfg.reason) &&
           !answered(next.reason);
-        setUnreachable(down);
+        misses.current = down ? misses.current + 1 : 0;
+        setUnreachable(misses.current >= 2);
         if (down) {
           setLoadNote(null);
         }
@@ -222,6 +226,7 @@ export default function TerminalPage() {
         .replayInfo()
         .then((info) => {
           if (stop) return;
+          misses.current = 0;
           setUnreachable(false);
           onReplay(info);
         })
@@ -256,6 +261,7 @@ export default function TerminalPage() {
         .state()
         .then((next) => {
           setState(next);
+          misses.current = 0;
           setUnreachable(false);
           setLoadNote(null);
           if (lastPlayed.current && next.symbol) lastPlayed.current.symbol = next.symbol;
