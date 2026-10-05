@@ -23,6 +23,8 @@ export type StockCardData = {
   /** Groww's last refusal today, e.g. "Add ₹20092.46 to your Groww Balance". */
   reject?: string | null;
   rejectAt?: string | null;
+  /** Which settings this stock sets for itself, e.g. "qty, RSI"; empty when it uses the shared ones. */
+  ownStrategy?: string;
 };
 
 function Money({ value }: { value: number }) {
@@ -38,7 +40,7 @@ type Props = {
 };
 
 export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowOnChart }: Props) {
-  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet, reject, rejectAt } =
+  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet, reject, rejectAt, ownStrategy } =
     stock;
   const traded = openNet != null || (closedTrades ?? 0) > 0;
   const cannotArm = !armed && armLimitReached;
@@ -71,6 +73,11 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
         <SideBadge side={side} />
         {side !== "FLAT" && qty > 0 ? <span className="shrink-0 font-mono text-xs text-slate-300">{qty}</span> : null}
         {side !== "FLAT" && stopOff ? <Badge color="amber">No stop</Badge> : null}
+        {ownStrategy ? (
+          <Badge color="violet" title={`Own strategy settings: ${ownStrategy}`}>
+            Own
+          </Badge>
+        ) : null}
         <span className="min-w-0 truncate text-xs text-slate-400" title={note || undefined}>
           {note || "No note yet"}
         </span>

@@ -40,7 +40,10 @@ from models import BotConfig
 from strategy_engine import (
     BOOK_LIMIT,
     BOOKS,
+    STOCK_FIELDS,
+    _cfg_for,
     pack_strategies,
+    stock_settings,
     MAX_TRADE_SYMBOLS,
     ForceRefused,
     StrategyEngine,
@@ -185,6 +188,9 @@ def _config_dict(row: BotConfig) -> dict:
         "square_off_time": row.square_off_time,
         "entry_cutoff_time": row.entry_cutoff_time or "15:00",
         "trading_mode": row.trading_mode,
+        # Each stock's own strategy settings over the shared ones above.
+        "stock_settings": stock_settings(row),
+        "stock_fields": list(STOCK_FIELDS),
     }
 
 
@@ -270,10 +276,15 @@ async def put_config(body: ConfigUpdate):
         row = db.get(BotConfig, 1)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
+        own = stock_settings(row)
         if (
             body.qty is not None
             and int(body.qty) != int(row.qty)
-            and any(pos.qty != body.qty for pos in engine.positions.values())
+            and any(
+                pos.qty != body.qty
+                for symbol, pos in engine.positions.items()
+                if "qty" not in own.get(symbol, {})
+            )
         ):
             raise HTTPException(409, "Close the open position before changing quantity")
         data = body.model_dump(exclude_none=True)
@@ -295,6 +306,8 @@ async def put_config(body: ConfigUpdate):
             raise HTTPException(400, "Buy RSI low must be at or below the buy RSI high")
         if float(row.rsi_short_min) > float(row.rsi_short_max):
             raise HTTPException(400, "Sell RSI low must be at or below the sell RSI high")
+        for symbol in own:
+            _check_settings(_cfg_for(row, symbol), symbol)
         db.commit()
         db.refresh(row)
         payload = _config_dict(row)
@@ -308,6 +321,102 @@ async def put_config(body: ConfigUpdate):
         if replay.engine is not None:
             replay.engine.release_trade_cap(cap)
     return payload
+
+
+def _check_settings(cfg: BotConfig, symbol: str = "") -> None:
+    """The same consistency checks as Save, on one stock's settings."""
+    who = f"{symbol}: " if symbol else ""
+    if int(cfg.sma_fast) >= int(cfg.sma_slow):
+        raise HTTPException(400, f"{who}Fast SMA period must be shorter than the slow period")
+    if float(cfg.rsi_long_min) > float(cfg.rsi_long_max):
+        raise HTTPException(400, f"{who}Buy RSI low must be at or below the buy RSI high")
+    if float(cfg.rsi_short_min) > float(cfg.rsi_short_max):
+        raise HTTPException(400, f"{who}Sell RSI low must be at or below the sell RSI high")
+
+
+class StockConfigUpdate(ConfigUpdate):
+    """One stock's strategy settings. Account-wide fields are refused."""
+
+
+@app.get("/api/config/stock/{symbol}")
+async def get_stock_config(symbol: str):
+    """This stock's settings as the bot will use them, and which are its own."""
+    name = _stock_name(symbol)
+    row = engine.load_config()
+    return {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": stock_settings(row).get(name, {})}
+
+
+@app.put("/api/config/stock/{symbol}")
+async def put_stock_config(symbol: str, body: StockConfigUpdate):
+    """Set this stock's own strategy settings.
+
+    A value equal to the shared setting is not stored, so the stock keeps
+    following the shared value when that changes later.
+    """
+    name = _stock_name(symbol)
+    data = body.model_dump(exclude_none=True)
+    data.pop("symbol", None)
+    shared_only = sorted(k for k in data if k not in STOCK_FIELDS)
+    if shared_only:
+        raise HTTPException(
+            400, f"{', '.join(shared_only)} apply to every stock. Change them with All stocks selected."
+        )
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        everything = stock_settings(row)
+        own = dict(everything.get(name, {}))
+        for key, value in data.items():
+            if value == getattr(row, key):
+                own.pop(key, None)
+            else:
+                own[key] = value
+        pos = engine.positions.get(name)
+        new_qty = int(own.get("qty", row.qty))
+        if pos is not None and int(pos.qty) != new_qty:
+            raise HTTPException(409, f"Close the open {name} position before changing its quantity")
+        if own:
+            everything[name] = own
+        else:
+            everything.pop(name, None)
+        row.stock_settings = json.dumps(everything)
+        _check_settings(_cfg_for(row, name), name)
+        db.commit()
+        db.refresh(row)
+        payload = {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": own}
+        db.expunge(row)
+    engine._cfg_cache = row
+    return payload
+
+
+@app.delete("/api/config/stock/{symbol}")
+async def reset_stock_config(symbol: str):
+    """Drop this stock's own settings. It follows the shared ones again."""
+    name = _stock_name(symbol)
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        everything = stock_settings(row)
+        own = everything.pop(name, {})
+        pos = engine.positions.get(name)
+        if pos is not None and "qty" in own and int(pos.qty) != int(row.qty):
+            raise HTTPException(409, f"Close the open {name} position before changing its quantity")
+        row.stock_settings = json.dumps(everything)
+        db.commit()
+        db.refresh(row)
+        payload = {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": {}}
+        db.expunge(row)
+    engine._cfg_cache = row
+    return payload
+
+
+def _stock_name(symbol: str) -> str:
+    name = (symbol or "").upper().strip()
+    if not name or not name.isalnum():
+        raise HTTPException(400, "Symbol must be an NSE trading symbol")
+    return name
 
 
 def _validate_hhmm(value: str, field: str = "square_off_time") -> None:
@@ -469,7 +578,13 @@ async def replay_start(body: ReplayStart):
     if not engine.broker.token:
         raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
     await replay.begin(
-        engine.broker, symbols, day, start, body.speed, end_day=end_day, settings=settings_snapshot(cfg)
+        engine.broker,
+        symbols,
+        day,
+        start,
+        body.speed,
+        end_day=end_day,
+        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg)},
     )
     return replay.info()
 

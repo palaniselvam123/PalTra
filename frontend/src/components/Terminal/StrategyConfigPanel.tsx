@@ -1,20 +1,84 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import { smaApi, type SmaConfig } from "@/lib/smaApi";
 
 type Props = { config: SmaConfig | null; onChanged: () => void };
+
+/** "" edits the shared settings; a symbol edits that stock's own. */
+const ALL = "";
+
+const LABELS: Record<string, string> = {
+  qty: "qty",
+  sma_fast: "fast MA",
+  sma_slow: "slow MA",
+  atr_period: "ATR period",
+  atr_multiplier: "ATR ×",
+  use_stop: "stop on/off",
+  stop_type: "stop type",
+  use_adx_filter: "ADX",
+  adx_threshold: "ADX threshold",
+  use_vwap: "VWAP",
+  use_volume: "volume",
+  use_density: "density",
+  use_rsi: "RSI",
+};
+
+export function ownSummary(own: Record<string, unknown> | undefined): string {
+  const keys = Object.keys(own ?? {});
+  if (!keys.length) return "";
+  const named = keys.map((k) => LABELS[k] ?? k.replace(/_/g, " "));
+  return named.length > 4 ? `${named.slice(0, 4).join(", ")} +${named.length - 4}` : named.join(", ");
+}
 
 export function StrategyConfigPanel({ config, onChanged }: Props) {
   const [form, setForm] = useState<SmaConfig | null>(config);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scope, setScope] = useState<string>(ALL);
+  const [own, setOwn] = useState<Partial<SmaConfig>>({});
   const dirty = useRef(false);
 
+  const armed = (config?.trade_symbols ?? []).map((s) => s.toUpperCase());
+  const withOwn = Object.keys(config?.stock_settings ?? {});
+  const scopes = Array.from(new Set([...armed, ...withOwn, ...(scope ? [scope] : [])])).sort();
+  const stockScope = scope !== ALL;
+
   useEffect(() => {
-    if (!dirty.current) setForm(config);
-  }, [config]);
+    if (!dirty.current && !stockScope) setForm(config);
+  }, [config, stockScope]);
+
+  // A stock's form shows the values the bot will use for it.
+  useEffect(() => {
+    if (!stockScope) {
+      setOwn({});
+      return;
+    }
+    let live = true;
+    smaApi
+      .stockConfig(scope)
+      .then((row) => {
+        if (!live) return;
+        dirty.current = false;
+        setForm(row);
+        setOwn(row.own ?? {});
+      })
+      .catch((e: unknown) => live && setMsg(e instanceof Error ? e.message : "Could not load that stock"));
+    return () => {
+      live = false;
+    };
+  }, [scope, stockScope]);
+
   if (!form) return null;
+
+  const pick = (next: string) => {
+    dirty.current = false;
+    setMsg(null);
+    if (next === ALL) setForm(config);
+    setScope(next);
+  };
+  const isOwn = (key: keyof SmaConfig) => stockScope && key in own;
 
   const set = (key: keyof SmaConfig, value: string | boolean) => {
     dirty.current = true;
@@ -29,8 +93,75 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
     setMsg(null);
   };
 
+  const strategyBody = (): Partial<SmaConfig> => ({
+    qty: Number(form.qty),
+    sma_fast: Number(form.sma_fast),
+    sma_slow: Number(form.sma_slow),
+    atr_period: Number(form.atr_period),
+    atr_multiplier: Number(form.atr_multiplier),
+    use_adx_filter: form.use_adx_filter,
+    use_stop: form.use_stop !== false,
+    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR",
+    tsl_sl_points: Number(form.tsl_sl_points ?? 20),
+    tsl_trail_points: Number(form.tsl_trail_points ?? 10),
+    tsl_target_points: Number(form.tsl_target_points ?? 0),
+    gap_sl_mult: Number(form.gap_sl_mult ?? 1),
+    gap_tp_mult: Number(form.gap_tp_mult ?? 2),
+    gap_min_pct: Number(form.gap_min_pct ?? 0.2),
+    adx_threshold: Number(form.adx_threshold),
+    use_vwap: Boolean(form.use_vwap),
+    use_volume: Boolean(form.use_volume),
+    volume_min_ratio: Number(form.volume_min_ratio ?? 1),
+    use_density: Boolean(form.use_density),
+    density_min_pct: Number(form.density_min_pct ?? 50),
+    use_rsi: Boolean(form.use_rsi),
+    rsi_long_min: Number(form.rsi_long_min ?? 40),
+    rsi_long_max: Number(form.rsi_long_max ?? 70),
+    rsi_short_min: Number(form.rsi_short_min ?? 30),
+    rsi_short_max: Number(form.rsi_short_max ?? 60),
+  });
+
+  const saveStock = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const row = await smaApi.saveStockConfig(scope, strategyBody());
+      dirty.current = false;
+      setForm(row);
+      setOwn(row.own ?? {});
+      setMsg(
+        Object.keys(row.own ?? {}).length
+          ? `Saved for ${scope}. Its next order uses these settings.`
+          : `Saved. ${scope} matches the shared settings, so it follows them.`
+      );
+      onChanged();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetStock = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const row = await smaApi.resetStockConfig(scope);
+      dirty.current = false;
+      setForm(row);
+      setOwn({});
+      setMsg(`Saved. ${scope} follows the shared settings again.`);
+      onChanged();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
     if (!form) return;
+    if (stockScope) return saveStock();
     const cap = Number(form.max_trades_per_day);
     if (!Number.isInteger(cap) || cap < 1 || cap > 100) {
       setMsg("Max trades / day must be a whole number from 1 to 100.");
@@ -41,31 +172,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
     try {
       await smaApi.saveConfig({
         symbol: form.symbol,
-        qty: Number(form.qty),
-        sma_fast: Number(form.sma_fast),
-        sma_slow: Number(form.sma_slow),
-        atr_period: Number(form.atr_period),
-        atr_multiplier: Number(form.atr_multiplier),
-        use_adx_filter: form.use_adx_filter,
-        use_stop: form.use_stop !== false,
-        stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR",
-        tsl_sl_points: Number(form.tsl_sl_points ?? 20),
-        tsl_trail_points: Number(form.tsl_trail_points ?? 10),
-        tsl_target_points: Number(form.tsl_target_points ?? 0),
-        gap_sl_mult: Number(form.gap_sl_mult ?? 1),
-        gap_tp_mult: Number(form.gap_tp_mult ?? 2),
-        gap_min_pct: Number(form.gap_min_pct ?? 0.2),
-        adx_threshold: Number(form.adx_threshold),
-        use_vwap: Boolean(form.use_vwap),
-        use_volume: Boolean(form.use_volume),
-        volume_min_ratio: Number(form.volume_min_ratio ?? 1),
-        use_density: Boolean(form.use_density),
-        density_min_pct: Number(form.density_min_pct ?? 50),
-        use_rsi: Boolean(form.use_rsi),
-        rsi_long_min: Number(form.rsi_long_min ?? 40),
-        rsi_long_max: Number(form.rsi_long_max ?? 70),
-        rsi_short_min: Number(form.rsi_short_min ?? 30),
-        rsi_short_max: Number(form.rsi_short_max ?? 60),
+        ...strategyBody(),
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
@@ -84,27 +191,71 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
+      <label className="mt-3 block text-sm text-slate-300">
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">Settings for</span>
+        <select
+          value={scope}
+          onChange={(e) => pick(e.target.value)}
+          className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+        >
+          <option value={ALL}>All stocks (shared settings)</option>
+          {scopes.map((name) => (
+            <option key={name} value={name}>
+              {name}
+              {withOwn.includes(name) ? " — own settings" : " — uses shared"}
+            </option>
+          ))}
+        </select>
+      </label>
+      {stockScope ? (
+        <p className="mt-2 rounded-md border border-violet-400/25 bg-violet-400/[0.06] p-2 text-[11px] leading-snug text-slate-300">
+          {Object.keys(own).length
+            ? `${scope} has its own ${ownSummary(own)} (marked “own”). Everything else follows the shared settings.`
+            : `${scope} uses the shared settings. Change any value below and Save to give it its own.`}{" "}
+          Daily loss, trades per day, entry cut-off and square-off are for the whole account.
+        </p>
+      ) : withOwn.length ? (
+        <p className="mt-2 text-[11px] leading-snug text-slate-400">
+          Own settings:{" "}
+          {withOwn.map((name, i) => (
+            <span key={name}>
+              {i ? "; " : ""}
+              <button type="button" className="text-violet-300 underline-offset-2 hover:underline" onClick={() => pick(name)}>
+                {name}
+              </button>{" "}
+              ({ownSummary(config?.stock_settings?.[name] as Record<string, unknown>)})
+            </span>
+          ))}
+          . Changing a shared value here does not change those.
+        </p>
+      ) : null}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Field label="Symbol" value={form.symbol} onChange={(v) => set("symbol", v.toUpperCase())} />
-        <Field label="Quantity" value={String(form.qty)} onChange={(v) => set("qty", v)} />
-        <Field label="Fast MA" value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
-        <Field label="Slow MA" value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
-        <Field label="ATR period" value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-        <Field label="ATR SL ×" value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-        <Field label="ADX threshold" value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
-        <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
-        <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
-        <Field
-          label="No new entries after"
-          value={form.entry_cutoff_time || "15:00"}
-          onChange={(v) => set("entry_cutoff_time", v)}
-        />
-        <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
+        {!stockScope && <Field label="Symbol" value={form.symbol} onChange={(v) => set("symbol", v.toUpperCase())} />}
+        <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
+        <Field label="Fast MA" own={isOwn("sma_fast")} value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
+        <Field label="Slow MA" own={isOwn("sma_slow")} value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
+        <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+        <Field label="ATR SL ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+        <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+        {!stockScope && (
+          <>
+            <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
+            <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+            <Field
+              label="No new entries after"
+              value={form.entry_cutoff_time || "15:00"}
+              onChange={(v) => set("entry_cutoff_time", v)}
+            />
+            <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
+          </>
+        )}
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-slate-400">
-        If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
-        stay open. A loss-limit stop stays locked.
-      </p>
+      {!stockScope && (
+        <p className="mt-2 text-[11px] leading-snug text-slate-400">
+          If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
+          stay open. A loss-limit stop stays locked.
+        </p>
+      )}
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
         <input
           type="checkbox"
@@ -112,6 +263,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_stop", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_stop") && <OwnTag />}
         {form.stop_type === "SMA_GAP"
           ? "Stop-loss on new entries (moving, from the SMA gap). Uncheck to enter with no stop."
           : form.stop_type === "TSL"
@@ -119,7 +271,9 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
             : `Exchange stop-loss at ${form.atr_multiplier}× ATR. Uncheck to enter with no stop order.`}
       </label>
       <label className="mt-3 block text-sm text-slate-300">
-        <span className="text-[11px] uppercase tracking-wider text-slate-400">Stop type</span>
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">
+          Stop type{isOwn("stop_type") && <OwnTag />}
+        </span>
         <select
           value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR"}
           onChange={(e) => set("stop_type", e.target.value)}
@@ -133,9 +287,9 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
       {form.stop_type === "SMA_GAP" ? (
         <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} />
-            <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} />
-            <Field label="Min gap %" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} />
+            <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} own={isOwn("gap_sl_mult")} />
+            <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} own={isOwn("gap_tp_mult")} />
+            <Field label="Min gap %" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
           </div>
           <p className="mt-2 text-[11px] leading-snug text-slate-400">
             Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
@@ -148,9 +302,9 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
       {form.stop_type === "TSL" ? (
         <div className="mt-2 rounded-md border border-emerald-400/20 bg-emerald-400/[0.04] p-2">
           <div className="grid grid-cols-3 items-end gap-2">
-            <Field label="Stop ₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} />
-            <Field label="Trail every ₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} />
-            <Field label="Target ₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} />
+            <Field label="Stop ₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} own={isOwn("tsl_sl_points")} />
+            <Field label="Trail every ₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
+            <Field label="Target ₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
           </div>
           <p className="mt-2 text-[11px] leading-snug text-slate-400">
             Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
@@ -171,6 +325,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_adx_filter", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_adx_filter") && <OwnTag />}
         ADX trend filter (block entries when ADX is below the threshold)
       </label>
       <p className="mt-3 text-[11px] leading-snug text-slate-400">
@@ -184,6 +339,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_vwap", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_vwap") && <OwnTag />}
         VWAP. Buy at or above today’s VWAP. Sell at or below it.
       </label>
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -193,12 +349,13 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_volume", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_volume") && <OwnTag />}
         Volume. The closed candle must be at least this multiple of the previous 20 candles.
       </label>
       <Field
         label="Volume multiple"
         value={String(form.volume_min_ratio ?? 1)}
-        onChange={(v) => set("volume_min_ratio", v)}
+        onChange={(v) => set("volume_min_ratio", v)} own={isOwn("volume_min_ratio")}
       />
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
         <input
@@ -207,12 +364,13 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_density", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_density") && <OwnTag />}
         Density. The candle body must cover at least this percent of its high-to-low range.
       </label>
       <Field
         label="Density %"
         value={String(form.density_min_pct ?? 50)}
-        onChange={(v) => set("density_min_pct", v)}
+        onChange={(v) => set("density_min_pct", v)} own={isOwn("density_min_pct")}
       />
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
         <input
@@ -221,13 +379,14 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onChange={(e) => set("use_rsi", e.target.checked)}
           className="accent-[#10B981]"
         />
+        {isOwn("use_rsi") && <OwnTag />}
         RSI(14). A buy must sit in the buy range. A sell must sit in the sell range.
       </label>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} />
-        <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} />
-        <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} />
-        <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} />
+        <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
+        <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} own={isOwn("rsi_long_max")} />
+        <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
+        <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
       </div>
       <div className="mt-3 flex items-center gap-3">
         <button
@@ -235,8 +394,17 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
           onClick={save}
           className="rounded-md bg-white/10 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-white/15"
         >
-          Save
+          {stockScope ? `Save for ${scope}` : "Save"}
         </button>
+        {stockScope && Object.keys(own).length > 0 && (
+          <button
+            disabled={busy}
+            onClick={resetStock}
+            className="rounded-md px-3 py-1.5 text-sm text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+          >
+            Use shared settings
+          </button>
+        )}
         {msg && (
           <span role="status" className={msg.startsWith("Saved") ? "text-xs text-slate-400" : "text-xs font-semibold text-amber-300"}>
             {msg}
@@ -247,7 +415,22 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function OwnTag() {
+  return <span className="ml-1 shrink-0 text-[11px] normal-case tracking-normal text-violet-300">· own</span>;
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  own,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  /** This stock sets the value itself rather than using the shared one. */
+  own?: boolean;
+}) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
   useEffect(() => {
@@ -255,7 +438,10 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
   }, [value]);
   return (
     <label className="block">
-      <span className="text-[11px] uppercase tracking-wider text-slate-400">{label}</span>
+      <span className="text-[11px] uppercase tracking-wider text-slate-400">
+        {label}
+        {own && <span className="ml-1 normal-case tracking-normal text-violet-300">· own</span>}
+      </span>
       <input
         inputMode="decimal"
         value={text}
@@ -269,7 +455,10 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
           setText(e.target.value);
           onChange(e.target.value);
         }}
-        className="mt-0.5 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none focus:border-[#10B981]/50"
+        className={clsx(
+          "mt-0.5 w-full rounded-md border bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none focus:border-[#10B981]/50",
+          own ? "border-violet-400/50" : "border-white/10"
+        )}
       />
     </label>
   );
