@@ -82,10 +82,13 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
       {state?.last_signal && <p className="mt-3 text-xs text-slate-400">{state.last_signal}</p>}
       {(state?.books ?? []).length > 0 && (
         <div className="mt-3 space-y-1 border-t border-white/5 pt-3">
-          <div className="text-[11px] uppercase tracking-wider text-slate-400">Armed stocks</div>
+          <div className="flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-slate-400">
+            <span>Armed stocks</span>
+            <span>Today net</span>
+          </div>
           {(state?.books ?? []).map((book) => (
-            <div key={book.symbol} className="flex items-center justify-between gap-2 font-mono text-xs">
-              <span className="text-slate-300">{book.symbol}</span>
+            <div key={book.symbol} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 font-mono text-xs">
+              <span className="min-w-0 truncate text-slate-300">{book.symbol}</span>
               <span
                 className={
                   book.direction === "LONG"
@@ -99,11 +102,44 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
                   ? "FLAT"
                   : `${book.direction} ${book.qty}${book.stop_active === false ? " · NO STOP" : ""}`}
               </span>
+              <span
+                className={clsx(
+                  "min-w-[5.5rem] text-right",
+                  (book.day_net ?? 0) > 0 ? "text-[#10B981]" : (book.day_net ?? 0) < 0 ? "text-[#F43F5E]" : "text-slate-500"
+                )}
+                title={
+                  book.open_net != null
+                    ? `open ${inr(book.open_net)} · closed ${inr(book.closed_net ?? 0)} (${book.closed_trades ?? 0})`
+                    : `${book.closed_trades ?? 0} closed trade(s)`
+                }
+              >
+                {inr(book.day_net ?? 0)}
+              </span>
             </div>
           ))}
+          <AllStocksTotal state={state} />
         </div>
       )}
     </section>
+  );
+}
+
+/** Every armed or held stock together: today's closed net plus all open P&L. */
+function AllStocksTotal({ state }: { state: SmaState | null }) {
+  const books = state?.books ?? [];
+  if (books.length < 2) return null;
+  const open = books.reduce((sum, b) => sum + (b.open_net ?? 0), 0);
+  const closed = state?.realized_net_pnl ?? books.reduce((sum, b) => sum + (b.closed_net ?? 0), 0);
+  const total = closed + open;
+  return (
+    <div className="mt-1 grid grid-cols-[1fr_auto] items-center gap-3 border-t border-white/5 pt-1 font-mono text-xs">
+      <span className="text-slate-400">
+        All stocks · open {inr(open)} · closed {inr(closed)}
+      </span>
+      <span className={clsx("min-w-[5.5rem] text-right font-semibold", total >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}>
+        {inr(total)}
+      </span>
+    </div>
   );
 }
 

@@ -449,6 +449,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                       stopOff: book?.stop_active === false,
                       armed: armed.has(s),
                       onChart,
+                      openNet: book?.open_net ?? null,
+                      closedNet: book?.closed_net ?? 0,
+                      closedTrades: book?.closed_trades ?? 0,
+                      dayNet: book?.day_net,
                     }}
                   />
                 );
