@@ -23,6 +23,7 @@ from app.api import (
     routes_reports,
     routes_scanner,
     routes_movers,
+    routes_scalp,
     routes_research,
     routes_scanner_engine,
     routes_ws,
@@ -312,9 +313,10 @@ app.include_router(routes_chart.router)
 app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
-# These routers live on the deployed image and are not in this checkout.
-# Skipping a missing module keeps a local run working.
-for _extra in ("routes_volatility", "routes_scalp", "routes_order_book"):
+app.include_router(routes_scalp.router)
+# Optional routers that are not in this repository. Skipping a missing module
+# keeps a run working.
+for _extra in ("routes_volatility", "routes_order_book"):
     try:
         _mod = __import__(f"app.api.{_extra}", fromlist=["router"])
         app.include_router(_mod.router)
