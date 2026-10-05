@@ -33,20 +33,26 @@ export function ConfirmDialog({
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  // The page re-renders every second with a new onCancel. Reading it from a
+  // ref keeps the effect below from re-running, which used to wipe what was
+  // typed in the CONFIRM box mid-word.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
+  // Clear the box and move focus only when the dialog opens.
   useEffect(() => {
     if (!open) return;
     setTyped("");
     const id = setTimeout(() => (requireTyping ? inputRef.current : cancelRef.current)?.focus(), 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") onCancelRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       clearTimeout(id);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, requireTyping, onCancel]);
+  }, [open, requireTyping]);
 
   if (!open) return null;
   const ready = !requireTyping || typed.trim().toUpperCase() === WORD;
