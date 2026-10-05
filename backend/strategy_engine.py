@@ -557,6 +557,50 @@ class StrategyEngine:
         """Telegram/WhatsApp alert. A replay engine sends none."""
         _schedule_whatsapp(message)
 
+    def _view_frame(self, view: str, frame: pd.DataFrame, cfg: BotConfig) -> tuple[pd.DataFrame, bool]:
+        """The chart stock's enriched candles, and whether they were recomputed.
+
+        The display readings (SMA, ATR, ADX, VWAP, RSI) come from the last
+        closed candle, so they only change when a candle closes. Recomputing
+        every indicator over ~2,500 candles on every tick was most of a
+        replay tick's cost. Between closes only the forming candle's prices
+        move, so the cached frame is reused with that row updated. Its own
+        indicators are never read (the chart blanks them). Orders do not use
+        this frame: each armed stock is enriched afresh when its candle closes.
+        """
+        if frame is None or frame.empty:
+            return frame, True
+        if len(frame) < 2:
+            return enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period), True
+        closed = frame.iloc[-2]
+        key = (
+            view,
+            len(frame),
+            int(frame["ts"].iloc[0]),
+            int(closed["ts"]),
+            float(closed["close"]),
+            float(closed.get("volume", 0) or 0),
+            int(frame["ts"].iloc[-1]),
+            int(cfg.sma_fast),
+            int(cfg.sma_slow),
+            int(cfg.atr_period),
+        )
+        cached = getattr(self, "_view_cache", None)
+        if cached is not None and cached[0] == key:
+            base = cached[1]
+            cols = [c for c in ("open", "high", "low", "close", "volume") if c in frame.columns and c in base.columns]
+            now_vals = frame[cols].iloc[-1].to_numpy()
+            if (base[cols].iloc[-1].to_numpy() == now_vals).all():
+                return base, False
+            # A new frame, never an edit in place: the chart may be reading
+            # the previous one from another thread.
+            out = base.copy()
+            out.iloc[-1, [out.columns.get_loc(c) for c in cols]] = now_vals
+            return out, False
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        self._view_cache = (key, enriched)
+        return enriched, True
+
     def _position_key(self) -> str:
         if self._focus:
             return self._focus
@@ -753,11 +797,9 @@ class StrategyEngine:
             self.ltp = float(ltp)
             self.data_source = source
             view_cfg = _cfg_for(cfg, view)
-            enriched = (
-                enrich(frame, view_cfg.sma_fast, view_cfg.sma_slow, view_cfg.atr_period) if not frame.empty else frame
-            )
+            enriched, fresh = self._view_frame(view, frame, view_cfg)
             self.candles = enriched
-            if not enriched.empty and len(enriched) >= 2:
+            if fresh and not enriched.empty and len(enriched) >= 2:
                 # Display values from the last CLOSED bar so the UI does not
                 # repaint SMA/ATR with the forming tick. These are the same
                 # readings the order path uses.
