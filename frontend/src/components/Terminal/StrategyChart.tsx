@@ -164,7 +164,7 @@ type Marker = {
   time: number;
   position: "aboveBar" | "belowBar";
   color: string;
-  shape: "arrowUp" | "arrowDown" | "circle";
+  shape: "arrowUp" | "arrowDown" | "circle" | "square";
   text: string;
 };
 
