@@ -67,6 +67,17 @@ def _status_and_price(data: dict) -> tuple[str, float | None]:
     return status, price
 
 
+def _remark(data) -> str:
+    """Groww's own words on an order (why it was rejected, for example)."""
+    if not isinstance(data, dict):
+        return ""
+    for key in ("remark", "rejection_reason", "reason", "message"):
+        text = str(data.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
 def _order_ack_from_response(raw) -> OrderAck:
     """A Groww place_order body. A refusal or a missing id is not an order.
 
@@ -345,6 +356,8 @@ class GrowwClient:
         self.mode = "LIVE" if (mode or "").upper() == "LIVE" else "PAPER"
         self.token = (token or "").strip()
         self._rejected: set[str] = set()
+        # Groww's remark per order id, kept so a rejection can say why.
+        self.order_remarks: dict[str, str] = {}
         self._using_saved = False
         self.simulator = CandleSimulator()
         self.data_source = "SIMULATOR"
@@ -686,6 +699,32 @@ class GrowwClient:
         status, _price = await self.read_order(order_id)
         return status
 
+    async def order_remark(self, order_id: str) -> str:
+        """Why Groww rejected (or cancelled) an order, in Groww's words.
+
+        Read-only: one get_order_detail call, cached. Empty when Groww gave
+        no remark or the read failed; it never raises.
+        """
+        if not order_id:
+            return ""
+        if self.order_remarks.get(order_id):
+            return self.order_remarks[order_id]
+        if self.mode == "PAPER" or order_id.startswith("PAPER"):
+            return ""
+        try:
+            sdk = self._require_sdk()
+            if not hasattr(sdk, "get_order_detail"):
+                return ""
+            raw = await asyncio.to_thread(sdk.get_order_detail, segment="CASH", groww_order_id=order_id)
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)
+            return ""
+        data = raw.get("payload", raw) if isinstance(raw, dict) else raw
+        text = _remark(data)
+        if text:
+            self.order_remarks[order_id] = text
+        return text
+
     async def read_order(self, order_id: str) -> tuple[str, float | None]:
         """Groww status and average fill. ('', None) when the id is blank.
 
@@ -704,12 +743,16 @@ class GrowwClient:
                 raw = sdk.get_order_status(groww_order_id=order_id, segment="CASH")
                 data = raw.get("payload", raw) if isinstance(raw, dict) else raw
                 if isinstance(data, dict):
+                    if _remark(data):
+                        self.order_remarks[order_id] = _remark(data)
                     return _status_and_price(data)
             raw = sdk.get_order_list(segment="CASH")
             orders = raw.get("payload", raw) if isinstance(raw, dict) else raw
             for o in orders or []:
                 oid = str(o.get("groww_order_id") or o.get("order_id") or "")
                 if oid == order_id:
+                    if _remark(o):
+                        self.order_remarks[order_id] = _remark(o)
                     return _status_and_price(o)
             return "", None
 

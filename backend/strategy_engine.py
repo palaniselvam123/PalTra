@@ -1095,6 +1095,24 @@ class StrategyEngine:
         except Exception:  # noqa: BLE001
             return "UNKNOWN", None
 
+    async def _rejection(self, order_id: str, status: str, said: str = "") -> SlCancelFailed:
+        """The refusal with Groww's reason when Groww gave one.
+
+        A bare "Groww REJECTED the order" left no way to tell margin from a
+        blocked stock or a price band. The reason is read, never acted on.
+        """
+        reason = (said or "").strip()
+        if not reason and order_id:
+            fn = getattr(self.broker, "order_remark", None)
+            if fn is not None:
+                try:
+                    reason = (await fn(order_id) or "").strip()
+                except Exception:  # noqa: BLE001
+                    reason = ""
+        text = f"Groww {status} the order" + (f": {reason}" if reason else "") + ". Nothing was booked."
+        logger.warning("order %s %s: %s", order_id or "-", status, reason or "no reason given")
+        return SlCancelFailed(text)
+
     async def _require_live_fill(self, ack, cfg: BotConfig):
         """Return only when Groww has filled this order.
 
@@ -1109,7 +1127,7 @@ class StrategyEngine:
         if not order_id or order_id.startswith(("LIVE", "PAPER")):
             raise SlCancelFailed(getattr(ack, "message", "") or "Groww did not accept the order. Nothing was booked.")
         if status in TERMINAL_CANCELLED or status in {"REJECTED", "FAILED", "FAILURE"}:
-            raise SlCancelFailed(getattr(ack, "message", "") or f"Groww {status} the order. Nothing was booked.")
+            raise await self._rejection(order_id, status, getattr(ack, "message", "") or "")
         price = getattr(ack, "fill_price", None)
         if status not in TERMINAL_FILLED:
             for _ in range(6):
@@ -1120,7 +1138,7 @@ class StrategyEngine:
                 if status in TERMINAL_FILLED:
                     break
                 if status in TERMINAL_CANCELLED or status in {"REJECTED", "FAILED", "FAILURE"}:
-                    raise SlCancelFailed(f"Groww {status} the order. Nothing was booked.")
+                    raise await self._rejection(order_id, status)
         if status in TERMINAL_FILLED:
             ack.status = status
             if price:
