@@ -17,6 +17,8 @@ function chipNote(note: string, symbol: string): string {
   return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
 }
 const SAVED_KEY = "sma.symbols";
+// Stocks taken off the list with Remove, so a default does not come back.
+const HIDDEN_KEY = "sma.symbols.hidden";
 const FOLD_KEY = "sma.stocks.folded";
 
 type Hit = { symbol: string; name: string };
@@ -42,6 +44,8 @@ type Props = {
 export function Header({ state, config, connected, loadNote, onChanged, notice }: Props) {
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -64,6 +68,13 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
       }
     } catch {
       /* a private browser can refuse storage */
+    }
+    try {
+      const raw = localStorage.getItem(HIDDEN_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(parsed)) setHidden(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)));
+    } catch {
+      /* ignore */
     }
     try {
       setFolded(localStorage.getItem(FOLD_KEY) === "1");
@@ -119,9 +130,25 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
+  const storeHidden = (list: string[]) => {
+    try {
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify(list));
+    } catch {
+      /* storage full or blocked */
+    }
+  };
+
   const remember = (next: string) => {
     const cleaned = next.trim().toUpperCase();
-    if (!cleaned || DEFAULTS.includes(cleaned)) return;
+    if (!cleaned) return;
+    // Picking a removed stock again brings it back.
+    setHidden((prev) => {
+      if (!prev.includes(cleaned)) return prev;
+      const list = prev.filter((s) => s !== cleaned);
+      storeHidden(list);
+      return list;
+    });
+    if (DEFAULTS.includes(cleaned)) return;
     setSaved((prev) => {
       const list = [cleaned, ...prev.filter((s) => s !== cleaned)].slice(0, 24);
       try {
@@ -144,13 +171,15 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
   const books = state?.books ?? [];
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
   const openCount = books.filter((b) => b.direction === "LONG" || b.direction === "SHORT").length;
-  // Armed first, then the rest, each alphabetically. A held stock is never dropped.
+  // Armed first, then the rest, each alphabetically. A held stock is never
+  // dropped; a removed one stays off unless it is armed, held or on the chart.
+  const chartSymbol = (config?.symbol ?? "").toUpperCase();
   const symbols = Array.from(
     new Set([
       ...armedList,
       ...books.map((book) => book.symbol.toUpperCase()),
-      ...DEFAULTS,
-      ...saved,
+      ...(chartSymbol ? [chartSymbol] : []),
+      ...[...DEFAULTS, ...saved].filter((s) => !hidden.includes(s)),
     ])
   )
     .slice(0, 24)
@@ -212,6 +241,85 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
       onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not change the trade button");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isHeld = (s: string) => {
+    const dir = bookBySymbol.get(s)?.direction;
+    return dir === "LONG" || dir === "SHORT";
+  };
+  const shownSelected = symbols.filter((s) => selected.has(s));
+  const select = (s: string, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(s);
+      else next.delete(s);
+      return next;
+    });
+
+  /** Unarm each stock in turn. Open positions stay open; only new orders stop. */
+  const unarm = async (names: string[]) => {
+    const targets = names.filter((s) => armed.has(s));
+    if (!targets.length) return [] as string[];
+    const failed: string[] = [];
+    for (const name of targets) {
+      try {
+        await smaApi.setTradeSymbol(name, false);
+      } catch (e: unknown) {
+        failed.push(`${name}: ${e instanceof Error ? e.message : "could not unarm"}`);
+      }
+    }
+    return failed;
+  };
+
+  const bulkUnarm = async (names: string[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      // Unarmed stocks stay on the list; only Remove takes them off.
+      names.forEach(remember);
+      const failed = await unarm(names);
+      if (failed.length) setError(failed.join(" · "));
+      setSelected(new Set());
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Unarm, then drop from this list. The chart stock and held stocks stay. */
+  const remove = async (names: string[]) => {
+    const kept = names.filter((s) => s === chartSymbol || isHeld(s));
+    const going = names.filter((s) => !kept.includes(s));
+    setBusy(true);
+    setError(null);
+    try {
+      const failed = await unarm(going);
+      const failedNames = failed.map((f) => f.split(":")[0]);
+      const gone = going.filter((s) => !failedNames.includes(s));
+      setSaved((prev) => {
+        const list = prev.filter((s) => !gone.includes(s));
+        try {
+          localStorage.setItem(SAVED_KEY, JSON.stringify(list));
+        } catch {
+          /* ignore */
+        }
+        return list;
+      });
+      setHidden((prev) => {
+        const list = Array.from(new Set([...prev, ...gone]));
+        storeHidden(list);
+        return list;
+      });
+      setSelected((prev) => new Set([...prev].filter((s) => !gone.includes(s))));
+      const notes = [...failed];
+      if (kept.length) {
+        notes.push(`Kept ${kept.join(", ")}: on the chart or holding a position.`);
+      }
+      if (notes.length) setError(notes.join(" · "));
+      onChanged();
     } finally {
       setBusy(false);
     }
@@ -427,6 +535,58 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                 ))}
               </ul>
             ) : (
+            <>
+            <div className="flex flex-wrap items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs text-slate-300">
+              <label className="flex min-h-9 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-sky-400"
+                  checked={symbols.length > 0 && shownSelected.length === symbols.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = shownSelected.length > 0 && shownSelected.length < symbols.length;
+                  }}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(symbols) : new Set())}
+                  aria-label="Select every stock"
+                />
+                {shownSelected.length ? `${shownSelected.length} selected` : "Select"}
+              </label>
+              {shownSelected.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy || !shownSelected.some((s) => armed.has(s))}
+                    onClick={() => bulkUnarm(shownSelected)}
+                    className="min-h-9 rounded-md px-2.5 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10 disabled:opacity-40"
+                  >
+                    Unarm selected
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => remove(shownSelected)}
+                    className="min-h-9 rounded-md px-2.5 font-semibold text-rose-200 ring-1 ring-inset ring-rose-400/40 hover:bg-rose-500/10 disabled:opacity-40"
+                  >
+                    Remove selected
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set())}
+                    className="min-h-9 rounded-md px-2 text-slate-400 hover:text-slate-200"
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                disabled={busy || armedList.length === 0}
+                onClick={() => bulkUnarm(armedList)}
+                title="Stop new orders on every stock. Open positions stay open until their stop, a cross or square-off."
+                className="ml-auto min-h-9 rounded-md px-2.5 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10 disabled:opacity-40"
+              >
+                Unarm all{armedList.length ? ` (${armedList.length})` : ""}
+              </button>
+            </div>
             <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
               {symbols.map((s) => {
                 const book = bookBySymbol.get(s);
@@ -440,6 +600,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                     armLimitReached={armedList.length >= ARM_LIMIT}
                     onToggleArmed={() => toggleTrade(s)}
                     onShowOnChart={() => applySymbol(s)}
+                    selected={selected.has(s)}
+                    onSelect={(on) => select(s, on)}
+                    onRemove={() => remove([s])}
                     stock={{
                       symbol: s,
                       ltp: ltpOf,
@@ -462,6 +625,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                 );
               })}
             </ul>
+            </>
             )}
             </div>
           </div>
