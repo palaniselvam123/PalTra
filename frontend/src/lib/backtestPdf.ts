@@ -161,6 +161,45 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
   });
   let y = Math.max(resultEnd, after()) + 22;
 
+  const stocks = run.stocks ?? [];
+  if (stocks.length > 1) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("By stock", margin, y);
+    autoTable(doc, {
+      startY: y + 6,
+      margin: { left: margin, right: margin },
+      theme: "striped",
+      head: [["Stock", "Trades", "Won", "Lost", "Win %", "Profit", "Loss", "Gross", "Charges", "Net", "Max DD"]],
+      body: stocks.map((s) => [
+        s.symbol,
+        s.totals.trades,
+        s.totals.wins,
+        s.totals.losses,
+        s.totals.trades ? `${s.totals.win_rate.toFixed(1)}%` : "-",
+        pdfMoney(s.totals.profit),
+        pdfMoney(s.totals.loss),
+        pdfMoney(s.totals.gross),
+        pdfMoney(s.totals.charges).replace("+", ""),
+        pdfMoney(s.totals.net),
+        pdfMoney(s.totals.max_drawdown),
+      ]),
+      styles: { fontSize: 8.5, cellPadding: 3.5 },
+      headStyles: { fillColor: [30, 41, 59] },
+      columnStyles: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => [i, { halign: "right" as const }])),
+      didParseCell: (cell) => {
+        if (cell.section === "head" && cell.column.index > 0) cell.cell.styles.halign = "right";
+        if (cell.section !== "body") return;
+        const s = stocks[cell.row.index];
+        if (cell.column.index === 0) cell.cell.styles.fontStyle = "bold";
+        if (cell.column.index === 9) cell.cell.styles.textColor = tone(s.totals.net);
+        if (cell.column.index === 5) cell.cell.styles.textColor = GREEN;
+        if (cell.column.index === 6) cell.cell.styles.textColor = RED;
+      },
+    });
+    y = after() + 22;
+  }
+
   const days = run.days ?? [];
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);

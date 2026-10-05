@@ -649,3 +649,35 @@ def test_an_open_trade_shows_its_high_and_low_so_far(db):
     engine._trades_cache = None
     row = next(t for t in engine.trades() if t["id"] == trade_id)
     assert (row["max_high"], row["max_low"]) == (None, None)
+
+
+def test_a_run_is_split_by_stock_with_each_stocks_days():
+    import json as _json
+
+    from models import TradeLog
+    from replay import _day_rows, _stock_rows, _totals
+
+    def trade(i, symbol, date, gross, charges=10.0, strategy=None):
+        return TradeLog(
+            id=i, symbol=symbol, date=date, direction="LONG", qty=10, entry_price=100.0,
+            ma_cross_price=100.0, exit_price=101.0, gross_pnl=gross, brokerage_and_taxes=charges,
+            net_pnl=gross - charges, strategy=_json.dumps(strategy) if strategy else None,
+        )
+
+    trades = [
+        trade(1, "AAA", "2026-10-05", 50.0, strategy={"qty": 10, "use_rsi": True}),
+        trade(2, "AAA", "2026-10-06", -20.0),
+        trade(3, "BBB", "2026-10-05", 200.0, strategy={"qty": 5}),
+    ]
+    stocks = _stock_rows(trades, ["AAA", "BBB", "CCC"])
+    assert [s["symbol"] for s in stocks] == ["BBB", "AAA", "CCC"]  # best net first, no-trade stocks last
+    by = {s["symbol"]: s for s in stocks}
+    assert by["AAA"]["totals"] == _totals(_day_rows(trades[:2]))
+    assert [d["date"] for d in by["AAA"]["days"]] == ["2026-10-05", "2026-10-06"]
+    assert by["AAA"]["strategy"] == {"qty": 10, "use_rsi": True}
+    assert by["BBB"]["totals"]["net"] == 190.0
+    assert by["CCC"]["totals"]["trades"] == 0 and by["CCC"]["days"] == [] and by["CCC"]["strategy"] is None
+    # The stocks add up to the run.
+    whole = _totals(_day_rows(trades))
+    for key in ("trades", "wins", "losses", "profit", "loss", "charges", "net"):
+        assert sum(s["totals"][key] for s in stocks) == pytest.approx(whole[key])
