@@ -649,3 +649,51 @@ def test_an_open_trade_shows_its_high_and_low_so_far(db):
     engine._trades_cache = None
     row = next(t for t in engine.trades() if t["id"] == trade_id)
     assert (row["max_high"], row["max_low"]) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_reusing_the_chart_frame_between_closes_changes_nothing(db, monkeypatch):
+    """The view cache only skips recomputing indicators between candle closes.
+
+    A day replayed with it and without it must give the same trades and the
+    same on-screen readings at every 10-second step.
+    """
+    from database import session_factory
+    from models import TradeLog
+    from strategy_engine import enrich
+
+    async def play(recompute: bool):
+        clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+        engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], run_id=7 if recompute else 8)
+        if recompute:
+            monkeypatch.setattr(
+                engine,
+                "_view_frame",
+                lambda view, frame, cfg: (enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period), True),
+            )
+        engine.load_config()
+        await engine.tick(clock)
+        engine.hold_for_next_cross(["TCS"])
+        engine.status = "RUNNING"
+        readings = []
+        end = dt.datetime.combine(DAY, dt.time(11, 30), tzinfo=IST)
+        while engine.feed.clock < end:
+            engine.feed.clock += dt.timedelta(seconds=10)
+            await engine.tick(engine.feed.clock)
+            row = engine.candles.iloc[-1]
+            readings.append(
+                (engine.sma9, engine.sma21, engine.atr14, engine.adx14, engine.vwap, engine.rsi14, engine.ltp,
+                 float(row["close"]), float(row["high"]), float(row["low"]))
+            )
+        with session_factory()() as s:
+            trades = [
+                (t.direction, t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.exit_reason)
+                for t in s.query(TradeLog).filter(TradeLog.run_id == engine.run_id).order_by(TradeLog.id)
+            ]
+        return trades, readings
+
+    fresh_trades, fresh_readings = await play(recompute=True)
+    cached_trades, cached_readings = await play(recompute=False)
+    assert fresh_trades, "the sine-wave day should trade"
+    assert cached_trades == fresh_trades
+    assert cached_readings == fresh_readings
