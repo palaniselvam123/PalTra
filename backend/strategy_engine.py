@@ -24,6 +24,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -139,6 +140,55 @@ SNAPSHOT_FIELDS = (
 )
 
 
+# The settings one stock may set for itself. The rest of SNAPSHOT_FIELDS
+# (daily loss, entry cut-off, square-off) and the mode, trade cap and Trade
+# list are for the whole account and always come from the shared row.
+STOCK_FIELDS = tuple(
+    name for name in SNAPSHOT_FIELDS if name not in ("max_daily_loss", "entry_cutoff_time", "square_off_time")
+)
+
+
+def stock_settings(cfg) -> dict[str, dict]:
+    """Every stock's own overrides, {SYMBOL: {field: value}}. Never raises."""
+    raw = getattr(cfg, "stock_settings", None)
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            data = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for symbol, fields in data.items():
+        if not isinstance(fields, dict):
+            continue
+        kept = {k: v for k, v in fields.items() if k in STOCK_FIELDS and v is not None}
+        if kept:
+            out[str(symbol).upper()] = kept
+    return out
+
+
+def stock_overrides(cfg, symbol: str) -> dict:
+    return stock_settings(cfg).get((symbol or "").upper(), {})
+
+
+def settings_for(cfg, symbol: str):
+    """`cfg` with this stock's own settings on top, for any config-like object
+    (a BotConfig or a replay run's snapshot). The input is not changed.
+    """
+    if cfg is None:
+        return None
+    if isinstance(cfg, BotConfig):
+        return _cfg_for(cfg, symbol)
+    own = stock_overrides(cfg, symbol)
+    if not own:
+        return cfg
+    base = {name: getattr(cfg, name) for name in dir(cfg) if not name.startswith("_") and not callable(getattr(cfg, name, None))}
+    return SimpleNamespace(**{**base, **own})
+
+
 def settings_snapshot(cfg: BotConfig) -> dict:
     return {name: getattr(cfg, name, None) for name in SNAPSHOT_FIELDS}
 
@@ -208,8 +258,10 @@ def trade_names(cfg: BotConfig) -> list[str]:
 
 
 def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
+    """This stock's settings: the shared row with the stock's own overrides on top."""
     data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
     data["symbol"] = symbol
+    data.update(stock_overrides(cfg, symbol))
     return BotConfig(**data)
 
 
@@ -675,7 +727,10 @@ class StrategyEngine:
             self.last_error = ""
             self.ltp = float(ltp)
             self.data_source = source
-            enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period) if not frame.empty else frame
+            view_cfg = _cfg_for(cfg, view)
+            enriched = (
+                enrich(frame, view_cfg.sma_fast, view_cfg.sma_slow, view_cfg.atr_period) if not frame.empty else frame
+            )
             self.candles = enriched
             if not enriched.empty and len(enriched) >= 2:
                 # Display values from the last CLOSED bar so the UI does not
@@ -747,10 +802,11 @@ class StrategyEngine:
             if not self._still_armed(symbol):
                 # Taken off the Trade list while this pass fetched quotes.
                 continue
-            enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+            symbol_cfg = _cfg_for(cfg, symbol)
+            enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period)
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
-            result = await self.on_minute(now, _cfg_for(cfg, symbol), enriched)
+            result = await self.on_minute(now, symbol_cfg, enriched)
             if (result or "").startswith("blocked — order PENDING"):
                 continue
             judged = _closed_bar_ts(enriched) or closed_ts
@@ -1087,7 +1143,8 @@ class StrategyEngine:
                 self.ltp = float(ltp)
                 self.last_error = ""
                 self.data_source = source
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        own = _cfg_for(cfg, name)
+        enriched = enrich(frame, own.sma_fast, own.sma_slow, own.atr_period)
         side = _live_ma_side(enriched)
         if side is None:
             raise ForceRefused(f"{name} has no SMA yet")
@@ -1102,7 +1159,7 @@ class StrategyEngine:
         atr = _latest_atr(enriched)
         if atr is None:
             raise ForceRefused(f"{name} ATR is not ready")
-        blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", cfg, price=price)
+        blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", own, price=price)
         if blocked:
             self._log_decision(
                 side,
@@ -2303,6 +2360,7 @@ class StrategyEngine:
             except Exception:  # noqa: BLE001
                 cfg = None
         view = (cfg.symbol if cfg else self._focus or "").upper()
+        view_cfg = _cfg_for(cfg, view) if cfg is not None else None
         saved_focus, saved_ltp = self._focus, self.ltp
         self._focus = view
         if view in self._ltps:
@@ -2359,9 +2417,11 @@ class StrategyEngine:
             "symbol": cfg.symbol if cfg else "",
             "trade_symbols": trade_names(cfg) if cfg else [],
             "books": books,
-            "stop_enabled": True if cfg is None or cfg.use_stop is None else bool(cfg.use_stop),
-            "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
-            "stop_type": (getattr(cfg, "stop_type", None) or "ATR") if cfg else "ATR",
+            "stop_enabled": True if view_cfg is None or view_cfg.use_stop is None else bool(view_cfg.use_stop),
+            "atr_multiplier": float(view_cfg.atr_multiplier) if view_cfg else 1.5,
+            "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
+            # Stocks with their own strategy settings, and which fields they set.
+            "stock_settings": stock_settings(cfg) if cfg else {},
             "exchange": cfg.exchange if cfg else "NSE",
             "ltp": self.ltp,
             "day_open": day_open,
@@ -2440,6 +2500,9 @@ class StrategyEngine:
                 cfg = self.load_config()
             except Exception:  # noqa: BLE001
                 cfg = None
+        if cfg is not None:
+            # The chart's stock is judged with its own settings.
+            cfg = _cfg_for(cfg, (cfg.symbol or "").upper())
         first_shown = candles[0]["time"] if candles else None
         blocked = [
             mark for mark in filter_blocks(frame, cfg) if first_shown is not None and mark["time"] >= first_shown

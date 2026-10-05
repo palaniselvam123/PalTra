@@ -116,3 +116,7 @@ class BotConfig(Base):
     # the stop, or the square-off.
     entry_cutoff_time: Mapped[str] = mapped_column(String, default="15:00")
     trading_mode: Mapped[str] = mapped_column(String, default="PAPER")
+    # Per-stock strategy overrides as JSON: {"TCS": {"qty": 50, "stop_type": "TSL"}}.
+    # Only STOCK_FIELDS (strategy_engine.py) are read from it; the account-wide
+    # risk limits, cut-off, square-off and mode always come from this row.
+    stock_settings: Mapped[str] = mapped_column(String, default="{}")
