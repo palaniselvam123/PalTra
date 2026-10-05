@@ -499,6 +499,48 @@ export type FastMoverRow = {
   resolution_min: number;
 };
 
+export type ScalpRow = {
+  symbol: string;
+  ltp: number | null;
+  bars: number;
+  change_pct: number | null;
+  atr_pct: number | null;
+  spread_pct: number | null;
+  volume_ratio: number | null;
+  value_cr: number | null;
+  move_1m_pct: number | null;
+  move_5m_pct: number | null;
+  vwap: number | null;
+  vwap_dist_pct: number | null;
+  range_pct: number | null;
+  bias: "LONG" | "SHORT" | "NONE";
+  score: number;
+  ready: boolean;
+  reasons: string[];
+  as_of: number | null;
+};
+
+export type ScalpAlerts = {
+  enabled: boolean;
+  min_score: number;
+  cooldown_minutes: number;
+  last_run: string | null;
+  last_error: string | null;
+  sent_today: string[];
+};
+
+export type ScalpMonitorResponse = {
+  as_of: string;
+  source: string;
+  market_open: boolean;
+  universe: number;
+  ready: number;
+  settings: { min_atr_pct: number; max_spread_pct: number; min_value_cr: number };
+  rows: ScalpRow[];
+  notes: string[];
+  alerts: ScalpAlerts;
+};
+
 export type FastMoversResponse = {
   day: string;
   source: string;
@@ -800,6 +842,11 @@ export const api = {
     request<MoversResponse>(`/api/movers/morning${queryString(stringifyParams(params))}`),
   moversFast: (params: { day?: string; window_min?: number; min_speed?: number; min_move?: number; peak?: boolean; until?: string } = {}) =>
     request<FastMoversResponse>(`/api/movers/fast${queryString(stringifyParams(params))}`),
+  scalpMonitor: (params: { min_atr_pct?: number; max_spread_pct?: number; min_value_cr?: number; only_ready?: boolean; top?: number } = {}) =>
+    request<ScalpMonitorResponse>(`/api/scalp/monitor${queryString(stringifyParams(params))}`),
+  scalpAlerts: (body: { enabled: boolean; min_score: number; cooldown_minutes: number }) =>
+    request<ScalpAlerts>("/api/scalp/alerts", { method: "POST", body: JSON.stringify(body) }),
+  scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),
   moversDays: () => request<{ source: string; days: string[]; stats: any }>("/api/movers/days"),
