@@ -512,10 +512,14 @@ export const smaApi = {
     ),
   tradeCounts: () => request<Record<TradeBookMode, number>>("/api/trades/counts"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
-  replayStart: (date: string, start: string, speed: number, endDate?: string) =>
+  /** `symbols` replays those stocks instead of the armed ones (they are not armed). */
+  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[]) =>
     request<ReplayInfo>(
       "/api/replay/start",
-      { method: "POST", body: JSON.stringify({ date, end_date: endDate || null, start, speed }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ date, end_date: endDate || null, start, speed, symbols: symbols?.length ? symbols : null }),
+      },
       20000
     ),
   replayRuns: () => request<ReplayRun[]>("/api/replay/runs"),
