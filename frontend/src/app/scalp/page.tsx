@@ -2,12 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, BellRing, Gauge, Loader2, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, RefreshCw } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
-import { smaApi, type SmaConfig } from "@/lib/smaApi";
+import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
+import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
+
+const BACKTEST_DAYS = [1, 5, 10, 20];
+const MAX_BACKTEST_STOCKS = 24;
 
 const REFRESH_MS = 10_000;
 const ATR_STOPS = [0, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2];
@@ -44,6 +49,12 @@ export default function ScalpPage() {
   const [smaConfig, setSmaConfig] = useState<SmaConfig | null>(null);
   const [arming, setArming] = useState<string | null>(null);
   const [armNote, setArmNote] = useState<string | null>(null);
+
+  // "Backtest these": replay the ticked stocks over past days with the bot.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [btDays, setBtDays] = useState(10);
+  const [btBusy, setBtBusy] = useState(false);
+  const [btNote, setBtNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [alertScore, setAlertScore] = useState(60);
   const [alertCooldown, setAlertCooldown] = useState(30);
@@ -100,6 +111,38 @@ export default function ScalpPage() {
       return dir * (av - bv);
     });
   }, [data, readyOnly, bias, sort]);
+
+  const pick = (symbol: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(symbol);
+      else next.delete(symbol);
+      return next;
+    });
+
+  const backtest = async () => {
+    const symbols = Array.from(picked).slice(0, MAX_BACKTEST_STOCKS);
+    if (!symbols.length) return;
+    const days = lastClosedWeekdays(btDays);
+    setBtBusy(true);
+    setBtNote(null);
+    try {
+      const current = await smaApi.replayInfo().catch(() => null);
+      if (current && replayActive(current) && current.status !== "FINISHED") {
+        const ok = window.confirm("A replay is already running. Stop it and start this backtest instead?");
+        if (!ok) return;
+      }
+      await smaApi.replayStart(days[0], "09:15", 300, days[days.length - 1], symbols);
+      setBtNote({
+        ok: true,
+        text: `Backtest started: ${symbols.join(", ")} · ${days.length === 1 ? days[0] : `${days[0]} → ${days[days.length - 1]}`}. It replays your SMA settings (each stock's own, if set) on Groww's past candles — practice money, no orders. A day takes a few minutes; results build up in the SMA terminal's Backtests tab.`,
+      });
+    } catch (e: unknown) {
+      setBtNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the backtest" });
+    } finally {
+      setBtBusy(false);
+    }
+  };
 
   const arm = async (symbol: string) => {
     const live = (smaConfig?.trading_mode ?? "PAPER") === "LIVE";
@@ -213,7 +256,7 @@ export default function ScalpPage() {
         </section>
 
         {simulated && (
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
             The desk is on the simulated feed, so these prices are invented and alerts are off. Switch the data source
             to LIVE NSE (top bar) for real readings.
           </p>
@@ -257,7 +300,54 @@ export default function ScalpPage() {
             </label>
           </div>
 
-          {armNote && <p className="mb-2 text-xs text-sky-300">{armNote}</p>}
+          {armNote && <p className="mb-2 text-xs text-accentSky">{armNote}</p>}
+
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-accentViolet/30 bg-accentViolet/[0.06] px-3 py-2 text-xs text-slate-300">
+            <FlaskConical size={14} className="text-accentViolet" />
+            <span>
+              {picked.size
+                ? `${picked.size} ticked`
+                : "Tick stocks below to test how the bot would have traded them"}
+            </span>
+            {picked.size > 0 && (
+              <button type="button" onClick={() => setPicked(new Set())} className="text-slate-400 hover:text-slate-200">
+                Clear
+              </button>
+            )}
+            <label className="ml-auto flex items-center gap-1.5 text-slate-400">
+              over the last
+              <select
+                value={btDays}
+                onChange={(e) => setBtDays(Number(e.target.value))}
+                className="rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+              >
+                {BACKTEST_DAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {d} trading day{d === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={btBusy || picked.size === 0}
+              onClick={backtest}
+              title="Replays the ticked stocks on Groww's past 1-minute candles with your SMA settings. Practice money only; nothing is armed and no order is sent."
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentViolet/15 px-3 font-semibold text-accentViolet ring-1 ring-inset ring-accentViolet/40 hover:bg-accentViolet/25 disabled:opacity-40"
+            >
+              {btBusy ? <Loader2 size={13} className="animate-spin" /> : <FlaskConical size={13} />} Backtest selected
+            </button>
+          </div>
+          {btNote && (
+            <p className={clsx("mb-3 text-xs", btNote.ok ? "text-accentViolet" : "text-amber-300")}>
+              {btNote.text}{" "}
+              {btNote.ok && (
+                <Link href="/terminal" className="font-semibold text-accentSky underline-offset-2 hover:underline">
+                  Open the SMA terminal →
+                </Link>
+              )}
+            </p>
+          )}
 
           {!data ? (
             <Empty>Loading…</Empty>
@@ -272,6 +362,17 @@ export default function ScalpPage() {
               <table className="w-full text-sm">
                 <thead className="text-xs uppercase text-slate-500">
                   <tr>
+                    <th className="w-7 pb-2">
+                      <input
+                        type="checkbox"
+                        aria-label="Tick every stock shown"
+                        className="accent-violet-400"
+                        checked={rows.length > 0 && rows.every((r) => picked.has(r.symbol))}
+                        onChange={(e) =>
+                          setPicked(e.target.checked ? new Set(rows.slice(0, MAX_BACKTEST_STOCKS).map((r) => r.symbol)) : new Set())
+                        }
+                      />
+                    </th>
                     {header("symbol", "Stock", false)}
                     {header("score", "Score", true, "0–100: movement 35, volume spike 25, 5-minute move 20, money traded 20; cut by a wide spread")}
                     <th className="pb-2 text-right font-medium">LTP</th>
@@ -289,7 +390,15 @@ export default function ScalpPage() {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <Row key={r.symbol} row={r} armed={armed.has(r.symbol)} arming={arming === r.symbol} onArm={() => arm(r.symbol)} />
+                    <Row
+                      key={r.symbol}
+                      row={r}
+                      armed={armed.has(r.symbol)}
+                      arming={arming === r.symbol}
+                      onArm={() => arm(r.symbol)}
+                      picked={picked.has(r.symbol)}
+                      onPick={(on) => pick(r.symbol, on)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -398,9 +507,32 @@ export default function ScalpPage() {
   );
 }
 
-function Row({ row: r, armed, arming, onArm }: { row: ScalpRow; armed: boolean; arming: boolean; onArm: () => void }) {
+function Row({
+  row: r,
+  armed,
+  arming,
+  onArm,
+  picked,
+  onPick,
+}: {
+  row: ScalpRow;
+  armed: boolean;
+  arming: boolean;
+  onArm: () => void;
+  picked: boolean;
+  onPick: (on: boolean) => void;
+}) {
   return (
-    <tr className={clsx("border-t border-slate-800/70", r.ready && "bg-profit/[0.04]")}>
+    <tr className={clsx("border-t border-slate-800/70", r.ready && "bg-profit/[0.04]", picked && "bg-accentViolet/[0.08]")}>
+      <td className="py-1.5">
+        <input
+          type="checkbox"
+          aria-label={`Tick ${r.symbol} for a backtest`}
+          className="accent-violet-400"
+          checked={picked}
+          onChange={(e) => onPick(e.target.checked)}
+        />
+      </td>
       <td className="py-1.5 font-semibold text-amber-300">{r.symbol}</td>
       <td className="py-1.5 text-right">
         <ScoreBar value={r.score} />
@@ -414,7 +546,7 @@ function Row({ row: r, armed, arming, onArm }: { row: ScalpRow; armed: boolean; 
       <td
         className={clsx(
           "py-1.5 text-right tabular-nums",
-          r.volume_ratio != null && r.volume_ratio >= 2 ? "font-semibold text-sky-300" : ""
+          r.volume_ratio != null && r.volume_ratio >= 2 ? "font-semibold text-accentSky" : ""
         )}
       >
         {r.volume_ratio == null ? "—" : `${r.volume_ratio.toFixed(1)}×`}
@@ -446,13 +578,13 @@ function Row({ row: r, armed, arming, onArm }: { row: ScalpRow; armed: boolean; 
       </td>
       <td className="py-1.5 text-right">
         {armed ? (
-          <span className="text-xs font-semibold text-emerald-300">Armed</span>
+          <span className="text-xs font-semibold text-profit">Armed</span>
         ) : (
           <button
             type="button"
             disabled={arming}
             onClick={onArm}
-            className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+            className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
           >
             {arming ? "…" : "Arm"}
           </button>

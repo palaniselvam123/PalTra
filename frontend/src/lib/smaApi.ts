@@ -545,10 +545,14 @@ export const smaApi = {
     speed?: number;
   }) =>
     request<ReplayInfo>("/api/replay/scalp-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
-  replayStart: (date: string, start: string, speed: number, endDate?: string) =>
+  /** `symbols` replays those stocks instead of the armed ones (they are not armed). */
+  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[]) =>
     request<ReplayInfo>(
       "/api/replay/start",
-      { method: "POST", body: JSON.stringify({ date, end_date: endDate || null, start, speed }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ date, end_date: endDate || null, start, speed, symbols: symbols?.length ? symbols : null }),
+      },
       20000
     ),
   replayRuns: () => request<ReplayRun[]>("/api/replay/runs"),
