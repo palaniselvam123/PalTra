@@ -93,7 +93,10 @@ export function ControlBar({ state, live, running, busy, symbol, symbolArmed, on
             </>
           ) : null}
         </p>
-        <p>It does not wait for a cross. Checked VWAP, volume, density and RSI filters still apply. The bot will start.</p>
+        <p>
+          It does not wait for a cross and skips the VWAP, volume, density, RSI and ADX filters. Market hours,
+          the entry cut-off, the Trade list, the trade cap and the loss limit still apply. The bot will start.
+        </p>
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -172,7 +175,7 @@ function HowItWorks() {
             <li>Buy and sell both wait for the next SMA 9 / SMA 21 cross on a closed 1-minute candle.</li>
             <li>Telegram warns about 3 minutes before a likely cross; the order still waits for the cross.</li>
             <li><b>Force order</b> orders the chart stock now from the current SMA side.</li>
-            <li>Checked VWAP, volume, density and RSI filters apply to both.</li>
+            <li>Checked VWAP, volume, density, RSI and ADX filters apply to a cross. Force order skips them.</li>
           </ul>
         </div>
       )}

@@ -1532,27 +1532,53 @@ async def test_a_checked_vwap_blocks_the_new_order_and_still_closes_the_old_one(
 
 
 @pytest.mark.asyncio
-async def test_force_order_obeys_a_checked_filter_and_does_not_start(engine, monkeypatch):
+async def test_force_order_skips_checked_filters_but_logs_them(engine, monkeypatch):
     from models import BotConfig
     import database
-    from strategy_engine import ForceRefused
 
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
     monkeypatch.setattr("strategy_engine._ist_now", lambda: dt.datetime(2026, 9, 29, 13, 59, tzinfo=IST))
+    logged = []
+    monkeypatch.setattr(engine, "_log_decision", lambda *a, **k: logged.append(k.get("note", "")))
 
     with database.session_factory()() as db:
         row = db.get(BotConfig, 1)
         row.use_vwap = True
+        row.use_rsi = True
         row.symbol = "SUNTV"
         row.trade_symbols = "SUNTV"
+        row.trading_mode = "PAPER"
         db.commit()
     frame = enrich(_tape([100.0 + i for i in range(30)]))
     engine._frames["SUNTV"] = frame
-    engine._ltps["SUNTV"] = 50.0
+    engine._ltps["SUNTV"] = 50.0  # far below VWAP: a cross would be refused
     engine.status = "STOPPED"
-    with pytest.raises(ForceRefused, match="VWAP"):
+    result = await engine.force_order("SUNTV")
+    assert result == "opened LONG"
+    assert engine.positions["SUNTV"].direction == "LONG"
+    assert engine.status == "RUNNING"
+    assert any("would have refused" in note and "VWAP" in note for note in logged)
+
+
+@pytest.mark.asyncio
+async def test_force_order_still_refuses_an_unarmed_stock_and_a_closed_market(engine, monkeypatch):
+    from models import BotConfig
+    import database
+    from strategy_engine import ForceRefused
+
+    monkeypatch.setattr("strategy_engine._ist_now", lambda: dt.datetime(2026, 9, 29, 13, 59, tzinfo=IST))
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.symbol = "SUNTV"
+        row.trade_symbols = "TCS"
+        db.commit()
+    engine._frames["SUNTV"] = enrich(_tape([100.0 + i for i in range(30)]))
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
+    with pytest.raises(ForceRefused, match="not on the Trade list"):
         await engine.force_order("SUNTV")
-    assert engine.status == "STOPPED"
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: False)
+    with pytest.raises(ForceRefused, match="Market is closed"):
+        await engine.force_order("TCS")
     assert engine.broker.events == []
 
 
