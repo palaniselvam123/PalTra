@@ -100,3 +100,56 @@ async def test_an_immediate_rejection_keeps_the_message_groww_sent():
     with pytest.raises(SlCancelFailed) as err:
         await engine._require_live_fill(OrderAck("GRW9", "REJECTED", None, "Price outside circuit"), SimpleNamespace())
     assert "Price outside circuit" in str(err.value)
+
+
+# ---- the refusal reaches the screen and Telegram -----------------------------
+
+import datetime as dt  # noqa: E402
+
+from strategy_engine import order_refused_alert  # noqa: E402
+
+_MARGIN = "Groww REJECTED the order: Add ₹20092.46 to your Groww Balance to place the order. Nothing was booked."
+
+
+@pytest.fixture
+def paper_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/sma.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    return StrategyEngine(broker=_FakeBroker())
+
+
+def test_the_refusal_text_is_groww_s_own_words():
+    text = order_refused_alert(mode="LIVE", symbol="ANTELOPUS", text=_MARGIN, when=dt.datetime(2026, 10, 5, 14, 44, 16))
+    assert text.splitlines() == [
+        "PalTra order refused",
+        "LIVE ANTELOPUS",
+        _MARGIN,
+        "05 Oct 14:44:16 IST",
+    ]
+
+
+def test_a_refusal_alerts_once_and_stays_on_the_stock(paper_engine, monkeypatch):
+    sent: list[str] = []
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", sent.append)
+    engine = paper_engine
+    cfg = engine.load_config()
+    cfg.trade_symbols = "ANTELOPUS"
+    engine._cfg_cache = cfg
+    engine._focus = "ANTELOPUS"
+    engine._note_broker_block(SlCancelFailed(_MARGIN))
+    engine._note_broker_block(SlCancelFailed(_MARGIN))  # retried next minute
+    assert len(sent) == 1 and "Add ₹20092.46" in sent[0]
+    # The next tick replaces the note; the refusal is still on the stock.
+    engine._signals["ANTELOPUS"] = "ANTELOPUS no order — waiting for an SMA cross."
+    book = next(b for b in engine.snapshot()["books"] if b["symbol"] == "ANTELOPUS")
+    assert book["last_reject"] == _MARGIN
+    assert book["last_reject_at"]
+    # A different reason is news and alerts again.
+    engine._note_broker_block(SlCancelFailed("Groww REJECTED the order: Stock is not allowed for intraday (MIS). Nothing was booked."))
+    assert len(sent) == 2
