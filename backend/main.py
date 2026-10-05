@@ -539,6 +539,9 @@ class ReplayStart(BaseModel):
     end_date: str | None = None
     start: str = "09:15"
     speed: int = 60
+    #: Stocks to replay. Empty replays the armed stocks, as before. Lets the
+    #: Scalp page test a shortlist without arming it.
+    symbols: list[str] | None = None
 
 
 class ReplayControl(BaseModel):
@@ -571,7 +574,18 @@ async def replay_start(body: ReplayStart):
         start = parse_start(body.start)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    symbols = trade_names(cfg)
+    if body.symbols:
+        symbols = []
+        for raw in body.symbols:
+            name = (raw or "").strip().upper()
+            if not name.isalnum():
+                raise HTTPException(400, f"{raw!r} is not an NSE trading symbol.")
+            if name not in symbols:
+                symbols.append(name)
+        if len(symbols) > MAX_TRADE_SYMBOLS:
+            raise HTTPException(400, f"Replay at most {MAX_TRADE_SYMBOLS} stocks at once.")
+    else:
+        symbols = trade_names(cfg)
     if not symbols:
         raise HTTPException(400, "Arm at least one stock in the Stocks panel first.")
     if not engine.broker.token:

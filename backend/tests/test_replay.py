@@ -729,3 +729,44 @@ async def test_reusing_the_chart_frame_between_closes_changes_nothing(db, monkey
     assert fresh_trades, "the sine-wave day should trade"
     assert cached_trades == fresh_trades
     assert cached_readings == fresh_readings
+
+
+def test_api_replays_a_given_list_of_stocks_instead_of_the_armed_ones(tmp_path, monkeypatch):
+    """The Scalp page's "Backtest these" replays a shortlist without arming it."""
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    from config import get_settings
+
+    get_settings.cache_clear()
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+    from models import BotConfig
+
+    with database.session_factory()() as s:
+        s.get(BotConfig, 1).trade_symbols = "TCS"
+        s.commit()
+    seen = {}
+
+    async def fake_begin(broker, symbols, day, start, speed, end_day=None, settings=None):
+        seen.update(symbols=symbols, day=day, end_day=end_day, speed=speed)
+
+    monkeypatch.setattr(main.engine.broker, "token", "test-token")
+    monkeypatch.setattr(main.replay, "begin", fake_begin)
+    with TestClient(main.app) as client:
+        body = {"date": "2026-09-28", "end_date": "2026-10-02", "speed": 300, "symbols": ["infy", "SBIN", "INFY"]}
+        assert client.post("/api/replay/start", json=body).status_code == 200
+        assert seen["symbols"] == ["INFY", "SBIN"]
+        assert (seen["day"], seen["end_day"]) == (dt.date(2026, 9, 28), dt.date(2026, 10, 2))
+        # Without a list, the armed stocks as before.
+        assert client.post("/api/replay/start", json={"date": "2026-09-29"}).status_code == 200
+        assert seen["symbols"] == ["TCS"]
+        bad = client.post("/api/replay/start", json={"date": "2026-09-29", "symbols": ["TCS; DROP"]})
+        assert bad.status_code == 400
+        # Arming is untouched: the shortlist is not added to the Trade list.
+        assert client.get("/api/config").json()["trade_symbols"] == ["TCS"]
+    database.reset_engine()
+    get_settings.cache_clear()
