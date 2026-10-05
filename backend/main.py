@@ -10,6 +10,7 @@ stop, P&L, bot status). REST lives under `/api`.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import csv
 import io
@@ -35,6 +36,7 @@ from replay import (
     settings_snapshot,
 )
 from groww_client import preferred_quote_token
+from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
 from strategy_engine import (
@@ -544,6 +546,19 @@ class ReplayStart(BaseModel):
     symbols: list[str] | None = None
 
 
+class ScalpPickStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The stocks to choose from each day (the Scalp page's streaming list).
+    universe: list[str]
+    pick_time: str = "09:45"
+    top_n: int = Field(default=3, ge=1, le=10)
+    min_atr_pct: float = Field(default=0.08, ge=0, le=5)
+    min_value_cr: float = Field(default=5.0, ge=0, le=100000)
+    require_bias: bool = True
+    speed: int = 300
+
+
 class ReplayControl(BaseModel):
     action: Literal["play", "pause", "stop", "speed"]
     speed: int | None = None
@@ -558,6 +573,59 @@ def _replay_engine():
 
 @app.get("/api/replay")
 async def replay_info():
+    return replay.info()
+
+
+@app.post("/api/replay/scalp-picks")
+async def replay_scalp_picks(body: ScalpPickStart):
+    """Backtest the Scalp page's picks: each past day, score the universe at
+    the pick time as the live page would, then let the SMA bot trade only the
+    top picks for the rest of that day. Practice money; never sends an order.
+    """
+    cfg = engine.load_config()
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, "Switch to PAPER before starting a replay.")
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date)
+        pick_time = parse_start(body.pick_time)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not (dt.time(9, 20) <= pick_time <= dt.time(14, 30)):
+        raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
+    universe: list[str] = []
+    for raw in body.universe:
+        name = (raw or "").strip().upper()
+        if not name.isalnum():
+            raise HTTPException(400, f"{raw!r} is not an NSE trading symbol.")
+        if name not in universe:
+            universe.append(name)
+    if not universe:
+        raise HTTPException(400, "Give at least one stock to pick from.")
+    if len(universe) > MAX_UNIVERSE:
+        raise HTTPException(400, f"Pick from at most {MAX_UNIVERSE} stocks.")
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
+    rule = PickRule(
+        pick_time=pick_time,
+        top_n=body.top_n,
+        min_atr_pct=body.min_atr_pct,
+        min_value_cr=body.min_value_cr,
+        require_bias=body.require_bias,
+    )
+    await replay.begin(
+        engine.broker,
+        universe,
+        day,
+        pick_time,
+        body.speed,
+        end_day=end_day,
+        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg)},
+        rule=rule,
+    )
     return replay.info()
 
 

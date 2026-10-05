@@ -98,9 +98,14 @@ def score_row(
     min_atr_pct: float = DEFAULT_MIN_ATR_PCT,
     max_spread_pct: float = DEFAULT_MAX_SPREAD_PCT,
     min_value_cr: float = DEFAULT_MIN_VALUE_CR,
+    require_spread: bool = True,
 ) -> ScalpRow:
     """One stock's scalp readings. `bars` are 1-minute candles, oldest first;
-    the last one is the forming minute and is used only for the live price."""
+    the last one is the forming minute and is used only for the live price.
+
+    `require_spread=False` judges a stock without bid/ask, for past days where
+    Groww keeps no quotes: the spread check is skipped, not passed.
+    """
     quote = quote or {}
     closed = bars[:-1] if len(bars) > 1 else []
     ltp = float(quote.get("ltp") or 0) or (bars[-1].close if bars else None)
@@ -147,7 +152,8 @@ def score_row(
     if atr_pct is not None and atr_pct < min_atr_pct:
         reasons.append(f"ATR {atr_pct:.3f}% < {min_atr_pct:g}%")
     if spread_pct is None:
-        reasons.append("no bid/ask yet")
+        if require_spread:
+            reasons.append("no bid/ask yet")
     elif spread_pct > max_spread_pct:
         reasons.append(f"spread {spread_pct:.3f}% > {max_spread_pct:g}%")
     if value_cr is not None and value_cr < min_value_cr:

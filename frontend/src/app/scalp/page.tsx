@@ -8,26 +8,11 @@ import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
 import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
+import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 
 const BACKTEST_DAYS = [1, 5, 10, 20];
 const MAX_BACKTEST_STOCKS = 24;
-
-/** The last `count` weekdays that have closed, oldest first, in IST. A day
- * counts as closed after 15:30 IST. Exchange holidays are not known here; the
- * replay skips a day with no candles. */
-function lastClosedWeekdays(count: number, now: Date = new Date()): string[] {
-  const ist = new Date(now.getTime() + 330 * 60_000); // UTC fields now read as IST
-  const day = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
-  const closedToday = ist.getUTCHours() * 60 + ist.getUTCMinutes() >= 15 * 60 + 30;
-  if (!closedToday) day.setUTCDate(day.getUTCDate() - 1);
-  const out: string[] = [];
-  while (out.length < count) {
-    const wd = day.getUTCDay();
-    if (wd !== 0 && wd !== 6) out.unshift(day.toISOString().slice(0, 10));
-    day.setUTCDate(day.getUTCDate() - 1);
-  }
-  return out;
-}
 
 const REFRESH_MS = 10_000;
 const ATR_STOPS = [0, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2];
@@ -426,6 +411,8 @@ export default function ScalpPage() {
             SMA cross and filters.
           </p>
         </section>
+
+        <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
 
         <section className="rounded-xl border border-slate-800 bg-card p-4">
           <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
