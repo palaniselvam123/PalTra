@@ -33,11 +33,13 @@ from charges import calculate_charges, legs_for
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
 from indicators import (
+    _session_vwap,
     closed_candle_cross,
     closed_technical_snapshot,
     enrich,
     entry_filter_reason,
     format_signal_report,
+    minute_volume_stats,
     rsi_wilder,
     session_vwap_series,
     sma_gap_pct,
@@ -211,15 +213,29 @@ def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
     return BotConfig(**data)
 
 
-def _entry_block(frame: pd.DataFrame, direction: str, cfg: BotConfig, price: float | None = None) -> str | None:
-    """Checked entry filters only. An unchecked box is not read."""
+def _entry_block(
+    frame: pd.DataFrame,
+    direction: str,
+    cfg: BotConfig,
+    price: float | None = None,
+    only: str | None = None,
+) -> str | None:
+    """Checked entry filters only. An unchecked box is not read.
+
+    `only` ("vwap", "volume", "density" or "rsi") reads that one filter, so a
+    message can say which of several checked filters agrees and which does not.
+    """
+
+    def on(name: str) -> bool:
+        return bool(getattr(cfg, f"use_{name}", False)) and (only is None or only == name)
+
     return entry_filter_reason(
         frame,
         direction,
-        use_vwap=bool(getattr(cfg, "use_vwap", False)),
-        use_volume=bool(getattr(cfg, "use_volume", False)),
-        use_density=bool(getattr(cfg, "use_density", False)),
-        use_rsi=bool(getattr(cfg, "use_rsi", False)),
+        use_vwap=on("vwap"),
+        use_volume=on("volume"),
+        use_density=on("density"),
+        use_rsi=on("rsi"),
         volume_min_ratio=float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0),
         density_min_pct=float(getattr(cfg, "density_min_pct", 50.0) or 50.0),
         rsi_long_min=float(getattr(cfg, "rsi_long_min", 40.0) or 40.0),
@@ -298,6 +314,66 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
                 }
             )
     return out
+
+
+_CHECK_NAMES = (("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"))
+
+
+def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
+    """The reading behind a filter that agrees, e.g. "RSI 55.2 (40–70)"."""
+    try:
+        closed = frame.iloc[:-1]
+        bar = closed.iloc[-1]
+        if name == "vwap":
+            vwap = _session_vwap(closed)
+            side = "above" if direction == "LONG" else "below"
+            return f"VWAP: {float(bar['close']):.2f} {side} {vwap:.2f}"
+        if name == "rsi":
+            rsi = float(rsi_wilder(closed["close"], 14).iloc[-1])
+            if direction == "LONG":
+                lo, hi = getattr(cfg, "rsi_long_min", 40.0) or 40.0, getattr(cfg, "rsi_long_max", 70.0) or 70.0
+            else:
+                lo, hi = getattr(cfg, "rsi_short_min", 30.0) or 30.0, getattr(cfg, "rsi_short_max", 60.0) or 60.0
+            return f"RSI {rsi:.1f} (inside {float(lo):.0f}–{float(hi):.0f})"
+        if name == "volume":
+            current, average, _got = minute_volume_stats(closed, 20)
+            ratio = float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0)
+            return f"Volume {current:.0f} ≥ {ratio:g}× avg {average:.0f}"
+        if name == "density":
+            span = float(bar["high"]) - float(bar["low"])
+            body = abs(float(bar["close"]) - float(bar["open"]))
+            density = 0.0 if span <= 0 else body / span * 100
+            return f"Density {density:.0f}%"
+    except Exception:  # noqa: BLE001
+        pass
+    return dict(_CHECK_NAMES).get(name, name)
+
+
+def entry_checks(frame: pd.DataFrame, direction: str, cfg) -> list[str]:
+    """Each checked entry filter on the last closed candle, read as the bot reads it.
+
+    One line per checked filter: "✅ …" when it lets an entry through, "❌ …"
+    with the reason when it would refuse. Unchecked filters are left out.
+    Only text for alerts; the order decision stays in `apply_signal`.
+    """
+    if cfg is None or frame is None or getattr(frame, "empty", True):
+        return []
+    lines: list[str] = []
+    for name, _label in _CHECK_NAMES:
+        if not bool(getattr(cfg, f"use_{name}", False)):
+            continue
+        reason = _entry_block(frame, direction, cfg, only=name)
+        lines.append(f"❌ {reason}" if reason else f"✅ {_check_passed(name, frame, direction, cfg)}")
+    if bool(getattr(cfg, "use_adx_filter", False)):
+        need = float(getattr(cfg, "adx_threshold", 20) or 20)
+        adx = _finite(frame.iloc[-2].get("adx_14")) if len(frame) >= 2 else None
+        if adx is None:
+            lines.append("❌ ADX is not ready")
+        else:
+            lines.append(f"{'✅' if adx >= need else '❌'} ADX {adx:.1f} (needs {need:g})")
+    if not lines:
+        lines.append("No filters on — the cross alone places the order")
+    return lines
 
 
 def chart_filters(cfg) -> dict:
@@ -852,6 +928,7 @@ class StrategyEngine:
                 self.last_signal = result
                 self._signals[self._focus] = result
                 self._log_decision(signal, frame, cfg, now, result)
+                self._alert_refused(signal, frame, cfg, now, result)
                 return result
             except SlCancelFailed as exc:
                 self._note_broker_block(exc)
@@ -859,6 +936,33 @@ class StrategyEngine:
                 return self.last_signal
             finally:
                 self.inflight = None
+
+    def _alert_refused(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, result: str) -> None:
+        """Telegram when a fresh cross is not ordered because a check refused it.
+
+        Each closed-candle cross is judged once, so this sends once per cross.
+        It never changes the decision; a failure here is only logged.
+        """
+        try:
+            ignored = result.startswith(f"{signal} ignored — ")
+            no_reverse = result.startswith(f"closed on {signal} — ")
+            if not (ignored or no_reverse):
+                return
+            want = "LONG" if signal == "BULLISH" else "SHORT"
+            self._alert(
+                refused_alert(
+                    mode=(cfg.trading_mode or "PAPER").upper(),
+                    symbol=(cfg.symbol or "").upper(),
+                    signal=signal,
+                    reason=result.split(" — ", 1)[1],
+                    closed=no_reverse,
+                    checks=entry_checks(frame, want, cfg),
+                    price=_finite(frame.iloc[-2].get("close")),
+                    when=now,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("refused-cross alert failed")
 
     async def _apply_locked(
         self,
@@ -1294,6 +1398,7 @@ class StrategyEngine:
                 fill=fill,
                 stop=sl if stop_active else None,
                 when=now,
+                day=self._day_totals(cfg.symbol),
             )
         )
         self.position = OpenPosition(
@@ -1770,6 +1875,7 @@ class StrategyEngine:
                 gross=float(costs.get("gross_pnl") or 0),
                 net=float(costs.get("net_pnl") or 0),
                 when=now,
+                day=self._day_totals(symbol),
             )
         )
 
@@ -1859,6 +1965,8 @@ class StrategyEngine:
                     side=side,
                     minutes=minutes or 0,
                     gap_pct=gap_pct or 0,
+                    checks=entry_checks(frame, "LONG" if side == "BULLISH" else "SHORT", cfg),
+                    trades=(self.trades_today, int(cfg.max_trades_per_day)),
                 )
             elif closes:
                 text = upcoming_close_alert(
@@ -1868,6 +1976,7 @@ class StrategyEngine:
                     side=side,
                     minutes=minutes or 0,
                     gap_pct=gap_pct or 0,
+                    checks=entry_checks(frame, "LONG" if side == "BULLISH" else "SHORT", cfg),
                 )
             else:
                 text = ""
@@ -2087,6 +2196,41 @@ class StrategyEngine:
         if due:
             await self._square_off("EOD_SQUARE_OFF", symbols=due)
 
+    def _open_net(self, symbol: str) -> float | None:
+        """Unrealized net of one held stock at its last price. None when flat."""
+        name = (symbol or "").upper()
+        if name not in self.positions:
+            return None
+        view, ltp = self._focus, self.ltp
+        try:
+            self._focus = name
+            self.ltp = float(self._ltps.get(name) or 0)
+            unreal = self._unrealized()
+            return float(unreal["net"]) if unreal else None
+        finally:
+            self._focus, self.ltp = view, ltp
+
+    def _day_totals(self, exclude: str = "") -> dict:
+        """Today's closed net and trade count of this book, plus the open P&L of
+        every other held stock. For alert text only.
+        """
+        try:
+            kpis = self._kpis(self._realized_mode or "PAPER")
+            skip = (exclude or "").upper()
+            open_net = 0.0
+            held = 0
+            for name in list(self.positions):
+                if name == skip:
+                    continue
+                value = self._open_net(name)
+                if value is not None:
+                    open_net += value
+                    held += 1
+            return {"net": float(kpis["net"]), "trades": int(kpis["trades"]), "open_net": open_net, "held": held}
+        except Exception:  # noqa: BLE001
+            logger.exception("day totals for alert failed")
+            return {}
+
     def _unrealized(self) -> dict | None:
         pos = self.position
         if pos is None or self.ltp <= 0:
@@ -2135,9 +2279,15 @@ class StrategyEngine:
             day_open, day_change = self._day_open_and_change()
             armed_names = trade_names(cfg) if cfg else []
             shown = list(dict.fromkeys([*armed_names, *self.positions.keys()]))
+            kpis = self._kpis((cfg.trading_mode if cfg else "PAPER") or "PAPER")
+            closed_by = kpis.get("by_symbol", {})
             books = []
+            open_total = 0.0
             for symbol in shown:
                 book = self.positions.get(symbol)
+                open_net = self._open_net(symbol)
+                open_total += open_net or 0.0
+                closed = closed_by.get(symbol, {"net": 0.0, "trades": 0})
                 books.append(
                     {
                         "symbol": symbol,
@@ -2151,11 +2301,15 @@ class StrategyEngine:
                         "tsl_step": book.tsl_step if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": _book_note(symbol, book, self._signals.get(symbol, "")),
+                        # Today's P&L of this stock, whichever stock the chart shows.
+                        "open_net": open_net,
+                        "closed_net": closed["net"],
+                        "closed_trades": closed["trades"],
+                        "day_net": closed["net"] + (open_net or 0.0),
                     }
                 )
         finally:
             self._focus, self.ltp = saved_focus, saved_ltp
-        kpis = self._kpis((cfg.trading_mode if cfg else "PAPER") or "PAPER")
         return {
             "bot_status": self.status,
             "halt_reason": self.halt_reason,
@@ -2206,6 +2360,8 @@ class StrategyEngine:
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
             "estimated_charges": unreal["charges"] if unreal else 0.0,
             "unrealized_net_pnl": unreal["net"] if unreal else 0.0,
+            # Every held stock, not only the one on the chart.
+            "open_net_total": open_total,
             "sl_room": unreal["room"] if unreal else None,
             "sl_room_pct": unreal["room_pct"] if unreal else None,
             "charge_estimate": unreal["breakdown"] if unreal else None,
@@ -2302,6 +2458,7 @@ class StrategyEngine:
         charges = 0.0
         net = 0.0
         wins = 0
+        by_symbol: dict[str, dict] = {}
         breakdown = {
             "brokerage": 0.0,
             "stt": 0.0,
@@ -2321,6 +2478,9 @@ class StrategyEngine:
             net += float(row.net_pnl or 0)
             if (row.net_pnl or 0) > 0:
                 wins += 1
+            per = by_symbol.setdefault((row.symbol or "").upper(), {"net": 0.0, "trades": 0})
+            per["net"] += float(row.net_pnl or 0)
+            per["trades"] += 1
             buy, sell = legs_for(row.direction, row.entry_price, sign_exit)
             part = calculate_charges(buy, sell, row.qty)
             for key in breakdown:
@@ -2335,6 +2495,7 @@ class StrategyEngine:
             "win_rate": (wins / n * 100) if n else 0.0,
             "trades": n,
             "wins": wins,
+            "by_symbol": by_symbol,
         }
 
     def book(self, mode: str | None, limit: int = BOOK_LIMIT) -> dict:
@@ -2417,6 +2578,7 @@ def fill_alert(
     fill: float,
     stop: float | None,
     when: dt.datetime,
+    day: dict | None = None,
 ) -> str:
     """WhatsApp text for a fill. No account numbers or order ids."""
     clock = when.strftime("%d %b %H:%M:%S")
@@ -2426,8 +2588,23 @@ def fill_alert(
         f"{mode} {direction} {symbol}\n"
         f"Filled {qty} @ {fill:,.2f}\n"
         f"{stop_text}\n"
+        f"{_day_text(day)}"
         f"{clock} IST"
     )
+
+
+def _day_text(day: dict | None) -> str:
+    """Today's running total for an alert, or nothing when it is unknown."""
+    if not day:
+        return ""
+    trades = int(day.get("trades") or 0)
+    text = f"Today net {float(day.get('net') or 0):+,.2f} ({trades} closed trade{'' if trades == 1 else 's'})"
+    held = int(day.get("held") or 0)
+    if held:
+        open_net = float(day.get("open_net") or 0)
+        total = float(day.get("net") or 0) + open_net
+        text += f"\nOpen {held} other stock{'' if held == 1 else 's'} {open_net:+,.2f} · total {total:+,.2f}"
+    return text + "\n"
 
 
 def close_alert(
@@ -2439,15 +2616,41 @@ def close_alert(
     gross: float,
     net: float,
     when: dt.datetime,
+    day: dict | None = None,
 ) -> str:
     clock = when.strftime("%d %b %H:%M:%S")
     why = _ALERT_REASON.get(reason, reason or "closed")
     return (
         f"PalTra closed {direction} {symbol}\n"
         f"Exit {exit_price:,.2f} · {why}\n"
-        f"P&L {gross:+,.2f}  net {net:+,.2f}\n"
+        f"This trade P&L {gross:+,.2f}  net {net:+,.2f}\n"
+        f"{_day_text(day)}"
         f"{clock} IST"
     )
+
+
+def refused_alert(
+    *,
+    mode: str,
+    symbol: str,
+    signal: str,
+    reason: str,
+    closed: bool,
+    checks: list[str],
+    price: float | None,
+    when: dt.datetime,
+) -> str:
+    """A cross the bot saw but did not order on, and why."""
+    clock = when.strftime("%d %b %H:%M:%S")
+    order = "BUY" if signal == "BULLISH" else "SELL"
+    head = f"{symbol} closed on the {signal} cross, no reverse {order}" if closed else f"{symbol} {signal} cross — no {order} placed"
+    at = f" at {price:,.2f}" if price else ""
+    lines = [f"PalTra no order", head + at, f"Why: {reason}"]
+    if checks:
+        lines.append("Checks on the cross candle:")
+        lines.extend(checks)
+    lines.append(f"{mode} · {clock} IST")
+    return "\n".join(lines)
 
 
 def minutes_until_cross(frame: pd.DataFrame, lookback: int = 3) -> tuple[str | None, float | None, float | None]:
@@ -2510,14 +2713,39 @@ def _gap_text(gap_pct: float) -> str:
     return f"{abs(gap_pct):.2f}% from SMA 21"
 
 
+def _checks_text(checks: list[str] | None) -> str:
+    if not checks:
+        return ""
+    return "Checks now (re-checked on the cross candle):\n" + "\n".join(checks) + "\n"
+
+
 def upcoming_entry_alert(
-    *, mode: str, symbol: str, side: str, minutes: float, gap_pct: float
+    *,
+    mode: str,
+    symbol: str,
+    side: str,
+    minutes: float,
+    gap_pct: float,
+    checks: list[str] | None = None,
+    trades: tuple[int, int] | None = None,
 ) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
+    refused = any(line.startswith("❌") for line in checks or [])
+    verdict = ""
+    if checks:
+        verdict = (
+            f"If the cross printed now: no {order} — a check refuses it.\n"
+            if refused
+            else f"If the cross printed now: {order} would be placed.\n"
+        )
+    cap = f"Trades today {trades[0]}/{trades[1]}\n" if trades else ""
     return (
         f"PalTra heads-up\n"
         f"{symbol} may be ordered in about {_about(minutes)} min\n"
         f"SMA 9 is {_gap_text(gap_pct)}. A {order} would be placed.\n"
+        f"{_checks_text(checks)}"
+        f"{verdict}"
+        f"{cap}"
         f"{mode} · no order yet"
     )
 
@@ -2530,12 +2758,15 @@ def upcoming_close_alert(
     side: str,
     minutes: float,
     gap_pct: float,
+    checks: list[str] | None = None,
 ) -> str:
     order = "BUY" if side == "BULLISH" else "SELL"
+    reverse = ("Reverse entry — " + _checks_text(checks)) if checks else ""
     return (
         f"PalTra heads-up\n"
         f"{position} {symbol} may close in about {_about(minutes)} min\n"
         f"SMA 9 is {_gap_text(gap_pct)}. A {order} would follow.\n"
+        f"{reverse}"
         f"{mode} · no close yet"
     )
 

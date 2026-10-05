@@ -97,7 +97,16 @@ export type SmaState = {
     tsl_step?: number | null;
     ltp: number | null;
     note?: string;
+    /** Unrealized net at this stock's last price; null when flat. */
+    open_net?: number | null;
+    /** Today's closed trades of this stock in the current book. */
+    closed_net?: number;
+    closed_trades?: number;
+    /** closed_net + open_net. */
+    day_net?: number;
   }[];
+  /** Unrealized net of every held stock, not only the chart's. */
+  open_net_total?: number;
   /** use_stop in the config. False means new entries get no stop order. */
   stop_enabled?: boolean;
   atr_multiplier?: number;

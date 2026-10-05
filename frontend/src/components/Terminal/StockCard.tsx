@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { px } from "@/lib/smaApi";
+import { inr, px } from "@/lib/smaApi";
 import { Badge, SideBadge } from "./ui";
 
 export type StockCardData = {
@@ -15,7 +15,16 @@ export type StockCardData = {
   stopOff: boolean;
   armed: boolean;
   onChart: boolean;
+  /** Today's P&L of this stock, sent for every stock, not only the chart's. */
+  openNet?: number | null;
+  closedNet?: number;
+  closedTrades?: number;
+  dayNet?: number;
 };
+
+function Money({ value }: { value: number }) {
+  return <span className={value >= 0 ? "text-emerald-400" : "text-rose-400"}>{inr(value)}</span>;
+}
 
 type Props = {
   stock: StockCardData;
@@ -26,7 +35,9 @@ type Props = {
 };
 
 export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowOnChart }: Props) {
-  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart } = stock;
+  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet } =
+    stock;
+  const traded = openNet != null || (closedTrades ?? 0) > 0;
   const cannotArm = !armed && armLimitReached;
   return (
     <li
@@ -61,6 +72,24 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
           {note || "No note yet"}
         </span>
       </div>
+
+      {traded && (
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-xs text-slate-400">
+          {openNet != null && (
+            <span>
+              Open <Money value={openNet} />
+            </span>
+          )}
+          {(closedTrades ?? 0) > 0 && (
+            <span>
+              Closed <Money value={closedNet ?? 0} /> ({closedTrades})
+            </span>
+          )}
+          <span className="font-semibold">
+            Today <Money value={dayNet ?? (closedNet ?? 0) + (openNet ?? 0)} />
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2">
         <button
