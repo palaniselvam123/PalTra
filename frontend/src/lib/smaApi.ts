@@ -61,7 +61,14 @@ export type SmaConfig = {
   /** HH:MM. No new entries from this time. */
   entry_cutoff_time?: string;
   trading_mode: "PAPER" | "LIVE";
+  /** Each stock's own strategy settings over the shared ones: {TCS: {qty: 50}}. */
+  stock_settings?: Record<string, Partial<SmaConfig>>;
+  /** The fields a stock may set for itself. */
+  stock_fields?: string[];
 };
+
+/** One stock's settings as the bot uses them, plus the ones it sets itself. */
+export type StockConfig = SmaConfig & { own: Partial<SmaConfig> };
 
 export type ChargeBreakdown = {
   brokerage: number;
@@ -110,6 +117,8 @@ export type SmaState = {
   }[];
   /** Unrealized net of every held stock, not only the chart's. */
   open_net_total?: number;
+  /** Stocks with their own strategy settings, and the fields each sets. */
+  stock_settings?: Record<string, Record<string, unknown>>;
   /** use_stop in the config. False means new entries get no stop order. */
   stop_enabled?: boolean;
   atr_multiplier?: number;
@@ -446,6 +455,14 @@ export const smaApi = {
   config: () => request<SmaConfig>("/api/config"),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
+  stockConfig: (symbol: string) => request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`),
+  saveStockConfig: (symbol: string, body: Partial<SmaConfig>) =>
+    request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  resetStockConfig: (symbol: string) =>
+    request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
   setTradeSymbol: (symbol: string, armed: boolean) =>
     request<SmaConfig>("/api/trade-symbols", {
       method: "POST",

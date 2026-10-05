@@ -82,6 +82,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "tsl_sl_points": "FLOAT DEFAULT 20",
             "tsl_trail_points": "FLOAT DEFAULT 10",
             "tsl_target_points": "FLOAT DEFAULT 0",
+            "stock_settings": "TEXT DEFAULT '{}'",
         }
         for column, decl in additions.items():
             if column not in names:

@@ -18,7 +18,7 @@ from database import session_factory
 from groww_client import IST, _is_auth_error, _parse_candles
 from indicators import enrich
 from models import ReplayRun, TradeLog
-from strategy_engine import candle_rows, chart_filters, filter_blocks
+from strategy_engine import candle_rows, chart_filters, filter_blocks, settings_for
 
 # Groww serves 1-minute candles at most 7 days per request.
 CHUNK_DAYS = 7
@@ -258,7 +258,9 @@ async def load_history(
     # 21 bars of 30 or 60 minutes need more than four days before From.
     warmup = WARMUP_DAYS if interval <= 15 else 10
     frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
-    return build_payload(frame, symbol, start, end, run_settings(cfg, run_id), interval, run_id)
+    # The stock's own settings (from the run's snapshot for a replay run).
+    settings = settings_for(run_settings(cfg, run_id), symbol)
+    return build_payload(frame, symbol, start, end, settings, interval, run_id)
 
 
 def run_settings(cfg, run_id: int | None):
@@ -275,4 +277,6 @@ def run_settings(cfg, run_id: int | None):
     if not isinstance(snapshot, dict) or not snapshot:
         return cfg
     base = {name: getattr(cfg, name) for name in dir(cfg) if not name.startswith("_") and not callable(getattr(cfg, name, None))}
+    # A run from before per-stock settings used the shared ones for every stock.
+    snapshot.setdefault("stock_settings", {})
     return SimpleNamespace(**{**base, **{k: v for k, v in snapshot.items() if v is not None}})

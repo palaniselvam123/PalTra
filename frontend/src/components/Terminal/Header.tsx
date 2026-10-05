@@ -8,6 +8,7 @@ import { StatusBar } from "./StatusBar";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
+import { ownSummary } from "./StrategyConfigPanel";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -617,6 +618,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                       closedTrades: book?.closed_trades ?? 0,
                       dayNet: book?.day_net,
                       reject: book?.last_reject ?? null,
+                      ownStrategy: ownSummary(config?.stock_settings?.[s] as Record<string, unknown> | undefined),
                       rejectAt: book?.last_reject_at ?? null,
                     }}
                   />
