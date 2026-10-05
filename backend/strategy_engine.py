@@ -440,6 +440,11 @@ class StrategyEngine:
         self._skip_cross_until: dict[str, int | None] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
+        # Latest order refusal per stock (Groww's own words), kept for the
+        # screen after the next tick's note replaces it, and when it was sent
+        # to Telegram so a refusal repeated every minute alerts once.
+        self._rejects: dict[str, tuple[str, dt.datetime]] = {}
+        self._reject_sent: dict[tuple[str, str], dt.datetime] = {}
         self.ltp = 0.0
         self.sma9 = None
         self.sma21 = None
@@ -593,6 +598,8 @@ class StrategyEngine:
             self._realized_mode = None
             self.trades_today = 0
             self._warned.clear()
+            self._rejects.clear()
+            self._reject_sent.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1132,6 +1139,7 @@ class StrategyEngine:
                 )
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
+                self._order_refused(name, str(exc))
                 raise ForceRefused(str(exc)) from exc
             finally:
                 self.inflight = None
@@ -1167,6 +1175,7 @@ class StrategyEngine:
                     await self._cancel_sl_verified(pos)
                 except SlCancelFailed as exc:
                     self.last_error = str(exc)
+                    self._order_refused(name, str(exc))
                     raise ForceRefused(str(exc)) from exc
                 if self.position is None:
                     return f"{name} was already flat"
@@ -1177,6 +1186,7 @@ class StrategyEngine:
                     )
                 except SlCancelFailed as exc:
                     self.last_error = str(exc)
+                    self._order_refused(name, str(exc))
                     raise ForceRefused(str(exc)) from exc
                 self.position = None
                 text = f"{name} closed"
@@ -1389,6 +1399,7 @@ class StrategyEngine:
             stop_active=stop_active,
         )
         self.trades_today += 1
+        self._rejects.pop((cfg.symbol or "").upper(), None)
         self._alert(
             fill_alert(
                 mode=(cfg.trading_mode or "PAPER").upper(),
@@ -1733,6 +1744,7 @@ class StrategyEngine:
                         self.last_error = str(exc)
                         self.last_signal = f"blocked — {exc}"
                         self._signals[symbol] = self.last_signal
+                        self._order_refused(symbol, str(exc))
                         if _intraday_is_shut(str(exc)):
                             self.status = "DAY_COMPLETED"
                             self.halt_reason = str(exc)
@@ -2055,12 +2067,34 @@ class StrategyEngine:
         self.halt_reason = reason
         self._announce_down("HALTED", reason)
 
+    def _order_refused(self, symbol: str, text: str) -> None:
+        """Keep Groww's refusal for the screen and send it to Telegram.
+
+        The same refusal for the same stock alerts at most once in 15
+        minutes, so an exit retried every tick does not flood the chat.
+        Text only: nothing here sends or changes an order.
+        """
+        name = (symbol or "").upper()
+        text = (text or "").strip()
+        if not name or not text:
+            return
+        now = self._now()
+        self._rejects[name] = (text, now)
+        last = self._reject_sent.get((name, text))
+        if last is not None and (now - last) < dt.timedelta(minutes=15):
+            return
+        self._reject_sent[(name, text)] = now
+        cfg = self._cfg_cache
+        mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
+        self._alert(order_refused_alert(mode=mode, symbol=name, text=text, when=now))
+
     def _note_broker_block(self, exc: SlCancelFailed, symbol: str = "") -> None:
         self.last_error = str(exc)
         self.last_signal = f"blocked — {exc}"
         key = symbol or self._focus
         if key:
             self._signals[key] = self.last_signal
+            self._order_refused(key, str(exc))
         if _intraday_is_shut(str(exc)) and self.status != "DAY_COMPLETED":
             self.status = "DAY_COMPLETED"
             self.halt_reason = str(exc)
@@ -2306,6 +2340,11 @@ class StrategyEngine:
                         "closed_net": closed["net"],
                         "closed_trades": closed["trades"],
                         "day_net": closed["net"] + (open_net or 0.0),
+                        # Groww's last refusal on this stock today, until an order fills.
+                        "last_reject": self._rejects[symbol][0] if symbol in self._rejects else None,
+                        "last_reject_at": self._rejects[symbol][1].strftime("%H:%M")
+                        if symbol in self._rejects
+                        else None,
                     }
                 )
         finally:
@@ -2627,6 +2666,12 @@ def close_alert(
         f"{_day_text(day)}"
         f"{clock} IST"
     )
+
+
+def order_refused_alert(*, mode: str, symbol: str, text: str, when: dt.datetime) -> str:
+    """An order Groww (or the pre-checks before Groww) refused, in its own words."""
+    clock = when.strftime("%d %b %H:%M:%S")
+    return f"PalTra order refused\n{mode} {symbol}\n{text}\n{clock} IST"
 
 
 def refused_alert(

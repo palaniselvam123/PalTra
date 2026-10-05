@@ -453,6 +453,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                       closedNet: book?.closed_net ?? 0,
                       closedTrades: book?.closed_trades ?? 0,
                       dayNet: book?.day_net,
+                      reject: book?.last_reject ?? null,
+                      rejectAt: book?.last_reject_at ?? null,
                     }}
                   />
                 );

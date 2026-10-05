@@ -20,6 +20,9 @@ export type StockCardData = {
   closedNet?: number;
   closedTrades?: number;
   dayNet?: number;
+  /** Groww's last refusal today, e.g. "Add ₹20092.46 to your Groww Balance". */
+  reject?: string | null;
+  rejectAt?: string | null;
 };
 
 function Money({ value }: { value: number }) {
@@ -35,7 +38,7 @@ type Props = {
 };
 
 export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowOnChart }: Props) {
-  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet } =
+  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet, reject, rejectAt } =
     stock;
   const traded = openNet != null || (closedTrades ?? 0) > 0;
   const cannotArm = !armed && armLimitReached;
@@ -72,6 +75,16 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
           {note || "No note yet"}
         </span>
       </div>
+
+      {reject && (
+        <div
+          role="alert"
+          className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200"
+          title={reject}
+        >
+          <span className="font-semibold">Order refused{rejectAt ? ` ${rejectAt}` : ""}:</span> {reject}
+        </div>
+      )}
 
       {traded && (
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-xs text-slate-400">

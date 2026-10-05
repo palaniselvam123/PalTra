@@ -104,6 +104,9 @@ export type SmaState = {
     closed_trades?: number;
     /** closed_net + open_net. */
     day_net?: number;
+    /** Groww's last refusal on this stock today (its own words), until an order fills. */
+    last_reject?: string | null;
+    last_reject_at?: string | null;
   }[];
   /** Unrealized net of every held stock, not only the chart's. */
   open_net_total?: number;
