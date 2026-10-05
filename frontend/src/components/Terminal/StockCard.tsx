@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import { X } from "lucide-react";
 import { inr, px } from "@/lib/smaApi";
 import { Badge, SideBadge } from "./ui";
 
@@ -35,9 +36,23 @@ type Props = {
   armLimitReached: boolean;
   onToggleArmed: () => void;
   onShowOnChart: () => void;
+  /** Ticked for a bulk Unarm / Remove. */
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  /** Take the stock off this list (unarms it first). */
+  onRemove: () => void;
 };
 
-export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowOnChart }: Props) {
+export function StockCard({
+  stock,
+  busy,
+  armLimitReached,
+  onToggleArmed,
+  onShowOnChart,
+  selected,
+  onSelect,
+  onRemove,
+}: Props) {
   const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet, reject, rejectAt } =
     stock;
   const traded = openNet != null || (closedTrades ?? 0) > 0;
@@ -46,13 +61,23 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
     <li
       className={clsx(
         "flex min-w-0 flex-col gap-2 rounded-lg bg-[#151921] p-3 ring-inset",
-        onChart ? "ring-2 ring-sky-400/60" : armed ? "ring-1 ring-emerald-400/35" : "ring-1 ring-white/10"
+        onChart ? "ring-2 ring-sky-400/60" : armed ? "ring-1 ring-emerald-400/35" : "ring-1 ring-white/10",
+        selected && "bg-sky-500/[0.06]"
       )}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate text-[15px] font-semibold tracking-wide text-amber-300" title={symbol}>
-          {symbol}
-        </span>
+        <label className="flex min-w-0 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => onSelect(e.target.checked)}
+            aria-label={`Select ${symbol}`}
+            className="h-4 w-4 shrink-0 accent-sky-400"
+          />
+          <span className="min-w-0 truncate text-[15px] font-semibold tracking-wide text-amber-300" title={symbol}>
+            {symbol}
+          </span>
+        </label>
         <span className="flex shrink-0 items-baseline gap-2 font-mono">
           <span className="text-sm text-slate-100">{px(ltp)}</span>
           <span
@@ -138,6 +163,7 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
             {armed ? "Armed for trading" : "Not armed"}
           </span>
         </button>
+        <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           disabled={busy || onChart}
@@ -151,6 +177,25 @@ export function StockCard({ stock, busy, armLimitReached, onToggleArmed, onShowO
         >
           {onChart ? "On chart" : "Show on chart"}
         </button>
+        <button
+          type="button"
+          disabled={busy || onChart || side !== "FLAT"}
+          onClick={onRemove}
+          aria-label={`Remove ${symbol} from the list`}
+          title={
+            onChart
+              ? "This stock is on the chart. Show another stock first."
+              : side !== "FLAT"
+                ? "This stock has an open position. Close it first."
+                : armed
+                  ? "Unarm and remove from this list"
+                  : "Remove from this list"
+          }
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-slate-400 ring-1 ring-inset ring-white/10 hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <X size={16} aria-hidden />
+        </button>
+        </div>
       </div>
     </li>
   );
