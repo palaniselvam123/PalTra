@@ -71,6 +71,12 @@ export default function MoversPage() {
   // Peak scans the whole session for each symbol's fastest window. "Right now"
   // is the useful question live; reviewing a past morning needs the other one.
   const [peak, setPeak] = useState(false);
+  // Fast-mover thresholds. The API defaults (0.1%/min, 0.75% from open) are
+  // strict on a quiet day, so both are adjustable here; alerts keep their own.
+  const SPEED_STOPS = [0.02, 0.03, 0.05, 0.1, 0.15, 0.2];
+  const MOVE_STOPS = [0, 0.25, 0.5, 0.75, 1, 1.5];
+  const [minSpeed, setMinSpeed] = useState(0.1);
+  const [minMove, setMinMove] = useState(0.75);
   const [top, setTop] = useState(15);
 
   // Point-in-time lookup
@@ -100,11 +106,17 @@ export default function MoversPage() {
       })
       .catch((e) => setError(String(e?.message ?? e)));
     api
-      .moversFast({ day: day || undefined, peak: peak || undefined, until: peak ? "11:00" : undefined })
+      .moversFast({
+        day: day || undefined,
+        peak: peak || undefined,
+        until: peak ? "11:00" : undefined,
+        min_speed: minSpeed,
+        min_move: minMove,
+      })
       .then(setFast)
       .catch(() => {});
     api.moversDays().then((d: any) => setAvailableDays(d.available)).catch(() => {});
-  }, [window_, day, peak, top]);
+  }, [window_, day, peak, top, minSpeed, minMove]);
 
   useEffect(() => {
     refresh();
@@ -469,6 +481,34 @@ export default function MoversPage() {
               />
               Peak of the session (to 11:00)
             </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              Min speed
+              <select
+                value={minSpeed}
+                onChange={(e) => setMinSpeed(Number(e.target.value))}
+                className="rounded border border-slate-700 bg-bg px-1.5 py-0.5 text-xs text-slate-200"
+              >
+                {SPEED_STOPS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}%/min
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              Min move from open
+              <select
+                value={minMove}
+                onChange={(e) => setMinMove(Number(e.target.value))}
+                className="rounded border border-slate-700 bg-bg px-1.5 py-0.5 text-xs text-slate-200"
+              >
+                {MOVE_STOPS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}%
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <p className="mb-3 text-xs text-slate-500">
             {peak
@@ -478,8 +518,9 @@ export default function MoversPage() {
           {!fast || fast.movers.length === 0 ? (
             <Empty>
               {peak
-                ? `Nothing reached ${fast?.min_speed_pct_per_min ?? 0.1}%/min during that session.`
-                : `Nothing is moving faster than ${fast?.min_speed_pct_per_min ?? 0.1}%/min right now.`}
+                ? `Nothing reached ${fast?.min_speed_pct_per_min ?? minSpeed}%/min while at least ${fast?.min_move_pct ?? minMove}% from the open during that session.`
+                : `Nothing is moving faster than ${fast?.min_speed_pct_per_min ?? minSpeed}%/min while at least ${fast?.min_move_pct ?? minMove}% from the open right now.`}
+              {" "}Lower Min speed or Min move from open to see slower stocks.
             </Empty>
           ) : (
             <div className="overflow-x-auto">
