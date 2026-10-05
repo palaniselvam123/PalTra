@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import re
+from types import SimpleNamespace
 
 import pandas as pd
 
 from database import session_factory
 from groww_client import IST, _is_auth_error, _parse_candles
 from indicators import enrich
-from models import TradeLog
+from models import ReplayRun, TradeLog
+from strategy_engine import candle_rows, chart_filters, filter_blocks
 
 # Groww serves 1-minute candles at most 7 days per request.
 CHUNK_DAYS = 7
@@ -215,26 +218,18 @@ def build_payload(
     sma_slow = getattr(cfg, "sma_slow", 21) or 21
     atr_period = getattr(cfg, "atr_period", 14) or 14
     candles: list[dict] = []
+    blocked: list[dict] = []
     if not frame.empty:
         enriched = enrich(resample(frame, interval), sma_fast, sma_slow, atr_period)
         lo, hi = _epoch(start), _epoch(end)
         # Keep the bar that holds From even when it opened a little earlier.
         lo -= lo % 60
         lo -= ((((lo + 19_800) % 86_400) // 60) - _SESSION_OPEN_MIN) % interval * 60
-        shown = enriched[(enriched["ts"] >= lo) & (enriched["ts"] <= hi)]
-        for row in shown.itertuples(index=False):
-            candles.append(
-                {
-                    "time": int(row.ts),
-                    "open": float(row.open),
-                    "high": float(row.high),
-                    "low": float(row.low),
-                    "close": float(row.close),
-                    "sma9": _finite(row.sma_9),
-                    "sma21": _finite(row.sma_21),
-                    "atr14": _finite(row.atr_14),
-                }
-            )
+        keep = (enriched["ts"] >= lo) & (enriched["ts"] <= hi)
+        candles = [row for row, inside in zip(candle_rows(enriched), keep) if inside]
+        # Refused crosses are judged on 1-minute candles, as the bot trades them.
+        minute = enrich(frame, sma_fast, sma_slow, atr_period) if interval != 1 else enriched
+        blocked = [b for b in filter_blocks(minute, cfg) if lo <= b["time"] <= hi]
     markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60, run_id) if candles else []
     return {
         "symbol": symbol,
@@ -246,6 +241,8 @@ def build_payload(
         "entry_price": None,
         "sl_trigger": None,
         "atr_multiplier": float(getattr(cfg, "atr_multiplier", 1.5) or 1.5),
+        "blocked": blocked,
+        "filters": chart_filters(cfg),
     }
 
 
@@ -261,4 +258,21 @@ async def load_history(
     # 21 bars of 30 or 60 minutes need more than four days before From.
     warmup = WARMUP_DAYS if interval <= 15 else 10
     frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
-    return build_payload(frame, symbol, start, end, cfg, interval, run_id)
+    return build_payload(frame, symbol, start, end, run_settings(cfg, run_id), interval, run_id)
+
+
+def run_settings(cfg, run_id: int | None):
+    """A replay run is judged with the settings it ran with, not today's."""
+    if run_id is None:
+        return cfg
+    with session_factory()() as db:
+        run = db.get(ReplayRun, run_id)
+        raw = run.settings if run is not None else None
+    try:
+        snapshot = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        snapshot = {}
+    if not isinstance(snapshot, dict) or not snapshot:
+        return cfg
+    base = {name: getattr(cfg, name) for name in dir(cfg) if not name.startswith("_") and not callable(getattr(cfg, name, None))}
+    return SimpleNamespace(**{**base, **{k: v for k, v in snapshot.items() if v is not None}})

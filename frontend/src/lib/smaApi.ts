@@ -168,6 +168,24 @@ export type Candle = {
   sma9: number | null;
   sma21: number | null;
   atr14: number | null;
+  /** Session VWAP after this candle (what the VWAP filter reads). */
+  vwap?: number | null;
+  /** RSI 14 on 1-minute closes (what the RSI filter reads). */
+  rsi14?: number | null;
+};
+
+/** An SMA cross the entry filters refused, with the bot's own reason. */
+export type BlockedCross = { time: number; direction: "LONG" | "SHORT"; reason: string; label: string };
+
+export type ChartFilters = {
+  use_vwap: boolean;
+  use_rsi: boolean;
+  rsi_long_min: number;
+  rsi_long_max: number;
+  rsi_short_min: number;
+  rsi_short_max: number;
+  /** The ATR stop is the one in use, so the ATR line matters. */
+  atr_stop: boolean;
 };
 
 export type ChartPayload = {
@@ -188,6 +206,8 @@ export type ChartPayload = {
   trailing?: boolean;
   tsl_step?: number | null;
   atr_multiplier?: number;
+  blocked?: BlockedCross[];
+  filters?: ChartFilters;
 };
 
 export type TradeRow = {

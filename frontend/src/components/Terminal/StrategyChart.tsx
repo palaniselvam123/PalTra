@@ -95,8 +95,22 @@ function resampleCandles(rows: Candle[], bar: number): Candle[] {
       last.high = Math.max(last.high, c.high);
       last.low = Math.min(last.low, c.low);
       last.close = c.close;
+      // The filters read 1-minute values; the bar shows them as of its last minute.
+      if (c.vwap != null) last.vwap = c.vwap;
+      if (c.rsi14 != null) last.rsi14 = c.rsi14;
     } else {
-      out.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close, sma9: null, sma21: null, atr14: null });
+      out.push({
+        time: t,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        sma9: null,
+        sma21: null,
+        atr14: null,
+        vwap: c.vwap ?? null,
+        rsi14: c.rsi14 ?? null,
+      });
     }
   }
   return out;
@@ -120,7 +134,7 @@ function withIndicators(rows: Candle[], formingLast: boolean): Candle[] {
   // The forming candle's lines would repaint, so they stop on the last closed one.
   if (formingLast && out.length) {
     const last = out[out.length - 1];
-    out[out.length - 1] = { ...last, sma9: null, sma21: null, atr14: null };
+    out[out.length - 1] = { ...last, sma9: null, sma21: null, atr14: null, vwap: null, rsi14: null };
   }
   return out;
 }
@@ -200,6 +214,9 @@ function entryResult(
 }
 
 const MAX_HIGH_COLOR = "#34D399";
+const BLOCKED_COLOR = "#94A3B8";
+const VWAP_COLOR = "#22D3EE";
+const RSI_COLOR = "#F472B6";
 const MAX_LOW_COLOR = "#FB7185";
 
 /** One trade's highest and lowest price, drawn across the bars it was open. */
@@ -357,6 +374,18 @@ function chartMarkers(
         text: `${m.direction === "LONG" ? "BUY" : "SELL"} ${compactPrice(m.price)}`,
       };
     });
+  // Crosses the entry filters refused: a grey ✕ with the filter that said no.
+  for (const b of chart.blocked ?? []) {
+    const sec = snap(b.time);
+    if (sec < first || sec > last) continue;
+    out.push({
+      time: sec,
+      position: b.direction === "LONG" ? "belowBar" : "aboveBar",
+      color: BLOCKED_COLOR,
+      shape: "square",
+      text: `✕ ${b.label}`,
+    });
+  }
   for (const t of trades) {
     if (t.symbol.toUpperCase() !== symbol || t.exit_price == null || !t.exit_time) continue;
     const when = parseClock(t.exit_time);
@@ -501,6 +530,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const rsiBands = useRef<IPriceLine[]>([]);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
@@ -778,6 +810,29 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       title: "ATR 14",
     });
     instance.priceScale("atr").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    // VWAP sits on the price scale; RSI gets its own 0–100 strip at the bottom.
+    const vwap = instance.addLineSeries({
+      color: VWAP_COLOR,
+      lineWidth: 2,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: "VWAP",
+      visible: false,
+    });
+    const rsi = instance.addLineSeries({
+      color: RSI_COLOR,
+      lineWidth: 2,
+      priceScaleId: "rsi",
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: "RSI 14",
+      visible: false,
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+    });
+    instance.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    vwapRef.current = vwap;
+    rsiRef.current = rsi;
 
     apiRef.current = instance;
     candleRef.current = candles;
@@ -860,6 +915,45 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     atrRef.current.setData(
       rows.filter((c) => c.atr14 != null).map((c) => ({ time: c.time as never, value: c.atr14 as number }))
     );
+    // Each line shows only when its setting is in use. An older server sends no
+    // filters block: keep ATR as before and hide the rest.
+    const filters = chart.filters;
+    const showAtr = filters ? filters.atr_stop : true;
+    const showVwap = Boolean(filters?.use_vwap);
+    const showRsi = Boolean(filters?.use_rsi);
+    atrRef.current.applyOptions({ visible: showAtr });
+    // Both strips at once share the bottom: ATR above, RSI below.
+    apiRef.current?.priceScale("atr").applyOptions({
+      scaleMargins: showRsi ? { top: 0.72, bottom: 0.15 } : { top: 0.75, bottom: 0.02 },
+    });
+    apiRef.current?.priceScale("rsi").applyOptions({
+      scaleMargins: showAtr ? { top: 0.87, bottom: 0.01 } : { top: 0.75, bottom: 0.02 },
+    });
+    if (vwapRef.current) {
+      vwapRef.current.applyOptions({ visible: showVwap });
+      vwapRef.current.setData(
+        showVwap ? rows.filter((c) => c.vwap != null).map((c) => ({ time: c.time as never, value: c.vwap as number })) : []
+      );
+    }
+    if (rsiRef.current) {
+      const series = rsiRef.current;
+      series.applyOptions({ visible: showRsi });
+      series.setData(
+        showRsi ? rows.filter((c) => c.rsi14 != null).map((c) => ({ time: c.time as never, value: c.rsi14 as number })) : []
+      );
+      for (const line of rsiBands.current) series.removePriceLine(line);
+      rsiBands.current = [];
+      if (showRsi && filters) {
+        const band = (price: number, color: string, title: string) =>
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title });
+        rsiBands.current = [
+          band(filters.rsi_long_min, "rgba(52, 211, 153, 0.6)", `buy ${filters.rsi_long_min}`),
+          band(filters.rsi_long_max, "rgba(52, 211, 153, 0.6)", `buy ${filters.rsi_long_max}`),
+          band(filters.rsi_short_min, "rgba(251, 113, 133, 0.6)", `sell ${filters.rsi_short_min}`),
+          band(filters.rsi_short_max, "rgba(251, 113, 133, 0.6)", `sell ${filters.rsi_short_max}`),
+        ];
+      }
+    }
     // Past candles carry their own exit markers; the blotter only covers recent trades.
     candleRef.current.setMarkers(
       chartMarkers(chart, rows, past ? [] : trades, symbol, bar, trades).map((m) => ({ ...m, time: m.time as never }))
@@ -946,6 +1040,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   }, [slLevel, targetLevel, slTitle, targetTitle]);
 
   const latest = latestSma(rows);
+  const filters = view?.filters;
+  const blocked = view?.blocked ?? [];
+  const lastBlocked = blocked.length ? blocked[blocked.length - 1] : null;
+  const hoverRow = hoverOhlc ? rows.find((c) => c.time === hoverOhlc.time) ?? null : null;
+  const lastOf = (key: "vwap" | "rsi14") => {
+    for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i][key] != null) return rows[i][key] as number;
+    return null;
+  };
+  const shownVwap = hoverRow ? hoverRow.vwap ?? null : lastOf("vwap");
+  const shownRsi = hoverRow ? hoverRow.rsi14 ?? null : lastOf("rsi14");
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
@@ -1030,7 +1134,27 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               )}
             </LegendItem>
           )}
-          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>
+          {filters?.use_vwap ? (
+            <LegendItem swatch={<span className="block w-5 border-t-2 border-dotted border-[#22D3EE]" />}>
+              VWAP <span className="font-mono text-slate-100">{px(shownVwap)}</span>
+            </LegendItem>
+          ) : null}
+          {filters?.use_rsi ? (
+            <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#F472B6]" />}>
+              RSI 14{" "}
+              <span className="font-mono text-slate-100">{shownRsi == null ? "—" : shownRsi.toFixed(1)}</span>
+              <span className="text-slate-400">
+                {" "}
+                · buy {filters.rsi_long_min}–{filters.rsi_long_max} · sell {filters.rsi_short_min}–{filters.rsi_short_max}
+              </span>
+            </LegendItem>
+          ) : null}
+          {(filters ? filters.atr_stop : true) ? (
+            <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>
+          ) : null}
+          {blocked.length ? (
+            <LegendItem swatch={<span className="text-[#94A3B8]">✕</span>}>Cross skipped by a filter</LegendItem>
+          ) : null}
           <LegendItem swatch={<span className="text-slate-300">▲▼</span>}>Buy / Sell</LegendItem>
           <LegendItem swatch={<span className="block h-2.5 w-2.5 rounded-full bg-emerald-400" />}>
             <span className="text-emerald-300">Profit</span>
@@ -1047,6 +1171,14 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         </ul>
       </div>
       <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
+      {lastBlocked ? (
+        <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
+          <span className="font-semibold text-slate-200">
+            Last skipped cross · {istClock(lastBlocked.time)} {lastBlocked.direction === "LONG" ? "BUY" : "SELL"}:
+          </span>{" "}
+          {lastBlocked.reason}
+        </p>
+      ) : null}
       {measuring ? (
         <MeasureBar
           measure={measure}
