@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import { inr, smaApi, type ReplayRun, type ReplayStockRow } from "@/lib/smaApi";
+import { inr, smaApi, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 
@@ -31,9 +31,19 @@ function dayLabel(iso: string): string {
   }).format(d);
 }
 
+type ScalpPickInfo = ScalpPickRule & { universe?: number; picks?: Record<string, ScalpPick[]> };
+
+/** The Scalp-pick rule and picks a run recorded, or null for a plain replay. */
+export function scalpPickOf(s: Settings): ScalpPickInfo | null {
+  const raw = (s as Record<string, unknown>).scalp_pick;
+  return raw && typeof raw === "object" ? (raw as ScalpPickInfo) : null;
+}
+
 /** One line naming the strategy a run used. */
 export function strategyLabel(s: Settings): string {
-  const parts: string[] = [`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`];
+  const pick = scalpPickOf(s);
+  const parts: string[] = pick ? [`Scalp top ${pick.top_n} @ ${pick.pick_time}`] : [];
+  parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
   if (s.use_stop === false) parts.push("no stop");
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
   else if (s.stop_type === "TSL")
@@ -369,6 +379,7 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>Net {signed(t.net)}</span>
       </div>
+      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} /> : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
@@ -538,6 +549,47 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/** A Scalp-pick run: which stocks each day picked at the pick time, and why. */
+function PickList({ pick }: { pick: ScalpPickInfo }) {
+  const days = Object.keys(pick.picks ?? {}).sort();
+  return (
+    <div className="mb-4 px-2">
+      <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">
+        Scalp picks · top {pick.top_n} at {pick.pick_time}
+        {pick.universe ? ` from ${pick.universe} stocks` : ""} · ATR ≥ {pick.min_atr_pct}%/min · ≥ ₹{pick.min_value_cr} cr
+        {pick.require_bias ? " · with a bias" : ""} · spread not checked
+      </div>
+      {days.length === 0 ? (
+        <p className="text-xs text-slate-400">No day has been picked yet.</p>
+      ) : (
+        <div className="space-y-0.5 text-xs">
+          {days.map((d) => {
+            const list = pick.picks?.[d] ?? [];
+            return (
+              <div key={d} className="flex flex-wrap items-baseline gap-x-3 border-b border-white/5 py-1">
+                <span className="w-28 shrink-0 text-slate-400">{dayLabel(d)}</span>
+                {list.length === 0 ? (
+                  <span className="text-slate-500">nothing ready at {pick.pick_time} — no trades</span>
+                ) : (
+                  list.map((p) => (
+                    <span key={p.symbol} className="font-mono" title={`ATR ${p.atr_pct ?? "—"}%/min · ₹${p.value_cr ?? "—"} cr · 5m ${p.move_5m_pct ?? "—"}%`}>
+                      <span className="font-semibold text-amber-300">{p.symbol}</span>{" "}
+                      <span className="text-slate-400">{p.score.toFixed(0)}</span>{" "}
+                      <span className={p.bias === "LONG" ? "text-emerald-400" : p.bias === "SHORT" ? "text-rose-400" : "text-slate-500"}>
+                        {p.bias === "NONE" ? "" : p.bias}
+                      </span>
+                    </span>
+                  ))
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,7 @@ from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
+from scalp_picks import PickRule, picks_for_day
 
 SPEEDS = (1, 10, 60, 300)
 # Longest range one run may cover, in calendar days (about 22 trading days).
@@ -398,6 +399,11 @@ class ReplaySession:
     loaded: int = 0
     error: str = ""
     effective_speed: float = 0.0
+    #: Scalp-pick mode: each day trades only that day's picks, from the pick time.
+    rule: PickRule | None = None
+    picks: dict[str, list[dict]] = field(default_factory=dict)
+    universe: list[str] = field(default_factory=list)
+    _settings: dict = field(default_factory=dict)
     engine: ReplayEngine | None = None
     _task: asyncio.Task | None = None
     _stop: bool = False
@@ -426,8 +432,10 @@ class ReplaySession:
             "days_total": len(self.days),
             "run_id": self.run_id,
             "loaded": self.loaded,
-            "total": len(self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
+            "total": len(self.universe or self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
             "error": self.error,
+            "pick_rule": self.rule.as_dict() if self.rule is not None else None,
+            "picks": self.picks,
         }
 
     async def begin(
@@ -439,8 +447,10 @@ class ReplaySession:
         speed: int,
         end_day: dt.date | None = None,
         settings: dict | None = None,
+        rule: PickRule | None = None,
     ) -> None:
         await self.stop("REPLAY_STOPPED")
+        self.rule, self.picks, self.universe = rule, {}, []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = day, end_day or day, start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
@@ -491,7 +501,11 @@ class ReplaySession:
             self.error = str(exc)
             return
         self.symbols = list(frames)
+        self.universe = list(frames)
         self.days = days
+        if self.rule is not None:
+            settings = {**settings, "scalp_pick": {**self.rule.as_dict(), "universe": len(frames), "picks": {}}}
+        self._settings = settings
         with session_factory()() as db:
             run = ReplayRun(
                 created_at=dt.datetime.now(IST).replace(tzinfo=None),
@@ -519,13 +533,26 @@ class ReplaySession:
                 return
             self.day_index, self.day = index, day
             start = self.start if index == 0 else SESSION_OPEN
+            symbols = self.universe
+            if self.rule is not None:
+                # Pick as the live Scalp page would have at the pick time, then
+                # trade only those stocks from that minute on.
+                picked = picks_for_day(frames, day, self.rule)
+                self.picks[day.isoformat()] = picked
+                self._save_picks()
+                symbols = [p["symbol"] for p in picked]
+                start = self.rule.pick_time
+                if not symbols:
+                    self._mark_run(days_done=index + 1)
+                    continue
+            self.symbols = symbols
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(feed, self.symbols, run_id=self.run_id)
+            engine = ReplayEngine(feed, symbols, run_id=self.run_id)
             engine.load_config()
             await engine.tick(clock)
-            engine.hold_for_next_cross(self.symbols)
+            engine.hold_for_next_cross(symbols)
             engine.status = "PAUSED" if bot_paused else "RUNNING"
             self.engine = engine
             if self.status not in ("PLAYING", "PAUSED"):
@@ -537,6 +564,25 @@ class ReplaySession:
             self._mark_run(days_done=index + 1)
         self._mark_run(status="FINISHED")
         self.status = "FINISHED"
+
+    def _save_picks(self) -> None:
+        """Keep the picks on the run: its settings name them per day, and its
+        stock list is the stocks actually picked (not the whole universe)."""
+        if self.run_id is None or self.rule is None:
+            return
+        picked: list[str] = []
+        for day_picks in self.picks.values():
+            for p in day_picks:
+                if p["symbol"] not in picked:
+                    picked.append(p["symbol"])
+        self._settings["scalp_pick"]["picks"] = self.picks
+        with session_factory()() as db:
+            run = db.get(ReplayRun, self.run_id)
+            if run is None:
+                return
+            run.settings = json.dumps(self._settings, default=str)
+            run.symbols = ",".join(picked)
+            db.commit()
 
     def _mark_run(self, *, days_done: int | None = None, status: str | None = None) -> None:
         if self.run_id is None:

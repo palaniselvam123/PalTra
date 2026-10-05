@@ -7,6 +7,7 @@ import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
 import { smaApi, type SmaConfig } from "@/lib/smaApi";
+import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 
 const REFRESH_MS = 10_000;
 const ATR_STOPS = [0, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2];
@@ -301,6 +302,8 @@ export default function ScalpPage() {
             SMA cross and filters.
           </p>
         </section>
+
+        <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
 
         <section className="rounded-xl border border-slate-800 bg-card p-4">
           <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">

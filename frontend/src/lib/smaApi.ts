@@ -310,6 +310,26 @@ export type ReplayInfo = {
   day_index?: number;
   days_total?: number;
   run_id?: number | null;
+  /** Scalp-pick runs: the rule and each day's picks (date -> picks, best first). */
+  pick_rule?: ScalpPickRule | null;
+  picks?: Record<string, ScalpPick[]>;
+};
+
+export type ScalpPickRule = {
+  pick_time: string;
+  top_n: number;
+  min_atr_pct: number;
+  min_value_cr: number;
+  require_bias: boolean;
+};
+
+export type ScalpPick = {
+  symbol: string;
+  score: number;
+  bias: "LONG" | "SHORT" | "NONE";
+  atr_pct: number | null;
+  value_cr: number | null;
+  move_5m_pct: number | null;
 };
 
 export type ReplayDayRow = {
@@ -512,6 +532,19 @@ export const smaApi = {
     ),
   tradeCounts: () => request<Record<TradeBookMode, number>>("/api/trades/counts"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
+  /** Backtest the Scalp page's own picks: each day, the top N at the pick time. */
+  replayScalpPicks: (body: {
+    date: string;
+    end_date: string;
+    universe: string[];
+    pick_time: string;
+    top_n: number;
+    min_atr_pct: number;
+    min_value_cr: number;
+    require_bias: boolean;
+    speed?: number;
+  }) =>
+    request<ReplayInfo>("/api/replay/scalp-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   replayStart: (date: string, start: string, speed: number, endDate?: string) =>
     request<ReplayInfo>(
       "/api/replay/start",
