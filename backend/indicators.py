@@ -351,6 +351,28 @@ def _session_vwap(closed: pd.DataFrame) -> float | None:
     return float((typical * vol).sum() / total)
 
 
+def session_vwap_series(df: pd.DataFrame) -> pd.Series:
+    """VWAP after each candle, the same value `_session_vwap` gives when that
+    candle is the last closed one: typical price weighted by minute volume,
+    restarting each IST session. NaN until the session has volume.
+    """
+    if df is None or len(df) == 0 or not {"high", "low", "close"}.issubset(df.columns):
+        return pd.Series(np.nan, index=getattr(df, "index", None), dtype=float)
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+    if "minute_volume" in df.columns:
+        vol = pd.to_numeric(df["minute_volume"], errors="coerce")
+    else:
+        vol = derive_minute_volume(df)
+    weight = vol.where(vol.notna(), 0.0)
+    if "ts" in df.columns:
+        session = pd.to_datetime(df["ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
+    else:
+        session = pd.Series(0, index=df.index)
+    num = (typical.where(vol.notna(), 0.0) * weight).groupby(session).cumsum()
+    den = weight.groupby(session).cumsum()
+    return (num / den.where(den > 0)).astype(float)
+
+
 def _volume_reason(closed: pd.DataFrame, lookback: int, ratio: float) -> list[str]:
     if "volume" not in closed.columns and "minute_volume" not in closed.columns:
         return ["volume is not on these candles"]

@@ -38,6 +38,8 @@ from indicators import (
     enrich,
     entry_filter_reason,
     format_signal_report,
+    rsi_wilder,
+    session_vwap_series,
     sma_gap_pct,
 )
 from gap_trail import gap_levels, tighten, uses_gap_stop
@@ -226,6 +228,116 @@ def _entry_block(frame: pd.DataFrame, direction: str, cfg: BotConfig, price: flo
         rsi_short_max=float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
         price=price,
     )
+
+
+def _short_block_label(reason: str) -> str:
+    """A few words for the chart marker, e.g. "RSI 72.3" or "VWAP"."""
+    parts = []
+    for part in (reason or "").split("; "):
+        low = part.lower()
+        if low.startswith("vwap"):
+            parts.append("VWAP")
+        elif low.startswith("rsi"):
+            words = part.split()
+            parts.append(f"RSI {words[1]}" if len(words) > 1 and words[1][0].isdigit() else "RSI")
+        elif low.startswith("volume"):
+            parts.append("Vol")
+        elif low.startswith("density"):
+            parts.append("Density")
+        elif low.startswith("adx"):
+            parts.append(part.split(" is")[0])
+        elif part:
+            parts.append(part[:16])
+    return " · ".join(parts)
+
+
+def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
+    """SMA crosses on closed candles that the entry filters would refuse.
+
+    Each cross is judged exactly as the bot judges one: the frame up to the
+    candle after the cross (which plays the forming bar), through
+    `_entry_block`, plus the ADX gate. Only refused crosses are returned,
+    oldest first, with the full reason and a short label for the chart.
+    """
+    if cfg is None or frame is None or len(frame) < 3 or not {"sma_9", "sma_21", "ts"}.issubset(frame.columns):
+        return []
+    use_adx = bool(getattr(cfg, "use_adx_filter", False))
+    if not (use_adx or any(bool(getattr(cfg, k, False)) for k in ("use_vwap", "use_volume", "use_density", "use_rsi"))):
+        return []
+    fast = frame["sma_9"].to_numpy(dtype=float)
+    slow = frame["sma_21"].to_numpy(dtype=float)
+    out: list[dict] = []
+    for i in range(1, len(frame) - 1):
+        a0, b0, a1, b1 = fast[i - 1], slow[i - 1], fast[i], slow[i]
+        if any(pd.isna(v) for v in (a0, b0, a1, b1)):
+            continue
+        if a0 <= b0 and a1 > b1:
+            direction = "LONG"
+        elif a0 >= b0 and a1 < b1:
+            direction = "SHORT"
+        else:
+            continue
+        window = frame.iloc[: i + 2]
+        reasons = []
+        block = _entry_block(window, direction, cfg)
+        if block:
+            reasons.append(block)
+        if use_adx:
+            adx = _finite(frame.iloc[i].get("adx_14"))
+            need = float(getattr(cfg, "adx_threshold", 20) or 20)
+            if adx is None or adx < need:
+                reasons.append(f"ADX {adx:.1f} is below {need:g}" if adx is not None else "ADX is not ready")
+        if reasons:
+            reason = "; ".join(reasons)
+            out.append(
+                {
+                    "time": int(frame.iloc[i]["ts"]),
+                    "direction": direction,
+                    "reason": reason,
+                    "label": _short_block_label(reason),
+                }
+            )
+    return out
+
+
+def chart_filters(cfg) -> dict:
+    """Which filter lines the chart should draw, and the RSI bands."""
+    if cfg is None:
+        return {}
+    return {
+        "use_vwap": bool(getattr(cfg, "use_vwap", False)),
+        "use_rsi": bool(getattr(cfg, "use_rsi", False)),
+        "rsi_long_min": float(getattr(cfg, "rsi_long_min", 40.0) or 40.0),
+        "rsi_long_max": float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
+        "rsi_short_min": float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
+        "rsi_short_max": float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        "atr_stop": getattr(cfg, "use_stop", True) is not False and (getattr(cfg, "stop_type", "ATR") or "ATR") == "ATR",
+    }
+
+
+def candle_rows(frame: pd.DataFrame) -> list[dict]:
+    """Chart candles with SMA, ATR, session VWAP and RSI 14 per candle."""
+    if frame is None or frame.empty:
+        return []
+    vwap = session_vwap_series(frame)
+    rsi = rsi_wilder(frame["close"], 14)
+    rows = []
+    for i, (_, row) in enumerate(frame.iterrows()):
+        rows.append(
+            {
+                "time": int(row["ts"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "sma9": _finite(row.get("sma_9")),
+                "sma21": _finite(row.get("sma_21")),
+                "atr14": _finite(row.get("atr_14")),
+                "vwap": _finite(vwap.iloc[i]),
+                "rsi14": _finite(rsi.iloc[i]),
+            }
+        )
+    return rows
 
 
 class StrategyEngine:
@@ -2101,28 +2213,13 @@ class StrategyEngine:
 
     def chart_payload(self, limit: int = 240) -> dict:
         frame = self.candles
-        candles = []
-        if frame is not None and not frame.empty:
-            tail = frame.tail(limit)
-            for _, row in tail.iterrows():
-                candles.append(
-                    {
-                        "time": int(row["ts"]),
-                        "open": float(row["open"]),
-                        "high": float(row["high"]),
-                        "low": float(row["low"]),
-                        "close": float(row["close"]),
-                        "sma9": _finite(row.get("sma_9")),
-                        "sma21": _finite(row.get("sma_21")),
-                        "atr14": _finite(row.get("atr_14")),
-                    }
-                )
+        # VWAP and RSI need the whole session, so compute before trimming.
+        candles = candle_rows(frame)[-limit:] if frame is not None and not frame.empty else []
         # The last row is the forming bar. Blank its indicators so the chart
         # lines stop on the last closed candle and do not repaint.
         if candles:
-            candles[-1]["sma9"] = None
-            candles[-1]["sma21"] = None
-            candles[-1]["atr14"] = None
+            for key in ("sma9", "sma21", "atr14", "vwap", "rsi14"):
+                candles[-1][key] = None
         markers = []
         cfg = self._cfg_cache
         if cfg is None:
@@ -2130,6 +2227,10 @@ class StrategyEngine:
                 cfg = self.load_config()
             except Exception:  # noqa: BLE001
                 cfg = None
+        first_shown = candles[0]["time"] if candles else None
+        blocked = [
+            mark for mark in filter_blocks(frame, cfg) if first_shown is not None and mark["time"] >= first_shown
+        ] if frame is not None and not frame.empty else []
         view = (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
             rows = (
@@ -2164,6 +2265,8 @@ class StrategyEngine:
             "trailing": bool(pos.trailing) if pos else False,
             "tsl_step": pos.tsl_step if pos else None,
             "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
+            "blocked": blocked,
+            "filters": chart_filters(cfg),
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
