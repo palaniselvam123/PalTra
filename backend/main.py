@@ -207,7 +207,8 @@ async def state():
 @app.get("/api/chart")
 async def chart(limit: int = 240):
     # The 5/15/30/60-minute views build their bars from more 1-minute candles.
-    return engine.chart_payload(limit=max(30, min(int(limit), 2500)))
+    # Off the event loop: building the chart must not hold up /api/state.
+    return await asyncio.to_thread(engine.chart_payload, max(30, min(int(limit), 2500)))
 
 
 @app.get("/api/history")
@@ -633,7 +634,8 @@ async def replay_state():
 
 @app.get("/api/replay/chart")
 async def replay_chart(limit: int = 240):
-    return _replay_engine().chart_payload(limit=max(30, min(int(limit), 2500)))
+    # Off the event loop: building the chart must not hold up /api/state.
+    return await asyncio.to_thread(_replay_engine().chart_payload, max(30, min(int(limit), 2500)))
 
 
 @app.post("/api/replay/bot/start")

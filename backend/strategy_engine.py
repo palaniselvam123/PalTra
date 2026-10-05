@@ -443,6 +443,31 @@ def chart_filters(cfg) -> dict:
     }
 
 
+# The settings filter_blocks reads. The chart cache is keyed on them.
+_FILTER_KEYS = (
+    "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
+    "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
+    "rsi_short_min", "rsi_short_max",
+)
+
+
+def _forming_row(bar) -> dict:
+    """The forming candle for the chart. Its indicators are left blank so the
+    lines stop on the last closed candle and do not repaint."""
+    return {
+        "time": int(bar["ts"]),
+        "open": float(bar["open"]),
+        "high": float(bar["high"]),
+        "low": float(bar["low"]),
+        "close": float(bar["close"]),
+        "sma9": None,
+        "sma21": None,
+        "atr14": None,
+        "vwap": None,
+        "rsi14": None,
+    }
+
+
 def candle_rows(frame: pd.DataFrame) -> list[dict]:
     """Chart candles with SMA, ATR, session VWAP and RSI 14 per candle."""
     if frame is None or frame.empty:
@@ -2484,15 +2509,33 @@ class StrategyEngine:
             return or_(TradeLog.mode == "PAPER", TradeLog.mode.is_(None))
         return TradeLog.mode == mode
 
+    def _chart_parts(self, frame: pd.DataFrame, cfg) -> tuple[list[dict], list[dict]]:
+        """Closed candle rows and refused crosses, reused until a candle closes.
+
+        Both depend only on closed candles (and the filter settings), so the
+        page's polls between two closes reuse one computation. Re-scanning
+        every cross on every poll held the server for seconds during a
+        replay, and /api/state timed out behind it.
+        """
+        closed = frame.iloc[-2]
+        key = (
+            len(frame),
+            int(frame["ts"].iloc[0]),
+            int(closed["ts"]),
+            float(closed["close"]),
+            float(closed.get("volume", 0) or 0),
+            tuple(getattr(cfg, name, None) for name in _FILTER_KEYS) if cfg is not None else None,
+        )
+        cached = getattr(self, "_chart_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        rows = candle_rows(frame)[:-1]
+        blocks = filter_blocks(frame, cfg)
+        self._chart_cache = (key, rows, blocks)
+        return rows, blocks
+
     def chart_payload(self, limit: int = 240) -> dict:
         frame = self.candles
-        # VWAP and RSI need the whole session, so compute before trimming.
-        candles = candle_rows(frame)[-limit:] if frame is not None and not frame.empty else []
-        # The last row is the forming bar. Blank its indicators so the chart
-        # lines stop on the last closed candle and do not repaint.
-        if candles:
-            for key in ("sma9", "sma21", "atr14", "vwap", "rsi14"):
-                candles[-1][key] = None
         markers = []
         cfg = self._cfg_cache
         if cfg is None:
@@ -2502,11 +2545,18 @@ class StrategyEngine:
                 cfg = None
         if cfg is not None:
             # The chart's stock is judged with its own settings.
-            cfg = _cfg_for(cfg, (cfg.symbol or "").upper())
+            cfg = settings_for(cfg, (cfg.symbol or "").upper())
+        candles: list[dict] = []
+        all_blocks: list[dict] = []
+        if frame is not None and not frame.empty:
+            if len(frame) >= 2:
+                # VWAP and RSI need the whole session, so compute before trimming.
+                closed_rows, all_blocks = self._chart_parts(frame, cfg)
+                candles = [*closed_rows, _forming_row(frame.iloc[-1])][-limit:]
+            else:
+                candles = [_forming_row(frame.iloc[-1])]
         first_shown = candles[0]["time"] if candles else None
-        blocked = [
-            mark for mark in filter_blocks(frame, cfg) if first_shown is not None and mark["time"] >= first_shown
-        ] if frame is not None and not frame.empty else []
+        blocked = [mark for mark in all_blocks if first_shown is not None and mark["time"] >= first_shown]
         view = (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
             rows = (
