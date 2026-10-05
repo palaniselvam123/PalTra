@@ -329,7 +329,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         ADX trend filter (block entries when ADX is below the threshold)
       </label>
       <p className="mt-3 text-[11px] leading-snug text-slate-400">
-        These apply only when checked, on a crossover and on Force order. An unchecked box is ignored. A
+        These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored. A
         close still happens on the opposite cross.
       </p>
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">

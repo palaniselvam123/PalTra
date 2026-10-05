@@ -1174,6 +1174,11 @@ class StrategyEngine:
         This does not wait for a cross and does not require the candle, or
         the session, to be closed. A cross already on the tape still cannot
         fire an extra order on this same bar.
+
+        The entry filters (VWAP, volume, density, RSI, ADX) are not applied:
+        the person pressing Force has decided. What a filter would have said
+        is still logged with the decision. Market hours, the entry cut-off,
+        the Trade list, the halt / loss lock and the trade cap still apply.
         """
         self.release_manual_panic()
         if self.status == "HALTED":
@@ -1226,17 +1231,9 @@ class StrategyEngine:
         atr = _latest_atr(enriched)
         if atr is None:
             raise ForceRefused(f"{name} ATR is not ready")
-        blocked = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", own, price=price)
-        if blocked:
-            self._log_decision(
-                side,
-                enriched,
-                _cfg_for(cfg, name),
-                self._now(),
-                blocked,
-                note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
-            )
-            raise ForceRefused(blocked)
+        # Filters do not stop a Force order. Keep what they would have said
+        # for the decision log, so a forced entry can be reviewed later.
+        overridden = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", own, price=price)
         if self.status != "RUNNING":
             self.status = "RUNNING"
             self.halt_reason = ""
@@ -1275,7 +1272,8 @@ class StrategyEngine:
             _cfg_for(cfg, name),
             now,
             result,
-            note="Force order. SMA side is read from the forming bar, then the last closed bar. Filters still use the last closed candle. The VWAP comparison uses the live price.",
+            note="Force order. SMA side is read from the forming bar, then the last closed bar. Entry filters are not applied"
+            + (f" (they would have refused: {overridden})." if overridden else "."),
         )
         return result
 
