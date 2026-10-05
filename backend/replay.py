@@ -305,6 +305,30 @@ def _totals(day_rows: list[dict]) -> dict:
     return {k: round(v, 2) if isinstance(v, float) else v for k, v in total.items()}
 
 
+def _stock_rows(trades: list[TradeLog], symbols: list[str]) -> list[dict]:
+    """The run split by stock: each stock's totals and its own day-wise P&L.
+
+    Every stock the run replayed is listed, a stock that never traded with
+    zero rows, so a quiet stock is visible rather than missing. The strategy
+    is the snapshot on the stock's first trade (a stock can have its own
+    settings), or None when it did not trade.
+    """
+    by_symbol: dict[str, list[TradeLog]] = {s.upper(): [] for s in symbols}
+    for row in trades:
+        by_symbol.setdefault((row.symbol or "").upper(), []).append(row)
+    out = []
+    for symbol, rows in by_symbol.items():
+        days = _day_rows(rows)
+        first = min((r for r in rows if r.strategy), key=lambda r: r.id, default=None)
+        try:
+            strategy = json.loads(first.strategy) if first is not None else None
+        except (TypeError, ValueError):
+            strategy = None
+        out.append({"symbol": symbol, "totals": _totals(days), "days": days, "strategy": strategy})
+    out.sort(key=lambda r: (r["totals"]["trades"] > 0, r["totals"]["net"]), reverse=True)
+    return out
+
+
 def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     day_rows = _day_rows(trades)
     out = {
@@ -322,6 +346,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     }
     if with_days:
         out["days"] = day_rows
+        out["stocks"] = _stock_rows(trades, out["symbols"])
     return out
 
 

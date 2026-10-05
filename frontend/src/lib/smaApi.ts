@@ -340,6 +340,15 @@ export type ReplayRunTotals = {
   red_days: number;
 };
 
+/** One stock's share of a run: its totals and its own day-wise P&L. */
+export type ReplayStockRow = {
+  symbol: string;
+  totals: ReplayRunTotals;
+  days: ReplayDayRow[];
+  /** Settings on the stock's first trade (it may have its own); null if it never traded. */
+  strategy: Record<string, string | number | boolean | null> | null;
+};
+
 export type ReplayRun = {
   id: number;
   created_at: string | null;
@@ -354,6 +363,8 @@ export type ReplayRun = {
   days_done: number;
   totals: ReplayRunTotals;
   days?: ReplayDayRow[];
+  /** Per-stock split, on the run detail only. */
+  stocks?: ReplayStockRow[];
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {

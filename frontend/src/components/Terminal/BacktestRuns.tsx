@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import { inr, smaApi, type ReplayRun } from "@/lib/smaApi";
+import { inr, smaApi, type ReplayRun, type ReplayStockRow } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 
@@ -369,6 +369,7 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>Net {signed(t.net)}</span>
       </div>
+      {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
           <thead className="text-[11px] uppercase tracking-wider text-slate-400">
@@ -444,5 +445,99 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
         </dl>
       </div>
     </section>
+  );
+}
+
+/** The run split by stock. Each row opens that stock's own day-wise P&L. */
+function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Settings }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const base = strategyLabel(settings);
+  return (
+    <div className="mb-4">
+      <div className="mb-1 px-2 text-[11px] uppercase tracking-wider text-slate-400">By stock</div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] whitespace-nowrap text-left text-xs">
+          <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-2 py-2">Stock</th>
+              <th className="px-2 py-2 text-right">Trades</th>
+              <th className="px-2 py-2 text-right">W / L</th>
+              <th className="px-2 py-2 text-right">Win %</th>
+              <th className="px-2 py-2 text-right">Profit</th>
+              <th className="px-2 py-2 text-right">Loss</th>
+              <th className="px-2 py-2 text-right">Gross</th>
+              <th className="px-2 py-2 text-right">Charges</th>
+              <th className="px-2 py-2 text-right">Net</th>
+              <th className="px-2 py-2 text-right">Max DD</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5 font-mono">
+            {stocks.map((s) => {
+              const t = s.totals;
+              const own = s.strategy ? strategyLabel({ ...settings, ...s.strategy }) : null;
+              const isOpen = open === s.symbol;
+              return (
+                <Fragment key={s.symbol}>
+                  <tr>
+                    <td className="px-2 py-1.5 font-sans">
+                      <button
+                        type="button"
+                        disabled={s.days.length === 0}
+                        onClick={() => setOpen(isOpen ? null : s.symbol)}
+                        aria-expanded={isOpen}
+                        className="inline-flex items-center gap-1 font-semibold text-amber-300 disabled:cursor-default"
+                      >
+                        {s.days.length > 0 ? (
+                          isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />
+                        ) : (
+                          <span className="w-[13px]" />
+                        )}
+                        {s.symbol}
+                      </button>
+                      {own && own !== base ? (
+                        <div className="pl-[18px] text-[11px] font-normal text-violet-300" title="This stock traded with its own settings">
+                          {own}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-slate-200">{t.trades}</td>
+                    <td className="px-2 py-1.5 text-right text-slate-300">
+                      {t.wins} / {t.losses}
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-slate-300">{t.trades ? `${t.win_rate.toFixed(1)}%` : "—"}</td>
+                    <td className="px-2 py-1.5 text-right text-emerald-300">{signed(t.profit)}</td>
+                    <td className="px-2 py-1.5 text-right text-rose-300">{signed(t.loss)}</td>
+                    <td className={clsx("px-2 py-1.5 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>
+                    <td className="px-2 py-1.5 text-right text-amber-300">{inr(t.charges)}</td>
+                    <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>
+                    <td className="px-2 py-1.5 text-right text-slate-400">{signed(t.max_drawdown)}</td>
+                  </tr>
+                  {isOpen
+                    ? s.days.map((d) => (
+                        <tr key={`${s.symbol}-${d.date}`} className="bg-white/[0.02] text-slate-300">
+                          <td className="px-2 py-1 pl-8 font-sans text-slate-400">{dayLabel(d.date)}</td>
+                          <td className="px-2 py-1 text-right">{d.trades}</td>
+                          <td className="px-2 py-1 text-right">
+                            {d.wins} / {d.losses}
+                          </td>
+                          <td className="px-2 py-1 text-right">—</td>
+                          <td className="px-2 py-1 text-right text-emerald-300">{signed(d.profit)}</td>
+                          <td className="px-2 py-1 text-right text-rose-300">{signed(d.loss)}</td>
+                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>
+                          <td className="px-2 py-1 text-right text-amber-300">{inr(d.charges)}</td>
+                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.net))}>{signed(d.net)}</td>
+                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="Running total for this stock">
+                            {signed(d.cumulative)}
+                          </td>
+                        </tr>
+                      ))
+                    : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
