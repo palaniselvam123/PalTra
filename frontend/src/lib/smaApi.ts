@@ -251,8 +251,12 @@ export type ChartPayload = {
     kind: "ENTRY" | "EXIT" | string;
     /** The trade's net P&L once it has closed, when the API sends it. */
     net_pnl?: number | null;
-    /** Only on EXIT markers from /api/history: why the trade closed. */
+    /** Only on EXIT markers: why the trade closed. */
     reason?: string | null;
+    /** The trade's id inside its book: N-12 (NSE live), P-12 (simulation), R7-12 (replay run 7). */
+    trade_ref?: string | null;
+    /** True while the trade is still open. */
+    open?: boolean;
   }[];
   entry_price: number | null;
   sl_trigger: number | null;
@@ -291,6 +295,10 @@ export type TradeRow = {
   mode: string;
   /** The replay run a REPLAY trade belongs to. */
   run_id?: number | null;
+  /** Number inside its own book (NSE live, simulation, or one replay run). */
+  book_seq?: number | null;
+  /** The id people see: N-12 (NSE live), P-12 (simulation), R7-12 (replay run 7). */
+  trade_ref?: string | null;
   /** Settings the bot used for this trade, when the API records them. */
   strategy?: Record<string, string | number | boolean | null> | null;
   /** Highest / lowest price while the trade was open (so far, while it is). */

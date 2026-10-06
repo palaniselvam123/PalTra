@@ -272,10 +272,10 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["#", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "Net P&L"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "Net P&L"]],
     body: rows.length
       ? rows.map((r) => [
-          r.id,
+          r.trade_ref || `#${r.id}`,
           r.symbol,
           r.direction === "LONG" ? "Long" : r.direction === "SHORT" ? "Short" : r.direction,
           r.qty,

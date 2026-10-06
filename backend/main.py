@@ -862,6 +862,7 @@ async def trades_csv(mode: str = ""):
     rows = attach_market_prices(data["rows"], engine._ltps)
     buffer = io.StringIO()
     fields = [
+        "trade_ref",
         "id",
         "date",
         "symbol",

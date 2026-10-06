@@ -52,7 +52,7 @@ from indicators import (
 from gap_mode import Pending, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
-from models import BotConfig, TradeLog
+from models import BotConfig, TradeLog, trade_ref
 import tick_sizes
 from tick_sizes import round_price
 
@@ -2205,7 +2205,13 @@ class StrategyEngine:
         qty: int | None = None,
         stop_active: bool = True,
     ) -> int:
+        mode = (cfg.trading_mode or "PAPER").upper()
+        run_id = getattr(self, "run_id", None)
         with session_factory()() as db:
+            # Next number in this trade's own book (PAPER, LIVE, or this replay run).
+            book = db.query(func.max(TradeLog.book_seq)).filter(TradeLog.mode == mode)
+            book = book.filter(TradeLog.run_id == run_id) if run_id is not None else book.filter(TradeLog.run_id.is_(None))
+            seq = int(book.scalar() or 0) + 1
             row = TradeLog(
                 date=now.date().isoformat(),
                 symbol=cfg.symbol,
@@ -2216,9 +2222,10 @@ class StrategyEngine:
                 ma_cross_price=cross_price,
                 atr_at_entry=atr,
                 sl_trigger_price=sl,
-                mode=(cfg.trading_mode or "PAPER").upper(),
+                mode=mode,
                 stop_active=bool(stop_active),
-                run_id=getattr(self, "run_id", None),
+                run_id=run_id,
+                book_seq=seq,
                 strategy=json.dumps({**settings_snapshot(cfg), "qty": int(qty if qty is not None else cfg.qty)}),
             )
             db.add(row)
@@ -2868,16 +2875,31 @@ class StrategyEngine:
         for row in reversed(rows):
             if view and (row.symbol or "").upper() != view:
                 continue
+            net = row.net_pnl if row.net_pnl is not None else row.gross_pnl
+            ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id)
             if row.entry_time is not None:
                 markers.append(
                     {
-                        "time": int(row.entry_time.replace(tzinfo=IST).timestamp())
-                        if row.entry_time.tzinfo is None
-                        else int(row.entry_time.timestamp()),
+                        "time": _epoch_ist(row.entry_time),
                         "direction": row.direction,
                         "price": row.entry_price,
                         "kind": "ENTRY",
-                        "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                        "net_pnl": net,
+                        "trade_ref": ref,
+                        "open": row.exit_time is None,
+                    }
+                )
+            if row.exit_time is not None and row.exit_price is not None:
+                markers.append(
+                    {
+                        "time": _epoch_ist(row.exit_time),
+                        "direction": row.direction,
+                        "price": row.exit_price,
+                        "kind": "EXIT",
+                        "net_pnl": net,
+                        "reason": row.exit_reason,
+                        "trade_ref": ref,
+                        "open": False,
                     }
                 )
         pos = self.position
@@ -3484,6 +3506,8 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "points": points,
         "mode": row.mode,
         "run_id": getattr(row, "run_id", None),
+        "book_seq": getattr(row, "book_seq", None),
+        "trade_ref": trade_ref(row.mode, getattr(row, "run_id", None), getattr(row, "book_seq", None), row.id),
         "strategy": _strategy_of(row, parsed),
         "max_high": getattr(row, "max_high", None),
         "max_low": getattr(row, "max_low", None),
@@ -3496,6 +3520,11 @@ def _fill_lag(direction: str, entry: float | None, cross: float | None) -> float
         return None
     lag = float(entry) - float(cross)
     return round(lag if (direction or "").upper() == "LONG" else -lag, 4)
+
+
+def _epoch_ist(when: dt.datetime) -> int:
+    """A saved trade time (naive = IST) as epoch seconds."""
+    return int(when.replace(tzinfo=IST).timestamp()) if when.tzinfo is None else int(when.timestamp())
 
 
 def _finite(value) -> float | None:
