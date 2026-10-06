@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { istToday, useChatScreen } from "@/lib/chatScreen";
 import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
 import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
@@ -115,6 +116,44 @@ export default function TerminalPage() {
     liveBars.current = count;
     smaApi.chart(count).then(setChart).catch(() => {});
   }, []);
+
+  // What this page shows, for the "Ask the bot" chat: the bot, the books,
+  // today's trades and the settings in use.
+  const screenSummary = useMemo(() => {
+    if (!state && !config) return null;
+    const today = istToday();
+    const todays = trades.filter((t) => t.date === today && (t.mode ?? "PAPER").toUpperCase() !== "REPLAY");
+    return {
+      view: "SMA terminal",
+      chart_stock: state?.symbol ?? config?.symbol ?? null,
+      bot_status: state?.bot_status,
+      halt_reason: state?.halt_reason || undefined,
+      mode: state?.mode,
+      data_source: state?.data_source,
+      last_signal: state?.last_signal,
+      armed_stocks: state?.trade_symbols ?? config?.trade_symbols,
+      open_books: (state?.books ?? []).filter((b) => b.direction !== "FLAT"),
+      realized_net_pnl: state?.realized_net_pnl,
+      open_net_total: state?.open_net_total,
+      trades_today_count: state?.trades_today,
+      kpis: state?.kpis,
+      todays_trades: todays.slice(0, 40).map((t) => ({
+        symbol: t.symbol,
+        side: t.direction,
+        qty: t.qty,
+        entry: t.entry_price,
+        entry_time: t.entry_time,
+        exit: t.exit_price,
+        exit_time: t.exit_time,
+        exit_reason: t.exit_reason,
+        net: t.net_pnl,
+        mode: t.mode,
+      })),
+      settings: config ?? undefined,
+      replay: replay && replay.status !== "IDLE" ? replay : undefined,
+    };
+  }, [state, config, trades, replay]);
+  useChatScreen(screenSummary);
 
   const refresh = useCallback(() => {
     if (busy.current) return;

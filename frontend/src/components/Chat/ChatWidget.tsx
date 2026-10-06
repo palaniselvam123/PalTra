@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Bot, Eraser, Loader2, MessageSquare, Send, X } from "lucide-react";
 import { api, type ChatTurn } from "@/lib/api";
+import { chatScreen } from "@/lib/chatScreen";
 
 /** Floating "ask the bot" panel, mounted in the root layout so it follows the
  *  user across Dashboard, Reports and Settings — the questions it answers
@@ -17,6 +19,7 @@ export function ChatWidget() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
 
   useEffect(() => {
     if (open && !status) api.getChatStatus().then(setStatus).catch(() => {});
@@ -39,7 +42,7 @@ export function ChatWidget() {
     setError(null);
 
     try {
-      const res = await api.askChat(question, priorTurns);
+      const res = await api.askChat(question, priorTurns, pathname ?? undefined, chatScreen());
       setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
     } catch (e: any) {
       setError(e.message ?? "Could not reach the assistant");
@@ -107,8 +110,9 @@ export function ChatWidget() {
             {messages.length === 0 && (
               <div className="space-y-3">
                 <p className="text-xs text-slate-500">
-                  I answer from your actual trade record — the fills, the charges, the opening ranges I measured and
-                  my own console log. If something isn&apos;t recorded, I&apos;ll say so rather than guess.
+                  I answer from your actual trade record and what this page shows: today&apos;s trades, the SMA and ORB
+                  bots&apos; settings, stops and filters, and how to use them. If something isn&apos;t recorded,
+                  I&apos;ll say so rather than guess.
                 </p>
                 <div className="space-y-1.5">
                   {(status?.suggestions ?? []).map((q) => (
@@ -160,7 +164,7 @@ export function ChatWidget() {
                     send(draft);
                   }
                 }}
-                placeholder="Why did you buy that stock?"
+                placeholder="How many trades today? Which strategy am I using?"
                 className="flex-1 resize-none bg-base border border-border rounded-md px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-bot/60 max-h-24"
               />
               <button
@@ -173,7 +177,7 @@ export function ChatWidget() {
               </button>
             </div>
             <p className="text-[10px] text-slate-600 mt-1.5">
-              Paper trading only. Explains past decisions — not advice on what to trade next.
+              Reads your trades and this page. Explains — never places orders or picks stocks for you.
             </p>
           </div>
         </>
