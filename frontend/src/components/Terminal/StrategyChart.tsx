@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { BarChartHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -345,6 +345,9 @@ class TradeRangeLines implements ISeriesPrimitive<Time> {
 }
 
 const PROFILE_KEY = "sma.chart.profile";
+const CHART_HIDDEN_KEY = "sma.chart.hidden";
+const BOX_SMALL_KEY = "sma.chart.posbox.small";
+const BOX_POS_KEY = "sma.chart.posbox.pos";
 const POC_COLOR = "#FACC15";
 const VALUE_AREA_COLOR = "#38BDF8";
 
@@ -613,6 +616,76 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [hoverOhlc, setHoverOhlc] = useState<Ohlc | null>(null);
   const rowsRef = useRef<Candle[]>([]);
   const sectionRef = useRef<HTMLElement>(null);
+  // Hide the chart (header stays) and the open-position box's place and size.
+  const [chartHidden, setChartHidden] = useState(false);
+  const [boxSmall, setBoxSmall] = useState(false);
+  const [boxPos, setBoxPos] = useState<{ x: number; y: number } | null>(null);
+  const boxDrag = useRef<{ dx: number; dy: number } | null>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(CHART_HIDDEN_KEY) === "1") setChartHidden(true);
+      const small = localStorage.getItem(BOX_SMALL_KEY);
+      // Phones start with the compact box so it does not cover the candles.
+      setBoxSmall(small == null ? window.matchMedia("(max-width: 639px)").matches : small === "1");
+      const saved = JSON.parse(localStorage.getItem(BOX_POS_KEY) || "null");
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) setBoxPos(saved);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const remember = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode */
+    }
+  };
+  const toggleChart = () => {
+    setChartHidden((on) => {
+      remember(CHART_HIDDEN_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  const toggleBox = () => {
+    setBoxSmall((on) => {
+      remember(BOX_SMALL_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  /** Keep the box inside the chart, so a resize or rotate never loses it. */
+  const clampBox = (x: number, y: number) => {
+    const plot = plotRef.current?.getBoundingClientRect();
+    const box = boxRef.current?.getBoundingClientRect();
+    if (!plot || !box) return { x, y };
+    return {
+      x: Math.min(Math.max(0, x), Math.max(0, plot.width - box.width)),
+      y: Math.min(Math.max(0, y), Math.max(0, plot.height - box.height)),
+    };
+  };
+  const startBoxDrag = (e: ReactPointerEvent) => {
+    const plot = plotRef.current?.getBoundingClientRect();
+    const box = boxRef.current?.getBoundingClientRect();
+    if (!plot || !box) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    boxDrag.current = { dx: e.clientX - box.left, dy: e.clientY - box.top };
+  };
+  const moveBox = (e: ReactPointerEvent) => {
+    const drag = boxDrag.current;
+    const plot = plotRef.current?.getBoundingClientRect();
+    if (!drag || !plot) return;
+    setBoxPos(clampBox(e.clientX - plot.left - drag.dx, e.clientY - plot.top - drag.dy));
+  };
+  const endBoxDrag = () => {
+    if (!boxDrag.current) return;
+    boxDrag.current = null;
+    setBoxPos((pos) => {
+      if (pos) remember(BOX_POS_KEY, JSON.stringify(pos));
+      return pos;
+    });
+  };
   const [full, setFull] = useState(false);
   const [bar, setBar] = useState<BarMinutes>(1);
   const measureLineRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -842,10 +915,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
 
   useEffect(() => {
     if (!rootRef.current) return;
+    // Phones: smaller axis text, and line names stay in the legend instead of
+    // widening every price tag on the axis over the candles.
+    const narrow = window.matchMedia("(max-width: 639px)").matches;
+    const tag = (name: string) => (narrow ? "" : name);
     const instance = createChart(rootRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "#151921" },
         textColor: "#94a3b8",
+        fontSize: narrow ? 10 : 12,
       },
       grid: {
         vertLines: { color: "#1c2230" },
@@ -904,14 +982,14 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
-      title: "SMA 9",
+      title: tag("SMA 9"),
     });
     const slow = instance.addLineSeries({
       color: "#3B82F6",
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
-      title: "SMA 21",
+      title: tag("SMA 21"),
     });
     const atr = instance.addLineSeries({
       color: "#A78BFA",
@@ -919,7 +997,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       priceScaleId: "atr",
       priceLineVisible: false,
       lastValueVisible: true,
-      title: "ATR 14",
+      title: tag("ATR 14"),
     });
     instance.priceScale("atr").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     // VWAP sits on the price scale; RSI gets its own 0–100 strip at the bottom.
@@ -929,7 +1007,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       lineStyle: LineStyle.Dotted,
       priceLineVisible: false,
       lastValueVisible: false,
-      title: "VWAP",
+      title: tag("VWAP"),
       visible: false,
     });
     const rsi = instance.addLineSeries({
@@ -938,7 +1016,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       priceScaleId: "rsi",
       priceLineVisible: false,
       lastValueVisible: true,
-      title: "RSI 14",
+      title: tag("RSI 14"),
       visible: false,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
     });
@@ -1233,13 +1311,24 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <BarChartHorizontal size={14} aria-hidden />
             Profile
           </button>
+          <button
+            type="button"
+            onClick={toggleChart}
+            aria-pressed={chartHidden}
+            aria-controls="sma-chart-body"
+            title={chartHidden ? "Show the chart" : "Hide the chart (the header stays)"}
+            className="flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+          >
+            {chartHidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
+            {chartHidden ? "Show chart" : "Hide chart"}
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
             </span>
           ) : null}
         </h2>
-        <ul aria-label="Chart legend" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
+        <ul aria-label="Chart legend" className={clsx("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300", chartHidden && "hidden")}>
           {showProfile ? (
             profile ? (
               <>
@@ -1316,6 +1405,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </LegendItem>
         </ul>
       </div>
+      <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
       <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
@@ -1345,7 +1435,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         onLoad={loadPast}
         onLive={backToLive}
       />
-      <div className={clsx("relative", full && "min-h-[240px] flex-1")}>
+      <div ref={plotRef} className={clsx("relative", full && "min-h-[240px] flex-1")}>
         <div
           ref={rootRef}
           className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]", measuring && "cursor-crosshair")}
@@ -1357,14 +1447,58 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </div>
         )}
         {pos && pnl && !past && (
-          <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[240px] rounded-lg border border-white/10 bg-[#0B0E14]/90 p-2.5 shadow-lg">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400">
-              {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
+          <div
+            ref={boxRef}
+            style={boxPos ? { left: boxPos.x, top: boxPos.y } : undefined}
+            className={clsx(
+              "pointer-events-none absolute z-10 rounded-lg border border-white/10 bg-[#0B0E14]/90 shadow-lg",
+              !boxPos && "left-2 top-2 sm:left-3 sm:top-3",
+              boxSmall ? "max-w-[170px] p-1.5" : "max-w-[200px] p-2 sm:max-w-[240px] sm:p-2.5"
+            )}
+          >
+            {/* Drag here to move the box off the candles; the arrow folds it to one line. */}
+            <div className="pointer-events-auto flex items-center gap-1">
+              <div
+                role="button"
+                tabIndex={-1}
+                aria-label="Drag to move the position box"
+                title="Drag to move"
+                onPointerDown={startBoxDrag}
+                onPointerMove={moveBox}
+                onPointerUp={endBoxDrag}
+                onPointerCancel={endBoxDrag}
+                onDoubleClick={() => {
+                  setBoxPos(null);
+                  remember(BOX_POS_KEY, "null");
+                }}
+                className="flex min-w-0 flex-1 cursor-move touch-none select-none items-center gap-1 text-[10px] uppercase tracking-wider text-slate-400 sm:text-[11px]"
+              >
+                <GripHorizontal size={12} aria-hidden className="shrink-0 text-slate-500" />
+                <span className="truncate">
+                  {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={toggleBox}
+                aria-label={boxSmall ? "Show stop, target and close" : "Fold the position box"}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-white/10 hover:text-slate-100"
+              >
+                {boxSmall ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
+              </button>
             </div>
-            <div className={`mt-1 font-mono text-lg font-semibold ${pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}`}>
+            <div
+              className={clsx(
+                "font-mono font-semibold",
+                boxSmall ? "text-sm" : "mt-1 text-[1rem] leading-6 sm:text-lg",
+                pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"
+              )}
+            >
               {pnl.gross >= 0 ? "+" : ""}
               {inr(pnl.gross)}
             </div>
+            {boxSmall ? null : (
+            <>
             <div className="font-mono text-[11px] text-slate-400">
               {pnl.points >= 0 ? "+" : ""}
               {pnl.points.toFixed(2)} pts · {pnl.pct >= 0 ? "+" : ""}
@@ -1408,8 +1542,11 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             >
               {closing ? "Closing…" : "Close position"}
             </button>
+            </>
+            )}
           </div>
         )}
+      </div>
       </div>
     </section>
   );
