@@ -454,12 +454,12 @@ export default function TerminalPage() {
               <Fold title="Alerts" storageKey="sma.card.alerts">
                 <WhatsAppAlerts />
               </Fold>
-              <Fold title="Strategy" storageKey="sma.card.config">
-                <StrategyConfigPanel config={config} onChanged={refresh} />
-              </Fold>
             </div>
           )}
         </div>
+        <Fold title="Strategy" storageKey="sma.card.config">
+          <StrategyConfigPanel config={config} onChanged={refresh} wide />
+        </Fold>
         <TradeHistoryTable
           loading={!tradesLoaded}
           trades={trades}
