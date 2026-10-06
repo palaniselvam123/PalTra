@@ -1201,11 +1201,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     : pos?.tsl_step || chart?.tsl_step
       ? "Trailing SL"
       : `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR SL`;
-  // Every held stock (the chart shows one; replay and the bot can hold several).
-  const openBooks = (state?.books ?? []).filter((b) => b.direction !== "FLAT" && b.qty > 0);
-  const openTotal =
-    state?.open_net_total ?? openBooks.reduce((sum, b) => sum + (b.open_net ?? 0), 0);
-  const othersOpen = openBooks.filter((b) => b.symbol.toUpperCase() !== symbol).length;
   const slLevel = past || !pos || !stopOn ? null : (pos.sl_trigger ?? chart?.sl_trigger ?? null);
   const targetLevel = past || !pos ? null : (pos.target ?? chart?.target ?? null);
   const slCash = pos && slLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, slLevel) : null;
@@ -1451,7 +1446,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <Skeleton className="h-1/6 w-full opacity-40" />
           </div>
         )}
-        {!past && ((pos && pnl) || openBooks.length > 0) && (
+        {pos && pnl && !past && (
           <div
             ref={boxRef}
             style={boxPos ? { left: boxPos.x, top: boxPos.y } : undefined}
@@ -1480,11 +1475,21 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               >
                 <GripHorizontal size={12} aria-hidden className="shrink-0 text-slate-500" />
                 <span className="truncate">
-                  {pos
-                    ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} · entry ${px(pos.entry_price)}`
-                    : `${openBooks.length} open position${openBooks.length === 1 ? "" : "s"}`}
+                  {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
                 </span>
               </div>
+              {boxSmall ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={closing}
+                  aria-label="Close position"
+                  title="Close this position (asks first)"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-rose-300 ring-1 ring-inset ring-rose-400/40 hover:bg-rose-500/20 disabled:opacity-50"
+                >
+                  {closing ? <Loader2 size={12} aria-hidden className="animate-spin" /> : <X size={13} aria-hidden />}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={toggleBox}
@@ -1494,8 +1499,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                 {boxSmall ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
               </button>
             </div>
-            {pos && pnl ? (
-            <>
             <div
               className={clsx(
                 "font-mono font-semibold",
@@ -1553,39 +1556,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </button>
             </>
             )}
-            </>
-            ) : null}
-            {othersOpen > 0 || (!pos && openBooks.length > 0) ? (
-              <div className={clsx("pointer-events-auto", pos && "mt-1.5 border-t border-white/10 pt-1.5")}>
-                <div className="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wider text-slate-400 sm:text-[11px]">
-                  <span>All open · {openBooks.length}</span>
-                  <span
-                    className={clsx("font-mono text-xs font-semibold normal-case", openTotal >= 0 ? "text-[#10B981]" : "text-[#F43F5E]")}
-                    title="Unrealized net of every held stock, after estimated charges"
-                  >
-                    {signedInr(openTotal)} net
-                  </span>
-                </div>
-                {boxSmall ? null : (
-                  <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto font-mono text-[11px]">
-                    {openBooks.map((b) => (
-                      <li key={b.symbol} className="flex items-baseline justify-between gap-2">
-                        <span className={clsx("truncate font-sans", b.symbol.toUpperCase() === symbol ? "font-semibold text-amber-300" : "text-slate-200")}>
-                          {b.symbol}{" "}
-                          <span className={b.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}>
-                            {b.direction === "LONG" ? "L" : "S"}
-                          </span>
-                          <span className="text-slate-500"> ×{b.qty}</span>
-                        </span>
-                        <span className={(b.open_net ?? 0) >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"}>
-                          {b.open_net == null ? "—" : signedInr(b.open_net)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : null}
           </div>
         )}
       </div>
