@@ -61,6 +61,8 @@ export type SmaConfig = {
   bb_std?: number;
   /** Bands narrower than this % of price count as a squeeze. 0 = check off. */
   bb_min_width_pct?: number;
+  /** Bollinger exit: band target, middle-band fade, both, or off. */
+  bb_exit?: BbExit;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;
@@ -206,6 +208,9 @@ export type Candle = {
 /** An SMA cross the entry filters refused, with the bot's own reason. */
 export type BlockedCross = { time: number; direction: "LONG" | "SHORT"; reason: string; label: string };
 
+export const BB_EXITS = ["OFF", "BAND", "MIDDLE", "BOTH"] as const;
+export type BbExit = (typeof BB_EXITS)[number];
+
 export type ChartFilters = {
   use_vwap: boolean;
   use_rsi: boolean;
@@ -216,6 +221,7 @@ export type ChartFilters = {
   use_bollinger?: boolean;
   bb_period?: number;
   bb_std?: number;
+  bb_exit?: BbExit;
   /** The ATR stop is the one in use, so the ATR line matters. */
   atr_stop: boolean;
 };

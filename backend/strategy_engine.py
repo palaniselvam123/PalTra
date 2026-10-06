@@ -36,6 +36,7 @@ from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwCl
 from indicators import (
     _session_vwap,
     bollinger,
+    bollinger_exit,
     closed_candle_cross,
     closed_technical_snapshot,
     derive_minute_volume,
@@ -106,6 +107,10 @@ class OpenPosition:
     tsl_best: float | None = None
     # LIVE: monotonic time of the last stop modify sent to Groww.
     tsl_modified_at: float = 0.0
+    # Bollinger exit: the last closed candle read, and whether a close has
+    # been on the trade's side of the middle band (arms the MIDDLE exit).
+    bb_bar: int | None = None
+    bb_armed: bool = False
     # Highest and lowest price seen while the trade is open (every tick's
     # LTP, the entry and the exit). Saved as TradeLog.max_high / max_low.
     high: float | None = None
@@ -138,7 +143,7 @@ SNAPSHOT_FIELDS = (
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
-    "max_daily_loss", "entry_cutoff_time", "square_off_time",
+    "bb_exit", "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
 
@@ -465,6 +470,7 @@ def chart_filters(cfg) -> dict:
         "use_bollinger": bool(getattr(cfg, "use_bollinger", False)),
         "bb_period": int(getattr(cfg, "bb_period", 20) or 20),
         "bb_std": float(getattr(cfg, "bb_std", 2.0) or 2.0),
+        "bb_exit": (getattr(cfg, "bb_exit", None) or "OFF").upper(),
         "atr_stop": getattr(cfg, "use_stop", True) is not False and (getattr(cfg, "stop_type", "ATR") or "ATR") == "ATR",
     }
 
@@ -877,6 +883,7 @@ class StrategyEngine:
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
             await self._watch_stop(symbol_cfg)
+            await self._watch_bollinger(symbol_cfg)
 
         self._focus = view
         if view in self._ltps:
@@ -1840,12 +1847,51 @@ class StrategyEngine:
                 reason = "TARGET_HIT"
         if not hit:
             return
+        await self._exit_now(cfg, fill_price, reason)
+
+    async def _watch_bollinger(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit on the Bollinger band (bb_exit)."""
+        pos = self.position
+        mode = (getattr(cfg, "bb_exit", None) or "OFF").upper()
+        if pos is None or self.status != "RUNNING" or mode == "OFF" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.bb_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart: the exchange stop id is unknown, so it
+            # cannot be cancelled first. An exit now could leave that stop to
+            # fill later and open a reverse. The stop and crosses still close it.
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        if closed_ts + 60 <= opened.timestamp():
+            # That candle closed before the entry (it is the cross candle).
+            return
+        pos.bb_bar = closed_ts
+        closes = frame["close"].iloc[:-1]
+        reason, note, pos.bb_armed = bollinger_exit(
+            closes,
+            pos.direction,
+            mode,
+            int(getattr(cfg, "bb_period", 20) or 20),
+            float(getattr(cfg, "bb_std", 2.0) or 2.0),
+            pos.bb_armed,
+        )
+        if reason is None:
+            return
+        self._signals[symbol] = f"{symbol} Bollinger exit — {note}"
+        await self._exit_now(cfg, self.ltp, reason)
+
+    async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str) -> None:
+        """Close the focused position for a stop, target or Bollinger exit."""
         async with self.lock:
             if self.position is None or self.inflight:
                 return
             self.inflight = "TRANSIT"
             try:
-                if reason == "TARGET_HIT" and self.position.sl_order_id:
+                if reason in _TAKEN_EXITS and self.position.sl_order_id:
                     # The stop is still working on Groww. Cancel it first so
                     # it cannot fill after the exit and open a reverse.
                     try:
@@ -1862,6 +1908,8 @@ class StrategyEngine:
                     "TARGET_HIT": "target hit — flat",
                     "GAP_SL_HIT": "moving stop hit — flat",
                     "TSL_HIT": "trailing stop hit — flat",
+                    "BB_TARGET": "Bollinger band target — flat",
+                    "BB_MIDDLE": "Bollinger middle band exit — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -2780,6 +2828,8 @@ _ALERT_REASON = {
     "GAP_SL_HIT": "moving stop (SMA gap)",
     "TSL_HIT": "trailing stop",
     "TARGET_HIT": "target hit",
+    "BB_TARGET": "Bollinger band target",
+    "BB_MIDDLE": "Bollinger middle band",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -3076,6 +3126,10 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
         now = now.astimezone(IST)
     now_minute = int(now.replace(second=0, microsecond=0).timestamp())
     return closed_ts < now_minute - 60
+
+
+# Exits the bot sends itself while an exchange stop may still be working.
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE")
 
 
 def _filter_note(cfg: BotConfig) -> str:

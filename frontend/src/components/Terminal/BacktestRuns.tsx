@@ -52,6 +52,7 @@ export function strategyLabel(s: Settings): string {
         (Number(s.tsl_target_points ?? 0) > 0 ? ` · target ₹${s.tsl_target_points}` : "")
     );
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
+  if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
   const filters: string[] = [];
   if (s.use_vwap) filters.push("VWAP");
   if (s.use_volume) filters.push(`Vol ≥${s.volume_min_ratio}×`);
@@ -73,6 +74,13 @@ export function stopShort(s: Settings): string {
     return `TSL ₹${s.tsl_sl_points ?? 20} / ₹${s.tsl_trail_points ?? 10}${target}`;
   }
   return `${s.atr_multiplier ?? 1.5}× ATR`;
+}
+
+const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
+
+/** The Bollinger exit in a few words, or "" when it was off. */
+export function bbExitText(s: Settings): string {
+  return BB_EXIT_TEXT[String(s.bb_exit ?? "OFF").toUpperCase()] ?? "";
 }
 
 /** The entry filters that were on, e.g. "VWAP, RSI", or "no filters". */
@@ -116,6 +124,10 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
       s.use_bollinger
         ? `${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ · squeeze < ${s.bb_min_width_pct ?? 0.15}%`
         : "Off",
+  ],
+  [
+    "Bollinger exit",
+    (s) => (bbExitText(s) ? `${bbExitText(s)} · ${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ` : "Off"),
   ],
   ["ADX filter", (s) => (s.use_adx_filter ? `≥ ${s.adx_threshold}` : "Off")],
   ["Daily loss limit", (s) => inr(Number(s.max_daily_loss ?? 0))],

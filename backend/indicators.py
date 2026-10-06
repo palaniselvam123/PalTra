@@ -298,6 +298,45 @@ def _bollinger_reason(
     return out
 
 
+BB_EXIT_MODES = ("OFF", "BAND", "MIDDLE", "BOTH")
+
+
+def bollinger_exit(
+    closes: pd.Series, direction: str, mode: str, period: int, k: float, armed: bool
+) -> tuple[str | None, str, bool]:
+    """Bollinger exit read on the last close of `closes` (closed candles only).
+
+    Returns (reason, note, armed):
+    * BAND (or BOTH): a buy that closes at or above the upper band (a sell at
+      or below the lower) is stretched ~2 sigma in its favour. Take the profit
+      before it snaps back: reason "BB_TARGET".
+    * MIDDLE (or BOTH): once a close has been on the trade's side of the middle
+      band (`armed`), a close back across it means the move has faded:
+      reason "BB_MIDDLE". Not armed yet means a trade that entered on the
+      wrong side of the middle is not cut on its first candle.
+    """
+    mode = (mode or "OFF").upper()
+    if mode not in ("BAND", "MIDDLE", "BOTH") or closes is None or len(closes) < int(period):
+        return None, "", armed
+    mid, upper, lower = bollinger(closes, period, k)
+    m, u, lo = mid.iloc[-1], upper.iloc[-1], lower.iloc[-1]
+    if pd.isna(m) or pd.isna(u) or pd.isna(lo):
+        return None, "", armed
+    close = float(closes.iloc[-1])
+    m, u, lo = float(m), float(u), float(lo)
+    long = direction == "LONG"
+    if mode in ("BAND", "BOTH"):
+        if long and close >= u:
+            return "BB_TARGET", f"closed {close:.2f} at the upper band {u:.2f}", armed
+        if not long and close <= lo:
+            return "BB_TARGET", f"closed {close:.2f} at the lower band {lo:.2f}", armed
+    if mode in ("MIDDLE", "BOTH"):
+        if armed and ((long and close < m) or (not long and close > m)):
+            return "BB_MIDDLE", f"closed {close:.2f} back across the middle band {m:.2f}", armed
+        armed = armed or (close > m if long else close < m)
+    return None, "", armed
+
+
 def entry_filter_reason(
     df: pd.DataFrame,
     direction: str,

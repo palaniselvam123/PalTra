@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { smaApi, type SmaConfig } from "@/lib/smaApi";
+import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
 
 type Props = { config: SmaConfig | null; onChanged: () => void };
 
@@ -24,6 +24,7 @@ const LABELS: Record<string, string> = {
   use_density: "density",
   use_rsi: "RSI",
   use_bollinger: "Bollinger",
+  bb_exit: "Bollinger exit",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -124,6 +125,7 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
     bb_period: Number(form.bb_period ?? 20),
     bb_std: Number(form.bb_std ?? 2),
     bb_min_width_pct: Number(form.bb_min_width_pct ?? 0.15),
+    bb_exit: BB_EXITS.includes(form.bb_exit as BbExit) ? (form.bb_exit as BbExit) : "OFF",
   });
 
   const saveStock = async () => {
@@ -411,6 +413,26 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
       </div>
       <p className="mt-1 text-[11px] leading-snug text-slate-400">
         Squeeze is the band width as % of price on 1-minute candles; 0 turns the squeeze check off.
+      </p>
+      <label className="mt-3 block text-sm text-slate-300">
+        <span className="text-[11px] uppercase tracking-wider text-slate-400">
+          Bollinger exit{isOwn("bb_exit") && <OwnTag />}
+        </span>
+        <select
+          value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
+          onChange={(e) => set("bb_exit", e.target.value)}
+          className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+        >
+          <option value="OFF">Off — exit only on the stop, target, cross or square-off</option>
+          <option value="BAND">Band target — book profit when a candle closes at the far band</option>
+          <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
+          <option value="BOTH">Both — band target or middle band, whichever comes first</option>
+        </select>
+      </label>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        Read once per closed 1-minute candle after the entry, on the Period and Width above (the bands show on the
+        chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first.
+        Your stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
       </p>
       <div className="mt-3 flex items-center gap-3">
         <button
