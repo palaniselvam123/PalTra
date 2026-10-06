@@ -59,6 +59,7 @@ export function strategyLabel(s: Settings): string {
   if (s.use_density) filters.push(`Density ≥${s.density_min_pct}%`);
   if (s.use_rsi) filters.push(`RSI ${s.rsi_long_min}–${s.rsi_long_max}/${s.rsi_short_min}–${s.rsi_short_max}`);
   if (s.use_bollinger) filters.push(`BB ${s.bb_period ?? 20}/${s.bb_std ?? 2}σ`);
+  if (gapText(s)) filters.push(`Gap ${gapText(s)}`);
   if (s.use_adx_filter) filters.push(`ADX ≥${s.adx_threshold}`);
   parts.push(filters.length ? filters.join(", ") : "no filters");
   parts.push(`qty ${s.qty ?? "—"}`);
@@ -76,6 +77,14 @@ export function stopShort(s: Settings): string {
   return `${s.atr_multiplier ?? 1.5}× ATR`;
 }
 
+/** The SMA gap ranges that were ticked, e.g. "buy 0.02–0.5% · sell -0.5–-0.02%", or "". */
+export function gapText(s: Settings): string {
+  const parts: string[] = [];
+  if (s.use_gap_long) parts.push(`buy ${s.gap_long_min ?? 0.02}–${s.gap_long_max ?? 0.5}%`);
+  if (s.use_gap_short) parts.push(`sell ${s.gap_short_min ?? -0.5}–${s.gap_short_max ?? -0.02}%`);
+  return parts.join(" · ");
+}
+
 const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
 
 /** The Bollinger exit in a few words, or "" when it was off. */
@@ -91,6 +100,7 @@ export function filtersShort(s: Settings): string {
   if (s.use_density) on.push("Density");
   if (s.use_rsi) on.push("RSI");
   if (s.use_bollinger) on.push("BB");
+  if (s.use_gap_long || s.use_gap_short) on.push("Gap");
   if (s.use_adx_filter) on.push("ADX");
   return on.length ? on.join(", ") : "no filters";
 }
@@ -125,6 +135,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
         ? `${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ · squeeze < ${s.bb_min_width_pct ?? 0.15}%`
         : "Off",
   ],
+  ["SMA gap filter", (s) => gapText(s) || "Off"],
   [
     "Bollinger exit",
     (s) => (bbExitText(s) ? `${bbExitText(s)} · ${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ` : "Off"),

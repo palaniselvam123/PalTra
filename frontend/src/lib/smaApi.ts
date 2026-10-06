@@ -63,6 +63,13 @@ export type SmaConfig = {
   bb_min_width_pct?: number;
   /** Bollinger exit: band target, middle-band fade, both, or off. */
   bb_exit?: BbExit;
+  /** SMA gap range entry filter, signed % ((SMA9 − SMA21) / SMA21 × 100); each side ticked separately. */
+  use_gap_long?: boolean;
+  gap_long_min?: number;
+  gap_long_max?: number;
+  use_gap_short?: boolean;
+  gap_short_min?: number;
+  gap_short_max?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;

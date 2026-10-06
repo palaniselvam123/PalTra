@@ -140,6 +140,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`ResearchEngine`: fixed settings, no chart frame, minute steps while flat)
   into its own SQLite files and writes the evidence report. Driven by
   `.github/workflows/sma-stock-research.yml` (manual, refused in market hours).
+- SMA gap range entry filter (`use_gap_long` / `use_gap_short`, off by
+  default): `indicators._gap_reason` on the closed cross candle's signed
+  gap % `(SMA fast − SMA slow) / SMA slow × 100`, inside `gap_long_min..max`
+  for a buy or `gap_short_min..max` for a sell (negative values allowed).
+  Wired through `_entry_block` like the other filters (chart ✕ "Gap",
+  Telegram check line, per-stock settings).
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

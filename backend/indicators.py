@@ -337,6 +337,35 @@ def bollinger_exit(
     return None, "", armed
 
 
+def _gap_reason(closed: pd.DataFrame, side: str, lo: float, hi: float) -> list[str]:
+    """SMA fast vs slow gap % on the closed candle, signed: + when SMA 9 is above SMA 21.
+
+    A buy needs it inside [lo, hi] of the buy range, a sell inside the sell
+    range. The sign is kept, so a sell range is usually negative numbers.
+    """
+    bar = closed.iloc[-1]
+    gap = sma_gap_signed(bar.get("sma_9"), bar.get("sma_21"))
+    word = "buy" if side == "LONG" else "sell"
+    if gap is None:
+        return ["SMA gap is not ready"]
+    if lo > hi:
+        return [f"SMA gap {word} range is empty ({lo:g}% > {hi:g}%)"]
+    if gap < lo or gap > hi:
+        return [f"SMA gap {gap:+.3f}% is outside the {word} range {lo:g}% to {hi:g}%"]
+    return []
+
+
+def sma_gap_signed(fast, slow) -> float | None:
+    """(SMA fast - SMA slow) / SMA slow x 100, keeping the sign."""
+    try:
+        f, s = float(fast), float(slow)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(f) or np.isnan(s) or s == 0:
+        return None
+    return (f - s) / s * 100
+
+
 def entry_filter_reason(
     df: pd.DataFrame,
     direction: str,
@@ -349,6 +378,12 @@ def entry_filter_reason(
     bb_period: int = BB_PERIOD,
     bb_std: float = BB_STD,
     bb_min_width_pct: float = 0.15,
+    use_gap_long: bool = False,
+    gap_long_min: float = 0.02,
+    gap_long_max: float = 0.5,
+    use_gap_short: bool = False,
+    gap_short_min: float = -0.5,
+    gap_short_max: float = -0.02,
     volume_lookback: int = 20,
     volume_min_ratio: float = 1.0,
     density_min_pct: float = 50.0,
@@ -365,14 +400,15 @@ def entry_filter_reason(
     (`iloc[-2]`). `price` overrides that close for the VWAP comparison only,
     so a manual order can be judged at the price about to be sent.
     """
-    if not any((use_vwap, use_volume, use_density, use_rsi, use_bollinger)):
+    side = (direction or "").upper()
+    use_gap = use_gap_long if side == "LONG" else use_gap_short if side == "SHORT" else False
+    if not any((use_vwap, use_volume, use_density, use_rsi, use_bollinger, use_gap)):
         return None
     if df is None or len(df) < 3:
         return "filters need more candles"
     closed = df.iloc[:-1]
     bar = closed.iloc[-1]
     reasons: list[str] = []
-    side = (direction or "").upper()
 
     if use_vwap:
         vwap = _session_vwap(closed)
@@ -405,6 +441,12 @@ def entry_filter_reason(
 
     if use_bollinger:
         reasons.extend(_bollinger_reason(closed, side, int(bb_period), float(bb_std), float(bb_min_width_pct)))
+
+    if use_gap:
+        if side == "LONG":
+            reasons.extend(_gap_reason(closed, side, float(gap_long_min), float(gap_long_max)))
+        else:
+            reasons.extend(_gap_reason(closed, side, float(gap_short_min), float(gap_short_max)))
 
     if not reasons:
         return None
