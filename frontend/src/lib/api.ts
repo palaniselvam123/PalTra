@@ -979,10 +979,10 @@ export const api = {
 
   getChatStatus: () =>
     request<{ configured: boolean; model: string; suggestions: string[] }>("/api/chat/status"),
-  askChat: (message: string, history: ChatTurn[]) =>
+  askChat: (message: string, history: ChatTurn[], page?: string, screen?: Record<string, unknown> | null) =>
     request<{ reply: string; model: string; facts_summary: Record<string, unknown> }>("/api/chat/ask", {
       method: "POST",
-      body: JSON.stringify({ message, history }),
+      body: JSON.stringify({ message, history, page, screen: screen ?? undefined }),
     }),
 
   getAiAnalyses: (symbol?: string, limit = 25) =>
