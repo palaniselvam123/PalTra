@@ -255,6 +255,49 @@ def rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
+BB_PERIOD = 20
+BB_STD = 2.0
+
+
+def bollinger(closes: pd.Series, period: int = BB_PERIOD, k: float = BB_STD) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Bollinger Bands on closes: the period SMA and k population standard
+    deviations either side (the usual charting definition, ddof=0)."""
+    closes = pd.to_numeric(closes, errors="coerce")
+    mid = closes.rolling(int(period), min_periods=int(period)).mean()
+    sd = closes.rolling(int(period), min_periods=int(period)).std(ddof=0)
+    return mid, mid + float(k) * sd, mid - float(k) * sd
+
+
+def _bollinger_reason(
+    closed: pd.DataFrame, side: str, period: int, k: float, min_width_pct: float
+) -> list[str]:
+    """Why Bollinger refuses an entry on the last closed candle.
+
+    Two checks, both about the cross arriving at a bad moment:
+    * stretched: a buy that already closed above the upper band (or a sell
+      below the lower) has run past ~2 sigma, so it is chasing a spike that
+      usually snaps back toward the middle band;
+    * squeeze: bands narrower than `min_width_pct` of price mean the stock is
+      going sideways, where SMA crosses whipsaw. 0 turns this check off.
+    """
+    if closed is None or len(closed) < int(period):
+        return [f"Bollinger needs {int(period)} candles"]
+    mid, upper, lower = bollinger(closed["close"], period, k)
+    m, u, lo = mid.iloc[-1], upper.iloc[-1], lower.iloc[-1]
+    if pd.isna(m) or pd.isna(u) or pd.isna(lo) or m <= 0:
+        return ["Bollinger is not ready"]
+    close = float(closed["close"].iloc[-1])
+    width = (float(u) - float(lo)) / float(m) * 100
+    out: list[str] = []
+    if min_width_pct > 0 and width < min_width_pct:
+        out.append(f"Bollinger squeeze: bands {width:.2f}% wide < {min_width_pct:g}%")
+    if side == "LONG" and close > float(u):
+        out.append(f"Bollinger: {close:.2f} is above the upper band {float(u):.2f}")
+    elif side == "SHORT" and close < float(lo):
+        out.append(f"Bollinger: {close:.2f} is below the lower band {float(lo):.2f}")
+    return out
+
+
 def entry_filter_reason(
     df: pd.DataFrame,
     direction: str,
@@ -263,6 +306,10 @@ def entry_filter_reason(
     use_volume: bool = False,
     use_density: bool = False,
     use_rsi: bool = False,
+    use_bollinger: bool = False,
+    bb_period: int = BB_PERIOD,
+    bb_std: float = BB_STD,
+    bb_min_width_pct: float = 0.15,
     volume_lookback: int = 20,
     volume_min_ratio: float = 1.0,
     density_min_pct: float = 50.0,
@@ -279,7 +326,7 @@ def entry_filter_reason(
     (`iloc[-2]`). `price` overrides that close for the VWAP comparison only,
     so a manual order can be judged at the price about to be sent.
     """
-    if not any((use_vwap, use_volume, use_density, use_rsi)):
+    if not any((use_vwap, use_volume, use_density, use_rsi, use_bollinger)):
         return None
     if df is None or len(df) < 3:
         return "filters need more candles"
@@ -316,6 +363,9 @@ def entry_filter_reason(
                 float(rsi_short_max),
             )
         )
+
+    if use_bollinger:
+        reasons.extend(_bollinger_reason(closed, side, int(bb_period), float(bb_std), float(bb_min_width_pct)))
 
     if not reasons:
         return None

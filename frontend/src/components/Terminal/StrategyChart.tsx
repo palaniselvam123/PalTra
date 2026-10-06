@@ -344,6 +344,32 @@ class TradeRangeLines implements ISeriesPrimitive<Time> {
   }
 }
 
+const BB_COLOR = "#C4B5FD";
+
+/** Bollinger Bands on the candles as drawn (population SD, like the bot's
+ * filter). The forming candle is left out on the live chart so the bands do
+ * not repaint. */
+function bollingerRows(
+  rows: Candle[],
+  period: number,
+  k: number,
+  formingLast: boolean
+): { time: number; upper: number; mid: number; lower: number }[] {
+  const closed = formingLast ? rows.slice(0, -1) : rows;
+  const out: { time: number; upper: number; mid: number; lower: number }[] = [];
+  const n = Math.max(2, Math.round(period));
+  for (let i = n - 1; i < closed.length; i += 1) {
+    let sum = 0;
+    for (let j = i - n + 1; j <= i; j += 1) sum += closed[j].close;
+    const mid = sum / n;
+    let sq = 0;
+    for (let j = i - n + 1; j <= i; j += 1) sq += (closed[j].close - mid) ** 2;
+    const sd = Math.sqrt(sq / n);
+    out.push({ time: closed[i].time, mid, upper: mid + k * sd, lower: mid - k * sd });
+  }
+  return out;
+}
+
 const PROFILE_KEY = "sma.chart.profile";
 const CHART_HIDDEN_KEY = "sma.chart.hidden";
 const BOX_SMALL_KEY = "sma.chart.posbox.small";
@@ -604,6 +630,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
   const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbRefs = useRef<ISeriesApi<"Line">[]>([]);
   const rsiBands = useRef<IPriceLine[]>([]);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
@@ -1023,6 +1050,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     instance.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     vwapRef.current = vwap;
     rsiRef.current = rsi;
+    // Bollinger: upper and lower dashed, middle faint. Drawn only when the filter is on.
+    bbRefs.current = [
+      { color: BB_COLOR, style: LineStyle.Dashed, width: 1 },
+      { color: "rgba(196, 181, 253, 0.45)", style: LineStyle.Dotted, width: 1 },
+      { color: BB_COLOR, style: LineStyle.Dashed, width: 1 },
+    ].map((look) =>
+      instance.addLineSeries({
+        color: look.color,
+        lineWidth: look.width as 1,
+        lineStyle: look.style,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: false,
+      })
+    );
 
     apiRef.current = instance;
     candleRef.current = candles;
@@ -1127,6 +1170,14 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         showVwap ? rows.filter((c) => c.vwap != null).map((c) => ({ time: c.time as never, value: c.vwap as number })) : []
       );
     }
+    const showBb = Boolean(filters?.use_bollinger);
+    const bands = showBb ? bollingerRows(rows, filters?.bb_period ?? 20, filters?.bb_std ?? 2, !past) : null;
+    bbRefs.current.forEach((series, i) => {
+      series.applyOptions({ visible: showBb });
+      series.setData(
+        bands ? bands.map((b) => ({ time: b.time as never, value: [b.upper, b.mid, b.lower][i] })) : []
+      );
+    });
     if (rsiRef.current) {
       const series = rsiRef.current;
       series.applyOptions({ visible: showRsi });
@@ -1372,6 +1423,11 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           {filters?.use_vwap ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dotted border-[#22D3EE]" />}>
               VWAP <span className="font-mono text-slate-100">{px(shownVwap)}</span>
+            </LegendItem>
+          ) : null}
+          {filters?.use_bollinger ? (
+            <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-[#C4B5FD]" />}>
+              Bollinger {filters.bb_period ?? 20}/{filters.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
           {filters?.use_rsi ? (

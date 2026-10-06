@@ -35,6 +35,7 @@ from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
 from indicators import (
     _session_vwap,
+    bollinger,
     closed_candle_cross,
     closed_technical_snapshot,
     derive_minute_volume,
@@ -136,8 +137,8 @@ SNAPSHOT_FIELDS = (
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
-    "rsi_short_min", "rsi_short_max", "max_daily_loss",
-    "entry_cutoff_time", "square_off_time",
+    "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
+    "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
 
@@ -295,8 +296,18 @@ def _entry_block(
         rsi_long_max=float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
         rsi_short_min=float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
         rsi_short_max=float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        use_bollinger=on("bollinger"),
+        bb_period=int(getattr(cfg, "bb_period", 20) or 20),
+        bb_std=float(getattr(cfg, "bb_std", 2.0) or 2.0),
+        bb_min_width_pct=_bb_min_width(cfg),
         price=price,
     )
+
+
+def _bb_min_width(cfg) -> float:
+    """The squeeze threshold; 0 is a real setting (squeeze check off)."""
+    value = getattr(cfg, "bb_min_width_pct", None)
+    return 0.15 if value is None else float(value)
 
 
 def _short_block_label(reason: str) -> str:
@@ -313,6 +324,10 @@ def _short_block_label(reason: str) -> str:
             parts.append("Vol")
         elif low.startswith("density"):
             parts.append("Density")
+        elif low.startswith("bollinger squeeze"):
+            parts.append("BB squeeze")
+        elif low.startswith("bollinger"):
+            parts.append("BB")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -331,7 +346,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
     if cfg is None or frame is None or len(frame) < 3 or not {"sma_9", "sma_21", "ts"}.issubset(frame.columns):
         return []
     use_adx = bool(getattr(cfg, "use_adx_filter", False))
-    if not (use_adx or any(bool(getattr(cfg, k, False)) for k in ("use_vwap", "use_volume", "use_density", "use_rsi"))):
+    if not (use_adx or any(bool(getattr(cfg, k, False)) for k in ("use_vwap", "use_volume", "use_density", "use_rsi", "use_bollinger"))):
         return []
     fast = frame["sma_9"].to_numpy(dtype=float)
     slow = frame["sma_21"].to_numpy(dtype=float)
@@ -369,7 +384,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
     return out
 
 
-_CHECK_NAMES = (("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"))
+_CHECK_NAMES = (("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"))
 
 
 def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
@@ -392,6 +407,13 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             current, average, _got = minute_volume_stats(closed, 20)
             ratio = float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0)
             return f"Volume {current:.0f} ≥ {ratio:g}× avg {average:.0f}"
+        if name == "bollinger":
+            period = int(getattr(cfg, "bb_period", 20) or 20)
+            _mid, upper, lower = bollinger(closed["close"], period, float(getattr(cfg, "bb_std", 2.0) or 2.0))
+            u, lo = float(upper.iloc[-1]), float(lower.iloc[-1])
+            mid = (u + lo) / 2
+            width = (u - lo) / mid * 100 if mid else 0.0
+            return f"Bollinger: {float(bar['close']):.2f} inside {lo:.2f}–{u:.2f} (bands {width:.2f}% wide)"
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -440,6 +462,9 @@ def chart_filters(cfg) -> dict:
         "rsi_long_max": float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
         "rsi_short_min": float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
         "rsi_short_max": float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        "use_bollinger": bool(getattr(cfg, "use_bollinger", False)),
+        "bb_period": int(getattr(cfg, "bb_period", 20) or 20),
+        "bb_std": float(getattr(cfg, "bb_std", 2.0) or 2.0),
         "atr_stop": getattr(cfg, "use_stop", True) is not False and (getattr(cfg, "stop_type", "ATR") or "ATR") == "ATR",
     }
 
@@ -448,7 +473,7 @@ def chart_filters(cfg) -> dict:
 _FILTER_KEYS = (
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
-    "rsi_short_min", "rsi_short_max",
+    "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
 )
 
 
@@ -3064,10 +3089,12 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("density")
     if bool(getattr(cfg, "use_rsi", False)):
         checked.append("RSI")
+    if bool(getattr(cfg, "use_bollinger", False)):
+        checked.append("Bollinger")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:
-        return "VWAP, volume, density, and RSI are off."
+        return "VWAP, volume, density, RSI and Bollinger are off."
     return "Checked: " + ", ".join(checked) + "."
 
 

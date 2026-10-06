@@ -55,6 +55,12 @@ export type SmaConfig = {
   rsi_long_max?: number;
   rsi_short_min?: number;
   rsi_short_max?: number;
+  /** Bollinger entry filter: skip a stretched cross or a squeeze. */
+  use_bollinger?: boolean;
+  bb_period?: number;
+  bb_std?: number;
+  /** Bands narrower than this % of price count as a squeeze. 0 = check off. */
+  bb_min_width_pct?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;
@@ -207,6 +213,9 @@ export type ChartFilters = {
   rsi_long_max: number;
   rsi_short_min: number;
   rsi_short_max: number;
+  use_bollinger?: boolean;
+  bb_period?: number;
+  bb_std?: number;
   /** The ATR stop is the one in use, so the ATR line matters. */
   atr_stop: boolean;
 };

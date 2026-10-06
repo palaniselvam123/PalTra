@@ -106,6 +106,12 @@ class BotConfig(Base):
     rsi_long_max: Mapped[float] = mapped_column(Float, default=70.0)
     rsi_short_min: Mapped[float] = mapped_column(Float, default=30.0)
     rsi_short_max: Mapped[float] = mapped_column(Float, default=60.0)
+    # Bollinger entry filter: skip a stretched cross (closed outside the band
+    # on its own side) and a squeeze (bands narrower than bb_min_width_pct).
+    use_bollinger: Mapped[bool] = mapped_column(Boolean, default=False)
+    bb_period: Mapped[int] = mapped_column(Integer, default=20)
+    bb_std: Mapped[float] = mapped_column(Float, default=2.0)
+    bb_min_width_pct: Mapped[float] = mapped_column(Float, default=0.15)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
     # 1 after the one-time raise from the old default of 15. A later edit to
