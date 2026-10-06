@@ -217,6 +217,20 @@ class MarketDataManager:
         self.error = None
         self.generation += 1
 
+    def adopt_client(self, client) -> bool:
+        """Point a running LIVE feed at a freshly logged-in Groww client.
+
+        The feed keeps the client it was started with. Without this, a new
+        token from Connect Live Data never reached it: quotes kept failing on
+        the expired token until the source was switched away and back.
+        """
+        if self.source is not DataSource.LIVE or self._live is None:
+            return False
+        self._live.client = client
+        self._live.last_error = None
+        self.error = None
+        return True
+
     def health(self) -> FeedHealth:
         now = ist_now()
         stale = False
