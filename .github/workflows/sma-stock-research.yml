@@ -1,0 +1,106 @@
+name: SMA stock-selection research
+
+# Read-only research for the SMA 9/21 terminal (backend/sma_research).
+# 1. On the Fly machine (where the Groww session lives): download past
+#    1-minute candles for the most liquid F&O stocks plus the saved strategy
+#    settings. Only Groww's candle-history API is called; no order API.
+# 2. On this runner: replay the unchanged strategy on those candles with the
+#    app's ReplayEngine (local fills, no broker), take the readings, and write
+#    the evidence report. Nothing is deployed and the live bot is not touched.
+# Started by hand only, and refused during NSE market hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Calendar days of history
+        default: "90"
+      top:
+        description: Most liquid F&O stocks to study
+        default: "60"
+      symbols:
+        description: Or a comma-separated stock list (leave empty for the F&O ranking)
+        default: ""
+      dev_share:
+        description: Earlier share of days used to choose thresholds (the rest is hold-out)
+        default: "0.6"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sma-stock-research
+  cancel-in-progress: false
+
+jobs:
+  download:
+    name: Download candles on Fly (read-only)
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 120
+    steps:
+      - name: Refuse during market hours
+        run: |
+          day=$(TZ=Asia/Kolkata date +%u); hhmm=$(TZ=Asia/Kolkata date +%H%M)
+          if [ "$day" -le 5 ] && [ "$((10#$hhmm))" -ge 900 ] && [ "$((10#$hhmm))" -le 1545 ]; then
+            echo "::error::NSE market hours (09:00-15:45 IST). The live bot needs the machine; run this after 15:45."
+            exit 1
+          fi
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Download on the Fly machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DAYS: ${{ inputs.days }}
+          TOP: ${{ inputs.top }}
+          SYMBOLS: ${{ inputs.symbols }}
+        run: |
+          case "$DAYS$TOP" in *[!0-9]*) echo "days and top must be numbers"; exit 1;; esac
+          case "$SYMBOLS" in *[!A-Za-z0-9,\&_-]*) echo "symbols: letters, digits, commas only"; exit 1;; esac
+          flyctl ssh console -a paltra -C "sh -c 'rm -rf /data/research/sma_download && cd /app && nice -n 19 python -m sma_research download --out /data/research/sma_download --days $DAYS --top $TOP --symbols \"$SYMBOLS\" && tar czf /tmp/sma_download.tgz -C /data/research sma_download'"
+          flyctl ssh sftp get -a paltra /tmp/sma_download.tgz sma_download.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sma-download
+          path: sma_download.tgz
+          retention-days: 7
+
+  analyze:
+    name: Replay and report
+    needs: download
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TRADING_MODE: PAPER
+      SMA_TICK_SIZES: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: sma-download
+          path: backend/
+      - run: tar xzf sma_download.tgz
+      - name: Replay and analyse
+        env:
+          DEV_SHARE: ${{ inputs.dev_share }}
+        run: |
+          python -m sma_research analyze --data sma_download --out sma_report --jobs "$(nproc)" --dev-share "$DEV_SHARE"
+          cat sma_report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sma-report
+          path: |
+            backend/sma_report/report.md
+            backend/sma_report/results.json
+            backend/sma_report/trades.csv
+            backend/sma_report/stock_days.csv
+          retention-days: 30
