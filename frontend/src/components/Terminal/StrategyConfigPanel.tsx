@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
 
-type Props = { config: SmaConfig | null; onChanged: () => void };
+type Props = {
+  config: SmaConfig | null;
+  onChanged: () => void;
+  /** Full page width (below the chart): the settings flow into columns on wide screens. */
+  wide?: boolean;
+};
 
 /** "" edits the shared settings; a symbol edits that stock's own. */
 const ALL = "";
@@ -36,7 +41,7 @@ export function ownSummary(own: Record<string, unknown> | undefined): string {
   return named.length > 4 ? `${named.slice(0, 4).join(", ")} +${named.length - 4}` : named.join(", ");
 }
 
-export function StrategyConfigPanel({ config, onChanged }: Props) {
+export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) {
   const [form, setForm] = useState<SmaConfig | null>(config);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -204,7 +209,12 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
   };
 
   return (
-    <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
+    <section
+      className={clsx(
+        "rounded-xl border border-white/5 bg-[#151921] p-4",
+        wide && "lg:columns-2 lg:gap-8 2xl:columns-3 [&>*]:break-inside-avoid",
+      )}
+    >
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
       <label className="mt-3 block text-sm text-slate-300">
         <span className="text-[11px] uppercase tracking-wider text-slate-400">Settings for</span>
