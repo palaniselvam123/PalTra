@@ -78,6 +78,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "bb_period": "INTEGER DEFAULT 20",
             "bb_std": "FLOAT DEFAULT 2",
             "bb_min_width_pct": "FLOAT DEFAULT 0.15",
+            "bb_exit": "VARCHAR DEFAULT 'OFF'",
             "entry_cutoff_time": "TEXT DEFAULT '15:00'",
             "stop_type": "TEXT DEFAULT 'ATR'",
             "gap_sl_mult": "FLOAT DEFAULT 1",

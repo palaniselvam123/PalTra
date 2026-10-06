@@ -1170,7 +1170,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         showVwap ? rows.filter((c) => c.vwap != null).map((c) => ({ time: c.time as never, value: c.vwap as number })) : []
       );
     }
-    const showBb = Boolean(filters?.use_bollinger);
+    const showBb = Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF";
     const bands = showBb ? bollingerRows(rows, filters?.bb_period ?? 20, filters?.bb_std ?? 2, !past) : null;
     bbRefs.current.forEach((series, i) => {
       series.applyOptions({ visible: showBb });
@@ -1425,9 +1425,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               VWAP <span className="font-mono text-slate-100">{px(shownVwap)}</span>
             </LegendItem>
           ) : null}
-          {filters?.use_bollinger ? (
+          {filters?.use_bollinger || (filters?.bb_exit ?? "OFF") !== "OFF" ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-[#C4B5FD]" />}>
-              Bollinger {filters.bb_period ?? 20}/{filters.bb_std ?? 2}σ
+              Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
           {filters?.use_rsi ? (

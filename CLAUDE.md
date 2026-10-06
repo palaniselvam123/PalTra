@@ -112,6 +112,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the old stop, and a position restored after a restart (no stop id) stays at
   its saved stop. A LIVE target cancels the exchange stop before the exit.
   Exits are `TSL_HIT` / `TARGET_HIT`.
+- Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
+  PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
+  after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
+  `bb_std`. `BAND` books a close at the far band (`BB_TARGET`); `MIDDLE`
+  exits a close back across the middle band once a close has been on the
+  trade's side (`BB_MIDDLE`). Exits go through `_exit_now`, which in LIVE
+  cancels the exchange stop first, like a target; a LIVE position restored
+  without its stop id is left to that stop.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
