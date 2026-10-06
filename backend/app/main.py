@@ -265,6 +265,12 @@ async def lifespan(app: FastAPI):
     tick_task = asyncio.create_task(_tick_feed_loop())
     square_off_task = asyncio.create_task(_square_off_scheduler_loop())
     health_task = asyncio.create_task(_feed_health_loop())
+    # Most-active scan: one Groww quote per F&O stock every few minutes while
+    # the market is open and Groww is connected. Market data only.
+    from app.services.active_stocks import active_scanner
+    from app.services.groww_funds import groww_client as _groww_session
+
+    active_scanner.start_background(_groww_session)
     await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
     yield
     if scanner_worker.running:
@@ -283,6 +289,7 @@ async def lifespan(app: FastAPI):
         pass
     if sma_task is not None:
         sma_task.cancel()
+    active_scanner.stop_background()
     tick_task.cancel()
     square_off_task.cancel()
     health_task.cancel()
