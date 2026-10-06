@@ -133,6 +133,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   settings it used, and its trades carry `run_id` (day-wise P&L in
   `get_run`, shown in the blotter's Backtests tab).
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused in LIVE mode.
+- `backend/sma_research/` – offline stock-selection research for the SMA bot
+  (read-only; `python -m sma_research download|analyze`). `download` runs on
+  the Fly machine after hours and only calls Groww's candle-history API;
+  `analyze` replays the unchanged strategy per stock through `ReplayEngine`
+  (`ResearchEngine`: fixed settings, no chart frame, minute steps while flat)
+  into its own SQLite files and writes the evidence report. Driven by
+  `.github/workflows/sma-stock-research.yml` (manual, refused in market hours).
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
