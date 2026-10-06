@@ -35,6 +35,7 @@ from replay import (
     parse_start,
     settings_snapshot,
 )
+import gap_mode
 from groww_client import preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
@@ -155,6 +156,14 @@ class ConfigUpdate(BaseModel):
     use_gap_short: bool | None = None
     gap_short_min: float | None = Field(default=None, ge=-10, le=10)
     gap_short_max: float | None = Field(default=None, ge=-10, le=10)
+    use_gap_mode: bool | None = None
+    gap_entry_long: float | None = Field(default=None, ge=-10, le=10)
+    gap_exit_long: float | None = Field(default=None, ge=-10, le=10)
+    gap_entry_short: float | None = Field(default=None, ge=-10, le=10)
+    gap_exit_short: float | None = Field(default=None, ge=-10, le=10)
+    gap_giveback_pct: float | None = Field(default=None, ge=0, le=100)
+    gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
+    gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
@@ -370,6 +379,10 @@ def _gap_dict(row) -> dict:
         "use_gap_long": bool(getattr(row, "use_gap_long", False)),
         "use_gap_short": bool(getattr(row, "use_gap_short", False)),
         **{key: _gap_value(row, key) for key in _GAP_DEFAULTS},
+        "use_gap_mode": bool(getattr(row, "use_gap_mode", False)),
+        **{key: gap_mode.setting(row, key) for key in gap_mode.DEFAULTS},
+        "gap_entry_delay_min": int(gap_mode.setting(row, "gap_entry_delay_min")),
+        "gap_entry_window_min": int(gap_mode.setting(row, "gap_entry_window_min")),
     }
 
 
@@ -378,6 +391,9 @@ def _check_gap(cfg, who: str = "") -> None:
         raise HTTPException(400, f"{who}Buy SMA gap min must be at or below the buy max")
     if _gap_value(cfg, "gap_short_min") > _gap_value(cfg, "gap_short_max"):
         raise HTTPException(400, f"{who}Sell SMA gap min must be at or below the sell max")
+    problem = gap_mode.check(cfg)
+    if problem:
+        raise HTTPException(400, f"{who}{problem}")
 
 
 class StockConfigUpdate(ConfigUpdate):

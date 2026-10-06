@@ -1296,6 +1296,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
+  // (SMA 9 − SMA 21) ÷ SMA 21 × 100, the gap the gap filter and gap mode read.
+  const smaGap = sma9 != null && sma21 != null && sma21 !== 0 ? ((sma9 - sma21) / sma21) * 100 : null;
 
   return (
     <section
@@ -1405,6 +1407,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#3B82F6]" />}>
             SMA 21 <span className="font-mono text-slate-100">{px(sma21)}</span>
           </LegendItem>
+          {smaGap != null ? (
+            <LegendItem swatch={<span className="block w-5 text-center text-[10px] leading-none text-slate-400">Δ</span>}>
+              Gap{" "}
+              <span className={clsx("font-mono", smaGap >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                {smaGap >= 0 ? "+" : ""}
+                {smaGap.toFixed(3)}%
+              </span>
+            </LegendItem>
+          ) : null}
           {past ? null : (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-amber-400" />}>
               {!stopOn ? (
