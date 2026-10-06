@@ -37,6 +37,7 @@ from indicators import (
     _session_vwap,
     closed_candle_cross,
     closed_technical_snapshot,
+    derive_minute_volume,
     enrich,
     entry_filter_reason,
     format_signal_report,
@@ -465,6 +466,7 @@ def _forming_row(bar) -> dict:
         "atr14": None,
         "vwap": None,
         "rsi14": None,
+        "volume": None,
     }
 
 
@@ -474,6 +476,12 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
         return []
     vwap = session_vwap_series(frame)
     rsi = rsi_wilder(frame["close"], 14)
+    # Shares traded in each minute (Groww's own volume is a running session
+    # total). Feeds the chart's volume profile; missing stays None, not 0.
+    if "minute_volume" in frame.columns:
+        minute_vol = pd.to_numeric(frame["minute_volume"], errors="coerce")
+    else:
+        minute_vol = derive_minute_volume(frame)
     rows = []
     for i, (_, row) in enumerate(frame.iterrows()):
         rows.append(
@@ -488,6 +496,7 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
                 "atr14": _finite(row.get("atr_14")),
                 "vwap": _finite(vwap.iloc[i]),
                 "rsi14": _finite(rsi.iloc[i]),
+                "volume": _finite(minute_vol.iloc[i]),
             }
         )
     return rows

@@ -69,6 +69,17 @@ def test_candles_carry_vwap_and_rsi():
     assert rows[0]["rsi14"] is None  # not ready yet
 
 
+def test_candles_carry_the_shares_traded_in_each_minute():
+    frame = _frame()
+    rows = candle_rows(frame)
+    # Groww's volume is a running session total; the chart gets each minute's own.
+    assert rows[1]["volume"] == pytest.approx(frame["volume"].iloc[1] - frame["volume"].iloc[0])
+    assert rows[50]["volume"] == pytest.approx(500 + (50 * 37) % 900)
+    # The first minute of each session has no earlier total, so it is unknown, not 0.
+    assert rows[0]["volume"] is None
+    assert rows[200]["volume"] is None
+
+
 def test_no_filter_on_means_no_refused_crosses():
     assert filter_blocks(_frame(), _cfg()) == []
 
@@ -115,7 +126,7 @@ def _chart_engine(frame, cfg):
 def _uncached(frame, cfg, limit):
     """What chart_payload sent before the cache: every row and cross recomputed."""
     rows = candle_rows(frame)[-limit:]
-    for key in ("sma9", "sma21", "atr14", "vwap", "rsi14"):
+    for key in ("sma9", "sma21", "atr14", "vwap", "rsi14", "volume"):
         rows[-1][key] = None
     first = rows[0]["time"]
     return rows, [b for b in filter_blocks(frame, cfg) if b["time"] >= first]

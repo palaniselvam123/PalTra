@@ -194,13 +194,20 @@ def test_resample_builds_bars_from_the_0915_open():
 
     base = int(dt.datetime(2026, 9, 29, 9, 15, tzinfo=IST).timestamp())
     rows = [
-        {"ts": base + 60 * i, "open": 100 + i, "high": 101 + i, "low": 99 + i, "close": 100.5 + i, "volume": 10}
+        # Groww volume is the running session total: 10 shares a minute.
+        {"ts": base + 60 * i, "open": 100 + i, "high": 101 + i, "low": 99 + i, "close": 100.5 + i, "volume": 10 * (i + 1)}
         for i in range(31)
     ]
     out = resample(pd.DataFrame(rows), 15)
     assert list(out["ts"]) == [base, base + 900, base + 1800]
     first = out.iloc[0]
     assert (first["open"], first["high"], first["low"], first["close"], first["volume"]) == (100, 115, 99, 114.5, 150)
+    # The bar keeps the running total at its last minute, not a sum of totals.
+    assert out.iloc[1]["volume"] == 300
+    # enrich() turns that into the shares traded inside each 15-minute bar.
+    from indicators import enrich
+
+    assert enrich(out)["minute_volume"].iloc[1] == 150
     # 60-minute bars also start at 09:15, then 10:15.
     hourly = resample(pd.DataFrame(rows), 60)
     assert list(hourly["ts"]) == [base]
