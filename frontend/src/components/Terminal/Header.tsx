@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
-import { smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
@@ -170,7 +170,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
   const armed = new Set(armedList);
   const books = state?.books ?? [];
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
-  const openCount = books.filter((b) => b.direction === "LONG" || b.direction === "SHORT").length;
+  const openBooks = books.filter((b) => (b.direction === "LONG" || b.direction === "SHORT") && b.qty > 0);
+  const openCount = openBooks.length;
+  const openNet = state?.open_net_total ?? openBooks.reduce((sum, b) => sum + (b.open_net ?? 0), 0);
+  const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${inr(Math.abs(v))}`;
   // Armed first, then the rest, each alphabetically. A held stock is never
   // dropped; a removed one stays off unless it is armed, held or on the chart.
   const chartSymbol = (config?.symbol ?? "").toUpperCase();
@@ -453,6 +456,26 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                   className={clsx("shrink-0 text-slate-400 transition-transform", folded && "-rotate-90")}
                 />
                 <span className="shrink-0 text-sm font-semibold text-slate-100">Stocks</span>
+                {openCount > 0 ? (
+                  // Every open position and its live net, in the bar's empty middle.
+                  <span className="flex min-w-0 flex-1 items-center gap-x-3 overflow-hidden whitespace-nowrap pl-2 font-mono text-xs" aria-label="Open positions">
+                    <span className={clsx("shrink-0 font-semibold", openNet >= 0 ? "text-emerald-300" : "text-rose-300")} title="Unrealized net of every open position, after estimated charges">
+                      Open {signed(openNet)}
+                    </span>
+                    <span className="hidden min-w-0 items-center gap-x-3 overflow-hidden sm:flex">
+                      {openBooks.map((b) => (
+                        <span key={b.symbol} className="shrink-0" title={`${b.symbol} ${b.direction} ${b.qty}${b.entry_price ? ` @ ${px(b.entry_price)}` : ""}`}>
+                          <span className="font-sans text-slate-200">{b.symbol}</span>{" "}
+                          <span className={b.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}>{b.direction === "LONG" ? "L" : "S"}</span>
+                          <span className="text-slate-500">×{b.qty}</span>{" "}
+                          <span className={(b.open_net ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                            {b.open_net == null ? "—" : signed(b.open_net)}
+                          </span>
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                ) : null}
                 <span className="ml-auto shrink-0 text-xs font-normal text-slate-400">
                   <span className="font-semibold text-emerald-300">{armedList.length}</span>
                   {folded ? " armed" : ` of ${ARM_LIMIT} armed for trading`}
