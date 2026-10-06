@@ -57,9 +57,26 @@ export type BacktestPdfInput = {
   strategy: string;
   settings: [string, string][];
   reasons: Record<string, string>;
+  /** A live or simulation book summary reuses this layout with its own words. */
+  title?: string;
+  subtitle?: string;
+  note?: string;
+  settingsHead?: [string, string];
+  fileName?: string;
 };
 
-export async function downloadBacktestPdf({ run, trades, strategy, settings, reasons }: BacktestPdfInput): Promise<void> {
+export async function downloadBacktestPdf({
+  run,
+  trades,
+  strategy,
+  settings,
+  reasons,
+  title,
+  subtitle,
+  note,
+  settingsHead,
+  fileName,
+}: BacktestPdfInput): Promise<void> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const width = doc.internal.pageSize.getWidth();
@@ -95,19 +112,24 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(...INK);
-  doc.text(`Backtest #${run.id}`, margin, 48);
+  const heading = title ?? `Backtest #${run.id}`;
+  doc.text(pdfText(heading), margin, 48);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(...MUTED);
   const range = run.end_date !== run.start_date ? `${day(run.start_date)} to ${day(run.end_date)}` : day(run.start_date);
   doc.text(
-    pdfText(`${range} · from ${run.start_time} · ${run.symbols.join(", ")} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days`),
+    pdfText(
+      subtitle ??
+        `${range} · from ${run.start_time} · ${run.symbols.join(", ")} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days`
+    ),
     margin,
-    66
+    66,
+    { maxWidth: width - margin * 2 }
   );
   doc.text(
     pdfText(
-      `Practice replay on Groww 1-minute candles. No order was sent. Generated ${new Date().toLocaleString("en-IN", {
+      `${note ?? "Practice replay on Groww 1-minute candles. No order was sent."} Generated ${new Date().toLocaleString("en-IN", {
         timeZone: "Asia/Kolkata",
         dateStyle: "medium",
         timeStyle: "short",
@@ -153,8 +175,8 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
     startY: 112,
     margin: { left: width / 2 + 6, right: margin },
     theme: "grid",
-    head: [["Setting", "Value"]],
-    body: settings.map(([k, v]) => [k, pdfText(v)]),
+    head: [settingsHead ?? ["Setting", "Value"]],
+    body: settings.map(([k, v]) => [pdfText(k), pdfText(v)]),
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [30, 41, 59] },
     columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
@@ -268,7 +290,7 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
           r.brokerage_and_taxes == null ? "-" : pdfMoney(r.brokerage_and_taxes).replace("+", ""),
           pdfMoney(r.net_pnl),
         ])
-      : [[{ content: "This run has no trades in the loaded book.", colSpan: 14 }]],
+      : [[{ content: "No closed trades.", colSpan: 14 }]],
     styles: { fontSize: 7.5, cellPadding: 3 },
     headStyles: { fillColor: [30, 41, 59] },
     columnStyles: Object.fromEntries([0, 3, 5, 7, 8, 9, 10, 12, 13].map((i) => [i, { halign: "right" as const }])),
@@ -289,7 +311,7 @@ export async function downloadBacktestPdf({ run, trades, strategy, settings, rea
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(...MUTED);
-    doc.text(`PalTra · Backtest #${run.id} · page ${i} of ${pages}`, margin, doc.internal.pageSize.getHeight() - 18);
+    doc.text(pdfText(`PalTra · ${heading} · page ${i} of ${pages}`), margin, doc.internal.pageSize.getHeight() - 18);
   }
-  doc.save(`backtest-${run.id}-${run.start_date}${run.end_date !== run.start_date ? `_to_${run.end_date}` : ""}.pdf`);
+  doc.save(fileName ?? `backtest-${run.id}-${run.start_date}${run.end_date !== run.start_date ? `_to_${run.end_date}` : ""}.pdf`);
 }
