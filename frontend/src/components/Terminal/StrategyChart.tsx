@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
+import { BarChartHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -17,6 +17,7 @@ import {
 } from "lightweight-charts";
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { parseClock } from "@/lib/format";
+import { VALUE_AREA_SHARE, volumeProfile, type VolumeProfile } from "@/lib/volumeProfile";
 import { Skeleton } from "./ui";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
@@ -43,9 +44,10 @@ export const BAR_MINUTES = [1, 5, 15, 30, 60] as const;
 export type BarMinutes = (typeof BAR_MINUTES)[number];
 const BAR_KEY = "sma.chart.interval";
 
-/** 1-minute bars the live chart needs so SMA 21 is formed on the bigger candles. */
+/** 1-minute bars the live chart needs so SMA 21 is formed on the bigger candles.
+ * 1-minute asks for a whole session (375 minutes) so the volume profile covers the day. */
 export function liveBarsFor(bar: number): number {
-  return bar <= 1 ? 240 : Math.min(2500, bar * 120);
+  return bar <= 1 ? 400 : Math.min(2500, bar * 120);
 }
 
 function barLabel(bar: number): string {
@@ -95,6 +97,7 @@ function resampleCandles(rows: Candle[], bar: number): Candle[] {
       last.high = Math.max(last.high, c.high);
       last.low = Math.min(last.low, c.low);
       last.close = c.close;
+      if (c.volume != null) last.volume = (last.volume ?? 0) + c.volume;
       // The filters read 1-minute values; the bar shows them as of its last minute.
       if (c.vwap != null) last.vwap = c.vwap;
       if (c.rsi14 != null) last.rsi14 = c.rsi14;
@@ -110,6 +113,7 @@ function resampleCandles(rows: Candle[], bar: number): Candle[] {
         atr14: null,
         vwap: c.vwap ?? null,
         rsi14: c.rsi14 ?? null,
+        volume: c.volume ?? null,
       });
     }
   }
@@ -340,6 +344,69 @@ class TradeRangeLines implements ISeriesPrimitive<Time> {
   }
 }
 
+const PROFILE_KEY = "sma.chart.profile";
+const POC_COLOR = "#FACC15";
+const VALUE_AREA_COLOR = "#38BDF8";
+
+/** Today's volume profile: a sideways histogram on the right of the price
+ * pane, drawn under the candles. Value-area rows are blue, the POC row yellow. */
+class VolumeProfileBars implements ISeriesPrimitive<Time> {
+  private profile: VolumeProfile | null = null;
+  private host: SeriesAttachedParameter<Time> | null = null;
+  private readonly views: ISeriesPrimitivePaneView[];
+
+  constructor() {
+    this.views = [{ zOrder: () => "bottom", renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>): void {
+    this.host = param;
+  }
+
+  detached(): void {
+    this.host = null;
+  }
+
+  paneViews(): readonly ISeriesPrimitivePaneView[] {
+    return this.views;
+  }
+
+  set(profile: VolumeProfile | null): void {
+    this.profile = profile;
+    this.host?.requestUpdate();
+  }
+
+  private draw(target: CanvasRenderingTarget2D): void {
+    const host = this.host;
+    const profile = this.profile;
+    if (!host || !profile || profile.rows.length === 0) return;
+    const max = Math.max(...profile.rows.map((r) => r.volume));
+    if (max <= 0) return;
+    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      // At most a quarter of the pane, so the latest candles stay readable.
+      const room = Math.min(bitmapSize.width * 0.25, 220 * hr);
+      const right = bitmapSize.width;
+      for (const row of profile.rows) {
+        if (row.volume <= 0) continue;
+        const yTop = host.series.priceToCoordinate(row.high);
+        const yBottom = host.series.priceToCoordinate(row.low);
+        if (yTop == null || yBottom == null) continue;
+        const top = Math.round(Math.min(yTop, yBottom) * vr);
+        const height = Math.max(1, Math.round(Math.abs(yBottom - yTop) * vr) - Math.round(vr));
+        const width = Math.max(1, Math.round((row.volume / max) * room));
+        const isPoc = profile.poc >= row.low && profile.poc <= row.high;
+        const inValue = row.low >= profile.val - 1e-9 && row.high <= profile.vah + 1e-9;
+        ctx.fillStyle = isPoc
+          ? "rgba(250, 204, 21, 0.5)"
+          : inValue
+            ? "rgba(56, 189, 248, 0.28)"
+            : "rgba(148, 163, 184, 0.16)";
+        ctx.fillRect(right - width, top, width, height);
+      }
+    });
+  }
+}
+
 function chartMarkers(
   chart: ChartPayload,
   rows: Candle[],
@@ -527,6 +594,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const rangesRef = useRef<TradeRangeLines | null>(null);
+  const profileBarsRef = useRef<VolumeProfileBars | null>(null);
+  const profileLines = useRef<IPriceLine[]>([]);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -602,6 +671,46 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     return base;
   }, [view, past, bar]);
   rowsRef.current = rows;
+
+  // Volume profile of the latest session on screen, from the candles as sent
+  // (1-minute live; the chosen size on a past range).
+  const [showProfile, setShowProfile] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PROFILE_KEY) === "off") setShowProfile(false);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const toggleProfile = () => {
+    setShowProfile((on) => {
+      try {
+        localStorage.setItem(PROFILE_KEY, on ? "off" : "on");
+      } catch {
+        /* private mode */
+      }
+      return !on;
+    });
+  };
+  const profile = useMemo(
+    () => (showProfile && view ? volumeProfile(sessionCandles(view.candles)) : null),
+    [view, showProfile]
+  );
+  useEffect(() => {
+    profileBarsRef.current?.set(profile);
+    const series = candleRef.current;
+    if (!series) return;
+    for (const line of profileLines.current) series.removePriceLine(line);
+    profileLines.current = [];
+    if (!profile) return;
+    const line = (price: number, color: string, title: string, style: LineStyle, axis: boolean) =>
+      series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: axis, title });
+    profileLines.current = [
+      line(profile.poc, POC_COLOR, "POC", LineStyle.Solid, true),
+      line(profile.vah, VALUE_AREA_COLOR, "VAH", LineStyle.Dotted, false),
+      line(profile.val, VALUE_AREA_COLOR, "VAL", LineStyle.Dotted, false),
+    ];
+  }, [profile]);
 
   // The replay run whose trades the past view marks; null = the default book.
   const pastRunRef = useRef<number | null>(null);
@@ -771,6 +880,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const ranges = new TradeRangeLines();
     candles.attachPrimitive(ranges);
     rangesRef.current = ranges;
+    const profileBars = new VolumeProfileBars();
+    candles.attachPrimitive(profileBars);
+    profileBarsRef.current = profileBars;
     // Stretch the price scale so the open position's entry, stop and target
     // lines stay on screen instead of being cut off above or below the candles.
     candles.applyOptions({
@@ -895,6 +1007,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       instance.unsubscribeClick(onClick);
       observer.disconnect();
       rangesRef.current = null;
+      profileBarsRef.current = null;
+      profileLines.current = [];
       instance.remove();
       apiRef.current = null;
     };
@@ -1106,6 +1220,19 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <Ruler size={14} aria-hidden />
             Measure
           </button>
+          <button
+            type="button"
+            onClick={toggleProfile}
+            aria-pressed={showProfile}
+            title="Volume profile: how many shares traded at each price today"
+            className={clsx(
+              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              showProfile ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <BarChartHorizontal size={14} aria-hidden />
+            Profile
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -1113,6 +1240,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           ) : null}
         </h2>
         <ul aria-label="Chart legend" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
+          {showProfile ? (
+            profile ? (
+              <>
+                <LegendItem swatch={<span className="block h-2.5 w-4 rounded-sm bg-[#FACC15]/70" />}>
+                  POC <span className="font-mono text-slate-100">{px(profile.poc)}</span>
+                </LegendItem>
+                <LegendItem swatch={<span className="block h-2.5 w-4 rounded-sm bg-[#38BDF8]/50" />}>
+                  Value area {Math.round(VALUE_AREA_SHARE * 100)}%{" "}
+                  <span className="font-mono text-slate-100">
+                    {px(profile.val)}–{px(profile.vah)}
+                  </span>
+                </LegendItem>
+              </>
+            ) : (
+              <LegendItem swatch={<span className="block h-2.5 w-4 rounded-sm bg-slate-500/40" />}>
+                Volume profile: no volume yet
+              </LegendItem>
+            )
+          ) : null}
           <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#F43F5E]" />}>
             SMA 9 <span className="font-mono text-slate-100">{px(sma9)}</span>
           </LegendItem>

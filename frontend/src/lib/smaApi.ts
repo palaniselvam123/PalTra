@@ -193,6 +193,8 @@ export type Candle = {
   vwap?: number | null;
   /** RSI 14 on 1-minute closes (what the RSI filter reads). */
   rsi14?: number | null;
+  /** Shares traded in this candle (null when Groww's running total cannot give it). */
+  volume?: number | null;
 };
 
 /** An SMA cross the entry filters refused, with the bot's own reason. */

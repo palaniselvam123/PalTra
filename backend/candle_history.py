@@ -121,6 +121,9 @@ def resample(frame: pd.DataFrame, minutes: int) -> pd.DataFrame:
     ist_min = ((ts + 19_800) % 86_400) // 60
     offset = (ist_min - _SESSION_OPEN_MIN) % minutes
     bucket = ts - ts % 60 - offset * 60
+    # Groww's `volume` is a running session total, so a bigger bar keeps the
+    # total at its last minute. enrich() then differences it into the shares
+    # traded in each bar; summing running totals counted them many times over.
     grouped = frame.assign(bucket=bucket).groupby("bucket", sort=True)
     out = pd.DataFrame(
         {
@@ -129,7 +132,7 @@ def resample(frame: pd.DataFrame, minutes: int) -> pd.DataFrame:
             "high": grouped["high"].max().to_numpy(),
             "low": grouped["low"].min().to_numpy(),
             "close": grouped["close"].last().to_numpy(),
-            "volume": grouped["volume"].sum().to_numpy(),
+            "volume": grouped["volume"].last().to_numpy(),
         }
     )
     return out.reset_index(drop=True)
