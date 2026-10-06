@@ -122,6 +122,11 @@ async def login(broker: str, session: AsyncSession = Depends(get_session)):
     row.token_expires_at = dt.datetime.combine(dt.date.today(), dt.time(23, 59))
     await session.commit()
     _active_clients[broker] = client
+    # A LIVE feed already running still holds the old client and its dead
+    # token. Hand it the new one so quotes recover without a source switch.
+    from app.services.market_data import market_data
+
+    market_data.adopt_client(client)
     try:
         from groww_client import note_fresh_desk_token
 
