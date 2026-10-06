@@ -116,6 +116,15 @@ class BotConfig(Base):
     # the far band) | MIDDLE (close back across the middle band) | BOTH.
     # Uses bb_period / bb_std. Exits are BB_TARGET / BB_MIDDLE.
     bb_exit: Mapped[str] = mapped_column(String, default="OFF")
+    # SMA gap range entry filter: (SMA fast - SMA slow) / SMA slow x 100 on the
+    # closed cross candle, signed. Buys and sells are switched on separately;
+    # an unticked side is not checked.
+    use_gap_long: Mapped[bool] = mapped_column(Boolean, default=False)
+    gap_long_min: Mapped[float] = mapped_column(Float, default=0.02)
+    gap_long_max: Mapped[float] = mapped_column(Float, default=0.5)
+    use_gap_short: Mapped[bool] = mapped_column(Boolean, default=False)
+    gap_short_min: Mapped[float] = mapped_column(Float, default=-0.5)
+    gap_short_max: Mapped[float] = mapped_column(Float, default=-0.02)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
     # 1 after the one-time raise from the old default of 15. A later edit to

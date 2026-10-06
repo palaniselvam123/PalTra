@@ -149,6 +149,12 @@ class ConfigUpdate(BaseModel):
     bb_std: float | None = Field(default=None, gt=0, le=5)
     bb_min_width_pct: float | None = Field(default=None, ge=0, le=10)
     bb_exit: Literal["OFF", "BAND", "MIDDLE", "BOTH"] | None = None
+    use_gap_long: bool | None = None
+    gap_long_min: float | None = Field(default=None, ge=-10, le=10)
+    gap_long_max: float | None = Field(default=None, ge=-10, le=10)
+    use_gap_short: bool | None = None
+    gap_short_min: float | None = Field(default=None, ge=-10, le=10)
+    gap_short_max: float | None = Field(default=None, ge=-10, le=10)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
@@ -195,6 +201,7 @@ def _config_dict(row: BotConfig) -> dict:
         "bb_std": float(getattr(row, "bb_std", 2.0) or 2.0),
         "bb_min_width_pct": float(getattr(row, "bb_min_width_pct", 0.15) if getattr(row, "bb_min_width_pct", None) is not None else 0.15),
         "bb_exit": (getattr(row, "bb_exit", None) or "OFF").upper(),
+        **_gap_dict(row),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,
@@ -319,6 +326,7 @@ async def put_config(body: ConfigUpdate):
             raise HTTPException(400, "Buy RSI low must be at or below the buy RSI high")
         if float(row.rsi_short_min) > float(row.rsi_short_max):
             raise HTTPException(400, "Sell RSI low must be at or below the sell RSI high")
+        _check_gap(row)
         for symbol in own:
             _check_settings(_cfg_for(row, symbol), symbol)
         db.commit()
@@ -345,6 +353,31 @@ def _check_settings(cfg: BotConfig, symbol: str = "") -> None:
         raise HTTPException(400, f"{who}Buy RSI low must be at or below the buy RSI high")
     if float(cfg.rsi_short_min) > float(cfg.rsi_short_max):
         raise HTTPException(400, f"{who}Sell RSI low must be at or below the sell RSI high")
+    _check_gap(cfg, who)
+
+
+_GAP_DEFAULTS = {"gap_long_min": 0.02, "gap_long_max": 0.5, "gap_short_min": -0.5, "gap_short_max": -0.02}
+
+
+def _gap_value(row, key: str) -> float:
+    value = getattr(row, key, None)
+    return _GAP_DEFAULTS[key] if value is None else float(value)
+
+
+def _gap_dict(row) -> dict:
+    """The SMA gap range filter. 0 and negative numbers are real settings."""
+    return {
+        "use_gap_long": bool(getattr(row, "use_gap_long", False)),
+        "use_gap_short": bool(getattr(row, "use_gap_short", False)),
+        **{key: _gap_value(row, key) for key in _GAP_DEFAULTS},
+    }
+
+
+def _check_gap(cfg, who: str = "") -> None:
+    if _gap_value(cfg, "gap_long_min") > _gap_value(cfg, "gap_long_max"):
+        raise HTTPException(400, f"{who}Buy SMA gap min must be at or below the buy max")
+    if _gap_value(cfg, "gap_short_min") > _gap_value(cfg, "gap_short_max"):
+        raise HTTPException(400, f"{who}Sell SMA gap min must be at or below the sell max")
 
 
 class StockConfigUpdate(ConfigUpdate):

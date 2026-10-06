@@ -69,6 +69,11 @@ STRATEGY_GUIDE = {
             "cross while the bands are narrower than bb_min_width_pct % (squeeze; 0 = check off)."
         ),
         "use_adx_filter": "ADX(14) must be at least adx_threshold (trend strength).",
+        "use_gap_long / use_gap_short": (
+            "SMA gap range, ticked per side: the signed gap % = (SMA9 - SMA21) / SMA21 x 100 on the cross candle "
+            "must be within gap_long_min..gap_long_max for a buy, gap_short_min..gap_short_max for a sell "
+            "(sell ranges are usually negative). An unticked side is not checked."
+        ),
         "note": "A refused cross is shown on the chart with an x marker and the reason.",
     },
     "bollinger_exit": {

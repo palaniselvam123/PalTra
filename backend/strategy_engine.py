@@ -47,6 +47,7 @@ from indicators import (
     rsi_wilder,
     session_vwap_series,
     sma_gap_pct,
+    sma_gap_signed,
 )
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
@@ -143,7 +144,8 @@ SNAPSHOT_FIELDS = (
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
-    "bb_exit", "max_daily_loss", "entry_cutoff_time", "square_off_time",
+    "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
+    "gap_short_max", "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
 
@@ -281,7 +283,7 @@ def _entry_block(
 ) -> str | None:
     """Checked entry filters only. An unchecked box is not read.
 
-    `only` ("vwap", "volume", "density" or "rsi") reads that one filter, so a
+    `only` ("vwap", "volume", "density", "rsi", "bollinger" or "gap") reads that one filter, so a
     message can say which of several checked filters agrees and which does not.
     """
 
@@ -305,8 +307,31 @@ def _entry_block(
         bb_period=int(getattr(cfg, "bb_period", 20) or 20),
         bb_std=float(getattr(cfg, "bb_std", 2.0) or 2.0),
         bb_min_width_pct=_bb_min_width(cfg),
+        use_gap_long=bool(getattr(cfg, "use_gap_long", False)) and only in (None, "gap"),
+        use_gap_short=bool(getattr(cfg, "use_gap_short", False)) and only in (None, "gap"),
+        gap_long_min=_gap_setting(cfg, "gap_long_min"),
+        gap_long_max=_gap_setting(cfg, "gap_long_max"),
+        gap_short_min=_gap_setting(cfg, "gap_short_min"),
+        gap_short_max=_gap_setting(cfg, "gap_short_max"),
         price=price,
     )
+
+
+_GAP_DEFAULTS = {"gap_long_min": 0.02, "gap_long_max": 0.5, "gap_short_min": -0.5, "gap_short_max": -0.02}
+
+
+def _gap_setting(cfg, key: str) -> float:
+    """A gap range end; 0 and negative numbers are real settings."""
+    value = getattr(cfg, key, None)
+    return _GAP_DEFAULTS[key] if value is None else float(value)
+
+
+def _uses_check(cfg, name: str, direction: str) -> bool:
+    """Whether a named entry check is ticked for this side."""
+    if name == "gap":
+        key = "use_gap_long" if direction == "LONG" else "use_gap_short"
+        return bool(getattr(cfg, key, False))
+    return bool(getattr(cfg, f"use_{name}", False))
 
 
 def _bb_min_width(cfg) -> float:
@@ -333,6 +358,9 @@ def _short_block_label(reason: str) -> str:
             parts.append("BB squeeze")
         elif low.startswith("bollinger"):
             parts.append("BB")
+        elif low.startswith("sma gap"):
+            words = part.split()
+            parts.append(f"Gap {words[2]}" if len(words) > 2 and words[2][:1] in "+-" else "Gap")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -351,7 +379,9 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
     if cfg is None or frame is None or len(frame) < 3 or not {"sma_9", "sma_21", "ts"}.issubset(frame.columns):
         return []
     use_adx = bool(getattr(cfg, "use_adx_filter", False))
-    if not (use_adx or any(bool(getattr(cfg, k, False)) for k in ("use_vwap", "use_volume", "use_density", "use_rsi", "use_bollinger"))):
+    if not (use_adx or any(bool(getattr(cfg, k, False)) for k in (
+        "use_vwap", "use_volume", "use_density", "use_rsi", "use_bollinger", "use_gap_long", "use_gap_short",
+    ))):
         return []
     fast = frame["sma_9"].to_numpy(dtype=float)
     slow = frame["sma_21"].to_numpy(dtype=float)
@@ -389,7 +419,10 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
     return out
 
 
-_CHECK_NAMES = (("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"))
+_CHECK_NAMES = (
+    ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
+    ("gap", "SMA gap"),
+)
 
 
 def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
@@ -419,6 +452,12 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             mid = (u + lo) / 2
             width = (u - lo) / mid * 100 if mid else 0.0
             return f"Bollinger: {float(bar['close']):.2f} inside {lo:.2f}–{u:.2f} (bands {width:.2f}% wide)"
+        if name == "gap":
+            gap = sma_gap_signed(bar.get("sma_9"), bar.get("sma_21"))
+            side = "buy" if direction == "LONG" else "sell"
+            lo = _gap_setting(cfg, f"gap_{'long' if direction == 'LONG' else 'short'}_min")
+            hi = _gap_setting(cfg, f"gap_{'long' if direction == 'LONG' else 'short'}_max")
+            return f"SMA gap {gap:+.3f}% (inside the {side} range {lo:g}% to {hi:g}%)"
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -440,7 +479,7 @@ def entry_checks(frame: pd.DataFrame, direction: str, cfg) -> list[str]:
         return []
     lines: list[str] = []
     for name, _label in _CHECK_NAMES:
-        if not bool(getattr(cfg, f"use_{name}", False)):
+        if not _uses_check(cfg, name, direction):
             continue
         reason = _entry_block(frame, direction, cfg, only=name)
         lines.append(f"❌ {reason}" if reason else f"✅ {_check_passed(name, frame, direction, cfg)}")
@@ -480,6 +519,7 @@ _FILTER_KEYS = (
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
+    "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
 )
 
 
@@ -3145,10 +3185,12 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("RSI")
     if bool(getattr(cfg, "use_bollinger", False)):
         checked.append("Bollinger")
+    if bool(getattr(cfg, "use_gap_long", False)) or bool(getattr(cfg, "use_gap_short", False)):
+        checked.append("SMA gap")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:
-        return "VWAP, volume, density, RSI and Bollinger are off."
+        return "VWAP, volume, density, RSI, Bollinger and SMA gap are off."
     return "Checked: " + ", ".join(checked) + "."
 
 

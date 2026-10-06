@@ -25,6 +25,8 @@ const LABELS: Record<string, string> = {
   use_rsi: "RSI",
   use_bollinger: "Bollinger",
   bb_exit: "Bollinger exit",
+  use_gap_long: "SMA gap (buy)",
+  use_gap_short: "SMA gap (sell)",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -126,6 +128,12 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
     bb_std: Number(form.bb_std ?? 2),
     bb_min_width_pct: Number(form.bb_min_width_pct ?? 0.15),
     bb_exit: BB_EXITS.includes(form.bb_exit as BbExit) ? (form.bb_exit as BbExit) : "OFF",
+    use_gap_long: Boolean(form.use_gap_long),
+    gap_long_min: Number(form.gap_long_min ?? 0.02),
+    gap_long_max: Number(form.gap_long_max ?? 0.5),
+    use_gap_short: Boolean(form.use_gap_short),
+    gap_short_min: Number(form.gap_short_min ?? -0.5),
+    gap_short_max: Number(form.gap_short_max ?? -0.02),
   });
 
   const saveStock = async () => {
@@ -434,6 +442,49 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first.
         Your stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
       </p>
+      <div className="mt-4 text-sm text-slate-300">
+        SMA 9/21 gap range. Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is
+        above, negative when below. Tick the side(s) to check; an unticked side trades as before.
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-md border border-white/10 p-2">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_gap_long)}
+              onChange={(e) => set("use_gap_long", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_gap_long") && <OwnTag />}
+            Buy (LONG)
+          </label>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Field label="Min %" signed value={String(form.gap_long_min ?? 0.02)} onChange={(v) => set("gap_long_min", v)} own={isOwn("gap_long_min")} />
+            <Field label="Max %" signed value={String(form.gap_long_max ?? 0.5)} onChange={(v) => set("gap_long_max", v)} own={isOwn("gap_long_max")} />
+          </div>
+        </div>
+        <div className="rounded-md border border-white/10 p-2">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_gap_short)}
+              onChange={(e) => set("use_gap_short", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_gap_short") && <OwnTag />}
+            Sell (SHORT)
+          </label>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Field label="Min %" signed value={String(form.gap_short_min ?? -0.5)} onChange={(v) => set("gap_short_min", v)} own={isOwn("gap_short_min")} />
+            <Field label="Max %" signed value={String(form.gap_short_max ?? -0.02)} onChange={(v) => set("gap_short_max", v)} own={isOwn("gap_short_max")} />
+          </div>
+        </div>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        Negative numbers are allowed (a sell gap is usually negative, e.g. −0.5 to −0.02). On the cross candle the
+        gap is usually small, so a tight range skips most crosses; skipped crosses show as ✕ on the chart with the
+        gap. Force order skips this check.
+      </p>
       <div className="mt-3 flex items-center gap-3">
         <button
           disabled={busy}
@@ -470,12 +521,15 @@ function Field({
   value,
   onChange,
   own,
+  signed,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   /** This stock sets the value itself rather than using the shared one. */
   own?: boolean;
+  /** Allows a minus sign: phones' decimal keypads have none. */
+  signed?: boolean;
 }) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
@@ -489,7 +543,7 @@ function Field({
         {own && <span className="ml-1 normal-case tracking-normal text-violet-300">· own</span>}
       </span>
       <input
-        inputMode="decimal"
+        inputMode={signed ? "text" : "decimal"}
         value={text}
         onFocus={() => {
           focused.current = true;
