@@ -1401,21 +1401,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               </LegendItem>
             )
           ) : null}
-          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#F43F5E]" />}>
-            SMA 9 <span className="font-mono text-slate-100">{px(sma9)}</span>
-          </LegendItem>
-          <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#3B82F6]" />}>
-            SMA 21 <span className="font-mono text-slate-100">{px(sma21)}</span>
-          </LegendItem>
-          {smaGap != null ? (
-            <LegendItem swatch={<span className="block w-5 text-center text-[10px] leading-none text-slate-400">Δ</span>}>
-              Gap{" "}
-              <span className={clsx("font-mono", smaGap >= 0 ? "text-emerald-300" : "text-rose-300")}>
-                {smaGap >= 0 ? "+" : ""}
-                {smaGap.toFixed(3)}%
-              </span>
-            </LegendItem>
-          ) : null}
           {past ? null : (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-amber-400" />}>
               {!stopOn ? (
@@ -1451,29 +1436,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               </span>
             </LegendItem>
           ) : null}
-          {(filters ? filters.atr_stop : true) ? (
-            <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#A78BFA]" />}>ATR 14</LegendItem>
-          ) : null}
-          {blocked.length ? (
-            <LegendItem swatch={<span className="text-[#94A3B8]">✕</span>}>Cross skipped by a filter</LegendItem>
-          ) : null}
-          <LegendItem swatch={<span className="text-slate-300">▲▼</span>}>Buy / Sell</LegendItem>
-          <LegendItem swatch={<span className="block h-2.5 w-2.5 rounded-full bg-emerald-400" />}>
-            <span className="text-emerald-300">Profit</span>
-          </LegendItem>
-          <LegendItem swatch={<span className="block h-2.5 w-2.5 rounded-full bg-rose-400" />}>
-            <span className="text-rose-300">Loss</span>
-          </LegendItem>
-          <LegendItem swatch={<span className="text-slate-300">●</span>}>Exit</LegendItem>
-          <LegendItem swatch={<span className="block h-0.5 w-3 rounded bg-[#34D399]" />}>Max high</LegendItem>
-          <LegendItem swatch={<span className="block h-0.5 w-3 rounded bg-[#FB7185]" />}>Max low</LegendItem>
-          <LegendItem swatch={<span className="text-[#FACC15]">●</span>}>
-            <span className="text-[#FACC15]">Stop exit</span>
-          </LegendItem>
         </ul>
       </div>
       <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
-      <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} />
+      <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} sma9={sma9} sma21={sma21} gap={smaGap} />
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
           <span className="font-semibold text-slate-200">
@@ -1845,7 +1811,21 @@ function MeasureBar({
   );
 }
 
-function OhlcLine({ ohlc, hovering }: { ohlc: Ohlc | null; hovering: boolean }) {
+/** The candle under the mouse (else the latest): OHLC, change, and the SMA 9 / SMA 21
+ *  readings with their gap % — the number the gap filter and gap mode read. */
+function OhlcLine({
+  ohlc,
+  hovering,
+  sma9,
+  sma21,
+  gap,
+}: {
+  ohlc: Ohlc | null;
+  hovering: boolean;
+  sma9: number | null;
+  sma21: number | null;
+  gap: number | null;
+}) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
   const base = ohlc.prevClose ?? ohlc.open;
@@ -1873,6 +1853,18 @@ function OhlcLine({ ohlc, hovering }: { ohlc: Ohlc | null; hovering: boolean }) 
         {change >= 0 ? "+" : ""}
         {change.toFixed(2)} ({pct >= 0 ? "+" : ""}
         {pct.toFixed(2)}%)
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-[#F43F5E]">SMA 9</span> <span className="text-slate-100">{px(sma9)}</span>
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-[#3B82F6]">SMA 21</span> <span className="text-slate-100">{px(sma21)}</span>
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-slate-400">Gap</span>{" "}
+        <span className={clsx(gap == null ? "text-slate-400" : gap >= 0 ? "text-emerald-300" : "text-rose-300")}>
+          {gap == null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%`}
+        </span>
       </span>
     </div>
   );
