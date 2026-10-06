@@ -164,22 +164,24 @@ function spanText(seconds: number): string {
   return [d ? `${d}d` : "", h ? `${h}h` : "", `${m}m`].filter(Boolean).join(" ");
 }
 
-type Marker = {
+/** One order on the chart: a small box at the bar and fill price. */
+type TradeBox = {
   time: number;
-  position: "aboveBar" | "belowBar";
-  color: string;
-  shape: "arrowUp" | "arrowDown" | "circle" | "square";
+  price: number;
+  kind: "ENTRY" | "EXIT";
+  direction: string;
   text: string;
+  color: string;
 };
 
 /** Green for a trade that made money, red for a loss, grey while it is open or unknown. */
-const ENTRY_OPEN_COLOR = "#CBD5E1";
+const BOX_OPEN_COLOR = "#64748B";
 
 function resultColor(net: number | null | undefined): string {
-  return net == null ? ENTRY_OPEN_COLOR : net >= 0 ? "#34D399" : "#FB7185";
+  return net == null ? BOX_OPEN_COLOR : net >= 0 ? "#059669" : "#E11D48";
 }
 
-/** The closed trade an entry marker belongs to: same stock, side, fill price and bar. */
+/** The closed trade a marker belongs to: same stock, side, fill price and bar. */
 function entryResult(
   m: { time: number; direction: string; price: number; net_pnl?: number | null },
   lookup: TradeRow[],
@@ -196,6 +198,79 @@ function entryResult(
     return t.net_pnl ?? t.gross_pnl ?? null;
   }
   return null;
+}
+
+/** The number part of a trade id ("P-12" -> "12", "R7-3" -> "3"). */
+function refNumber(ref: string | null | undefined): string {
+  if (!ref) return "";
+  const dash = ref.lastIndexOf("-");
+  return dash >= 0 ? ref.slice(dash + 1) : ref.replace(/^#/, "");
+}
+
+/** Entry and exit boxes: "B 12" / "S 12" where the order filled, "X 12" where it closed,
+ * white text on green (profit), red (loss) or grey (still open). */
+class TradeBoxes implements ISeriesPrimitive<Time> {
+  private boxes: TradeBox[] = [];
+  private host: SeriesAttachedParameter<Time> | null = null;
+  private readonly views: ISeriesPrimitivePaneView[];
+
+  constructor() {
+    this.views = [{ zOrder: () => "top", renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>): void {
+    this.host = param;
+  }
+
+  detached(): void {
+    this.host = null;
+  }
+
+  paneViews(): readonly ISeriesPrimitivePaneView[] {
+    return this.views;
+  }
+
+  set(boxes: TradeBox[]): void {
+    this.boxes = boxes;
+    this.host?.requestUpdate();
+  }
+
+  private draw(target: CanvasRenderingTarget2D): void {
+    const host = this.host;
+    if (!host || this.boxes.length === 0) return;
+    const scale = host.chart.timeScale();
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      const h = 14;
+      const gap = 7;
+      for (const b of this.boxes) {
+        const x = scale.timeToCoordinate(b.time as Time);
+        const y = host.series.priceToCoordinate(b.price);
+        if (x == null || y == null || x < -40 || x > mediaSize.width + 40) continue;
+        const w = Math.ceil(ctx.measureText(b.text).width) + 8;
+        // A buy entry sits under its fill and a sell entry above it; the exit goes the other way.
+        const below = (b.direction === "LONG") === (b.kind === "ENTRY");
+        const top = below ? y + gap : y - gap - h;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, below ? top : top + h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.roundRect(x - w / 2, top, w, h, 3);
+        ctx.fill();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillText(b.text, x, top + h / 2 + 0.5);
+      }
+    });
+  }
 }
 
 const VWAP_COLOR = "#22D3EE";
@@ -294,31 +369,35 @@ class VolumeProfileBars implements ISeriesPrimitive<Time> {
   }
 }
 
-function chartMarkers(
+function tradeBoxes(
   chart: ChartPayload,
   rows: Candle[],
-  trades: TradeRow[],
   symbol: string,
   bar = 1,
-  lookup: TradeRow[] = trades
-): Marker[] {
+  lookup: TradeRow[] = []
+): TradeBox[] {
   if (rows.length === 0) return [];
   const first = rows[0].time;
   const last = rows[rows.length - 1].time;
   const times = new Set(rows.map((c) => c.time));
   const snap = (sec: number) => bucketStart(sec, bar);
-  // Only the orders: a small "B" or "S" box at each entry, green when that trade made
-  // money, red when it lost, grey while it is still open. No exit, filter or price text.
-  const out: Marker[] = chart.markers
-    .filter((m) => m.kind !== "EXIT")
+  const out: TradeBox[] = chart.markers
+    .filter((m) => m.kind === "ENTRY" || m.kind === "EXIT")
     .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time < last + bar * 60))
-    .map((m): Marker => ({
-      time: snap(m.time),
-      position: m.direction === "LONG" ? "belowBar" : "aboveBar",
-      color: resultColor(entryResult(m, lookup, symbol, snap)),
-      shape: "square",
-      text: m.direction === "LONG" ? "B" : "S",
-    }));
+    .map((m): TradeBox => {
+      const n = refNumber(m.trade_ref);
+      const entry = m.kind === "ENTRY";
+      const net = m.open ? null : entryResult(m, lookup, symbol, snap);
+      const letter = entry ? (m.direction === "LONG" ? "B" : "S") : "X";
+      return {
+        time: snap(m.time),
+        price: m.price,
+        kind: entry ? "ENTRY" : "EXIT",
+        direction: m.direction,
+        text: n ? `${letter} ${n}` : letter,
+        color: resultColor(net),
+      };
+    });
   return out.sort((a, b) => a.time - b.time);
 }
 
@@ -446,6 +525,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const profileBarsRef = useRef<VolumeProfileBars | null>(null);
+  const tradeBoxesRef = useRef<TradeBoxes | null>(null);
   const profileLines = useRef<IPriceLine[]>([]);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -809,6 +889,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const profileBars = new VolumeProfileBars();
     candles.attachPrimitive(profileBars);
     profileBarsRef.current = profileBars;
+    const boxes = new TradeBoxes();
+    candles.attachPrimitive(boxes);
+    tradeBoxesRef.current = boxes;
     // Stretch the price scale so the open position's entry, stop and target
     // lines stay on screen instead of being cut off above or below the candles.
     candles.applyOptions({
@@ -1017,10 +1100,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         ];
       }
     }
-    // Past candles carry their own exit markers; the blotter only covers recent trades.
-    candleRef.current.setMarkers(
-      chartMarkers(chart, rows, past ? [] : trades, symbol, bar, trades).map((m) => ({ ...m, time: m.time as never }))
-    );
+    candleRef.current.setMarkers([]);
+    tradeBoxesRef.current?.set(tradeBoxes(chart, rows, symbol, bar, trades));
 
     if (entryLine.current) {
       candleRef.current.removePriceLine(entryLine.current);

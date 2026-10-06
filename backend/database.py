@@ -134,6 +134,16 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN max_high FLOAT")
         if "max_low" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN max_low FLOAT")
+        if "book_seq" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN book_seq INTEGER")
+        # Number older trades inside their own book (mode, and run for replays).
+        conn.exec_driver_sql(
+            "UPDATE trade_log SET book_seq = ("
+            " SELECT COUNT(*) FROM trade_log t2"
+            " WHERE t2.mode = trade_log.mode AND IFNULL(t2.run_id, -1) = IFNULL(trade_log.run_id, -1)"
+            " AND t2.id <= trade_log.id"
+            ") WHERE book_seq IS NULL"
+        )
 
 
 def init_db() -> BotConfig:

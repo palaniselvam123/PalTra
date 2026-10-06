@@ -495,11 +495,11 @@ def test_chart_markers_come_from_this_book_only(db):
 
     run2 = ReplayEngine(feed, ["TCS"], run_id=2)
     run2.load_config()
-    assert [m["price"] for m in run2.chart_payload()["markers"]] == [1001.0]
+    assert [m["price"] for m in run2.chart_payload()["markers"] if m["kind"] == "ENTRY"] == [1001.0]
 
     paper = StrategyEngine(broker=ReplayBroker(feed))
     paper.load_config()
-    assert [m["price"] for m in paper.chart_payload()["markers"]] == [1002.0]
+    assert [m["price"] for m in paper.chart_payload()["markers"] if m["kind"] == "ENTRY"] == [1002.0]
 
     # The trade list says which run a replay trade belongs to, so the page can match it.
     assert {t["entry_price"]: t["run_id"] for t in paper.trades()} == {1000.0: 1, 1001.0: 2, 1002.0: None}

@@ -47,6 +47,11 @@ const BOOKS: { id: Book; title: string; note: string }[] = [
   },
 ];
 
+/** The trade's id inside its book: N-12 (NSE live), P-12 (simulation), R7-12 (replay run 7). */
+function tradeId(trade: TradeRow): string {
+  return trade.trade_ref || `#${trade.id}`;
+}
+
 function bookOf(trade: TradeRow): Book {
   const mode = (trade.mode || "PAPER").toUpperCase();
   return mode === "LIVE" ? "LIVE" : mode === "REPLAY" ? "REPLAY" : "PAPER";
@@ -874,7 +879,7 @@ export function TradeHistoryTable({
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
 const COLUMNS: Col[] = [
-  { key: "id", label: "#", num: true },
+  { key: "id", label: "Trade ID", num: true },
   { key: "stock", label: "Stock" },
   { key: "side", label: "Side" },
   { key: "entry_time", label: "Entry time" },
@@ -1406,7 +1411,7 @@ function OrderRowView({
   const { open, market, points, net } = rowFigures(t, state);
   return (
     <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
-      <td className="px-3 py-2 text-right font-mono text-slate-400">{t.id}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
       <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
       <td className="whitespace-nowrap px-3 py-2">
         <ResultSideBadge trade={t} net={net} />
@@ -1490,7 +1495,7 @@ function TradeCardView({
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-xs text-slate-400">
-          #{t.id} <ReasonBadge trade={t} />
+          {tradeId(t)} <ReasonBadge trade={t} />
         </span>
         {open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}
       </div>

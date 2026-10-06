@@ -44,6 +44,25 @@ class TradeLog(Base):
     # Written at the close; None on trades booked before this was recorded.
     max_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Trade number inside its own book: PAPER and LIVE count separately, and
+    # each replay / backtest run counts from 1. See trade_ref().
+    book_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+BOOK_PREFIX = {"LIVE": "N", "PAPER": "P"}
+
+
+def trade_ref(mode: str | None, run_id: int | None, seq: int | None, fallback: int | None = None) -> str:
+    """The trade id shown to people, unique within its book.
+
+    NSE live: N-12 · Simulation (PAPER): P-12 · a replay / backtest run 7: R7-12.
+    """
+    book = (mode or "PAPER").upper()
+    if seq is None:
+        return f"#{fallback}" if fallback is not None else "—"
+    if book == "REPLAY":
+        return f"R{run_id}-{seq}" if run_id is not None else f"R-{seq}"
+    return f"{BOOK_PREFIX.get(book, book[:1])}-{seq}"
 
 
 class ReplayRun(Base):

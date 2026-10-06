@@ -17,7 +17,7 @@ import pandas as pd
 from database import session_factory
 from groww_client import IST, _is_auth_error, _parse_candles
 from indicators import enrich
-from models import ReplayRun, TradeLog
+from models import ReplayRun, TradeLog, trade_ref
 from strategy_engine import candle_rows, chart_filters, filter_blocks, settings_for
 
 # Groww serves 1-minute candles at most 7 days per request.
@@ -171,6 +171,7 @@ def _markers(symbol: str, first: int, last: int, span: int = 60, run_id: int | N
     with session_factory()() as db:
         rows = db.query(TradeLog).filter(TradeLog.symbol == symbol).order_by(TradeLog.id).all()
     for row in _one_book(rows, first, last + span - 1, run_id):
+        ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id)
         if row.entry_time is not None:
             t = _epoch(row.entry_time)
             if first <= t <= last + span - 1:
@@ -182,6 +183,8 @@ def _markers(symbol: str, first: int, last: int, span: int = 60, run_id: int | N
                         "kind": "ENTRY",
                         # Lets the chart colour the entry by the trade's result.
                         "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                        "trade_ref": ref,
+                        "open": row.exit_time is None,
                     }
                 )
         if row.exit_time is not None and row.exit_price is not None:
@@ -195,6 +198,8 @@ def _markers(symbol: str, first: int, last: int, span: int = 60, run_id: int | N
                         "kind": "EXIT",
                         "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
                         "reason": row.exit_reason,
+                        "trade_ref": ref,
+                        "open": False,
                     }
                 )
     return sorted(out, key=lambda m: m["time"])
