@@ -23,6 +23,7 @@ const LABELS: Record<string, string> = {
   use_volume: "volume",
   use_density: "density",
   use_rsi: "RSI",
+  use_bollinger: "Bollinger",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -119,6 +120,10 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
     rsi_long_max: Number(form.rsi_long_max ?? 70),
     rsi_short_min: Number(form.rsi_short_min ?? 30),
     rsi_short_max: Number(form.rsi_short_max ?? 60),
+    use_bollinger: Boolean(form.use_bollinger),
+    bb_period: Number(form.bb_period ?? 20),
+    bb_std: Number(form.bb_std ?? 2),
+    bb_min_width_pct: Number(form.bb_min_width_pct ?? 0.15),
   });
 
   const saveStock = async () => {
@@ -388,6 +393,25 @@ export function StrategyConfigPanel({ config, onChanged }: Props) {
         <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
         <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
       </div>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_bollinger)}
+          onChange={(e) => set("use_bollinger", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("use_bollinger") && <OwnTag />}
+        Bollinger Bands. Skip a buy that closed above the upper band (or a sell below the lower): it is chasing a
+        spike. Skip any cross while the bands are squeezed: the stock is going sideways.
+      </label>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
+        <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
+        <Field label="Squeeze below %" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        Squeeze is the band width as % of price on 1-minute candles; 0 turns the squeeze check off.
+      </p>
       <div className="mt-3 flex items-center gap-3">
         <button
           disabled={busy}

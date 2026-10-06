@@ -57,6 +57,7 @@ export function strategyLabel(s: Settings): string {
   if (s.use_volume) filters.push(`Vol ≥${s.volume_min_ratio}×`);
   if (s.use_density) filters.push(`Density ≥${s.density_min_pct}%`);
   if (s.use_rsi) filters.push(`RSI ${s.rsi_long_min}–${s.rsi_long_max}/${s.rsi_short_min}–${s.rsi_short_max}`);
+  if (s.use_bollinger) filters.push(`BB ${s.bb_period ?? 20}/${s.bb_std ?? 2}σ`);
   if (s.use_adx_filter) filters.push(`ADX ≥${s.adx_threshold}`);
   parts.push(filters.length ? filters.join(", ") : "no filters");
   parts.push(`qty ${s.qty ?? "—"}`);
@@ -81,6 +82,7 @@ export function filtersShort(s: Settings): string {
   if (s.use_volume) on.push("Vol");
   if (s.use_density) on.push("Density");
   if (s.use_rsi) on.push("RSI");
+  if (s.use_bollinger) on.push("BB");
   if (s.use_adx_filter) on.push("ADX");
   return on.length ? on.join(", ") : "no filters";
 }
@@ -107,6 +109,13 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   [
     "RSI filter",
     (s) => (s.use_rsi ? `buy ${s.rsi_long_min}–${s.rsi_long_max}, sell ${s.rsi_short_min}–${s.rsi_short_max}` : "Off"),
+  ],
+  [
+    "Bollinger filter",
+    (s) =>
+      s.use_bollinger
+        ? `${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ · squeeze < ${s.bb_min_width_pct ?? 0.15}%`
+        : "Off",
   ],
   ["ADX filter", (s) => (s.use_adx_filter ? `≥ ${s.adx_threshold}` : "Off")],
   ["Daily loss limit", (s) => inr(Number(s.max_daily_loss ?? 0))],

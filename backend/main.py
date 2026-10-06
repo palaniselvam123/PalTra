@@ -144,6 +144,10 @@ class ConfigUpdate(BaseModel):
     rsi_long_max: float | None = Field(default=None, ge=0, le=100)
     rsi_short_min: float | None = Field(default=None, ge=0, le=100)
     rsi_short_max: float | None = Field(default=None, ge=0, le=100)
+    use_bollinger: bool | None = None
+    bb_period: int | None = Field(default=None, ge=5, le=100)
+    bb_std: float | None = Field(default=None, gt=0, le=5)
+    bb_min_width_pct: float | None = Field(default=None, ge=0, le=10)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     square_off_time: str | None = None
@@ -185,6 +189,10 @@ def _config_dict(row: BotConfig) -> dict:
         "rsi_long_max": float(getattr(row, "rsi_long_max", 70.0) or 70.0),
         "rsi_short_min": float(getattr(row, "rsi_short_min", 30.0) or 30.0),
         "rsi_short_max": float(getattr(row, "rsi_short_max", 60.0) or 60.0),
+        "use_bollinger": bool(getattr(row, "use_bollinger", False)),
+        "bb_period": int(getattr(row, "bb_period", 20) or 20),
+        "bb_std": float(getattr(row, "bb_std", 2.0) or 2.0),
+        "bb_min_width_pct": float(getattr(row, "bb_min_width_pct", 0.15) if getattr(row, "bb_min_width_pct", None) is not None else 0.15),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,
