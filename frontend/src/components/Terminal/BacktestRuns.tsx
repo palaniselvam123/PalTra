@@ -357,7 +357,20 @@ export function BacktestRuns() {
   );
 }
 
-function RunDetail({ run }: { run: ReplayRun | null }) {
+/** One run's breakup. A trade-book summary passes its own heading and settings. */
+export function RunDetail({
+  run,
+  heading,
+  subheading,
+  settingsTitle = "Settings used",
+  settingsRows,
+}: {
+  run: ReplayRun | null;
+  heading?: string;
+  subheading?: string;
+  settingsTitle?: string;
+  settingsRows?: [string, string][];
+}) {
   if (!run) {
     return (
       <div aria-busy="true" className="border-t border-white/10 p-4">
@@ -368,13 +381,15 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
   const t = run.totals;
   const days = run.days ?? [];
   return (
-    <section aria-label={`Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
+    <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-2">
         <h3 className="text-sm font-semibold text-slate-100">
-          Run #{run.id} · day-wise P&amp;L
+          {heading ?? `Run #${run.id} · day-wise P&L`}
           <span className="ml-2 font-normal text-slate-400">
-            {dayLabel(run.start_date)}
-            {run.end_date !== run.start_date ? ` → ${dayLabel(run.end_date)}` : ""} · start {run.start_time}
+            {subheading ??
+              (run.start_date
+                ? `${dayLabel(run.start_date)}${run.end_date !== run.start_date ? ` → ${dayLabel(run.end_date)}` : ""} · start ${run.start_time}`
+                : "")}
           </span>
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>Net {signed(t.net)}</span>
@@ -400,7 +415,7 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
             {days.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-2 py-4 font-sans text-slate-400">
-                  No closed trades in this run yet.
+                  {heading ? "No closed trades match these filters." : "No closed trades in this run yet."}
                 </td>
               </tr>
             ) : (
@@ -441,14 +456,16 @@ function RunDetail({ run }: { run: ReplayRun | null }) {
         </table>
       </div>
       <div className="mt-3 px-2">
-        <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">Settings used</div>
+        <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">{settingsTitle}</div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
-          {SETTING_ROWS.map(([label, fmt]) => (
-            <div key={label} className="flex justify-between gap-3 border-b border-white/5 py-1">
-              <dt className="text-slate-400">{label}</dt>
-              <dd className="text-right text-slate-200">{fmt(run.settings)}</dd>
-            </div>
-          ))}
+          {(settingsRows ?? SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string])).map(
+            ([label, value]) => (
+              <div key={label} className="flex justify-between gap-3 border-b border-white/5 py-1">
+                <dt className="text-slate-400">{label}</dt>
+                <dd className="text-right text-slate-200">{value}</dd>
+              </div>
+            )
+          )}
           <div className="flex justify-between gap-3 border-b border-white/5 py-1">
             <dt className="text-slate-400">Stocks</dt>
             <dd className="text-right text-slate-200">{run.symbols.join(", ")}</dd>

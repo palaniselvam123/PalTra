@@ -1,12 +1,13 @@
 "use client";
 
 import { Fragment, memo, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
 import { inr, pnlAtPrice, px, smaApi, type SmaState, type TradeBook, type TradeRow } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
-import { BacktestRuns, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
+import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
+import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -450,6 +451,62 @@ export function TradeHistoryTable({
     setMaxPnl("");
   };
 
+  // Backtest-style summary of the closed trades the filters show, and its PDF.
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const bookSummary = useMemo(() => (summaryOpen ? summarizeBook(completedRows) : null), [summaryOpen, completedRows]);
+  const usedStrategies = useMemo(
+    () => (summaryOpen ? strategiesUsed(completedRows, (s) => strategyLabel(s as Settings)) : []),
+    [summaryOpen, completedRows]
+  );
+  const filterWords = (): string => {
+    const words: string[] = [];
+    if (stockFilter !== "ALL") words.push(stockFilter);
+    if (side !== "ALL") words.push(side === "LONG" ? "long only" : "short only");
+    if (reasonFilter !== "ALL") words.push(`exit: ${REASON_SHORT[reasonFilter] ?? reasonFilter}`);
+    if (strategyFilter !== "ALL") words.push(`strategy: ${strategyFilter}`);
+    if (from || to) words.push(`dates ${from || "start"} to ${to || "today"}`);
+    if (pnlSide === "profit") words.push("profit only");
+    if (pnlSide === "loss") words.push("loss only");
+    if (minPnl !== "") words.push(`P&L >= ${minPnl}`);
+    if (maxPnl !== "") words.push(`P&L <= ${maxPnl}`);
+    return words.length ? words.join(", ") : "all closed trades";
+  };
+  const summaryTitle = `${selected.title} summary`;
+  const downloadSummaryPdf = async () => {
+    setPrinting(true);
+    setPdfError(null);
+    try {
+      const run = summarizeBook(completedRows);
+      const range = run.start_date ? (run.end_date !== run.start_date ? `${run.start_date} to ${run.end_date}` : run.start_date) : "no trades";
+      const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
+      await downloadBacktestPdf({
+        run,
+        trades: completedRows,
+        strategy: `Filters: ${filterWords()}`,
+        settings: strategiesUsed(completedRows, (st) => strategyLabel(st as Settings)),
+        settingsHead: ["Strategy used", "Trades"],
+        reasons: REASON_SHORT,
+        title: summaryTitle,
+        subtitle: `${range} · ${run.symbols.length} stock${run.symbols.length === 1 ? "" : "s"}: ${run.symbols.join(", ") || "-"} · ${run.days_total} trading day${run.days_total === 1 ? "" : "s"}`,
+        note:
+          book === "LIVE"
+            ? "Real orders sent to Groww (NSE live book). Net is after estimated Groww charges; check your Groww contract notes for the exact figures."
+            : book === "REPLAY"
+              ? "Practice replays on Groww 1-minute candles. No order was sent."
+              : "Practice fills (Simulation book). No order was sent.",
+        fileName: `${book === "LIVE" ? "nse-live" : book === "REPLAY" ? "replay" : "simulation"}-summary-${run.start_date || "empty"}${
+          run.end_date && run.end_date !== run.start_date ? `_to_${run.end_date}` : ""
+        }.pdf`,
+      });
+    } catch (err) {
+      setPdfError(err instanceof Error ? `PDF failed: ${err.message}` : "PDF failed");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const downloadFiltered = () => {
     const fields = [
       "id",
@@ -563,6 +620,27 @@ export function TradeHistoryTable({
             className="min-h-11 whitespace-nowrap rounded-md border border-white/15 px-3 text-xs text-slate-200 hover:bg-white/5 sm:min-h-9"
           >
             Download CSV
+          </button>
+          <button
+            type="button"
+            aria-pressed={summaryOpen}
+            onClick={() => setSummaryOpen((v) => !v)}
+            title="Day-wise P&L, by stock and totals of the closed trades shown, like a backtest"
+            className={clsx(
+              "inline-flex min-h-11 items-center justify-center gap-1 whitespace-nowrap rounded-md px-3 text-xs font-semibold sm:min-h-9",
+              summaryOpen ? "bg-sky-500 text-white" : "border border-sky-500/40 text-sky-300 hover:bg-sky-500/10"
+            )}
+          >
+            <Sigma size={13} aria-hidden /> Summary
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadSummaryPdf()}
+            disabled={printing}
+            title="PDF of the summary and every closed trade shown"
+            className="inline-flex min-h-11 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-sky-500/40 px-3 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-60 sm:min-h-9"
+          >
+            {printing ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <FileDown size={13} aria-hidden />} PDF
           </button>
           </>
           )}
@@ -718,6 +796,22 @@ export function TradeHistoryTable({
         </p>
       </div>
       <p className="px-4 pb-3 text-xs text-slate-400">{selected.note}</p>
+      {pdfError ? (
+        <p role="alert" className="px-4 pb-2 text-xs text-rose-300">
+          {pdfError}
+        </p>
+      ) : null}
+      {summaryOpen && bookSummary ? (
+        <div className="mx-2 mb-3 rounded-lg border border-sky-500/30 bg-sky-500/[0.03] sm:mx-4">
+          <RunDetail
+            run={bookSummary}
+            heading={`${summaryTitle} · day-wise P&L`}
+            subheading={`${filterWords()}${full.total > inBook.length ? ` · newest ${inBook.length.toLocaleString("en-IN")} trades loaded` : ""}`}
+            settingsTitle="Strategies used"
+            settingsRows={usedStrategies}
+          />
+        </div>
+      ) : null}
       <BookSummary
         closed={completedRows.length}
         open={openRows.length}
