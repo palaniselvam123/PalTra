@@ -172,25 +172,6 @@ type Marker = {
   text: string;
 };
 
-/** Exits a stop closed. Drawn in yellow so they stand apart from crosses and targets. */
-const STOP_EXIT_LABEL: Record<string, string> = {
-  ATR_SL_HIT: "SL EXIT",
-  TSL_HIT: "TSL EXIT",
-  GAP_SL_HIT: "SL EXIT",
-};
-const STOP_EXIT_COLOR = "#FACC15";
-
-function exitLook(reason: string | null | undefined, net: number | null | undefined): { color: string; label: string } {
-  const stop = reason ? STOP_EXIT_LABEL[reason] : undefined;
-  if (stop) return { color: STOP_EXIT_COLOR, label: stop };
-  return { color: net == null ? "#CBD5E1" : net >= 0 ? "#34D399" : "#FB7185", label: "EXIT" };
-}
-
-function compactPrice(value: number): string {
-  return value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-}
-
-/** Entry markers from the API plus exit markers from closed trades on this stock. */
 /** Green for a trade that made money, red for a loss, grey while it is open or unknown. */
 const ENTRY_OPEN_COLOR = "#CBD5E1";
 
@@ -217,132 +198,9 @@ function entryResult(
   return null;
 }
 
-const MAX_HIGH_COLOR = "#34D399";
-const BLOCKED_COLOR = "#94A3B8";
 const VWAP_COLOR = "#22D3EE";
 const RSI_COLOR = "#F472B6";
-const MAX_LOW_COLOR = "#FB7185";
 
-/** One trade's highest and lowest price, drawn across the bars it was open. */
-type RangeSegment = { from: number; to: number; high: number; low: number };
-
-/** Bar time at or after `sec` (or the last bar), so a line always lands on a candle. */
-function barAtOrAfter(times: number[], sec: number): number {
-  let lo = 0;
-  let hi = times.length - 1;
-  if (sec >= times[hi]) return times[hi];
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (times[mid] < sec) lo = mid + 1;
-    else hi = mid;
-  }
-  return times[lo];
-}
-
-/** Bar time at or before `sec` (or the first bar). */
-function barAtOrBefore(times: number[], sec: number): number {
-  if (sec <= times[0]) return times[0];
-  let lo = 0;
-  let hi = times.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (times[mid] > sec) hi = mid - 1;
-    else lo = mid;
-  }
-  return times[lo];
-}
-
-function rangeSegments(trades: TradeRow[], rows: Candle[], symbol: string, bar: number): RangeSegment[] {
-  if (rows.length === 0) return [];
-  const times = rows.map((c) => c.time);
-  const first = times[0];
-  const last = times[times.length - 1] + bar * 60 - 1;
-  const out: RangeSegment[] = [];
-  for (const t of trades) {
-    if (t.symbol.toUpperCase() !== symbol || t.max_high == null || t.max_low == null) continue;
-    const opened = t.entry_time ? parseClock(t.entry_time) : null;
-    if (!opened) continue;
-    const closed = t.exit_time ? parseClock(t.exit_time) : null;
-    const start = Math.floor(opened.getTime() / 1000);
-    const end = closed ? Math.floor(closed.getTime() / 1000) : last;
-    if (end < first || start > last) continue;
-    const from = barAtOrBefore(times, bucketStart(Math.max(start, first), bar));
-    const to = barAtOrBefore(times, bucketStart(Math.min(end, last), bar));
-    out.push({ from, to: Math.max(from, to), high: t.max_high, low: t.max_low });
-  }
-  return out;
-}
-
-/**
- * Draws each trade's max high (green) and max low (red) as short lines over
- * the candles the trade was open, on the candle series' own canvas.
- */
-class TradeRangeLines implements ISeriesPrimitive<Time> {
-  private segments: RangeSegment[] = [];
-  private host: SeriesAttachedParameter<Time> | null = null;
-  private readonly views: ISeriesPrimitivePaneView[];
-
-  constructor() {
-    this.views = [{ renderer: () => ({ draw: (target) => this.draw(target) }) }];
-  }
-
-  attached(param: SeriesAttachedParameter<Time>): void {
-    this.host = param;
-  }
-
-  detached(): void {
-    this.host = null;
-  }
-
-  paneViews(): readonly ISeriesPrimitivePaneView[] {
-    return this.views;
-  }
-
-  set(segments: RangeSegment[]): void {
-    this.segments = segments;
-    this.host?.requestUpdate();
-  }
-
-  private draw(target: CanvasRenderingTarget2D): void {
-    const host = this.host;
-    if (!host || this.segments.length === 0) return;
-    const scale = host.chart.timeScale();
-    // A short mark (14 px) in the middle of the trade, outlined so it shows on any candle.
-    const half = 7;
-    target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
-      ctx.lineCap = "round";
-      for (const seg of this.segments) {
-        const x1 = scale.timeToCoordinate(seg.from as Time);
-        const x2 = scale.timeToCoordinate(seg.to as Time);
-        if (x1 == null || x2 == null) continue;
-        const mid = (x1 + x2) / 2;
-        const left = Math.round((mid - half) * hr);
-        const right = Math.round((mid + half) * hr);
-        for (const [price, color] of [
-          [seg.high, MAX_HIGH_COLOR],
-          [seg.low, MAX_LOW_COLOR],
-        ] as const) {
-          const y = host.series.priceToCoordinate(price);
-          if (y == null) continue;
-          const yy = Math.round(y * vr) + 0.5;
-          // Dark edge first, then the colour on top.
-          ctx.strokeStyle = "rgba(2, 6, 23, 0.85)";
-          ctx.lineWidth = Math.max(3, Math.round(4.5 * vr));
-          ctx.beginPath();
-          ctx.moveTo(left, yy);
-          ctx.lineTo(right, yy);
-          ctx.stroke();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = Math.max(2, Math.round(2.5 * vr));
-          ctx.beginPath();
-          ctx.moveTo(left, yy);
-          ctx.lineTo(right, yy);
-          ctx.stroke();
-        }
-      }
-    });
-  }
-}
 
 const BB_COLOR = "#C4B5FD";
 
@@ -449,54 +307,18 @@ function chartMarkers(
   const last = rows[rows.length - 1].time;
   const times = new Set(rows.map((c) => c.time));
   const snap = (sec: number) => bucketStart(sec, bar);
+  // Only the orders: a small "B" or "S" box at each entry, green when that trade made
+  // money, red when it lost, grey while it is still open. No exit, filter or price text.
   const out: Marker[] = chart.markers
+    .filter((m) => m.kind !== "EXIT")
     .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time < last + bar * 60))
-    .map((m): Marker => {
-      if (m.kind === "EXIT") {
-        const look = exitLook(m.reason, m.net_pnl);
-        return {
-          time: snap(m.time),
-          position: m.direction === "LONG" ? "aboveBar" : "belowBar",
-          color: look.color,
-          shape: "circle",
-          text: `${look.label} ${compactPrice(m.price)}`,
-        };
-      }
-      return {
-        time: snap(m.time),
-        position: m.direction === "LONG" ? "belowBar" : "aboveBar",
-        color: resultColor(entryResult(m, lookup, symbol, snap)),
-        shape: m.direction === "LONG" ? "arrowUp" : "arrowDown",
-        text: `${m.direction === "LONG" ? "BUY" : "SELL"} ${compactPrice(m.price)}`,
-      };
-    });
-  // Crosses the entry filters refused: a grey ✕ with the filter that said no.
-  for (const b of chart.blocked ?? []) {
-    const sec = snap(b.time);
-    if (sec < first || sec > last) continue;
-    out.push({
-      time: sec,
-      position: b.direction === "LONG" ? "belowBar" : "aboveBar",
-      color: BLOCKED_COLOR,
+    .map((m): Marker => ({
+      time: snap(m.time),
+      position: m.direction === "LONG" ? "belowBar" : "aboveBar",
+      color: resultColor(entryResult(m, lookup, symbol, snap)),
       shape: "square",
-      text: `✕ ${b.label}`,
-    });
-  }
-  for (const t of trades) {
-    if (t.symbol.toUpperCase() !== symbol || t.exit_price == null || !t.exit_time) continue;
-    const when = parseClock(t.exit_time);
-    if (!when) continue;
-    const sec = snap(Math.floor(when.getTime() / 1000));
-    if (sec < first || sec > last) continue;
-    const look = exitLook(t.exit_reason, t.net_pnl ?? t.gross_pnl);
-    out.push({
-      time: sec,
-      position: t.direction === "LONG" ? "aboveBar" : "belowBar",
-      color: look.color,
-      shape: "circle",
-      text: `${look.label} ${compactPrice(t.exit_price)}`,
-    });
-  }
+      text: m.direction === "LONG" ? "B" : "S",
+    }));
   return out.sort((a, b) => a.time - b.time);
 }
 
@@ -591,9 +413,10 @@ function lineValue(row: unknown): number | null {
 }
 
 function entryLook(gross: number | null): { title: string; color: string } {
-  if (gross == null) return { title: "Entry", color: "#94a3b8" };
+  // The line stays (colour = open P&L sign); its text is left off the chart.
+  if (gross == null) return { title: "", color: "#94a3b8" };
   return {
-    title: `P&L ${gross >= 0 ? "+" : ""}${inr(gross)}`,
+    title: "",
     color: gross >= 0 ? "#10B981" : "#F43F5E",
   };
 }
@@ -622,7 +445,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const rangesRef = useRef<TradeRangeLines | null>(null);
   const profileBarsRef = useRef<VolumeProfileBars | null>(null);
   const profileLines = useRef<IPriceLine[]>([]);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -803,12 +625,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     for (const line of profileLines.current) series.removePriceLine(line);
     profileLines.current = [];
     if (!profile) return;
-    const line = (price: number, color: string, title: string, style: LineStyle, axis: boolean) =>
-      series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: axis, title });
+    // Lines only, no labels: the POC and value-area figures are in the header.
+    const line = (price: number, color: string, style: LineStyle) =>
+      series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: false, title: "" });
     profileLines.current = [
-      line(profile.poc, POC_COLOR, "POC", LineStyle.Solid, true),
-      line(profile.vah, VALUE_AREA_COLOR, "VAH", LineStyle.Dotted, false),
-      line(profile.val, VALUE_AREA_COLOR, "VAL", LineStyle.Dotted, false),
+      line(profile.poc, POC_COLOR, LineStyle.Solid),
+      line(profile.vah, VALUE_AREA_COLOR, LineStyle.Dotted),
+      line(profile.val, VALUE_AREA_COLOR, LineStyle.Dotted),
     ];
   }, [profile]);
 
@@ -945,7 +768,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Phones: smaller axis text, and line names stay in the legend instead of
     // widening every price tag on the axis over the candles.
     const narrow = window.matchMedia("(max-width: 639px)").matches;
-    const tag = (name: string) => (narrow ? "" : name);
+    // No line names on the chart: SMA, VWAP and RSI readings live in the header line.
+    const tag = (_name: string) => "";
     const instance = createChart(rootRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "#151921" },
@@ -982,9 +806,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       wickDownColor: "#F43F5E",
     });
     candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.28 } });
-    const ranges = new TradeRangeLines();
-    candles.attachPrimitive(ranges);
-    rangesRef.current = ranges;
     const profileBars = new VolumeProfileBars();
     candles.attachPrimitive(profileBars);
     profileBarsRef.current = profileBars;
@@ -1023,7 +844,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       lineWidth: 2,
       priceScaleId: "atr",
       priceLineVisible: false,
-      lastValueVisible: true,
+      lastValueVisible: false,
       title: tag("ATR 14"),
     });
     instance.priceScale("atr").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
@@ -1042,7 +863,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       lineWidth: 2,
       priceScaleId: "rsi",
       priceLineVisible: false,
-      lastValueVisible: true,
+      lastValueVisible: false,
       title: tag("RSI 14"),
       visible: false,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
@@ -1127,7 +948,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       instance.unsubscribeCrosshairMove(onCrosshair);
       instance.unsubscribeClick(onClick);
       observer.disconnect();
-      rangesRef.current = null;
       profileBarsRef.current = null;
       profileLines.current = [];
       instance.remove();
@@ -1187,13 +1007,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       for (const line of rsiBands.current) series.removePriceLine(line);
       rsiBands.current = [];
       if (showRsi && filters) {
-        const band = (price: number, color: string, title: string) =>
-          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title });
+        const band = (price: number, color: string) =>
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
         rsiBands.current = [
-          band(filters.rsi_long_min, "rgba(52, 211, 153, 0.6)", `buy ${filters.rsi_long_min}`),
-          band(filters.rsi_long_max, "rgba(52, 211, 153, 0.6)", `buy ${filters.rsi_long_max}`),
-          band(filters.rsi_short_min, "rgba(251, 113, 133, 0.6)", `sell ${filters.rsi_short_min}`),
-          band(filters.rsi_short_max, "rgba(251, 113, 133, 0.6)", `sell ${filters.rsi_short_max}`),
+          band(filters.rsi_long_min, "rgba(52, 211, 153, 0.6)"),
+          band(filters.rsi_long_max, "rgba(52, 211, 153, 0.6)"),
+          band(filters.rsi_short_min, "rgba(251, 113, 133, 0.6)"),
+          band(filters.rsi_short_max, "rgba(251, 113, 133, 0.6)"),
         ];
       }
     }
@@ -1201,14 +1021,6 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     candleRef.current.setMarkers(
       chartMarkers(chart, rows, past ? [] : trades, symbol, bar, trades).map((m) => ({ ...m, time: m.time as never }))
     );
-    // A past day shows the replay run it was pinned to, else the practice/real book.
-    const runId = pastRunRef.current;
-    const ranged = past
-      ? (allTrades ?? trades).filter((t) =>
-          runId != null ? t.run_id === runId : (t.mode || "PAPER").toUpperCase() !== "REPLAY"
-        )
-      : trades;
-    rangesRef.current?.set(rangeSegments(ranged, rows, symbol, bar));
 
     if (entryLine.current) {
       candleRef.current.removePriceLine(entryLine.current);
@@ -1247,17 +1059,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // Stop and target follow the live position (about every second), so a
   // trailing stop slides on the chart as it moves. The chart payload only
   // refreshes every 15 s, so it is the fallback.
-  const stopKind = pos?.trailing
-    ? "Moving SL"
-    : pos?.tsl_step || chart?.tsl_step
-      ? "Trailing SL"
-      : `${chart?.atr_multiplier ?? state?.atr_multiplier ?? 1.5}× ATR SL`;
   const slLevel = past || !pos || !stopOn ? null : (pos.sl_trigger ?? chart?.sl_trigger ?? null);
   const targetLevel = past || !pos ? null : (pos.target ?? chart?.target ?? null);
   const slCash = pos && slLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, slLevel) : null;
   const targetCash = pos && targetLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, targetLevel) : null;
-  const slTitle = slLevel == null || slCash == null ? "" : `${stopKind} · ${signedInr(slCash)}`;
-  const targetTitle = targetLevel == null || targetCash == null ? "" : `Target · ${signedInr(targetCash)}`;
   levelsRef.current =
     past || !pos ? [] : [pos.entry_price, slLevel, targetLevel].filter((v): v is number => v != null && v > 0);
 
@@ -1267,20 +1072,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const place = (
       ref: { current: IPriceLine | null },
       price: number | null,
-      color: string,
-      title: string
+      color: string
     ) => {
       if (price == null || price <= 0) {
         if (ref.current) series.removePriceLine(ref.current);
         ref.current = null;
         return;
       }
-      if (ref.current) ref.current.applyOptions({ price, title });
-      else ref.current = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, title });
+      // Lines only: no text on the chart (the position box names them).
+      if (ref.current) ref.current.applyOptions({ price });
+      else ref.current = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, title: "" });
     };
-    place(slLine, slLevel, "#F59E0B", slTitle);
-    place(targetLine, targetLevel, "#34D399", targetTitle);
-  }, [slLevel, targetLevel, slTitle, targetTitle]);
+    place(slLine, slLevel, "#F59E0B");
+    place(targetLine, targetLevel, "#34D399");
+  }, [slLevel, targetLevel]);
 
   const latest = latestSma(rows);
   const filters = view?.filters;
@@ -1416,30 +1221,23 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               )}
             </LegendItem>
           )}
-          {filters?.use_vwap ? (
-            <LegendItem swatch={<span className="block w-5 border-t-2 border-dotted border-[#22D3EE]" />}>
-              VWAP <span className="font-mono text-slate-100">{px(shownVwap)}</span>
-            </LegendItem>
-          ) : null}
           {filters?.use_bollinger || (filters?.bb_exit ?? "OFF") !== "OFF" ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-[#C4B5FD]" />}>
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
-          {filters?.use_rsi ? (
-            <LegendItem swatch={<span className="block h-0.5 w-5 rounded bg-[#F472B6]" />}>
-              RSI 14{" "}
-              <span className="font-mono text-slate-100">{shownRsi == null ? "—" : shownRsi.toFixed(1)}</span>
-              <span className="text-slate-400">
-                {" "}
-                · buy {filters.rsi_long_min}–{filters.rsi_long_max} · sell {filters.rsi_short_min}–{filters.rsi_short_max}
-              </span>
-            </LegendItem>
-          ) : null}
         </ul>
       </div>
       <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
-      <OhlcLine ohlc={ohlc} hovering={hoverOhlc != null} sma9={sma9} sma21={sma21} gap={smaGap} />
+      <OhlcLine
+        ohlc={ohlc}
+        hovering={hoverOhlc != null}
+        sma9={sma9}
+        sma21={sma21}
+        gap={smaGap}
+        vwap={shownVwap}
+        rsi={shownRsi}
+      />
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
           <span className="font-semibold text-slate-200">
@@ -1819,12 +1617,16 @@ function OhlcLine({
   sma9,
   sma21,
   gap,
+  vwap,
+  rsi,
 }: {
   ohlc: Ohlc | null;
   hovering: boolean;
   sma9: number | null;
   sma21: number | null;
   gap: number | null;
+  vwap: number | null;
+  rsi: number | null;
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -1865,6 +1667,13 @@ function OhlcLine({
         <span className={clsx(gap == null ? "text-slate-400" : gap >= 0 ? "text-emerald-300" : "text-rose-300")}>
           {gap == null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%`}
         </span>
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-[#22D3EE]">VWAP</span> <span className="text-slate-100">{px(vwap)}</span>
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-[#F472B6]">RSI</span>{" "}
+        <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
     </div>
   );
