@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -125,6 +125,20 @@ class BotConfig(Base):
     use_gap_short: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_short_min: Mapped[float] = mapped_column(Float, default=-0.5)
     gap_short_max: Mapped[float] = mapped_column(Float, default=-0.02)
+    # SMA gap mode (gap_mode.py): a cross arms the trade and the signed gap %
+    # fires it (>= gap_entry_long / <= gap_entry_short), optionally after
+    # gap_entry_delay_min more minutes and within gap_entry_window_min of the
+    # cross (0 = until the next cross). The trade closes when the gap fades
+    # back to gap_exit_long / gap_exit_short, or gives back gap_giveback_pct
+    # of its widest (0 = off). Exit reason GAP_FADE.
+    use_gap_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    gap_entry_long: Mapped[float] = mapped_column(Float, default=0.05)
+    gap_exit_long: Mapped[float] = mapped_column(Float, default=0.02)
+    gap_entry_short: Mapped[float] = mapped_column(Float, default=-0.05)
+    gap_exit_short: Mapped[float] = mapped_column(Float, default=-0.02)
+    gap_giveback_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
+    gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
     # 1 after the one-time raise from the old default of 15. A later edit to

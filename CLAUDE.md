@@ -146,6 +146,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   for a buy or `gap_short_min..max` for a sell (negative values allowed).
   Wired through `_entry_block` like the other filters (chart ✕ "Gap",
   Telegram check line, per-stock settings).
+- `backend/gap_mode.py` – SMA gap mode (`use_gap_mode`, off by default,
+  PAPER and LIVE): a cross only arms the trade (`StrategyEngine._gap_minute`,
+  `_gap_pending`); the order goes on the first closed candle whose signed gap
+  is ≥ `gap_entry_long` / ≤ `gap_entry_short`, after `gap_entry_delay_min`
+  more minutes if set, given up after `gap_entry_window_min` (0 = until the
+  next cross). `_watch_gap_fade` closes it (`GAP_FADE`, via `_exit_now`) when
+  the gap fades back to `gap_exit_long` / `gap_exit_short` after clearing it,
+  or gives back `gap_giveback_pct` of its widest. An opposite cross closes at
+  once (`_close_on_cross`) and the reverse waits for its own gap.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

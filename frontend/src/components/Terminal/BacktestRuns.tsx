@@ -53,6 +53,7 @@ export function strategyLabel(s: Settings): string {
     );
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
+  if (gapModeText(s)) parts.push(`Gap mode ${gapModeText(s)}`);
   const filters: string[] = [];
   if (s.use_vwap) filters.push("VWAP");
   if (s.use_volume) filters.push(`Vol ≥${s.volume_min_ratio}×`);
@@ -82,6 +83,19 @@ export function gapText(s: Settings): string {
   const parts: string[] = [];
   if (s.use_gap_long) parts.push(`buy ${s.gap_long_min ?? 0.02}–${s.gap_long_max ?? 0.5}%`);
   if (s.use_gap_short) parts.push(`sell ${s.gap_short_min ?? -0.5}–${s.gap_short_max ?? -0.02}%`);
+  return parts.join(" · ");
+}
+
+/** Gap mode in a few words, e.g. "in ≥0.05/≤-0.05 · out 0.02/-0.02 · wait 2m", or "". */
+export function gapModeText(s: Settings): string {
+  if (!s.use_gap_mode) return "";
+  const parts = [
+    `in ≥${s.gap_entry_long ?? 0.05}/≤${s.gap_entry_short ?? -0.05}%`,
+    `out ${s.gap_exit_long ?? 0.02}/${s.gap_exit_short ?? -0.02}%`,
+  ];
+  if (Number(s.gap_giveback_pct ?? 0) > 0) parts.push(`give back ${s.gap_giveback_pct}%`);
+  if (Number(s.gap_entry_delay_min ?? 0) > 0) parts.push(`wait ${s.gap_entry_delay_min}m`);
+  if (Number(s.gap_entry_window_min ?? 0) > 0) parts.push(`within ${s.gap_entry_window_min}m`);
   return parts.join(" · ");
 }
 
@@ -136,6 +150,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
         : "Off",
   ],
   ["SMA gap filter", (s) => gapText(s) || "Off"],
+  ["SMA gap mode", (s) => gapModeText(s) || "Off"],
   [
     "Bollinger exit",
     (s) => (bbExitText(s) ? `${bbExitText(s)} · ${s.bb_period ?? 20} / ${s.bb_std ?? 2}σ` : "Off"),

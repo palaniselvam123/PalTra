@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   bb_exit: "Bollinger exit",
   use_gap_long: "SMA gap (buy)",
   use_gap_short: "SMA gap (sell)",
+  use_gap_mode: "Gap mode",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -139,6 +140,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     use_gap_short: Boolean(form.use_gap_short),
     gap_short_min: Number(form.gap_short_min ?? -0.5),
     gap_short_max: Number(form.gap_short_max ?? -0.02),
+    use_gap_mode: Boolean(form.use_gap_mode),
+    gap_entry_long: Number(form.gap_entry_long ?? 0.05),
+    gap_exit_long: Number(form.gap_exit_long ?? 0.02),
+    gap_entry_short: Number(form.gap_entry_short ?? -0.05),
+    gap_exit_short: Number(form.gap_exit_short ?? -0.02),
+    gap_giveback_pct: Number(form.gap_giveback_pct ?? 0),
+    gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
+    gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
   });
 
   const saveStock = async () => {
@@ -494,6 +503,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         Negative numbers are allowed (a sell gap is usually negative, e.g. −0.5 to −0.02). On the cross candle the
         gap is usually small, so a tight range skips most crosses; skipped crosses show as ✕ on the chart with the
         gap. Force order skips this check.
+      </p>
+      <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_gap_mode)}
+          onChange={(e) => set("use_gap_mode", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("use_gap_mode") && <OwnTag />}
+        SMA gap mode — enter when the gap widens past a level, exit when it fades back.
+      </label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Field label="Buy: enter at gap ≥ %" signed value={String(form.gap_entry_long ?? 0.05)} onChange={(v) => set("gap_entry_long", v)} own={isOwn("gap_entry_long")} />
+        <Field label="Buy: exit at gap ≤ %" signed value={String(form.gap_exit_long ?? 0.02)} onChange={(v) => set("gap_exit_long", v)} own={isOwn("gap_exit_long")} />
+        <Field label="Sell: enter at gap ≤ %" signed value={String(form.gap_entry_short ?? -0.05)} onChange={(v) => set("gap_entry_short", v)} own={isOwn("gap_entry_short")} />
+        <Field label="Sell: exit at gap ≥ %" signed value={String(form.gap_exit_short ?? -0.02)} onChange={(v) => set("gap_exit_short", v)} own={isOwn("gap_exit_short")} />
+        <Field label="Also exit after giving back % of peak (0 = off)" value={String(form.gap_giveback_pct ?? 0)} onChange={(v) => set("gap_giveback_pct", v)} own={isOwn("gap_giveback_pct")} />
+        <Field label="Wait after the level is met (min)" value={String(form.gap_entry_delay_min ?? 0)} onChange={(v) => set("gap_entry_delay_min", v)} own={isOwn("gap_entry_delay_min")} />
+        <Field label="Give up after the cross (min, 0 = never)" value={String(form.gap_entry_window_min ?? 0)} onChange={(v) => set("gap_entry_window_min", v)} own={isOwn("gap_entry_window_min")} />
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        A cross only arms the trade; the order goes on the first closed candle whose gap reaches the entry level
+        (plus the wait, if set — the gap must still be there). While the gap keeps widening the trade is held; once it
+        has cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes
+        (exit reason “Gap fade”). An opposite cross still closes at once, and the reverse waits for its own gap. The
+        stop, filters, entry cut-off and square-off still apply.
       </p>
       <div className="mt-3 flex items-center gap-3">
         <button

@@ -70,6 +70,15 @@ export type SmaConfig = {
   use_gap_short?: boolean;
   gap_short_min?: number;
   gap_short_max?: number;
+  /** SMA gap mode: enter on a widening gap, exit when it fades (gap_mode.py). */
+  use_gap_mode?: boolean;
+  gap_entry_long?: number;
+  gap_exit_long?: number;
+  gap_entry_short?: number;
+  gap_exit_short?: number;
+  gap_giveback_pct?: number;
+  gap_entry_delay_min?: number;
+  gap_entry_window_min?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
   square_off_time: string;

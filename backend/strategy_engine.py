@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -49,6 +49,7 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
+from gap_mode import Pending, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, TradeLog
@@ -112,6 +113,10 @@ class OpenPosition:
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
     bb_armed: bool = False
+    # SMA gap mode exit: last closed candle read, its gap, and armed / peak.
+    gap_bar: int | None = None
+    gap_prev: float | None = None
+    gap_state: dict = field(default_factory=dict)
     # Highest and lowest price seen while the trade is open (every tick's
     # LTP, the entry and the exit). Saved as TradeLog.max_high / max_low.
     high: float | None = None
@@ -145,7 +150,8 @@ SNAPSHOT_FIELDS = (
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
     "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
-    "gap_short_max", "max_daily_loss", "entry_cutoff_time", "square_off_time",
+    "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
+    "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min", "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
 
@@ -595,6 +601,8 @@ class StrategyEngine:
         # bot was started or the stock was armed. None means the first bar
         # we see is that bar. A cross on it must not trade.
         self._skip_cross_until: dict[str, int | None] = {}
+        # SMA gap mode: a cross waiting for its gap before the order goes.
+        self._gap_pending: dict[str, Pending] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
         # Latest order refusal per stock (Groww's own words), kept for the
@@ -801,6 +809,7 @@ class StrategyEngine:
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
+            self._gap_pending.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -924,6 +933,7 @@ class StrategyEngine:
             await self._trail_tsl(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
+            await self._watch_gap_fade(symbol_cfg)
 
         self._focus = view
         if view in self._ltps:
@@ -986,7 +996,7 @@ class StrategyEngine:
         A removed stock is no longer quoted or judged. If it is armed again,
         hold_for_next_cross makes it wait for a fresh cross.
         """
-        for table in (self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until):
+        for table in (self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
 
@@ -1050,6 +1060,8 @@ class StrategyEngine:
             self.last_signal = text
             return text
         signal, signal_frame = _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
+        if uses_gap_mode(cfg):
+            return await self._gap_minute(symbol, signal, signal_frame, frame, cfg, now)
         if signal is None or signal_frame is None:
             relation = _sma_side_text(frame)
             if symbol in self.positions:
@@ -1064,6 +1076,127 @@ class StrategyEngine:
             self.last_signal = text
             return text
         return await self.apply_signal(signal, signal_frame, cfg, now)
+
+    async def _gap_minute(
+        self,
+        symbol: str,
+        signal: str | None,
+        signal_frame: pd.DataFrame | None,
+        frame: pd.DataFrame,
+        cfg: BotConfig,
+        now: dt.datetime,
+    ) -> str:
+        """SMA gap mode, once per closed candle: a cross arms, the gap fires.
+
+        An opposite cross still closes the open trade at once; the reverse
+        waits for its own gap like any other entry (see gap_mode.py).
+        """
+        if signal is not None and signal_frame is not None:
+            want = "LONG" if signal == "BULLISH" else "SHORT"
+            pos = self.positions.get(symbol)
+            if pos is not None and pos.direction != want:
+                closed = await self._close_on_cross(signal, signal_frame, cfg, now)
+                if symbol in self.positions:
+                    return closed  # the close did not go through; do not arm the reverse
+            if symbol not in self.positions:
+                cross_ts = _closed_bar_ts(signal_frame) or _closed_bar_ts(frame) or 0
+                self._gap_pending[symbol] = Pending(want, int(cross_ts))
+        pending = self._gap_pending.get(symbol)
+        if pending is None or symbol in self.positions:
+            self._gap_pending.pop(symbol, None)
+            text = (
+                f"{symbol} holding"
+                if symbol in self.positions
+                else f"{symbol} no order — gap mode waits for an SMA cross. {_filter_note(cfg)}"
+            )
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        bar = frame.iloc[-2]
+        gap = sma_gap_signed(bar.get("sma_9"), bar.get("sma_21"))
+        action, note = judge_pending(cfg, pending, gap, int(bar["ts"]))
+        if action == "enter":
+            sig = "BULLISH" if pending.direction == "LONG" else "BEARISH"
+            result = await self.apply_signal(sig, frame, cfg, now, alert=not pending.alerted)
+            refused = result.startswith(f"{sig} ignored — ") and "no new entries after" not in result
+            if refused or result.startswith(("blocked", "skipped")):
+                # A ticked filter or ADX said no on this candle: keep waiting,
+                # it may agree on a later one. Alert once per armed cross.
+                pending.alerted = True
+            else:
+                self._gap_pending.pop(symbol, None)
+            if result.startswith(("opened", "reversed")):
+                result = f"{result} — {note}"
+                self._signals[symbol] = result
+                self.last_signal = result
+            return result
+        if action == "drop":
+            self._gap_pending.pop(symbol, None)
+            text = f"{symbol} no order — {note}"
+        else:
+            text = f"{symbol} {pending.direction} armed — {note}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
+
+    async def _close_on_cross(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Gap mode: an opposite cross closes the trade but does not reverse yet."""
+        pos = self.position
+        if pos is None:
+            return ""
+        price = round_price(cfg.symbol, float(frame.iloc[-2]["close"]))
+        async with self.lock:
+            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                self.last_signal = "blocked — order PENDING/TRANSIT"
+                return self.last_signal
+            self.inflight = "TRANSIT"
+            try:
+                await self._cancel_sl_verified(pos)
+                await self._close_position(pos, self._market_price(cfg.symbol, price), "MA_CROSS", now, cfg)
+                self.position = None
+                text = f"closed on {signal} — gap mode waits for the gap before the reverse"
+            except SlCancelFailed as exc:
+                self._note_broker_block(exc)
+                text = self.last_signal
+            finally:
+                self.inflight = None
+        self.last_signal = text
+        self._signals[(cfg.symbol or "").upper()] = text
+        self._log_decision(signal, frame, cfg, now, text)
+        if self._loss_breached(cfg):
+            await self._stop_for_loss(cfg)
+        return text
+
+    async def _watch_gap_fade(self, cfg: BotConfig) -> None:
+        """Once per closed candle: close a trade whose SMA gap has faded (gap mode)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not uses_gap_mode(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.gap_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart: the exchange stop id is unknown and
+            # cannot be cancelled first. The stop and crosses still close it.
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        if closed_ts + 60 <= opened.timestamp():
+            return  # that candle closed before the entry
+        pos.gap_bar = closed_ts
+        closes = frame["close"].iloc[:-1].astype(float)
+        fast = closes.rolling(int(cfg.sma_fast)).mean()
+        slow = closes.rolling(int(cfg.sma_slow)).mean()
+        gap = sma_gap_signed(fast.iloc[-1], slow.iloc[-1])
+        if gap is None:
+            return
+        note = judge_exit(cfg, pos.direction, gap, pos.gap_prev, pos.gap_state)
+        pos.gap_prev = gap
+        if note is None:
+            return
+        self._signals[symbol] = f"{symbol} gap exit — {note}"
+        await self._exit_now(cfg, self.ltp, "GAP_FADE")
 
     def _log_decision(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, decision: str, note: str = "") -> None:
         """Write the closed-candle readings once per entry evaluation.
@@ -1100,7 +1233,9 @@ class StrategyEngine:
         except Exception:  # noqa: BLE001
             logger.exception("signal report failed")
 
-    async def apply_signal(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+    async def apply_signal(
+        self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, alert: bool = True
+    ) -> str:
         """Stop-and-reverse on a closed-candle cross. Returns a short status."""
         self._focus = (cfg.symbol or "").upper()
         curr = frame.iloc[-2]
@@ -1139,7 +1274,8 @@ class StrategyEngine:
                 self.last_signal = result
                 self._signals[self._focus] = result
                 self._log_decision(signal, frame, cfg, now, result)
-                self._alert_refused(signal, frame, cfg, now, result)
+                if alert:
+                    self._alert_refused(signal, frame, cfg, now, result)
                 return result
             except SlCancelFailed as exc:
                 self._note_broker_block(exc)
@@ -1950,6 +2086,7 @@ class StrategyEngine:
                     "TSL_HIT": "trailing stop hit — flat",
                     "BB_TARGET": "Bollinger band target — flat",
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
+                    "GAP_FADE": "SMA gap faded — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -2870,6 +3007,7 @@ _ALERT_REASON = {
     "TARGET_HIT": "target hit",
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",
+    "GAP_FADE": "SMA gap faded",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -3169,7 +3307,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE")
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE")
 
 
 def _filter_note(cfg: BotConfig) -> str:
