@@ -529,6 +529,37 @@ export type ScalpAlerts = {
   sent_today: string[];
 };
 
+export type ActiveStock = {
+  symbol: string;
+  ltp: number;
+  change_pct: number | null;
+  volume: number;
+  value_cr: number;
+  avg_price: number | null;
+  vwap_dist_pct: number | null;
+  rvol: number | null;
+  buy_qty: number | null;
+  sell_qty: number | null;
+  buy_share: number | null;
+  range_pct: number | null;
+  bias: "LONG" | "SHORT" | "NONE";
+};
+
+export type ActiveSort = "value" | "rvol" | "change" | "pressure";
+
+export type ActiveStocksResponse = {
+  as_of: string | null;
+  universe: number;
+  scanned: number;
+  failed: number;
+  running: boolean;
+  error: string | null;
+  sort: ActiveSort;
+  connected: boolean;
+  market_open: boolean;
+  rows: ActiveStock[];
+};
+
 export type ScalpMonitorResponse = {
   as_of: string;
   source: string;
@@ -846,6 +877,9 @@ export const api = {
     request<ScalpMonitorResponse>(`/api/scalp/monitor${queryString(stringifyParams(params))}`),
   scalpAlerts: (body: { enabled: boolean; min_score: number; cooldown_minutes: number }) =>
     request<ScalpAlerts>("/api/scalp/alerts", { method: "POST", body: JSON.stringify(body) }),
+  scalpActive: (params: { sort?: ActiveSort; top?: number; bias?: "LONG" | "SHORT"; min_value_cr?: number } = {}) =>
+    request<ActiveStocksResponse>(`/api/scalp/active${queryString(stringifyParams(params))}`),
+  scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
   scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),

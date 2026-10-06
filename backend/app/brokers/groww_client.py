@@ -298,6 +298,28 @@ class GrowwClient(BrokerClient):
         data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
         return self._parse_quote(symbol, data or {})
 
+    async def get_quote_payload(self, symbol: str) -> dict:
+        """Groww's full quote for one NSE stock, as sent (volume, average
+        price, OHLC, total buy/sell quantity…). Market data only."""
+        sdk = self._require_session()
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    sdk.get_quote,
+                    trading_symbol=symbol,
+                    exchange=self.EXCHANGE,
+                    segment=self.SEGMENT,
+                    timeout=6,
+                ),
+                timeout=8,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if _is_forbidden(exc):
+                raise BrokerDataForbidden(_FORBIDDEN_HINT) from exc
+            raise BrokerOrderError(f"Groww quote fetch failed for {symbol}: {exc}") from exc
+        data = raw.get("payload", raw) if isinstance(raw, dict) and "payload" in raw else raw
+        return data if isinstance(data, dict) else {}
+
     @staticmethod
     def _parse_quote(symbol: str, data: dict) -> Quote:
         ltp = float(_pick(data, "last_price", "ltp", "last_traded_price", "close", default=0.0) or 0.0)
@@ -323,12 +345,13 @@ class GrowwClient(BrokerClient):
         volume = int(float(_pick(data, "volume", "day_volume", "total_traded_volume", default=0) or 0))
         return Quote(symbol=symbol, ltp=ltp, bid=bid, ask=ask, volume=volume)
 
-    async def get_daily_volumes(self, symbol: str, days: int = 20) -> list[int]:
+    async def get_daily_volumes(self, symbol: str, days: int = 20, end: dt.datetime | None = None) -> list[int]:
         """Daily volumes for the last `days` sessions — the basis for a real
-        20-day RVOL instead of a cross-sectional stand-in.
+        20-day RVOL instead of a cross-sectional stand-in. `end` stops before
+        a day (e.g. yesterday's close, so today's partial candle is left out).
         """
         sdk = self._require_session()
-        end = dt.datetime.now()
+        end = end or dt.datetime.now()
         start = end - dt.timedelta(days=days * 2)  # padding for weekends/holidays
         fmt = "%Y-%m-%d %H:%M:%S"
         try:

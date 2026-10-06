@@ -66,7 +66,7 @@ export function ScalpPickBacktest({ universe, minAtr, minValue }: Props) {
     }
   };
 
-  const select = "rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200";
+  const select = "rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200";
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">

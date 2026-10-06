@@ -223,7 +223,7 @@ export default function MoversPage() {
   const store = recorder?.store;
 
   return (
-    <div className="min-h-screen bg-bg text-slate-100">
+    <div className="min-h-screen bg-base text-slate-100">
       <Navbar
         connected={connected}
         totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
@@ -486,7 +486,7 @@ export default function MoversPage() {
               <select
                 value={minSpeed}
                 onChange={(e) => setMinSpeed(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-bg px-1.5 py-0.5 text-xs text-slate-200"
+                className="rounded border border-slate-700 bg-base px-1.5 py-0.5 text-xs text-slate-200"
               >
                 {SPEED_STOPS.map((v) => (
                   <option key={v} value={v}>
@@ -500,7 +500,7 @@ export default function MoversPage() {
               <select
                 value={minMove}
                 onChange={(e) => setMinMove(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-bg px-1.5 py-0.5 text-xs text-slate-200"
+                className="rounded border border-slate-700 bg-base px-1.5 py-0.5 text-xs text-slate-200"
               >
                 {MOVE_STOPS.map((v) => (
                   <option key={v} value={v}>
@@ -646,7 +646,7 @@ export default function MoversPage() {
           </div>
 
           {lookup && (
-            <div className="mt-4 rounded-lg border border-slate-800 bg-bg/60 p-4 text-sm">
+            <div className="mt-4 rounded-lg border border-slate-800 bg-base/60 p-4 text-sm">
               {lookup.found ? (
                 <div className="space-y-1">
                   <div className="text-lg font-semibold tabular-nums">
@@ -751,7 +751,7 @@ export default function MoversPage() {
                 {alerts.dry_run && <span className="ml-2 text-amber-400">DRY RUN — nothing sent</span>}
               </div>
               {alerts.results.map((r) => (
-                <div key={r.symbol + r.direction} className="rounded-lg border border-slate-800 bg-bg/60 p-3">
+                <div key={r.symbol + r.direction} className="rounded-lg border border-slate-800 bg-base/60 p-3">
                   <pre className="whitespace-pre-wrap font-sans text-xs text-slate-300">{r.message}</pre>
                   <div className="mt-2 text-xs text-slate-500">
                     {typeof r.delivery === "string" ? (
@@ -777,7 +777,7 @@ const btn =
 const btnPrimary =
   "inline-flex items-center gap-1.5 rounded-lg bg-bot px-3 py-1.5 text-sm font-medium text-slate-900 hover:brightness-110 disabled:opacity-50";
 const input =
-  "rounded-lg border border-slate-700 bg-bg px-2 py-1.5 text-sm outline-none focus:border-bot";
+  "rounded-lg border border-slate-700 bg-base px-2 py-1.5 text-sm outline-none focus:border-bot";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

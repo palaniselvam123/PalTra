@@ -41,6 +41,8 @@ class Instrument:
 class InstrumentMaster:
     def __init__(self) -> None:
         self._by_symbol: dict[str, Instrument] = {}
+        # NSE stocks with futures (the F&O list): the most traded names.
+        self._fno: set[str] = set()
         self._fetched_at: float = 0.0
         self._error: str | None = None
 
@@ -61,7 +63,15 @@ class InstrumentMaster:
             raise
 
         by_symbol: dict[str, Instrument] = {}
+        fno: set[str] = set()
         for row in csv.DictReader(io.StringIO(raw)):
+            if (
+                row.get("exchange") == "NSE"
+                and row.get("segment") == "FNO"
+                and row.get("instrument_type") == "FUT"
+                and row.get("underlying_symbol", "").strip()
+            ):
+                fno.add(row["underlying_symbol"].strip().upper())
             # NSE cash-market equities only. FNO (options/futures) and
             # COMMODITY together are 130k of the 143k rows and are a different
             # trading instrument entirely — irrelevant to an equity watchlist
@@ -80,6 +90,8 @@ class InstrumentMaster:
             )
 
         self._by_symbol = by_symbol
+        # Index futures (NIFTY, BANKNIFTY…) have no cash-market stock; keep stocks only.
+        self._fno = {s for s in fno if s in by_symbol and by_symbol[s].series == "EQ"}
         self._fetched_at = time.monotonic()
         self._error = None
 
@@ -93,6 +105,11 @@ class InstrumentMaster:
             "cached_age_sec": round(time.monotonic() - self._fetched_at, 1) if self._fetched_at else None,
             "error": self._error,
         }
+
+    def fno_stocks(self) -> list[str]:
+        """NSE cash stocks that have futures, sorted. Empty if the list has none."""
+        self.ensure_loaded()
+        return sorted(self._fno)
 
     def get(self, symbol: str) -> Instrument | None:
         self.ensure_loaded()

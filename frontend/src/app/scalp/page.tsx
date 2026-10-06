@@ -10,6 +10,7 @@ import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
 import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
+import { MostActive } from "@/components/Scalp/MostActive";
 
 const BACKTEST_DAYS = [1, 5, 10, 20];
 const MAX_BACKTEST_STOCKS = 24;
@@ -205,7 +206,7 @@ export default function ScalpPage() {
   const alerts = data?.alerts;
 
   return (
-    <div className="min-h-screen bg-bg text-slate-100">
+    <div className="min-h-screen bg-base text-slate-100">
       <Navbar
         connected={connected}
         totalPnl={summaryLoad === "ok" ? summary.total_pnl : null}
@@ -255,6 +256,14 @@ export default function ScalpPage() {
           </button>
         </section>
 
+        <MostActive
+          watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
+          armed={armed}
+          arming={arming}
+          onArm={arm}
+          onWatched={refresh}
+        />
+
         {simulated && (
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
             The desk is on the simulated feed, so these prices are invented and alerts are off. Switch the data source
@@ -282,7 +291,7 @@ export default function ScalpPage() {
               <select
                 value={bias}
                 onChange={(e) => setBias(e.target.value as "ALL" | "LONG" | "SHORT")}
-                className="rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+                className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
               >
                 <option value="ALL">All</option>
                 <option value="LONG">Long (above VWAP, rising)</option>
@@ -319,7 +328,7 @@ export default function ScalpPage() {
               <select
                 value={btDays}
                 onChange={(e) => setBtDays(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+                className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
               >
                 {BACKTEST_DAYS.map((d) => (
                   <option key={d} value={d}>
@@ -432,7 +441,7 @@ export default function ScalpPage() {
                 max={100}
                 value={alertScore}
                 onChange={(e) => setAlertScore(Number(e.target.value))}
-                className="w-20 rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+                className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -443,7 +452,7 @@ export default function ScalpPage() {
                 max={600}
                 value={alertCooldown}
                 onChange={(e) => setAlertCooldown(Number(e.target.value))}
-                className="w-20 rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+                className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
               />
             </label>
             <button
@@ -494,7 +503,7 @@ export default function ScalpPage() {
                 <p className="text-xs text-slate-500">Nothing would be sent right now.</p>
               ) : (
                 preview.map((p) => (
-                  <pre key={p.symbol} className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-bg/60 p-3 font-sans text-xs text-slate-300">
+                  <pre key={p.symbol} className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-base/60 p-3 font-sans text-xs text-slate-300">
                     {p.message}
                   </pre>
                 ))
@@ -639,7 +648,7 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="rounded border border-slate-700 bg-bg px-1.5 py-1 text-xs text-slate-200"
+        className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
       >
         {options.map((v) => (
           <option key={v} value={v}>

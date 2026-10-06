@@ -8,11 +8,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app import state
 from app.core.market_clock import ist_now, is_market_open
+from app.services.active_stocks import SORTS, active_scanner
 from app.services.alert_notifier import alert_notifier
 from app.services.backfill import ensure_backfilled
 from app.services.candle_store import candle_store
@@ -219,3 +220,42 @@ async def scalp_alerts_preview():
     """The messages the next alert pass would send, without sending them."""
     rows = monitor.due_alerts(monitor.rows())
     return {"messages": [{"symbol": r.symbol, "message": alert_text(r)} for r in rows]}
+
+
+# ---- most active stocks on NSE ----------------------------------------------
+
+
+def _groww_session():
+    from app.services.groww_funds import groww_client
+
+    return groww_client()
+
+
+@router.get("/active")
+async def most_active(
+    sort: str = Query("value"),
+    top: int = Query(40, ge=1, le=250),
+    bias: str | None = Query(None),
+    min_value_cr: float = Query(0.0, ge=0, le=100000),
+):
+    """The F&O stocks ranked by where traders are: ₹ traded, volume vs usual,
+    buy/sell quantity. From the last scan; market data only."""
+    if sort not in SORTS:
+        raise HTTPException(400, f"sort must be one of {', '.join(SORTS)}")
+    out = active_scanner.snapshot(sort=sort, top=top, bias=(bias or "").upper() or None, min_value_cr=min_value_cr)
+    out["connected"] = _groww_session() is not None
+    out["market_open"] = is_market_open()
+    return out
+
+
+@router.post("/active/scan")
+async def most_active_scan():
+    """Start a scan now (at most once a minute). Returns at once; the page polls."""
+    client = _groww_session()
+    if client is None:
+        raise HTTPException(428, "Connect Groww in Settings (Connect Live Data) to scan NSE.")
+    if not active_scanner.can_scan_now():
+        raise HTTPException(429, "A scan ran less than a minute ago or is still running.")
+    # Kept on the scanner so the task is not garbage-collected mid-scan.
+    active_scanner.manual_task = asyncio.create_task(active_scanner.scan(client))
+    return {"started": True}
