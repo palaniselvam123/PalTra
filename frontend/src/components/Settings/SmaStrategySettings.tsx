@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } from "@/lib/smaApi";
@@ -13,6 +13,10 @@ import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } fr
 export function SmaStrategySettings() {
   const [desk, pickDesk] = useState<Desk>("live");
   const [config, setConfig] = useState<SmaConfig | null>(null);
+  // The desk the shown settings belong to. While another desk loads, the old form stays on screen
+  // (dimmed) so the page keeps its height and scroll position.
+  const [configDesk, setConfigDesk] = useState<Desk>("live");
+  const wanted = useRef<Desk>("live");
   const [error, setError] = useState<string | null>(null);
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [name, setName] = useState("");
@@ -26,10 +30,14 @@ export function SmaStrategySettings() {
   }, [config]);
 
   const load = useCallback(() => {
+    const asked = wanted.current;
     smaApi
       .config()
       .then((cfg) => {
+        // A slower answer for a desk you have already left is dropped.
+        if (asked !== wanted.current) return;
         setConfig(cfg);
+        setConfigDesk(asked);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "The SMA terminal did not answer."));
@@ -40,19 +48,25 @@ export function SmaStrategySettings() {
     const chosen: Desk = (DESKS as string[]).includes(asked ?? "") ? (asked as Desk) : "live";
     setDesk(chosen);
     pickDesk(chosen);
+    wanted.current = chosen;
     load();
-    const target = window.location.hash.slice(1);
-    if (target) {
-      // Wait a frame so the sections below this one have rendered too.
-      requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView());
-    }
   }, [load]);
+
+  // A link to a section (#risk, #trade-alerts …) is followed once this form has its full height,
+  // otherwise the target would slide down as the settings load.
+  const followedHash = useRef(false);
+  useEffect(() => {
+    if (!config || followedHash.current) return;
+    followedHash.current = true;
+    const target = window.location.hash.slice(1);
+    if (target) requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView());
+  }, [config]);
 
   const choose = (next: Desk) => {
     if (next === desk) return;
     setDesk(next);
     pickDesk(next);
-    setConfig(null);
+    wanted.current = next;
     const url = new URL(window.location.href);
     if (next !== "live") url.searchParams.set("desk", next);
     else url.searchParams.delete("desk");
@@ -126,9 +140,16 @@ export function SmaStrategySettings() {
           </button>
           {nameNote ? <span className="text-xs text-slate-400">{nameNote}</span> : null}
         </form>
+      ) : config ? (
+        // Same height as the name form, so switching to Research does not shift the page.
+        <p className="mb-2 flex min-h-[3.75rem] items-end text-xs text-slate-400">
+          The research desk always trades practice money next to the live bots; it has no name of its own.
+        </p>
       ) : null}
       {config ? (
-        <StrategyConfigPanel key={desk} config={config} onChanged={load} wide />
+        <div aria-busy={configDesk !== desk} className={clsx("transition-opacity", configDesk !== desk && "pointer-events-none opacity-50")}>
+          <StrategyConfigPanel key={configDesk} config={config} onChanged={load} wide />
+        </div>
       ) : error ? null : (
         <p className="text-sm text-slate-400">Loading the strategy settings…</p>
       )}
