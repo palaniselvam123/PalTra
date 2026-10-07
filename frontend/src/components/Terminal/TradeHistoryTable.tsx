@@ -27,7 +27,7 @@ const REASON: Record<string, string> = {
   MANUAL_CLOSE: "MANUAL CLOSE",
 };
 
-type Book = "PAPER" | "LIVE" | "REPLAY";
+type Book = "PAPER" | "LIVE" | "REPLAY" | "RESEARCH";
 
 const BOOKS: { id: Book; title: string; note: string }[] = [
   {
@@ -39,6 +39,11 @@ const BOOKS: { id: Book; title: string; note: string }[] = [
     id: "LIVE",
     title: "NSE live",
     note: "Fills that were sent to Groww on the NSE tape.",
+  },
+  {
+    id: "RESEARCH",
+    title: "Research",
+    note: "The research desk: a paper-only second bot on today's live prices, with its own settings. Never sent to Groww.",
   },
   {
     id: "REPLAY",
@@ -54,7 +59,7 @@ function tradeId(trade: TradeRow): string {
 
 function bookOf(trade: TradeRow): Book {
   const mode = (trade.mode || "PAPER").toUpperCase();
-  return mode === "LIVE" ? "LIVE" : mode === "REPLAY" ? "REPLAY" : "PAPER";
+  return mode === "LIVE" ? "LIVE" : mode === "REPLAY" ? "REPLAY" : mode === "RESEARCH" ? "RESEARCH" : "PAPER";
 }
 
 type PnlSide = "all" | "profit" | "loss" | "open";
@@ -330,7 +335,7 @@ export function TradeHistoryTable({
   };
   useEffect(() => {
     if (picked || !state?.mode) return;
-    setBook(state.mode === "LIVE" ? "LIVE" : state.mode === "REPLAY" ? "REPLAY" : "PAPER");
+    setBook(state.mode === "LIVE" ? "LIVE" : state.mode === "REPLAY" ? "REPLAY" : state.mode === "RESEARCH" ? "RESEARCH" : "PAPER");
   }, [picked, state?.mode]);
   const inBook = full.rows;
   // The lists below cover the whole book (up to 20,000 trades), so they are

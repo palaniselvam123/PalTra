@@ -97,7 +97,9 @@ STRATEGY_GUIDE = {
     "risk": "max_daily_loss stops the bot for the day when realised loss reaches it; max_trades_per_day caps entries.",
     "modes": (
         "PAPER fills locally at the price (virtual money). LIVE sends real Groww MIS orders with an exchange "
-        "stop. REPLAY trades are backtests on past candles and have their own book."
+        "stop. REPLAY trades are backtests on past candles and have their own book. RESEARCH trades (ids Q-n) "
+        "come from the research desk: a second, paper-only bot on today's live prices with its own settings, "
+        "Trade list and book, which never touches the live bot."
     ),
     "exit_reasons": {
         "MA_CROSS": "opposite SMA cross",

@@ -14,8 +14,11 @@ import {
   SMA_API,
   ApiError,
   answered,
+  initialDesk,
+  setDesk,
   setReplayRouting,
   smaApi,
+  type Desk,
   type ChartPayload,
   type ReplayInfo,
   type SmaConfig,
@@ -86,6 +89,22 @@ function Fold({
 }
 
 export default function TerminalPage() {
+  // Which bot this page drives. Set before the first request (effects run in
+  // order), so every call below already goes to the right desk.
+  const [desk, setDeskState] = useState<Desk>("live");
+  const research = desk === "research";
+  const researchRef = useRef(false);
+  useEffect(() => {
+    const chosen = initialDesk();
+    setDesk(chosen);
+    researchRef.current = chosen === "research";
+    setDeskState(chosen);
+  }, []);
+  const changeDesk = useCallback((next: Desk) => {
+    setDesk(next);
+    // A fresh page: nothing from the other desk's state, chart or replay carries over.
+    window.location.href = next === "research" ? "/terminal/?desk=research" : "/terminal/";
+  }, []);
   const [state, setState] = useState<SmaState | null>(null);
   const [config, setConfig] = useState<SmaConfig | null>(null);
   const [chart, setChart] = useState<ChartPayload | null>(null);
@@ -124,7 +143,7 @@ export default function TerminalPage() {
     const today = istToday();
     const todays = trades.filter((t) => t.date === today && (t.mode ?? "PAPER").toUpperCase() !== "REPLAY");
     return {
-      view: "SMA terminal",
+      view: research ? "SMA terminal — research desk (paper only, own settings and book)" : "SMA terminal",
       chart_stock: state?.symbol ?? config?.symbol ?? null,
       bot_status: state?.bot_status,
       halt_reason: state?.halt_reason || undefined,
@@ -152,7 +171,7 @@ export default function TerminalPage() {
       settings: config ?? undefined,
       replay: replay && replay.status !== "IDLE" ? replay : undefined,
     };
-  }, [state, config, trades, replay]);
+  }, [state, config, trades, replay, research]);
   useChatScreen(screenSummary);
 
   const refresh = useCallback(() => {
@@ -233,6 +252,8 @@ export default function TerminalPage() {
   // replay engine (smaApi routes them) and update every second.
   const onReplay = useCallback(
     (info: ReplayInfo) => {
+      // Replays belong to the live desk; the research desk never follows one.
+      if (researchRef.current) return;
       setReplay(info);
       const on = replayRouted(info);
       if (on && info.date) {
@@ -318,6 +339,22 @@ export default function TerminalPage() {
     return () => clearInterval(poll);
   }, [routed, onReplay]);
 
+  // The research desk has no stream: poll its state every 2 s while the tab is visible.
+  useEffect(() => {
+    if (!research) return;
+    const poll = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      smaApi
+        .state()
+        .then((next) => {
+          setState(next);
+          setConnected(true);
+        })
+        .catch(() => setConnected(false));
+    }, 2000);
+    return () => clearInterval(poll);
+  }, [research]);
+
   useEffect(() => {
     let ws: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout>;
@@ -343,8 +380,9 @@ export default function TerminalPage() {
       ws.onerror = () => ws?.close();
       ws.onmessage = (ev) => {
         try {
-          // The stream is the live engine. During a replay the page polls instead.
-          if (replayOn.current) return;
+          // The stream is the live engine. During a replay, or on the research
+          // desk, the page polls its own engine instead.
+          if (replayOn.current || researchRef.current) return;
           const next = JSON.parse(ev.data) as SmaState;
           setState((prev) => (next.ltp > 0 || !prev || prev.ltp <= 0 ? next : prev));
         } catch {
@@ -368,6 +406,8 @@ export default function TerminalPage() {
         connected={connected}
         loadNote={loadNote}
         onChanged={refresh}
+        desk={desk}
+        onDeskChange={changeDesk}
         notice={
           unreachable ? (
               <div
@@ -405,12 +445,20 @@ export default function TerminalPage() {
             {closeNote}
           </div>
         )}
-        <ReplayBar
-          info={replay}
-          live={config?.trading_mode === "LIVE"}
-          armedCount={config?.trade_symbols?.length ?? 0}
-          onChanged={onReplay}
-        />
+        {research ? (
+          <div role="note" className="rounded-xl border border-teal-400/30 bg-teal-500/[0.07] px-3 py-2 text-sm text-teal-100">
+            <span className="font-semibold">Research desk</span> — a second bot on today&apos;s live prices with practice
+            money only. Its settings, Trade list (up to 10 stocks), trades (Q-1, Q-2…) and P&amp;L are its own. It never
+            sends an order or alert, and changes here never touch the live desk.
+          </div>
+        ) : (
+          <ReplayBar
+            info={replay}
+            live={config?.trading_mode === "LIVE"}
+            armedCount={config?.trade_symbols?.length ?? 0}
+            onChanged={onReplay}
+          />
+        )}
         <PnlMetricsRow state={state} />
         <div className="flex flex-col gap-4 xl:flex-row">
           <div className="min-w-0 flex-1">
@@ -451,9 +499,11 @@ export default function TerminalPage() {
               <Fold title="Position" storageKey="sma.card.position">
                 <LivePositionCard state={state} pending={Boolean(loadNote)} />
               </Fold>
-              <Fold title="Alerts" storageKey="sma.card.alerts">
-                <WhatsAppAlerts />
-              </Fold>
+              {research ? null : (
+                <Fold title="Alerts" storageKey="sma.card.alerts">
+                  <WhatsAppAlerts />
+                </Fold>
+              )}
             </div>
           )}
         </div>

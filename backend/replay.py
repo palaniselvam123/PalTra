@@ -136,15 +136,18 @@ class ReplayFeed:
         return float(price), frame
 
 
-class ReplayBroker:
-    """Local fills only. There is deliberately no Groww SDK in here."""
+class LocalFills:
+    """Fills at the quoted price, locally. There is deliberately no Groww SDK in here.
+
+    Shared by the replay and the research desk: neither can reach the Groww
+    order API, whatever mode the live desk is in.
+    """
 
     mode = "PAPER"
     token = ""
+    ORDER_PREFIX = "LOCAL"
 
-    def __init__(self, feed: ReplayFeed):
-        self.feed = feed
-        self.data_source = "REPLAY"
+    def __init__(self):
         self.last_error = ""
         self._seq = 0
         self._orders: dict[str, tuple[str, float | None]] = {}
@@ -159,13 +162,9 @@ class ReplayBroker:
         self._seq += 1
         return f"{prefix}-{self._seq:06d}"
 
-    async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
-        ltp, frame = self.feed.quote(symbol)
-        return ltp, frame, "REPLAY"
-
     async def place_entry(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:  # noqa: ARG002
         px = round_price(symbol, ltp)
-        oid = self._id("REPLAY")
+        oid = self._id(self.ORDER_PREFIX)
         self._orders[oid] = ("FILLED", px)
         return OrderAck(oid, "FILLED", px)
 
@@ -173,7 +172,7 @@ class ReplayBroker:
         return await self.place_entry(symbol, side, qty, ltp)
 
     async def place_sl(self, symbol: str, side: str, qty: int, trigger: float) -> OrderAck:  # noqa: ARG002
-        oid = self._id("REPLAYSL")
+        oid = self._id(f"{self.ORDER_PREFIX}SL")
         self._orders[oid] = ("TRIGGER_PENDING", None)
         return OrderAck(oid, "TRIGGER_PENDING", None)
 
@@ -189,6 +188,21 @@ class ReplayBroker:
 
     async def net_quantity(self, symbol: str) -> int | None:  # noqa: ARG002
         return None
+
+
+class ReplayBroker(LocalFills):
+    """Replayed quotes, local fills."""
+
+    ORDER_PREFIX = "REPLAY"
+
+    def __init__(self, feed: ReplayFeed):
+        super().__init__()
+        self.feed = feed
+        self.data_source = "REPLAY"
+
+    async def refresh(self, symbol: str) -> tuple[float, pd.DataFrame, str]:
+        ltp, frame = self.feed.quote(symbol)
+        return ltp, frame, "REPLAY"
 
 
 class ReplayEngine(StrategyEngine):

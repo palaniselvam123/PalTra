@@ -120,6 +120,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   trade's side (`BB_MIDDLE`). Exits go through `_exit_now`, which in LIVE
   cancels the exchange stop first, like a target; a LIVE position restored
   without its stop id is left to that stop.
+- `backend/research.py` – Research desk: a second, paper-only `ResearchEngine`
+  (subclass of `StrategyEngine`) that runs next to the live bot during market
+  hours. Own settings row (`BotConfig` id 2, `RESEARCH_CONFIG_ID`, first copied
+  from row 1 with an empty Trade list, max 10 armed), own book (`RESEARCH`,
+  ids `Q-n`), own P&L, caps and panic. Quotes come through the live client's
+  `refresh` only; fills are local (`ResearchBroker`, built on `replay.LocalFills`,
+  no Groww order path). No alerts. API mirrors the terminal under
+  `/api/research/*` (state, chart, history, config, trade-symbols, bot); there is
+  no research mode switch. UI: the terminal's Live desk / Research switch,
+  remembered per browser or set with `/terminal/?desk=research`.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -221,8 +231,11 @@ There are separate switches. All of them boot safe.
   positions are squared off at `square_off_time` even when the bot is paused,
   and a practice position from an earlier day is closed on the next tick.
 
-Trades are tagged with their mode (`PAPER`/`LIVE`, `paper`/`live`) so the
-books stay separate in reports and CSV exports.
+- **Research desk** (`backend/research.py`): always practice money, whatever
+  the SMA Terminal mode is. It runs alongside a LIVE bot without touching it.
+
+Trades are tagged with their mode (`PAPER`/`LIVE`/`REPLAY`/`RESEARCH`,
+`paper`/`live`) so the books stay separate in reports and CSV exports.
 
 ## Running locally
 

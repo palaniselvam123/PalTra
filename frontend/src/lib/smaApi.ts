@@ -84,7 +84,8 @@ export type SmaConfig = {
   square_off_time: string;
   /** HH:MM. No new entries from this time. */
   entry_cutoff_time?: string;
-  trading_mode: "PAPER" | "LIVE";
+  /** RESEARCH on the research desk (paper only, its own book). */
+  trading_mode: "PAPER" | "LIVE" | "RESEARCH";
   /** Each stock's own strategy settings over the shared ones: {TCS: {qty: 50}}. */
   stock_settings?: Record<string, Partial<SmaConfig>>;
   /** The fields a stock may set for itself. */
@@ -107,8 +108,10 @@ export type ChargeBreakdown = {
 export type SmaState = {
   bot_status: string;
   halt_reason: string;
-  /** REPLAY while a past day is replaying (practice only). */
-  mode: "PAPER" | "LIVE" | "REPLAY";
+  /** REPLAY while a past day is replaying, RESEARCH on the research desk (both practice only). */
+  mode: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH";
+  /** "research" on the research desk's state. */
+  desk?: "research";
   data_source: string;
   /** Present only on /api/replay/state. */
   replay?: ReplayInfo;
@@ -316,7 +319,7 @@ export function pnlAtPrice(trade: Pick<TradeRow, "direction" | "entry_price" | "
   return points * (trade.qty || 0);
 }
 
-export type TradeBookMode = "PAPER" | "LIVE" | "REPLAY";
+export type TradeBookMode = "PAPER" | "LIVE" | "REPLAY" | "RESEARCH";
 
 /** Each distinct strategy is sent once; rows point at it by index. */
 type TradeBookPayload = {
@@ -437,7 +440,44 @@ let replayRouting = false;
 export function setReplayRouting(on: boolean): void {
   replayRouting = on;
 }
+/** Which bot this page drives: the live desk, or the paper-only research desk. */
+export type Desk = "live" | "research";
+const DESK_KEY = "sma.desk";
+let desk: Desk = "live";
+
+/** The desk for this page: `?desk=research` in the address wins, then this browser's last choice. */
+export function initialDesk(): Desk {
+  if (typeof window === "undefined") return "live";
+  const asked = new URLSearchParams(window.location.search).get("desk");
+  if (asked === "research" || asked === "live") return asked;
+  try {
+    return localStorage.getItem(DESK_KEY) === "research" ? "research" : "live";
+  } catch {
+    return "live";
+  }
+}
+
+export function setDesk(next: Desk): void {
+  desk = next;
+  try {
+    localStorage.setItem(DESK_KEY, next);
+  } catch {
+    /* private mode: the address still says which desk */
+  }
+}
+
+export function currentDesk(): Desk {
+  return desk;
+}
+
+/** The research desk has its own copy of these routes; the mode switch and replay are live-desk only. */
+const RESEARCH_PREFIXES = ["/api/state", "/api/chart", "/api/history", "/api/config", "/api/trade-symbols", "/api/bot/"];
+
 function route(path: string): string {
+  if (desk === "research") {
+    const hit = RESEARCH_PREFIXES.find((prefix) => path.startsWith(prefix));
+    return hit ? path.replace("/api/", "/api/research/") : path;
+  }
   if (!replayRouting) return path;
   if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
   if (path.startsWith("/api/chart")) return path.replace("/api/chart", "/api/replay/chart");

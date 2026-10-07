@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Search } from "lucide-react";
 import clsx from "clsx";
-import { inr, smaApi, px, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
@@ -12,6 +12,8 @@ import { ownSummary } from "./StrategyConfigPanel";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
+// The research desk shares the live bot's Groww quota, so it arms fewer stocks.
+const RESEARCH_ARM_LIMIT = 10;
 
 function chipNote(note: string, symbol: string): string {
   return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
@@ -39,9 +41,48 @@ type Props = {
   onChanged: () => void;
   /** A page-level alert shown right under the sticky header. */
   notice?: ReactNode;
+  /** The bot this page drives: live desk or the paper-only research desk. */
+  desk?: Desk;
+  onDeskChange?: (desk: Desk) => void;
 };
 
-export function Header({ state, config, connected, loadNote, onChanged, notice }: Props) {
+/** Live desk / Research desk. Each browser (or `?desk=` link) keeps its own choice. */
+function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => void }) {
+  const options: { id: Desk; label: string; title: string }[] = [
+    { id: "live", label: "Live desk", title: "The bot that trades your account (PAPER or LIVE)" },
+    {
+      id: "research",
+      label: "Research",
+      title: "A paper-only second bot on today's live prices, with its own settings and book. Never sends an order.",
+    },
+  ];
+  return (
+    <span role="group" aria-label="Desk" className="inline-flex shrink-0 rounded-md ring-1 ring-inset ring-white/15">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          aria-pressed={desk === o.id}
+          title={o.title}
+          onClick={() => desk !== o.id && onChange(o.id)}
+          className={clsx(
+            "min-h-9 px-2.5 text-xs font-semibold first:rounded-l-md last:rounded-r-md",
+            desk === o.id
+              ? o.id === "research"
+                ? "bg-teal-600/30 text-teal-100"
+                : "bg-white/10 text-slate-100"
+              : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange }: Props) {
+  const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [hidden, setHidden] = useState<string[]>([]);
@@ -226,8 +267,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
     const cleaned = next.trim().toUpperCase();
     if (!cleaned) return;
     const turningOn = !armed.has(cleaned);
-    if (turningOn && armedList.length >= ARM_LIMIT) {
-      setError(`Trade is limited to ${ARM_LIMIT} stocks at once. Turn one off before adding another.`);
+    if (turningOn && armedList.length >= armLimit) {
+      setError(`Trade is limited to ${armLimit} stocks at once. Turn one off before adding another.`);
       return;
     }
     if (turningOn && live) {
@@ -397,7 +438,12 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
       >
         <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
           <div className="flex min-w-0 items-center justify-between gap-2">
-            <span className="text-sm font-semibold tracking-tight text-slate-100">SMA × ATR Terminal</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="hidden truncate text-sm font-semibold tracking-tight text-slate-100 sm:inline">
+                SMA × ATR Terminal
+              </span>
+              {onDeskChange ? <DeskSwitch desk={desk} onChange={onDeskChange} /> : null}
+            </span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
               {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}
               <span className="font-mono text-slate-100">{px(ltp)}</span>
@@ -478,7 +524,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                 ) : null}
                 <span className="ml-auto shrink-0 text-xs font-normal text-slate-400">
                   <span className="font-semibold text-emerald-300">{armedList.length}</span>
-                  {folded ? " armed" : ` of ${ARM_LIMIT} armed for trading`}
+                  {folded ? " armed" : ` of ${armLimit} armed for trading`}
                   {folded && openCount > 0 ? (
                     <>
                       {" · "}
@@ -620,7 +666,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice }
                   <StockCard
                     key={s}
                     busy={busy}
-                    armLimitReached={armedList.length >= ARM_LIMIT}
+                    armLimitReached={armedList.length >= armLimit}
                     onToggleArmed={() => toggleTrade(s)}
                     onShowOnChart={() => applySymbol(s)}
                     selected={selected.has(s)}
