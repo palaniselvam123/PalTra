@@ -152,6 +152,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_entry_short: Number(form.gap_entry_short ?? -0.05),
     gap_exit_short: Number(form.gap_exit_short ?? -0.02),
     gap_giveback_pct: Number(form.gap_giveback_pct ?? 0),
+    gap_fade_confirm_sma: Boolean(form.gap_fade_confirm_sma),
+    gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
     gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
   });
@@ -566,12 +568,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         <Field label="Also exit after giving back % of peak (0 = off)" value={String(form.gap_giveback_pct ?? 0)} onChange={(v) => set("gap_giveback_pct", v)} own={isOwn("gap_giveback_pct")} />
         <Field label="Wait after the level is met (min)" value={String(form.gap_entry_delay_min ?? 0)} onChange={(v) => set("gap_entry_delay_min", v)} own={isOwn("gap_entry_delay_min")} />
         <Field label="Give up after the cross (min, 0 = never)" value={String(form.gap_entry_window_min ?? 0)} onChange={(v) => set("gap_entry_window_min", v)} own={isOwn("gap_entry_window_min")} />
+        <Field
+          label="Fade exit: gap narrowing for N candles in a row (0 = off)"
+          value={String(form.gap_fade_min_candles ?? 0)}
+          onChange={(v) => set("gap_fade_min_candles", v)}
+          own={isOwn("gap_fade_min_candles")}
+        />
       </div>
+      <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.gap_fade_confirm_sma)}
+          onChange={(e) => set("gap_fade_confirm_sma", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {isOwn("gap_fade_confirm_sma") && <OwnTag />}
+          Ride out pullbacks — exit on a fade only when a candle also closes on the wrong side of SMA {form.sma_slow ?? 21}{" "}
+          (below it for a buy, above it for a sell).
+        </span>
+      </label>
       <p className="mt-1 text-[11px] leading-snug text-slate-400">
         A cross only arms the trade; the order goes on the first closed candle whose gap reaches the entry level
         (plus the wait, if set — the gap must still be there). While the gap keeps widening the trade is held; once it
         has cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes
-        (exit reason “Gap fade”). An opposite cross still closes at once, and the reverse waits for its own gap. The
+        (exit reason “Gap fade”). With “Ride out pullbacks”, a narrowing that keeps the candles on the trade&apos;s side of
+        SMA {form.sma_slow ?? 21} is treated as a pullback and held; the exit waits for a close through it. An opposite cross still closes at once, and the reverse waits for its own gap. The
         stop, filters, entry cut-off and square-off still apply.
       </p>
       <div className="mt-3 flex items-center gap-3">

@@ -95,6 +95,8 @@ export function gapModeText(s: Settings): string {
     `out ${s.gap_exit_long ?? 0.02}/${s.gap_exit_short ?? -0.02}%`,
   ];
   if (Number(s.gap_giveback_pct ?? 0) > 0) parts.push(`give back ${s.gap_giveback_pct}%`);
+  if (s.gap_fade_confirm_sma) parts.push("exit on close past SMA");
+  if (Number(s.gap_fade_min_candles ?? 0) > 0) parts.push(`fade ${s.gap_fade_min_candles} candles`);
   if (Number(s.gap_entry_delay_min ?? 0) > 0) parts.push(`wait ${s.gap_entry_delay_min}m`);
   if (Number(s.gap_entry_window_min ?? 0) > 0) parts.push(`within ${s.gap_entry_window_min}m`);
   return parts.join(" · ");

@@ -49,7 +49,7 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
-from gap_mode import Pending, judge_exit, judge_pending, uses_gap_mode
+from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, TradeLog, trade_ref
@@ -152,6 +152,7 @@ SNAPSHOT_FIELDS = (
     "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
+    "gap_fade_confirm_sma", "gap_fade_min_candles",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
@@ -1228,6 +1229,11 @@ class StrategyEngine:
         note = judge_exit(cfg, pos.direction, gap, pos.gap_prev, pos.gap_state)
         pos.gap_prev = gap
         if note is None:
+            return
+        ok, why = fade_confirmed(cfg, pos.direction, float(closes.iloc[-1]), _finite(slow.iloc[-1]), pos.gap_state)
+        if not ok:
+            # A pullback, not a reversal yet: hold and judge the next closed candle.
+            self._signals[symbol] = f"{symbol} holding — {note}, but {why}"
             return
         self._signals[symbol] = f"{symbol} gap exit — {note}"
         await self._exit_now(cfg, self.ltp, "GAP_FADE")

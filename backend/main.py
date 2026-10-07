@@ -182,6 +182,8 @@ class ConfigUpdate(BaseModel):
     gap_entry_short: float | None = Field(default=None, ge=-10, le=10)
     gap_exit_short: float | None = Field(default=None, ge=-10, le=10)
     gap_giveback_pct: float | None = Field(default=None, ge=0, le=100)
+    gap_fade_confirm_sma: bool | None = None
+    gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
@@ -480,6 +482,8 @@ def _gap_dict(row) -> dict:
         **{key: gap_mode.setting(row, key) for key in gap_mode.DEFAULTS},
         "gap_entry_delay_min": int(gap_mode.setting(row, "gap_entry_delay_min")),
         "gap_entry_window_min": int(gap_mode.setting(row, "gap_entry_window_min")),
+        "gap_fade_min_candles": int(gap_mode.setting(row, "gap_fade_min_candles")),
+        "gap_fade_confirm_sma": bool(getattr(row, "gap_fade_confirm_sma", False)),
     }
 
 

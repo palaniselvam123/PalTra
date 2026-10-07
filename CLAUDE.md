@@ -171,6 +171,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the gap fades back to `gap_exit_long` / `gap_exit_short` after clearing it,
   or gives back `gap_giveback_pct` of its widest. An opposite cross closes at
   once (`_close_on_cross`) and the reverse waits for its own gap.
+  Optional fade confirmations (`gap_mode.fade_confirmed`, off by default):
+  `gap_fade_confirm_sma` holds a fade until a candle closes on the wrong side
+  of the slow SMA (rides out a pullback), `gap_fade_min_candles` needs the gap
+  to narrow N closed candles in a row.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
