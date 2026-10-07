@@ -150,6 +150,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
   chart that follows the replay while it plays and shows the replayed day
   afterwards. "Hold view" on the chart keeps its zoom, scroll and stock.
+  The terminal's Strategy card (`StrategySummary`) switches each part of the
+  strategy on or off for all stocks or one stock (gap mode, flip, entry
+  filters, stop on/off and type, Bollinger exit, gap-mode exit options); each
+  switch saves at once (`PUT /api/config` or `/api/config/stock/{symbol}`) and
+  asks first before the stop goes off or, in LIVE, the flip changes. The
+  numbers behind them are edited on the Settings page (`#sma-strategy`).
 - `backend/sma_research/` – offline stock-selection research for the SMA bot
   (read-only; `python -m sma_research download|analyze`). `download` runs on
   the Fly machine after hours and only calls Groww's candle-history API;

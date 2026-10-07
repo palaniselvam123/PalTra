@@ -584,7 +584,7 @@ export default function TerminalPage() {
           )}
         </div>
         <Fold title="Strategy" storageKey="sma.card.config">
-          <StrategySummary config={config} research={research} />
+          <StrategySummary config={config} research={research} onChanged={refresh} />
         </Fold>
         <TradeHistoryTable
           loading={!tradesLoaded}
