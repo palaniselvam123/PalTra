@@ -86,6 +86,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "gap_short_min": "FLOAT DEFAULT -0.5",
             "gap_short_max": "FLOAT DEFAULT -0.02",
             "use_candle_dir": "BOOLEAN DEFAULT 0",
+            "trade_count_reset_id": "INTEGER DEFAULT 0",
+            "trade_count_reset_date": "VARCHAR",
             "candle_dir_count": "INTEGER DEFAULT 2",
             "candle_dir_rule": "VARCHAR DEFAULT 'CLOSES'",
             "use_gap_mode": "BOOLEAN DEFAULT 0",

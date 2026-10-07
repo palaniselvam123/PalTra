@@ -1664,6 +1664,8 @@ class StrategyEngine:
         with session_factory()() as db:
             row = db.get(TradeLog, trade_id)
             day = row.date if row is not None else None
+        if trade_id <= self._count_floor():
+            return  # already left out of the count by a reset
         if day == self._session_date and self.trades_today > 0:
             self.trades_today -= 1
 
@@ -2577,6 +2579,39 @@ class StrategyEngine:
         self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
         return True
 
+    def _count_floor(self) -> int:
+        """Trades up to this id do not count today: the user reset the count."""
+        cfg = self._cfg_cache
+        if cfg is None or getattr(cfg, "trade_count_reset_date", None) != self._session_date:
+            return 0
+        return int(getattr(cfg, "trade_count_reset_id", 0) or 0)
+
+    def reset_trade_count(self) -> int:
+        """Set today's trade count back to 0. Today's trades, P&L and the loss limit stay.
+
+        Kept on this engine's settings row, so a restart does not count the
+        earlier trades again. A trade-cap halt is lifted (press Start); a
+        loss-limit or panic halt stays locked.
+        """
+        self._roll_session(self._now())
+        self.load_config()  # the research desk creates its settings row here if it is new
+        with session_factory()() as db:
+            top = db.query(func.max(TradeLog.id)).scalar() or 0
+            row = db.get(BotConfig, self.config_id)
+            if row is None:
+                raise RuntimeError("BotConfig missing")
+            row.trade_count_reset_id = int(top)
+            row.trade_count_reset_date = self._session_date
+            db.commit()
+        self.load_config()
+        before = self.trades_today
+        self.trades_today = 0
+        if self.status == "HALTED" and (self.halt_reason or "").startswith("max_trades_per_day"):
+            self.status = "STOPPED"
+            self.halt_reason = ""
+        self.last_signal = f"Trade count reset ({before} → 0). Press Start if the bot is stopped."
+        return before
+
     def restore_trades_today(self) -> int:
         """A restart must not forget how many entries this session already took."""
         cfg = self._cfg_cache
@@ -2586,8 +2621,13 @@ class StrategyEngine:
             pass
         mode = ((cfg.trading_mode if cfg is not None else None) or "PAPER").upper()
         day = self._session_date
+        floor = self._count_floor()
         with session_factory()() as db:
-            rows = db.query(TradeLog.mode, TradeLog.exit_reason).filter(TradeLog.date == day).all()
+            rows = (
+                db.query(TradeLog.mode, TradeLog.exit_reason)
+                .filter(TradeLog.date == day, TradeLog.id > floor)
+                .all()
+            )
         # A row Groww never held was not a trade, so it does not use the cap.
         self.trades_today = sum(
             1

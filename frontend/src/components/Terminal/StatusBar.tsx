@@ -27,10 +27,12 @@ type Props = {
   connected: boolean;
   busy: boolean;
   onModeClick: () => void;
+  /** Set today's trade count back to 0. Hidden during a replay (no cap there). */
+  onResetTrades?: () => void;
 };
 
 /** One always-visible strip with everything that decides what the bot may do. */
-export function StatusBar({ state, config, connected, busy, onModeClick }: Props) {
+export function StatusBar({ state, config, connected, busy, onModeClick, onResetTrades }: Props) {
   const mode = state?.mode ?? config?.trading_mode ?? null;
   const live = mode === "LIVE";
   const replaying = mode === "REPLAY";
@@ -153,8 +155,21 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
         ) : used == null || cap == null ? (
           <Skeleton className="h-4 w-10" />
         ) : (
-          <span className={clsx("font-mono", nearCap ? "text-amber-300" : "text-slate-100")}>
-            {used}/{cap}
+          <span className="flex items-center gap-2">
+            <span className={clsx("font-mono", nearCap ? "text-amber-300" : "text-slate-100")}>
+              {used}/{cap}
+            </span>
+            {onResetTrades && used > 0 ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onResetTrades}
+                title="Set today's trade count back to 0 so the bot can keep trading. Today's trades, P&L and the daily loss limit are kept."
+                className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+              >
+                Reset
+              </button>
+            ) : null}
           </span>
         )}
       </Cell>
