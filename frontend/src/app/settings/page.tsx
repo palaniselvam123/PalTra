@@ -25,7 +25,7 @@ export default function SettingsPage() {
         onFeedChanged={setFeed}
         botRunning={bot?.enabled ?? false}
       />
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+      <main className="mx-auto max-w-[1440px] space-y-4 px-4 py-6 lg:px-6">
         <nav aria-label="Settings sections" className="flex flex-wrap gap-1.5 text-xs">
           {[
             ["#sma-strategy", "SMA strategy"],
@@ -45,21 +45,24 @@ export default function SettingsPage() {
           ))}
         </nav>
         <SmaStrategySettings />
-        <section id="trade-alerts" aria-label="Trade alerts" className="terminal-dark scroll-mt-20">
-          <h2 className="mb-2 text-base font-semibold text-slate-100">Trade alerts</h2>
-          <WhatsAppAlerts />
-        </section>
-        <div id="broker-keys" className="scroll-mt-20">
-          <ApiKeyForm />
-        </div>
-        <div id="ai-key" className="scroll-mt-20">
-          <AiKeyForm />
-        </div>
-        <div id="diagnostics" className="scroll-mt-20">
-          <MarketDataDiagnostics />
-        </div>
-        <div id="risk" className="scroll-mt-20">
-          <RiskSettings />
+        {/* The smaller forms sit two to a row on a wide screen instead of stretching across it. */}
+        <div className="grid items-start gap-4 xl:grid-cols-2">
+          <section id="trade-alerts" aria-label="Trade alerts" className="terminal-dark scroll-mt-20 xl:col-span-2">
+            <h2 className="mb-2 text-base font-semibold text-slate-100">Trade alerts</h2>
+            <WhatsAppAlerts />
+          </section>
+          <div id="broker-keys" className="scroll-mt-20">
+            <ApiKeyForm />
+          </div>
+          <div id="ai-key" className="scroll-mt-20">
+            <AiKeyForm />
+          </div>
+          <div id="diagnostics" className="scroll-mt-20">
+            <MarketDataDiagnostics />
+          </div>
+          <div id="risk" className="scroll-mt-20">
+            <RiskSettings />
+          </div>
         </div>
       </main>
     </div>
