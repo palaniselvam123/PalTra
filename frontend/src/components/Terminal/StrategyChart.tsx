@@ -404,6 +404,29 @@ function tradeBoxes(
   return out.sort((a, b) => a.time - b.time);
 }
 
+/** Chart canvas colours per page theme (the canvas cannot read CSS). */
+const CHART_LOOK = {
+  dark: { background: "#151921", text: "#94a3b8", grid: "#1c2230" },
+  light: { background: "#ffffff", text: "#475569", grid: "#e5eaf1" },
+} as const;
+
+function pageTheme(): "dark" | "light" {
+  if (typeof document === "undefined") return "dark";
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+/** The page theme, following the switch on <html data-theme> as it changes. */
+function usePageTheme(): "dark" | "light" {
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  useEffect(() => {
+    setTheme(pageTheme());
+    const watch = new MutationObserver(() => setTheme(pageTheme()));
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => watch.disconnect();
+  }, []);
+  return theme;
+}
+
 type SmaHover = { sma9: number | null; sma21: number | null };
 
 function latestSma(rows: Candle[]): SmaHover {
@@ -529,6 +552,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const profileBarsRef = useRef<VolumeProfileBars | null>(null);
   const tradeBoxesRef = useRef<TradeBoxes | null>(null);
+  const theme = usePageTheme();
+  useEffect(() => {
+    const look = CHART_LOOK[theme];
+    apiRef.current?.applyOptions({
+      layout: { background: { type: ColorType.Solid, color: look.background }, textColor: look.text },
+      grid: { vertLines: { color: look.grid }, horzLines: { color: look.grid } },
+      rightPriceScale: { borderColor: look.grid },
+      timeScale: { borderColor: look.grid },
+    });
+  }, [theme]);
   const profileLines = useRef<IPriceLine[]>([]);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -863,19 +896,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const narrow = window.matchMedia("(max-width: 639px)").matches;
     // No line names on the chart: SMA, VWAP and RSI readings live in the header line.
     const tag = (_name: string) => "";
+    const look = CHART_LOOK[pageTheme()];
     const instance = createChart(rootRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#151921" },
-        textColor: "#94a3b8",
+        background: { type: ColorType.Solid, color: look.background },
+        textColor: look.text,
         fontSize: narrow ? 10 : 12,
       },
       grid: {
-        vertLines: { color: "#1c2230" },
-        horzLines: { color: "#1c2230" },
+        vertLines: { color: look.grid },
+        horzLines: { color: look.grid },
       },
-      rightPriceScale: { borderColor: "#1c2230" },
+      rightPriceScale: { borderColor: look.grid },
       timeScale: {
-        borderColor: "#1c2230",
+        borderColor: look.grid,
         timeVisible: true,
         secondsVisible: false,
         // 0 year, 1 month, 2 day: a new day starts here, so show the date.
