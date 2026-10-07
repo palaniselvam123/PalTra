@@ -82,12 +82,12 @@ export function BotControl({ bot, onChanged }: Props) {
         <div className="text-xs text-bot font-mono">Range locks in {bot.range_ends_in_sec}s</div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {bot.enabled ? (
           <button
             onClick={() => act(api.stopBot)}
             disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-loss/20 text-loss text-xs font-semibold hover:bg-loss/30 transition"
+            className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-md bg-loss/20 text-loss text-xs font-semibold hover:bg-loss/30 transition"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Square size={13} />} Stop Bot
           </button>
@@ -95,7 +95,7 @@ export function BotControl({ bot, onChanged }: Props) {
           <button
             onClick={() => act(api.startBot)}
             disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-profit/20 text-profit text-xs font-semibold hover:bg-profit/30 transition"
+            className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-md bg-profit/20 text-profit text-xs font-semibold hover:bg-profit/30 transition"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Start Bot
           </button>
@@ -111,12 +111,12 @@ export function BotControl({ bot, onChanged }: Props) {
               disabled={bot.enabled || busy}
               onClick={() => act(() => api.setBotConfig({ strategy: st }))}
               className={clsx(
-                "px-2.5 py-1.5 transition",
+                "whitespace-nowrap px-2.5 py-1.5 transition",
                 bot.config.strategy === st ? "bg-bot/20 text-bot" : "text-slate-400 hover:text-slate-200",
                 bot.enabled && "cursor-not-allowed opacity-50"
               )}
             >
-              {st === "orb" ? "ORB" : st === "gainers" ? "TOP GAINERS" : "SCANNER"}
+              {st === "orb" ? "ORB" : st === "gainers" ? "Top gainers" : "Scanner"}
             </button>
           ))}
         </div>
@@ -128,12 +128,12 @@ export function BotControl({ bot, onChanged }: Props) {
               disabled={bot.enabled || busy}
               onClick={() => act(() => api.setBotConfig({ session_mode: m }))}
               className={clsx(
-                "px-2.5 py-1.5 transition",
+                "whitespace-nowrap px-2.5 py-1.5 transition",
                 bot.config.session_mode === m ? "bg-bot/20 text-bot" : "text-slate-400 hover:text-slate-200",
                 bot.enabled && "opacity-50 cursor-not-allowed"
               )}
             >
-              {m === "demo" ? "DEMO TIMING" : "MARKET TIMING"}
+              {m === "demo" ? "Demo timing" : "Market timing"}
             </button>
           ))}
         </div>

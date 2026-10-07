@@ -1,5 +1,6 @@
 "use client";
 
+import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import {
@@ -241,11 +242,10 @@ export default function MoversPage() {
             <Zap size={20} className="text-bot" />
             Morning Movers
           </h1>
-          <p className="max-w-3xl text-sm text-slate-400">
-            Every tracked stock&apos;s price is recorded once a minute while the market is open and kept on
-            disk, so the morning can still be examined in the evening. Ranking is by move from the
-            session open; &quot;fast&quot; is how much of that move arrived in the last few minutes.
-          </p>
+          <Explain lead="Today's biggest moves from the session open, kept on disk so the morning can be examined in the evening.">
+            Every tracked stock&apos;s price is recorded once a minute while the market is open. Ranking is by move
+            from the session open; &quot;fast&quot; is how much of that move arrived in the last few minutes.
+          </Explain>
         </header>
 
         {error && (

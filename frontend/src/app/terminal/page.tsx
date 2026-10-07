@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { istToday, useChatScreen } from "@/lib/chatScreen";
 import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
@@ -8,7 +9,7 @@ import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
 import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
-import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
+import { AlertsStatus } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
 import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
 import {
@@ -54,40 +55,6 @@ function useFold(key: string) {
     });
   };
   return [folded, toggle] as const;
-}
-
-function Fold({
-  title,
-  storageKey,
-  children,
-}: {
-  title: string;
-  storageKey: string;
-  children: ReactNode;
-}) {
-  const [folded, toggle] = useFold(storageKey);
-  if (folded) {
-    return (
-      <button
-        type="button"
-        onClick={toggle}
-        className="flex min-h-11 w-full items-center justify-between rounded-xl border border-white/10 bg-[#151921] px-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300"
-      >
-        <span>{title}</span>
-        <span className="font-normal normal-case tracking-normal text-slate-400">Show</span>
-      </button>
-    );
-  }
-  return (
-    <div>
-      <div className="mb-1 flex justify-end">
-        <button type="button" onClick={toggle} className="min-h-11 px-2 text-xs text-slate-400 hover:text-slate-200 sm:min-h-8">
-          Minimize {title.toLowerCase()}
-        </button>
-      </div>
-      {children}
-    </div>
-  );
 }
 
 export default function TerminalPage() {
@@ -557,35 +524,28 @@ export default function TerminalPage() {
             <button
               type="button"
               onClick={toggleRail}
-              className="min-h-11 self-start rounded-xl border border-white/10 bg-[#151921] px-3 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
+              className="flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-white/10 bg-[#151921] px-3 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
             >
+              <PanelRightOpen size={15} aria-hidden className="xl:rotate-90" />
               Show side panel
             </button>
           ) : (
-            <div className="w-full shrink-0 space-y-3 xl:w-[360px]">
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={toggleRail}
-                  className="min-h-11 rounded-md border border-white/10 px-3 text-xs text-slate-300 hover:bg-white/5 sm:min-h-8"
-                >
-                  Minimize side panel
-                </button>
-              </div>
-              <Fold title="Position" storageKey="sma.card.position">
-                <LivePositionCard state={state} pending={Boolean(loadNote)} />
-              </Fold>
-              {research ? null : (
-                <Fold title="Alerts" storageKey="sma.card.alerts">
-                  <WhatsAppAlerts />
-                </Fold>
-              )}
+            <div className="relative w-full shrink-0 space-y-3 xl:w-[360px]">
+              <button
+                type="button"
+                onClick={toggleRail}
+                aria-label="Hide the side panel"
+                title="Hide the side panel"
+                className="absolute right-2 top-2 z-10 hidden h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 xl:flex"
+              >
+                <PanelRightClose size={15} aria-hidden />
+              </button>
+              <LivePositionCard state={viewState} pending={Boolean(loadNote)} />
+              {research ? null : <AlertsStatus />}
             </div>
           )}
         </div>
-        <Fold title="Strategy" storageKey="sma.card.config">
-          <StrategySummary config={config} research={research} onChanged={refresh} />
-        </Fold>
+        <StrategySummary config={config} research={research} onChanged={refresh} />
         <TradeHistoryTable
           loading={!tradesLoaded}
           trades={trades}
