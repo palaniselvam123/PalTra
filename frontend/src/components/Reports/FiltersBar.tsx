@@ -138,7 +138,7 @@ export function FiltersBar({
           <option value="">Any source</option>
           {options?.sources.map((s) => (
             <option key={s} value={s}>
-              {s === "BOT" ? "BOT (automated)" : "MANUAL"}
+              {s === "BOT" ? "BOT (automated)" : s}
             </option>
           ))}
         </select>
