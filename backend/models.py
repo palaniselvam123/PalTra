@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -64,6 +64,19 @@ def trade_ref(mode: str | None, run_id: int | None, seq: int | None, fallback: i
     if book == "REPLAY":
         return f"R{run_id}-{seq}" if run_id is not None else f"R-{seq}"
     return f"{BOOK_PREFIX.get(book, book[:1])}-{seq}"
+
+
+class PriceTick(Base):
+    """A watched stock's last traded price, about once a second while the market
+    is open (tick_store.py). Live Groww prices only; kept for TICK_KEEP_DAYS."""
+
+    __tablename__ = "price_ticks"
+    __table_args__ = (Index("ix_price_ticks_symbol_ts", "symbol", "ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String)
+    ts: Mapped[int] = mapped_column(Integer)  # epoch seconds
+    price: Mapped[float] = mapped_column(Float)
 
 
 class ReplayRun(Base):
@@ -171,6 +184,9 @@ class BotConfig(Base):
     # SMA, and/or the gap narrowing on N candles in a row (0 = off).
     gap_fade_confirm_sma: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_fade_min_candles: Mapped[int] = mapped_column(Integer, default=0)
+    # Judge the fade on the live price about once a second, as if that second
+    # closed the candle, instead of only on closed candles.
+    gap_fade_intrabar: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)

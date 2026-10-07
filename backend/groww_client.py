@@ -37,6 +37,11 @@ _SDK_TIMEOUT_SEC = 6
 # and letting the displayed price drift from Groww. History is refreshed once
 # a minute. The last trade is fetched on the normal quote interval.
 _CANDLE_REFRESH_SEC = 55.0
+# While the market is open the last trade of every watched stock comes from
+# one batched call per second (refresh_ltps), so the bot and the second-by-
+# second record see each move. Groww takes up to 50 symbols per call.
+_LTP_BATCH_SEC = 1.0
+_LTP_BATCH_MAX = 50
 _CANDLE_MIN_BARS = 30
 _DESK_TOKEN_TTL_SEC = 30.0
 _desk_token_cache: tuple[float, str] | None = None
@@ -370,6 +375,9 @@ class GrowwClient:
         self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
         self._candle_frames: dict[str, pd.DataFrame] = {}
         self._candle_at: dict[str, float] = {}
+        # When refresh_ltps last updated each stock's price, and last tried.
+        self._batch_at: dict[str, float] = {}
+        self._batch_tried = 0.0
         self._retry_after: dict[str, float] = {}
         self._simulators: dict[str, CandleSimulator] = {}
         # A stock's own price to start a practice tape from when Groww has
@@ -518,7 +526,11 @@ class GrowwClient:
         now_m = time.monotonic()
         cached = self._quotes.get(symbol)
         ttl = _QUOTE_TTL_OPEN_SEC if market_is_open() else _QUOTE_TTL_CLOSED_SEC
-        if cached is not None and now_m - cached[2] < ttl:
+        # A price from the batched call counts as fresh, but the minute
+        # history is still re-downloaded on its own schedule.
+        fresh_at = max(cached[2], self._batch_at.get(symbol, 0.0)) if cached is not None else 0.0
+        candles_due = symbol in self._candle_frames and now_m - self._candle_at.get(symbol, 0.0) >= _CANDLE_REFRESH_SEC
+        if cached is not None and now_m - fresh_at < ttl and not candles_due:
             self.last_error = ""
             return self._serve_quote(symbol, live=market_is_open())
         if self.token:
@@ -545,6 +557,48 @@ class GrowwClient:
             self.data_source = "ERROR"
             raise RuntimeError(self.last_error or "NSE quote unavailable")
         return self._simulator_quote(symbol)
+
+    async def refresh_ltps(self, symbols) -> dict[str, float]:
+        """One Groww call for the last trade of every watched stock, once a second.
+
+        Market hours with a Groww session only. Only stocks already loaded by
+        refresh() are batched (their minute history is held); the forming
+        candle follows each new price. Returns {symbol: price} it updated.
+        A failure changes nothing: refresh() keeps working on its own.
+        """
+        if not self.token or not market_is_open():
+            return {}
+        now_m = time.monotonic()
+        if now_m - self._batch_tried < _LTP_BATCH_SEC:
+            return {}
+        self._batch_tried = now_m
+        names = [s for s in dict.fromkeys((x or "").upper() for x in symbols) if s and s in self._quotes]
+        names = names[:_LTP_BATCH_MAX]
+        if not names:
+            return {}
+        try:
+            raw = await asyncio.wait_for(asyncio.to_thread(self._load_ltps, names), timeout=_QUOTE_TIMEOUT_SEC)
+        except Exception:  # noqa: BLE001
+            return {}
+        got: dict[str, float] = {}
+        for name in names:
+            ltp = _batch_price(raw, name)
+            cached = self._quotes.get(name)
+            if ltp is None or cached is None:
+                continue
+            frame = _apply_ltp(cached[1], ltp)
+            self._quotes[name] = (float(ltp), frame, cached[2])
+            if name in self._candle_frames:
+                self._candle_frames[name] = frame
+            self._batch_at[name] = time.monotonic()
+            got[name] = float(ltp)
+        return got
+
+    def _load_ltps(self, names: list[str]):
+        sdk = self._require_sdk()
+        return sdk.get_ltp(
+            exchange_trading_symbols=tuple(f"NSE_{name}" for name in names), segment="CASH", timeout=_SDK_TIMEOUT_SEC
+        )
 
     def _ensure_quote_token(self) -> None:
         self.adopt_saved_session()
@@ -882,6 +936,18 @@ def _as_price(value) -> float | None:
         return None
     if math.isfinite(number) and number > 0:
         return number
+    return None
+
+
+def _batch_price(raw, symbol: str) -> float | None:
+    """One stock's price from a batched LTP reply, matched on the exact key."""
+    data = raw.get("payload", raw) if isinstance(raw, dict) else None
+    if not isinstance(data, dict):
+        return None
+    want = {f"NSE_{symbol}".upper(), symbol.upper()}
+    for key, value in data.items():
+        if str(key).upper() in want:
+            return _as_price(value)
     return None
 
 

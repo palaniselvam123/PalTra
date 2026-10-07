@@ -154,6 +154,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_giveback_pct: Number(form.gap_giveback_pct ?? 0),
     gap_fade_confirm_sma: Boolean(form.gap_fade_confirm_sma),
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
+    gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
     gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
     gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
   });
@@ -586,6 +587,20 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           {isOwn("gap_fade_confirm_sma") && <OwnTag />}
           Ride out pullbacks — exit on a fade only when a candle also closes on the wrong side of SMA {form.sma_slow ?? 21}{" "}
           (below it for a buy, above it for a sell).
+        </span>
+      </label>
+      <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.gap_fade_intrabar)}
+          onChange={(e) => set("gap_fade_intrabar", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {isOwn("gap_fade_intrabar") && <OwnTag />}
+          Check the fade every second — judge the exit on the live price, as if that second closed the candle, instead of
+          waiting for the minute to close. Faster on a sharp reversal; a candle that turns back inside the minute can
+          exit too early. Entries still wait for the candle to close.
         </span>
       </label>
       <p className="mt-1 text-[11px] leading-snug text-slate-400">

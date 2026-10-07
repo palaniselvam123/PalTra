@@ -174,7 +174,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Optional fade confirmations (`gap_mode.fade_confirmed`, off by default):
   `gap_fade_confirm_sma` holds a fade until a candle closes on the wrong side
   of the slow SMA (rides out a pullback), `gap_fade_min_candles` needs the gap
-  to narrow N closed candles in a row.
+  to narrow N closed candles in a row. `gap_fade_intrabar` judges the fade
+  about once a second on the live price as if that second closed the candle
+  (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state).
+- `backend/tick_store.py` – second-by-second prices: while the market is open
+  the live engine fetches every watched stock's last trade in one batched
+  Groww call a second (`GrowwClient.refresh_ltps`; the minute history still
+  refreshes every 55 s) and records real Groww prices (`price_ticks`, one row
+  per stock per second, kept 10 days). `/api/ticks` serves them to the data
+  table, whose rows expand into their seconds. Groww's history has no seconds,
+  so replays and earlier days have none; `SMA_RECORD_TICKS=all` also records
+  simulator prices for a local test.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
