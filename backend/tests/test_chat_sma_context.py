@@ -128,3 +128,43 @@ async def test_question_is_sent_with_the_sma_facts_and_the_screen(monkeypatch):
     assert facts["sma_terminal"]["trades_today_count"] == 3
     assert facts["screen"] == {"page": "/terminal", "data": {"view": "SMA terminal", "trades_today_count": 3}}
     assert "SMA terminal" in sent["body"]["instructions"]
+
+
+def test_a_live_terminal_reaches_the_assistant_as_real_money(tmp_path, monkeypatch):
+    """The ORB desk's "paper only" note once made the assistant call a LIVE terminal paper."""
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/sma.db")
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "")
+    monkeypatch.setattr("groww_client._env_access_token", lambda: "")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    import main as sma_main
+    from models import BotConfig
+    from strategy_engine import StrategyEngine
+
+    # Only the stored mode changes; nothing here talks to Groww.
+    with database.session_factory()() as db:
+        db.get(BotConfig, 1).trading_mode = "LIVE"
+        db.commit()
+    fake = SimpleNamespace(engine=StrategyEngine(), _config_dict=sma_main._config_dict)
+    monkeypatch.setattr(sma_context, "_terminal", lambda: fake)
+    facts = sma_facts()
+    with database.session_factory()() as db:
+        db.get(BotConfig, 1).trading_mode = "PAPER"
+        db.commit()
+    paper = sma_facts()
+    database.reset_engine()
+
+    assert facts["execution_mode"] == "LIVE" and facts["real_money"] is True
+    assert "REAL money" in facts["execution_note"]
+    assert paper["execution_mode"] == "PAPER" and paper["real_money"] is False
+
+
+def test_orb_mechanics_say_they_are_not_the_sma_terminal():
+    from app.services import chat_advisor
+
+    mech = chat_advisor._mechanics()
+    assert "ORB desk only" in mech["applies_to"] and "sma_terminal.execution_mode" in mech["applies_to"]
+    assert "REAL MONEY" in chat_advisor.SYSTEM_PROMPT
+    assert "never call it paper" in chat_advisor.SYSTEM_PROMPT

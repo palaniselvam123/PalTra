@@ -179,6 +179,19 @@ def sma_facts() -> dict:
         return facts
     facts["available"] = True
     try:
+        mode = (engine.load_config().trading_mode or "PAPER").upper()
+    except Exception:  # noqa: BLE001
+        mode = "UNKNOWN"
+    facts["execution_mode"] = mode
+    facts["real_money"] = mode == "LIVE"
+    facts["execution_note"] = (
+        "LIVE: the SMA bot sends REAL Groww orders with REAL money."
+        if mode == "LIVE"
+        else "PAPER: practice fills only; no order reaches Groww."
+        if mode == "PAPER"
+        else "Could not read the mode; check the terminal's mode button."
+    )
+    try:
         from database import session_factory
         from models import TradeLog
         from strategy_engine import trade_names
