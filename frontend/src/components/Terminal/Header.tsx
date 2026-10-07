@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, Loader2, Search } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
+import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
 import { inr, smaApi, px, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
@@ -45,6 +46,23 @@ type Props = {
   desk?: Desk;
   onDeskChange?: (desk: Desk) => void;
 };
+
+/** Light / dark, shared with the rest of the desk (saved in this browser). */
+function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  const light = theme === "light";
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={light ? "Switch to the dark theme" : "Switch to the light theme"}
+      title={light ? "Dark theme" : "Light theme"}
+      className="flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+    >
+      {light ? <Moon size={15} aria-hidden /> : <Sun size={15} aria-hidden />}
+    </button>
+  );
+}
 
 /** Live desk / Research desk. Each browser (or `?desk=` link) keeps its own choice. */
 function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => void }) {
@@ -466,6 +484,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 SMA × ATR Terminal
               </span>
               {onDeskChange ? <DeskSwitch desk={desk} onChange={onDeskChange} /> : null}
+              <ThemeToggle />
             </span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
               {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}

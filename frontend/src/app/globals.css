@@ -184,26 +184,94 @@ select {
   max-width: 100%;
 }
 
-/* The SMA terminal stays a dark surface when the rest of the desk is light.
-   Light theme turns slate text near-black, which hides the numbers typed
-   into these fields. */
-[data-theme="light"] .terminal-dark .text-slate-100 { color: #f1f5f9; }
-[data-theme="light"] .terminal-dark .text-slate-200 { color: #e2e8f0; }
-[data-theme="light"] .terminal-dark .text-slate-300 { color: #cbd5e1; }
-[data-theme="light"] .terminal-dark .text-slate-400 { color: #94a3b8; }
-[data-theme="light"] .terminal-dark .text-slate-500 { color: #94a3b8; }
+/* --- SMA terminal --------------------------------------------------------
+   The terminal was written dark-only with hard-coded surfaces (#0B0E14 page,
+   #151921 cards) and white-alpha borders. In dark theme those stand as
+   written. In light theme they are remapped here, scoped to the terminal, so
+   it follows the same light theme as the rest of the desk: white cards on a
+   pale ground, dark-tint borders and washes, and accent text dark enough to
+   read on white. Text on coloured buttons (rose, violet, sky) stays white. */
 
-[data-theme="light"] .terminal-dark input,
-[data-theme="light"] .terminal-dark textarea,
-[data-theme="light"] .terminal-dark select,
-.terminal-dark input,
-.terminal-dark textarea,
-.terminal-dark select {
+/* Inputs: light text on dark fields, dark text on light fields. */
+:root:not([data-theme="light"]) .terminal-dark input,
+:root:not([data-theme="light"]) .terminal-dark textarea,
+:root:not([data-theme="light"]) .terminal-dark select {
   color: #f8fafc;
   -webkit-text-fill-color: #f8fafc;
   caret-color: #f8fafc;
   color-scheme: dark;
 }
+[data-theme="light"] .terminal-dark input,
+[data-theme="light"] .terminal-dark textarea,
+[data-theme="light"] .terminal-dark select {
+  color: #0f172a;
+  -webkit-text-fill-color: #0f172a;
+  caret-color: #0f172a;
+  color-scheme: light;
+}
+
+/* Surfaces */
+[data-theme="light"] .terminal-dark.bg-\[\#0B0E14\],
+[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #eef3fb; }
+[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/90 { background-color: rgb(255 255 255 / 0.94); }
+[data-theme="light"] .terminal-dark .bg-\[\#151921\] { background-color: #ffffff; }
+[data-theme="light"] .terminal-dark .bg-\[\#1A1F29\] { background-color: #f1f5f9; }
+[data-theme="light"] .terminal-dark .bg-\[\#1b2130\] { background-color: #f8fafc; }
+[data-theme="light"] .terminal-dark .bg-black\/20,
+[data-theme="light"] .terminal-dark .bg-black\/25,
+[data-theme="light"] .terminal-dark .bg-black\/30,
+[data-theme="light"] .terminal-dark .bg-black\/40 { background-color: #ffffff; }
+[data-theme="light"] .terminal-dark .bg-black\/70 { background-color: rgb(15 23 42 / 0.45); }
+[data-theme="light"] .terminal-dark .bg-white\/10 { background-color: rgb(15 23 42 / 0.08); }
+[data-theme="light"] .terminal-dark .bg-white\/15 { background-color: rgb(15 23 42 / 0.11); }
+[data-theme="light"] .terminal-dark .bg-white\/\[0\.06\],
+[data-theme="light"] .terminal-dark .bg-white\/\[0\.05\] { background-color: rgb(15 23 42 / 0.06); }
+[data-theme="light"] .terminal-dark .bg-white\/\[0\.025\],
+[data-theme="light"] .terminal-dark .bg-white\/\[0\.02\],
+[data-theme="light"] .terminal-dark .bg-white\/\[0\.015\] { background-color: rgb(15 23 42 / 0.03); }
+[data-theme="light"] .terminal-dark .odd\:bg-white\/\[0\.025\]:nth-child(odd) { background-color: rgb(15 23 42 / 0.03); }
+[data-theme="light"] .terminal-dark .hover\:bg-white\/10:hover,
+[data-theme="light"] .terminal-dark .hover\:bg-white\/15:hover { background-color: rgb(15 23 42 / 0.1); }
+
+/* Borders, rings, dividers */
+[data-theme="light"] .terminal-dark .border-white\/5 { border-color: rgb(15 23 42 / 0.08); }
+[data-theme="light"] .terminal-dark .border-white\/10 { border-color: rgb(15 23 42 / 0.12); }
+[data-theme="light"] .terminal-dark .border-white\/15,
+[data-theme="light"] .terminal-dark .border-white\/20 { border-color: rgb(15 23 42 / 0.18); }
+[data-theme="light"] .terminal-dark .ring-white\/10 { --tw-ring-color: rgb(15 23 42 / 0.14); }
+[data-theme="light"] .terminal-dark .ring-white\/15 { --tw-ring-color: rgb(15 23 42 / 0.2); }
+[data-theme="light"] .terminal-dark .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(15 23 42 / 0.08); }
+[data-theme="light"] .terminal-dark .divide-white\/10 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(15 23 42 / 0.12); }
+
+/* White text that sits on a tint (not a coloured button) turns dark. */
+[data-theme="light"] .terminal-dark .bg-white\/10.text-white,
+[data-theme="light"] .terminal-dark .bg-violet-400\/30.text-white,
+[data-theme="light"] .terminal-dark .hover\:text-white:hover { color: #0f172a; }
+
+/* Accent text: the 100-400 shades were picked for a dark ground. */
+[data-theme="light"] .terminal-dark .text-emerald-300,
+[data-theme="light"] .terminal-dark .text-emerald-400,
+[data-theme="light"] .terminal-dark .text-emerald-200 { color: #047857; }
+[data-theme="light"] .terminal-dark .text-rose-300,
+[data-theme="light"] .terminal-dark .text-rose-400,
+[data-theme="light"] .terminal-dark .text-rose-200,
+[data-theme="light"] .terminal-dark .text-rose-100 { color: #be123c; }
+[data-theme="light"] .terminal-dark .text-sky-300,
+[data-theme="light"] .terminal-dark .text-sky-200,
+[data-theme="light"] .terminal-dark .text-sky-100,
+[data-theme="light"] .terminal-dark .text-accentSky { color: #0369a1; }
+[data-theme="light"] .terminal-dark .text-amber-300,
+[data-theme="light"] .terminal-dark .text-amber-200,
+[data-theme="light"] .terminal-dark .text-amber-100 { color: #92400e; }
+[data-theme="light"] .terminal-dark .text-violet-300,
+[data-theme="light"] .terminal-dark .text-violet-200,
+[data-theme="light"] .terminal-dark .text-violet-100,
+[data-theme="light"] .terminal-dark .text-violet-50 { color: #6d28d9; }
+[data-theme="light"] .terminal-dark .text-teal-100,
+[data-theme="light"] .terminal-dark .text-teal-200,
+[data-theme="light"] .terminal-dark .text-teal-300 { color: #0f766e; }
+[data-theme="light"] .terminal-dark .text-blue-200,
+[data-theme="light"] .terminal-dark .text-blue-300 { color: #1d4ed8; }
 
 /* Thumb-sized targets on a phone. Every control on the SMA terminal is at
    least 44px tall below the sm breakpoint, including the strategy and alert
@@ -221,7 +289,6 @@ select {
   }
 }
 
-[data-theme="light"] .terminal-dark input::placeholder,
 .terminal-dark input::placeholder {
   color: #94a3b8;
   -webkit-text-fill-color: #94a3b8;
@@ -277,18 +344,9 @@ select {
   box-shadow: 0 1px 3px rgb(15 28 51 / 0.06);
 }
 
-/* The terminal header is a dark control bar. Light mode must not paint it white,
-   or the price and buttons wash out on a phone. */
-[data-theme="light"] .terminal-dark header.sticky {
-  background-color: #0b0e14;
-  background-image: none;
-  border-bottom-color: rgb(255 255 255 / 0.06);
-  box-shadow: none;
-}
-
-[data-theme="light"] .terminal-dark thead tr {
-  background-color: transparent;
-}
+/* The terminal header follows the light theme like the rest of the desk (the
+   generic white header.sticky rule above); its text and chips are remapped in
+   the SMA terminal block. */
 
 /* Table header rows: a soft tint so the head separates from the body without
    a heavy rule. */
@@ -316,3 +374,6 @@ select {
   background-clip: text;
   color: transparent;
 }
+
+/* The blotter's active sort header is white on dark; on a light header it turns dark. */
+[data-theme="light"] .terminal-dark thead .text-white { color: #0f172a; }
