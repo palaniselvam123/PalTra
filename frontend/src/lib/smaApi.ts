@@ -22,6 +22,8 @@ export const SMA_API = resolveSmaApi();
 export type StopType = "ATR" | "SMA_GAP" | "TSL";
 
 export type SmaConfig = {
+  /** This bot's name, e.g. "Scalper". */
+  bot_name?: string | null;
   symbol: string;
   trade_symbols?: string[];
   exchange: string;
@@ -119,6 +121,9 @@ export type ChargeBreakdown = {
 };
 
 export type SmaState = {
+  /** Which SMA bot this is (1 = main desk) and its name. */
+  bot?: number;
+  bot_name?: string;
   bot_status: string;
   halt_reason: string;
   /** REPLAY while a past day is replaying, RESEARCH on the research desk (both practice only). */
@@ -263,6 +268,17 @@ export type ChartFilters = {
   atr_stop: boolean;
 };
 
+export type BotSummary = {
+  bot: number;
+  name: string;
+  mode: "PAPER" | "LIVE";
+  status: string;
+  armed: string[];
+  held: string[];
+  trades_today: number;
+  net_today: number;
+};
+
 export type ChartPayload = {
   /** The stock drawn (the chart focus, or the one asked for). */
   symbol?: string;
@@ -295,6 +311,8 @@ export type TradeRow = {
   id: number;
   date: string;
   symbol: string;
+  /** The SMA bot that placed it (1 = main desk, 2-4 the extra bots). */
+  bot?: number;
   direction: "LONG" | "SHORT";
   /** Flip strategy: the order went against the signal. */
   flipped?: boolean;
@@ -462,18 +480,34 @@ let replayRouting = false;
 export function setReplayRouting(on: boolean): void {
   replayRouting = on;
 }
-/** Which bot this page drives: the live desk, or the paper-only research desk. */
-export type Desk = "live" | "research";
+/**
+ * Which bot this page drives: "live" is the main desk (bot 1), "bot2"…"bot4"
+ * the extra bots (each PAPER or LIVE, own settings and book), "research" the
+ * paper-only research desk.
+ */
+export type Desk = "live" | "bot2" | "bot3" | "bot4" | "research";
+export const DESKS: Desk[] = ["live", "bot2", "bot3", "bot4", "research"];
 const DESK_KEY = "sma.desk";
 let desk: Desk = "live";
 
-/** The desk for this page: `?desk=research` in the address wins, then this browser's last choice. */
+function asDesk(value: string | null | undefined): Desk | null {
+  return value && (DESKS as string[]).includes(value) ? (value as Desk) : null;
+}
+
+/** The SMA bot number of a desk: 1 for the main desk, 2-4 for the extra bots, null for research. */
+export function deskBot(d: Desk = desk): number | null {
+  if (d === "live") return 1;
+  if (d === "research") return null;
+  return Number(d.slice(3));
+}
+
+/** The desk for this page: `?desk=` in the address wins, then this browser's last choice. */
 export function initialDesk(): Desk {
   if (typeof window === "undefined") return "live";
-  const asked = new URLSearchParams(window.location.search).get("desk");
-  if (asked === "research" || asked === "live") return asked;
+  const asked = asDesk(new URLSearchParams(window.location.search).get("desk"));
+  if (asked) return asked;
   try {
-    return localStorage.getItem(DESK_KEY) === "research" ? "research" : "live";
+    return asDesk(localStorage.getItem(DESK_KEY)) ?? "live";
   } catch {
     return "live";
   }
@@ -494,11 +528,18 @@ export function currentDesk(): Desk {
 
 /** The research desk has its own copy of these routes; the mode switch and replay are live-desk only. */
 const RESEARCH_PREFIXES = ["/api/state", "/api/chart", "/api/history", "/api/config", "/api/trade-symbols", "/api/bot/"];
+/** Bots 2-4 have the same routes under /api/bots/{n}/, their own PAPER/LIVE switch included. */
+const BOT_PREFIXES = [...RESEARCH_PREFIXES, "/api/mode"];
 
 function route(path: string): string {
   if (desk === "research") {
     const hit = RESEARCH_PREFIXES.find((prefix) => path.startsWith(prefix));
     return hit ? path.replace("/api/", "/api/research/") : path;
+  }
+  const bot = deskBot();
+  if (bot != null && bot > 1) {
+    const hit = BOT_PREFIXES.find((prefix) => path.startsWith(prefix));
+    return hit ? path.replace("/api/", `/api/bots/${bot}/`) : path;
   }
   if (!replayRouting) return path;
   if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
@@ -609,6 +650,10 @@ export const smaApi = {
       method: "POST",
       body: JSON.stringify({ symbol, armed }),
     }),
+  /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
+  bots: () => request<BotSummary[]>("/api/bots"),
+  /** Panic on every SMA bot at once (main desk and bots 2-4). */
+  killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {
       method: "POST",
@@ -641,8 +686,13 @@ export const smaApi = {
   setTickFeed: (on: boolean) =>
     request<{ on: boolean }>("/api/ticks/feed", { method: "PUT", body: JSON.stringify({ on }) }),
   /** One whole book, newest first, up to 20,000 trades. */
+  /** One book; on a bot's desk only that bot's PAPER / LIVE trades. */
   tradeBook: (mode: TradeBookMode) =>
-    request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(
+    request<TradeBookPayload>(
+      `/api/trades/book?mode=${mode}${deskBot() != null && (mode === "PAPER" || mode === "LIVE") ? `&bot=${deskBot()}` : ""}`,
+      undefined,
+      30000
+    ).then(
       (body): TradeBook => ({
         total: body.total,
         rows: body.rows.map(({ strategy_ref, ...row }) => ({
@@ -651,7 +701,8 @@ export const smaApi = {
         })),
       })
     ),
-  tradeCounts: () => request<Record<TradeBookMode, number>>("/api/trades/counts"),
+  tradeCounts: () =>
+    request<Record<TradeBookMode, number>>(deskBot() != null ? `/api/trades/counts?bot=${deskBot()}` : "/api/trades/counts"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
   /** Backtest the Scalp page's own picks: each day, the top N at the pick time. */
   replayScalpPicks: (body: {

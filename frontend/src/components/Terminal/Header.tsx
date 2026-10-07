@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CandlestickChart, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
-import { inr, smaApi, px, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type BotSummary, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
@@ -65,18 +65,49 @@ export function ThemeToggle() {
   );
 }
 
-/** Live desk / Research desk. Each browser (or `?desk=` link) keeps its own choice. */
+/**
+ * Main desk, bots 2-4 and the research desk. Each browser (or `?desk=` link)
+ * keeps its own choice. A red dot marks a bot trading LIVE.
+ */
 function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => void }) {
-  const options: { id: Desk; label: string; title: string }[] = [
-    { id: "live", label: "Live desk", title: "The bot that trades your account (PAPER or LIVE)" },
+  const [bots, setBots] = useState<BotSummary[]>([]);
+  useEffect(() => {
+    let stop = false;
+    const pull = () =>
+      smaApi
+        .bots()
+        .then((rows) => !stop && setBots(rows))
+        .catch(() => undefined);
+    pull();
+    const id = setInterval(pull, 15000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
+  const byNo = new Map(bots.map((b) => [b.bot, b]));
+  const options: { id: Desk; label: string; title: string; live: boolean }[] = [
+    ...(["live", "bot2", "bot3", "bot4"] as const).map((id, i) => {
+      const info = byNo.get(i + 1);
+      const name = info?.name ?? (i === 0 ? "Bot 1" : `Bot ${i + 1}`);
+      return {
+        id,
+        label: name,
+        live: info?.mode === "LIVE",
+        title: `${name}: ${info?.mode ?? "PAPER"} · ${info?.status?.toLowerCase() ?? "…"}${
+          info ? ` · ${info.armed.length} armed · today ${info.net_today >= 0 ? "+" : ""}₹${info.net_today.toFixed(2)}` : ""
+        }`,
+      };
+    }),
     {
       id: "research",
       label: "Research",
-      title: "A paper-only second bot on today's live prices, with its own settings and book. Never sends an order.",
+      live: false,
+      title: "A paper-only bot on today's live prices, with its own settings and book. Never sends an order.",
     },
   ];
   return (
-    <span role="group" aria-label="Desk" className="inline-flex shrink-0 rounded-md ring-1 ring-inset ring-white/15">
+    <span role="group" aria-label="Bot" className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-md ring-1 ring-inset ring-white/15">
       {options.map((o) => (
         <button
           key={o.id}
@@ -85,7 +116,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
           title={o.title}
           onClick={() => desk !== o.id && onChange(o.id)}
           className={clsx(
-            "min-h-9 px-2.5 text-xs font-semibold first:rounded-l-md last:rounded-r-md",
+            "flex min-h-9 items-center gap-1.5 whitespace-nowrap px-2.5 text-xs font-semibold first:rounded-l-md last:rounded-r-md",
             desk === o.id
               ? o.id === "research"
                 ? "bg-teal-600/30 text-teal-100"
@@ -93,6 +124,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
               : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
           )}
         >
+          {o.live ? <span aria-label="LIVE" className="h-1.5 w-1.5 rounded-full bg-rose-500" /> : null}
           {o.label}
         </button>
       ))}
@@ -454,6 +486,19 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
+  const panicAll = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await smaApi.killAllBots();
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Panic all failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const panic = async () => {
     setBusy(true);
     setError(null);
@@ -555,6 +600,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
           onToggleBot={toggleBot}
           onForce={forceOrder}
           onPanic={panic}
+          onPanicAll={desk === "research" ? undefined : panicAll}
+          botName={state?.bot_name}
         />
         <div ref={searchRef} className="relative min-w-0">
           <div className="rounded-xl border border-white/10 bg-[#151921]">
@@ -778,11 +825,14 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 text-[#F43F5E]" size={20} />
               <div>
-                <h2 className="text-[17px] font-semibold text-slate-100">Enable LIVE REAL MONEY?</h2>
+                <h2 className="text-[17px] font-semibold text-slate-100">
+                  Enable LIVE REAL MONEY{state?.bot_name ? ` for ${state.bot_name}` : ""}?
+                </h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
                   Orders will be sent to Groww as NSE MIS limit orders with a 0.20% protection buffer,
                   plus an exchange stop-loss. This uses the Groww login already saved on the desk.
-                  Paper mode stays the default until you confirm.
+                  Paper mode stays the default until you confirm. Only this bot switches; a stock another
+                  LIVE bot trades cannot be armed here.
                 </p>
               </div>
             </div>

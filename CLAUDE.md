@@ -130,6 +130,23 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `/api/research/*` (state, chart, history, config, trade-symbols, bot); there is
   no research mode switch. UI: the terminal's Live desk / Research switch,
   remembered per browser or set with `/terminal/?desk=research`.
+- `backend/bots.py` – Bots 2-4: more SMA bots next to the main desk (bot 1),
+  each a `BotEngine` (subclass of `StrategyEngine`) that can trade LIVE. Own
+  settings row (`BotConfig` id 3-5 via `config_id_for`; id 2 is research),
+  first copied from bot 1 with an empty Trade list and PAPER, and its own
+  `bot_name`. Own book: every trade row carries `TradeLog.bot` (1 = main
+  desk, NULL on older rows), and the engine's queries filter by it
+  (`bot_rows`), so trades, P&L, caps, panic and ids (`N2-1`, `P3-4`) are its
+  own. Own order client (`BotGrowwClient`): its own PAPER/LIVE mode, paper
+  fills and Groww SDK session, so one bot's mode never changes where another
+  bot's order goes; quotes, candles and the per-second price call come from
+  the main desk's client (`refresh_ltps` batches every bot's stocks).
+  **A stock belongs to at most one LIVE bot** (`live_conflict`): checked when
+  a stock is armed on a LIVE bot, when a bot is switched to LIVE, and in
+  `StrategyEngine._open` just before every LIVE entry (`live_guard`).
+  API: `/api/bots` (list), `/api/bots/kill-all`, and the terminal routes under
+  `/api/bots/{2-4}/` (state, chart, history, config, trade-symbols, mode,
+  bot/*). UI: the terminal's bot switch (`?desk=bot2`…), Settings picks the bot.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -233,7 +250,9 @@ Real orders reach Groww in only two places:
    (MIS limit orders with a 0.20% protection buffer, plus an exchange `SL`).
    In PAPER these return local `PAPER…` ids and never touch the SDK.
    Called from `strategy_engine.py` (`_open`, `_close_position`,
-   `_cancel_sl_verified`).
+   `_cancel_sl_verified`). Bots 2-4 send theirs through their own
+   `bots.BotGrowwClient` (a `GrowwClient` with its own mode), never through
+   the main desk's client.
 2. **ORB Desk manual desk, "groww" execution** –
    `backend/app/services/manual_desk.py`, `_send_groww_order` →
    `backend/app/brokers/groww_client.py`, `GrowwClient.place_order`
@@ -275,6 +294,9 @@ There are separate switches. All of them boot safe.
   positions are squared off at `square_off_time` even when the bot is paused,
   and a practice position from an earlier day is closed on the next tick.
 
+- **Bots 2-4** (`backend/bots.py`): each has its own PAPER/LIVE switch
+  (`POST /api/bots/{n}/mode`, same `confirm_live` and Groww-session rules) and
+  boots in PAPER. Two LIVE bots never trade the same stock.
 - **Research desk** (`backend/research.py`): always practice money, whatever
   the SMA Terminal mode is. It runs alongside a LIVE bot without touching it.
 

@@ -37,6 +37,9 @@ class TradeLog(Base):
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Flip strategy: the order went against the signal (a buy signal sold).
     flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Which SMA bot placed it: 1 is the main desk (NULL on older rows), 2-4 the
+    # extra bots (bots.py). Each bot has its own book, P&L and caps.
+    bot: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     # The replay run (ReplayRun.id) a REPLAY trade belongs to. None otherwise.
     run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # JSON copy of the strategy settings at entry (strategy_engine.SNAPSHOT_FIELDS).
@@ -54,18 +57,21 @@ class TradeLog(Base):
 BOOK_PREFIX = {"LIVE": "N", "PAPER": "P", "RESEARCH": "Q"}
 
 
-def trade_ref(mode: str | None, run_id: int | None, seq: int | None, fallback: int | None = None) -> str:
+def trade_ref(
+    mode: str | None, run_id: int | None, seq: int | None, fallback: int | None = None, bot: int | None = None
+) -> str:
     """The trade id shown to people, unique within its book.
 
     NSE live: N-12 · Simulation (PAPER): P-12 · Research desk: Q-12 ·
-    a replay / backtest run 7: R7-12.
+    a replay / backtest run 7: R7-12. Bots 2-4 add their number: N2-12, P3-4.
     """
     book = (mode or "PAPER").upper()
     if seq is None:
         return f"#{fallback}" if fallback is not None else "—"
     if book == "REPLAY":
         return f"R{run_id}-{seq}" if run_id is not None else f"R-{seq}"
-    return f"{BOOK_PREFIX.get(book, book[:1])}-{seq}"
+    tag = f"{bot}" if bot is not None and int(bot) > 1 and book in ("PAPER", "LIVE") else ""
+    return f"{BOOK_PREFIX.get(book, book[:1])}{tag}-{seq}"
 
 
 class PriceTick(Base):
@@ -192,6 +198,8 @@ class BotConfig(Base):
     # App-wide (read from row 1): fetch every watched stock's price from Groww
     # once a second and record it (tick_store). Off: quotes every few seconds.
     second_ticks: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Name of an SMA bot (rows 1 and 3-5; bots.py), e.g. "Scalper".
+    bot_name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Flip strategy: a buy signal places a sell order and a sell signal a buy.
     # Every condition stays the same; signal exits follow the signal.
     flip_orders: Mapped[bool] = mapped_column(Boolean, default=False)

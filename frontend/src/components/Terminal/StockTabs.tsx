@@ -88,10 +88,10 @@ export function tradeTotals(rows: { symbol: string; net_pnl?: number | null }[])
 }
 
 /** The address of one stock's chart page. */
-export function chartHref(symbol: string, opts: { date?: string | null; runId?: number | null; research?: boolean } = {}): string {
+export function chartHref(symbol: string, opts: { date?: string | null; runId?: number | null; desk?: string } = {}): string {
   const q = new URLSearchParams({ symbol: symbol.toUpperCase() });
   if (opts.date) q.set("date", opts.date);
   if (opts.runId != null) q.set("run", String(opts.runId));
-  if (opts.research) q.set("desk", "research");
+  if (opts.desk && opts.desk !== "live") q.set("desk", opts.desk);
   return `/terminal/chart/?${q.toString()}`;
 }

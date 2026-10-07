@@ -20,6 +20,7 @@ import {
   setDesk,
   setReplayRouting,
   smaApi,
+  deskBot,
   stateForSymbol,
   type Desk,
   type ChartPayload,
@@ -62,22 +63,37 @@ export default function TerminalPage() {
   // order), so every call below already goes to the right desk.
   const [desk, setDeskState] = useState<Desk>("live");
   const research = desk === "research";
+  // Bots 2-4 and the research desk have no stream and never follow a replay.
+  const mainDesk = desk === "live";
+  const botNo = deskBot(desk);
   const researchRef = useRef(false);
   useEffect(() => {
     const chosen = initialDesk();
     setDesk(chosen);
-    researchRef.current = chosen === "research";
+    researchRef.current = chosen !== "live";
     setDeskState(chosen);
   }, []);
   const changeDesk = useCallback((next: Desk) => {
     setDesk(next);
     // A fresh page: nothing from the other desk's state, chart or replay carries over.
-    window.location.href = next === "research" ? "/terminal/?desk=research" : "/terminal/";
+    window.location.href = next === "live" ? "/terminal/" : `/terminal/?desk=${next}`;
   }, []);
   const [state, setState] = useState<SmaState | null>(null);
   const [config, setConfig] = useState<SmaConfig | null>(null);
   const [chart, setChart] = useState<ChartPayload | null>(null);
   const [trades, setTrades] = useState<TradeRow[]>([]);
+  // A bot's desk shows only its own practice / real trades; replay and research rows keep their own tabs.
+  const deskTrades = useMemo(
+    () =>
+      botNo == null
+        ? trades
+        : trades.filter((t) => {
+            const mode = (t.mode || "PAPER").toUpperCase();
+            if (mode !== "PAPER" && mode !== "LIVE") return botNo === 1;
+            return (t.bot ?? 1) === botNo;
+          }),
+    [trades, botNo]
+  );
   const [tradesLoaded, setTradesLoaded] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
   // Polls in a row with no answer. One slow moment (a restart, a busy
@@ -122,7 +138,7 @@ export default function TerminalPage() {
   const screenSummary = useMemo(() => {
     if (!state && !config) return null;
     const today = istToday();
-    const todays = trades.filter((t) => t.date === today && (t.mode ?? "PAPER").toUpperCase() !== "REPLAY");
+    const todays = deskTrades.filter((t) => t.date === today && (t.mode ?? "PAPER").toUpperCase() !== "REPLAY");
     return {
       view: research ? "SMA terminal — research desk (paper only, own settings and book)" : "SMA terminal",
       chart_stock: state?.symbol ?? config?.symbol ?? null,
@@ -293,7 +309,7 @@ export default function TerminalPage() {
   // The chart marks only the book on screen: this replay run, or the PAPER /
   // LIVE book. Each earlier replay of the same day would otherwise add its own
   // EXIT at the same time and price.
-  const chartTrades = trades.filter((t) => {
+  const chartTrades = deskTrades.filter((t) => {
     const mode = (t.mode || "PAPER").toUpperCase();
     if (routed) return mode === "REPLAY" && (replay?.run_id == null || t.run_id === replay.run_id);
     return mode === (config?.trading_mode || "PAPER").toUpperCase();
@@ -327,9 +343,9 @@ export default function TerminalPage() {
     return () => clearInterval(poll);
   }, [routed, onReplay]);
 
-  // The research desk has no stream: poll its state every 2 s while the tab is visible.
+  // Bots 2-4 and the research desk have no stream: poll their state every 2 s while the tab is visible.
   useEffect(() => {
-    if (!research) return;
+    if (mainDesk) return;
     const poll = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       smaApi
@@ -341,7 +357,7 @@ export default function TerminalPage() {
         .catch(() => setConnected(false));
     }, 2000);
     return () => clearInterval(poll);
-  }, [research]);
+  }, [mainDesk]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -433,9 +449,9 @@ export default function TerminalPage() {
           side: b.direction !== "FLAT" ? b.direction : null,
         })),
       label: research ? "Research stocks" : "Stocks",
-      href: (name) => chartHref(name, { research }),
+      href: (name) => chartHref(name, { desk }),
     };
-  }, [state?.books, state?.trade_symbols, trades, routed, replay, endedRun, research]);
+  }, [state?.books, state?.trade_symbols, trades, routed, replay, endedRun, research, desk]);
   const viewState = useMemo(() => stateForSymbol(state, held), [state, held]);
   const activeTab = (held ?? chart?.symbol ?? state?.symbol ?? null) || null;
 
@@ -486,7 +502,14 @@ export default function TerminalPage() {
             {closeNote}
           </div>
         )}
-        {research ? (
+        {botNo != null && botNo > 1 ? (
+          <div role="note" className="rounded-xl border border-sky-400/30 bg-sky-500/[0.07] px-3 py-2 text-sm text-sky-100">
+            <span className="font-semibold">{state?.bot_name ?? `Bot ${botNo}`}</span> — its own settings, Trade list,
+            trades ({state?.mode === "LIVE" ? "N" : "P"}
+            {botNo}-1, …), P&amp;L, limits and panic. PAPER or LIVE on its own switch. A stock can be traded LIVE by only
+            one bot at a time.
+          </div>
+        ) : research ? (
           <div role="note" className="rounded-xl border border-teal-400/30 bg-teal-500/[0.07] px-3 py-2 text-sm text-teal-100">
             <span className="font-semibold">Research desk</span> — a second bot on today&apos;s live prices with practice
             money only. Its settings, Trade list (up to 10 stocks), trades (Q-1, Q-2…) and P&amp;L are its own. It never
@@ -509,7 +532,7 @@ export default function TerminalPage() {
               state={viewState}
               onHoldChange={onHoldChange}
               trades={chartTrades}
-              allTrades={trades}
+              allTrades={deskTrades}
               pin={pin}
               closing={Boolean(viewState?.symbol) && closingSymbol === viewState?.symbol.toUpperCase()}
               onLiveBars={askLiveBars}
@@ -548,7 +571,7 @@ export default function TerminalPage() {
         <StrategySummary config={config} research={research} onChanged={refresh} />
         <TradeHistoryTable
           loading={!tradesLoaded}
-          trades={trades}
+          trades={deskTrades}
           state={state}
           closingSymbol={closingSymbol}
           onClose={(trade) => closePosition(trade.symbol, trade.direction, trade.qty)}

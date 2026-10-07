@@ -169,14 +169,27 @@ def _one_book(rows: list, first: int, last: int, run_id: int | None, book: str |
 
 
 def _markers(
-    symbol: str, first: int, last: int, span: int = 60, run_id: int | None = None, book: str | None = None
+    symbol: str,
+    first: int,
+    last: int,
+    span: int = 60,
+    run_id: int | None = None,
+    book: str | None = None,
+    bot: int | None = None,
 ) -> list[dict]:
     """Entries and exits on this stock inside the shown bars."""
     out: list[dict] = []
     with session_factory()() as db:
         rows = db.query(TradeLog).filter(TradeLog.symbol == symbol).order_by(TradeLog.id).all()
+    if bot is not None:
+        # One SMA bot's practice / real trades; replay and research rows have their own books.
+        rows = [
+            r
+            for r in rows
+            if (r.mode or "PAPER").upper() not in ("PAPER", "LIVE") or int(getattr(r, "bot", None) or 1) == int(bot)
+        ]
     for row in _one_book(rows, first, last + span - 1, run_id, book):
-        ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id)
+        ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id, getattr(row, "bot", None))
         if row.entry_time is not None:
             t = _epoch(row.entry_time)
             if first <= t <= last + span - 1:
@@ -227,6 +240,7 @@ def build_payload(
     interval: int = 1,
     run_id: int | None = None,
     book: str | None = None,
+    bot: int | None = None,
 ) -> dict:
     sma_fast = getattr(cfg, "sma_fast", 9) or 9
     sma_slow = getattr(cfg, "sma_slow", 21) or 21
@@ -244,7 +258,7 @@ def build_payload(
         # Refused crosses are judged on 1-minute candles, as the bot trades them.
         minute = enrich(frame, sma_fast, sma_slow, atr_period) if interval != 1 else enriched
         blocked = [b for b in filter_blocks(minute, cfg) if lo <= b["time"] <= hi]
-    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60, run_id, book) if candles else []
+    markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60, run_id, book, bot) if candles else []
     return {
         "symbol": symbol,
         "interval": interval,
@@ -269,6 +283,7 @@ async def load_history(
     interval: int = 1,
     run_id: int | None = None,
     book: str | None = None,
+    bot: int | None = None,
 ) -> dict:
     if interval not in INTERVALS:
         raise HistoryError(f"Candle size must be one of {', '.join(str(i) for i in INTERVALS)} minutes.")
@@ -281,7 +296,7 @@ async def load_history(
     frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
     # The stock's own settings (from the run's snapshot for a replay run).
     settings = settings_for(run_settings(cfg, run_id), symbol)
-    return build_payload(frame, symbol, start, end, settings, interval, run_id, book)
+    return build_payload(frame, symbol, start, end, settings, interval, run_id, book, bot)
 
 
 def run_settings(cfg, run_id: int | None):
