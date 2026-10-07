@@ -391,3 +391,20 @@ select {
     font-size: max(16px, 1em) !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Movable panels (components/Layout/Board.tsx): one column below 1280px, a
+   12-column grid above it where each panel spans its chosen width. A panel
+   whose content sizes itself (the chart) takes the dragged height.
+--------------------------------------------------------------------------- */
+@media (min-width: 1280px) {
+  .board-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .board-panel {
+    grid-column: span var(--span, 12) / span var(--span, 12);
+  }
+}
+.board-panel[data-sized] [data-panel-sized] {
+  height: var(--panel-h) !important;
+}

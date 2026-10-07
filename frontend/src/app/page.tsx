@@ -13,6 +13,7 @@ import { AccountBalance } from "@/components/Dashboard/AccountBalance";
 import { TradeHistory } from "@/components/Dashboard/TradeHistory";
 import { AiExpertPanel } from "@/components/Dashboard/AiExpertPanel";
 import { useTradingState } from "@/hooks/useTradingState";
+import { Board } from "@/components/Layout/Board";
 import { api, type DeskPosition } from "@/lib/api";
 import type { ClosedTrade } from "@/components/Dashboard/TradeHistory";
 
@@ -129,86 +130,122 @@ export default function DashboardPage() {
         <SymbolStrip symbols={symbols} ticks={ticks} active={activeSymbol} onSelect={setSelectedSymbol} />
 
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
-          {/* --- workspace ------------------------------------------------ */}
-          <div className="space-y-4 xl:col-span-2">
-            {activeSymbol && (
-              <AdvancedChart
-                symbol={activeSymbol}
-                symbols={Object.keys(ticks).sort()}
-                onSymbolChange={setSelectedSymbol}
-                tick={ticks[activeSymbol]}
-                stopLoss={activePosition?.stop_loss}
-                target={activePosition?.target}
-                height={560}
-              />
-            )}
+          {/* --- workspace: movable, resizable panels ---------------------- */}
+          <Board
+            page="dashboard.workspace"
+            widths={false}
+            className="xl:col-span-2"
+            panels={[
+              ...(activeSymbol
+                ? [
+                    {
+                      id: "chart",
+                      title: "Chart",
+                      resize: "var" as const,
+                      minHeight: 240,
+                      hideable: false,
+                      node: (
+                        <AdvancedChart
+                          symbol={activeSymbol}
+                          symbols={Object.keys(ticks).sort()}
+                          onSymbolChange={setSelectedSymbol}
+                          tick={ticks[activeSymbol]}
+                          stopLoss={activePosition?.stop_loss}
+                          target={activePosition?.target}
+                          height={560}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
+              {
+                id: "positions",
+                title: "Positions",
+                node: (
+                  <PositionsTable
+                    emptyTitle={
+                      deskPosLoad === "error" || positionsLoad === "error"
+                        ? "Positions did not load"
+                        : deskPosLoad === "loading" || positionsLoad === "loading"
+                          ? "Loading positions…"
+                          : "No open positions"
+                    }
+                    emptyHint={
+                      deskPosLoad === "error" || positionsLoad === "error"
+                        ? "The request did not answer. This is not an empty account."
+                        : deskPosLoad === "loading" || positionsLoad === "loading"
+                          ? "Still waiting on the desk."
+                          : "Entries opened by the bot or the manual desk appear here with live P&L and their bracket levels."
+                    }
+                    positions={[
+                      ...deskPositions.map((d) => ({
+                        symbol: d.symbol,
+                        side: d.side,
+                        quantity: d.quantity,
+                        entry_price: d.entry_price,
+                        stop_loss: d.stop_loss,
+                        target: d.target,
+                        order_id: d.order_id,
+                        ltp: d.ltp,
+                      })),
+                      ...positions.filter((p) => !deskPositions.some((d) => d.symbol === p.symbol)),
+                    ]}
+                    ticks={ticks}
+                    onClose={async (symbol) => {
+                      if (deskPositions.some((d) => d.symbol === symbol)) await api.deskClose(symbol);
+                      else await api.closePosition(symbol);
+                      refreshPositions();
+                      refreshSummary();
+                    }}
+                  />
+                ),
+              },
+              {
+                id: "history",
+                title: "Trade history",
+                node: (
+                  <TradeHistory
+                    trades={[...deskHistory, ...history]}
+                    emptyLabel={
+                      deskHistLoad === "error" || historyLoad === "error"
+                        ? "Trades did not load. This is not an empty book."
+                        : deskHistLoad === "loading" || historyLoad === "loading"
+                          ? "Loading trades…"
+                          : "No closed trades yet."
+                    }
+                  />
+                ),
+              },
+            ]}
+          />
 
-            <PositionsTable
-              emptyTitle={
-                deskPosLoad === "error" || positionsLoad === "error"
-                  ? "Positions did not load"
-                  : deskPosLoad === "loading" || positionsLoad === "loading"
-                    ? "Loading positions…"
-                    : "No open positions"
-              }
-              emptyHint={
-                deskPosLoad === "error" || positionsLoad === "error"
-                  ? "The request did not answer. This is not an empty account."
-                  : deskPosLoad === "loading" || positionsLoad === "loading"
-                    ? "Still waiting on the desk."
-                    : "Entries opened by the bot or the manual desk appear here with live P&L and their bracket levels."
-              }
-              positions={[
-                ...deskPositions.map((d) => ({
-                  symbol: d.symbol,
-                  side: d.side,
-                  quantity: d.quantity,
-                  entry_price: d.entry_price,
-                  stop_loss: d.stop_loss,
-                  target: d.target,
-                  order_id: d.order_id,
-                  ltp: d.ltp,
-                })),
-                ...positions.filter((p) => !deskPositions.some((d) => d.symbol === p.symbol)),
-              ]}
-              ticks={ticks}
-              onClose={async (symbol) => {
-                if (deskPositions.some((d) => d.symbol === symbol)) await api.deskClose(symbol);
-                else await api.closePosition(symbol);
-                refreshPositions();
-                refreshSummary();
-              }}
-            />
-
-            <TradeHistory
-              trades={[...deskHistory, ...history]}
-              emptyLabel={
-                deskHistLoad === "error" || historyLoad === "error"
-                  ? "Trades did not load. This is not an empty book."
-                  : deskHistLoad === "loading" || historyLoad === "loading"
-                    ? "Loading trades…"
-                    : "No closed trades yet."
-              }
-            />
-          </div>
-
-          {/* --- rail: status, then controls ------------------------------ */}
-          <div className="space-y-4">
-            <AccountBalance account={account} loadState={accountLoad} onCapitalChanged={refreshSummary} />
-            <BotControl bot={bot} onChanged={setBot} />
-            <LiveConsole logs={logs} />
-            <PlaceOrderForm
-              symbols={symbols}
-              ticks={ticks}
-              feed={feed}
-              killSwitchActive={killSwitchActive}
-              onOrderPlaced={() => {
-                refreshPositions();
-                refreshSummary();
-              }}
-            />
-            <AiExpertPanel symbols={symbols} activeSymbol={activeSymbol} />
-          </div>
+          {/* --- rail: status, then controls (each panel movable) -------------- */}
+          <Board
+            page="dashboard.rail"
+            widths={false}
+            panels={[
+              { id: "account", title: "Account", node: <AccountBalance account={account} loadState={accountLoad} onCapitalChanged={refreshSummary} /> },
+              { id: "bot", title: "Bot", node: <BotControl bot={bot} onChanged={setBot} /> },
+              { id: "console", title: "Console", node: <LiveConsole logs={logs} /> },
+              {
+                id: "order",
+                title: "Place order",
+                node: (
+                  <PlaceOrderForm
+                    symbols={symbols}
+                    ticks={ticks}
+                    feed={feed}
+                    killSwitchActive={killSwitchActive}
+                    onOrderPlaced={() => {
+                      refreshPositions();
+                      refreshSummary();
+                    }}
+                  />
+                ),
+              },
+              { id: "expert", title: "AI expert", node: <AiExpertPanel symbols={symbols} activeSymbol={activeSymbol} /> },
+            ]}
+          />
         </div>
       </main>
     </div>

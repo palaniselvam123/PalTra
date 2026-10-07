@@ -179,12 +179,17 @@ export function AdvancedChart({
       });
     });
 
+    // Follows its box, not just the window: a movable panel can be made taller or narrower.
     const resize = () => {
-      if (priceRef.current) chart.applyOptions({ width: priceRef.current.clientWidth });
+      const box = priceRef.current;
+      if (box) chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || height });
       if (oscRef.current && oscChart.current) oscChart.current.applyOptions({ width: oscRef.current.clientWidth });
     };
+    const watcher = new ResizeObserver(resize);
+    watcher.observe(priceRef.current);
     window.addEventListener("resize", resize);
     return () => {
+      watcher.disconnect();
       window.removeEventListener("resize", resize);
       chart.remove();
       priceChart.current = null;
@@ -621,7 +626,8 @@ export function AdvancedChart({
         </div>
       )}
 
-      <div ref={priceRef} />
+      {/* On a movable board the panel's bottom edge sets this height (see Layout/Board). */}
+      <div ref={priceRef} data-panel-sized="" style={{ height }} />
       {osc && <div ref={oscRef} className="border-t border-border/60" />}
     </div>
   );
