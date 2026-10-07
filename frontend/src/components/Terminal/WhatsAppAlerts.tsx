@@ -223,3 +223,40 @@ export function WhatsAppAlerts() {
     </section>
   );
 }
+
+/**
+ * One line for the terminal's side panel: which alert channel is on, with a
+ * link to set it up. The form itself lives on the Settings page.
+ */
+export function AlertsStatus() {
+  const [channels, setChannels] = useState<Channel[] | null>(null);
+  useEffect(() => {
+    desk<Channel[]>("/api/scan/channels")
+      .then(setChannels)
+      .catch(() => setChannels([]));
+  }, []);
+  const active = channels?.find((row) => row.enabled && row.configured);
+  const name = active
+    ? active.provider === "telegram"
+      ? "Telegram"
+      : active.provider === "twilio"
+        ? "WhatsApp (Twilio)"
+        : "WhatsApp (CallMeBot)"
+    : null;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-white/5 bg-[#151921] px-4 py-3 text-sm">
+      <span className="flex items-center gap-2">
+        <span aria-hidden className={`h-2 w-2 rounded-full ${active ? "bg-emerald-400" : "bg-slate-500"}`} />
+        <span className="text-slate-300">
+          Trade alerts{" "}
+          <span className={active ? "font-semibold text-emerald-300" : "text-slate-400"}>
+            {channels == null ? "…" : name ? `on · ${name}` : "off"}
+          </span>
+        </span>
+      </span>
+      <a href="/settings/#trade-alerts" className="text-xs font-semibold text-sky-300 underline-offset-2 hover:underline">
+        {active ? "Change" : "Set up"} in Settings
+      </a>
+    </div>
+  );
+}

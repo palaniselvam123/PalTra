@@ -46,7 +46,7 @@ import { Badge, Button, StatusDot } from "@/components/ui";
  * permanent attention.
  */
 
-const NAV = [
+export const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/terminal", label: "SMA Terminal", icon: Activity },
   { href: "/chart", label: "Charts", icon: LineChart },
@@ -193,16 +193,16 @@ export function Navbar({
           <span className="grad-text hidden text-title font-bold sm:inline">ORB Desk</span>
         </Link>
 
-        <nav className="hidden min-w-0 items-center gap-4 self-stretch xl:flex">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
+        <nav className="hidden min-w-0 items-center gap-3 self-stretch xl:flex 2xl:gap-5">
+          {NAV.map(({ href, label }) => {
+            const active = isActive(pathname, href);
             return (
               <Link
                 key={href}
                 href={href}
                 prefetch={false}
                 className={clsx(
-                  "relative px-1 py-5 text-body font-medium transition-colors",
+                  "relative whitespace-nowrap px-1 py-5 text-body font-medium transition-colors",
                   active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
                 )}
               >
@@ -238,8 +238,8 @@ export function Navbar({
               <span className="text-caption text-slate-400">{linkLabel}</span>
             </span>
 
-            <span className="hidden h-3 w-px bg-border xl:block" />
-            <div className="hidden items-center gap-3 xl:flex">
+            <span className="hidden h-3 w-px bg-border 2xl:block" />
+            <div className="hidden items-center gap-3 2xl:flex">
 
             {/* Data source is a real choice, so it stays a control — but as a
                 quiet segmented pair rather than two competing colour chips. */}
@@ -285,7 +285,7 @@ export function Navbar({
           <Badge
             tone={deskLive ? "loss" : "profit"}
             icon={<ShieldCheck size={11} />}
-            className="hidden xl:inline-flex"
+            className="hidden 2xl:inline-flex"
             title={
               deskLive
                 ? "The next order on the Trade page is sent to Groww. A practice position already on the desk is not."
@@ -314,14 +314,6 @@ export function Navbar({
               </Button>
             )}
 
-            <button
-              type="button"
-              onClick={signOut}
-              className="rounded-md px-2 py-1 text-caption font-medium text-slate-200 hover:bg-white/10"
-            >
-              Sign out
-            </button>
-
             {/* Overflow: preferences, not per-session controls. The menu is
                 portaled so a short header cannot clip it. */}
             <div className="relative">
@@ -347,7 +339,7 @@ export function Navbar({
                     className="w-52 overflow-hidden rounded-card border border-border bg-surface shadow-pop"
                   >
                     {/* Phones and tablets: the Sim / NSE switch is hidden in the bar. */}
-                    <div className="border-b border-border px-3 py-2 xl:hidden">
+                    <div className="border-b border-border px-3 py-2 2xl:hidden">
                       <div className="mb-1.5 text-caption text-slate-500">Data source</div>
                       <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Data source">
                         {(["simulated", "live"] as const).map((src) => (
@@ -403,7 +395,7 @@ export function Navbar({
                       hint="Locks the desk on this browser"
                       onClick={signOut}
                     />
-                    <div className="border-t border-border px-3 py-2 xl:hidden">
+                    <div className="border-t border-border px-3 py-2 2xl:hidden">
                       <Badge tone={deskLive ? "loss" : "profit"} icon={<ShieldCheck size={11} />}>
                         {deskLive ? "LIVE ORDERS" : "PRACTICE"}
                       </Badge>
@@ -424,7 +416,7 @@ export function Navbar({
         className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 xl:hidden"
       >
         {NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
+          const active = isActive(pathname, href);
           return (
             <Link
               key={href}
@@ -471,6 +463,13 @@ export function Navbar({
       )}
     </header>
   );
+}
+
+/** The current page's link: "/" only on the dashboard, others also on their sub-pages. */
+export function isActive(pathname: string | null, href: string): boolean {
+  const path = (pathname ?? "/").replace(/\/+$/, "") || "/";
+  if (href === "/") return path === "/";
+  return path === href || path.startsWith(`${href}/`);
 }
 
 function FeedBanner({

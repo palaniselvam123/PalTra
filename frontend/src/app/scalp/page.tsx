@@ -1,5 +1,6 @@
 "use client";
 
+import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
@@ -207,7 +208,7 @@ export default function ScalpPage() {
   };
 
   const header = (key: SortKey, label: string, right = true, title?: string) => (
-    <th className={clsx("whitespace-nowrap pb-2 font-medium", right ? "text-right" : "text-left")} title={title}>
+    <th className={clsx("whitespace-nowrap pb-2 font-medium", right ? "text-right" : "text-left", !right && key !== "symbol" && "pl-3")} title={title}>
       <button
         type="button"
         onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "symbol" && key !== "spread_pct" }))}
@@ -240,11 +241,10 @@ export default function ScalpPage() {
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Gauge size={20} className="text-bot" /> Scalp monitor
           </h1>
-          <p className="max-w-3xl text-sm text-slate-400">
-            Which streaming stocks are worth scalping right now: enough movement per minute (ATR), a tight bid/ask
-            spread, enough money traded today, and something happening in the last few minutes. Watch only — nothing
-            here places an order.
-          </p>
+          <Explain lead="Which streaming stocks are worth scalping right now. Watch only — nothing here places an order.">
+            A stock scores well with enough movement per minute (ATR), a tight bid/ask spread, enough money traded
+            today, and something happening in the last few minutes.
+          </Explain>
         </header>
 
         <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-800 bg-card p-4 text-sm">

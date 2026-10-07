@@ -1,5 +1,6 @@
 "use client";
 
+import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react";
@@ -115,12 +116,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
       </div>
-      <p className="mb-3 max-w-3xl text-xs text-slate-400">
-        Every 5 minutes while the market is open, one Groww quote for each NSE stock that has futures (the most traded
-        names). Ranked by money traded today, volume against its 20-day usual for this time of day, and how many shares
-        buyers vs sellers have waiting. Watch adds a stock to the desk feed so the monitor below scores it for scalping.
-        Market data only — nothing here places an order.
-      </p>
+      <Explain className="mb-3" lead="The most traded F&O stocks, ranked every 5 minutes. Market data only — nothing here places an order.">
+        Every 5 minutes while the market is open, one Groww quote for each NSE stock that has futures. Ranked by money
+        traded today, volume against its 20-day usual for this time of day, and how many shares buyers vs sellers have
+        waiting. Watch adds a stock to the desk feed so the monitor below scores it for scalping.
+      </Explain>
 
       <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
         <label className="flex flex-col gap-1">

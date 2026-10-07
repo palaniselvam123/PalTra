@@ -56,10 +56,14 @@ export function ChatWidget() {
       <button
         onClick={() => setOpen(true)}
         aria-label="Ask the bot about its trades"
-        className="fixed bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center gap-2 rounded-full bg-bot text-sm font-semibold text-slate-900 shadow-lg shadow-bot/20 transition hover:brightness-110 sm:h-auto sm:w-auto sm:px-4 sm:py-3"
+        title="Ask the bot"
+        className="group fixed bottom-4 right-4 z-40 flex h-12 min-w-12 items-center justify-center rounded-full bg-bot px-3.5 text-sm font-semibold text-slate-900 shadow-lg shadow-bot/20 transition-all hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        <MessageSquare size={16} />
-        <span className="hidden sm:inline">Ask the bot</span>
+        <MessageSquare size={18} aria-hidden />
+        {/* Icon only, so it does not sit over the cards at the right edge; the label slides out on hover or focus. */}
+        <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:ml-2 group-hover:max-w-[8rem] group-focus-visible:ml-2 group-focus-visible:max-w-[8rem]">
+          Ask the bot
+        </span>
       </button>
     );
   }

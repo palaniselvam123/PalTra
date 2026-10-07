@@ -115,7 +115,7 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
       </Cell>
       <Cell label="Data">
         {source ? (
-          <span className="flex items-center gap-1.5">
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <span
               aria-hidden
               title={connected ? "Live stream connected" : "Live stream reconnecting"}

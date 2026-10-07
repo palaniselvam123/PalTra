@@ -31,8 +31,10 @@ export function SmaStrategySettings() {
     setDesk(chosen);
     pickDesk(chosen);
     load();
-    if (window.location.hash === "#sma-strategy") {
-      requestAnimationFrame(() => document.getElementById("sma-strategy")?.scrollIntoView());
+    const target = window.location.hash.slice(1);
+    if (target) {
+      // Wait a frame so the sections below this one have rendered too.
+      requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView());
     }
   }, [load]);
 

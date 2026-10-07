@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
+import { AlertTriangle, CandlestickChart, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
 import { inr, smaApi, px, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
+import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
@@ -470,18 +471,31 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     <>
       <nav
         aria-label="Desk pages"
-        className="grid grid-cols-4 border-b border-white/10 bg-[#0B0E14] text-xs uppercase tracking-[0.12em] text-slate-300 sm:flex sm:gap-5 sm:px-4"
+        className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14] px-2 sm:gap-2 sm:px-4"
       >
-        {[
-          ["/", "Dashboard"],
-          ["/trade/", "Trade"],
-          ["/chart/", "Charts"],
-          ["/settings/", "Settings"],
-        ].map(([href, label]) => (
-          <a key={href} href={href} className="flex min-h-11 items-center justify-center hover:text-white sm:min-h-9 sm:justify-start">
-            {label}
-          </a>
-        ))}
+        <a href="/" className="mr-1 flex shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
+          <span className="grad-brand grid h-7 w-7 place-items-center rounded-full text-white">
+            <CandlestickChart size={14} aria-hidden />
+          </span>
+        </a>
+        {NAV.map(({ href, label, icon: Icon }) => {
+          const active = href === "/terminal";
+          return (
+            <a
+              key={href}
+              href={href === "/" ? "/" : `${href}/`}
+              aria-current={active ? "page" : undefined}
+              className={clsx(
+                "relative flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-xs font-medium sm:min-h-10",
+                active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
+              )}
+            >
+              <Icon size={13} aria-hidden className="hidden sm:block" />
+              {label}
+              {active ? <span className="absolute inset-x-1 bottom-0 h-[2px] rounded-t bg-emerald-400" /> : null}
+            </a>
+          );
+        })}
       </nav>
       <header
         aria-label="SMA terminal"
@@ -491,7 +505,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         )}
       >
         <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
-          <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="hidden truncate text-sm font-semibold tracking-tight text-slate-100 sm:inline">
                 SMA × ATR Terminal
