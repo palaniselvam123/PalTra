@@ -51,12 +51,25 @@ export function strategyNotes(cfg: Partial<SmaConfig> | null | undefined): Strat
   }
   const roomLong = round(inLong - outLong);
   const roomShort = round(outShort - inShort);
-  if (Math.abs(inLong + inShort) > 1e-9 || Math.abs(outLong + outShort) > 1e-9) {
+  // A lock-in level (exit beyond entry) is chosen on purpose, so "balance both" would undo it.
+  const lockIn = roomLong < 0 || roomShort < 0;
+  if (!lockIn && (Math.abs(inLong + inShort) > 1e-9 || Math.abs(outLong + outShort) > 1e-9)) {
     notes.push({
       id: "lopsided",
       text: `Buys and sells are not mirror images: a buy enters at ${inLong}% and exits at ${outLong}% (room ${roomLong}), a sell enters at ${inShort}% and exits at ${outShort}% (room ${roomShort}). One side is held much longer than the other.`,
       fix: balanced(inLong, inShort),
     });
+  }
+  for (const [side, inLevel, outLevel, room] of [
+    ["buy", inLong, outLong, roomLong],
+    ["sell", inShort, outShort, roomShort],
+  ] as const) {
+    if (room < 0) {
+      notes.push({
+        id: `lock-in-${side}`,
+        text: `The ${side} exit (${outLevel}%) is beyond the ${side} entry (${inLevel}%): a lock-in level. The gap exit only arms once the gap has reached ${outLevel}%, then closes when it comes back to it${num(cfg.gap_giveback_pct, 0) > 0 ? " (the give-back waits for that too)" : ""}. A ${side} whose gap never gets that wide is closed only by the stop, the opposite cross or square-off.`,
+      });
+    }
   }
   for (const [side, room] of [
     ["buy", roomLong],
