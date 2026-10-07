@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, Table2, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -19,6 +19,7 @@ import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import { parseClock } from "@/lib/format";
 import { VALUE_AREA_SHARE, volumeProfile, type VolumeProfile } from "@/lib/volumeProfile";
 import { Skeleton } from "./ui";
+import { ChartDataTable } from "./ChartDataTable";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 type Props = {
@@ -305,6 +306,8 @@ function bollingerRows(
 
 const PROFILE_KEY = "sma.chart.profile";
 const CHART_HIDDEN_KEY = "sma.chart.hidden";
+const TABLE_KEY = "sma.chart.table";
+const NO_MARKERS: ChartPayload["markers"] = [];
 const BOX_SMALL_KEY = "sma.chart.posbox.small";
 const BOX_POS_KEY = "sma.chart.posbox.pos";
 const POC_COLOR = "#FACC15";
@@ -547,6 +550,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const sectionRef = useRef<HTMLElement>(null);
   // Hide the chart (header stays) and the open-position box's place and size.
   const [chartHidden, setChartHidden] = useState(false);
+  // The candles as a table under the chart (sort, filter, columns, CSV / PDF).
+  const [showTable, setShowTable] = useState(false);
   const [boxSmall, setBoxSmall] = useState(false);
   const [boxPos, setBoxPos] = useState<{ x: number; y: number } | null>(null);
   const boxDrag = useRef<{ dx: number; dy: number } | null>(null);
@@ -555,6 +560,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   useEffect(() => {
     try {
       if (localStorage.getItem(CHART_HIDDEN_KEY) === "1") setChartHidden(true);
+      if (localStorage.getItem(TABLE_KEY) === "1") setShowTable(true);
       const small = localStorage.getItem(BOX_SMALL_KEY);
       // Phones start with the compact box so it does not cover the candles.
       setBoxSmall(small == null ? window.matchMedia("(max-width: 639px)").matches : small === "1");
@@ -574,6 +580,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const toggleChart = () => {
     setChartHidden((on) => {
       remember(CHART_HIDDEN_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  const toggleTable = () => {
+    setShowTable((on) => {
+      remember(TABLE_KEY, on ? "0" : "1");
       return !on;
     });
   };
@@ -673,6 +685,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     return base;
   }, [view, past, bar]);
   rowsRef.current = rows;
+  const snapToBar = useCallback((sec: number) => bucketStart(sec, bar), [bar]);
 
   // Volume profile of the latest session on screen, from the candles as sent
   // (1-minute live; the chosen size on a past range).
@@ -1261,6 +1274,19 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             {chartHidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
             {chartHidden ? "Show chart" : "Hide chart"}
           </button>
+          <button
+            type="button"
+            onClick={toggleTable}
+            aria-pressed={showTable}
+            title={showTable ? "Hide the data table" : "Show these candles as a table: prices, SMA gap, VWAP, RSI, candle names and trade P&L"}
+            className={clsx(
+              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              showTable ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <Table2 size={14} aria-hidden />
+            Table
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -1472,6 +1498,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         )}
       </div>
       </div>
+      {showTable ? (
+        <ChartDataTable
+          candles={rows}
+          markers={view?.markers ?? NO_MARKERS}
+          trades={allTrades ?? trades}
+          snap={snapToBar}
+          symbol={(past?.symbol ?? state?.symbol ?? "").toUpperCase()}
+          barLabel={bar === 60 ? "1-hour" : `${bar}-minute`}
+          source={past ? "Past view" : state?.mode === "REPLAY" ? "Replay" : state?.mode === "LIVE" ? "Live" : "Paper"}
+        />
+      ) : null}
     </section>
   );
 }
