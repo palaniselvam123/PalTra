@@ -88,6 +88,8 @@ export type SmaConfig = {
   gap_fade_min_candles?: number;
   /** Judge the fade on the live price about once a second, not only on closed candles. */
   gap_fade_intrabar?: boolean;
+  /** Flip strategy: a buy signal sells, a sell signal buys. */
+  flip_orders?: boolean;
   gap_entry_delay_min?: number;
   gap_entry_window_min?: number;
   max_daily_loss: number;
@@ -126,6 +128,8 @@ export type SmaState = {
   data_source: string;
   /** The per-second Groww price fetch and record is on (one switch for both desks). */
   second_ticks?: boolean;
+  /** The chart stock's flip strategy is on (buy signals sell, sell signals buy). */
+  flip_orders?: boolean;
   /** Present only on /api/replay/state. */
   replay?: ReplayInfo;
   last_error: string;
@@ -180,6 +184,7 @@ export type SmaState = {
   adx14: number | null;
   position: null | {
     direction: "LONG" | "SHORT";
+    flipped?: boolean;
     qty: number;
     entry_price: number;
     ma_cross_price: number;
@@ -289,6 +294,8 @@ export type TradeRow = {
   date: string;
   symbol: string;
   direction: "LONG" | "SHORT";
+  /** Flip strategy: the order went against the signal. */
+  flipped?: boolean;
   qty: number;
   entry_time: string | null;
   entry_price: number;

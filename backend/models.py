@@ -35,6 +35,8 @@ class TradeLog(Base):
     # False when the trade was entered with no stop (use_stop off). The
     # sl_trigger_price on such a row is only the level a stop would have used.
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Flip strategy: the order went against the signal (a buy signal sold).
+    flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # The replay run (ReplayRun.id) a REPLAY trade belongs to. None otherwise.
     run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # JSON copy of the strategy settings at entry (strategy_engine.SNAPSHOT_FIELDS).
@@ -190,6 +192,9 @@ class BotConfig(Base):
     # App-wide (read from row 1): fetch every watched stock's price from Groww
     # once a second and record it (tick_store). Off: quotes every few seconds.
     second_ticks: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Flip strategy: a buy signal places a sell order and a sell signal a buy.
+    # Every condition stays the same; signal exits follow the signal.
+    flip_orders: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)

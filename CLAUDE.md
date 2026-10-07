@@ -177,6 +177,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   to narrow N closed candles in a row. `gap_fade_intrabar` judges the fade
   about once a second on the live price as if that second closed the candle
   (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state).
+- Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
+  every condition is unchanged, but `StrategyEngine._open` sends the order the
+  other way (a buy signal sells, a sell signal buys). The position keeps
+  `flipped` (saved on `TradeLog.flipped`, restored after a restart);
+  `OpenPosition.signal_direction` is the signal's side, and the cross, gap
+  mode/fade and Bollinger exits judge that, so a flipped trade opens and closes
+  when the unflipped one would. Stops and targets guard the real position.
+  The offline stock research baseline keeps it off.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still

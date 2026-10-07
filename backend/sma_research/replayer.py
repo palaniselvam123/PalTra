@@ -39,6 +39,7 @@ BASELINE_OFF = {
     "use_adx_filter": False,
     "use_bollinger": False,
     "bb_exit": "OFF",
+    "flip_orders": False,
     "stock_settings": "{}",
 }
 

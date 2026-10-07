@@ -32,7 +32,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
             ? "Position did not load"
             : "Loading position…"
           : pos
-            ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY`
+            ? `${pos.direction} ${pos.qty.toLocaleString("en-IN")} QTY${pos.flipped ? " · FLIPPED" : ""}`
             : "FLAT — waiting for the next SMA cross"}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">

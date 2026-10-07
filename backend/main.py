@@ -187,6 +187,7 @@ class ConfigUpdate(BaseModel):
     gap_fade_confirm_sma: bool | None = None
     gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
     gap_fade_intrabar: bool | None = None
+    flip_orders: bool | None = None
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
@@ -488,6 +489,7 @@ def _gap_dict(row) -> dict:
         "gap_fade_min_candles": int(gap_mode.setting(row, "gap_fade_min_candles")),
         "gap_fade_confirm_sma": bool(getattr(row, "gap_fade_confirm_sma", False)),
         "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
+        "flip_orders": bool(getattr(row, "flip_orders", False)),
     }
 
 

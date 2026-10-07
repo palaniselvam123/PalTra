@@ -44,6 +44,7 @@ export function strategyLabel(s: Settings): string {
   const pick = scalpPickOf(s);
   const parts: string[] = pick ? [`Scalp top ${pick.top_n} @ ${pick.pick_time}`] : [];
   parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
+  if (s.flip_orders) parts.push("FLIPPED (buy signals sell)");
   if (s.use_stop === false) parts.push("no stop");
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
   else if (s.stop_type === "TSL")

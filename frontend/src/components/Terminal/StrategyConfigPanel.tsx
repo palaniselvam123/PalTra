@@ -34,6 +34,7 @@ const LABELS: Record<string, string> = {
   use_gap_short: "SMA gap (sell)",
   use_gap_mode: "Gap mode",
   use_candle_dir: "candle direction",
+  flip_orders: "flip",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -155,6 +156,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_confirm_sma: Boolean(form.gap_fade_confirm_sma),
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
+    flip_orders: Boolean(form.flip_orders),
     gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
     gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
   });
@@ -293,6 +295,26 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </>
         )}
       </div>
+      <label
+        className={clsx(
+          "mt-3 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+          form.flip_orders ? "bg-amber-400/[0.08] ring-amber-400/40" : "ring-white/10"
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={Boolean(form.flip_orders)}
+          onChange={(e) => set("flip_orders", e.target.checked)}
+          className="mt-1 accent-[#F59E0B]"
+        />
+        <span>
+          {isOwn("flip_orders") && <OwnTag />}
+          <b className="text-amber-200">Flip strategy</b> — every buy signal places a SELL order and every sell signal a
+          BUY. All conditions (cross, filters, gap mode) stay the same, and the trade closes when the signal&apos;s trade
+          would (opposite cross, gap fade, Bollinger exit, square-off). The stop-loss and target guard the real, flipped
+          position. Works in PAPER, LIVE, Research and Replay — try it on Replay or Research first.
+        </span>
+      </label>
       {!stockScope && (
         <p className="mt-2 text-[11px] leading-snug text-slate-400">
           If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
