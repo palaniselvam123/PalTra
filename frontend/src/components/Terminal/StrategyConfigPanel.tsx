@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
 import { strategyNotes } from "@/lib/strategyChecks";
@@ -216,8 +216,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     setBusy(true);
     setMsg(null);
     try {
+      // The chart stock is picked on the terminal; Save leaves it alone so it cannot undo a newer pick.
       await smaApi.saveConfig({
-        symbol: form.symbol,
         ...strategyBody(),
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
@@ -284,16 +284,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               . Changing a shared value here does not change those.
             </p>
           ) : null}
-          <div className="mt-3 grid grid-cols-2 items-end gap-2">
-            {!stockScope && <Field label="Symbol" value={form.symbol} onChange={(v) => set("symbol", v.toUpperCase())} />}
+          <SectionTitle>Size and signal</SectionTitle>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
             <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
             <Field label="Fast MA" own={isOwn("sma_fast")} value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
             <Field label="Slow MA" own={isOwn("sma_slow")} value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
-            <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-            <Field label="ATR SL ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-            <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
-            {!stockScope && (
-              <>
+          </div>
+          {!stockScope && (
+            <>
+              <SectionTitle>Daily limits (this bot)</SectionTitle>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
                 <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
                 <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
                 <Field
@@ -302,12 +302,17 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   onChange={(v) => set("entry_cutoff_time", v)}
                 />
                 <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
-              </>
-            )}
-          </div>
+              </div>
+              <p className="mt-2 text-[11px] leading-snug text-slate-400">
+                If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
+                stay open. A loss-limit stop stays locked.
+              </p>
+            </>
+          )}
+          <SectionTitle>Order direction</SectionTitle>
           <label
             className={clsx(
-              "mt-3 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
               form.flip_orders ? "bg-amber-400/[0.08] ring-amber-400/40" : "ring-white/10"
             )}
           >
@@ -325,13 +330,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               position. Works in PAPER, LIVE, Research and Replay — try it on Replay or Research first.
             </span>
           </label>
-          {!stockScope && (
-            <p className="mt-2 text-[11px] leading-snug text-slate-400">
-              If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
-              stay open. A loss-limit stop stays locked.
-            </p>
-          )}
-          <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+          <SectionTitle>Stop-loss</SectionTitle>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
               checked={form.use_stop !== false}
@@ -359,6 +359,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
             </select>
           </label>
+          {form.stop_type !== "TSL" ? (
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+            </div>
+          ) : null}
           {form.stop_type === "SMA_GAP" ? (
             <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
               <div className="grid grid-cols-3 items-end gap-2">
@@ -393,6 +399,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </p>
             </div>
           ) : null}
+          <SectionTitle>Entry filters</SectionTitle>
+          <p className="mt-1 text-[11px] leading-snug text-slate-400">
+            These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored. A
+            close still happens on the opposite cross.
+          </p>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -403,10 +414,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_adx_filter") && <OwnTag />}
             ADX trend filter (block entries when ADX is below the threshold)
           </label>
-          <p className="mt-3 text-[11px] leading-snug text-slate-400">
-            These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored. A
-            close still happens on the opposite cross.
-          </p>
+          <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -465,6 +473,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </div>
         </div>
         <div className="min-w-0">
+          <SectionTitle>Entry filters (more)</SectionTitle>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -483,26 +492,6 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </div>
           <p className="mt-1 text-[11px] leading-snug text-slate-400">
             Squeeze is the band width as % of price on 1-minute candles; 0 turns the squeeze check off.
-          </p>
-          <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
-              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
-            </span>
-            <select
-              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
-              onChange={(e) => set("bb_exit", e.target.value)}
-              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-            >
-              <option value="OFF">Off — exit only on the stop, target, cross or square-off</option>
-              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
-              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
-              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
-            </select>
-          </label>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Read once per closed 1-minute candle after the entry, on the Period and Width above (the bands show on the
-            chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first.
-            Your stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
           </p>
           <div className="mt-4 text-sm text-slate-300">
             SMA 9/21 gap range. Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is
@@ -585,7 +574,29 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             each risen (e.g. 100.0 → 100.4 → 100.9); a sell needs them each to have fallen. Refused crosses show as ✕
             “Candles” on the chart. Force order skips this check.
           </p>
-          <div className="mt-4 rounded-md p-2 ring-1 ring-inset ring-white/10">
+          <SectionTitle>Exits</SectionTitle>
+          <label className="mt-2 block text-sm text-slate-300">
+            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
+            </span>
+            <select
+              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
+              onChange={(e) => set("bb_exit", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="OFF">Off — exit only on the stop, target, cross or square-off</option>
+              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
+              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
+              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
+            </select>
+          </label>
+          <p className="mt-1 text-[11px] leading-snug text-slate-400">
+            Read once per closed 1-minute candle after the entry, on the Period and Width above (the bands show on the
+            chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first.
+            Your stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
+          </p>
+          <SectionTitle>How a trade opens</SectionTitle>
+          <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <div className="text-sm text-slate-300">
               Entry — what opens a trade{isOwn("entry_mode") && <OwnTag />}
             </div>
@@ -653,7 +664,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               charges for this quantity. Try it in Replay first.
             </p>
           </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+          <SectionTitle>SMA gap mode</SectionTitle>
+          {form.entry_mode === "PATTERN" ? (
+            <p className="mt-1 text-[11px] leading-snug text-amber-300">
+              Not used while “Enter on” is Candle patterns: pattern trades open at the candle start and close at its end.
+            </p>
+          ) : null}
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
               checked={Boolean(form.use_gap_mode)}
@@ -826,5 +843,14 @@ function Field({
         )}
       />
     </label>
+  );
+}
+
+/** A small heading that splits the settings into groups. */
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-5 border-t border-white/10 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
+      {children}
+    </div>
   );
 }

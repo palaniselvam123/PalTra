@@ -124,9 +124,10 @@ export function RiskSettings() {
 
   return (
     <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">Risk Management Engine</h2>
+      <h2 className="text-sm font-medium text-slate-200">ORB desk risk (ORB bot and manual desk)</h2>
       <p className="text-xs text-slate-500">
-        Enforced server-side before every order — the bot and the manual form both go through it, and neither can
+        Not the SMA bots: each SMA bot has its own daily loss and trade limits under SMA strategy above.
+        Enforced server-side before every ORB order — the ORB bot and the manual form both go through it, and neither can
         bypass it. Saved values stay on disk and survive a restart; they do not snap back to ₹1,00,000 / 2% / 5
         trades. The 15:30 IST auto square-off (the NSE close) is fixed and applies on live market data.
       </p>
