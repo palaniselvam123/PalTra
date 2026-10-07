@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { istToday, useChatScreen } from "@/lib/chatScreen";
 import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
@@ -11,6 +10,7 @@ import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { AlertsStatus } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
+import { Board } from "@/components/Layout/Board";
 import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
 import {
   SMA_API,
@@ -35,28 +35,6 @@ function replayRouted(info: ReplayInfo | null): boolean {
   return !!info && ["PLAYING", "PAUSED", "FINISHED"].includes(info.status);
 }
 
-function useFold(key: string) {
-  const [folded, setFolded] = useState(false);
-  useEffect(() => {
-    try {
-      setFolded(localStorage.getItem(key) === "1");
-    } catch {
-      /* private mode */
-    }
-  }, [key]);
-  const toggle = () => {
-    setFolded((current) => {
-      const next = !current;
-      try {
-        localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        /* private mode */
-      }
-      return next;
-    });
-  };
-  return [folded, toggle] as const;
-}
 
 export default function TerminalPage() {
   // Which bot this page drives. Set before the first request (effects run in
@@ -103,7 +81,6 @@ export default function TerminalPage() {
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
   const [closeNote, setCloseNote] = useState<string | null>(null);
-  const [railFolded, toggleRail] = useFold("sma.rail");
   const busy = useRef(false);
   const [replay, setReplay] = useState<ReplayInfo | null>(null);
   const replayOn = useRef(false);
@@ -523,58 +500,66 @@ export default function TerminalPage() {
             onChanged={onReplay}
           />
         )}
-        <PnlMetricsRow state={state} />
-        <div className="flex flex-col gap-4 xl:flex-row">
-          <div className="min-w-0 flex-1">
-            <StockTabs tabs={stockTabs.tabs} active={activeTab} hrefFor={stockTabs.href} label={stockTabs.label} />
-            <StrategyChart
-              chart={chart}
-              state={viewState}
-              onHoldChange={onHoldChange}
-              trades={chartTrades}
-              allTrades={deskTrades}
-              pin={pin}
-              closing={Boolean(viewState?.symbol) && closingSymbol === viewState?.symbol.toUpperCase()}
-              onLiveBars={askLiveBars}
-              onClose={() => {
-                const pos = viewState?.position;
-                if (!pos || !viewState?.symbol) return;
-                closePosition(viewState.symbol, pos.direction, pos.qty);
-              }}
-            />
-          </div>
-          {railFolded ? (
-            <button
-              type="button"
-              onClick={toggleRail}
-              className="flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-white/10 bg-[#151921] px-3 text-xs font-semibold text-slate-300 hover:bg-white/5 xl:w-10 xl:self-stretch xl:px-1 xl:[writing-mode:vertical-rl]"
-            >
-              <PanelRightOpen size={15} aria-hidden className="xl:rotate-90" />
-              Show side panel
-            </button>
-          ) : (
-            <div className="relative w-full shrink-0 space-y-3 xl:w-[360px]">
-              <button
-                type="button"
-                onClick={toggleRail}
-                aria-label="Hide the side panel"
-                title="Hide the side panel"
-                className="absolute right-2 top-2 z-10 hidden h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 xl:flex"
-              >
-                <PanelRightClose size={15} aria-hidden />
-              </button>
-              <LivePositionCard state={viewState} pending={Boolean(loadNote)} />
-              {research ? null : <AlertsStatus />}
-            </div>
-          )}
-        </div>
-        <StrategySummary config={config} research={research} onChanged={refresh} />
-        <TradeHistoryTable
-          loading={!tradesLoaded}
-          trades={deskTrades}
-          state={state}
-          closingSymbol={closingSymbol}
-          onClose={(trade) => closePosition(trade.symbol, trade.direction, trade.qty)}
+        {/* Movable, resizable panels: drag by the grip, resize by the bottom edge, change the width on a wide screen. */}
+        <Board
+          page={`terminal.${desk}`}
+          panels={[
+            { id: "metrics", title: "P&L", node: <PnlMetricsRow state={state} />, resize: "none" },
+            {
+              id: "chart",
+              title: "Chart",
+              span: 9,
+              resize: "var",
+              minHeight: 220,
+              hideable: false,
+              node: (
+                <div className="min-w-0">
+                  <StockTabs tabs={stockTabs.tabs} active={activeTab} hrefFor={stockTabs.href} label={stockTabs.label} />
+                  <StrategyChart
+                    chart={chart}
+                    state={viewState}
+                    onHoldChange={onHoldChange}
+                    trades={chartTrades}
+                    allTrades={deskTrades}
+                    pin={pin}
+                    closing={Boolean(viewState?.symbol) && closingSymbol === viewState?.symbol.toUpperCase()}
+                    onLiveBars={askLiveBars}
+                    onClose={() => {
+                      const pos = viewState?.position;
+                      if (!pos || !viewState?.symbol) return;
+                      closePosition(viewState.symbol, pos.direction, pos.qty);
+                    }}
+                  />
+                </div>
+              ),
+            },
+            {
+              id: "side",
+              title: "Side panel",
+              span: 3,
+              node: (
+                <div className="space-y-3">
+                  <LivePositionCard state={viewState} pending={Boolean(loadNote)} />
+                  {research ? null : <AlertsStatus />}
+                </div>
+              ),
+            },
+            { id: "strategy", title: "Strategy", node: <StrategySummary config={config} research={research} onChanged={refresh} /> },
+            {
+              id: "blotter",
+              title: "Trades",
+              minHeight: 240,
+              node: (
+                <TradeHistoryTable
+                  loading={!tradesLoaded}
+                  trades={deskTrades}
+                  state={state}
+                  closingSymbol={closingSymbol}
+                  onClose={(trade) => closePosition(trade.symbol, trade.direction, trade.qty)}
+                />
+              ),
+            },
+          ]}
         />
       </main>
     </div>

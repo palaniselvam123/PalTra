@@ -1570,6 +1570,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       <div ref={plotRef} className={clsx("relative", full && "min-h-[240px] flex-1")}>
         <div
           ref={rootRef}
+          // On a movable board the chart panel's bottom edge sets this height (see Layout/Board).
+          data-panel-sized={full ? undefined : ""}
           className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]", measuring && "cursor-crosshair")}
         />
         {tradeTipAt ? (
