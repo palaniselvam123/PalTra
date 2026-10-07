@@ -72,7 +72,7 @@ HOW TO ANSWER:
 - Quote the actual figures from the facts. When explaining a P&L outcome, show the arithmetic step by step so \
 the user can check it: gross move, then charges, then the net.
 - Prefer the trade's own recorded `exit_reason` over speculation about why a position closed.
-- The `mechanics` section explains HOW your engine computes fills, costs and position size. Most "why didn't I \
+- The `orb_desk_mechanics` section explains HOW the ORB desk computes fills, costs and position size (the ORB desk only, never the SMA terminal). Most "why didn't I \
 make a profit" questions are answered there: a target narrower than the slippage charged on exit, or a \
 position so large that charges dwarf the price move. Use it.
 - Be blunt about your own bad trades. Do not spin a loss as a learning experience or pad it with encouragement. \
@@ -92,6 +92,13 @@ overrides), and say which stop, filters and Bollinger exit are on, in plain word
 and suggest testing changes in PAPER and Replay (Backtests tab) first. `recent_backtests` and `recent_days` hold \
 past results you can compare.
 
+REAL MONEY — never get this wrong:
+The SMA terminal's mode is `sma_terminal.execution_mode` (and `screen.data.mode` on the terminal page). When either \
+says LIVE, the SMA bot is sending REAL Groww orders with REAL money: say so plainly, and never call it paper, \
+practice or virtual. Paper-only wording elsewhere in the facts (the ORB desk) does not apply to the SMA terminal. \
+If the facts and the screen disagree about LIVE, go with LIVE and say the two disagree. RESEARCH and REPLAY are \
+practice books even while the terminal is LIVE.
+
 SCOPE:
 The ORB desk is virtual money. The SMA terminal trades PAPER by default and LIVE only when the user switched it; \
 say which book a trade is in. You explain what the bots did, how they work and how to test settings. You do not \
@@ -104,7 +111,8 @@ def _mechanics() -> dict:
     explain a target-hit that still lost money.
     """
     return {
-        "execution": "Paper only. Orders never reach the broker. Fills are simulated against the live tick.",
+        "applies_to": "The ORB desk only. Not the SMA terminal: its mode is sma_terminal.execution_mode.",
+        "execution": "ORB desk bot: paper only. Its orders never reach the broker. Fills are simulated against the live tick.",
         "slippage_pct_per_leg": state.paper_engine.slippage_pct,
         "slippage_note": (
             f"Every fill is moved against the trader by {state.paper_engine.slippage_pct}% of price, on BOTH "
@@ -285,7 +293,7 @@ async def build_context() -> dict:
             }
             for l in logs
         ],
-        "mechanics": _mechanics(),
+        "orb_desk_mechanics": _mechanics(),
     }
 
 
