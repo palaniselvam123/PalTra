@@ -20,6 +20,7 @@ import { parseClock } from "@/lib/format";
 import { VALUE_AREA_SHARE, volumeProfile, type VolumeProfile } from "@/lib/volumeProfile";
 import { Skeleton } from "./ui";
 import { ChartDataTable } from "./ChartDataTable";
+import { REASON_SHORT } from "./TradeHistoryTable";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 type Props = {
@@ -176,6 +177,29 @@ type TradeBox = {
   direction: string;
   text: string;
   color: string;
+  /** What the hover card shows for this order's trade. */
+  tip: TradeTip;
+};
+
+/** One trade as the hover card on its B / S / X label shows it. */
+type TradeTip = {
+  ref: string | null;
+  direction: string;
+  flipped: boolean;
+  qty: number | null;
+  entryPrice: number | null;
+  entryTime: number | null;
+  exitPrice: number | null;
+  exitTime: number | null;
+  reason: string | null;
+  open: boolean;
+  /** Points in the trade's favour (exit, or the latest price while open, against the entry). */
+  points: number | null;
+  gross: number | null;
+  net: number | null;
+  /** SMA fast vs slow gap % on the entry / exit candle: (fast − slow) ÷ slow × 100. */
+  gapEntry: number | null;
+  gapExit: number | null;
 };
 
 /** Green for a trade that made money, red for a loss, grey while it is open or unknown. */
@@ -215,11 +239,23 @@ function refNumber(ref: string | null | undefined): string {
  * white text on green (profit), red (loss) or grey (still open). */
 class TradeBoxes implements ISeriesPrimitive<Time> {
   private boxes: TradeBox[] = [];
+  /** Where each label was last drawn (pane pixels), for the hover card. */
+  private drawn: { left: number; top: number; right: number; bottom: number; box: TradeBox }[] = [];
   private host: SeriesAttachedParameter<Time> | null = null;
   private readonly views: ISeriesPrimitivePaneView[];
 
   constructor() {
     this.views = [{ zOrder: () => "top", renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  /** The label (or its fill dot) under a pane point, the top-most one first. */
+  hit(x: number, y: number): TradeBox | null {
+    const pad = 3;
+    for (let i = this.drawn.length - 1; i >= 0; i -= 1) {
+      const d = this.drawn[i];
+      if (x >= d.left - pad && x <= d.right + pad && y >= d.top - pad && y <= d.bottom + pad) return d.box;
+    }
+    return null;
   }
 
   attached(param: SeriesAttachedParameter<Time>): void {
@@ -241,6 +277,7 @@ class TradeBoxes implements ISeriesPrimitive<Time> {
 
   private draw(target: CanvasRenderingTarget2D): void {
     const host = this.host;
+    this.drawn = [];
     if (!host || this.boxes.length === 0) return;
     const scale = host.chart.timeScale();
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
@@ -272,6 +309,7 @@ class TradeBoxes implements ISeriesPrimitive<Time> {
         ctx.fill();
         ctx.fillStyle = "#FFFFFF";
         ctx.fillText(b.text, x, top + h / 2 + 0.5);
+        this.drawn.push({ left: x - w / 2, top: Math.min(top, y - 3), right: x + w / 2, bottom: Math.max(top + h, y + 3), box: b });
       }
     });
   }
@@ -387,8 +425,8 @@ function tradeBoxes(
   const last = rows[rows.length - 1].time;
   const times = new Set(rows.map((c) => c.time));
   const snap = (sec: number) => bucketStart(sec, bar);
-  const out: TradeBox[] = chart.markers
-    .filter((m) => m.kind === "ENTRY" || m.kind === "EXIT")
+  const orders = chart.markers.filter((m) => m.kind === "ENTRY" || m.kind === "EXIT");
+  const out: TradeBox[] = orders
     .filter((m) => times.has(snap(m.time)) || (m.time >= first && m.time < last + bar * 60))
     .map((m): TradeBox => {
       const n = refNumber(m.trade_ref);
@@ -402,9 +440,80 @@ function tradeBoxes(
         direction: m.direction,
         text: n ? `${letter} ${n}` : letter,
         color: resultColor(net),
+        tip: tradeTip(m, orders, rows, lookup, symbol, snap, rows[rows.length - 1]?.close ?? null),
       };
     });
   return out.sort((a, b) => a.time - b.time);
+}
+
+/** SMA fast vs slow gap % on the candle at `sec`, or null before the SMAs exist. */
+function gapAt(rows: Candle[], sec: number | null, snap: (sec: number) => number): number | null {
+  if (sec == null) return null;
+  const t = snap(sec);
+  const row = rows.find((c) => c.time === t);
+  if (!row || row.sma9 == null || row.sma21 == null || !row.sma21) return null;
+  return ((row.sma9 - row.sma21) / row.sma21) * 100;
+}
+
+/** The trade behind one entry or exit label: its other half, the blotter row, and the SMA gap at each end. */
+function tradeTip(
+  m: ChartPayload["markers"][number],
+  orders: ChartPayload["markers"],
+  rows: Candle[],
+  lookup: TradeRow[],
+  symbol: string,
+  snap: (sec: number) => number,
+  lastPrice: number | null
+): TradeTip {
+  const entry = m.kind === "ENTRY";
+  const other = m.trade_ref
+    ? orders.find((o) => o !== m && o.trade_ref === m.trade_ref && o.kind === (entry ? "EXIT" : "ENTRY"))
+    : undefined;
+  const en = entry ? m : other;
+  const ex = entry ? other : m;
+  const row =
+    lookup.find((t) => m.trade_ref && t.trade_ref === m.trade_ref && t.symbol.toUpperCase() === symbol) ??
+    (en
+      ? lookup.find((t) => {
+          if (t.symbol.toUpperCase() !== symbol || t.direction !== en.direction) return false;
+          if (Math.abs(t.entry_price - en.price) > 1e-6) return false;
+          const when = t.entry_time ? parseClock(t.entry_time) : null;
+          return !!when && snap(Math.floor(when.getTime() / 1000)) === snap(en.time);
+        })
+      : undefined);
+  const clock = (text: string | null | undefined) => {
+    const when = text ? parseClock(text) : null;
+    return when ? Math.floor(when.getTime() / 1000) : null;
+  };
+  const entryPrice = en?.price ?? row?.entry_price ?? null;
+  const entryTime = en?.time ?? clock(row?.entry_time);
+  const exitPrice = ex?.price ?? row?.exit_price ?? null;
+  const exitTime = ex?.time ?? clock(row?.exit_time);
+  const open = Boolean(m.open) || (exitPrice == null && (row == null || row.exit_time == null));
+  const mark = open ? row?.market_price ?? lastPrice : exitPrice;
+  const points =
+    entryPrice != null && mark != null ? (m.direction === "SHORT" ? entryPrice - mark : mark - entryPrice) : null;
+  const qty = row?.qty ?? null;
+  // Charges are booked at the exit, so an open trade has no net P&L yet.
+  const net = open ? null : ex?.net_pnl ?? en?.net_pnl ?? row?.net_pnl ?? null;
+  const byPoints = points != null && qty ? points * qty : null;
+  return {
+    ref: m.trade_ref ?? row?.trade_ref ?? null,
+    direction: m.direction,
+    flipped: Boolean(row?.flipped),
+    qty,
+    entryPrice,
+    entryTime,
+    exitPrice: open ? null : exitPrice,
+    exitTime: open ? null : exitTime,
+    reason: ex?.reason ?? row?.exit_reason ?? null,
+    open,
+    points,
+    gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? byPoints,
+    net,
+    gapEntry: gapAt(rows, entryTime, snap),
+    gapExit: open ? gapAt(rows, rows[rows.length - 1]?.time ?? null, snap) : gapAt(rows, exitTime, snap),
+  };
 }
 
 /** Chart canvas colours per page theme (the canvas cannot read CSS). */
@@ -582,6 +691,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const stopOn = state?.position ? state.position.stop_active !== false : state?.stop_enabled !== false;
   const [hover, setHover] = useState<SmaHover | null>(null);
   const [hoverOhlc, setHoverOhlc] = useState<Ohlc | null>(null);
+  const [tradeTipAt, setTradeTipAt] = useState<{ box: TradeBox; x: number; y: number } | null>(null);
   const rowsRef = useRef<Candle[]>([]);
   const sectionRef = useRef<HTMLElement>(null);
   // Hide the chart (header stays) and the open-position box's place and size.
@@ -1062,7 +1172,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     };
     instance.subscribeClick(onClick);
 
-    const onCrosshair = (param: { time?: unknown; seriesData: Map<unknown, unknown> }) => {
+    const onCrosshair = (param: { time?: unknown; point?: { x: number; y: number }; seriesData: Map<unknown, unknown> }) => {
+      const label = param.point ? tradeBoxesRef.current?.hit(param.point.x, param.point.y) ?? null : null;
+      setTradeTipAt(label && param.point ? { box: label, x: param.point.x, y: param.point.y } : null);
       if (param.time == null) {
         setHover(null);
         setHoverOhlc(null);
@@ -1460,6 +1572,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           ref={rootRef}
           className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]", measuring && "cursor-crosshair")}
         />
+        {tradeTipAt ? (
+          <TradeTipCard at={tradeTipAt} width={rootRef.current?.clientWidth ?? 0} height={rootRef.current?.clientHeight ?? 0} />
+        ) : null}
         {!view && (
           <div aria-busy="true" aria-label="Loading chart" className="absolute inset-0 z-[5] flex flex-col justify-end gap-2 bg-[#151921] p-4">
             <Skeleton className="h-2/3 w-full opacity-60" />
@@ -1890,5 +2005,77 @@ function LegendItem({ swatch, children }: { swatch: ReactNode; children: ReactNo
       </span>
       {children}
     </li>
+  );
+}
+
+/** The hover card on a B / S / X label: entry and exit price and time, SMA gap %, and P&L. */
+function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y: number }; width: number; height: number }) {
+  const t = at.box.tip;
+  const cardW = 236;
+  const cardH = 240;
+  // Beside the pointer, flipped to the other side near the right or bottom edge, and kept inside the chart.
+  const left = at.x + 14 + cardW > width ? Math.max(4, at.x - 14 - cardW) : at.x + 14;
+  const below = at.y + 14 + cardH <= height;
+  const top = Math.max(4, Math.min(below ? at.y + 14 : at.y - 14 - cardH, height - cardH - 4));
+  const money = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${inr(Math.abs(v))}`);
+  const tone = (v: number | null) => (v == null ? "text-slate-300" : v >= 0 ? "text-emerald-300" : "text-rose-300");
+  const pct = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(3)}%`);
+  const when = (sec: number | null) =>
+    sec == null
+      ? ""
+      : new Intl.DateTimeFormat("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        }).format(new Date(sec * 1000));
+  const side = t.direction === "SHORT" ? "Short" : "Buy";
+  const reason = t.reason ? REASON_SHORT[t.reason] ?? t.reason.replace(/_/g, " ").toLowerCase() : null;
+  const pctMove = t.points != null && t.entryPrice ? (t.points / t.entryPrice) * 100 : null;
+  const row = (label: string, value: ReactNode, cls = "text-slate-100") => (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-slate-400">{label}</span>
+      <span className={clsx("text-right font-mono tabular-nums", cls)}>{value}</span>
+    </div>
+  );
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute z-20 space-y-1 rounded-lg border border-white/10 bg-[#151921] p-2.5 text-[11px] shadow-xl"
+      style={{ left, top, width: cardW }}
+    >
+      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-100">
+        <span>
+          {side} {t.ref ?? ""}
+          {t.flipped ? <span className="ml-1 text-[10px] font-normal text-amber-300">flipped</span> : null}
+        </span>
+        <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-semibold", t.open ? "bg-slate-500/30 text-slate-200" : "bg-white/10 text-slate-300")}>
+          {t.open ? "Open" : "Closed"}
+        </span>
+      </div>
+      {row("Entry", t.entryPrice == null ? "—" : px(t.entryPrice))}
+      {t.entryTime != null ? row("", when(t.entryTime), "text-slate-400") : null}
+      {t.open ? row("Exit", "still open", "text-slate-400") : row("Exit", t.exitPrice == null ? "—" : px(t.exitPrice))}
+      {!t.open && t.exitTime != null ? row("", `${when(t.exitTime)}${reason ? ` · ${reason}` : ""}`, "text-slate-400") : null}
+      {t.qty ? row("Qty", String(t.qty)) : null}
+      {row("SMA gap at entry", pct(t.gapEntry), tone(t.gapEntry))}
+      {row(t.open ? "SMA gap now" : "SMA gap at exit", pct(t.gapExit), tone(t.gapExit))}
+      {row(
+        "Points",
+        t.points == null ? "—" : `${t.points >= 0 ? "+" : ""}${t.points.toFixed(2)}${pctMove != null ? ` (${pctMove >= 0 ? "+" : ""}${pctMove.toFixed(2)}%)` : ""}`,
+        tone(t.points)
+      )}
+      {t.open ? (
+        row("P&L now (before charges)", money(t.gross), clsx("font-semibold", tone(t.gross)))
+      ) : (
+        <>
+          {t.gross != null ? row("Gross P&L", money(t.gross), tone(t.gross)) : null}
+          {row("Net P&L", money(t.net), clsx("font-semibold", tone(t.net)))}
+        </>
+      )}
+    </div>
   );
 }
