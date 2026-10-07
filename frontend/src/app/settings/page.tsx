@@ -33,7 +33,7 @@ export default function SettingsPage() {
             ["#broker-keys", "Broker keys"],
             ["#ai-key", "AI expert"],
             ["#diagnostics", "Diagnostics"],
-            ["#risk", "Risk"],
+            ["#risk", "ORB desk risk"],
           ].map(([href, label]) => (
             <a
               key={href}
