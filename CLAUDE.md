@@ -184,7 +184,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   per stock per second, kept 10 days). `/api/ticks` serves them to the data
   table, whose rows expand into their seconds. Groww's history has no seconds,
   so replays and earlier days have none; `SMA_RECORD_TICKS=all` also records
-  simulator prices for a local test.
+  simulator prices for a local test. The "1s ON/OFF" chip in the status bar
+  (`PUT /api/ticks/feed`, `BotConfig.second_ticks` on row 1, default on) turns
+  the per-second fetch and record off for both desks; quotes then come on the
+  normal few-second interval.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

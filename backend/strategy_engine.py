@@ -900,7 +900,11 @@ class StrategyEngine:
         self._anchor_held_prices()
         await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
-        if self.records_ticks:
+        if self.config_id == 1:
+            # The second-by-second switch lives on the live desk's row and covers both desks.
+            tick_store.set_enabled(getattr(cfg, "second_ticks", None) is not False)
+        seconds = self.records_ticks and tick_store.enabled()
+        if seconds:
             # One batched Groww call a second for every watched stock (market
             # hours, Groww session only); refresh() below then serves it.
             prefetch = getattr(self.broker, "refresh_ltps", None)
@@ -928,7 +932,7 @@ class StrategyEngine:
                 frame = frame.iloc[-2500:].reset_index(drop=True)
             self._frames[symbol] = frame
             self._ltps[symbol] = float(ltp)
-            if self.records_ticks and tick_store.records(source) and market_is_open(now):
+            if seconds and tick_store.records(source) and market_is_open(now):
                 tick_store.add(symbol, now, float(ltp))
             if symbol != view:
                 continue
@@ -2880,6 +2884,7 @@ class StrategyEngine:
             "halt_reason": self.halt_reason,
             "mode": (cfg.trading_mode if cfg else "PAPER"),
             "data_source": self.data_source,
+            "second_ticks": tick_store.enabled(),
             "last_error": self.last_error,
             "last_signal": self.last_signal,
             "symbol": cfg.symbol if cfg else "",

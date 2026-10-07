@@ -29,10 +29,12 @@ type Props = {
   onModeClick: () => void;
   /** Set today's trade count back to 0. Hidden during a replay (no cap there). */
   onResetTrades?: () => void;
+  /** Turn the per-second Groww price fetch on or off. Hidden during a replay. */
+  onToggleSeconds?: () => void;
 };
 
 /** One always-visible strip with everything that decides what the bot may do. */
-export function StatusBar({ state, config, connected, busy, onModeClick, onResetTrades }: Props) {
+export function StatusBar({ state, config, connected, busy, onModeClick, onResetTrades, onToggleSeconds }: Props) {
   const mode = state?.mode ?? config?.trading_mode ?? null;
   const live = mode === "LIVE";
   const replaying = mode === "REPLAY";
@@ -120,6 +122,27 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
               className={clsx("h-2 w-2 rounded-full", connected ? "bg-emerald-400" : "bg-rose-400")}
             />
             <span className={state?.data_source === "ERROR" ? "text-rose-300" : "text-slate-100"}>{source}</span>
+            {onToggleSeconds && state?.second_ticks != null ? (
+              <button
+                type="button"
+                disabled={busy}
+                aria-pressed={state.second_ticks}
+                onClick={onToggleSeconds}
+                title={
+                  state.second_ticks
+                    ? "Per-second prices ON: one batched Groww call a second for every watched stock, recorded for the data table. Press to turn off and quote every few seconds instead (lighter on the server)."
+                    : "Per-second prices OFF: stocks are quoted every few seconds and nothing is recorded. Press to fetch and record every second again."
+                }
+                className={clsx(
+                  "rounded px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset disabled:opacity-50",
+                  state.second_ticks
+                    ? "text-emerald-300 ring-emerald-400/40 hover:bg-emerald-500/10"
+                    : "text-slate-400 ring-white/15 hover:bg-white/5"
+                )}
+              >
+                1s {state.second_ticks ? "ON" : "OFF"}
+              </button>
+            ) : null}
           </span>
         ) : (
           <Skeleton className="h-4 w-16" />

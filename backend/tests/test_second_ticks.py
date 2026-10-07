@@ -131,3 +131,46 @@ async def test_live_fade_exits_inside_the_reversal_minute(db):  # noqa: F811
     assert live["exit_reason"] == "GAP_FADE" and live["entry_time"] == closed["entry_time"]
     assert live["exit_time"] < closed["exit_time"]  # inside the reversal minute, not after it closed
     assert live["exit_price"] <= closed["exit_price"]  # a short: out lower, before the bounce ran
+
+
+def test_switch_turns_the_per_second_fetch_off_and_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/feed.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+    import tick_store
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from models import BotConfig
+    from strategy_engine import StrategyEngine
+
+    try:
+        with TestClient(app) as client:
+            assert client.get("/api/ticks/feed").json() == {"on": True}  # on by default
+            assert client.get("/api/state").json()["second_ticks"] is True
+            assert client.put("/api/ticks/feed", json={"on": False}).json() == {"on": False}
+            assert client.get("/api/state").json()["second_ticks"] is False
+        with database.session_factory()() as db:
+            assert db.get(BotConfig, 1).second_ticks is False  # kept over a restart
+
+        calls = []
+
+        async def fake_batch(symbols):
+            calls.append(list(symbols))
+            return {}
+
+        eng = StrategyEngine()
+        eng.broker.refresh_ltps = fake_batch
+        now = dt.datetime.now()
+        asyncio.run(eng.tick(now))
+        assert calls == [] and tick_store.enabled() is False  # the saved switch is read each tick
+
+        with TestClient(app) as client:
+            assert client.put("/api/ticks/feed", json={"on": True}).json() == {"on": True}
+        asyncio.run(eng.tick(now))
+        assert calls, "the batched fetch runs again once the switch is on"
+    finally:
+        tick_store.set_enabled(True)
+        database.reset_engine()

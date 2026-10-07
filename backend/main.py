@@ -83,6 +83,7 @@ def boot_engine() -> asyncio.Task | None:
     init_db()
     close_orphan_replay_rows()
     cfg = engine.load_config()
+    tick_store.set_enabled(getattr(cfg, "second_ticks", None) is not False)
     engine.restore_open_books()
     engine.restore_trades_today()
     engine.broker.set_mode(cfg.trading_mode)
@@ -1031,6 +1032,37 @@ async def ticks(symbol: str, start: int, end: int):
         raise HTTPException(400, "end must be after start")
     rows = await asyncio.to_thread(tick_store.between, name, int(start), int(end))
     return {"symbol": name, "start": int(start), "end": int(end), "ticks": rows}
+
+
+class TickFeedIn(BaseModel):
+    on: bool
+
+
+def _tick_feed() -> dict:
+    return {"on": tick_store.enabled()}
+
+
+@app.get("/api/ticks/feed")
+async def tick_feed():
+    """The second-by-second switch: one batched Groww price call a second, and its record."""
+    return _tick_feed()
+
+
+@app.put("/api/ticks/feed")
+async def set_tick_feed(body: TickFeedIn):
+    """Turn the per-second Groww price fetch on or off for both desks.
+
+    Off: each stock is quoted on the normal few-second interval, nothing is
+    recorded, and "Check the fade every second" judges at that pace instead.
+    """
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(404, "settings not found")
+        row.second_ticks = bool(body.on)
+        db.commit()
+    tick_store.set_enabled(body.on)
+    return _tick_feed()
 
 
 @app.get("/api/trades")

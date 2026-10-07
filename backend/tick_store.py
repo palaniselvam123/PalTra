@@ -32,6 +32,19 @@ _lock = threading.Lock()
 _last_flush = 0.0
 _last_prune_day = ""
 _flushing: asyncio.Future | None = None
+# The "Second-by-second prices" switch (BotConfig row 1, second_ticks). On by
+# default; off stops the batched Groww call a second and the recording.
+_enabled = True
+
+
+def enabled() -> bool:
+    """Whether the engines fetch and record prices every second."""
+    return _enabled
+
+
+def set_enabled(on: bool) -> None:
+    global _enabled
+    _enabled = bool(on)
 
 
 def records(source: str) -> bool:

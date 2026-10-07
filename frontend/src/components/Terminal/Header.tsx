@@ -440,6 +440,19 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
+  const toggleSeconds = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await smaApi.setTickFeed(!state?.second_ticks);
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not change the per-second prices");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const panic = async () => {
     setBusy(true);
     setError(null);
@@ -506,6 +519,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             busy={busy}
             onModeClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
             onResetTrades={state?.mode === "REPLAY" ? undefined : resetTrades}
+            onToggleSeconds={state?.mode === "REPLAY" ? undefined : toggleSeconds}
           />
         </div>
         {(error || state?.halt_reason || state?.last_error) && (
