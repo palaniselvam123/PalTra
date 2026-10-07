@@ -12,7 +12,8 @@ import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
 
-const BACKTEST_DAYS = [1, 5, 10, 20];
+/** 1 to 30 trading days, one at a time. */
+const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
 const MAX_BACKTEST_STOCKS = 24;
 
 const REFRESH_MS = 10_000;
@@ -23,6 +24,8 @@ const VALUE_STOPS = [0, 1, 5, 10, 25, 50, 100];
 type SortKey =
   | "score"
   | "symbol"
+  | "ltp"
+  | "ready"
   | "change_pct"
   | "atr_pct"
   | "spread_pct"
@@ -45,6 +48,9 @@ export default function ScalpPage() {
   const [readyOnly, setReadyOnly] = useState(false);
   const [bias, setBias] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "score", desc: true });
+  // LTP range: blank = no limit on that side.
+  const [ltpMin, setLtpMin] = useState("");
+  const [ltpMax, setLtpMax] = useState("");
 
   // The SMA terminal's Trade list, so a stock can be armed from here.
   const [smaConfig, setSmaConfig] = useState<SmaConfig | null>(null);
@@ -101,9 +107,20 @@ export default function ScalpPage() {
     let list = data?.rows ?? [];
     if (readyOnly) list = list.filter((r) => r.ready);
     if (bias !== "ALL") list = list.filter((r) => r.bias === bias);
+    const lo = ltpMin.trim() === "" ? null : Number(ltpMin);
+    const hi = ltpMax.trim() === "" ? null : Number(ltpMax);
+    if ((lo != null && Number.isFinite(lo)) || (hi != null && Number.isFinite(hi))) {
+      list = list.filter(
+        (r) =>
+          r.ltp != null &&
+          (lo == null || !Number.isFinite(lo) || r.ltp >= lo) &&
+          (hi == null || !Number.isFinite(hi) || r.ltp <= hi)
+      );
+    }
     const dir = sort.desc ? -1 : 1;
     return [...list].sort((a, b) => {
       if (sort.key === "symbol") return dir * a.symbol.localeCompare(b.symbol);
+      if (sort.key === "ready") return dir * (Number(a.ready) - Number(b.ready)) || b.score - a.score;
       const av = a[sort.key] as number | null;
       const bv = b[sort.key] as number | null;
       if (av == null && bv == null) return 0;
@@ -111,7 +128,7 @@ export default function ScalpPage() {
       if (bv == null) return -1;
       return dir * (av - bv);
     });
-  }, [data, readyOnly, bias, sort]);
+  }, [data, readyOnly, bias, sort, ltpMin, ltpMax]);
 
   const pick = (symbol: string, on: boolean) =>
     setPicked((prev) => {
@@ -286,6 +303,45 @@ export default function ScalpPage() {
             <Select label="Min ATR %/min" value={minAtr} options={ATR_STOPS} suffix="%" onChange={setMinAtr} />
             <Select label="Max spread" value={maxSpread} options={SPREAD_STOPS} suffix="%" onChange={setMaxSpread} />
             <Select label="Min traded today" value={minValue} options={VALUE_STOPS} prefix="₹" suffix=" cr" onChange={setMinValue} />
+            <fieldset className="flex flex-col gap-1">
+              <legend className="mb-1">LTP range ₹</legend>
+              <span className="flex items-center gap-1">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  placeholder="min"
+                  aria-label="Lowest LTP"
+                  value={ltpMin}
+                  onChange={(e) => setLtpMin(e.target.value)}
+                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                />
+                <span aria-hidden>–</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  placeholder="max"
+                  aria-label="Highest LTP"
+                  value={ltpMax}
+                  onChange={(e) => setLtpMax(e.target.value)}
+                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                />
+                {ltpMin || ltpMax ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLtpMin("");
+                      setLtpMax("");
+                    }}
+                    className="px-1 text-slate-400 hover:text-slate-200"
+                    aria-label="Clear the LTP range"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            </fieldset>
             <label className="flex flex-col gap-1">
               Bias
               <select
@@ -384,7 +440,7 @@ export default function ScalpPage() {
                     </th>
                     {header("symbol", "Stock", false)}
                     {header("score", "Score", true, "0–100: movement 35, volume spike 25, 5-minute move 20, money traded 20; cut by a wide spread")}
-                    <th className="pb-2 text-right font-medium">LTP</th>
+                    {header("ltp", "LTP", true, "Last traded price")}
                     {header("change_pct", "Day")}
                     {header("atr_pct", "ATR/min", true, "Wilder ATR(14) on closed 1-minute candles, as % of price")}
                     {header("spread_pct", "Spread", true, "Ask minus bid, as % of price")}
@@ -393,7 +449,7 @@ export default function ScalpPage() {
                     {header("move_1m_pct", "1m")}
                     {header("move_5m_pct", "5m")}
                     {header("vwap_dist_pct", "vs VWAP")}
-                    <th className="pb-2 text-left font-medium">Status</th>
+                    {header("ready", "Status", false, "Ready stocks first (then by score)")}
                     <th className="pb-2 text-right font-medium">Terminal</th>
                   </tr>
                 </thead>

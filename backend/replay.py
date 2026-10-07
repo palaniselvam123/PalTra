@@ -37,7 +37,8 @@ from scalp_picks import PickRule, picks_for_day
 
 SPEEDS = (1, 10, 60, 300)
 # Longest range one run may cover, in calendar days (about 22 trading days).
-MAX_RANGE_DAYS = 31
+# 45 calendar days: room for 30 trading days (six weeks with holidays).
+MAX_RANGE_DAYS = 45
 # Settings saved with each run, so runs with different strategies compare.
 # No trade cap: a replay has none (REPLAY_TRADE_CAP).
 SESSION_OPEN = dt.time(9, 15)
@@ -722,7 +723,7 @@ def parse_replay_day(text: str, now: dt.datetime | None = None) -> dt.date:
 
 
 def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime | None = None) -> tuple[dt.date, dt.date]:
-    """From/To for a run: both finished days, To on or after From, at most a month."""
+    """From/To for a run: both finished days, To on or after From, at most MAX_RANGE_DAYS (45) calendar days."""
     if not end_text or end_text.strip() == (start_text or "").strip():
         first = parse_replay_day(start_text, now)
         return first, first
@@ -740,7 +741,7 @@ def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime |
     if last < first:
         raise ValueError("To must be on or after From.")
     if (last - first).days > MAX_RANGE_DAYS:
-        raise ValueError("Pick a range of one month or less.")
+        raise ValueError(f"Pick a range of {MAX_RANGE_DAYS} days or less (about 30 trading days).")
     # The last day must have closed too; weekends inside the range are skipped.
     while last.weekday() >= 5 and last > first:
         last -= dt.timedelta(days=1)

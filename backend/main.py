@@ -815,7 +815,7 @@ class ScalpPickStart(BaseModel):
     #: The stocks to choose from each day (the Scalp page's streaming list).
     universe: list[str]
     pick_time: str = "09:45"
-    top_n: int = Field(default=3, ge=1, le=10)
+    top_n: int = Field(default=3, ge=1, le=30)
     min_atr_pct: float = Field(default=0.08, ge=0, le=5)
     min_value_cr: float = Field(default=5.0, ge=0, le=100000)
     require_bias: bool = True
