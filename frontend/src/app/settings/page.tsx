@@ -6,8 +6,18 @@ import { AiKeyForm } from "@/components/Settings/AiKeyForm";
 import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
 import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
+import { SectionNav } from "@/components/Settings/SectionNav";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { useTradingState } from "@/hooks/useTradingState";
+
+const SECTIONS: [string, string][] = [
+  ["sma-strategy", "SMA strategy"],
+  ["trade-alerts", "Trade alerts"],
+  ["broker-keys", "Broker keys"],
+  ["ai-key", "AI expert"],
+  ["diagnostics", "Diagnostics"],
+  ["risk", "ORB desk risk"],
+];
 
 export default function SettingsPage() {
   const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
@@ -26,24 +36,7 @@ export default function SettingsPage() {
         botRunning={bot?.enabled ?? false}
       />
       <main className="mx-auto max-w-[1440px] space-y-4 px-4 py-6 lg:px-6">
-        <nav aria-label="Settings sections" className="flex flex-wrap gap-1.5 text-xs">
-          {[
-            ["#sma-strategy", "SMA strategy"],
-            ["#trade-alerts", "Trade alerts"],
-            ["#broker-keys", "Broker keys"],
-            ["#ai-key", "AI expert"],
-            ["#diagnostics", "Diagnostics"],
-            ["#risk", "ORB desk risk"],
-          ].map(([href, label]) => (
-            <a
-              key={href}
-              href={href}
-              className="rounded-full border border-border px-3 py-1.5 text-slate-300 hover:bg-white/[0.05] hover:text-slate-100"
-            >
-              {label}
-            </a>
-          ))}
-        </nav>
+        <SectionNav sections={SECTIONS} />
         <SmaStrategySettings />
         {/* The smaller forms sit two to a row on a wide screen instead of stretching across it. */}
         <div className="grid items-start gap-4 xl:grid-cols-2">

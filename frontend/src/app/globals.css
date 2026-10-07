@@ -391,3 +391,15 @@ select {
     font-size: max(16px, 1em) !important;
   }
 }
+
+/* Keyboard users see where they are on every control; mouse clicks stay ring-free. */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role="separator"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgb(56 189 248 / 0.9);
+  outline-offset: 2px;
+}
