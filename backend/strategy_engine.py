@@ -2988,7 +2988,7 @@ class StrategyEngine:
             return or_(TradeLog.mode == "PAPER", TradeLog.mode.is_(None))
         return TradeLog.mode == mode
 
-    def _chart_parts(self, frame: pd.DataFrame, cfg) -> tuple[list[dict], list[dict]]:
+    def _chart_parts(self, frame: pd.DataFrame, cfg, symbol: str = "") -> tuple[list[dict], list[dict]]:
         """Closed candle rows and refused crosses, reused until a candle closes.
 
         Both depend only on closed candles (and the filter settings), so the
@@ -3005,15 +3005,42 @@ class StrategyEngine:
             float(closed.get("volume", 0) or 0),
             tuple(getattr(cfg, name, None) for name in _FILTER_KEYS) if cfg is not None else None,
         )
-        cached = getattr(self, "_chart_cache", None)
+        # One entry per stock: a second tab on another stock keeps its own.
+        caches = getattr(self, "_chart_cache", None)
+        if not isinstance(caches, dict):
+            caches = self._chart_cache = {}
+        cached = caches.get(symbol)
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
         rows = candle_rows(frame)[:-1]
         blocks = filter_blocks(frame, cfg)
-        self._chart_cache = (key, rows, blocks)
+        if symbol not in caches and len(caches) >= 12:
+            caches.pop(next(iter(caches)))
+        caches[symbol] = (key, rows, blocks)
         return rows, blocks
 
-    def chart_payload(self, limit: int = 240) -> dict:
+    def _other_frame(self, symbol: str, frame: pd.DataFrame, cfg) -> pd.DataFrame:
+        """Another stock's enriched candles for its own chart tab, redone only when its tape moves."""
+        key = (len(frame), int(frame["ts"].iloc[-1]), float(frame["close"].iloc[-1]), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period))
+        caches = getattr(self, "_other_frames", None)
+        if caches is None:
+            caches = self._other_frames = {}
+        hit = caches.get(symbol)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        if symbol not in caches and len(caches) >= 12:
+            caches.pop(next(iter(caches)))
+        caches[symbol] = (key, enriched)
+        return enriched
+
+    def chart_payload(self, limit: int = 240, symbol: str | None = None) -> dict:
+        """The chart's candles, markers and levels.
+
+        `symbol` draws another watched stock without moving the chart focus
+        (a second browser tab on one stock of a replay). An unknown stock gives
+        an empty chart.
+        """
         frame = self.candles
         markers = []
         cfg = self._cfg_cache
@@ -3022,25 +3049,36 @@ class StrategyEngine:
                 cfg = self.load_config()
             except Exception:  # noqa: BLE001
                 cfg = None
+        focus = ((cfg.symbol if cfg else None) or self._focus or "").upper()
+        other = (symbol or "").upper().strip()
+        if other == focus:
+            other = ""
+        if other:
+            raw = self._frames.get(other)
+            frame = pd.DataFrame() if raw is None else raw
         if cfg is not None:
             # The chart's stock is judged with its own settings.
-            cfg = settings_for(cfg, (cfg.symbol or "").upper())
+            cfg = settings_for(cfg, other or (cfg.symbol or "").upper())
+            if other and frame is not None and not frame.empty:
+                frame = self._other_frame(other, frame, cfg)
         candles: list[dict] = []
         all_blocks: list[dict] = []
         if frame is not None and not frame.empty:
             if len(frame) >= 2:
                 # VWAP and RSI need the whole session, so compute before trimming.
-                closed_rows, all_blocks = self._chart_parts(frame, cfg)
+                closed_rows, all_blocks = self._chart_parts(frame, cfg, other or focus)
                 candles = [*closed_rows, _forming_row(frame.iloc[-1])][-limit:]
             else:
                 candles = [_forming_row(frame.iloc[-1])]
         first_shown = candles[0]["time"] if candles else None
         blocked = [mark for mark in all_blocks if first_shown is not None and mark["time"] >= first_shown]
-        view = (cfg.symbol if cfg else self._focus or "").upper()
+        view = other or (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
+            query = db.query(TradeLog).filter(self._marker_book(cfg))
+            if view:
+                query = query.filter(func.upper(TradeLog.symbol) == view)
             rows = (
-                db.query(TradeLog)
-                .filter(self._marker_book(cfg))
+                query
                 .order_by(TradeLog.id.desc())
                 .limit(40)
                 .all()
@@ -3075,8 +3113,9 @@ class StrategyEngine:
                         "open": False,
                     }
                 )
-        pos = self.position
+        pos = self.positions.get(other) if other else self.position
         return {
+            "symbol": view,
             "candles": candles,
             "markers": markers,
             "entry_price": pos.entry_price if pos else None,

@@ -264,6 +264,8 @@ export type ChartFilters = {
 };
 
 export type ChartPayload = {
+  /** The stock drawn (the chart focus, or the one asked for). */
+  symbol?: string;
   candles: Candle[];
   markers: {
     time: number;
@@ -569,7 +571,14 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): 
 
 export const smaApi = {
   state: () => request<SmaState>("/api/state"),
-  chart: (limit = 240) => request<ChartPayload>(limit === 240 ? "/api/chart" : `/api/chart?limit=${limit}`),
+  /** `symbol` draws that watched stock without moving the chart focus (another tab, a held view). */
+  chart: (limit = 240, symbol?: string | null) => {
+    const q = new URLSearchParams();
+    if (limit !== 240) q.set("limit", String(limit));
+    if (symbol) q.set("symbol", symbol);
+    const qs = q.toString();
+    return request<ChartPayload>(qs ? `/api/chart?${qs}` : "/api/chart");
+  },
   /** Past 1-minute candles from Groww. Times are IST wall clock, YYYY-MM-DDTHH:MM. */
   /** runId marks one replay run's trades; without it, the practice/real book plus the latest run. */
   history: (symbol: string, start: string, end: string, interval = 1, runId?: number | null) =>
@@ -686,4 +695,40 @@ export function inr(value: number | null | undefined, digits = 2): string {
 export function px(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+
+/**
+ * The state as seen from one stock: its last price and open position come
+ * from its book, so a chart of another watched stock draws its own entry and
+ * stop. The chart focus's own state is returned as it is.
+ */
+export function stateForSymbol(state: SmaState | null, symbol: string | null | undefined): SmaState | null {
+  const name = (symbol ?? "").toUpperCase();
+  if (!state || !name || (state.symbol ?? "").toUpperCase() === name) return state;
+  const book = state.books?.find((b) => b.symbol.toUpperCase() === name);
+  const held = book && book.direction !== "FLAT" && book.entry_price != null;
+  return {
+    ...state,
+    symbol: name,
+    ltp: book?.ltp ?? 0,
+    day_open: null,
+    day_change_pct: null,
+    position: held
+      ? {
+          direction: book.direction as "LONG" | "SHORT",
+          qty: book.qty,
+          entry_price: book.entry_price as number,
+          ma_cross_price: book.entry_price as number,
+          atr_at_entry: 0,
+          sl_trigger: book.stop_active === false ? null : book.sl_trigger,
+          sl_order_id: "",
+          entry_time: "",
+          mode: state.mode,
+          stop_active: book.stop_active ?? true,
+          trailing: book.trailing ?? false,
+          target: book.target ?? null,
+        }
+      : null,
+  };
 }
