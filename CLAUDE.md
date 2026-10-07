@@ -199,7 +199,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   more minutes if set, given up after `gap_entry_window_min` (0 = until the
   next cross). `_watch_gap_fade` closes it (`GAP_FADE`, via `_exit_now`) when
   the gap fades back to `gap_exit_long` / `gap_exit_short` after clearing it,
-  or gives back `gap_giveback_pct` of its widest. An opposite cross closes at
+  or gives back `gap_giveback_pct` of its widest. An exit level may sit beyond
+  the entry level (a lock-in level, e.g. sell in at −0.08, out at −0.39): the
+  exit then arms only once the gap has been that wide. An opposite cross closes at
   once (`_close_on_cross`) and the reverse waits for its own gap.
   Optional fade confirmations (`gap_mode.fade_confirmed`, off by default):
   `gap_fade_confirm_sma` holds a fade until a candle closes on the wrong side

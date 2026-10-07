@@ -73,10 +73,35 @@ def test_giveback_exits_on_a_narrowing_gap():
     assert "gave back 50%" in judge_exit(cfg, "SHORT", -0.09, -0.12, state)
 
 
-def test_settings_that_cannot_work_are_refused():
+def test_an_exit_level_beyond_the_entry_level_is_allowed():
     assert check(_cfg()) is None
-    assert "Buy exit" in check(_cfg(gap_exit_long=0.06))
-    assert "Sell exit" in check(_cfg(gap_exit_short=-0.06))
+    assert check(_cfg(gap_exit_long=0.06)) is None
+    assert check(_cfg(gap_exit_short=-0.06)) is None
+
+
+def test_lock_in_exit_beyond_the_entry_arms_only_once_the_gap_gets_that_wide():
+    # Sell in at -0.076%, out at -0.386%: hold until the gap has been past -0.386%, then exit when it comes back.
+    cfg = _cfg(gap_entry_short=-0.076, gap_exit_short=-0.386)
+    state: dict = {}
+    assert judge_exit(cfg, "SHORT", -0.10, None, state) is None and not state.get("armed")
+    assert judge_exit(cfg, "SHORT", -0.30, -0.10, state) is None and not state.get("armed")
+    assert judge_exit(cfg, "SHORT", -0.45, -0.30, state) is None and state["armed"]
+    assert judge_exit(cfg, "SHORT", -0.40, -0.45, state) is None  # narrowing, still past -0.386
+    assert "exit level -0.386%" in judge_exit(cfg, "SHORT", -0.38, -0.40, state)
+    # The buy mirror: in at 0.05%, out at 0.30%.
+    cfg = _cfg(gap_entry_long=0.05, gap_exit_long=0.30)
+    state = {}
+    assert judge_exit(cfg, "LONG", 0.06, None, state) is None and not state.get("armed")
+    assert judge_exit(cfg, "LONG", 0.35, 0.06, state) is None and state["armed"]
+    assert "exit level 0.3%" in judge_exit(cfg, "LONG", 0.29, 0.35, state)
+
+
+def test_a_lock_in_level_the_gap_never_reaches_never_exits():
+    cfg = _cfg(gap_entry_short=-0.076, gap_exit_short=-0.386, gap_giveback_pct=50)
+    state: dict = {}
+    for prev, gap in ((None, -0.10), (-0.10, -0.25), (-0.25, -0.12), (-0.12, -0.02)):
+        assert judge_exit(cfg, "SHORT", gap, prev, state) is None
+    assert not state.get("armed")
 
 
 # ---- through the real engine (replay engine, local fills) -------------------------------------
@@ -163,7 +188,7 @@ async def test_delay_moves_the_entry_back_by_at_least_that_many_minutes(db):
     assert (later["entry_time"] - now["entry_time"]).total_seconds() >= 180
 
 
-def test_api_saves_gap_mode_and_refuses_an_exit_past_the_entry(tmp_path, monkeypatch):
+def test_api_saves_gap_mode_and_an_exit_past_the_entry(tmp_path, monkeypatch):
     monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
     monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
     import database
@@ -183,6 +208,7 @@ def test_api_saves_gap_mode_and_refuses_an_exit_past_the_entry(tmp_path, monkeyp
         assert ok.status_code == 200, ok.text
         body = ok.json()
         assert body["use_gap_mode"] is True and body["gap_entry_long"] == 0.08 and body["gap_entry_delay_min"] == 2
-        bad = client.put("/api/config", json={"gap_exit_long": 0.1})
-        assert bad.status_code == 400 and "Buy exit" in bad.json()["detail"]
+        lock = client.put("/api/config", json={"gap_exit_long": 0.1, "gap_entry_short": -0.076, "gap_exit_short": -0.386})
+        assert lock.status_code == 200, lock.text
+        assert lock.json()["gap_exit_long"] == 0.1 and lock.json()["gap_exit_short"] == -0.386
     database.reset_engine()
