@@ -61,6 +61,7 @@ export function strategyLabel(s: Settings): string {
   if (s.use_rsi) filters.push(`RSI ${s.rsi_long_min}–${s.rsi_long_max}/${s.rsi_short_min}–${s.rsi_short_max}`);
   if (s.use_bollinger) filters.push(`BB ${s.bb_period ?? 20}/${s.bb_std ?? 2}σ`);
   if (gapText(s)) filters.push(`Gap ${gapText(s)}`);
+  if (s.use_candle_dir) filters.push(`Candles ${s.candle_dir_count ?? 2} ${String(s.candle_dir_rule ?? "CLOSES").toLowerCase()}`);
   if (s.use_adx_filter) filters.push(`ADX ≥${s.adx_threshold}`);
   parts.push(filters.length ? filters.join(", ") : "no filters");
   parts.push(`qty ${s.qty ?? "—"}`);
@@ -115,6 +116,7 @@ export function filtersShort(s: Settings): string {
   if (s.use_rsi) on.push("RSI");
   if (s.use_bollinger) on.push("BB");
   if (s.use_gap_long || s.use_gap_short) on.push("Gap");
+  if (s.use_candle_dir) on.push("Candles");
   if (s.use_adx_filter) on.push("ADX");
   return on.length ? on.join(", ") : "no filters";
 }
@@ -150,6 +152,10 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
         : "Off",
   ],
   ["SMA gap filter", (s) => gapText(s) || "Off"],
+  [
+    "Candle direction",
+    (s) => (s.use_candle_dir ? `last ${s.candle_dir_count ?? 2} · ${String(s.candle_dir_rule ?? "CLOSES").toLowerCase()}` : "Off"),
+  ],
   ["SMA gap mode", (s) => gapModeText(s) || "Off"],
   [
     "Bollinger exit",

@@ -33,6 +33,7 @@ const LABELS: Record<string, string> = {
   use_gap_long: "SMA gap (buy)",
   use_gap_short: "SMA gap (sell)",
   use_gap_mode: "Gap mode",
+  use_candle_dir: "candle direction",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -140,6 +141,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     use_gap_short: Boolean(form.use_gap_short),
     gap_short_min: Number(form.gap_short_min ?? -0.5),
     gap_short_max: Number(form.gap_short_max ?? -0.02),
+    use_candle_dir: Boolean(form.use_candle_dir),
+    candle_dir_count: Math.max(1, Math.round(Number(form.candle_dir_count ?? 2))),
+    candle_dir_rule: (["CLOSES", "COLOUR", "BOTH"] as const).includes(form.candle_dir_rule as "CLOSES")
+      ? (form.candle_dir_rule as "CLOSES" | "COLOUR" | "BOTH")
+      : "CLOSES",
     use_gap_mode: Boolean(form.use_gap_mode),
     gap_entry_long: Number(form.gap_entry_long ?? 0.05),
     gap_exit_long: Number(form.gap_exit_long ?? 0.02),
@@ -503,6 +509,44 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         Negative numbers are allowed (a sell gap is usually negative, e.g. −0.5 to −0.02). On the cross candle the
         gap is usually small, so a tight range skips most crosses; skipped crosses show as ✕ on the chart with the
         gap. Force order skips this check.
+      </p>
+      <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_candle_dir)}
+          onChange={(e) => set("use_candle_dir", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("use_candle_dir") && <OwnTag />}
+        Candle direction — the candles before the entry must move the trade&apos;s way.
+      </label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Field
+          label="Last candles to check (1–10)"
+          value={String(form.candle_dir_count ?? 2)}
+          onChange={(v) => set("candle_dir_count", v)}
+          own={isOwn("candle_dir_count")}
+        />
+        <label className="block text-sm text-slate-300">
+          <span className="text-[11px] uppercase tracking-wider text-slate-400">
+            Rule{isOwn("candle_dir_rule") && <OwnTag />}
+          </span>
+          <select
+            value={form.candle_dir_rule ?? "CLOSES"}
+            onChange={(e) => set("candle_dir_rule", e.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            <option value="CLOSES">Closes rising (buy) / falling (sell)</option>
+            <option value="COLOUR">Colour green (buy) / red (sell)</option>
+            <option value="BOTH">Both</option>
+          </select>
+        </label>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        Checked on the closed candles just before the order: on the cross candle normally, or in gap mode on the
+        candle where the gap reaches the entry level. With 2 and Closes, a buy needs the last two closes to have
+        each risen (e.g. 100.0 → 100.4 → 100.9); a sell needs them each to have fallen. Refused crosses show as ✕
+        “Candles” on the chart. Force order skips this check.
       </p>
       <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
         <input

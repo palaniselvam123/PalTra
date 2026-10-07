@@ -70,6 +70,11 @@ export type SmaConfig = {
   use_gap_short?: boolean;
   gap_short_min?: number;
   gap_short_max?: number;
+  /** Candle direction filter: the last N closed candles move the trade's way. */
+  use_candle_dir?: boolean;
+  candle_dir_count?: number;
+  /** CLOSES: each close beyond the last; COLOUR: green for a buy, red for a sell; BOTH. */
+  candle_dir_rule?: "CLOSES" | "COLOUR" | "BOTH";
   /** SMA gap mode: enter on a widening gap, exit when it fades (gap_mode.py). */
   use_gap_mode?: boolean;
   gap_entry_long?: number;

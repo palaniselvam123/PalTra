@@ -355,6 +355,40 @@ def _gap_reason(closed: pd.DataFrame, side: str, lo: float, hi: float) -> list[s
     return []
 
 
+CANDLE_DIR_RULES = ("CLOSES", "COLOUR", "BOTH")
+
+
+def _direction_reason(closed: pd.DataFrame, side: str, count: int, rule: str) -> list[str]:
+    """The last `count` closed candles must move the trade's way.
+
+    CLOSES: each close above the close before it for a buy (below for a sell).
+    COLOUR: each candle green (close > open) for a buy, red for a sell.
+    BOTH: both. Flat closes or doji candles do not count as moving.
+    """
+    n = max(1, int(count))
+    rule = (rule or "CLOSES").upper()
+    need = n + 1 if rule in ("CLOSES", "BOTH") else n
+    if len(closed) < need:
+        return ["Candle direction needs more candles"]
+    long = side == "LONG"
+    word = "rising" if long else "falling"
+    reasons: list[str] = []
+    if rule in ("CLOSES", "BOTH"):
+        closes = [float(c) for c in closed["close"].iloc[-(n + 1):]]
+        steps = [b - a for a, b in zip(closes, closes[1:])]
+        if not all(s > 0 if long else s < 0 for s in steps):
+            path = " → ".join(f"{c:.2f}" for c in closes)
+            reasons.append(f"Candle direction: last {n} closes are not all {word} ({path})")
+    if rule in ("COLOUR", "BOTH"):
+        tail = closed.iloc[-n:]
+        bodies = [float(c) - float(o) for o, c in zip(tail["open"], tail["close"])]
+        if not all(b > 0 if long else b < 0 for b in bodies):
+            colour = "green" if long else "red"
+            got = "".join("G" if b > 0 else "R" if b < 0 else "-" for b in bodies)
+            reasons.append(f"Candle direction: last {n} candles are not all {colour} ({got})")
+    return reasons
+
+
 def sma_gap_signed(fast, slow) -> float | None:
     """(SMA fast - SMA slow) / SMA slow x 100, keeping the sign."""
     try:
@@ -384,6 +418,9 @@ def entry_filter_reason(
     use_gap_short: bool = False,
     gap_short_min: float = -0.5,
     gap_short_max: float = -0.02,
+    use_candle_dir: bool = False,
+    candle_dir_count: int = 2,
+    candle_dir_rule: str = "CLOSES",
     volume_lookback: int = 20,
     volume_min_ratio: float = 1.0,
     density_min_pct: float = 50.0,
@@ -402,7 +439,7 @@ def entry_filter_reason(
     """
     side = (direction or "").upper()
     use_gap = use_gap_long if side == "LONG" else use_gap_short if side == "SHORT" else False
-    if not any((use_vwap, use_volume, use_density, use_rsi, use_bollinger, use_gap)):
+    if not any((use_vwap, use_volume, use_density, use_rsi, use_bollinger, use_gap, use_candle_dir)):
         return None
     if df is None or len(df) < 3:
         return "filters need more candles"
@@ -447,6 +484,9 @@ def entry_filter_reason(
             reasons.extend(_gap_reason(closed, side, float(gap_long_min), float(gap_long_max)))
         else:
             reasons.extend(_gap_reason(closed, side, float(gap_short_min), float(gap_short_max)))
+
+    if use_candle_dir:
+        reasons.extend(_direction_reason(closed, side, int(candle_dir_count), candle_dir_rule))
 
     if not reasons:
         return None
