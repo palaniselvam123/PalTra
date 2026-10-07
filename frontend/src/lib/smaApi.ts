@@ -124,6 +124,8 @@ export type SmaState = {
   /** "research" on the research desk's state. */
   desk?: "research";
   data_source: string;
+  /** The per-second Groww price fetch and record is on (one switch for both desks). */
+  second_ticks?: boolean;
   /** Present only on /api/replay/state. */
   replay?: ReplayInfo;
   last_error: string;
@@ -619,6 +621,9 @@ export const smaApi = {
     request<{ symbol: string; ticks: [number, number][] }>(
       `/api/ticks?${new URLSearchParams({ symbol, start: String(start), end: String(end) })}`
     ),
+  /** Turn the per-second Groww price fetch (and its record) on or off, for both desks. */
+  setTickFeed: (on: boolean) =>
+    request<{ on: boolean }>("/api/ticks/feed", { method: "PUT", body: JSON.stringify({ on }) }),
   /** One whole book, newest first, up to 20,000 trades. */
   tradeBook: (mode: TradeBookMode) =>
     request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(

@@ -600,7 +600,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           {isOwn("gap_fade_intrabar") && <OwnTag />}
           Check the fade every second — judge the exit on the live price, as if that second closed the candle, instead of
           waiting for the minute to close. Faster on a sharp reversal; a candle that turns back inside the minute can
-          exit too early. Entries still wait for the candle to close.
+          exit too early. Entries still wait for the candle to close. With “1s OFF” in the status bar it checks at the
+          slower quote pace (every few seconds).
         </span>
       </label>
       <p className="mt-1 text-[11px] leading-snug text-slate-400">
