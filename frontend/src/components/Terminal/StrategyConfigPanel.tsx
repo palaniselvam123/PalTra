@@ -158,6 +158,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
     flip_orders: Boolean(form.flip_orders),
+    entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
+    pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
+    pattern_trend: Boolean(form.pattern_trend),
+    pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
+    pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
     gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
     gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
   });
@@ -580,6 +585,74 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             each risen (e.g. 100.0 → 100.4 → 100.9); a sell needs them each to have fallen. Refused crosses show as ✕
             “Candles” on the chart. Force order skips this check.
           </p>
+          <div className="mt-4 rounded-md p-2 ring-1 ring-inset ring-white/10">
+            <div className="text-sm text-slate-300">
+              Entry — what opens a trade{isOwn("entry_mode") && <OwnTag />}
+            </div>
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <label className="block text-sm text-slate-300">
+                <span className="text-[11px] uppercase tracking-wider text-slate-400">Enter on</span>
+                <select
+                  value={form.entry_mode ?? "SMA"}
+                  onChange={(e) => set("entry_mode", e.target.value)}
+                  className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                >
+                  <option value="SMA">SMA cross</option>
+                  <option value="PATTERN">Candle patterns</option>
+                </select>
+              </label>
+              <label className="block text-sm text-slate-300">
+                <span className="text-[11px] uppercase tracking-wider text-slate-400">Pattern candle{isOwn("pattern_tf") ? " (own)" : ""}</span>
+                <select
+                  value={String(form.pattern_tf ?? 1)}
+                  onChange={(e) => set("pattern_tf", e.target.value)}
+                  className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                >
+                  <option value="1">1 minute</option>
+                  <option value="3">3 minutes</option>
+                  <option value="5">5 minutes</option>
+                </select>
+              </label>
+              <label className="block text-sm text-slate-300">
+                <span className="text-[11px] uppercase tracking-wider text-slate-400">Patterns{isOwn("pattern_set") ? " (own)" : ""}</span>
+                <select
+                  value={form.pattern_set ?? "STRONG"}
+                  onChange={(e) => set("pattern_set", e.target.value)}
+                  className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                >
+                  <option value="STRONG">Strong only (engulfing, stars, three soldiers/crows, piercing/dark cloud, marubozu)</option>
+                  <option value="ALL">All (adds hammer, shooting star, harami, tweezers, dragonfly/gravestone doji)</option>
+                </select>
+              </label>
+              <Field
+                label="Skip candles under N× the charges (0 = off)"
+                value={String(form.pattern_min_edge ?? 1.5)}
+                onChange={(v) => set("pattern_min_edge", v)}
+                own={isOwn("pattern_min_edge")}
+              />
+            </div>
+            <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.pattern_trend)}
+                onChange={(e) => set("pattern_trend", e.target.checked)}
+                className="mt-1 accent-[#10B981]"
+              />
+              <span>
+                {isOwn("pattern_trend") && <OwnTag />}
+                Only with the SMA trend — a bullish pattern only while SMA {form.sma_fast ?? 9} is above SMA{" "}
+                {form.sma_slow ?? 21}, a bearish one only below.
+              </span>
+            </label>
+            <p className="mt-1 text-[11px] leading-snug text-slate-400">
+              With Candle patterns, each time a candle of this size closes its pattern is read (the names in the chart&apos;s
+              data table). A bullish pattern buys and a bearish one sells short at the start of the next candle; the trade
+              closes at the end of that candle (exit “end of the pattern candle”), then the next candle is judged afresh.
+              Entry filters, the stop, the flip, market hours, the cut-off and the caps still apply; gap mode does not. Each
+              trade pays a full round of charges, so the charge check skips candles that usually move less than N× those
+              charges for this quantity. Try it in Replay first.
+            </p>
+          </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"

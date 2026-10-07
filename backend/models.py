@@ -203,6 +203,14 @@ class BotConfig(Base):
     # Flip strategy: a buy signal places a sell order and a sell signal a buy.
     # Every condition stays the same; signal exits follow the signal.
     flip_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
+    # bullish / short a bearish pattern at the start of the next pattern_tf
+    # candle and close at its end.
+    entry_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="SMA")
+    pattern_tf: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    pattern_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    pattern_set: Mapped[str | None] = mapped_column(String, nullable=True, default="STRONG")
+    pattern_min_edge: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
