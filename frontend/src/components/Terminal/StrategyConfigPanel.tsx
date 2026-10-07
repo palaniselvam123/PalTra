@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
+import { strategyNotes } from "@/lib/strategyChecks";
 
 type Props = {
   config: SmaConfig | null;
@@ -598,6 +599,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           own={isOwn("gap_fade_min_candles")}
         />
       </div>
+      {strategyNotes(form).length ? (
+        <ul aria-label="Setting notes" className="mt-2 space-y-1.5">
+          {strategyNotes(form).map((note) => (
+            <li
+              key={note.id}
+              className="rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-[12px] leading-snug text-amber-100"
+            >
+              {note.text}
+              {note.fix ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    for (const [key, value] of Object.entries(note.fix!.values)) {
+                      set(key as keyof SmaConfig, String(value));
+                    }
+                    setMsg("Changed — press Save to keep it.");
+                  }}
+                  className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+                >
+                  {note.fix.label}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
         <input
           type="checkbox"

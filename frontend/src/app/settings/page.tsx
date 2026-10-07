@@ -5,6 +5,7 @@ import { ApiKeyForm } from "@/components/Settings/ApiKeyForm";
 import { AiKeyForm } from "@/components/Settings/AiKeyForm";
 import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
+import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
 import { useTradingState } from "@/hooks/useTradingState";
 
 export default function SettingsPage() {
@@ -24,6 +25,7 @@ export default function SettingsPage() {
         botRunning={bot?.enabled ?? false}
       />
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+        <SmaStrategySettings />
         <ApiKeyForm />
         <AiKeyForm />
         <MarketDataDiagnostics />

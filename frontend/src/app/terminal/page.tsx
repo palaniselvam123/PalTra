@@ -6,7 +6,7 @@ import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
 import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
 import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
-import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
+import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
@@ -584,7 +584,7 @@ export default function TerminalPage() {
           )}
         </div>
         <Fold title="Strategy" storageKey="sma.card.config">
-          <StrategyConfigPanel config={config} onChanged={refresh} wide />
+          <StrategySummary config={config} research={research} />
         </Fold>
         <TradeHistoryTable
           loading={!tradesLoaded}
