@@ -40,6 +40,7 @@ from groww_client import preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
+from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
 from strategy_engine import (
     BOOK_LIMIT,
     BOOKS,
@@ -56,15 +57,25 @@ from strategy_engine import (
 
 engine = StrategyEngine()
 replay = ReplaySession()
+# Paper-only second bot on the same live quotes (research.py). It reads quotes
+# through the live client's refresh and nothing else.
+
+
+async def _live_quote(symbol: str):
+    return await engine.broker.refresh(symbol)
+
+
+research_engine = ResearchEngine(_live_quote)
 
 
 _booted = False
 _task: asyncio.Task | None = None
+_research_task: asyncio.Task | None = None
 
 
 def boot_engine() -> asyncio.Task | None:
     """Start the 1-second loop once. Safe if both the standalone app and a mount call it."""
-    global _booted, _task
+    global _booted, _task, _research_task
     if _booted:
         return _task
     _booted = True
@@ -76,13 +87,19 @@ def boot_engine() -> asyncio.Task | None:
     engine.broker.set_mode(cfg.trading_mode)
     engine.broker.adopt_saved_session(force=True)
     _task = asyncio.create_task(engine.run())
+    ensure_research_config()
+    research_engine.restore_open_books()
+    research_engine.restore_trades_today()
+    _research_task = asyncio.create_task(research_engine.run())
     return _task
 
 
 def stop_engine() -> None:
     engine.stop()
-    if _task is not None and not _task.done():
-        _task.cancel()
+    research_engine.stop()
+    for task in (_task, _research_task):
+        if task is not None and not task.done():
+            task.cancel()
 
 
 @asynccontextmanager
@@ -227,34 +244,73 @@ async def health():
     return {"ok": True, "mode": engine.load_config().trading_mode, "bot": engine.status}
 
 
+async def _state(eng: StrategyEngine):
+    return eng.snapshot()
+
+
 @app.get("/api/state")
 async def state():
-    return engine.snapshot()
+    return await _state(engine)
+
+
+@app.get("/api/research/state")
+async def research_state():
+    return await _state(_research())
+
+
+async def _chart(eng: StrategyEngine, limit: int = 240):
+    # The 5/15/30/60-minute views build their bars from more 1-minute candles.
+    # Off the event loop: building the chart must not hold up /api/state.
+    return await asyncio.to_thread(eng.chart_payload, max(30, min(int(limit), 2500)))
 
 
 @app.get("/api/chart")
 async def chart(limit: int = 240):
-    # The 5/15/30/60-minute views build their bars from more 1-minute candles.
-    # Off the event loop: building the chart must not hold up /api/state.
-    return await asyncio.to_thread(engine.chart_payload, max(30, min(int(limit), 2500)))
+    return await _chart(engine, limit)
 
 
-@app.get("/api/history")
-async def history(symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
+@app.get("/api/research/chart")
+async def research_chart(limit: int = 240):
+    return await _chart(_research(), limit)
+
+
+async def _history(eng: StrategyEngine, symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
     """Past candles from Groww for the chart's From/To view. Read-only.
 
     `run_id` marks one replay run's trades; without it, the practice/real
     trades plus the latest replay run in the range.
     """
     try:
-        return await load_history(engine.broker, symbol, start, end, engine.load_config(), interval, run_id)
+        # Candles come through the live desk's Groww client; the research desk
+        # marks only its own trades on them.
+        book = "RESEARCH" if isinstance(eng, ResearchEngine) else None
+        return await load_history(engine.broker, symbol, start, end, eng.load_config(), interval, run_id, book)
     except HistoryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/history")
+async def history(symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
+    return await _history(engine, symbol, start, end, interval, run_id)
+
+
+@app.get("/api/research/history")
+async def research_history(symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
+    return await _history(_research(), symbol, start, end, interval, run_id)
+
+
+async def _get_config(eng: StrategyEngine):
+    return _config_dict(eng.load_config())
+
+
 @app.get("/api/config")
 async def get_config():
-    return _config_dict(engine.load_config())
+    return await _get_config(engine)
+
+
+@app.get("/api/research/config")
+async def research_get_config():
+    return await _get_config(_research())
 
 
 class TradeSymbolUpdate(BaseModel):
@@ -262,29 +318,45 @@ class TradeSymbolUpdate(BaseModel):
     armed: bool
 
 
-def _open_symbols() -> set[str]:
-    return {symbol for symbol, pos in engine.positions.items() if pos is not None}
+def _research() -> ResearchEngine:
+    return research_engine
 
 
-@app.post("/api/trade-symbols")
-async def set_trade_symbol(body: TradeSymbolUpdate):
+def _symbol_cap(eng: StrategyEngine) -> int:
+    return MAX_RESEARCH_SYMBOLS if isinstance(eng, ResearchEngine) else MAX_TRADE_SYMBOLS
+
+
+def _reload(eng: StrategyEngine, payload: dict) -> None:
+    """Point the engine at the row just saved; report its book (RESEARCH on that desk)."""
+    cfg = eng.load_config()
+    if "trading_mode" in payload:
+        payload["trading_mode"] = cfg.trading_mode
+
+
+def _open_symbols(eng: StrategyEngine | None = None) -> set[str]:
+    eng = engine if eng is None else eng
+    return {symbol for symbol, pos in eng.positions.items() if pos is not None}
+
+
+async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
     """Arm or disarm a stock without changing the chart on screen."""
     symbol = (body.symbol or "").upper().strip()
     if not symbol or not symbol.isalnum():
         raise HTTPException(400, "Symbol must be an NSE trading symbol")
     with session_factory()() as db:
-        row = db.get(BotConfig, 1)
+        row = db.get(BotConfig, eng.config_id)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
         names = trade_names(row)
         if body.armed:
             if symbol not in names:
-                if len(names) >= MAX_TRADE_SYMBOLS:
-                    raise HTTPException(409, f"Trade is limited to {MAX_TRADE_SYMBOLS} stocks at once")
+                cap = _symbol_cap(eng)
+                if len(names) >= cap:
+                    raise HTTPException(409, f"Trade is limited to {cap} stocks at once")
                 names.append(symbol)
-                engine.hold_for_next_cross([symbol])
+                eng.hold_for_next_cross([symbol])
         else:
-            if symbol in _open_symbols():
+            if symbol in _open_symbols(eng):
                 raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
             names = [name for name in names if name != symbol]
         row.trade_symbols = ",".join(names)
@@ -292,17 +364,26 @@ async def set_trade_symbol(body: TradeSymbolUpdate):
         db.refresh(row)
         payload = _config_dict(row)
         db.expunge(row)
-    engine._cfg_cache = row
+    _reload(eng, payload)
     return payload
 
 
-@app.put("/api/config")
-async def put_config(body: ConfigUpdate):
+@app.post("/api/trade-symbols")
+async def set_trade_symbol(body: TradeSymbolUpdate):
+    return await _set_trade_symbol(engine, body)
+
+
+@app.post("/api/research/trade-symbols")
+async def research_set_trade_symbol(body: TradeSymbolUpdate):
+    return await _set_trade_symbol(_research(), body)
+
+
+async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
     # The chart symbol can change while another stock stays open. Quantity is
     # shared, so an open book still blocks a size change. Raising the trade
     # cap must not be blocked by that check.
     with session_factory()() as db:
-        row = db.get(BotConfig, 1)
+        row = db.get(BotConfig, eng.config_id)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
         own = stock_settings(row)
@@ -311,7 +392,7 @@ async def put_config(body: ConfigUpdate):
             and int(body.qty) != int(row.qty)
             and any(
                 pos.qty != body.qty
-                for symbol, pos in engine.positions.items()
+                for symbol, pos in eng.positions.items()
                 if "qty" not in own.get(symbol, {})
             )
         ):
@@ -344,13 +425,23 @@ async def put_config(body: ConfigUpdate):
         cap = int(row.max_trades_per_day)
         changed_cap = "max_trades_per_day" in data
         db.expunge(row)
-    engine._cfg_cache = row
+    _reload(eng, payload)
     if changed_cap:
-        engine.release_trade_cap(cap)
+        eng.release_trade_cap(cap)
         # A replay halted on the same cap resumes from the same Save.
-        if replay.engine is not None:
+        if eng is engine and replay.engine is not None:
             replay.engine.release_trade_cap(cap)
     return payload
+
+
+@app.put("/api/config")
+async def put_config(body: ConfigUpdate):
+    return await _put_config(engine, body)
+
+
+@app.put("/api/research/config")
+async def research_put_config(body: ConfigUpdate):
+    return await _put_config(_research(), body)
 
 
 def _check_settings(cfg: BotConfig, symbol: str = "") -> None:
@@ -400,16 +491,24 @@ class StockConfigUpdate(ConfigUpdate):
     """One stock's strategy settings. Account-wide fields are refused."""
 
 
-@app.get("/api/config/stock/{symbol}")
-async def get_stock_config(symbol: str):
+async def _get_stock_config(eng: StrategyEngine, symbol: str):
     """This stock's settings as the bot will use them, and which are its own."""
     name = _stock_name(symbol)
-    row = engine.load_config()
+    row = eng.load_config()
     return {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": stock_settings(row).get(name, {})}
 
 
-@app.put("/api/config/stock/{symbol}")
-async def put_stock_config(symbol: str, body: StockConfigUpdate):
+@app.get("/api/config/stock/{symbol}")
+async def get_stock_config(symbol: str):
+    return await _get_stock_config(engine, symbol)
+
+
+@app.get("/api/research/config/stock/{symbol}")
+async def research_get_stock_config(symbol: str):
+    return await _get_stock_config(_research(), symbol)
+
+
+async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigUpdate):
     """Set this stock's own strategy settings.
 
     A value equal to the shared setting is not stored, so the stock keeps
@@ -424,7 +523,7 @@ async def put_stock_config(symbol: str, body: StockConfigUpdate):
             400, f"{', '.join(shared_only)} apply to every stock. Change them with All stocks selected."
         )
     with session_factory()() as db:
-        row = db.get(BotConfig, 1)
+        row = db.get(BotConfig, eng.config_id)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
         everything = stock_settings(row)
@@ -434,7 +533,7 @@ async def put_stock_config(symbol: str, body: StockConfigUpdate):
                 own.pop(key, None)
             else:
                 own[key] = value
-        pos = engine.positions.get(name)
+        pos = eng.positions.get(name)
         new_qty = int(own.get("qty", row.qty))
         if pos is not None and int(pos.qty) != new_qty:
             raise HTTPException(409, f"Close the open {name} position before changing its quantity")
@@ -448,21 +547,30 @@ async def put_stock_config(symbol: str, body: StockConfigUpdate):
         db.refresh(row)
         payload = {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": own}
         db.expunge(row)
-    engine._cfg_cache = row
+    _reload(eng, payload)
     return payload
 
 
-@app.delete("/api/config/stock/{symbol}")
-async def reset_stock_config(symbol: str):
+@app.put("/api/config/stock/{symbol}")
+async def put_stock_config(symbol: str, body: StockConfigUpdate):
+    return await _put_stock_config(engine, symbol, body)
+
+
+@app.put("/api/research/config/stock/{symbol}")
+async def research_put_stock_config(symbol: str, body: StockConfigUpdate):
+    return await _put_stock_config(_research(), symbol, body)
+
+
+async def _reset_stock_config(eng: StrategyEngine, symbol: str):
     """Drop this stock's own settings. It follows the shared ones again."""
     name = _stock_name(symbol)
     with session_factory()() as db:
-        row = db.get(BotConfig, 1)
+        row = db.get(BotConfig, eng.config_id)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
         everything = stock_settings(row)
         own = everything.pop(name, {})
-        pos = engine.positions.get(name)
+        pos = eng.positions.get(name)
         if pos is not None and "qty" in own and int(pos.qty) != int(row.qty):
             raise HTTPException(409, f"Close the open {name} position before changing its quantity")
         row.stock_settings = json.dumps(everything)
@@ -470,8 +578,18 @@ async def reset_stock_config(symbol: str):
         db.refresh(row)
         payload = {**_config_dict(_cfg_for(row, name)), "symbol": name, "own": {}}
         db.expunge(row)
-    engine._cfg_cache = row
+    _reload(eng, payload)
     return payload
+
+
+@app.delete("/api/config/stock/{symbol}")
+async def reset_stock_config(symbol: str):
+    return await _reset_stock_config(engine, symbol)
+
+
+@app.delete("/api/research/config/stock/{symbol}")
+async def research_reset_stock_config(symbol: str):
+    return await _reset_stock_config(_research(), symbol)
 
 
 def _stock_name(symbol: str) -> str:
@@ -533,65 +651,110 @@ async def set_mode(body: ModeUpdate):
     return {"trading_mode": mode}
 
 
-@app.post("/api/bot/start")
-async def start_bot():
+async def _start_bot(eng: StrategyEngine):
     from strategy_engine import _ist_now
 
-    engine._roll_session(_ist_now())
-    engine.release_manual_panic()
-    engine.release_trade_cap()
-    if engine.status == "HALTED":
-        raise HTTPException(423, engine.halt_reason or "Halted for the day")
-    if engine.status == "DAY_COMPLETED":
-        raise HTTPException(423, engine.halt_reason or "Session already squared off")
+    eng._roll_session(_ist_now())
+    eng.release_manual_panic()
+    eng.release_trade_cap()
+    if eng.status == "HALTED":
+        raise HTTPException(423, eng.halt_reason or "Halted for the day")
+    if eng.status == "DAY_COMPLETED":
+        raise HTTPException(423, eng.halt_reason or "Session already squared off")
     # A cross already on the tape is not an order. The next cross is.
-    engine.hold_for_next_cross(trade_names(engine.load_config()))
-    engine.status = "RUNNING"
-    engine.halt_reason = ""
-    return {"bot_status": engine.status}
+    eng.hold_for_next_cross(trade_names(eng.load_config()))
+    eng.status = "RUNNING"
+    eng.halt_reason = ""
+    return {"bot_status": eng.status}
+
+
+@app.post("/api/bot/start")
+async def start_bot():
+    return await _start_bot(engine)
+
+
+@app.post("/api/research/bot/start")
+async def research_start_bot():
+    return await _start_bot(_research())
 
 
 class ForceOrder(BaseModel):
     symbol: str = ""
 
 
-@app.post("/api/bot/force")
-async def force_order(body: ForceOrder):
+async def _force_order(eng: StrategyEngine, body: ForceOrder):
     """Manual check order. Starts the bot. Does not wait for a cross."""
     try:
-        result = await engine.force_order(body.symbol)
+        result = await eng.force_order(body.symbol)
     except ForceRefused as exc:
-        code = 423 if engine.status in ("HALTED", "DAY_COMPLETED") else 400
+        code = 423 if eng.status in ("HALTED", "DAY_COMPLETED") else 400
         raise HTTPException(code, str(exc)) from exc
-    return {"bot_status": engine.status, "last_signal": result}
+    return {"bot_status": eng.status, "last_signal": result}
+
+
+@app.post("/api/bot/force")
+async def force_order(body: ForceOrder):
+    return await _force_order(engine, body)
+
+
+@app.post("/api/research/bot/force")
+async def research_force_order(body: ForceOrder):
+    return await _force_order(_research(), body)
+
+
+async def _pause_bot(eng: StrategyEngine):
+    if eng.status == "RUNNING":
+        eng.status = "PAUSED"
+    return {"bot_status": eng.status}
 
 
 @app.post("/api/bot/pause")
 async def pause_bot():
-    if engine.status == "RUNNING":
-        engine.status = "PAUSED"
-    return {"bot_status": engine.status}
+    return await _pause_bot(engine)
+
+
+@app.post("/api/research/bot/pause")
+async def research_pause_bot():
+    return await _pause_bot(_research())
 
 
 class CloseOrder(BaseModel):
     symbol: str = ""
 
 
-@app.post("/api/bot/close")
-async def close_position(body: CloseOrder):
+async def _close_position(eng: StrategyEngine, body: CloseOrder):
     """Close one open stock. Does not halt the bot."""
     try:
-        result = await engine.close_symbol(body.symbol)
+        result = await eng.close_symbol(body.symbol)
     except ForceRefused as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"bot_status": engine.status, "last_signal": result}
+    return {"bot_status": eng.status, "last_signal": result}
+
+
+@app.post("/api/bot/close")
+async def close_position(body: CloseOrder):
+    return await _close_position(engine, body)
+
+
+@app.post("/api/research/bot/close")
+async def research_close_position(body: CloseOrder):
+    return await _close_position(_research(), body)
+
+
+async def _kill_bot(eng: StrategyEngine):
+    """Panic: cancel SL, flatten MIS, lock the strategy. Each desk only its own."""
+    await eng.kill("Manual PANIC SQUARE-OFF (research)" if isinstance(eng, ResearchEngine) else "Manual PANIC SQUARE-OFF")
+    return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
 
 
 @app.post("/api/bot/kill")
 async def kill_bot():
-    """Panic: cancel SL, flatten MIS, lock the strategy."""
-    await engine.kill("Manual PANIC SQUARE-OFF")
-    return {"bot_status": engine.status, "halt_reason": engine.halt_reason}
+    return await _kill_bot(engine)
+
+
+@app.post("/api/research/bot/kill")
+async def research_kill_bot():
+    return await _kill_bot(_research())
 
 
 class ReplayStart(BaseModel):
@@ -829,7 +992,7 @@ async def replay_bot_kill():
 
 @app.get("/api/trades")
 async def trades():
-    return attach_market_prices(engine.trades(), engine._ltps)
+    return attach_market_prices(engine.trades(), {**research_engine._ltps, **engine._ltps})
 
 
 @app.get("/api/trades/book")
@@ -838,11 +1001,13 @@ async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT):
     book = (mode or "PAPER").upper()
     if book not in BOOKS:
         raise HTTPException(status_code=422, detail=f"mode must be one of {', '.join(BOOKS)}")
-    ltps = dict(engine._ltps)
+    # Open research trades are priced and ranged by the research desk.
+    src = research_engine if book == "RESEARCH" else engine
+    ltps = dict(src._ltps)
 
     def build() -> str:
-        data = engine.book(book, limit)
-        rows, strategies = pack_strategies(attach_market_prices(engine.with_open_extremes(data["rows"]), ltps))
+        data = src.book(book, limit)
+        rows, strategies = pack_strategies(attach_market_prices(src.with_open_extremes(data["rows"]), ltps))
         return json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies})
 
     # Thousands of rows take a moment; build them off the event loop so the
@@ -859,7 +1024,7 @@ async def trades_counts():
 async def trades_csv(mode: str = ""):
     book = (mode or "").upper()
     data = engine.book(book if book in BOOKS else None)
-    rows = attach_market_prices(data["rows"], engine._ltps)
+    rows = attach_market_prices(data["rows"], {**research_engine._ltps, **engine._ltps})
     buffer = io.StringIO()
     fields = [
         "trade_ref",

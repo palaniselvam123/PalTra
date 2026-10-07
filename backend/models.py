@@ -49,13 +49,14 @@ class TradeLog(Base):
     book_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-BOOK_PREFIX = {"LIVE": "N", "PAPER": "P"}
+BOOK_PREFIX = {"LIVE": "N", "PAPER": "P", "RESEARCH": "Q"}
 
 
 def trade_ref(mode: str | None, run_id: int | None, seq: int | None, fallback: int | None = None) -> str:
     """The trade id shown to people, unique within its book.
 
-    NSE live: N-12 · Simulation (PAPER): P-12 · a replay / backtest run 7: R7-12.
+    NSE live: N-12 · Simulation (PAPER): P-12 · Research desk: Q-12 ·
+    a replay / backtest run 7: R7-12.
     """
     book = (mode or "PAPER").upper()
     if seq is None:

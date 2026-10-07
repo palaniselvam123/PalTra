@@ -136,7 +136,7 @@ export function StockCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
           role="switch"
@@ -147,7 +147,7 @@ export function StockCard({
             armed
               ? "The bot may order this stock. Switch off to stop new orders on it."
               : cannotArm
-                ? "24 stocks are already armed. Switch one off first."
+                ? "The most stocks this desk can arm are already armed. Switch one off first."
                 : "Let the bot order this stock on its next SMA cross"
           }
           className="flex min-h-11 items-center gap-2 rounded-md pr-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"

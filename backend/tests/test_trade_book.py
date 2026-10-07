@@ -83,7 +83,7 @@ def test_the_practice_book_keeps_rows_with_no_mode_and_says_how_many_it_holds(cl
     assert body["total"] == 8
     assert len(body["rows"]) == 6
     assert body["rows"][0]["strategy_ref"] is None
-    assert http.get("/api/trades/counts").json() == {"PAPER": 8, "LIVE": 0, "REPLAY": 4}
+    assert http.get("/api/trades/counts").json() == {"PAPER": 8, "LIVE": 0, "REPLAY": 4, "RESEARCH": 0}
     # The poll endpoint is unchanged: newest 200 across books.
     assert len(http.get("/api/trades").json()) == 12
 

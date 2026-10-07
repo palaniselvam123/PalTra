@@ -23,7 +23,7 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const book = state?.mode === "LIVE" ? "Live book" : "Paper book";
+  const book = state?.mode === "LIVE" ? "Live book" : state?.mode === "RESEARCH" ? "Research book" : "Paper book";
   const trades = k?.trades ?? 0;
   const wins = k?.wins ?? 0;
   const losses = Math.max(0, trades - wins);

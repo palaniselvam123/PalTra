@@ -211,7 +211,7 @@ def settings_snapshot(cfg: BotConfig) -> dict:
 # Most trades the blotter loads for one book. /api/trades stays at the newest
 # 200 across all books, because the page polls it every few seconds.
 BOOK_LIMIT = 20000
-BOOKS = ("PAPER", "LIVE", "REPLAY")
+BOOKS = ("PAPER", "LIVE", "REPLAY", "RESEARCH")
 
 
 def _mode_filter(mode: str):
@@ -580,6 +580,9 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
 
 
 class StrategyEngine:
+    #: The BotConfig row this engine trades with. The research desk has its own.
+    config_id = 1
+
     def __init__(self, broker: GrowwClient | None = None):
         self.broker = broker or GrowwClient(mode="PAPER")
         self.lock = asyncio.Lock()
@@ -723,8 +726,8 @@ class StrategyEngine:
         """A restart must remember a live position or the next cross orders again."""
         with session_factory()() as db:
             rows = db.query(TradeLog).filter(TradeLog.exit_time.is_(None)).all()
-            # A replay's practice rows belong to the replay, never to this book.
-            rows = [row for row in rows if (row.mode or "PAPER").upper() != "REPLAY"]
+            # Replay and research rows belong to their own engines, never to this book.
+            rows = [row for row in rows if self._restores((row.mode or "PAPER").upper())]
             pending = [
                 (
                     str(row.symbol or "").upper(),
@@ -787,12 +790,16 @@ class StrategyEngine:
                 low=entry,
             )
 
+    def _restores(self, mode: str) -> bool:
+        """Whether an open row of this book is this engine's to pick up after a restart."""
+        return mode in ("PAPER", "LIVE")
+
     def stop(self) -> None:
         self._stop = True
 
     def load_config(self) -> BotConfig:
         with session_factory()() as db:
-            row = db.get(BotConfig, 1)
+            row = db.get(BotConfig, self.config_id)
             if row is None:
                 raise RuntimeError("BotConfig missing — init_db() was not called")
             db.expunge(row)

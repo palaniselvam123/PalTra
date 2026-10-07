@@ -34,6 +34,7 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
   const mode = state?.mode ?? config?.trading_mode ?? null;
   const live = mode === "LIVE";
   const replaying = mode === "REPLAY";
+  const research = mode === "RESEARCH";
   const bot = state ? BOT[state.bot_status] ?? { label: state.bot_status, dot: "bg-slate-400", text: "text-slate-200" } : null;
   const source = state ? SOURCE[state.data_source] ?? state.data_source : null;
   const stopOn = state?.stop_enabled ?? config?.use_stop;
@@ -49,10 +50,12 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
     <div role="status" aria-label="Terminal status" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-stretch">
       <button
         type="button"
-        disabled={busy || mode == null || replaying}
+        disabled={busy || mode == null || replaying || research}
         onClick={onModeClick}
         title={
-          replaying
+          research
+            ? "Research desk: paper only, with its own settings and book. It has no LIVE switch and never touches the live bot."
+            : replaying
             ? "Replaying a past day with practice money. Stop the replay to change mode."
             : live
               ? "Real Groww orders are on. Press to go back to PAPER."
@@ -64,15 +67,20 @@ export function StatusBar({ state, config, connected, busy, onModeClick }: Props
             ? "bg-rose-600 text-white ring-rose-300/60"
             : replaying
               ? "bg-violet-600/30 text-violet-100 ring-violet-400/60"
-              : "bg-blue-600/20 text-blue-200 ring-blue-400/50",
+              : research
+                ? "bg-teal-600/25 text-teal-100 ring-teal-400/60"
+                : "bg-blue-600/20 text-blue-200 ring-blue-400/50",
           mode == null && "bg-white/5 text-slate-400 ring-white/10"
         )}
       >
         <span
           aria-hidden
-          className={clsx("h-2 w-2 rounded-full", live ? "animate-pulse bg-white" : replaying ? "bg-violet-300" : "bg-blue-300")}
+          className={clsx(
+            "h-2 w-2 rounded-full",
+            live ? "animate-pulse bg-white" : replaying ? "bg-violet-300" : research ? "bg-teal-300" : "bg-blue-300"
+          )}
         />
-        {mode == null ? "Mode…" : live ? "LIVE MONEY" : replaying ? "REPLAY" : "PAPER"}
+        {mode == null ? "Mode…" : live ? "LIVE MONEY" : replaying ? "REPLAY" : research ? "RESEARCH" : "PAPER"}
       </button>
       <Cell label="Net today" title="Closed trades today, after charges">
         {net == null ? (
