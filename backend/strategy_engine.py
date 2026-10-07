@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import func, or_, select, true
+from sqlalchemy import and_, func, or_, select, true
 
 from charges import calculate_charges, legs_for
 from database import session_factory
@@ -233,6 +233,13 @@ def settings_snapshot(cfg: BotConfig) -> dict:
 # 200 across all books, because the page polls it every few seconds.
 BOOK_LIMIT = 20000
 BOOKS = ("PAPER", "LIVE", "REPLAY", "RESEARCH")
+
+
+def bot_rows(bot: int):
+    """Rows of one SMA bot. Rows from before the bots existed (NULL) are bot 1's."""
+    if int(bot) == 1:
+        return or_(TradeLog.bot == 1, TradeLog.bot.is_(None))
+    return TradeLog.bot == int(bot)
 
 
 def _mode_filter(mode: str):
@@ -628,6 +635,12 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
 class StrategyEngine:
     #: The BotConfig row this engine trades with. The research desk has its own.
     config_id = 1
+    #: Which SMA bot this is (TradeLog.bot): 1 the main desk, 2-4 the extra bots.
+    #: Research and replay engines stay 1; their mode tag keeps their books apart.
+    bot_id = 1
+    #: bots.live_conflict once the bots are registered: refuses a LIVE entry on
+    #: a stock another LIVE bot owns. None (no check) for a lone engine in tests.
+    live_guard = None
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
@@ -774,7 +787,7 @@ class StrategyEngine:
     def restore_open_books(self) -> None:
         """A restart must remember a live position or the next cross orders again."""
         with session_factory()() as db:
-            rows = db.query(TradeLog).filter(TradeLog.exit_time.is_(None)).all()
+            rows = db.query(TradeLog).filter(TradeLog.exit_time.is_(None), self._bot_rows()).all()
             # Replay and research rows belong to their own engines, never to this book.
             rows = [row for row in rows if self._restores((row.mode or "PAPER").upper())]
             pending = [
@@ -840,6 +853,10 @@ class StrategyEngine:
                 low=entry,
                 flipped=flipped,
             )
+
+    def _bot_rows(self):
+        """This bot's rows of the trade table (see bot_rows)."""
+        return bot_rows(self.bot_id)
 
     def _restores(self, mode: str) -> bool:
         """Whether an open row of this book is this engine's to pick up after a restart."""
@@ -1802,6 +1819,12 @@ class StrategyEngine:
             direction = _opposite(direction)
         side = "BUY" if direction == "LONG" else "SELL"
         live = (cfg.trading_mode or "").upper() == "LIVE"
+        guard = self.live_guard
+        if live and guard is not None:
+            # Last check before real money: another LIVE bot may own this stock.
+            why = guard(self.bot_id, [cfg.symbol])
+            if why:
+                raise SlCancelFailed(why)
         qty = int(cfg.qty)
         # The order goes out at the market price now. cross_price stays the
         # signal candle's close, so entry minus cross is the real fill lag.
@@ -2076,9 +2099,16 @@ class StrategyEngine:
             if await self._groww_net(symbol) != 0:
                 continue
             with session_factory()() as db:
+                # Only this bot's LIVE rows: Groww's net position says nothing
+                # about a practice or research trade on the same stock.
                 rows = (
                     db.query(TradeLog)
-                    .filter(TradeLog.exit_time.is_(None), TradeLog.symbol == symbol)
+                    .filter(
+                        TradeLog.exit_time.is_(None),
+                        TradeLog.symbol == symbol,
+                        TradeLog.mode == "LIVE",
+                        self._bot_rows(),
+                    )
                     .all()
                 )
                 pending = [
@@ -2340,7 +2370,7 @@ class StrategyEngine:
         run_id = getattr(self, "run_id", None)
         with session_factory()() as db:
             # Next number in this trade's own book (PAPER, LIVE, or this replay run).
-            book = db.query(func.max(TradeLog.book_seq)).filter(TradeLog.mode == mode)
+            book = db.query(func.max(TradeLog.book_seq)).filter(TradeLog.mode == mode, self._bot_rows())
             book = book.filter(TradeLog.run_id == run_id) if run_id is not None else book.filter(TradeLog.run_id.is_(None))
             seq = int(book.scalar() or 0) + 1
             row = TradeLog(
@@ -2356,6 +2386,7 @@ class StrategyEngine:
                 mode=mode,
                 stop_active=bool(stop_active),
                 flipped=bool(flipped),
+                bot=self.bot_id,
                 run_id=run_id,
                 book_seq=seq,
                 strategy=json.dumps({**settings_snapshot(cfg), "qty": int(qty if qty is not None else cfg.qty)}),
@@ -2721,7 +2752,7 @@ class StrategyEngine:
         with session_factory()() as db:
             rows = (
                 db.query(TradeLog.mode, TradeLog.exit_reason)
-                .filter(TradeLog.date == day, TradeLog.id > floor)
+                .filter(TradeLog.date == day, TradeLog.id > floor, self._bot_rows())
                 .all()
             )
         # A row Groww never held was not a trade, so it does not use the cap.
@@ -2909,6 +2940,8 @@ class StrategyEngine:
         finally:
             self._focus, self.ltp = saved_focus, saved_ltp
         return {
+            "bot": self.bot_id,
+            "bot_name": (getattr(cfg, "bot_name", None) if cfg else None) or f"Bot {self.bot_id}",
             "bot_status": self.status,
             "halt_reason": self.halt_reason,
             "mode": (cfg.trading_mode if cfg else "PAPER"),
@@ -3074,7 +3107,7 @@ class StrategyEngine:
         blocked = [mark for mark in all_blocks if first_shown is not None and mark["time"] >= first_shown]
         view = other or (cfg.symbol if cfg else self._focus or "").upper()
         with session_factory()() as db:
-            query = db.query(TradeLog).filter(self._marker_book(cfg))
+            query = db.query(TradeLog).filter(self._marker_book(cfg), self._bot_rows())
             if view:
                 query = query.filter(func.upper(TradeLog.symbol) == view)
             rows = (
@@ -3087,7 +3120,7 @@ class StrategyEngine:
             if view and (row.symbol or "").upper() != view:
                 continue
             net = row.net_pnl if row.net_pnl is not None else row.gross_pnl
-            ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id)
+            ref = trade_ref(row.mode, row.run_id, row.book_seq, row.id, getattr(row, "bot", None))
             if row.entry_time is not None:
                 markers.append(
                     {
@@ -3132,7 +3165,11 @@ class StrategyEngine:
         day = self._session_date
         book = (mode or "PAPER").upper()
         with session_factory()() as db:
-            rows = db.query(TradeLog).filter(TradeLog.date == day, TradeLog.exit_price.isnot(None)).all()
+            rows = (
+                db.query(TradeLog)
+                .filter(TradeLog.date == day, TradeLog.exit_price.isnot(None), self._bot_rows())
+                .all()
+            )
         rows = [row for row in rows if (row.mode or "PAPER").upper() == book]
         # A replay counts only its own run, not earlier replays of that date.
         floor_id = int(getattr(self, "_min_trade_id", 0) or 0)
@@ -3183,7 +3220,7 @@ class StrategyEngine:
             "by_symbol": by_symbol,
         }
 
-    def book(self, mode: str | None, limit: int = BOOK_LIMIT) -> dict:
+    def book(self, mode: str | None, limit: int = BOOK_LIMIT, bot: int | None = None) -> dict:
         """One book's newest trades (all books when mode is None), up to `limit`.
 
         `total` is how many the book holds, so the page can say when it shows
@@ -3192,6 +3229,8 @@ class StrategyEngine:
         limit = max(1, min(int(limit), BOOK_LIMIT))
         table = TradeLog.__table__
         where = _mode_filter(mode) if mode is not None else true()
+        if bot is not None:
+            where = and_(where, bot_rows(bot))
         with session_factory()() as db:
             total = db.execute(select(func.count()).select_from(table).where(where)).scalar_one()
             # Plain rows, not ORM objects: about 3x faster for thousands of trades.
@@ -3199,10 +3238,16 @@ class StrategyEngine:
         parsed: dict[str, dict | None] = {}
         return {"total": total, "rows": [_trade_dict(r, parsed) for r in rows]}
 
-    def book_counts(self) -> dict[str, int]:
-        """How many trades each book holds."""
+    def book_counts(self, bot: int | None = None) -> dict[str, int]:
+        """How many trades each book holds; with `bot`, that bot's PAPER and LIVE books."""
         with session_factory()() as db:
-            return {mode: db.query(TradeLog).filter(_mode_filter(mode)).count() for mode in BOOKS}
+            out = {}
+            for mode in BOOKS:
+                query = db.query(TradeLog).filter(_mode_filter(mode))
+                if bot is not None and mode in ("PAPER", "LIVE"):
+                    query = query.filter(bot_rows(bot))
+                out[mode] = query.count()
+            return out
 
     def trades(self) -> list[dict]:
         now = time.monotonic()
@@ -3722,7 +3767,10 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "mode": row.mode,
         "run_id": getattr(row, "run_id", None),
         "book_seq": getattr(row, "book_seq", None),
-        "trade_ref": trade_ref(row.mode, getattr(row, "run_id", None), getattr(row, "book_seq", None), row.id),
+        "trade_ref": trade_ref(
+            row.mode, getattr(row, "run_id", None), getattr(row, "book_seq", None), row.id, getattr(row, "bot", None)
+        ),
+        "bot": int(getattr(row, "bot", None) or 1),
         "strategy": _strategy_of(row, parsed),
         "max_high": getattr(row, "max_high", None),
         "max_low": getattr(row, "max_low", None),

@@ -6,6 +6,9 @@ import { StrategyChart } from "@/components/Terminal/StrategyChart";
 import { ThemeToggle } from "@/components/Terminal/Header";
 import {
   setDesk,
+  deskBot,
+  DESKS,
+  type Desk,
   setReplayRouting,
   smaApi,
   stateForSymbol,
@@ -39,7 +42,10 @@ export default function StockChartPage() {
   const [replay, setReplay] = useState<ReplayInfo | null>(null);
   const [pin, setPin] = useState<Pin | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const params = useRef<{ symbol: string; date: string | null; runId: number | null; research: boolean } | null>(null);
+  const params = useRef<{ symbol: string; date: string | null; runId: number | null; research: boolean; desk: Desk } | null>(
+    null
+  );
+  const [desk, setDeskName] = useState<Desk>("live");
   const following = useRef(false);
   const bars = useRef(400);
 
@@ -52,9 +58,11 @@ export default function StockChartPage() {
       date: q.get("date"),
       runId: run && /^\d+$/.test(run) ? Number(run) : null,
       research: q.get("desk") === "research",
+      desk: (DESKS as string[]).includes(q.get("desk") ?? "") ? (q.get("desk") as Desk) : "live",
     };
     params.current = p;
-    setDesk(p.research ? "research" : "live");
+    setDesk(p.desk);
+    setDeskName(p.desk);
     setSymbol(name);
     setResearch(p.research);
     document.title = name ? `${name} · SMA chart` : "SMA chart";
@@ -66,7 +74,8 @@ export default function StockChartPage() {
     const p = params.current;
     if (!p || !p.symbol) return;
     let follow = !p.date;
-    if (!p.research) {
+    // Only the main desk follows a replay.
+    if (p.desk === "live") {
       try {
         const info = await smaApi.replayInfo();
         setReplay(info);
@@ -122,9 +131,11 @@ export default function StockChartPage() {
     const mode = (t.mode ?? "PAPER").toUpperCase();
     if (p?.date) return mode === "REPLAY" && (p.runId == null || t.run_id === p.runId);
     if (research) return mode === "RESEARCH";
+    const bot = deskBot(desk);
+    if (bot != null && (t.bot ?? 1) !== bot) return false;
     return mode === (state?.mode ?? "PAPER").toUpperCase();
   });
-  const back = research ? "/terminal/?desk=research" : "/terminal/";
+  const back = desk === "live" ? "/terminal/" : `/terminal/?desk=${desk}`;
 
   return (
     <div className="terminal-dark min-h-screen w-full min-w-0 bg-[#0B0E14] text-slate-200">
@@ -144,6 +155,8 @@ export default function StockChartPage() {
                 : `Replay ${p.date}${p.runId != null ? ` · run ${p.runId}` : ""} · ended`
               : research
                 ? "Research desk"
+                : desk !== "live"
+                  ? `${state?.bot_name ?? desk.replace("bot", "Bot ")} · ${state?.mode ?? "PAPER"}`
                 : (state?.mode ?? "PAPER")}
           </span>
         </div>

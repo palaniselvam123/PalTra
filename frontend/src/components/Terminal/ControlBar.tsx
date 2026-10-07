@@ -18,11 +18,27 @@ type Props = {
   onToggleBot: () => void;
   onForce: () => void;
   onPanic: () => void;
+  /** Panic on every SMA bot at once. Left out on the research desk. */
+  onPanicAll?: () => void;
+  /** This bot's name, for the dialogs. */
+  botName?: string;
 };
 
 /** Start/Pause, Force order and Panic in one group, with named confirmations. */
-export function ControlBar({ state, live, running, busy, symbol, symbolArmed, onToggleBot, onForce, onPanic }: Props) {
-  const [ask, setAsk] = useState<"force" | "panic" | null>(null);
+export function ControlBar({
+  state,
+  live,
+  running,
+  busy,
+  symbol,
+  symbolArmed,
+  onToggleBot,
+  onForce,
+  onPanic,
+  onPanicAll,
+  botName,
+}: Props) {
+  const [ask, setAsk] = useState<"force" | "panic" | "panic-all" | null>(null);
   const open = (state?.books ?? []).filter((b) => b.direction === "LONG" || b.direction === "SHORT");
   const forceBlocked = !symbol || !symbolArmed;
   const sideNow =
@@ -68,6 +84,18 @@ export function ControlBar({ state, live, running, busy, symbol, symbolArmed, on
           <Siren size={16} aria-hidden />
           Panic square-off
         </button>
+        {onPanicAll ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setAsk("panic-all")}
+            title="Square off and halt every bot (all four), not only this one"
+            className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold text-rose-300 ring-1 ring-inset ring-rose-500/60 hover:bg-rose-500/15 sm:col-span-1"
+          >
+            <Siren size={14} aria-hidden />
+            Panic all bots
+          </button>
+        ) : null}
       </div>
 
       <ConfirmDialog
@@ -101,7 +129,11 @@ export function ControlBar({ state, live, running, busy, symbol, symbolArmed, on
 
       <ConfirmDialog
         open={ask === "panic"}
-        title={open.length ? `Close ${open.length} position${open.length > 1 ? "s" : ""} and halt the bot?` : "Halt the bot?"}
+        title={
+          open.length
+            ? `Close ${open.length} position${open.length > 1 ? "s" : ""} and halt ${botName ?? "the bot"}?`
+            : `Halt ${botName ?? "the bot"}?`
+        }
         confirmLabel="Square off and halt"
         requireTyping={live}
         busy={busy}
@@ -129,7 +161,25 @@ export function ControlBar({ state, live, running, busy, symbol, symbolArmed, on
         ) : (
           <p>No stock is open right now. Nothing will be sold.</p>
         )}
-        <p>The bot stops for the rest of the day. You can start it again after a manual panic.</p>
+        <p>The bot stops for the rest of the day. You can start it again after a manual panic. Other bots keep running.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={ask === "panic-all"}
+        title="Square off and halt ALL bots?"
+        confirmLabel="Panic all bots"
+        requireTyping
+        busy={busy}
+        onCancel={() => setAsk(null)}
+        onConfirm={() => {
+          setAsk(null);
+          onPanicAll?.();
+        }}
+      >
+        <p>
+          Every bot (all four) closes its open positions at the market now — real Groww positions on any bot in
+          LIVE — and stops for the rest of the day. The research desk is practice only and is not touched.
+        </p>
       </ConfirmDialog>
     </section>
   );

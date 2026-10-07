@@ -378,6 +378,8 @@ class GrowwClient:
         # When refresh_ltps last updated each stock's price, and last tried.
         self._batch_at: dict[str, float] = {}
         self._batch_tried = 0.0
+        # Stocks any bot asked to batch lately: one call a second covers them all.
+        self._batch_want: dict[str, float] = {}
         self._retry_after: dict[str, float] = {}
         self._simulators: dict[str, CandleSimulator] = {}
         # A stock's own price to start a practice tape from when Groww has
@@ -569,10 +571,16 @@ class GrowwClient:
         if not self.token or not market_is_open():
             return {}
         now_m = time.monotonic()
+        for name in symbols:
+            name = (name or "").upper()
+            if name:
+                self._batch_want[name] = now_m
         if now_m - self._batch_tried < _LTP_BATCH_SEC:
             return {}
         self._batch_tried = now_m
-        names = [s for s in dict.fromkeys((x or "").upper() for x in symbols) if s and s in self._quotes]
+        # Every bot's stocks asked for in the last few seconds, in one call.
+        self._batch_want = {s: t for s, t in self._batch_want.items() if now_m - t < 3 * _LTP_BATCH_SEC}
+        names = [s for s in self._batch_want if s in self._quotes]
         names = names[:_LTP_BATCH_MAX]
         if not names:
             return {}

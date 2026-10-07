@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
-import { setDesk, smaApi, type Desk, type SmaConfig } from "@/lib/smaApi";
+import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } from "@/lib/smaApi";
 
 /**
  * The SMA terminal's strategy settings (entry, filters, gap mode, exits,
@@ -14,6 +14,16 @@ export function SmaStrategySettings() {
   const [desk, pickDesk] = useState<Desk>("live");
   const [config, setConfig] = useState<SmaConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bots, setBots] = useState<BotSummary[]>([]);
+  const [name, setName] = useState("");
+  const [nameNote, setNameNote] = useState<string | null>(null);
+  useEffect(() => {
+    smaApi.bots().then(setBots).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    setName(config?.bot_name ?? "");
+    setNameNote(null);
+  }, [config]);
 
   const load = useCallback(() => {
     smaApi
@@ -27,7 +37,7 @@ export function SmaStrategySettings() {
 
   useEffect(() => {
     const asked = new URLSearchParams(window.location.search).get("desk");
-    const chosen: Desk = asked === "research" ? "research" : "live";
+    const chosen: Desk = (DESKS as string[]).includes(asked ?? "") ? (asked as Desk) : "live";
     setDesk(chosen);
     pickDesk(chosen);
     load();
@@ -44,7 +54,7 @@ export function SmaStrategySettings() {
     pickDesk(next);
     setConfig(null);
     const url = new URL(window.location.href);
-    if (next === "research") url.searchParams.set("desk", "research");
+    if (next !== "live") url.searchParams.set("desk", next);
     else url.searchParams.delete("desk");
     window.history.replaceState(null, "", url.toString());
     load();
@@ -60,7 +70,7 @@ export function SmaStrategySettings() {
           </p>
         </div>
         <div role="group" aria-label="Desk" className="inline-flex rounded-md ring-1 ring-inset ring-white/15">
-          {(["live", "research"] as const).map((d) => (
+          {DESKS.map((d) => (
             <button
               key={d}
               type="button"
@@ -71,7 +81,10 @@ export function SmaStrategySettings() {
                 desk === d ? "bg-sky-500/25 font-semibold text-sky-100" : "text-slate-300 hover:bg-white/5"
               )}
             >
-              {d === "live" ? "Live desk" : "Research"}
+              {d === "research"
+                ? "Research"
+                : bots.find((b) => b.bot === (d === "live" ? 1 : Number(d.slice(3))))?.name ??
+                  (d === "live" ? "Bot 1" : `Bot ${d.slice(3)}`)}
             </button>
           ))}
         </div>
@@ -80,6 +93,39 @@ export function SmaStrategySettings() {
         <p role="alert" className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
           {error}
         </p>
+      ) : null}
+      {config && desk !== "research" ? (
+        <form
+          className="mb-2 flex flex-wrap items-end gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const next = name.trim();
+            if (!next) return;
+            try {
+              await smaApi.saveConfig({ bot_name: next });
+              setNameNote("Saved.");
+              smaApi.bots().then(setBots).catch(() => undefined);
+              load();
+            } catch (err: unknown) {
+              setNameNote(err instanceof Error ? err.message : "Could not save the name");
+            }
+          }}
+        >
+          <label className="flex flex-col gap-1 text-xs text-slate-400">
+            Bot name
+            <input
+              value={name}
+              maxLength={24}
+              placeholder="e.g. Scalper"
+              onChange={(e) => setName(e.target.value)}
+              className="min-h-9 w-48 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+            />
+          </label>
+          <button type="submit" className="min-h-9 rounded-md px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10">
+            Save name
+          </button>
+          {nameNote ? <span className="text-xs text-slate-400">{nameNote}</span> : null}
+        </form>
       ) : null}
       {config ? (
         <StrategyConfigPanel key={desk} config={config} onChanged={load} wide />

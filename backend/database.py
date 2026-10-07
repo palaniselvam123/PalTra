@@ -100,6 +100,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "gap_fade_min_candles": "INTEGER DEFAULT 0",
             "gap_fade_intrabar": "BOOLEAN DEFAULT 0",
             "second_ticks": "BOOLEAN DEFAULT 1",
+            "bot_name": "VARCHAR",
             "flip_orders": "BOOLEAN DEFAULT 0",
             "gap_entry_delay_min": "INTEGER DEFAULT 0",
             "gap_entry_window_min": "INTEGER DEFAULT 0",
@@ -138,6 +139,8 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_active BOOLEAN DEFAULT 1")
         if "flipped" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN flipped BOOLEAN DEFAULT 0")
+        if "bot" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN bot INTEGER DEFAULT 1")
         if "run_id" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN run_id INTEGER")
         if "strategy" not in names:

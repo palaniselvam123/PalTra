@@ -42,6 +42,8 @@ from database import init_db, session_factory
 from models import BotConfig
 import tick_store
 from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
+import bots as bots_mod
+from bots import EXTRA_BOTS, BotEngine, ensure_bot_config
 from strategy_engine import (
     BOOK_LIMIT,
     BOOKS,
@@ -67,11 +69,15 @@ async def _live_quote(symbol: str):
 
 
 research_engine = ResearchEngine(_live_quote)
+# Bots 2-4 (bots.py): full SMA bots with their own settings, book and order
+# client; quotes come through the main desk's client.
+bot_engines: dict[int, BotEngine] = {n: BotEngine(n, engine.broker) for n in EXTRA_BOTS}
 
 
 _booted = False
 _task: asyncio.Task | None = None
 _research_task: asyncio.Task | None = None
+_bot_tasks: list[asyncio.Task] = []
 
 
 def boot_engine() -> asyncio.Task | None:
@@ -93,13 +99,22 @@ def boot_engine() -> asyncio.Task | None:
     research_engine.restore_open_books()
     research_engine.restore_trades_today()
     _research_task = asyncio.create_task(research_engine.run())
+    bots_mod.register(engine)
+    for eng in bot_engines.values():
+        ensure_bot_config(eng.bot_id)
+        bots_mod.register(eng)
+        eng.restore_open_books()
+        eng.restore_trades_today()
+        _bot_tasks.append(asyncio.create_task(eng.run()))
     return _task
 
 
 def stop_engine() -> None:
     engine.stop()
     research_engine.stop()
-    for task in (_task, _research_task):
+    for eng in bot_engines.values():
+        eng.stop()
+    for task in (_task, _research_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -188,6 +203,7 @@ class ConfigUpdate(BaseModel):
     gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
     gap_fade_intrabar: bool | None = None
     flip_orders: bool | None = None
+    bot_name: str | None = Field(default=None, min_length=1, max_length=24)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
@@ -203,6 +219,7 @@ class ModeUpdate(BaseModel):
 
 def _config_dict(row: BotConfig) -> dict:
     return {
+        "bot_name": getattr(row, "bot_name", None) or None,
         "symbol": row.symbol,
         "trade_symbols": trade_names(row),
         "exchange": row.exchange,
@@ -305,7 +322,8 @@ async def _history(eng: StrategyEngine, symbol: str, start: str, end: str, inter
         # Candles come through the live desk's Groww client; the research desk
         # marks only its own trades on them.
         book = "RESEARCH" if isinstance(eng, ResearchEngine) else None
-        return await load_history(engine.broker, symbol, start, end, eng.load_config(), interval, run_id, book)
+        bot = None if isinstance(eng, ResearchEngine) else eng.bot_id
+        return await load_history(engine.broker, symbol, start, end, eng.load_config(), interval, run_id, book, bot)
     except HistoryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -374,6 +392,10 @@ async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
                 cap = _symbol_cap(eng)
                 if len(names) >= cap:
                     raise HTTPException(409, f"Trade is limited to {cap} stocks at once")
+                if (row.trading_mode or "PAPER").upper() == "LIVE":
+                    why = bots_mod.live_conflict(eng.bot_id, [symbol])
+                    if why:
+                        raise HTTPException(409, why)
                 names.append(symbol)
                 eng.hold_for_next_cross([symbol])
         else:
@@ -644,9 +666,15 @@ def _live_token() -> str:
 @app.post("/api/mode")
 async def set_mode(body: ModeUpdate):
     """PAPER is the default. LIVE requires confirm_live and a Groww token."""
+    return await _set_mode(engine, body)
+
+
+async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
+    """One bot's PAPER/LIVE switch. LIVE needs confirm_live, a Groww session,
+    and none of its stocks traded LIVE by another bot."""
     from strategy_engine import _ist_now
 
-    engine._roll_session(_ist_now())
+    eng._roll_session(_ist_now())
     mode = body.mode.upper()
     if mode not in ("PAPER", "LIVE"):
         raise HTTPException(400, "mode must be PAPER or LIVE")
@@ -663,16 +691,22 @@ async def set_mode(body: ModeUpdate):
                 "No Groww session is saved. Connect Groww on the desk, then confirm LIVE again.",
             )
         # Overnight practice can halt itself. That must not block this confirm.
-        engine.release_paper_halt()
-    if engine.status == "HALTED":
+        eng.release_paper_halt()
+    if eng.status == "HALTED":
         raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
-    if _open_symbols():
+    if _open_symbols(eng):
         raise HTTPException(409, "Close the open position before switching execution mode")
     with session_factory()() as db:
-        row = db.get(BotConfig, 1)
+        row = db.get(BotConfig, eng.config_id)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        if mode == "LIVE":
+            why = bots_mod.live_conflict(eng.bot_id, trade_names(row))
+            if why:
+                raise HTTPException(409, why)
         row.trading_mode = mode
         db.commit()
-    engine.broker.set_mode(mode, _live_token())
+    eng.broker.set_mode(mode, _live_token())
     return {"trading_mode": mode}
 
 
@@ -1078,21 +1112,28 @@ async def set_tick_feed(body: TickFeedIn):
 
 @app.get("/api/trades")
 async def trades():
-    return attach_market_prices(engine.trades(), {**research_engine._ltps, **engine._ltps})
+    ltps = {**research_engine._ltps}
+    for eng in bot_engines.values():
+        ltps.update(eng._ltps)
+    ltps.update(engine._ltps)
+    return attach_market_prices(engine.trades(), ltps)
 
 
 @app.get("/api/trades/book")
-async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT):
-    """One book's newest trades, up to 20,000, for the blotter."""
+async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT, bot: int | None = None):
+    """One book's newest trades, up to 20,000, for the blotter. `bot` keeps one SMA bot's PAPER/LIVE trades."""
     book = (mode or "PAPER").upper()
     if book not in BOOKS:
         raise HTTPException(status_code=422, detail=f"mode must be one of {', '.join(BOOKS)}")
+    if bot is not None and bot not in (1, *EXTRA_BOTS):
+        raise HTTPException(status_code=422, detail="bot must be 1 to 4")
     # Open research trades are priced and ranged by the research desk.
-    src = research_engine if book == "RESEARCH" else engine
+    src = research_engine if book == "RESEARCH" else bot_engines.get(bot or 1, engine)
     ltps = dict(src._ltps)
+    only = bot if book in ("PAPER", "LIVE") else None
 
     def build() -> str:
-        data = src.book(book, limit)
+        data = src.book(book, limit, only)
         rows, strategies = pack_strategies(attach_market_prices(src.with_open_extremes(data["rows"]), ltps))
         return json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies})
 
@@ -1102,8 +1143,8 @@ async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT):
 
 
 @app.get("/api/trades/counts")
-async def trades_counts():
-    return engine.book_counts()
+async def trades_counts(bot: int | None = None):
+    return engine.book_counts(bot)
 
 
 @app.get("/api/trades.csv")
@@ -1161,3 +1202,126 @@ async def stream(websocket: WebSocket):
         return
     except Exception:
         return
+
+
+# ---- bots 2-4 (bots.py): the same routes as the main desk, under /api/bots/{bot} ----------------
+
+
+def _bot(bot: int) -> BotEngine:
+    eng = bot_engines.get(int(bot))
+    if eng is None:
+        raise HTTPException(404, f"There is no bot {bot}. Bots 2 to {EXTRA_BOTS[-1]} are here; bot 1 is the main desk.")
+    return eng
+
+
+def _bot_summary(eng: StrategyEngine) -> dict:
+    cfg = eng.load_config()
+    mode = (cfg.trading_mode or "PAPER").upper()
+    kpis = eng._kpis(mode)
+    return {
+        "bot": eng.bot_id,
+        "name": getattr(cfg, "bot_name", None) or f"Bot {eng.bot_id}",
+        "mode": mode,
+        "status": eng.status,
+        "armed": trade_names(cfg),
+        "held": sorted(eng.positions),
+        "trades_today": eng.trades_today,
+        "net_today": float(kpis["net"]),
+    }
+
+
+@app.get("/api/bots")
+async def list_bots():
+    """Every SMA bot: name, mode, status, armed and held stocks, today's net."""
+    return [_bot_summary(engine), *(_bot_summary(eng) for eng in bot_engines.values())]
+
+
+@app.post("/api/bots/kill-all")
+async def kill_all_bots():
+    """Panic on every SMA bot at once (main desk and bots 2-4). The research desk is practice only."""
+    out = []
+    for eng in (engine, *bot_engines.values()):
+        await eng.kill("Manual PANIC SQUARE-OFF (all bots)")
+        out.append({"bot": eng.bot_id, "bot_status": eng.status})
+    return out
+
+
+@app.get("/api/bots/{bot}/state")
+async def bot_state(bot: int):
+    return await _state(_bot(bot))
+
+
+@app.get("/api/bots/{bot}/chart")
+async def bot_chart(bot: int, limit: int = 240, symbol: str | None = None):
+    return await _chart(_bot(bot), limit, symbol)
+
+
+@app.get("/api/bots/{bot}/history")
+async def bot_history(bot: int, symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
+    return await _history(_bot(bot), symbol, start, end, interval, run_id)
+
+
+@app.get("/api/bots/{bot}/config")
+async def bot_get_config(bot: int):
+    return await _get_config(_bot(bot))
+
+
+@app.put("/api/bots/{bot}/config")
+async def bot_put_config(bot: int, body: ConfigUpdate):
+    return await _put_config(_bot(bot), body)
+
+
+@app.get("/api/bots/{bot}/config/stock/{symbol}")
+async def bot_get_stock_config(bot: int, symbol: str):
+    return await _get_stock_config(_bot(bot), symbol)
+
+
+@app.put("/api/bots/{bot}/config/stock/{symbol}")
+async def bot_put_stock_config(bot: int, symbol: str, body: StockConfigUpdate):
+    return await _put_stock_config(_bot(bot), symbol, body)
+
+
+@app.delete("/api/bots/{bot}/config/stock/{symbol}")
+async def bot_reset_stock_config(bot: int, symbol: str):
+    return await _reset_stock_config(_bot(bot), symbol)
+
+
+@app.post("/api/bots/{bot}/trade-symbols")
+async def bot_set_trade_symbol(bot: int, body: TradeSymbolUpdate):
+    return await _set_trade_symbol(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/mode")
+async def bot_set_mode(bot: int, body: ModeUpdate):
+    """PAPER is the default. LIVE needs confirm_live, a Groww session and stocks no other LIVE bot owns."""
+    return await _set_mode(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/bot/start")
+async def bot_start(bot: int):
+    return await _start_bot(_bot(bot))
+
+
+@app.post("/api/bots/{bot}/bot/pause")
+async def bot_pause(bot: int):
+    return await _pause_bot(_bot(bot))
+
+
+@app.post("/api/bots/{bot}/bot/force")
+async def bot_force(bot: int, body: ForceOrder):
+    return await _force_order(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/bot/close")
+async def bot_close(bot: int, body: CloseOrder):
+    return await _close_position(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/bot/reset-trades")
+async def bot_reset_trades(bot: int):
+    return await _reset_trades(_bot(bot))
+
+
+@app.post("/api/bots/{bot}/bot/kill")
+async def bot_kill(bot: int):
+    return await _kill_bot(_bot(bot))
