@@ -148,6 +148,10 @@ class BotConfig(Base):
     # Candle direction entry filter: the last candle_dir_count closed candles
     # move the trade's way. CLOSES: each close beyond the one before (up for a
     # buy, down for a sell); COLOUR: each candle green / red; BOTH.
+    # "Reset today's trade count": trades up to this TradeLog id on that day no
+    # longer count toward max_trades_per_day (kept so a restart remembers it).
+    trade_count_reset_id: Mapped[int] = mapped_column(Integer, default=0)
+    trade_count_reset_date: Mapped[str | None] = mapped_column(String, nullable=True)
     use_candle_dir: Mapped[bool] = mapped_column(Boolean, default=False)
     candle_dir_count: Mapped[int] = mapped_column(Integer, default=2)
     candle_dir_rule: Mapped[str] = mapped_column(String, default="CLOSES")

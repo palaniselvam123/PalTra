@@ -598,6 +598,9 @@ export const smaApi = {
     }),
   pause: () => request<{ bot_status: string }>("/api/bot/pause", { method: "POST" }),
   kill: () => request<{ bot_status: string; halt_reason: string }>("/api/bot/kill", { method: "POST" }),
+  /** Today's trade count back to 0; the daily cap counts again from here. Not during a replay. */
+  resetTrades: () =>
+    request<{ bot_status: string; trades_today: number; was: number }>("/api/bot/reset-trades", { method: "POST" }),
   closePosition: (symbol: string) =>
     request<{ bot_status: string; last_signal: string }>("/api/bot/close", {
       method: "POST",

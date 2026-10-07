@@ -747,6 +747,22 @@ async def research_close_position(body: CloseOrder):
     return await _close_position(_research(), body)
 
 
+async def _reset_trades(eng: StrategyEngine):
+    """Set today's trade count back to 0 (the daily cap counts again from here)."""
+    before = eng.reset_trade_count()
+    return {"bot_status": eng.status, "trades_today": eng.trades_today, "was": before, "last_signal": eng.last_signal}
+
+
+@app.post("/api/bot/reset-trades")
+async def reset_trades():
+    return await _reset_trades(engine)
+
+
+@app.post("/api/research/bot/reset-trades")
+async def research_reset_trades():
+    return await _reset_trades(_research())
+
+
 async def _kill_bot(eng: StrategyEngine):
     """Panic: cancel SL, flatten MIS, lock the strategy. Each desk only its own."""
     await eng.kill("Manual PANIC SQUARE-OFF (research)" if isinstance(eng, ResearchEngine) else "Manual PANIC SQUARE-OFF")

@@ -399,6 +399,29 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
+  const resetTrades = async () => {
+    const used = state?.trades_today ?? 0;
+    const cap = state?.max_trades ?? config?.max_trades_per_day ?? 0;
+    const money = live ? "REAL Groww orders" : "practice trades";
+    if (
+      !window.confirm(
+        `Reset today's trade count from ${used} to 0?\n\nThe bot may then place up to ${cap} more ${money} today. ` +
+          "Today's trades, P&L and the daily loss limit are kept. A loss-limit or panic stop stays locked."
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await smaApi.resetTrades();
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const panic = async () => {
     setBusy(true);
     setError(null);
@@ -463,6 +486,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             connected={connected}
             busy={busy}
             onModeClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
+            onResetTrades={state?.mode === "REPLAY" ? undefined : resetTrades}
           />
         </div>
         {(error || state?.halt_reason || state?.last_error) && (
