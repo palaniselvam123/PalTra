@@ -377,3 +377,17 @@ select {
 
 /* The blotter's active sort header is white on dark; on a light header it turns dark. */
 [data-theme="light"] .terminal-dark thead .text-white { color: #0f172a; }
+
+/* ---------------------------------------------------------------------------
+   iPhone / iPad Safari zooms the whole page into any field whose text is under
+   16px the moment it is tapped (inputs and dropdowns alike), then pans to it,
+   which reads as the screen jumping up and down on every pick. Touch screens
+   only: desktop keeps the compact sizes.
+--------------------------------------------------------------------------- */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}

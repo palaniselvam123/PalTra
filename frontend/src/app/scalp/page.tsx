@@ -1,7 +1,7 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, RefreshCw } from "lucide-react";
@@ -104,7 +104,12 @@ export default function ScalpPage() {
     [smaConfig]
   );
 
-  const rows = useMemo(() => {
+  // While the pointer or keyboard focus is in the list, rows keep their places (values still update),
+  // so a refresh never moves the row you are reading. They re-sort when you leave the list.
+  const [holdOrder, setHoldOrder] = useState(false);
+  const order = useRef<string[]>([]);
+
+  const sorted = useMemo(() => {
     let list = data?.rows ?? [];
     if (readyOnly) list = list.filter((r) => r.ready);
     if (bias !== "ALL") list = list.filter((r) => r.bias === bias);
@@ -130,6 +135,16 @@ export default function ScalpPage() {
       return dir * (av - bv);
     });
   }, [data, readyOnly, bias, sort, ltpMin, ltpMax]);
+
+  const rows = useMemo(() => {
+    if (!holdOrder || order.current.length === 0) return sorted;
+    const place = new Map(order.current.map((s, i) => [s, i]));
+    // Rows already shown keep their place; new ones go to the end in sorted order.
+    return [...sorted].sort((a, b) => (place.get(a.symbol) ?? Infinity) - (place.get(b.symbol) ?? Infinity));
+  }, [sorted, holdOrder]);
+  useEffect(() => {
+    order.current = rows.map((r) => r.symbol);
+  }, [rows]);
 
   const pick = (symbol: string, on: boolean) =>
     setPicked((prev) => {
@@ -414,6 +429,15 @@ export default function ScalpPage() {
             </p>
           )}
 
+          <div
+            className="h-[min(70vh,680px)] min-h-[320px] overflow-auto rounded-lg [overflow-anchor:none]"
+            onPointerEnter={() => setHoldOrder(true)}
+            onPointerLeave={() => setHoldOrder(false)}
+            onFocus={() => setHoldOrder(true)}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoldOrder(false);
+            }}
+          >
           {!data ? (
             <Empty>Loading…</Empty>
           ) : rows.length === 0 ? (
@@ -423,9 +447,9 @@ export default function ScalpPage() {
                 : "No stock passes these filters. Lower Min ATR or Min traded, or raise Max spread."}
             </Empty>
           ) : (
-            <div className="overflow-x-auto">
+            <div>
               <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500">
+                <thead className="sticky top-0 z-10 bg-card text-xs uppercase text-slate-500 shadow-[0_1px_0_rgba(148,163,184,0.15)]">
                   <tr>
                     <th className="w-7 pb-2">
                       <input
@@ -469,6 +493,11 @@ export default function ScalpPage() {
               </table>
             </div>
           )}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-500" aria-live="polite">
+            {rows.length} stock{rows.length === 1 ? "" : "s"} shown
+            {holdOrder ? " · order held while you point at the list; it re-sorts when you move away" : ""}
+          </p>
           <p className="mt-3 text-[11px] leading-snug text-slate-500">
             The list is every stock the desk is streaming. Readings use closed 1-minute candles; LTP, spread and the
             1-minute move use the live quote. Bias is LONG when price is above VWAP and up over 5 minutes, SHORT when
@@ -720,7 +749,7 @@ function Select({
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-sm text-slate-500">
+    <div className="flex h-full min-h-[160px] items-center justify-center rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-sm text-slate-500">
       {children}
     </div>
   );
