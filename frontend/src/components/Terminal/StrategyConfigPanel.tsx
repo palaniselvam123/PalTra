@@ -738,7 +738,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             has cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes
             (exit reason “Gap fade”). With “Ride out pullbacks”, a narrowing that keeps the candles on the trade&apos;s side of
             SMA {form.sma_slow ?? 21} is treated as a pullback and held; the exit waits for a close through it. An opposite cross still closes at once, and the reverse waits for its own gap. The
-            stop, filters, entry cut-off and square-off still apply.
+            stop, filters, entry cut-off and square-off still apply. An exit level beyond the entry level (e.g. sell in at
+            −0.08, out at −0.39) is a lock-in level: the gap exit waits until the gap has been that wide, then closes when it
+            comes back to it; a trade whose gap never gets that wide is left to the stop, the opposite cross and
+            square-off.
           </p>
         </div>
       </div>

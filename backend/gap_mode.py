@@ -21,6 +21,10 @@ Exit (the gap fades)
   * it closes on the first closed candle where the gap is back at or inside
     that level, or (``gap_giveback_pct`` > 0) has given back that share of
     the widest gap since entry while still narrowing;
+  * the exit level may sit beyond the entry level (a lock-in level, e.g. sell
+    in at -0.08 and out at -0.39): the exit then arms only once the gap has
+    widened past it, and a trade whose gap never gets that wide is left to the
+    stop, the opposite cross and square-off (the give-back also waits for it);
   * the stop, target, square-off and an opposite cross keep working as before.
 
 Telling a pullback from a reversal (both optional, off by default)
@@ -150,9 +154,9 @@ def fade_confirmed(cfg, direction: str, close: float, slow: float | None, state:
 
 
 def check(cfg) -> str | None:
-    """Why these settings cannot work, or None."""
-    if setting(cfg, "gap_exit_long") >= setting(cfg, "gap_entry_long"):
-        return "Buy exit gap must be below the buy entry gap"
-    if setting(cfg, "gap_exit_short") <= setting(cfg, "gap_entry_short"):
-        return "Sell exit gap must be above the sell entry gap (closer to zero)"
+    """Why these settings cannot work, or None.
+
+    Every pair of levels works: an exit level beyond the entry level is a
+    lock-in level (see the module notes), so nothing is refused today.
+    """
     return None
