@@ -710,6 +710,17 @@ export const smaApi = {
         })),
       })
     ),
+  /** One whole book for the Reports page: every SMA bot's trades (rows carry `bot`), whatever desk is open. */
+  reportBook: (mode: TradeBookMode) =>
+    request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(
+      (body): TradeBook => ({
+        total: body.total,
+        rows: body.rows.map(({ strategy_ref, ...row }) => ({
+          ...row,
+          strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
+        })),
+      })
+    ),
   tradeCounts: () =>
     request<Record<TradeBookMode, number>>(deskBot() != null ? `/api/trades/counts?bot=${deskBot()}` : "/api/trades/counts"),
   replayInfo: () => request<ReplayInfo>("/api/replay"),
@@ -741,7 +752,7 @@ export const smaApi = {
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
     request<ReplayInfo>("/api/replay/control", { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
-  csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY") =>
+  csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",
 };

@@ -30,7 +30,8 @@ function Tile({
   );
 }
 
-export function SummaryGrid({ summary }: { summary: ReportSummary }) {
+/** `capital` false (the SMA books) leaves out the drawdown as a share of wallet capital. */
+export function SummaryGrid({ summary, capital = true }: { summary: ReportSummary; capital?: boolean }) {
   const chargesMissing = summary.charges_coverage.startsWith("0/") && summary.trades_closed > 0;
 
   return (
@@ -64,7 +65,7 @@ export function SummaryGrid({ summary }: { summary: ReportSummary }) {
           label="Max Drawdown"
           value={money(-summary.max_drawdown)}
           tone={summary.max_drawdown > 0 ? "text-loss" : "text-slate-400"}
-          sub={`${pct(summary.max_drawdown_pct, 2)} of capital`}
+          sub={capital ? `${pct(summary.max_drawdown_pct, 2)} of capital` : undefined}
           hint="Largest peak-to-trough fall of the cumulative P&L curve within this filter."
         />
         <Tile

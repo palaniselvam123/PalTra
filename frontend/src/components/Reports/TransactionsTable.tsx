@@ -23,11 +23,12 @@ function Field({ label, value, tone }: { label: string; value: React.ReactNode; 
   );
 }
 
-function ExpandedDetail({ trade }: { trade: Transaction }) {
+function ExpandedDetail({ trade, expert }: { trade: Transaction; expert: boolean }) {
   const [analyses, setAnalyses] = useState<any[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(expert);
 
   useEffect(() => {
+    if (!expert) return;
     let cancelled = false;
     setLoading(true);
     api
@@ -38,7 +39,7 @@ function ExpandedDetail({ trade }: { trade: Transaction }) {
     return () => {
       cancelled = true;
     };
-  }, [trade.id]);
+  }, [trade.id, expert]);
 
   return (
     <div className="bg-base/60 px-4 py-3 space-y-3">
@@ -92,69 +93,72 @@ function ExpandedDetail({ trade }: { trade: Transaction }) {
         </div>
       )}
 
-      <div className="border-t border-border pt-2.5">
-        <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">AI expert view on this trade</div>
-        {loading ? (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Loader2 size={12} className="animate-spin" /> loading…
-          </div>
-        ) : analyses && analyses.length > 0 ? (
-          <div className="space-y-2">
-            {analyses.map((a) => (
-              <div key={a.id} className="rounded-md border border-border bg-surface p-2.5 space-y-1.5">
-                <div className="flex items-center gap-2 flex-wrap text-[11px]">
-                  <span
-                    className={clsx(
-                      "px-1.5 py-0.5 rounded",
-                      a.stance === "BULLISH"
-                        ? "bg-profit/15 text-profit"
-                        : a.stance === "BEARISH"
-                        ? "bg-loss/15 text-loss"
-                        : "bg-slate-700/40 text-slate-400"
-                    )}
-                  >
-                    {a.stance}
-                  </span>
-                  <span className="text-slate-400">conviction {a.conviction}</span>
-                  <span className="text-slate-400">sentiment {a.sentiment_label}</span>
-                  <span className="text-slate-600">{a.requested_by}</span>
-                  {a.gate_passed !== null && (
-                    <span className={a.gate_passed ? "text-profit" : "text-loss"}>
-                      gate {a.gate_passed ? "passed" : "blocked"}
+      {expert ? (
+        <div className="border-t border-border pt-2.5">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">AI expert view on this trade</div>
+          {loading ? (
+            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Loader2 size={12} className="animate-spin" /> loading…
+            </div>
+          ) : analyses && analyses.length > 0 ? (
+            <div className="space-y-2">
+              {analyses.map((a) => (
+                <div key={a.id} className="rounded-md border border-border bg-surface p-2.5 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                    <span
+                      className={clsx(
+                        "px-1.5 py-0.5 rounded",
+                        a.stance === "BULLISH"
+                          ? "bg-profit/15 text-profit"
+                          : a.stance === "BEARISH"
+                          ? "bg-loss/15 text-loss"
+                          : "bg-slate-700/40 text-slate-400"
+                      )}
+                    >
+                      {a.stance}
                     </span>
+                    <span className="text-slate-400">conviction {a.conviction}</span>
+                    <span className="text-slate-400">sentiment {a.sentiment_label}</span>
+                    <span className="text-slate-600">{a.requested_by}</span>
+                    {a.gate_passed !== null && (
+                      <span className={a.gate_passed ? "text-profit" : "text-loss"}>
+                        gate {a.gate_passed ? "passed" : "blocked"}
+                      </span>
+                    )}
+                  </div>
+                  {a.gate_reason && <div className="text-[11px] text-slate-500">{a.gate_reason}</div>}
+                  <div className="text-xs text-slate-300 leading-relaxed">{a.thesis}</div>
+                  {a.sources?.length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-[10px]">
+                      {a.sources.slice(0, 5).map((s: any) => (
+                        <a
+                          key={s.url}
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="text-bot hover:underline flex items-center gap-0.5"
+                        >
+                          {s.title.slice(0, 48)} <ExternalLink size={9} />
+                        </a>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {a.gate_reason && <div className="text-[11px] text-slate-500">{a.gate_reason}</div>}
-                <div className="text-xs text-slate-300 leading-relaxed">{a.thesis}</div>
-                {a.sources?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 text-[10px]">
-                    {a.sources.slice(0, 5).map((s: any) => (
-                      <a
-                        key={s.url}
-                        href={s.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-bot hover:underline flex items-center gap-0.5"
-                      >
-                        {s.title.slice(0, 48)} <ExternalLink size={9} />
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-slate-500">
-            No expert view was recorded for this trade — it was taken without the AI gate.
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500">
+              No expert view was recorded for this trade — it was taken without the AI gate.
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-export function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
+/** `expert` (ORB desk) adds the AI expert view to an opened row; the SMA books have none. */
+export function TransactionsTable({ transactions, expert = true }: { transactions: Transaction[]; expert?: boolean }) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
@@ -214,7 +218,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
                     <td className="px-2 py-2 w-6 text-slate-500">
                       {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-600">{t.id}</td>
+                    <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-600">{t.ref ?? t.id}</td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-400">
                       {markIst(timestamp(t.closed_at ?? t.opened_at))}
                     </td>
@@ -261,7 +265,7 @@ export function TransactionsTable({ transactions }: { transactions: Transaction[
                   {open && (
                     <tr className="border-b border-border/50">
                       <td colSpan={17} className="p-0">
-                        <ExpandedDetail trade={t} />
+                        <ExpandedDetail trade={t} expert={expert} />
                       </td>
                     </tr>
                   )}
