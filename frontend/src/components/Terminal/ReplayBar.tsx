@@ -106,7 +106,7 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
           <History size={16} aria-hidden className="text-violet-300" />
           <span className="font-semibold text-violet-100">Replay past days</span>
           <span className="hidden text-xs text-slate-400 sm:inline">
-            — practise on real Groww candles from one day or a range up to a month. Practice money only.
+            — practise on real Groww candles from one day or a range up to 45 days (about 30 trading days). Practice money only.
           </span>
           <span className="ml-auto text-xs text-violet-300">{open ? "Hide" : "Set up"}</span>
         </button>
@@ -173,8 +173,8 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
                   ? "Arm at least one stock in the Stocks panel first. "
                   : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with your current settings. `}
               The bot trades each day as it would live (crosses, filters, stop, target, 15:00 cut-off, 15:15
-              square-off), then moves to the next trading day; weekends and holidays are skipped. A range is up to one
-              month. Each run, with the settings it used, is saved in the Backtests tab of the trade blotter.
+              square-off), then moves to the next trading day; weekends and holidays are skipped. A range is up to 45
+              days (about 30 trading days). Each run, with the settings it used, is saved in the Backtests tab of the trade blotter.
               Replay trades go to a separate REPLAY book and never touch today’s PAPER or LIVE results. Needs a Groww
               login for the candles; nothing is ever sent to Groww.
             </p>

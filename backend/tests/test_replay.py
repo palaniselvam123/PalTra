@@ -318,7 +318,9 @@ def test_replay_range_rules():
         dt.date(2026, 9, 28),
         dt.date(2026, 10, 2),
     )
-    with pytest.raises(ValueError, match="one month"):
+    # Six weeks fits (30 trading days); more does not.
+    assert parse_replay_range("2026-08-18", "2026-09-30", late)[0] == dt.date(2026, 8, 18)
+    with pytest.raises(ValueError, match="45 days or less"):
         parse_replay_range("2026-08-01", "2026-09-30", late)
     with pytest.raises(ValueError, match="on or after"):
         parse_replay_range("2026-09-29", "2026-09-28", late)

@@ -138,7 +138,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   sent, and the live engine keeps running. The engine ticks on a fixed
   10-second grid of replay time (`_to_next_grid`), whatever the speed or server
   load, so the same day with the same settings always gives the same trades.
-  A run covers one day or a range up to a month (`parse_replay_range`), one
+  A run covers one day or a range up to 45 calendar days, about 30 trading days (`parse_replay_range`, `MAX_RANGE_DAYS`), one
   fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
   settings it used, and its trades carry `run_id` (day-wise P&L in
   `get_run`, shown in the blotter's Backtests tab).

@@ -7,9 +7,11 @@ import { History, Loader2 } from "lucide-react";
 import { replayActive, smaApi } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 
-const DAYS = [5, 10, 20];
+/** 1 to 30, one at a time: trading days back, and picks per day. */
+const ONE_TO_30 = Array.from({ length: 30 }, (_, i) => i + 1);
+const DAYS = ONE_TO_30;
 const PICK_TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "12:00"];
-const TOP_N = [1, 2, 3, 5];
+const TOP_N = ONE_TO_30;
 const MAX_UNIVERSE = 60;
 
 type Props = {
@@ -84,7 +86,7 @@ export function ScalpPickBacktest({ universe, minAtr, minValue }: Props) {
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={select}>
             {DAYS.map((d) => (
               <option key={d} value={d}>
-                {d} trading days
+                {d} trading day{d === 1 ? "" : "s"}
               </option>
             ))}
           </select>

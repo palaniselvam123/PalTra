@@ -144,7 +144,7 @@ def test_api_checks_the_pick_request(tmp_path, monkeypatch):
         assert seen["rule"].top_n == 2 and seen["rule"].pick_time == dt.time(10, 0)
         assert client.post("/api/replay/scalp-picks", json={**body, "pick_time": "15:10"}).status_code == 400
         assert client.post("/api/replay/scalp-picks", json={**body, "universe": ["A-B"]}).status_code == 400
-        assert client.post("/api/replay/scalp-picks", json={**body, "top_n": 50}).status_code == 422
+        assert client.post("/api/replay/scalp-picks", json={**body, "top_n": 31}).status_code == 422
         with database.session_factory()() as s:
             s.get(BotConfig, 1).trading_mode = "LIVE"
             s.commit()
