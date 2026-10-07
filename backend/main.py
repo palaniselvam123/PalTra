@@ -40,6 +40,7 @@ from groww_client import preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
+import tick_store
 from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
 from strategy_engine import (
     BOOK_LIMIT,
@@ -184,6 +185,7 @@ class ConfigUpdate(BaseModel):
     gap_giveback_pct: float | None = Field(default=None, ge=0, le=100)
     gap_fade_confirm_sma: bool | None = None
     gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
+    gap_fade_intrabar: bool | None = None
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
@@ -484,6 +486,7 @@ def _gap_dict(row) -> dict:
         "gap_entry_window_min": int(gap_mode.setting(row, "gap_entry_window_min")),
         "gap_fade_min_candles": int(gap_mode.setting(row, "gap_fade_min_candles")),
         "gap_fade_confirm_sma": bool(getattr(row, "gap_fade_confirm_sma", False)),
+        "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
     }
 
 
@@ -1014,6 +1017,20 @@ async def replay_bot_kill():
     eng = _replay_engine()
     await eng.kill("Manual PANIC SQUARE-OFF (replay)")
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
+
+
+@app.get("/api/ticks")
+async def ticks(symbol: str, start: int, end: int):
+    """Recorded second-by-second prices of one stock, start <= ts < end (epoch seconds).
+
+    Live market hours only: Groww's history has no seconds, so replays and days
+    before recording started return an empty list.
+    """
+    name = _stock_name(symbol)
+    if end <= start:
+        raise HTTPException(400, "end must be after start")
+    rows = await asyncio.to_thread(tick_store.between, name, int(start), int(end))
+    return {"symbol": name, "start": int(start), "end": int(end), "ticks": rows}
 
 
 @app.get("/api/trades")

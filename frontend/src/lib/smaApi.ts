@@ -86,6 +86,8 @@ export type SmaConfig = {
   gap_fade_confirm_sma?: boolean;
   /** Fade exit only after the gap narrowed this many candles in a row (0 = off). */
   gap_fade_min_candles?: number;
+  /** Judge the fade on the live price about once a second, not only on closed candles. */
+  gap_fade_intrabar?: boolean;
   gap_entry_delay_min?: number;
   gap_entry_window_min?: number;
   max_daily_loss: number;
@@ -612,6 +614,11 @@ export const smaApi = {
     }),
   /** Newest 200 trades across all books; the page polls this. */
   trades: () => request<TradeRow[]>("/api/trades"),
+  /** Recorded second-by-second prices, [[epoch seconds, price], ...]. Live market minutes only. */
+  ticks: (symbol: string, start: number, end: number) =>
+    request<{ symbol: string; ticks: [number, number][] }>(
+      `/api/ticks?${new URLSearchParams({ symbol, start: String(start), end: String(end) })}`
+    ),
   /** One whole book, newest first, up to 20,000 trades. */
   tradeBook: (mode: TradeBookMode) =>
     request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(

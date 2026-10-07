@@ -208,6 +208,8 @@ class ReplayBroker(LocalFills):
 class ReplayEngine(StrategyEngine):
     """The SMA bot on a replayed day: its own clock, books and broker."""
 
+    records_ticks = False  # its prices are walked from minute candles
+
     def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None):
         self.feed = feed
         self.run_id = run_id

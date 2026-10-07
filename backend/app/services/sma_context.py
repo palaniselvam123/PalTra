@@ -98,7 +98,8 @@ STRATEGY_GUIDE = {
         "trade closes with exit reason GAP_FADE when the gap, after clearing the exit level, fades back to "
         "gap_exit_long / gap_exit_short, or gives back gap_giveback_pct of its widest (0 = off). To ride out a pullback, gap_fade_confirm_sma makes a fade exit "
         "wait for a candle that closes on the wrong side of the slow SMA (below it for a buy, above it for a sell), and "
-        "gap_fade_min_candles needs the gap to narrow that many candles in a row (0 = off). An opposite cross "
+        "gap_fade_min_candles needs the gap to narrow that many candles in a row (0 = off). gap_fade_intrabar checks "
+        "the fade about once a second on the live price, as if that second closed the candle. An opposite cross "
         "closes at once and the reverse waits for its own gap."
     ),
     "force_order": "Enters now in the cross direction, skipping the entry filters; still refused out of hours or on an unarmed stock.",

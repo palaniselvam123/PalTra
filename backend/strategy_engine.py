@@ -54,6 +54,7 @@ from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, TradeLog, trade_ref
 import tick_sizes
+import tick_store
 from tick_sizes import round_price
 
 logger = logging.getLogger("sma.strategy")
@@ -152,7 +153,7 @@ SNAPSHOT_FIELDS = (
     "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
-    "gap_fade_confirm_sma", "gap_fade_min_candles",
+    "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
@@ -610,6 +611,9 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
 class StrategyEngine:
     #: The BotConfig row this engine trades with. The research desk has its own.
     config_id = 1
+    #: Whether this engine's live prices go to the second-by-second record
+    #: (tick_store). A replay's prices are made up from minute candles: never.
+    records_ticks = True
 
     def __init__(self, broker: GrowwClient | None = None):
         self.broker = broker or GrowwClient(mode="PAPER")
@@ -896,6 +900,15 @@ class StrategyEngine:
         self._anchor_held_prices()
         await self._drop_positions_groww_does_not_hold(cfg)
         await self._settle_exchange_flat(cfg, armed)
+        if self.records_ticks:
+            # One batched Groww call a second for every watched stock (market
+            # hours, Groww session only); refresh() below then serves it.
+            prefetch = getattr(self.broker, "refresh_ltps", None)
+            if prefetch is not None:
+                try:
+                    await prefetch(watch)
+                except Exception:  # noqa: BLE001
+                    pass
         if view != self._quote_symbol:
             self._quote_symbol = view
             cached = self._frames.get(view)
@@ -915,6 +928,8 @@ class StrategyEngine:
                 frame = frame.iloc[-2500:].reset_index(drop=True)
             self._frames[symbol] = frame
             self._ltps[symbol] = float(ltp)
+            if self.records_ticks and tick_store.records(source) and market_is_open(now):
+                tick_store.add(symbol, now, float(ltp))
             if symbol != view:
                 continue
             self.last_error = ""
@@ -944,6 +959,9 @@ class StrategyEngine:
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
+
+        if self.records_ticks:
+            await tick_store.flush()
 
         # Every open trade remembers its highest and lowest price, paused or not.
         for symbol, pos in self.positions.items():
@@ -1210,7 +1228,7 @@ class StrategyEngine:
         symbol = (cfg.symbol or self._focus or "").upper()
         frame = self._frames.get(symbol)
         closed_ts = _closed_bar_ts(frame)
-        if closed_ts is None or pos.gap_bar == closed_ts:
+        if closed_ts is None:
             return
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
             # Restored after a restart: the exchange stop id is unknown and
@@ -1219,6 +1237,10 @@ class StrategyEngine:
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
         if closed_ts + 60 <= opened.timestamp():
             return  # that candle closed before the entry
+        if pos.gap_bar == closed_ts:
+            if bool(getattr(cfg, "gap_fade_intrabar", False)):
+                await self._gap_fade_live(cfg, pos, symbol, frame)
+            return
         pos.gap_bar = closed_ts
         closes = frame["close"].iloc[:-1].astype(float)
         fast = closes.rolling(int(cfg.sma_fast)).mean()
@@ -1236,6 +1258,41 @@ class StrategyEngine:
             self._signals[symbol] = f"{symbol} holding — {note}, but {why}"
             return
         self._signals[symbol] = f"{symbol} gap exit — {note}"
+        await self._exit_now(cfg, self.ltp, "GAP_FADE")
+
+    async def _gap_fade_live(self, cfg: BotConfig, pos: OpenPosition, symbol: str, frame: pd.DataFrame) -> None:
+        """gap_fade_intrabar: judge the fade on the live price, about once a second.
+
+        The live price stands in for the forming candle's close, so the gap is
+        read "as if this second closed the candle". The closed-candle state
+        (armed, widest gap, narrowing run) is only probed on a copy, never
+        changed; the next closed candle updates it as usual.
+        """
+        if pos.gap_prev is None or self.ltp <= 0 or frame is None or len(frame) < 2:
+            return
+        now_s = self._now().timestamp()
+        seen = getattr(self, "_live_fade_at", None)
+        if seen is None:
+            seen = self._live_fade_at = {}
+        if now_s - seen.get(symbol, 0.0) < 1.0:
+            return
+        seen[symbol] = now_s
+        need = int(cfg.sma_slow) + 2
+        closes = pd.Series([*frame["close"].iloc[:-1].astype(float).tail(need).tolist(), float(self.ltp)])
+        fast = closes.rolling(int(cfg.sma_fast)).mean().iloc[-1]
+        slow = closes.rolling(int(cfg.sma_slow)).mean().iloc[-1]
+        gap = sma_gap_signed(fast, slow)
+        if gap is None:
+            return
+        probe = dict(pos.gap_state)
+        note = judge_exit(cfg, pos.direction, gap, pos.gap_prev, probe)
+        if note is None:
+            return
+        ok, why = fade_confirmed(cfg, pos.direction, float(self.ltp), _finite(slow), probe)
+        if not ok:
+            self._signals[symbol] = f"{symbol} holding — live {note}, but {why}"
+            return
+        self._signals[symbol] = f"{symbol} gap exit on the live price — {note}"
         await self._exit_now(cfg, self.ltp, "GAP_FADE")
 
     def _log_decision(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, decision: str, note: str = "") -> None:

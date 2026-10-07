@@ -98,6 +98,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "gap_giveback_pct": "FLOAT DEFAULT 0",
             "gap_fade_confirm_sma": "BOOLEAN DEFAULT 0",
             "gap_fade_min_candles": "INTEGER DEFAULT 0",
+            "gap_fade_intrabar": "BOOLEAN DEFAULT 0",
             "gap_entry_delay_min": "INTEGER DEFAULT 0",
             "gap_entry_window_min": "INTEGER DEFAULT 0",
             "entry_cutoff_time": "TEXT DEFAULT '15:00'",

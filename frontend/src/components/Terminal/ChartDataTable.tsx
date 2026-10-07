@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Columns3, FileDown, Filter, RotateCcw, Search, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Columns3, FileDown, Filter, RotateCcw, Search, X } from "lucide-react";
 import clsx from "clsx";
 import {
   COLUMNS,
@@ -21,7 +21,7 @@ import {
   type Sort,
   type TableRow,
 } from "@/lib/chartTable";
-import type { Candle, ChartPayload, TradeRow } from "@/lib/smaApi";
+import { smaApi, type Candle, type ChartPayload, type TradeRow } from "@/lib/smaApi";
 
 const LAYOUT_KEY = "sma.table.columns";
 const PAGE_KEY = "sma.table.page";
@@ -77,9 +77,141 @@ type Props = {
   barLabel: string;
   /** "Live", "Past" or "Replay": which book the trades come from, for the file title. */
   source: string;
+  /** Seconds in one candle of this view (60 on 1-minute candles). */
+  barSeconds?: number;
 };
 
-export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabel, source }: Props) {
+type Seconds = { status: "loading" | "done" | "error"; ticks: [number, number][]; error?: string };
+
+function clock(sec: number): string {
+  return new Date(sec * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+}
+
+/** One candle opened into its recorded seconds: price, move, gap if that second closed it, trade P&L. */
+function SecondsRows({
+  row,
+  data,
+  prevCloses,
+  colSpan,
+}: {
+  row: TableRow;
+  data: Seconds | undefined;
+  prevCloses: number[] | null;
+  colSpan: number;
+}) {
+  const sma = (closes: number[], n: number) =>
+    closes.length >= n ? closes.slice(-n).reduce((a, b) => a + b, 0) / n : null;
+  const sign = row.side === "Long" ? 1 : row.side === "Short" ? -1 : 0;
+  let body;
+  if (!data || data.status === "loading") {
+    body = <p className="px-3 py-2 text-slate-400">Loading seconds…</p>;
+  } else if (data.status === "error") {
+    body = <p className="px-3 py-2 text-rose-300">{data.error}</p>;
+  } else if (!data.ticks.length) {
+    body = (
+      <p className="max-w-3xl whitespace-normal px-3 py-2 text-slate-400">
+        No second prices recorded for this candle. Groww keeps only 1-minute history, so seconds exist only for live
+        market minutes the terminal recorded (from this update on), not for replays or earlier days.
+      </p>
+    );
+  } else {
+    body = (
+      <table className="min-w-max text-[11px]">
+        <thead>
+          <tr className="text-slate-400">
+            <th className="px-2 py-1 text-left font-semibold">Second</th>
+            <th className="px-2 py-1 text-right font-semibold">Price</th>
+            <th className="px-2 py-1 text-right font-semibold">Δ</th>
+            {prevCloses ? <th className="px-2 py-1 text-right font-semibold" title="SMA gap % if the candle closed at this price">Gap % if closed</th> : null}
+            {sign ? <th className="px-2 py-1 text-right font-semibold">P&amp;L pts</th> : null}
+            {sign && row.qty != null ? <th className="px-2 py-1 text-right font-semibold">P&amp;L ₹</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {data.ticks.map(([t, p], i) => {
+            const prev = i > 0 ? data.ticks[i - 1][1] : null;
+            const move = prev == null ? null : p - prev;
+            let gap: number | null = null;
+            if (prevCloses) {
+              const closes = [...prevCloses, p];
+              const f = sma(closes, 9);
+              const s = sma(closes, 21);
+              gap = f != null && s ? ((f - s) / s) * 100 : null;
+            }
+            const pts = sign && row.entryPrice != null ? sign * (p - row.entryPrice) : null;
+            const tone = (v: number | null) => (v == null || v === 0 ? "text-slate-300" : v > 0 ? "text-emerald-300" : "text-rose-300");
+            return (
+              <tr key={t} className="border-t border-white/5">
+                <td className="px-2 py-0.5 font-mono text-slate-300">{clock(t)}</td>
+                <td className="px-2 py-0.5 text-right font-mono text-slate-100">{p.toFixed(2)}</td>
+                <td className={clsx("px-2 py-0.5 text-right font-mono", tone(move))}>
+                  {move == null ? "—" : `${move > 0 ? "+" : ""}${move.toFixed(2)}`}
+                </td>
+                {prevCloses ? (
+                  <td className={clsx("px-2 py-0.5 text-right font-mono", tone(gap))}>
+                    {gap == null ? "—" : `${gap > 0 ? "+" : ""}${gap.toFixed(3)}`}
+                  </td>
+                ) : null}
+                {sign ? (
+                  <td className={clsx("px-2 py-0.5 text-right font-mono", tone(pts))}>
+                    {pts == null ? "—" : `${pts > 0 ? "+" : ""}${pts.toFixed(2)}`}
+                  </td>
+                ) : null}
+                {sign && row.qty != null ? (
+                  <td className={clsx("px-2 py-0.5 text-right font-mono", tone(pts))}>
+                    {pts == null ? "—" : `${pts > 0 ? "+" : pts < 0 ? "-" : ""}₹${Math.abs(pts * row.qty).toFixed(2)}`}
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+  return (
+    <tr className="bg-black/20">
+      <td colSpan={colSpan} className="px-6 py-1">
+        <div className="max-h-64 overflow-auto rounded border border-white/10">{body}</div>
+      </td>
+    </tr>
+  );
+}
+
+export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabel, source, barSeconds = 60 }: Props) {
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const [seconds, setSeconds] = useState<Record<number, Seconds>>({});
+  useEffect(() => {
+    setOpened(new Set());
+    setSeconds({});
+  }, [symbol, barSeconds]);
+  const closeIndex = useMemo(() => new Map(candles.map((c, i) => [c.time, i])), [candles]);
+  const toggleSeconds = (r: TableRow) => {
+    setOpened((cur) => {
+      const next = new Set(cur);
+      if (next.has(r.key)) next.delete(r.key);
+      else next.add(r.key);
+      return next;
+    });
+    if (seconds[r.time] && seconds[r.time].status !== "error") return;
+    setSeconds((cur) => ({ ...cur, [r.time]: { status: "loading", ticks: [] } }));
+    smaApi
+      .ticks(symbol, r.time, r.time + barSeconds)
+      .then((body) => setSeconds((cur) => ({ ...cur, [r.time]: { status: "done", ticks: body.ticks } })))
+      .catch((err: unknown) =>
+        setSeconds((cur) => ({
+          ...cur,
+          [r.time]: { status: "error", ticks: [], error: err instanceof Error ? err.message : "Could not load seconds" },
+        }))
+      );
+  };
+  // The 21 closes before a 1-minute candle, so a second can be read as that candle's close.
+  const prevCloses = (r: TableRow): number[] | null => {
+    if (barSeconds !== 60) return null;
+    const i = closeIndex.get(r.time);
+    if (i == null || i < 20) return null;
+    return candles.slice(i - 20, i).map((c) => c.close);
+  };
   const [layout, setLayout] = useState<Layout>(defaultLayout);
   const [pageSize, setPageSize] = useState<number>(100);
   useEffect(() => {
@@ -321,6 +453,9 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
         <table className="w-full min-w-max border-collapse text-xs">
           <thead className="sticky top-0 z-[1] bg-[#1A1F29]">
             <tr>
+              <th scope="col" className="w-6 px-1">
+                <span className="sr-only">Seconds</span>
+              </th>
               {cols.map((c) => {
                 const on = sort?.id === c.id;
                 return (
@@ -348,6 +483,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
             </tr>
             {showFilters ? (
               <tr>
+                <th className="w-6" />
                 {cols.map((c) => (
                   <th key={c.id} className="px-1 pb-1.5 font-normal">
                     <span className="relative flex items-center">
@@ -377,14 +513,14 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={Math.max(cols.length, 1)} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={cols.length + 1} className="px-3 py-6 text-center text-slate-400">
                   {all.length ? "No rows match the filters." : "No candles yet."}
                 </td>
               </tr>
             ) : (
               visible.map((r) => (
+                <Fragment key={r.key}>
                 <tr
-                  key={r.key}
                   className={clsx(
                     "border-b border-white/5 hover:bg-white/[0.05]",
                     r.stage.includes("Entry")
@@ -396,6 +532,18 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
                           : ""
                   )}
                 >
+                  <td className="w-6 px-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleSeconds(r)}
+                      aria-expanded={opened.has(r.key)}
+                      aria-label={`Seconds of ${cellText(COLUMN_BY_ID.get("time")!, r)}`}
+                      title="Show this candle's second-by-second prices"
+                      className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                    >
+                      {opened.has(r.key) ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+                    </button>
+                  </td>
                   {cols.map((c) => (
                     <td
                       key={c.id}
@@ -409,6 +557,10 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
                     </td>
                   ))}
                 </tr>
+                {opened.has(r.key) ? (
+                  <SecondsRows row={r} data={seconds[r.time]} prevCloses={prevCloses(r)} colSpan={cols.length + 1} />
+                ) : null}
+                </Fragment>
               ))
             )}
           </tbody>

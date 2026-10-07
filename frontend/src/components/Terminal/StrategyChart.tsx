@@ -1540,6 +1540,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           snap={snapToBar}
           symbol={(past?.symbol ?? state?.symbol ?? "").toUpperCase()}
           barLabel={bar === 60 ? "1-hour" : `${bar}-minute`}
+          barSeconds={bar * 60}
           source={past ? "Past view" : state?.mode === "REPLAY" ? "Replay" : state?.mode === "LIVE" ? "Live" : "Paper"}
         />
       ) : null}
