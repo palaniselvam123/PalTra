@@ -48,7 +48,7 @@ type Props = {
 };
 
 /** Light / dark, shared with the rest of the desk (saved in this browser). */
-function ThemeToggle() {
+export function ThemeToggle() {
   const { theme, toggle } = useTheme();
   const light = theme === "light";
   return (

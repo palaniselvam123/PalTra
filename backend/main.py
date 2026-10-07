@@ -270,20 +270,29 @@ async def research_state():
     return await _state(_research())
 
 
-async def _chart(eng: StrategyEngine, limit: int = 240):
+def _chart_symbol(symbol: str | None) -> str | None:
+    name = (symbol or "").strip().upper()
+    if not name:
+        return None
+    if not name.isalnum():
+        raise HTTPException(400, f"{symbol!r} is not an NSE trading symbol.")
+    return name
+
+
+async def _chart(eng: StrategyEngine, limit: int = 240, symbol: str | None = None):
     # The 5/15/30/60-minute views build their bars from more 1-minute candles.
     # Off the event loop: building the chart must not hold up /api/state.
-    return await asyncio.to_thread(eng.chart_payload, max(30, min(int(limit), 2500)))
+    return await asyncio.to_thread(eng.chart_payload, max(30, min(int(limit), 2500)), _chart_symbol(symbol))
 
 
 @app.get("/api/chart")
-async def chart(limit: int = 240):
-    return await _chart(engine, limit)
+async def chart(limit: int = 240, symbol: str | None = None):
+    return await _chart(engine, limit, symbol)
 
 
 @app.get("/api/research/chart")
-async def research_chart(limit: int = 240):
-    return await _chart(_research(), limit)
+async def research_chart(limit: int = 240, symbol: str | None = None):
+    return await _chart(_research(), limit, symbol)
 
 
 async def _history(eng: StrategyEngine, symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
@@ -969,9 +978,9 @@ async def replay_state():
 
 
 @app.get("/api/replay/chart")
-async def replay_chart(limit: int = 240):
+async def replay_chart(limit: int = 240, symbol: str | None = None):
     # Off the event loop: building the chart must not hold up /api/state.
-    return await asyncio.to_thread(_replay_engine().chart_payload, max(30, min(int(limit), 2500)))
+    return await _chart(_replay_engine(), limit, symbol)
 
 
 @app.post("/api/replay/bot/start")

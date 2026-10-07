@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Radio, Ruler, Table2, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, Table2, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -30,7 +30,8 @@ type Props = {
   /** Every loaded trade (all books); a past day picks its own from these for the high/low lines. */
   allTrades?: TradeRow[];
   closing: boolean;
-  onClose: () => void;
+  /** Closes the chart stock's position. Left out on a read-only chart (no Close button). */
+  onClose?: () => void;
   /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
   onLiveBars?: (count: number) => void;
   /**
@@ -39,6 +40,8 @@ type Props = {
    * A new `seq` applies it again.
    */
   pin?: { seq: number; date: string | null; runId: number | null; symbol: string | null } | null;
+  /** Told when "Hold view" turns on or off, with the stock on screen, so the page can keep that stock. */
+  onHoldChange?: (held: boolean, symbol: string) => void;
 };
 
 export const BAR_MINUTES = [1, 5, 15, 30, 60] as const;
@@ -546,7 +549,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onLiveBars, pin }: Props) {
+export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onLiveBars, pin, onHoldChange }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -682,6 +685,11 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     onLiveBars?.(liveBarsFor(bar));
   }, [bar, onLiveBars]);
   const symbol = (state?.symbol ?? "").toUpperCase();
+  // "Hold view": new candles keep coming, but the zoom and scroll stay where
+  // the user left them (a replay otherwise drags the chart along every bar).
+  const [hold, setHold] = useState(false);
+  const holdRef = useRef(false);
+  holdRef.current = hold;
   const [range, setRange] = useState(() => presetRange(0));
   const [past, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string; interval?: number }) | null>(null);
   const [loadingPast, setLoadingPast] = useState(false);
@@ -1088,6 +1096,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   useEffect(() => {
     const chart = view;
     if (!chart || !candleRef.current || !smaFastRef.current || !smaSlowRef.current || !atrRef.current) return;
+    // Held: remember the time span on screen and put it back after the new data.
+    const kept = holdRef.current ? apiRef.current?.timeScale().getVisibleRange() ?? null : null;
     candleRef.current.setData(
       rows.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close }))
     );
@@ -1148,7 +1158,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       }
     }
     candleRef.current.setMarkers([]);
-    tradeBoxesRef.current?.set(tradeBoxes(chart, rows, symbol, bar, trades));
+    tradeBoxesRef.current?.set(tradeBoxes(chart, rows, (past?.symbol ?? symbol).toUpperCase(), bar, trades));
 
     if (entryLine.current) {
       candleRef.current.removePriceLine(entryLine.current);
@@ -1164,12 +1174,19 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         title: look.title,
       });
     }
+    if (kept) {
+      try {
+        apiRef.current?.timeScale().setVisibleRange(kept);
+      } catch {
+        /* the held span is no longer in the data (another stock or size) */
+      }
+    }
   }, [view, rows, bar, past, trades, allTrades, symbol]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
     const api = apiRef.current;
-    if (!api) return;
+    if (!api || holdRef.current) return;
     // A short live series (few big candles) fills the width instead of hugging the right edge.
     if (past || rowsRef.current.length <= 150) api.timeScale().fitContent();
     else api.timeScale().scrollToRealTime();
@@ -1231,6 +1248,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const sma21 = hover ? hover.sma21 : latest.sma21;
   // (SMA 9 − SMA 21) ÷ SMA 21 × 100, the gap the gap filter and gap mode read.
   const smaGap = sma9 != null && sma21 != null && sma21 !== 0 ? ((sma9 - sma21) / sma21) * 100 : null;
+  // The stock whose candles are drawn: a past range keeps its own stock.
+  const shownSymbol = (past?.symbol ?? chart?.symbol ?? state?.symbol ?? "").toUpperCase();
+  const toggleHold = () => {
+    const next = !hold;
+    setHold(next);
+    onHoldChange?.(next, shownSymbol);
+    if (!next) {
+      const api = apiRef.current;
+      if (api) {
+        if (past || rowsRef.current.length <= 150) api.timeScale().fitContent();
+        else api.timeScale().scrollToRealTime();
+      }
+    }
+  };
 
   return (
     <section
@@ -1243,7 +1274,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     >
       <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <h2 className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-slate-100">
-          {state?.symbol ? <span className="text-amber-300">{state.symbol}</span> : null}
+          {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
           <span className="font-normal text-slate-300">{bar === 60 ? "1-hour" : `${bar}-minute`}</span>
           <span role="group" aria-label="Candle size" className="ml-1 inline-flex rounded-md ring-1 ring-inset ring-white/10">
             {BAR_MINUTES.map((m) => (
@@ -1270,6 +1301,23 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             className="flex min-h-8 min-w-9 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
           >
             {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
+          </button>
+          <button
+            type="button"
+            onClick={toggleHold}
+            aria-pressed={hold}
+            title={
+              hold
+                ? "Holding this view: new candles still arrive, but the zoom, scroll and stock stay put. Press to follow the latest candle again."
+                : "Hold this view: keep the zoom, scroll and stock you are looking at while the replay or market moves on"
+            }
+            className={clsx(
+              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              hold ? "bg-violet-400/20 font-semibold text-violet-100 ring-violet-400/50" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            {hold ? <PinOff size={14} aria-hidden /> : <Pin size={14} aria-hidden />}
+            {hold ? "Holding" : "Hold view"}
           </button>
           <button
             type="button"
@@ -1450,7 +1498,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                   {pos.direction} {pos.qty.toLocaleString("en-IN")} · entry {px(pos.entry_price)}
                 </span>
               </div>
-              {boxSmall ? (
+              {boxSmall && onClose ? (
                 <button
                   type="button"
                   onClick={onClose}
@@ -1518,14 +1566,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                 </dd>
               </div>
             </dl>
-            <button
-              type="button"
-              disabled={closing}
-              onClick={onClose}
-              className="pointer-events-auto mt-2 min-h-11 w-full rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
-            >
-              {closing ? "Closing…" : "Close position"}
-            </button>
+            {onClose ? (
+              <button
+                type="button"
+                disabled={closing}
+                onClick={onClose}
+                className="pointer-events-auto mt-2 min-h-11 w-full rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
+              >
+                {closing ? "Closing…" : "Close position"}
+              </button>
+            ) : null}
             </>
             )}
           </div>

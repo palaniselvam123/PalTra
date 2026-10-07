@@ -143,6 +143,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   settings it used, and its trades carry `run_id` (day-wise P&L in
   `get_run`, shown in the blotter's Backtests tab).
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused in LIVE mode.
+  The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
+  take an optional `symbol` to draw another watched stock without moving the
+  chart focus. The terminal shows stock tabs above the chart (the replay's
+  stocks, or the armed/held ones); each opens `/terminal/chart/?symbol=…`
+  (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
+  chart that follows the replay while it plays and shows the replayed day
+  afterwards. "Hold view" on the chart keeps its zoom, scroll and stock.
 - `backend/sma_research/` – offline stock-selection research for the SMA bot
   (read-only; `python -m sma_research download|analyze`). `download` runs on
   the Fly machine after hours and only calls Groww's candle-history API;

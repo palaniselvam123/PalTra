@@ -10,6 +10,7 @@ import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
+import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
 import {
   SMA_API,
   ApiError,
@@ -18,6 +19,7 @@ import {
   setDesk,
   setReplayRouting,
   smaApi,
+  stateForSymbol,
   type Desk,
   type ChartPayload,
   type ReplayInfo,
@@ -130,10 +132,22 @@ export default function TerminalPage() {
     null
   );
   const liveBars = useRef(240);
+  // "Hold view" keeps the stock on screen: the chart asks for it by name, so a
+  // replay moving its focus (a new day, another stock) does not swap the chart.
+  const heldRef = useRef<string | null>(null);
+  const [held, setHeld] = useState<string | null>(null);
+  const onHoldChange = useCallback((on: boolean, symbol: string) => {
+    const name = on && symbol ? symbol.toUpperCase() : null;
+    heldRef.current = name;
+    setHeld(name);
+  }, []);
+  // The replay last played (its day, run and stocks), for the stock tabs after it ends.
+  const [endedRun, setEndedRun] = useState<{ date: string; runId: number | null; symbols: string[] } | null>(null);
+  const runSymbols = useRef<string[]>([]);
   const askLiveBars = useCallback((count: number) => {
     if (count === liveBars.current) return;
     liveBars.current = count;
-    smaApi.chart(count).then(setChart).catch(() => {});
+    smaApi.chart(count, heldRef.current).then(setChart).catch(() => {});
   }, []);
 
   // What this page shows, for the "Ask the bot" chat: the bot, the books,
@@ -203,7 +217,7 @@ export default function TerminalPage() {
         }
       })
       .finally(finish);
-    smaApi.chart(liveBars.current).then(setChart).catch(() => {});
+    smaApi.chart(liveBars.current, heldRef.current).then(setChart).catch(() => {});
     smaApi
       .trades()
       .then((rows) => {
@@ -228,7 +242,7 @@ export default function TerminalPage() {
       smaApi
         .closePosition(name)
         .then(() =>
-          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current)]).then(([next, rows, nextChart]) => {
+          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current, heldRef.current)]).then(([next, rows, nextChart]) => {
             if (next.status === "fulfilled") {
               setState((prev) => (next.value.ltp > 0 || !prev || prev.ltp <= 0 ? next.value : prev));
             }
@@ -256,6 +270,9 @@ export default function TerminalPage() {
       if (researchRef.current) return;
       setReplay(info);
       const on = replayRouted(info);
+      if (on && info.symbols?.length) {
+        for (const name of info.symbols) if (!runSymbols.current.includes(name)) runSymbols.current.push(name);
+      }
       if (on && info.date) {
         lastPlayed.current = {
           date: info.date,
@@ -270,7 +287,11 @@ export default function TerminalPage() {
         pinSeq.current += 1;
         const held = on ? null : lastPlayed.current;
         setPin({ seq: pinSeq.current, date: held?.date ?? null, runId: held?.runId ?? null, symbol: held?.symbol ?? null });
-        if (on) lastPlayed.current = null;
+        setEndedRun(held ? { date: held.date, runId: held.runId, symbols: [...runSymbols.current] } : null);
+        if (on) {
+          lastPlayed.current = null;
+          runSymbols.current = [...(info.symbols ?? [])];
+        }
         setState(null);
         setChart(null);
         refresh();
@@ -333,7 +354,7 @@ export default function TerminalPage() {
             smaApi.replayInfo().then(onReplay).catch(() => {});
           }
         });
-      if (n % 2 === 0) smaApi.chart(liveBars.current).then(setChart).catch(() => {});
+      if (n % 2 === 0) smaApi.chart(liveBars.current, heldRef.current).then(setChart).catch(() => {});
       if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
     }, 1000);
     return () => clearInterval(poll);
@@ -397,6 +418,59 @@ export default function TerminalPage() {
       ws?.close();
     };
   }, []);
+
+  // Stock tabs above the chart: the replay's stocks (playing or just ended),
+  // otherwise the armed or held stocks. Each opens its chart in a new tab.
+  const stockTabs = useMemo((): { tabs: StockTab[]; label: string; href: (s: string) => string } => {
+    const books = state?.books ?? [];
+    const side = (name: string) => {
+      const book = books.find((b) => b.symbol.toUpperCase() === name);
+      return book && book.direction !== "FLAT" ? book.direction : null;
+    };
+    const runTabs = (symbols: string[], runId: number | null, withSide: boolean) => {
+      const totals = tradeTotals(
+        trades.filter(
+          (t) => (t.mode ?? "").toUpperCase() === "REPLAY" && t.exit_price != null && (runId == null || t.run_id === runId)
+        )
+      );
+      return symbols.map((name) => ({
+        symbol: name,
+        net: totals.get(name)?.net ?? null,
+        trades: totals.get(name)?.trades ?? 0,
+        side: withSide ? side(name) : null,
+      }));
+    };
+    if (routed && replay) {
+      const names = Array.from(new Set([...(replay.symbols ?? []), ...runSymbols.current]));
+      return {
+        tabs: runTabs(names, replay.run_id ?? null, true),
+        label: "Replay stocks",
+        href: (name) => chartHref(name, { date: replay.date, runId: replay.run_id ?? null }),
+      };
+    }
+    if (endedRun && endedRun.symbols.length) {
+      return {
+        tabs: runTabs(endedRun.symbols, endedRun.runId, false),
+        label: "Replay stocks",
+        href: (name) => chartHref(name, { date: endedRun.date, runId: endedRun.runId }),
+      };
+    }
+    const armed = new Set((state?.trade_symbols ?? []).map((n) => n.toUpperCase()));
+    return {
+      tabs: books
+        .filter((b) => armed.has(b.symbol.toUpperCase()) || b.direction !== "FLAT" || (b.closed_trades ?? 0) > 0)
+        .map((b) => ({
+          symbol: b.symbol.toUpperCase(),
+          net: b.day_net ?? b.closed_net ?? null,
+          trades: b.closed_trades ?? 0,
+          side: b.direction !== "FLAT" ? b.direction : null,
+        })),
+      label: research ? "Research stocks" : "Stocks",
+      href: (name) => chartHref(name, { research }),
+    };
+  }, [state?.books, state?.trade_symbols, trades, routed, replay, endedRun, research]);
+  const viewState = useMemo(() => stateForSymbol(state, held), [state, held]);
+  const activeTab = (held ?? chart?.symbol ?? state?.symbol ?? null) || null;
 
   return (
     <div className="terminal-dark min-h-screen w-full min-w-0 bg-[#0B0E14] text-slate-200">
@@ -462,18 +536,20 @@ export default function TerminalPage() {
         <PnlMetricsRow state={state} />
         <div className="flex flex-col gap-4 xl:flex-row">
           <div className="min-w-0 flex-1">
+            <StockTabs tabs={stockTabs.tabs} active={activeTab} hrefFor={stockTabs.href} label={stockTabs.label} />
             <StrategyChart
               chart={chart}
-              state={state}
+              state={viewState}
+              onHoldChange={onHoldChange}
               trades={chartTrades}
               allTrades={trades}
               pin={pin}
-              closing={Boolean(state?.symbol) && closingSymbol === state?.symbol.toUpperCase()}
+              closing={Boolean(viewState?.symbol) && closingSymbol === viewState?.symbol.toUpperCase()}
               onLiveBars={askLiveBars}
               onClose={() => {
-                const pos = state?.position;
-                if (!pos || !state?.symbol) return;
-                closePosition(state.symbol, pos.direction, pos.qty);
+                const pos = viewState?.position;
+                if (!pos || !viewState?.symbol) return;
+                closePosition(viewState.symbol, pos.direction, pos.qty);
               }}
             />
           </div>

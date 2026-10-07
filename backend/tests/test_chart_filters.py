@@ -177,3 +177,25 @@ class _NoRows:
 
 def _no_db():
     return lambda: _NoRows()
+
+
+def test_chart_draws_another_watched_stock_without_moving_the_focus(monkeypatch):
+    monkeypatch.setattr("strategy_engine.session_factory", _no_db)
+    frame = _frame()
+    cfg = _cfg(symbol="X", atr_multiplier=1.5, trading_mode="PAPER", sma_fast=9, sma_slow=21, atr_period=14)
+    engine = _chart_engine(frame, cfg)
+    other = frame.copy()
+    other["close"] = other["close"] + 50.0
+    other["open"] = other["open"] + 50.0
+    other["high"] = other["high"] + 50.0
+    other["low"] = other["low"] + 50.0
+    engine._frames["Y"] = other
+    focus = engine.chart_payload(240)
+    side = engine.chart_payload(240, "y")
+    assert focus["symbol"] == "X" and side["symbol"] == "Y"
+    assert side["candles"][-2]["close"] == pytest.approx(focus["candles"][-2]["close"] + 50.0)
+    assert side["candles"][-2]["sma9"] is not None  # enriched on its own
+    # The focus is untouched, and each stock keeps its own cached rows.
+    assert engine.chart_payload(240)["candles"] == focus["candles"]
+    assert engine.chart_payload(240, "X")["candles"] == focus["candles"]
+    assert engine.chart_payload(240, "NOPE")["candles"] == []
