@@ -40,6 +40,7 @@ from groww_client import preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
+import candle_patterns
 import tick_store
 from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
 import bots as bots_mod
@@ -203,6 +204,11 @@ class ConfigUpdate(BaseModel):
     gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
     gap_fade_intrabar: bool | None = None
     flip_orders: bool | None = None
+    entry_mode: Literal["SMA", "PATTERN"] | None = None
+    pattern_tf: Literal[1, 3, 5] | None = None
+    pattern_trend: bool | None = None
+    pattern_set: Literal["STRONG", "ALL"] | None = None
+    pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
     bot_name: str | None = Field(default=None, min_length=1, max_length=24)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
@@ -521,6 +527,7 @@ def _gap_dict(row) -> dict:
         "gap_fade_confirm_sma": bool(getattr(row, "gap_fade_confirm_sma", False)),
         "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
         "flip_orders": bool(getattr(row, "flip_orders", False)),
+        **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
     }
 
 
@@ -1211,6 +1218,8 @@ def _bot(bot: int) -> BotEngine:
     eng = bot_engines.get(int(bot))
     if eng is None:
         raise HTTPException(404, f"There is no bot {bot}. Bots 2 to {EXTRA_BOTS[-1]} are here; bot 1 is the main desk.")
+    # Its settings row exists before any route reads or writes it.
+    ensure_bot_config(eng.bot_id)
     return eng
 
 

@@ -49,6 +49,7 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
+from candle_patterns import closes_bucket, pattern_call, setting as pattern_setting, uses_patterns
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
@@ -172,6 +173,7 @@ SNAPSHOT_FIELDS = (
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders",
+    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -1143,6 +1145,8 @@ class StrategyEngine:
             return ""
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
+        if uses_patterns(cfg):
+            return await self._pattern_minute(symbol, frame, cfg, now)
         self._warn_upcoming(symbol, frame, cfg, now)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -1169,6 +1173,40 @@ class StrategyEngine:
             self.last_signal = text
             return text
         return await self.apply_signal(signal, signal_frame, cfg, now)
+
+    async def _pattern_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Candle-pattern entries (candle_patterns.py), once per closed candle of pattern_tf minutes.
+
+        At the end of each pattern candle the open trade closes (CANDLE_END);
+        then a bullish pattern buys and a bearish one sells short at the start
+        of the next candle. Market hours, the cut-off, the Trade list, the caps,
+        the entry filters, the stop and the flip all apply as for a cross.
+        """
+        tf = int(pattern_setting(cfg, "pattern_tf"))
+        closed_ts = _closed_bar_ts(frame)
+        at_end = closed_ts is not None and (tf == 1 or closes_bucket(closed_ts, tf))
+        if at_end and symbol in self.positions:
+            pos = self.positions[symbol]
+            self._focus = symbol
+            await self._exit_now(cfg, self._exit_price(symbol, pos), "CANDLE_END")
+            if symbol in self.positions:
+                text = f"{symbol} could not close at the candle end — {self.last_signal}"
+                self._signals[symbol] = text
+                return text
+        call = pattern_call(frame, cfg)
+        if call.side is None:
+            text = f"{symbol} no order — {call.note}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        signal = "BULLISH" if call.side == "LONG" else "BEARISH"
+        # No Telegram for a refused pattern: one can print on every candle.
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False)
+        if result.startswith(("opened", "reversed")):
+            result = f"{result} — {call.note}"
+            self._signals[symbol] = result
+            self.last_signal = result
+        return result
 
     async def _gap_minute(
         self,
@@ -2247,6 +2285,7 @@ class StrategyEngine:
                     "BB_TARGET": "Bollinger band target — flat",
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
                     "GAP_FADE": "SMA gap faded — flat",
+                    "CANDLE_END": "candle closed — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -3287,6 +3326,7 @@ _ALERT_REASON = {
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",
     "GAP_FADE": "SMA gap faded",
+    "CANDLE_END": "end of the pattern candle",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -3586,7 +3626,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE")
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END")
 
 
 def _filter_note(cfg: BotConfig) -> str:

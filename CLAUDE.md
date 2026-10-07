@@ -207,6 +207,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   to narrow N closed candles in a row. `gap_fade_intrabar` judges the fade
   about once a second on the live price as if that second closed the candle
   (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state).
+- `backend/candle_patterns.py` – candle-pattern entries (`entry_mode =
+  "PATTERN"`, default `"SMA"`, per bot and per stock, PAPER and LIVE). Each
+  time a candle of `pattern_tf` minutes (1/3/5, built from the 1-minute tape
+  from 09:15) closes, `StrategyEngine._pattern_minute` first closes the open
+  trade (`CANDLE_END`, via `_exit_now`, which cancels a LIVE stop first), then
+  `pattern_call` reads the pattern (names identical to
+  `frontend/src/lib/candlePatterns.ts`): a bullish one buys and a bearish one
+  shorts at the start of the next candle through `apply_signal` (filters,
+  stop, flip, cut-off, caps, one-LIVE-bot-per-stock all apply; gap mode does
+  not). Options: `pattern_set` (`STRONG` | `ALL`), `pattern_trend` (only with
+  the SMA fast/slow side), `pattern_min_edge` (skip when the last 14 candles'
+  average range is under N× the round-trip charges for the qty; 0 = off). No
+  Telegram for a refused pattern. The stock research baseline keeps `SMA`.
 - Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
   every condition is unchanged, but `StrategyEngine._open` sends the order the
   other way (a buy signal sells, a sell signal buys). The position keeps

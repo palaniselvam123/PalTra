@@ -40,6 +40,7 @@ BASELINE_OFF = {
     "use_bollinger": False,
     "bb_exit": "OFF",
     "flip_orders": False,
+    "entry_mode": "SMA",
     "stock_settings": "{}",
 }
 

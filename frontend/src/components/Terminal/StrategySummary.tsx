@@ -314,10 +314,51 @@ export function StrategySummary({
         {group(
           "Entry",
           <div className="grid gap-2 sm:grid-cols-2">
-            <div className="flex min-h-12 items-center rounded-lg px-3 py-2 text-sm text-slate-300 ring-1 ring-inset ring-white/10">
-              SMA {c.sma_fast}/{c.sma_slow} cross · closed 1-min candles
+            <div className="sm:col-span-2">
+              {segmented<"SMA" | "PATTERN">(
+                "Enter on",
+                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN",
+                ["SMA", "PATTERN"],
+                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns" },
+                (v) => save({ entry_mode: v }, v === "PATTERN" ? "Entry on candle patterns" : "Entry on the SMA cross")
+              )}
             </div>
-            {ENTRY.map(switchChip)}
+            {(c.entry_mode ?? "SMA") === "PATTERN" ? (
+              <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
+                <p className="text-[11px] leading-snug text-slate-400">
+                  When a candle closes: a bullish pattern buys and a bearish one sells short at the start of the next
+                  candle; the trade closes at that candle&apos;s end. Each trade pays a full round of charges.
+                </p>
+                {segmented<"1" | "3" | "5">(
+                  "Candle",
+                  String(c.pattern_tf ?? 1) as "1" | "3" | "5",
+                  ["1", "3", "5"],
+                  { "1": "1 min", "3": "3 min", "5": "5 min" },
+                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 }, `Pattern candle ${v} min`)
+                )}
+                {segmented<"STRONG" | "ALL">(
+                  "Patterns",
+                  ((c.pattern_set ?? "STRONG").toUpperCase() as "STRONG" | "ALL"),
+                  ["STRONG", "ALL"],
+                  { STRONG: "Strong only", ALL: "All" },
+                  (v) => save({ pattern_set: v }, v === "STRONG" ? "Strong patterns only" : "All patterns")
+                )}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {switchChip({
+                    key: "pattern_trend",
+                    label: "Only with the SMA trend",
+                    detail: (cc) => `bullish only while SMA ${cc.sma_fast} > SMA ${cc.sma_slow}, bearish only below`,
+                  })}
+                  <div className="flex min-h-12 items-center rounded-lg px-3 py-2 text-[11px] text-slate-400 ring-1 ring-inset ring-white/10">
+                    {Number(c.pattern_min_edge ?? 1.5) > 0
+                      ? `Skips candles smaller than ${c.pattern_min_edge ?? 1.5}× the charges`
+                      : "No charge check (set it in Settings)"}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              ENTRY.map(switchChip)
+            )}
             {switchChip({
               key: "flip_orders",
               label: "Flip (buy ⇄ sell)",
@@ -375,7 +416,7 @@ export function StrategySummary({
               save({ bb_exit: v }, `Bollinger exit ${BB_LABEL[v]}`)
             )}
             <p className="text-[11px] text-slate-400">
-              Always: the opposite cross closes the trade
+              {(c.entry_mode ?? "SMA") === "PATTERN" ? "Always: the trade closes at the end of its candle" : "Always: the opposite cross closes the trade"}
               {c.use_gap_mode ? ` · gap fades back to ${c.gap_exit_long ?? 0.02}% / ${c.gap_exit_short ?? -0.02}%` : ""}
               {c.use_gap_mode && Number(c.gap_giveback_pct ?? 0) > 0 ? ` or gives back ${c.gap_giveback_pct}%` : ""} · square-off{" "}
               {config.square_off_time}.
@@ -385,7 +426,7 @@ export function StrategySummary({
       </div>
 
       <div className="mt-4">
-        {group("Entry filters (a cross must pass every one that is on)", <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{FILTERS.map(switchChip)}</div>)}
+        {group("Entry filters (an entry must pass every one that is on)", <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{FILTERS.map(switchChip)}</div>)}
       </div>
 
       <p className="mt-3 text-[11px] text-slate-400">

@@ -24,6 +24,15 @@ export type StopType = "ATR" | "SMA_GAP" | "TSL";
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
   bot_name?: string | null;
+  /** "SMA" (cross, default) or "PATTERN": candle-pattern entries closed at the candle's end. */
+  entry_mode?: "SMA" | "PATTERN";
+  /** Pattern candle size in minutes. */
+  pattern_tf?: 1 | 3 | 5;
+  /** Patterns only with the SMA trend. */
+  pattern_trend?: boolean;
+  pattern_set?: "STRONG" | "ALL";
+  /** Skip candles whose usual range is under this many times the round-trip charges (0 = off). */
+  pattern_min_edge?: number;
   symbol: string;
   trade_symbols?: string[];
   exchange: string;
