@@ -1688,7 +1688,7 @@ async def test_a_cross_one_bar_late_still_orders(engine, monkeypatch):
     quiet = await engine.on_minute(now, cfg, missed)
     assert "waiting for a new cross" in quiet
     assert "no order" in quiet
-    assert "RSI, Bollinger and SMA gap are off" in quiet
+    assert "RSI, Bollinger, SMA gap and candle direction are off" in quiet
     assert "SMA 9 is above SMA 21" in quiet
     assert "AZAD" not in engine.positions
 

@@ -74,6 +74,12 @@ STRATEGY_GUIDE = {
             "must be within gap_long_min..gap_long_max for a buy, gap_short_min..gap_short_max for a sell "
             "(sell ranges are usually negative). An unticked side is not checked."
         ),
+        "use_candle_dir": (
+            "Candle direction: the last candle_dir_count closed candles must move the trade's way before an "
+            "entry. candle_dir_rule CLOSES = each close above the one before for a buy (below for a sell); "
+            "COLOUR = each candle green for a buy, red for a sell; BOTH = both. Read on the cross candle, or, "
+            "in gap mode, on the candle where the order would go."
+        ),
         "note": "A refused cross is shown on the chart with an x marker and the reason.",
     },
     "bollinger_exit": {

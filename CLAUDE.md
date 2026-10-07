@@ -156,6 +156,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   for a buy or `gap_short_min..max` for a sell (negative values allowed).
   Wired through `_entry_block` like the other filters (chart ✕ "Gap",
   Telegram check line, per-stock settings).
+- Candle direction entry filter (`use_candle_dir`, off by default):
+  `indicators._direction_reason` on the last `candle_dir_count` closed
+  candles; `candle_dir_rule` `CLOSES` (each close beyond the one before: up
+  for a buy, down for a sell), `COLOUR` (green / red candles) or `BOTH`.
+  Wired through `_entry_block` (chart ✕ "Candles", per-stock settings); in gap
+  mode it is read when the order would go, not at the cross.
 - `backend/gap_mode.py` – SMA gap mode (`use_gap_mode`, off by default,
   PAPER and LIVE): a cross only arms the trade (`StrategyEngine._gap_minute`,
   `_gap_pending`); the order goes on the first closed candle whose signed gap

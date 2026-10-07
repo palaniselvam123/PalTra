@@ -68,7 +68,7 @@ def test_check_lines_and_note():
     # Only the side's own tick decides whether the line is shown.
     assert not any("SMA gap" in line for line in entry_checks(_frame(99.9, 100.0), "SHORT", _cfg(use_gap_short=False)))
     assert "SMA gap" in _filter_note(_cfg(use_gap_long=False))
-    assert "SMA gap are off" in _filter_note(_cfg(use_gap_long=False, use_gap_short=False))
+    assert "SMA gap and candle direction are off" in _filter_note(_cfg(use_gap_long=False, use_gap_short=False))
 
 
 def test_each_stock_can_set_its_own_ranges():

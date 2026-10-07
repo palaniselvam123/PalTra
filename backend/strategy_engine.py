@@ -151,7 +151,9 @@ SNAPSHOT_FIELDS = (
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
     "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
-    "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min", "max_daily_loss", "entry_cutoff_time", "square_off_time",
+    "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule",
+    "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
 
@@ -289,7 +291,7 @@ def _entry_block(
 ) -> str | None:
     """Checked entry filters only. An unchecked box is not read.
 
-    `only` ("vwap", "volume", "density", "rsi", "bollinger" or "gap") reads that one filter, so a
+    `only` ("vwap", "volume", "density", "rsi", "bollinger", "gap" or "candle_dir") reads that one filter, so a
     message can say which of several checked filters agrees and which does not.
     """
 
@@ -319,8 +321,21 @@ def _entry_block(
         gap_long_max=_gap_setting(cfg, "gap_long_max"),
         gap_short_min=_gap_setting(cfg, "gap_short_min"),
         gap_short_max=_gap_setting(cfg, "gap_short_max"),
+        use_candle_dir=on("candle_dir"),
+        candle_dir_count=_candle_dir_count(cfg),
+        candle_dir_rule=_candle_dir_rule(cfg),
         price=price,
     )
+
+
+def _candle_dir_count(cfg) -> int:
+    value = getattr(cfg, "candle_dir_count", None)
+    return 2 if value is None else max(1, int(value))
+
+
+def _candle_dir_rule(cfg) -> str:
+    rule = (getattr(cfg, "candle_dir_rule", None) or "CLOSES").upper()
+    return rule if rule in ("CLOSES", "COLOUR", "BOTH") else "CLOSES"
 
 
 _GAP_DEFAULTS = {"gap_long_min": 0.02, "gap_long_max": 0.5, "gap_short_min": -0.5, "gap_short_max": -0.02}
@@ -367,6 +382,8 @@ def _short_block_label(reason: str) -> str:
         elif low.startswith("sma gap"):
             words = part.split()
             parts.append(f"Gap {words[2]}" if len(words) > 2 and words[2][:1] in "+-" else "Gap")
+        elif low.startswith("candle direction"):
+            parts.append("Candles")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -387,6 +404,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
     use_adx = bool(getattr(cfg, "use_adx_filter", False))
     if not (use_adx or any(bool(getattr(cfg, k, False)) for k in (
         "use_vwap", "use_volume", "use_density", "use_rsi", "use_bollinger", "use_gap_long", "use_gap_short",
+        "use_candle_dir",
     ))):
         return []
     fast = frame["sma_9"].to_numpy(dtype=float)
@@ -427,7 +445,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"),
 )
 
 
@@ -464,6 +482,14 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             lo = _gap_setting(cfg, f"gap_{'long' if direction == 'LONG' else 'short'}_min")
             hi = _gap_setting(cfg, f"gap_{'long' if direction == 'LONG' else 'short'}_max")
             return f"SMA gap {gap:+.3f}% (inside the {side} range {lo:g}% to {hi:g}%)"
+        if name == "candle_dir":
+            n = _candle_dir_count(cfg)
+            rule = _candle_dir_rule(cfg)
+            word = "rising" if direction == "LONG" else "falling"
+            what = {"CLOSES": f"closes {word}", "COLOUR": "green" if direction == "LONG" else "red",
+                    "BOTH": f"closes {word}, {'green' if direction == 'LONG' else 'red'}"}[rule]
+            closes = " → ".join(f"{float(c):.2f}" for c in closed["close"].iloc[-(n + 1):])
+            return f"Candle direction: last {n} {what} ({closes})"
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -526,6 +552,7 @@ _FILTER_KEYS = (
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule",
 )
 
 
@@ -3354,10 +3381,12 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("Bollinger")
     if bool(getattr(cfg, "use_gap_long", False)) or bool(getattr(cfg, "use_gap_short", False)):
         checked.append("SMA gap")
+    if bool(getattr(cfg, "use_candle_dir", False)):
+        checked.append("candle direction")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:
-        return "VWAP, volume, density, RSI, Bollinger and SMA gap are off."
+        return "VWAP, volume, density, RSI, Bollinger, SMA gap and candle direction are off."
     return "Checked: " + ", ".join(checked) + "."
 
 

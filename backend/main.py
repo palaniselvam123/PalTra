@@ -174,6 +174,9 @@ class ConfigUpdate(BaseModel):
     gap_short_min: float | None = Field(default=None, ge=-10, le=10)
     gap_short_max: float | None = Field(default=None, ge=-10, le=10)
     use_gap_mode: bool | None = None
+    use_candle_dir: bool | None = None
+    candle_dir_count: int | None = Field(default=None, ge=1, le=10)
+    candle_dir_rule: Literal["CLOSES", "COLOUR", "BOTH"] | None = None
     gap_entry_long: float | None = Field(default=None, ge=-10, le=10)
     gap_exit_long: float | None = Field(default=None, ge=-10, le=10)
     gap_entry_short: float | None = Field(default=None, ge=-10, le=10)
@@ -228,6 +231,9 @@ def _config_dict(row: BotConfig) -> dict:
         "bb_min_width_pct": float(getattr(row, "bb_min_width_pct", 0.15) if getattr(row, "bb_min_width_pct", None) is not None else 0.15),
         "bb_exit": (getattr(row, "bb_exit", None) or "OFF").upper(),
         **_gap_dict(row),
+        "use_candle_dir": bool(getattr(row, "use_candle_dir", False)),
+        "candle_dir_count": int(getattr(row, "candle_dir_count", None) or 2),
+        "candle_dir_rule": (getattr(row, "candle_dir_rule", None) or "CLOSES").upper(),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "square_off_time": row.square_off_time,

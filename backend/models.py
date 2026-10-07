@@ -145,6 +145,12 @@ class BotConfig(Base):
     use_gap_short: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_short_min: Mapped[float] = mapped_column(Float, default=-0.5)
     gap_short_max: Mapped[float] = mapped_column(Float, default=-0.02)
+    # Candle direction entry filter: the last candle_dir_count closed candles
+    # move the trade's way. CLOSES: each close beyond the one before (up for a
+    # buy, down for a sell); COLOUR: each candle green / red; BOTH.
+    use_candle_dir: Mapped[bool] = mapped_column(Boolean, default=False)
+    candle_dir_count: Mapped[int] = mapped_column(Integer, default=2)
+    candle_dir_rule: Mapped[str] = mapped_column(String, default="CLOSES")
     # SMA gap mode (gap_mode.py): a cross arms the trade and the signed gap %
     # fires it (>= gap_entry_long / <= gap_entry_short), optionally after
     # gap_entry_delay_min more minutes and within gap_entry_window_min of the
