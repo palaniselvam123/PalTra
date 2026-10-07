@@ -392,6 +392,18 @@ select {
   }
 }
 
+/* Keyboard users see where they are on every control; mouse clicks stay ring-free. */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role="separator"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgb(56 189 248 / 0.9);
+  outline-offset: 2px;
+}
+
 /* ---------------------------------------------------------------------------
    Movable panels (components/Layout/Board.tsx): one column below 1280px, a
    12-column grid above it where each panel spans its chosen width. A panel
