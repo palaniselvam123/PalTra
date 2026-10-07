@@ -20,7 +20,12 @@ primary_region = 'sin'
   source = 'data'
   destination = '/data'
 
-   [[vm]]
-     cpu_kind = 'shared'
-     cpus = 2
-     memory_mb = 2048
+# One dedicated core. The desk, both SMA bots, a replay and every API call
+# share one Python event loop, so extra shared vCPUs do not help; a shared
+# CPU's quota throttles a fast replay until the page cannot reach the engine.
+# Size the machine here: a deploy applies this section and undoes any resize
+# made in the Fly dashboard.
+[[vm]]
+  cpu_kind = 'performance'
+  cpus = 1
+  memory_mb = 2048

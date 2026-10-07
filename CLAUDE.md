@@ -246,10 +246,12 @@ No credentials are needed. The desk starts on the simulated feed.
 
 ## Deployment to Fly.io
 
-- `fly.toml`: app `paltra`, region `iad`, `internal_port = 3000`, HTTPS
+- `fly.toml`: app `paltra`, region `sin`, `internal_port = 3000`, HTTPS
   forced, one machine always running (`auto_stop_machines = 'off'`,
-  `min_machines_running = 1`), 1 GB shared CPU, and a volume `data` mounted
-  at `/data`.
+  `min_machines_running = 1`), one dedicated CPU (`performance`, 1 CPU,
+  2 GB), and a volume `data` mounted at `/data`. Change the machine size in
+  `[[vm]]`: every deploy applies it and undoes a resize made in the Fly
+  dashboard.
 - `Dockerfile` (`python:3.13-slim-bookworm`): installs
   `backend/requirements.txt`, copies `backend/` to `/app`, copies the
   **pre-built** static frontend from `frontend/out/` to `/app/static`, and
