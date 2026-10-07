@@ -1023,8 +1023,14 @@ function ResultSideBadge({ trade, net }: { trade: TradeRow; net: number | null }
   const color = open || net == null || net === 0 ? "slate" : net > 0 ? "green" : "red";
   const result = open ? "open" : net == null || net === 0 ? "flat" : net > 0 ? "profit" : "loss";
   return (
-    <Badge color={color} title={`${trade.direction === "LONG" ? "Bought" : "Sold"} first · ${result}`}>
+    <Badge
+      color={color}
+      title={`${trade.direction === "LONG" ? "Bought" : "Sold"} first · ${result}${
+        trade.flipped ? ` · flip strategy: the signal was a ${trade.direction === "LONG" ? "sell" : "buy"}` : ""
+      }`}
+    >
       {word}
+      {trade.flipped ? " ⇄" : ""}
     </Badge>
   );
 }

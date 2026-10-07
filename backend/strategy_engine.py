@@ -82,6 +82,15 @@ def _intraday_is_shut(message: str) -> bool:
     )
 
 
+def _opposite(direction: str) -> str:
+    return "SHORT" if direction == "LONG" else "LONG"
+
+
+def flips_orders(cfg) -> bool:
+    """Flip strategy (flip_orders): a buy signal places a sell and a sell signal a buy."""
+    return bool(getattr(cfg, "flip_orders", False))
+
+
 @dataclass
 class OpenPosition:
     direction: str  # LONG | SHORT
@@ -122,6 +131,14 @@ class OpenPosition:
     # LTP, the entry and the exit). Saved as TradeLog.max_high / max_low.
     high: float | None = None
     low: float | None = None
+    # Flip strategy: the order went the other way from the signal (a buy
+    # signal sold, a sell signal bought). Signal exits follow the signal.
+    flipped: bool = False
+
+    @property
+    def signal_direction(self) -> str:
+        """The side the signal asked for. Crosses, gap fade and Bollinger exits judge this."""
+        return _opposite(self.direction) if self.flipped else self.direction
 
     def note_price(self, price: float) -> None:
         if price <= 0:
@@ -154,7 +171,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -773,6 +790,7 @@ class StrategyEngine:
                     int(row.id),
                     row.mode or "PAPER",
                     row.stop_active is not False,
+                    bool(getattr(row, "flipped", False)),
                 )
                 for row in rows
             ]
@@ -780,7 +798,7 @@ class StrategyEngine:
             cfg = self.load_config()
         except Exception:  # noqa: BLE001
             cfg = None
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped in pending:
             if not symbol or symbol in self.positions:
                 continue
             # A practice book on the moving stop keeps trailing from the saved
@@ -820,6 +838,7 @@ class StrategyEngine:
                 # Ticks before a restart are not kept; the range restarts at entry.
                 high=entry,
                 low=entry,
+                flipped=flipped,
             )
 
     def _restores(self, mode: str) -> bool:
@@ -1151,7 +1170,7 @@ class StrategyEngine:
         if signal is not None and signal_frame is not None:
             want = "LONG" if signal == "BULLISH" else "SHORT"
             pos = self.positions.get(symbol)
-            if pos is not None and pos.direction != want:
+            if pos is not None and pos.signal_direction != want:
                 closed = await self._close_on_cross(signal, signal_frame, cfg, now)
                 if symbol in self.positions:
                     return closed  # the close did not go through; do not arm the reverse
@@ -1252,11 +1271,11 @@ class StrategyEngine:
         gap = sma_gap_signed(fast.iloc[-1], slow.iloc[-1])
         if gap is None:
             return
-        note = judge_exit(cfg, pos.direction, gap, pos.gap_prev, pos.gap_state)
+        note = judge_exit(cfg, pos.signal_direction, gap, pos.gap_prev, pos.gap_state)
         pos.gap_prev = gap
         if note is None:
             return
-        ok, why = fade_confirmed(cfg, pos.direction, float(closes.iloc[-1]), _finite(slow.iloc[-1]), pos.gap_state)
+        ok, why = fade_confirmed(cfg, pos.signal_direction, float(closes.iloc[-1]), _finite(slow.iloc[-1]), pos.gap_state)
         if not ok:
             # A pullback, not a reversal yet: hold and judge the next closed candle.
             self._signals[symbol] = f"{symbol} holding — {note}, but {why}"
@@ -1289,10 +1308,10 @@ class StrategyEngine:
         if gap is None:
             return
         probe = dict(pos.gap_state)
-        note = judge_exit(cfg, pos.direction, gap, pos.gap_prev, probe)
+        note = judge_exit(cfg, pos.signal_direction, gap, pos.gap_prev, probe)
         if note is None:
             return
-        ok, why = fade_confirmed(cfg, pos.direction, float(self.ltp), _finite(slow), probe)
+        ok, why = fade_confirmed(cfg, pos.signal_direction, float(self.ltp), _finite(slow), probe)
         if not ok:
             self._signals[symbol] = f"{symbol} holding — live {note}, but {why}"
             return
@@ -1429,10 +1448,10 @@ class StrategyEngine:
         past_cutoff = now.time() >= cutoff
         cutoff_text = f"no new entries after {cutoff.strftime('%H:%M')} IST"
 
-        if pos is not None and pos.direction == want:
-            return f"already {want}"
+        if pos is not None and pos.signal_direction == want:
+            return f"already {pos.direction}" + (" (flipped)" if pos.flipped else "")
 
-        if pos is not None and pos.direction != want:
+        if pos is not None and pos.signal_direction != want:
             # Opposite cross: cancel SL, verify, flatten, then maybe reverse.
             await self._cancel_sl_verified(pos)
             await self._close_position(pos, self._market_price(cfg.symbol, cross_price), "MA_CROSS", now, cfg)
@@ -1774,7 +1793,13 @@ class StrategyEngine:
         booked or counted, so the stock stays FLAT and the daily trade cap
         is not used up. Shares Groww did fill are always booked, even when
         the stop that follows is refused, so a real position is never lost.
+
+        `direction` is the signal's side. With the flip strategy on, the order
+        goes the other way; the stop and target guard that real position.
         """
+        flipped = flips_orders(cfg)
+        if flipped:
+            direction = _opposite(direction)
         side = "BUY" if direction == "LONG" else "SELL"
         live = (cfg.trading_mode or "").upper() == "LIVE"
         qty = int(cfg.qty)
@@ -1839,6 +1864,7 @@ class StrategyEngine:
             now=now,
             qty=qty,
             stop_active=stop_active,
+            flipped=flipped,
         )
         self.trades_today += 1
         self._rejects.pop((cfg.symbol or "").upper(), None)
@@ -1874,6 +1900,7 @@ class StrategyEngine:
             tsl_best=fill if tsl_step else None,
             high=fill,
             low=fill,
+            flipped=flipped,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -2152,7 +2179,7 @@ class StrategyEngine:
         closes = frame["close"].iloc[:-1]
         reason, note, pos.bb_armed = bollinger_exit(
             closes,
-            pos.direction,
+            pos.signal_direction,
             mode,
             int(getattr(cfg, "bb_period", 20) or 20),
             float(getattr(cfg, "bb_std", 2.0) or 2.0),
@@ -2307,6 +2334,7 @@ class StrategyEngine:
         now: dt.datetime,
         qty: int | None = None,
         stop_active: bool = True,
+        flipped: bool = False,
     ) -> int:
         mode = (cfg.trading_mode or "PAPER").upper()
         run_id = getattr(self, "run_id", None)
@@ -2327,6 +2355,7 @@ class StrategyEngine:
                 sl_trigger_price=sl,
                 mode=mode,
                 stop_active=bool(stop_active),
+                flipped=bool(flipped),
                 run_id=run_id,
                 book_seq=seq,
                 strategy=json.dumps({**settings_snapshot(cfg), "qty": int(qty if qty is not None else cfg.qty)}),
@@ -2454,8 +2483,8 @@ class StrategyEngine:
             other = "BEARISH" if side == "BULLISH" else "BULLISH"
             self._gate_warning((symbol, "cross", other), None, "")
             closes = pos is not None and (
-                (pos.direction == "LONG" and side == "BEARISH")
-                or (pos.direction == "SHORT" and side == "BULLISH")
+                (pos.signal_direction == "LONG" and side == "BEARISH")
+                or (pos.signal_direction == "SHORT" and side == "BULLISH")
             )
             if pos is None and now.time() >= _entry_cutoff(cfg):
                 # No entry can follow, so no heads-up.
@@ -2893,6 +2922,7 @@ class StrategyEngine:
             "stop_enabled": True if view_cfg is None or view_cfg.use_stop is None else bool(view_cfg.use_stop),
             "atr_multiplier": float(view_cfg.atr_multiplier) if view_cfg else 1.5,
             "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
+            "flip_orders": flips_orders(view_cfg) if view_cfg is not None else False,
             # Stocks with their own strategy settings, and which fields they set.
             "stock_settings": stock_settings(cfg) if cfg else {},
             "exchange": cfg.exchange if cfg else "NSE",
@@ -2914,6 +2944,7 @@ class StrategyEngine:
             if pos is None
             else {
                 "direction": pos.direction,
+                "flipped": pos.flipped,
                 "qty": pos.qty,
                 "entry_price": pos.entry_price,
                 "ma_cross_price": pos.ma_cross_price,
@@ -3633,6 +3664,7 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "date": row.date,
         "symbol": row.symbol,
         "direction": row.direction,
+        "flipped": bool(getattr(row, "flipped", False)),
         "qty": row.qty,
         "entry_time": row.entry_time.isoformat() if row.entry_time else None,
         "entry_price": row.entry_price,

@@ -167,6 +167,11 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           <span className="font-bold text-amber-300">OFF</span>
         )}
       </Cell>
+      {state?.flip_orders ? (
+        <Cell label="Flip" title="Flip strategy on: buy signals place a SELL, sell signals a BUY">
+          <span className="font-bold text-amber-300">ON ⇄</span>
+        </Cell>
+      ) : null}
       <Cell label="Cut-off" title="No new entries from this time">
         {cutoff ? <span className="text-slate-100">{cutoff}</span> : <Skeleton className="h-4 w-12" />}
       </Cell>
