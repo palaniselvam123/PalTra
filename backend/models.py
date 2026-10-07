@@ -167,6 +167,10 @@ class BotConfig(Base):
     gap_entry_short: Mapped[float] = mapped_column(Float, default=-0.05)
     gap_exit_short: Mapped[float] = mapped_column(Float, default=-0.02)
     gap_giveback_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    # Fade exit confirmations (gap_mode.fade_confirmed): close beyond the slow
+    # SMA, and/or the gap narrowing on N candles in a row (0 = off).
+    gap_fade_confirm_sma: Mapped[bool] = mapped_column(Boolean, default=False)
+    gap_fade_min_candles: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)

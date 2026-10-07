@@ -23,6 +23,14 @@ Exit (the gap fades)
     the widest gap since entry while still narrowing;
   * the stop, target, square-off and an opposite cross keep working as before.
 
+Telling a pullback from a reversal (both optional, off by default)
+  * ``gap_fade_confirm_sma``: a fade only closes the trade on a candle that
+    also closes on the wrong side of the slow SMA (below it for a buy, above
+    it for a sell). A pullback that narrows the gap but stays on the trade's
+    side of SMA 21 is held; a reversal that breaks through it exits;
+  * ``gap_fade_min_candles`` > 0: the gap must have narrowed on that many
+    closed candles in a row first, so a one-candle dip is not a fade.
+
 Pure functions only; the engine keeps the state and places the orders.
 """
 from __future__ import annotations
@@ -37,6 +45,7 @@ DEFAULTS = {
     "gap_giveback_pct": 0.0,
     "gap_entry_delay_min": 0,
     "gap_entry_window_min": 0,
+    "gap_fade_min_candles": 0,
 }
 
 
@@ -103,6 +112,9 @@ def judge_exit(cfg, direction: str, gap: float, prev_gap: float | None, state: d
     """
     sign = 1.0 if direction == "LONG" else -1.0
     g = sign * gap
+    if prev_gap is not None:
+        # Closed candles in a row on which the gap narrowed (for gap_fade_min_candles).
+        state["narrow_run"] = state.get("narrow_run", 0) + 1 if g < sign * prev_gap else 0
     level = sign * exit_level(cfg, direction)
     state["peak"] = max(state.get("peak", g), g)
     if not state.get("armed"):
@@ -116,6 +128,25 @@ def judge_exit(cfg, direction: str, gap: float, prev_gap: float | None, state: d
     if give > 0 and narrowing and state["peak"] > 0 and g <= state["peak"] * (1 - give / 100):
         return f"SMA gap {gap:+.3f}% gave back {give:g}% of its widest {sign * state['peak']:+.3f}%"
     return None
+
+
+def fade_confirmed(cfg, direction: str, close: float, slow: float | None, state: dict) -> tuple[bool, str]:
+    """Whether a fade judged by judge_exit may close the trade on this candle.
+
+    (True, "") with both confirmations off. Otherwise (False, why it holds).
+    """
+    need = int(setting(cfg, "gap_fade_min_candles"))
+    run = int(state.get("narrow_run", 0))
+    if need > 0 and run < need:
+        return False, f"the gap has narrowed {run} of {need} candles in a row"
+    if bool(getattr(cfg, "gap_fade_confirm_sma", False)):
+        if slow is None or slow != slow:  # NaN
+            return False, "the slow SMA is not ready"
+        if direction == "LONG" and close >= slow:
+            return False, f"close {close:.2f} is still above the slow SMA {slow:.2f}"
+        if direction == "SHORT" and close <= slow:
+            return False, f"close {close:.2f} is still below the slow SMA {slow:.2f}"
+    return True, ""
 
 
 def check(cfg) -> str | None:

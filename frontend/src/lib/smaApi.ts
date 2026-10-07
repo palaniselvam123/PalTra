@@ -82,6 +82,10 @@ export type SmaConfig = {
   gap_entry_short?: number;
   gap_exit_short?: number;
   gap_giveback_pct?: number;
+  /** Fade exit only on a close beyond the slow SMA (rides out a pullback). */
+  gap_fade_confirm_sma?: boolean;
+  /** Fade exit only after the gap narrowed this many candles in a row (0 = off). */
+  gap_fade_min_candles?: number;
   gap_entry_delay_min?: number;
   gap_entry_window_min?: number;
   max_daily_loss: number;
