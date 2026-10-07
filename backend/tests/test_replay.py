@@ -753,7 +753,7 @@ def test_api_replays_a_given_list_of_stocks_instead_of_the_armed_ones(tmp_path, 
         s.commit()
     seen = {}
 
-    async def fake_begin(broker, symbols, day, start, speed, end_day=None, settings=None):
+    async def fake_begin(broker, symbols, day, start, speed, end_day=None, settings=None, **_):
         seen.update(symbols=symbols, day=day, end_day=end_day, speed=speed)
 
     monkeypatch.setattr(main.engine.broker, "token", "test-token")
@@ -770,5 +770,80 @@ def test_api_replays_a_given_list_of_stocks_instead_of_the_armed_ones(tmp_path, 
         assert bad.status_code == 400
         # Arming is untouched: the shortlist is not added to the Trade list.
         assert client.get("/api/config").json()["trade_symbols"] == ["TCS"]
+    database.reset_engine()
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_a_replay_plays_another_bots_settings_into_the_replay_book(db):
+    """Bot 3's replay uses bot 3's settings row (id 4), tags its trades bot 3, and never writes that row."""
+    import database
+    from bots import ensure_bot_config
+    from models import BotConfig, TradeLog
+
+    ensure_bot_config(3)
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 4)
+        row.qty, row.trade_symbols, row.symbol = 7, "TCS", "TCS"
+        s.commit()
+        before = {c.name: getattr(row, c.name) for c in BotConfig.__table__.columns}
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], bot=3)
+    cfg = engine.load_config()
+    assert cfg.qty == 7 and cfg.trading_mode == "REPLAY"
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    await _run_day(engine, dt.time(15, 20))
+
+    with database.session_factory()() as s:
+        rows = s.query(TradeLog).all()
+        after = {c.name: getattr(s.get(BotConfig, 4), c.name) for c in BotConfig.__table__.columns}
+    assert rows and {r.mode for r in rows} == {"REPLAY"} and {r.bot for r in rows} == {3}
+    assert {r.qty for r in rows} == {7}
+    assert after == before  # the bot's own settings row is untouched
+
+
+def test_api_replays_any_bot_and_refuses_only_that_bot_in_live(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    from config import get_settings
+
+    get_settings.cache_clear()
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+    from models import BotConfig
+
+    seen = {}
+
+    async def fake_begin(broker, symbols, day, start, speed, end_day=None, settings=None, bot=1, bot_name=None, **_):
+        seen.update(symbols=symbols, bot=bot, bot_name=bot_name, settings=settings)
+
+    monkeypatch.setattr(main.engine.broker, "token", "test-token")
+    monkeypatch.setattr(main.replay, "begin", fake_begin)
+    with TestClient(main.app) as client:
+        client.put("/api/bots/3/config", json={"bot_name": "Scalper"})
+        client.post("/api/bots/3/trade-symbols", json={"symbol": "INFY", "armed": True})
+        with database.session_factory()() as s:
+            s.get(BotConfig, 1).trade_symbols = "TCS"
+            s.get(BotConfig, 1).trading_mode = "LIVE"  # bot 1 on real money does not block bot 3's replay
+            s.commit()
+        res = client.post("/api/replay/start", json={"date": "2026-09-29", "bot": 3})
+        assert res.status_code == 200, res.text
+        assert seen["symbols"] == ["INFY"] and seen["bot"] == 3 and seen["bot_name"] == "Scalper"
+        assert seen["settings"]["bot"] == 3 and seen["settings"]["bot_name"] == "Scalper"
+        # Bot 1's own replay is still refused while bot 1 is LIVE.
+        res = client.post("/api/replay/start", json={"date": "2026-09-29"})
+        assert res.status_code == 409 and "PAPER" in res.json()["detail"]
+        with database.session_factory()() as s:
+            s.get(BotConfig, 4).trading_mode = "LIVE"
+            s.commit()
+        res = client.post("/api/replay/start", json={"date": "2026-09-29", "bot": 3})
+        assert res.status_code == 409 and "Scalper" in res.json()["detail"]
+        assert client.post("/api/replay/start", json={"date": "2026-09-29", "bot": 9}).status_code == 422
     database.reset_engine()
     get_settings.cache_clear()

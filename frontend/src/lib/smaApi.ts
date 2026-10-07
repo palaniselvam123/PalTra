@@ -403,6 +403,9 @@ export type ReplayInfo = {
   day_index?: number;
   days_total?: number;
   run_id?: number | null;
+  /** The SMA bot whose settings the replay plays (1 = main desk, 2-4). */
+  bot?: number;
+  bot_name?: string;
   /** Scalp-pick runs: the rule and each day's picks (date -> picks, best first). */
   pick_rule?: ScalpPickRule | null;
   picks?: Record<string, ScalpPick[]>;
@@ -544,6 +547,12 @@ function route(path: string): string {
   if (desk === "research") {
     const hit = RESEARCH_PREFIXES.find((prefix) => path.startsWith(prefix));
     return hit ? path.replace("/api/", "/api/research/") : path;
+  }
+  // A desk following its own bot's replay reads the replay engine (bots 2-4 too).
+  if (replayRouting) {
+    if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
+    if (path.startsWith("/api/chart")) return path.replace("/api/chart", "/api/replay/chart");
+    if (path.startsWith("/api/bot/")) return path.replace("/api/bot/", "/api/replay/bot/");
   }
   const bot = deskBot();
   if (bot != null && bot > 1) {
@@ -726,13 +735,13 @@ export const smaApi = {
     speed?: number;
   }) =>
     request<ReplayInfo>("/api/replay/scalp-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
-  /** `symbols` replays those stocks instead of the armed ones (they are not armed). */
-  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[]) =>
+  /** `symbols` replays those stocks instead of the armed ones (they are not armed); `bot` whose settings (default 1). */
+  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[], bot = 1) =>
     request<ReplayInfo>(
       "/api/replay/start",
       {
         method: "POST",
-        body: JSON.stringify({ date, end_date: endDate || null, start, speed, symbols: symbols?.length ? symbols : null }),
+        body: JSON.stringify({ date, end_date: endDate || null, start, speed, symbols: symbols?.length ? symbols : null, bot }),
       },
       20000
     ),

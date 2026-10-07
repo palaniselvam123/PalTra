@@ -1199,8 +1199,9 @@ function OrderTable({
       {/* Phone: one stacked card per trade. */}
       <ul className="space-y-2 p-3 md:hidden">
         {rows.length === 0 && <li className="py-4 text-center text-sm text-slate-400">{empty}</li>}
-        {groups.map((group) => (
-          <li key={group.day} className="space-y-2">
+        {groups.map((group, i) => (
+          // A day can come back later in the list (rows are grouped as they run), so the key carries its place.
+          <li key={`${group.day}-${i}`} className="space-y-2">
             {group.rows.map((trade) => (
               <TradeCard
                 key={trade.id}
@@ -1259,8 +1260,8 @@ function OrderTable({
                 </td>
               </tr>
             )}
-            {groups.map((group) => (
-              <Fragment key={group.day}>
+            {groups.map((group, i) => (
+              <Fragment key={`${group.day}-${i}`}>
                 {group.rows.map((trade) => (
                   <OrderRow
                     key={trade.id}
