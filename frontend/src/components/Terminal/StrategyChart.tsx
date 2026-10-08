@@ -1409,7 +1409,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                 disabled={loadingPast}
                 onClick={() => pickBar(m)}
                 className={clsx(
-                  "min-h-8 min-w-9 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
+                  "min-h-9 min-w-9 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
                   bar === m ? "bg-sky-500/25 font-semibold text-sky-100" : "font-normal text-slate-300 hover:bg-white/5"
                 )}
               >
@@ -1436,7 +1436,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                 : "Hold this view: keep the zoom, scroll and stock you are looking at while the replay or market moves on"
             }
             className={clsx(
-              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
               hold ? "bg-violet-400/20 font-semibold text-violet-100 ring-violet-400/50" : "text-slate-300 ring-white/10 hover:bg-white/5"
             )}
           >
@@ -1449,7 +1449,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             aria-pressed={measuring}
             title="Measure profit or loss between two candles"
             className={clsx(
-              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
               measuring ? "bg-amber-400/20 font-semibold text-amber-100 ring-amber-400/50" : "text-slate-300 ring-white/10 hover:bg-white/5"
             )}
           >
@@ -1462,7 +1462,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             aria-pressed={showProfile}
             title="Volume profile: how many shares traded at each price today"
             className={clsx(
-              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
               showProfile ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
             )}
           >
@@ -1475,7 +1475,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             aria-pressed={chartHidden}
             aria-controls="sma-chart-body"
             title={chartHidden ? "Show the chart" : "Hide the chart (the header stays)"}
-            className="flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+            className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
           >
             {chartHidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
             {chartHidden ? "Show chart" : "Hide chart"}
@@ -1486,7 +1486,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             aria-pressed={showTable}
             title={showTable ? "Hide the data table" : "Show these candles as a table: prices, SMA gap, VWAP, RSI, candle names and trade P&L"}
             className={clsx(
-              "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
               showTable ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
             )}
           >
@@ -1494,7 +1494,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             Table
           </button>
           {past ? (
-            <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
+            <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
             </span>
           ) : null}
@@ -1620,7 +1620,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                   setBoxPos(null);
                   remember(BOX_POS_KEY, "null");
                 }}
-                className="flex min-w-0 flex-1 cursor-move touch-none select-none items-center gap-1 text-[10px] uppercase tracking-wider text-slate-400 sm:text-[11px]"
+                className="flex min-w-0 flex-1 cursor-move touch-none select-none items-center gap-1 text-xs uppercase tracking-wider text-slate-400 sm:text-xs"
               >
                 <GripHorizontal size={12} aria-hidden className="shrink-0 text-slate-500" />
                 <span className="truncate">
@@ -1651,7 +1651,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <div
               className={clsx(
                 "font-mono font-semibold",
-                boxSmall ? "text-sm" : "mt-1 text-[1rem] leading-6 sm:text-lg",
+                boxSmall ? "text-sm" : "mt-1 text-base leading-6 sm:text-xl",
                 pnl.gross >= 0 ? "text-[#10B981]" : "text-[#F43F5E]"
               )}
             >
@@ -1660,12 +1660,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </div>
             {boxSmall ? null : (
             <>
-            <div className="font-mono text-[11px] text-slate-400">
+            <div className="font-mono text-xs text-slate-400">
               {pnl.points >= 0 ? "+" : ""}
               {pnl.points.toFixed(2)} pts · {pnl.pct >= 0 ? "+" : ""}
               {pnl.pct.toFixed(2)}%
             </div>
-            <dl className="mt-2 space-y-0.5 border-t border-white/10 pt-1.5 font-mono text-[11px]">
+            <dl className="mt-2 space-y-0.5 border-t border-white/10 pt-1.5 font-mono text-xs">
               <div className="flex justify-between gap-3">
                 <dt className="font-sans text-amber-300">{pos.tsl_step ? "Trailing stop" : pos.trailing ? "Moving stop" : "Stop"}</dt>
                 <dd className="text-right text-slate-200">
@@ -1758,7 +1758,7 @@ function RangeBar({
   return (
     <div className="border-t border-white/5 px-3 py-2 sm:px-4">
       <form onSubmit={submit} aria-label="Past candles" className="flex flex-wrap items-end gap-2">
-        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
+        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
           From (IST)
           <input
             type="datetime-local"
@@ -1768,7 +1768,7 @@ function RangeBar({
             className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
           />
         </label>
-        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
+        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
           To (IST)
           <input
             type="datetime-local"
@@ -1888,7 +1888,7 @@ function MeasureBar({
         <span className="whitespace-nowrap">
           <span className="text-slate-400">Short</span> <span className={clsx("font-semibold", tone(short))}>{sign(short)}{inr(short)}</span>
         </span>
-        <span className="whitespace-nowrap text-[11px] text-slate-400">gross, before charges</span>
+        <span className="whitespace-nowrap text-xs text-slate-400">gross, before charges</span>
       </>
     );
   }
@@ -1909,7 +1909,7 @@ function MeasureBar({
             inputMode="numeric"
             value={qtyText}
             onChange={(e) => setQtyText(e.target.value.replace(/[^0-9]/g, ""))}
-            className="min-h-8 w-16 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-slate-100"
+            className="min-h-9 w-16 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-slate-100"
             aria-label="Quantity for the P&L"
           />
         </label>
@@ -1924,7 +1924,7 @@ function MeasureBar({
           type="button"
           onClick={onClear}
           disabled={!a}
-          className="min-h-8 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+          className="min-h-9 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
         >
           Clear
         </button>
@@ -1932,7 +1932,7 @@ function MeasureBar({
           type="button"
           onClick={onClose}
           aria-label="Close measure"
-          className="flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+          className="flex min-h-9 min-w-8 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
         >
           <X size={14} aria-hidden />
         </button>
@@ -2058,15 +2058,15 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
   return (
     <div
       role="tooltip"
-      className="pointer-events-none absolute z-20 space-y-1 rounded-lg border border-white/10 bg-[#151921] p-2.5 text-[11px] shadow-xl"
+      className="pointer-events-none absolute z-20 space-y-1 rounded-lg border border-white/10 bg-[#151921] p-2.5 text-xs shadow-xl"
       style={{ left, top, width: cardW }}
     >
       <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-100">
         <span>
           {side} {t.ref ?? ""}
-          {t.flipped ? <span className="ml-1 text-[10px] font-normal text-amber-300">flipped</span> : null}
+          {t.flipped ? <span className="ml-1 text-xs font-normal text-amber-300">flipped</span> : null}
         </span>
-        <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-semibold", t.open ? "bg-slate-500/30 text-slate-200" : "bg-white/10 text-slate-300")}>
+        <span className={clsx("rounded px-1.5 py-0.5 text-xs font-semibold", t.open ? "bg-slate-500/30 text-slate-200" : "bg-white/10 text-slate-300")}>
           {t.open ? "Open" : "Closed"}
         </span>
       </div>

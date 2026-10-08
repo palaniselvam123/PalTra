@@ -323,7 +323,7 @@ export function BacktestRuns() {
       ) : (
         <div className="overflow-x-auto px-2 py-3 sm:px-4">
           <table className="w-full min-w-[860px] whitespace-nowrap text-left text-xs">
-            <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+            <thead className="text-xs uppercase tracking-wider text-slate-400">
               <tr>
                 <SortTh label="Run" k="id" sort={runSort} onSort={onRunSort} />
                 <SortTh label="Days" k="days" text sort={runSort} onSort={onRunSort} />
@@ -367,7 +367,7 @@ export function BacktestRuns() {
                             e.stopPropagation();
                             setOpenId(on ? null : run.id);
                           }}
-                          className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10"
+                          className="mt-1 inline-flex min-h-9 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
                         >
                           {on ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
                           Day-wise P&amp;L
@@ -375,7 +375,7 @@ export function BacktestRuns() {
                       </td>
                       <td className="px-2 py-2 align-top font-mono text-slate-200">
                         {run.days_done}/{run.days_total}
-                        <div className="font-sans text-[11px] text-slate-400">
+                        <div className="font-sans text-xs text-slate-400">
                           {t.green_days}↑ {t.red_days}↓
                         </div>
                       </td>
@@ -383,7 +383,7 @@ export function BacktestRuns() {
                         <div className="truncate" title={strategyLabel(run.settings)}>
                           {strategyLabel(run.settings)}
                         </div>
-                        <div className="truncate text-[11px] text-slate-400" title={run.symbols.join(", ")}>
+                        <div className="truncate text-xs text-slate-400" title={run.symbols.join(", ")}>
                           {run.symbols.join(", ")}
                         </div>
                       </td>
@@ -414,7 +414,7 @@ export function BacktestRuns() {
                                 })
                                 .catch((err: unknown) => setError(err instanceof Error ? err.message : "Resume failed"));
                             }}
-                            className="mr-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-violet-400/50 px-2 text-[11px] font-semibold text-violet-200 hover:bg-violet-500/10"
+                            className="mr-1 inline-flex min-h-9 items-center gap-1 rounded-md border border-violet-400/50 px-2 text-xs font-semibold text-violet-200 hover:bg-violet-500/10"
                           >
                             <Play size={12} aria-hidden /> Resume
                           </button>
@@ -428,7 +428,7 @@ export function BacktestRuns() {
                             e.stopPropagation();
                             void downloadPdf(run);
                           }}
-                          className="mr-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-60"
+                          className="mr-1 inline-flex min-h-9 items-center gap-1 rounded-md border border-sky-500/40 px-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-60"
                         >
                           {printing === run.id ? (
                             <Loader2 size={13} aria-hidden className="animate-spin" />
@@ -444,7 +444,7 @@ export function BacktestRuns() {
                             e.stopPropagation();
                             remove(run);
                           }}
-                          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/5 hover:text-rose-300"
+                          className="inline-flex min-h-9 min-w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/5 hover:text-rose-300"
                         >
                           <Trash2 size={14} aria-hidden />
                         </button>
@@ -550,7 +550,7 @@ function RunDetailBody({
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
-          <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+          <thead className="text-xs uppercase tracking-wider text-slate-400">
             <tr>
               <SortTh label="Day" k="date" text sort={daySort} onSort={onDaySort} />
               <SortTh label="Trades" k="trades" num sort={daySort} onSort={onDaySort} />
@@ -648,7 +648,7 @@ function RunDetailBody({
         </table>
       </div>
       <div className="mt-3 px-2">
-        <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">{settingsTitle}</div>
+        <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">{settingsTitle}</div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
           {(settingsRows ?? SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string])).map(
             ([label, value]) => (
@@ -686,10 +686,10 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
   );
   return (
     <div className="mb-4">
-      <div className="mb-1 px-2 text-[11px] uppercase tracking-wider text-slate-400">By stock</div>
+      <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">By stock</div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] whitespace-nowrap text-left text-xs">
-          <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+          <thead className="text-xs uppercase tracking-wider text-slate-400">
             <tr>
               <SortTh label="Stock" k="symbol" text sort={sort} onSort={onSort} />
               <SortTh label="Trades" k="trades" num sort={sort} onSort={onSort} />
@@ -727,7 +727,7 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
                         {s.symbol}
                       </button>
                       {own && own !== base ? (
-                        <div className="pl-[18px] text-[11px] font-normal text-violet-300" title="This stock traded with its own settings">
+                        <div className="pl-[18px] text-xs font-normal text-violet-300" title="This stock traded with its own settings">
                           {own}
                         </div>
                       ) : null}
@@ -779,7 +779,7 @@ function PickList({ pick }: { pick: ScalpPickInfo }) {
   const days = Object.keys(pick.picks ?? {}).sort();
   return (
     <div className="mb-4 px-2">
-      <div className="mb-1 text-[11px] uppercase tracking-wider text-slate-400">
+      <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">
         Scalp picks · top {pick.top_n} at {pick.pick_time}
         {pick.universe ? ` from ${pick.universe} stocks` : ""} · ATR ≥ {pick.min_atr_pct}%/min · ≥ ₹{pick.min_value_cr} cr
         {pick.require_bias ? " · with a bias" : ""} · spread not checked

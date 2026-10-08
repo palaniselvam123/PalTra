@@ -770,7 +770,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                     className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
                   >
                     <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
-                    <span className="truncate text-[11px] text-slate-400">{hit.name}</span>
+                    <span className="truncate text-xs text-slate-400">{hit.name}</span>
                   </button>
                 ))}
               </div>
@@ -842,7 +842,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             </div>
             <div className="relative overflow-x-auto px-1 pb-1 sm:px-2">
             <table className="w-full text-left" aria-label="Stocks">
-              <thead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+              <thead className="text-xs font-medium uppercase tracking-wider text-slate-400">
                 <tr>
                   <th className="w-8 py-1.5 sm:w-10"><span className="sr-only">Select</span></th>
                   <th className="py-1.5 pr-2">Stock</th>
@@ -904,11 +904,11 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       </div>
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-5">
+          <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-4 sm:p-6">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 text-[#F43F5E]" size={20} />
               <div>
-                <h2 className="text-[17px] font-semibold text-slate-100">
+                <h2 className="text-xl font-semibold text-slate-100">
                   Enable LIVE REAL MONEY{state?.bot_name ? ` for ${state.bot_name}` : ""}?
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">

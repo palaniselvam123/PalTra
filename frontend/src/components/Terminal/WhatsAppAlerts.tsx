@@ -98,16 +98,16 @@ export function WhatsAppAlerts() {
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Trade alerts</div>
-        <span className={active ? "text-[11px] font-semibold text-[#10B981]" : "text-[11px] text-slate-400"}>
+        <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Trade alerts</div>
+        <span className={active ? "text-xs font-semibold text-[#10B981]" : "text-xs text-slate-400"}>
           {active ? `${active.provider} live` : "not connected"}
         </span>
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
         CallMeBot is not replying, so it cannot give a key. Use Telegram. It answers as soon as you create a bot.
         Twilio still sends real WhatsApp if you already have an account.
       </p>
-      <div className="mt-3 flex overflow-hidden rounded-md border border-white/10 text-[11px]">
+      <div className="mt-3 flex overflow-hidden rounded-md border border-white/10 text-xs">
         {(
           [
             ["telegram", "Telegram"],
@@ -129,7 +129,7 @@ export function WhatsAppAlerts() {
       </div>
 
       {provider === "telegram" && (
-        <ol className="mt-3 list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-slate-400">
+        <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
           <li>In Telegram, open @BotFather and send /newbot.</li>
           <li>Copy the token it gives you into the box below.</li>
           <li>Open the bot you just created and send it any message.</li>
@@ -137,13 +137,13 @@ export function WhatsAppAlerts() {
         </ol>
       )}
       {provider === "twilio" && (
-        <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+        <p className="mt-3 text-xs leading-relaxed text-slate-400">
           In the Twilio WhatsApp sandbox, send the join code from your phone to the sandbox number. Then paste your
           number, the account SID and auth token as SID:token, and the sandbox from-number.
         </p>
       )}
       {provider === "callmebot" && (
-        <p className="mt-3 text-[11px] leading-relaxed text-amber-200/80">
+        <p className="mt-3 text-xs leading-relaxed text-amber-200/80">
           CallMeBot did not answer the allow-message. Leave this off unless it later replies with an API key.
         </p>
       )}
@@ -151,7 +151,7 @@ export function WhatsAppAlerts() {
       {provider === "telegram" ? (
         <>
           <label className="mt-3 block">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">Bot token</span>
+            <span className="text-xs uppercase tracking-wider text-slate-400">Bot token</span>
             <input
               type="password"
               value={secret}
@@ -161,7 +161,7 @@ export function WhatsAppAlerts() {
             />
           </label>
           <label className="mt-2 block">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">Chat id, if you already have it</span>
+            <span className="text-xs uppercase tracking-wider text-slate-400">Chat id, if you already have it</span>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -173,7 +173,7 @@ export function WhatsAppAlerts() {
       ) : (
         <>
           <label className="mt-3 block">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">Phone with country code</span>
+            <span className="text-xs uppercase tracking-wider text-slate-400">Phone with country code</span>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -182,14 +182,14 @@ export function WhatsAppAlerts() {
             />
           </label>
           <label className="mt-2 block">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+            <span className="text-xs uppercase tracking-wider text-slate-400">
               {provider === "callmebot" ? "CallMeBot API key" : "account SID:auth token"}
             </span>
             <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} className={inputCls} />
           </label>
           {provider === "twilio" && (
             <label className="mt-2 block">
-              <span className="text-[11px] uppercase tracking-wider text-slate-400">Twilio WhatsApp from number</span>
+              <span className="text-xs uppercase tracking-wider text-slate-400">Twilio WhatsApp from number</span>
               <input
                 value={fromNumber}
                 onChange={(e) => setFromNumber(e.target.value)}
@@ -219,7 +219,7 @@ export function WhatsAppAlerts() {
           Send test
         </button>
       </div>
-      {note && <p className="mt-2 text-[11px] text-slate-400">{note}</p>}
+      {note && <p className="mt-2 text-xs text-slate-400">{note}</p>}
     </section>
   );
 }

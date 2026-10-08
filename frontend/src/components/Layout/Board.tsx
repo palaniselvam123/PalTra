@@ -213,7 +213,7 @@ export function Board({
   return (
     <div ref={rootRef} className={clsx("space-y-2", className)}>
       {floating.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           <span>Popped out:</span>
           {floating.map((id) => (
             <button
@@ -247,7 +247,7 @@ export function Board({
           )
         : null}
       {hidden.length > 0 || customised ? (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           {hidden.length > 0 ? (
             <>
               <span>Hidden:</span>
@@ -441,7 +441,7 @@ function BoardPanel({
         aria-label={`${spec.title} layout`}
         className="pointer-events-none absolute -top-3 right-2 z-30 flex items-center gap-0.5 rounded-lg border border-white/10 bg-[#0f131a]/95 p-0.5 opacity-0 shadow-lg transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100"
       >
-        <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{spec.title}</span>
+        <span className="px-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{spec.title}</span>
         <button
           type="button"
           aria-label={`Drag to move ${spec.title}`}
@@ -466,7 +466,7 @@ function BoardPanel({
         </button>
         <button
           type="button"
-          className={clsx(tool, "hidden gap-1 px-1.5 text-[11px]", widths && "xl:inline-flex")}
+          className={clsx(tool, "hidden gap-1 px-1.5 text-xs", widths && "xl:inline-flex")}
           onClick={onSpan}
           aria-label={`Width of ${spec.title}: ${SPAN_LABEL[span]}. Change`}
           title="Change the width (wide screens)"
@@ -474,7 +474,7 @@ function BoardPanel({
           <MoveHorizontal size={13} aria-hidden /> {SPAN_LABEL[span]}
         </button>
         {resize !== "none" && height != null ? (
-          <button type="button" className={clsx(tool, "px-1.5 text-[11px]")} onClick={() => onHeight(null)} title="Back to the normal height">
+          <button type="button" className={clsx(tool, "px-1.5 text-xs")} onClick={() => onHeight(null)} title="Back to the normal height">
             Auto height
           </button>
         ) : null}
@@ -618,7 +618,7 @@ function FloatingPanel({
           <button
             type="button"
             onClick={onDock}
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/10"
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/10"
             title="Put it back in the page"
           >
             <PanelBottomClose size={12} aria-hidden /> Dock

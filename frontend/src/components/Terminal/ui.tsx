@@ -47,7 +47,7 @@ export function Badge({
     <span
       title={title}
       className={clsx(
-        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide ring-1 ring-inset",
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-semibold uppercase leading-4 tracking-wide ring-1 ring-inset",
         BADGE[color],
         className
       )}

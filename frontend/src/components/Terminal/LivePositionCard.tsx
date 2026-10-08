@@ -13,7 +13,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
 
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">
+      <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
         Live position{state?.symbol ? ` · ${state.symbol}` : ""}
       </div>
       {state != null && stopOff && (
@@ -26,7 +26,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
             : "STOP-LOSS OFF — new entries will be sent with no stop order."}
         </div>
       )}
-      <div className={clsx("mt-1 font-mono text-[17px] font-semibold leading-snug sm:text-lg", tone)}>
+      <div className={clsx("mt-1 font-mono text-base font-semibold leading-snug sm:text-xl", tone)}>
         {state == null
           ? pending
             ? "Position did not load"
@@ -82,7 +82,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
       {state?.last_signal && <p className="mt-3 text-xs text-slate-400">{state.last_signal}</p>}
       {(state?.books ?? []).length > 0 && (
         <div className="mt-3 space-y-1 border-t border-white/5 pt-3">
-          <div className="flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-slate-400">
+          <div className="flex items-baseline justify-between gap-2 text-xs uppercase tracking-wider text-slate-400">
             <span>Armed stocks</span>
             <span>Today P&amp;L</span>
           </div>
@@ -152,7 +152,7 @@ function AllStocksTotal({ state }: { state: SmaState | null }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-wider text-slate-400">{label}</dt>
+      <dt className="text-xs uppercase tracking-wider text-slate-400">{label}</dt>
       <dd className="font-mono text-slate-100">{value}</dd>
     </div>
   );
@@ -162,9 +162,9 @@ function Meter({ label, value, hint }: { label: string; value: number; hint?: st
   const up = value >= 0;
   return (
     <div className="rounded-lg bg-black/20 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wider text-slate-400">{label}</div>
-      <div className={clsx("font-mono text-[17px] font-semibold", up ? "text-[#10B981]" : "text-[#F43F5E]")}>{inr(value)}</div>
-      {hint && <div className="text-[11px] text-slate-400">{hint}</div>}
+      <div className="text-xs uppercase tracking-wider text-slate-400">{label}</div>
+      <div className={clsx("font-mono text-base font-semibold", up ? "text-[#10B981]" : "text-[#F43F5E]")}>{inr(value)}</div>
+      {hint && <div className="text-xs text-slate-400">{hint}</div>}
     </div>
   );
 }

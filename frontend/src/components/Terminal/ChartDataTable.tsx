@@ -116,7 +116,7 @@ function SecondsRows({
     );
   } else {
     body = (
-      <table className="min-w-max text-[11px]">
+      <table className="min-w-max text-xs">
         <thead>
           <tr className="text-slate-400">
             <th className="px-2 py-1 text-left font-semibold">Second</th>
@@ -313,7 +313,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
           <select
             value={quick}
             onChange={(e) => setQuick(e.target.value as Quick)}
-            className="min-h-8 rounded-md bg-[#0B0E14] px-2 text-xs text-slate-200 ring-1 ring-inset ring-white/10"
+            className="min-h-9 rounded-md bg-[#0B0E14] px-2 text-xs text-slate-200 ring-1 ring-inset ring-white/10"
           >
             {QUICK.map((q) => (
               <option key={q.id} value={q.id}>
@@ -329,7 +329,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search rows"
             aria-label="Search rows"
-            className="min-h-8 w-full rounded-md bg-[#0B0E14] pl-7 pr-2 text-xs text-slate-200 ring-1 ring-inset ring-white/10 placeholder:text-slate-500"
+            className="min-h-9 w-full rounded-md bg-[#0B0E14] pl-7 pr-2 text-xs text-slate-200 ring-1 ring-inset ring-white/10 placeholder:text-slate-500"
           />
         </label>
         <button
@@ -338,7 +338,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
           aria-pressed={showFilters}
           title="Filter by column: >0.05, <=30, 10..20, =Exit, !=Holding, or text"
           className={clsx(
-            "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+            "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
             showFilters || activeFilters ? "bg-sky-400/15 text-sky-100 ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
           )}
         >
@@ -351,7 +351,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
           aria-pressed={showColumns}
           aria-controls="table-columns"
           className={clsx(
-            "flex min-h-8 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+            "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
             showColumns ? "bg-sky-400/15 text-sky-100 ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
           )}
         >
@@ -364,7 +364,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
             onClick={downloadCsv}
             disabled={!shown.length}
             title="The rows and columns shown (all pages), raw numbers"
-            className="flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+            className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
           >
             <FileDown size={13} aria-hidden />
             CSV
@@ -374,7 +374,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
             onClick={downloadPdf}
             disabled={!shown.length || busy === "pdf"}
             title="The rows and columns shown (all pages)"
-            className="flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+            className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
           >
             <FileDown size={13} aria-hidden />
             {busy === "pdf" ? "PDF…" : "PDF"}
@@ -399,14 +399,14 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
               <button
                 type="button"
                 onClick={() => saveLayout({ ...layout, hidden: [] })}
-                className="min-h-8 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+                className="min-h-9 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
               >
                 Show all
               </button>
               <button
                 type="button"
                 onClick={() => saveLayout(defaultLayout())}
-                className="flex min-h-8 items-center gap-1 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+                className="flex min-h-9 items-center gap-1 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
               >
                 <RotateCcw size={12} aria-hidden />
                 Reset
@@ -420,7 +420,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
               const on = !layout.hidden.includes(id);
               return (
                 <li key={id} className="flex items-center gap-1 rounded-md bg-white/[0.03] px-2 py-0.5 text-xs">
-                  <label className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-slate-200">
+                  <label className="flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 text-slate-200">
                     <input type="checkbox" checked={on} onChange={() => toggleCol(id)} className="h-4 w-4 accent-sky-400" />
                     <span className="truncate">{col.label}</span>
                   </label>
@@ -492,7 +492,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
                         onChange={(e) => setFilters((f) => ({ ...f, [c.id]: e.target.value }))}
                         placeholder={c.kind === "text" ? "contains" : ">, <, a..b"}
                         aria-label={`Filter ${c.label}`}
-                        className="min-h-7 w-full min-w-[64px] rounded bg-[#0B0E14] px-1.5 pr-5 text-[11px] text-slate-200 ring-1 ring-inset ring-white/10 placeholder:text-slate-600"
+                        className="min-h-7 w-full min-w-[64px] rounded bg-[#0B0E14] px-1.5 pr-5 text-xs text-slate-200 ring-1 ring-inset ring-white/10 placeholder:text-slate-600"
                       />
                       {filters[c.id] ? (
                         <button
@@ -577,7 +577,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
               setPageSize(next);
               remember(PAGE_KEY, String(next));
             }}
-            className="min-h-8 rounded-md bg-[#0B0E14] px-2 text-slate-200 ring-1 ring-inset ring-white/10"
+            className="min-h-9 rounded-md bg-[#0B0E14] px-2 text-slate-200 ring-1 ring-inset ring-white/10"
           >
             {PAGE_SIZES.map((n) => (
               <option key={n} value={n}>
@@ -592,7 +592,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
               type="button"
               onClick={() => setPage(Math.max(0, current - 1))}
               disabled={current === 0}
-              className="min-h-8 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+              className="min-h-9 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
             >
               Prev
             </button>
@@ -603,7 +603,7 @@ export function ChartDataTable({ candles, markers, trades, snap, symbol, barLabe
               type="button"
               onClick={() => setPage(Math.min(pages - 1, current + 1))}
               disabled={current >= pages - 1}
-              className="min-h-8 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+              className="min-h-9 rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
             >
               Next
             </button>

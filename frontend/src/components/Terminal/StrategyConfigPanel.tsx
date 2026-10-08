@@ -294,9 +294,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       {/* Two fixed columns on a wide screen: setup, stop and entry filters on the left; Bollinger, gap and
           candle-direction rules on the right. Each block stays whole. */}
       <div className="min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
+          <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
           <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">Settings for</span>
+            <span className="text-xs uppercase tracking-wider text-slate-400">Settings for</span>
             <select
               value={scope}
               onChange={(e) => pick(e.target.value)}
@@ -312,14 +312,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </select>
           </label>
           {stockScope ? (
-            <p className="mt-2 rounded-md border border-violet-400/25 bg-violet-400/[0.06] p-2 text-[11px] leading-snug text-slate-300">
+            <p className="mt-2 rounded-md border border-violet-400/25 bg-violet-400/[0.06] p-2 text-xs leading-snug text-slate-300">
               {Object.keys(own).length
                 ? `${scope} has its own ${ownSummary(own)} (marked “own”). Everything else follows the shared settings.`
                 : `${scope} uses the shared settings. Change any value below and Save to give it its own.`}{" "}
               Daily loss, trades per day, entry cut-off and square-off are for the whole account.
             </p>
           ) : withOwn.length ? (
-            <p className="mt-2 text-[11px] leading-snug text-slate-400">
+            <p className="mt-2 text-xs leading-snug text-slate-400">
               Own settings:{" "}
               {withOwn.map((name, i) => (
                 <span key={name}>
@@ -332,7 +332,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
               . Changing a shared value here does not change those.{" "}
               {confirmClear ? (
-                <span className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[11px] text-slate-200">
+                <span className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/[0.08] p-2 text-xs text-slate-200">
                   Clear the own settings of {withOwn.length} stock{withOwn.length === 1 ? "" : "s"} ({withOwn.join(", ")})? Each
                   then trades with the shared settings from its next order.
                   <button
@@ -407,7 +407,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </div>
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <label className="block text-sm text-slate-300">
-                <span className="text-[11px] uppercase tracking-wider text-slate-400">Enter on</span>
+                <span className="text-xs uppercase tracking-wider text-slate-400">Enter on</span>
                 <select
                   value={form.entry_mode ?? "SMA"}
                   onChange={(e) => set("entry_mode", e.target.value)}
@@ -418,7 +418,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 </select>
               </label>
               <label className="block text-sm text-slate-300">
-                <span className="text-[11px] uppercase tracking-wider text-slate-400">Pattern candle{isOwn("pattern_tf") ? " (own)" : ""}</span>
+                <span className="text-xs uppercase tracking-wider text-slate-400">Pattern candle{isOwn("pattern_tf") ? " (own)" : ""}</span>
                 <select
                   value={String(form.pattern_tf ?? 1)}
                   onChange={(e) => set("pattern_tf", e.target.value)}
@@ -430,7 +430,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 </select>
               </label>
               <label className="block text-sm text-slate-300">
-                <span className="text-[11px] uppercase tracking-wider text-slate-400">Patterns{isOwn("pattern_set") ? " (own)" : ""}</span>
+                <span className="text-xs uppercase tracking-wider text-slate-400">Patterns{isOwn("pattern_set") ? " (own)" : ""}</span>
                 <select
                   value={form.pattern_set ?? "STRONG"}
                   onChange={(e) => set("pattern_set", e.target.value)}
@@ -492,7 +492,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         <div className="min-w-0">
           <SectionTitle>SMA gap mode</SectionTitle>
           {form.entry_mode === "PATTERN" ? (
-            <p className="mt-1 text-[11px] leading-snug text-amber-300">
+            <p className="mt-1 text-xs leading-snug text-amber-300">
               Not used while “Enter on” is Candle patterns: pattern trades open at the candle start and close at its end.
             </p>
           ) : null}
@@ -547,7 +547,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                         }
                         setMsg("Changed — press Save to keep it.");
                       }}
-                      className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+                      className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
                     >
                       {note.fix.label}
                     </button>
@@ -771,7 +771,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("candle_dir_count")}
             />
             <label className="block text-sm text-slate-300">
-              <span className="text-[11px] uppercase tracking-wider text-slate-400">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
                 Rule{isOwn("candle_dir_rule") && <OwnTag />}
               </span>
               <select
@@ -809,7 +809,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </InfoTip>
           </label>
           <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+            <span className="text-xs uppercase tracking-wider text-slate-400">
               Stop type{isOwn("stop_type") && <OwnTag />}
             </span>
             <select
@@ -898,14 +898,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   set("cross_exit", true);
                   setMsg("Changed — press Save to keep it.");
                 }}
-                className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+                className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
               >
                 Turn the SMA cross exit on
               </button>
             </p>
           ) : null}
           <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+            <span className="text-xs uppercase tracking-wider text-slate-400">
               Bollinger exit{isOwn("bb_exit") && <OwnTag />}
               <InfoTip label="About the Bollinger exit">
                 Read once per closed 1-minute candle after the entry, on the Bollinger Period and Width (the bands show on the
@@ -975,7 +975,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           {stockScope ? `Save for ${scope}` : "Save"}
         </button>
         {unsaved && !busy ? (
-          <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
+          <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
             Unsaved changes
           </span>
         ) : null}
@@ -1013,7 +1013,7 @@ function FieldGroup({ title, hint, wide, children }: { title: string; hint: stri
 }
 
 function OwnTag() {
-  return <span className="ml-1 shrink-0 text-[11px] normal-case tracking-normal text-violet-300">· own</span>;
+  return <span className="ml-1 shrink-0 text-xs normal-case tracking-normal text-violet-300">· own</span>;
 }
 
 function Field({
@@ -1076,7 +1076,7 @@ function Field({
 /** A small heading that splits the settings into groups. */
 function SectionTitle({ children, info }: { children: ReactNode; info?: ReactNode }) {
   return (
-    <div className="mt-5 flex items-center gap-1 border-t border-white/10 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
+    <div className="mt-5 flex items-center gap-1 border-t border-white/10 pt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
       {children}
       {info ? <InfoTip label={`About ${typeof children === "string" ? children : "this section"}`}>{info}</InfoTip> : null}
     </div>
@@ -1086,7 +1086,7 @@ function SectionTitle({ children, info }: { children: ReactNode; info?: ReactNod
 /** A one-line "How it works" with the explanation in an ⓘ popover, under a group of fields. */
 function Hint({ children, label }: { children: ReactNode; label: string }) {
   return (
-    <div className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-400">
+    <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
       <InfoTip label={label}>{children}</InfoTip>
       How it works
     </div>
