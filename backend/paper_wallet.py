@@ -19,19 +19,22 @@ The balance itself is never stored as a running number:
     free = loaded + borrowed + P&L of PAPER trades opened since the start
            and closed - margin of every open PAPER trade
 
-so it always matches the trade book, restarts included. With no money loaded
-the wallet is off and PAPER trades exactly as before. LIVE, replay and
-research trades never touch it.
+so it always matches the trade book, restarts included. Replays use the
+same wallet (the owner's choice): a REPLAY trade of a run started since the
+start blocks its margin and returns its P&L like a PAPER one, so a backtest
+shows what money it needs. Deleting a run takes its P&L back off. With no
+money loaded the wallet is off and PAPER trades exactly as before. LIVE and
+the Research desk never touch it.
 """
 from __future__ import annotations
 
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 
 from database import session_factory
-from models import PaperWallet, TradeLog, WalletEntry
+from models import PaperWallet, ReplayRun, TradeLog, WalletEntry
 
 IST = ZoneInfo("Asia/Kolkata")
 MIN_LOAD = 1.0
@@ -58,23 +61,37 @@ def margin_for(price: float, qty: int, margin_pct: float) -> float:
     return abs(float(price) * int(qty)) * float(margin_pct) / 100.0
 
 
+def _counted(since: dt.datetime):
+    """The trades the wallet counts: PAPER ones opened since the start, and
+    REPLAY ones of runs started since then (a replayed trade's own times are
+    the past day it replays, so the run's start decides)."""
+    runs = select(ReplayRun.id).where(ReplayRun.created_at >= since)
+    return or_(
+        and_(TradeLog.mode == "PAPER", TradeLog.entry_time >= since),
+        and_(TradeLog.mode == "REPLAY", TradeLog.run_id.in_(runs)),
+    )
+
+
 def _figures(db, row: PaperWallet | None) -> dict:
     if row is None or row.funds <= 0:
         return {"realized": 0.0, "blocked": 0.0, "available": 0.0, "open": []}
     realized = db.execute(
         select(func.coalesce(func.sum(TradeLog.gross_pnl), 0.0)).where(
-            and_(TradeLog.mode == "PAPER", TradeLog.exit_time.is_not(None), TradeLog.entry_time >= row.since)
+            and_(_counted(row.since), TradeLog.exit_time.is_not(None))
         )
     ).scalar_one()
     open_rows = db.execute(
-        select(TradeLog.symbol, TradeLog.bot, TradeLog.direction, TradeLog.qty, TradeLog.entry_price).where(
-            and_(TradeLog.mode == "PAPER", TradeLog.exit_time.is_(None))
+        select(TradeLog.symbol, TradeLog.bot, TradeLog.direction, TradeLog.qty, TradeLog.entry_price, TradeLog.mode).where(
+            and_(
+                or_(TradeLog.mode == "PAPER", _counted(row.since)),
+                TradeLog.exit_time.is_(None),
+            )
         )
     ).all()
     opened = [
         {
             "symbol": r.symbol, "bot": int(r.bot or 1), "direction": r.direction, "qty": int(r.qty),
-            "entry_price": float(r.entry_price),
+            "entry_price": float(r.entry_price), "replay": r.mode == "REPLAY",
             "margin": round(margin_for(r.entry_price, r.qty, row.margin_pct), 2),
         }
         for r in open_rows
@@ -159,7 +176,7 @@ def loans(limit: int = 500) -> list[dict]:
         return [_entry_dict(e) for e in rows]
 
 
-def cover(symbol: str, qty: int, price: float, bot: int = 1) -> dict | None:
+def cover(symbol: str, qty: int, price: float, bot: int = 1, replay: bool = False) -> dict | None:
     """Make sure a PAPER entry's margin is there; borrow the shortfall when it is not.
 
     Returns None when the wallet is off or the free balance covers it, else
@@ -188,12 +205,14 @@ def cover(symbol: str, qty: int, price: float, bot: int = 1) -> dict | None:
         )
         entry = _record(
             db, "LOAN", short, bot=int(bot), symbol=symbol.upper(), qty=int(qty), price=round(float(price), 2),
-            need=need, repaid=0.0, note=f"Bot {int(bot)} entry, {_money(max(free, 0.0))} free",
+            need=need, repaid=0.0,
+            note=f"Bot {int(bot)} {'replay ' if replay else ''}entry, {_money(max(free, 0.0))} free",
         )
         db.commit()
         LAST_LOAN = {
             "id": entry.id,
             "bot": int(bot),
+            "replay": bool(replay),
             "symbol": symbol.upper(),
             "qty": int(qty),
             "price": round(float(price), 2),

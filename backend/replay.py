@@ -214,7 +214,7 @@ class ReplayEngine(StrategyEngine):
     """The SMA bot on a replayed day: its own clock, books and broker."""
 
     records_ticks = False  # its prices are walked from minute candles
-    uses_wallet = False  # a replay keeps its own practice money
+    uses_wallet = True  # a replay takes margin from the bots' practice wallet (owner's choice)
 
     def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None, bot: int = 1):
         self.feed = feed

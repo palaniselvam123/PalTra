@@ -848,3 +848,39 @@ def test_api_replays_any_bot_and_refuses_only_that_bot_in_live(tmp_path, monkeyp
         assert client.post("/api/replay/start", json={"date": "2026-09-29", "bot": 9}).status_code == 422
     database.reset_engine()
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_a_replay_takes_margin_from_the_wallet_and_returns_its_pnl(db, monkeypatch):
+    import paper_wallet
+    import replay as replay_mod
+    from database import session_factory
+    from models import TradeLog
+
+    mon, warm = dt.date(2026, 9, 28), dt.date(2026, 9, 25)
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.concat([_wave_day(d) for d in (warm, mon)]).reset_index(drop=True)
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "SESSION_END", dt.time(10, 30))
+    monkeypatch.setattr(replay_mod, "STEP_SECONDS", 60)
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+    paper_wallet.add(100)  # less than one entry's margin (10 x ~Rs 1,000 x 20%): the replay borrows
+
+    session = ReplaySession()
+    await session.begin(object(), ["TCS"], mon, dt.time(9, 15), 1_000_000, settings={"qty": 10, "stop_type": "ATR"})
+    for _ in range(600):
+        await asyncio.sleep(0.05)
+        if session.status in ("FINISHED", "ERROR"):
+            break
+    assert session.status == "FINISHED", session.error
+    with session_factory()() as s:
+        trades = s.query(TradeLog).filter(TradeLog.run_id == session.info()["run_id"]).all()
+    assert trades and all(t.exit_time is not None for t in trades)
+    w = paper_wallet.summary()
+    assert w["blocked"] == 0  # every margin came back at the square-off
+    assert w["realized"] == pytest.approx(sum(t.gross_pnl for t in trades), abs=0.01)
+    assert w["loan"] > 0 and "replay entry" in paper_wallet.loans()[-1]["note"]
+    await session.stop()

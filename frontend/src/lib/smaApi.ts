@@ -292,6 +292,8 @@ export type ChartFilters = {
 export type WalletLoan = {
   id?: number;
   bot?: number;
+  /** True when a replay took it. */
+  replay?: boolean;
   symbol: string;
   qty: number;
   price: number;

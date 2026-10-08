@@ -1,7 +1,8 @@
 """Practice wallet for the PAPER bots: margin blocked per entry, loans when short.
 
-PAPER only, local fills (stub Groww session). LIVE, replay and research
-engines never touch the wallet, and with no money loaded PAPER trades as before.
+PAPER only, local fills (stub Groww session). Replays share the wallet;
+LIVE and the research engines never touch it, and with no money loaded PAPER
+trades as before.
 """
 from __future__ import annotations
 
@@ -129,14 +130,75 @@ async def test_no_money_loaded_trades_as_before(eng):
     assert eng.snapshot()["wallet_loan"] is None
 
 
-def test_replay_and_research_engines_never_use_the_wallet():
+def test_replays_use_the_wallet_and_research_engines_never_do():
     from bots import BotEngine
     from replay import ReplayEngine
     from research import ResearchEngine
+    from sma_research.replayer import ResearchEngine as StockResearchEngine
     from strategy_engine import StrategyEngine
 
-    assert StrategyEngine.uses_wallet and BotEngine.uses_wallet
-    assert not ReplayEngine.uses_wallet and not ResearchEngine.uses_wallet
+    assert StrategyEngine.uses_wallet and BotEngine.uses_wallet and ReplayEngine.uses_wallet
+    assert not ResearchEngine.uses_wallet and not StockResearchEngine.uses_wallet
+
+
+def _run(created_at: dt.datetime) -> int:
+    import database
+    from models import ReplayRun
+
+    with database.session_factory()() as db:
+        run = ReplayRun(created_at=created_at, start_date="2026-09-01", end_date="2026-09-01")
+        db.add(run)
+        db.commit()
+        return run.id
+
+
+@pytest.mark.asyncio
+async def test_a_replay_entry_blocks_margin_and_its_pnl_comes_back(eng):
+    import paper_wallet
+
+    _load(1000)
+    eng.run_id = _run(dt.datetime(2026, 9, 1, 18, 0))  # a run started after the wallet opened
+    cfg = _cfg(eng, qty=100)
+    cfg.trading_mode = "REPLAY"
+    await _buy(eng, cfg, 10.0)  # replayed day is in the past; the run's start counts
+    w = paper_wallet.summary()
+    assert w["blocked"] == pytest.approx(200.0) and w["available"] == pytest.approx(800.0)
+    assert w["open"][0]["replay"] is True
+    await eng._exit_now(cfg, 11.0, "MANUAL_CLOSE")  # +Rs 100 before charges
+    w = paper_wallet.summary()
+    assert w["blocked"] == 0 and w["available"] == pytest.approx(1100.0)
+
+
+@pytest.mark.asyncio
+async def test_a_short_replay_borrows_like_paper(eng):
+    import paper_wallet
+
+    _load(50)
+    eng.run_id = _run(dt.datetime(2026, 9, 1, 18, 0))
+    cfg = _cfg(eng, qty=100)
+    cfg.trading_mode = "REPLAY"
+    await _buy(eng, cfg, 10.0)  # needs Rs 200, Rs 50 free
+    w = paper_wallet.summary()
+    assert w["loan"] == pytest.approx(150.0)
+    assert w["last_loan"]["replay"] is True
+    assert "replay entry" in paper_wallet.loans()[0]["note"]
+
+
+def test_replay_runs_before_the_wallet_opened_do_not_count(eng):
+    import database
+    import paper_wallet
+    from models import TradeLog
+
+    _load(1000)
+    old = _run(dt.datetime(2025, 12, 1, 18, 0))
+    with database.session_factory()() as db:
+        db.add(TradeLog(
+            date="2025-11-28", symbol="TCS", direction="LONG", qty=10, entry_time=dt.datetime(2025, 11, 28, 10, 0),
+            entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger_price=99.0,
+            exit_time=dt.datetime(2025, 11, 28, 11, 0), exit_price=150.0, gross_pnl=500.0, mode="REPLAY", run_id=old, bot=1,
+        ))
+        db.commit()
+    assert paper_wallet.summary()["available"] == pytest.approx(1000.0)
 
 
 def test_load_limits_and_api(tmp_path, monkeypatch):

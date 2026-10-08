@@ -57,6 +57,8 @@ def baseline_settings(row: dict) -> dict:
 class ResearchEngine(ReplayEngine):
     """ReplayEngine with fixed settings and no chart work."""
 
+    uses_wallet = False  # offline research never touches the practice wallet
+
     def __init__(self, feed: ReplayFeed, symbol: str, settings: dict):
         self._settings = dict(settings)
         super().__init__(feed, [symbol])

@@ -652,8 +652,8 @@ class StrategyEngine:
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
-    #: Whether PAPER entries take margin from the practice wallet (paper_wallet).
-    #: Bots 1-4 do; replay and research engines keep their own practice money.
+    #: Whether PAPER (and REPLAY) entries take margin from the practice wallet
+    #: (paper_wallet). Bots 1-4 and their replays do; the research engines don't.
     uses_wallet = True
 
     def __init__(self, broker: GrowwClient | None = None):
@@ -1884,10 +1884,11 @@ class StrategyEngine:
         # The order goes out at the market price now. cross_price stays the
         # signal candle's close, so entry minus cross is the real fill lag.
         order_price = self._market_price(cfg.symbol, cross_price)
-        if self.uses_wallet and (cfg.trading_mode or "PAPER").upper() == "PAPER":
+        practice = (cfg.trading_mode or "PAPER").upper()
+        if self.uses_wallet and practice in ("PAPER", "REPLAY"):
             # Practice wallet: block the margin, borrowing any shortfall. Never stops the order.
             try:
-                loan = paper_wallet.cover(cfg.symbol, qty, order_price, bot=self.bot_id)
+                loan = paper_wallet.cover(cfg.symbol, qty, order_price, bot=self.bot_id, replay=practice == "REPLAY")
             except Exception:  # noqa: BLE001
                 logger.exception("paper wallet margin check failed for %s", cfg.symbol)
                 loan = None

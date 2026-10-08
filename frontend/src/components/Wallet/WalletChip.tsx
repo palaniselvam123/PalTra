@@ -151,7 +151,7 @@ function LoanPopup({ loan, onClose, onOpenWallet }: { loan: WalletLoan; onClose:
     <Modal title="Loan taken for an order" onClose={onClose}>
       <div role="alert" className="space-y-2">
         <p className="text-slate-200">
-          {loan.bot ? <>Bot {loan.bot}: </> : null}
+          {loan.bot ? <>Bot {loan.bot}{loan.replay ? " replay" : ""}: </> : null}
           <b>{loan.symbol}</b> ×{loan.qty} at {inr(loan.price)} needed <b>{inr(loan.need)}</b> margin, but only{" "}
           <b>{inr(Math.max(0, loan.available))}</b> was free. The order was placed with a loan of{" "}
           <b className="text-amber-300">{inr(loan.borrowed)}</b>.
@@ -343,7 +343,7 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
       </>
       )}
       <p className="mt-3 text-[11px] text-slate-500">
-        Practice money only. LIVE bots use your real Groww balance; replays and the Research desk keep their own.
+        Practice money only, shared by the PAPER bots and their replays. LIVE bots use your real Groww balance; the Research desk keeps its own.
       </p>
     </Modal>
   );
