@@ -631,26 +631,28 @@ const RESEARCH_PREFIXES = ["/api/state", "/api/chart", "/api/history", "/api/con
 /** Bots 2-4 have the same routes under /api/bots/{n}/, their own PAPER/LIVE switch included. */
 const BOT_PREFIXES = [...RESEARCH_PREFIXES, "/api/mode"];
 
+/** Each bot has its own replay (they can play together): this desk's bot, 1 for the research desk. */
+function replayPath(path: string): string {
+  const bot = deskBot() ?? 1;
+  return `${path}${path.includes("?") ? "&" : "?"}bot=${bot}`;
+}
+
 function route(path: string): string {
   if (desk === "research") {
     const hit = RESEARCH_PREFIXES.find((prefix) => path.startsWith(prefix));
     return hit ? path.replace("/api/", "/api/research/") : path;
   }
-  // A desk following its own bot's replay reads the replay engine (bots 2-4 too).
+  // A desk following its own bot's replay reads that bot's replay engine (bots 2-4 too).
   if (replayRouting) {
-    if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
-    if (path.startsWith("/api/chart")) return path.replace("/api/chart", "/api/replay/chart");
-    if (path.startsWith("/api/bot/")) return path.replace("/api/bot/", "/api/replay/bot/");
+    if (path.startsWith("/api/state")) return replayPath(path.replace("/api/state", "/api/replay/state"));
+    if (path.startsWith("/api/chart")) return replayPath(path.replace("/api/chart", "/api/replay/chart"));
+    if (path.startsWith("/api/bot/")) return replayPath(path.replace("/api/bot/", "/api/replay/bot/"));
   }
   const bot = deskBot();
   if (bot != null && bot > 1) {
     const hit = BOT_PREFIXES.find((prefix) => path.startsWith(prefix));
     return hit ? path.replace("/api/", `/api/bots/${bot}/`) : path;
   }
-  if (!replayRouting) return path;
-  if (path.startsWith("/api/state")) return path.replace("/api/state", "/api/replay/state");
-  if (path.startsWith("/api/chart")) return path.replace("/api/chart", "/api/replay/chart");
-  if (path.startsWith("/api/bot/")) return path.replace("/api/bot/", "/api/replay/bot/");
   return path;
 }
 
@@ -851,7 +853,10 @@ export const smaApi = {
     ),
   tradeCounts: () =>
     request<Record<TradeBookMode, number>>(deskBot() != null ? `/api/trades/counts?bot=${deskBot()}` : "/api/trades/counts"),
-  replayInfo: () => request<ReplayInfo>("/api/replay"),
+  /** This desk's bot's replay (each bot has its own; they can play together). */
+  replayInfo: () => request<ReplayInfo>(replayPath("/api/replay")),
+  /** Every bot's replay, keyed "1"-"4". */
+  replayAll: () => request<Record<string, ReplayInfo>>("/api/replay/all"),
   /** Backtest the Scalp page's own picks: each day, the top N at the pick time. */
   replayScalpPicks: (body: {
     date: string;
@@ -881,7 +886,7 @@ export const smaApi = {
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
-    request<ReplayInfo>("/api/replay/control", { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
+    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
   csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",

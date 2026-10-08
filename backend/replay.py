@@ -50,9 +50,13 @@ WARMUP_DAYS = 4
 # previous one, enough for SMA 21, ATR 14, RSI, the volume average and the
 # previous close. More only slows every tick.
 FRAME_BARS = 500
-# Share of each real second the replay may spend ticking, so the live engine
-# and the API stay responsive on the one CPU. Past this it plays slower.
+# Share of each real second the replays together may spend ticking, so the
+# live engine and the API stay responsive (one Python process, one event loop).
+# Several bots replaying at once split it. Past this a replay plays slower.
 CPU_SHARE = 0.4
+
+#: Replays playing right now (one per bot can play at once); they split CPU_SHARE.
+_PLAYING: set[int] = set()
 LOOP_SECONDS = 0.2
 # Replay seconds per engine tick. Six ticks a minute land on the candle's
 # open, both extremes and its close.
@@ -259,15 +263,18 @@ class ReplayEngine(StrategyEngine):
         return snap
 
 
-def close_orphan_replay_rows() -> int:
-    """A restart mid-replay leaves REPLAY rows open. Close them flat."""
+def close_orphan_replay_rows(run_id: int | None = None) -> int:
+    """A restart mid-replay leaves REPLAY rows open. Close them flat.
+
+    With `run_id`, only that run's rows: each bot has its own replay, and
+    stopping one must not touch another bot's replay still playing.
+    """
     now = dt.datetime.now(IST).replace(tzinfo=None)
     with session_factory()() as db:
-        rows = (
-            db.query(TradeLog)
-            .filter(TradeLog.exit_time.is_(None), TradeLog.mode == "REPLAY")
-            .all()
-        )
+        query = db.query(TradeLog).filter(TradeLog.exit_time.is_(None), TradeLog.mode == "REPLAY")
+        if run_id is not None:
+            query = query.filter(TradeLog.run_id == run_id)
+        rows = query.all()
         for row in rows:
             row.exit_time = now
             row.exit_price = row.entry_price
@@ -276,7 +283,10 @@ def close_orphan_replay_rows() -> int:
             row.brokerage_and_taxes = 0.0
             row.net_pnl = 0.0
         # A run that was playing when the server stopped did not finish.
-        for run in db.query(ReplayRun).filter(ReplayRun.status == "RUNNING").all():
+        runs = db.query(ReplayRun).filter(ReplayRun.status == "RUNNING")
+        if run_id is not None:
+            runs = runs.filter(ReplayRun.id == run_id)
+        for run in runs.all():
             run.status = "STOPPED"
         db.commit()
         return len(rows)
@@ -444,7 +454,7 @@ def delete_run(run_id: int) -> bool:
 
 @dataclass
 class ReplaySession:
-    """One replay at a time: download the range, then play each day in turn."""
+    """One bot's replay: download the range, then play each day in turn (one per bot can run together)."""
 
     status: str = "IDLE"  # IDLE | LOADING | PLAYING | PAUSED | FINISHED | ERROR
     day: dt.date | None = None
@@ -680,14 +690,22 @@ class ReplaySession:
         end = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST)
         last = time.monotonic()
         owed = 0.0  # replay seconds earned but not yet played
+        try:
+            await self._play_loop(eng, end, last, owed)
+        finally:
+            _PLAYING.discard(id(self))
+
+    async def _play_loop(self, eng, end: dt.datetime, last: float, owed: float) -> None:
         while not self._stop:
             await asyncio.sleep(LOOP_SECONDS)
             now_m = time.monotonic()
             real = now_m - last
             last = now_m
             if self.status != "PLAYING":
+                _PLAYING.discard(id(self))
                 self.effective_speed = 0.0
                 continue
+            _PLAYING.add(id(self))
             owed += real * self.speed
             played = 0.0
             began = time.monotonic()
@@ -707,7 +725,8 @@ class ReplaySession:
                     return
                 # Let the live engine and the API run between ticks.
                 await asyncio.sleep(0)
-                if time.monotonic() - began > CPU_SHARE * max(real, LOOP_SECONDS):
+                share = CPU_SHARE / max(1, len(_PLAYING))
+                if time.monotonic() - began > share * max(real, LOOP_SECONDS):
                     owed = 0.0  # behind: drop the rest, play slower instead of piling up
                     break
             spent = time.monotonic() - now_m + LOOP_SECONDS
@@ -753,7 +772,9 @@ class ReplaySession:
         # Only a run still playing is cut short; a finished one keeps FINISHED.
         if self.status in ("LOADING", "PLAYING", "PAUSED"):
             self._mark_run(status="STOPPED")
-        close_orphan_replay_rows()
+        # Only this replay's own leftovers: other bots' replays may be playing.
+        if self.run_id is not None:
+            close_orphan_replay_rows(self.run_id)
         self.engine = None
         self.run_id = None
         self.status = "IDLE"
