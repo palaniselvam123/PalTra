@@ -79,6 +79,8 @@ class HistoricalMover:
     origin: str
     resolution_min: int
     first_ts: int
+    # Shares traded in the window; None when the store has no volume for it.
+    volume: int | None = None
 
     @property
     def last_time_ist(self) -> str:
@@ -206,7 +208,7 @@ def movers(
                     symbol=m.symbol, open_price=m.open_price, last_price=m.last_price,
                     last_ts=m.last_ts, pct_from_open=m.pct_from_open, high_price=m.high_price,
                     low_price=m.low_price, points=m.points, origin=LIVE, resolution_min=1,
-                    first_ts=m.first_ts,
+                    first_ts=m.first_ts, volume=m.volume,
                 )
                 for m in live
             ],
@@ -253,6 +255,7 @@ def movers(
                 origin=origin_seen,
                 resolution_min=resolution_seen,
                 first_ts=bars[0].ts,
+                volume=sum(int(getattr(b, "volume", 0) or 0) for b in bars),
             )
         )
     return sorted(out, key=lambda m: m.pct_from_open, reverse=True), origin_seen
@@ -357,6 +360,19 @@ def diagnose_miss(
         f"No price for {symbol} near {asked} on {day.isoformat()} in either record."
     )
     return coverage
+
+
+def volume_between(symbol: str, day: dt.date, source: str, lo_ts: int, hi_ts: int) -> int | None:
+    """Shares traded in `lo_ts < ts <= hi_ts`, from the minute record, else broker history."""
+    symbol = symbol.upper()
+    live = snapshot_store.volume_between(symbol, source, lo_ts, hi_ts)
+    if live is not None:
+        return live
+    if source != "live" and day >= ist_date(int(dt.datetime.now(dt.timezone.utc).timestamp())):
+        return None
+    bars, _origin, _resolution = _history_bars(symbol, day)
+    picked = [b for b in bars if lo_ts < b.ts <= hi_ts]
+    return sum(int(getattr(b, "volume", 0) or 0) for b in picked) if picked else None
 
 
 def series(

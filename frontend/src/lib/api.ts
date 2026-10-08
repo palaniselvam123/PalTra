@@ -462,6 +462,8 @@ export type MoverRow = {
   points: number;
   first_time_ist: string;
   baseline_is_session_open: boolean;
+  /** Shares traded in the window (today so far); null when not recorded. */
+  volume?: number | null;
 };
 
 export type MoversResponse = {
@@ -501,6 +503,9 @@ export type FastMoverRow = {
   direction: "UP" | "DOWN";
   origin: string;
   resolution_min: number;
+  /** Shares traded today up to `last_ts`, and inside the speed window; null when not recorded. */
+  volume?: number | null;
+  window_volume?: number | null;
 };
 
 export type ScalpRow = {

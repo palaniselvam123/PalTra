@@ -45,6 +45,9 @@ class FastMover:
     direction: str              # UP | DOWN
     origin: str = price_history.LIVE
     resolution_min: int = 1
+    # Shares traded today up to `last_ts`, and inside the speed window.
+    volume: int | None = None
+    window_volume: int | None = None
 
     @property
     def last_time_ist(self) -> str:
@@ -62,6 +65,8 @@ class FastMover:
             "direction": self.direction,
             "origin": self.origin,
             "resolution_min": self.resolution_min,
+            "volume": self.volume,
+            "window_volume": self.window_volume,
         }
 
 
@@ -148,6 +153,8 @@ def fast_movers(
                 direction="UP" if speed > 0 else "DOWN",
                 origin=origin,
                 resolution_min=resolution,
+                volume=m.volume,
+                window_volume=price_history.volume_between(m.symbol, day, source, past.ts, m.last_ts),
             )
         )
     return sorted(out, key=lambda f: abs(f.speed_pct_per_min), reverse=True)
@@ -184,6 +191,7 @@ def peak_fast_movers(
         if len(series) < 2:
             continue
         best: FastMover | None = None
+        best_from = 0
         for i, point in enumerate(series):
             # The bar `window_min` earlier, in index terms for this resolution.
             back = max(0, i - max(1, window_min // step))
@@ -213,7 +221,12 @@ def peak_fast_movers(
             )
             if best is None or abs(candidate.speed_pct_per_min) > abs(best.speed_pct_per_min):
                 best = candidate
+                best_from = prior.ts
         if best is not None:
+            # Volume up to the peak moment, and inside the peak's own window.
+            day_start = int(dt.datetime.combine(day, dt.time(0, 0), tzinfo=IST).timestamp())
+            best.volume = price_history.volume_between(m.symbol, day, source, day_start, best.last_ts)
+            best.window_volume = price_history.volume_between(m.symbol, day, source, best_from, best.last_ts)
             out.append(best)
     return sorted(out, key=lambda f: abs(f.speed_pct_per_min), reverse=True)
 

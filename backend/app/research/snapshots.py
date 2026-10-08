@@ -98,6 +98,8 @@ class Mover:
     low_price: float
     points: int
     first_ts: int = 0
+    # Shares traded in the window (sum of the recorded per-minute volumes); None when none were recorded.
+    volume: int | None = None
 
     @property
     def last_time_ist(self) -> str:
@@ -237,7 +239,8 @@ class SnapshotStore:
                        MAX(price)                            AS high_price,
                        MIN(price)                            AS low_price,
                        COUNT(*)                              AS points,
-                       MIN(ts)                               AS first_ts
+                       MIN(ts)                               AS first_ts,
+                       SUM(volume)                           AS volume
                 FROM intraday_prices
                 WHERE source=? AND ts >= ? AND ts < ? AND open_price IS NOT NULL
                 GROUP BY symbol
@@ -245,7 +248,7 @@ class SnapshotStore:
                 (source, lo, hi),
             ).fetchall()
             out: list[Mover] = []
-            for symbol, open_price, last_ts, high_price, low_price, points, first_ts in rows:
+            for symbol, open_price, last_ts, high_price, low_price, points, first_ts, volume in rows:
                 if windowed:
                     row = conn.execute(
                         "SELECT price FROM intraday_prices WHERE symbol=? AND source=? AND ts=?",
@@ -272,9 +275,19 @@ class SnapshotStore:
                         low_price=low_price,
                         points=points,
                         first_ts=first_ts,
+                        volume=int(volume) if volume is not None else None,
                     )
                 )
         return sorted(out, key=lambda m: m.pct_from_open, reverse=True)
+
+    def volume_between(self, symbol: str, source: str, lo_ts: int, hi_ts: int) -> int | None:
+        """Shares traded in the recorded minutes `lo_ts < ts <= hi_ts`; None when none were recorded."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT SUM(volume) FROM intraday_prices WHERE symbol=? AND source=? AND ts>? AND ts<=?",
+                (symbol.upper(), source, int(lo_ts), int(hi_ts)),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
 
     def recorded_days(self, source: str = "live") -> list[dt.date]:
         with self._conn() as conn:

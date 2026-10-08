@@ -939,3 +939,34 @@ class TestWatchlistNamesAreRanked:
         finally:
             if "ZZTESTONLY" in market_data.symbols:
                 market_data.symbols.remove("ZZTESTONLY")
+
+
+class TestVolume:
+    """Volume shown next to the moves: the recorder's per-minute volumes, summed."""
+
+    def test_movers_sum_the_days_recorded_volume(self, store):
+        seed(store, "AAA", [(9, 15, 100.0), (9, 16, 101.0), (9, 17, 102.0)], 100.0)  # 1,000 a minute
+        (m,) = store.movers(DAY)
+        assert m.volume == 3000
+
+    def test_as_of_cuts_the_volume_too(self, store):
+        seed(store, "AAA", [(9, 15, 100.0), (9, 16, 101.0), (9, 17, 102.0)], 100.0)
+        (m,) = store.movers(DAY, as_of=when(9, 16))
+        assert m.volume == 2000
+
+    def test_unrecorded_volume_is_none_not_zero(self, store):
+        store.record([("AAA", ts_at(9, 15), "live", 100.0, 100.0, None)])
+        (m,) = store.movers(DAY)
+        assert m.volume is None
+
+    def test_fast_movers_carry_day_and_window_volume(self, store, monkeypatch):
+        from app.research import price_history as ph
+        from app.services import movers as movers_mod
+
+        seed(store, "FAST", [(9, 15, 100.0), (10, 0, 100.2), (10, 5, 101.5), (10, 10, 103.0)], 100.0)
+        monkeypatch.setattr(ph, "snapshot_store", store)
+        (f,) = movers_mod.fast_movers(DAY, "live", when(10, 10), window_min=10, min_speed=0.10, min_move=0.75)
+        assert f.volume == 4000
+        # The 10-minute window runs from the 10:00 baseline to 10:10: the 10:05 and 10:10 minutes.
+        assert f.window_volume == 2000
+        assert f.as_dict()["window_volume"] == 2000

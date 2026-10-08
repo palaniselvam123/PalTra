@@ -531,6 +531,8 @@ export default function MoversPage() {
                     <Th right>Speed</Th>
                     <Th right>{peak ? "Best window" : `Last ${fast.window_min}m`}</Th>
                     <Th right>From open</Th>
+                    <Th right>{peak ? "Vol in window" : `Vol ${fast.window_min}m`}</Th>
+                    <Th right>Volume</Th>
                     <Th right>Price</Th>
                     <Th right>{peak ? "Peaked at" : "At"}</Th>
                   </tr>
@@ -550,6 +552,8 @@ export default function MoversPage() {
                       <Td right>
                         <Pct value={f.pct_from_open} />
                       </Td>
+                      <Td right className="tabular-nums">{vol(f.window_volume)}</Td>
+                      <Td right className="tabular-nums text-slate-400">{vol(f.volume)}</Td>
                       <Td right className="tabular-nums">{f.last_price.toFixed(2)}</Td>
                       <Td right className="text-slate-400">{f.last_time_ist}</Td>
                     </tr>
@@ -934,6 +938,7 @@ function MoverTable({
                 <Th right>High</Th>
                 <Th right>Low</Th>
                 <Th right>{openLabel}</Th>
+                <Th right>Volume</Th>
                 <Th right>At</Th>
               </tr>
             </thead>
@@ -951,6 +956,7 @@ function MoverTable({
                   <Td right className="tabular-nums text-profit/80">{m.high_price.toFixed(2)}</Td>
                   <Td right className="tabular-nums text-loss/80">{m.low_price.toFixed(2)}</Td>
                   <Td right className="tabular-nums text-slate-400">{m.open_price.toFixed(2)}</Td>
+                  <Td right className="tabular-nums">{vol(m.volume)}</Td>
                   <Td right className="text-slate-400">{m.last_time_ist}</Td>
                 </tr>
               ))}
@@ -960,6 +966,14 @@ function MoverTable({
       )}
     </div>
   );
+}
+
+/** Shares traded, short Indian style: 8,450 · 1.2 L · 3.4 Cr; "—" when not recorded. */
+function vol(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (v >= 1e7) return `${(v / 1e7).toFixed(1)} Cr`;
+  if (v >= 1e5) return `${(v / 1e5).toFixed(1)} L`;
+  return Math.round(v).toLocaleString("en-IN");
 }
 
 function Pct({ value, suffix = "%", digits = 2 }: { value: number; suffix?: string; digits?: number }) {
