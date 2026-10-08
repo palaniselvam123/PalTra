@@ -43,6 +43,7 @@ from database import init_db, session_factory
 from models import BotConfig
 import candle_patterns
 import paper_wallet
+import review
 import tick_store
 from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
 import bots as bots_mod
@@ -224,6 +225,9 @@ class ConfigUpdate(BaseModel):
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
+    review_on: bool | None = None
+    review_gap_pct: float | None = Field(default=None, gt=0, le=2)
+    review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
     bot_name: str | None = Field(default=None, min_length=1, max_length=24)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
@@ -546,6 +550,9 @@ def _gap_dict(row) -> dict:
         "cross_exit": getattr(row, "cross_exit", None) is not False,
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
+        "review_on": review.review_on(row),
+        "review_gap_pct": review.gap_band(row),
+        "review_cooldown_min": int(review.cooldown(row).total_seconds() // 60),
     }
 
 
@@ -820,6 +827,26 @@ async def close_position(body: CloseOrder):
     return await _close_position(engine, body)
 
 
+async def _answer_review(eng: StrategyEngine, review_id: int, action: str):
+    """EXIT or WAIT on a 1-minute review (review.py). Only EXIT sends an order."""
+    if action not in ("exit", "wait"):
+        raise HTTPException(404, "Answer exit or wait")
+    try:
+        return await eng.answer_review(review_id, action.upper())
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/bot/review/{review_id}/{action}")
+async def answer_review(review_id: int, action: str):
+    return await _answer_review(engine, review_id, action)
+
+
+@app.post("/api/research/bot/review/{review_id}/{action}")
+async def research_answer_review(review_id: int, action: str):
+    return await _answer_review(_research(), review_id, action)
+
+
 @app.post("/api/research/bot/close")
 async def research_close_position(body: CloseOrder):
     return await _close_position(_research(), body)
@@ -1090,6 +1117,11 @@ async def replay_control(body: ReplayControl, bot: int = 1):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return session.info()
+
+
+@app.post("/api/replay/bot/review/{review_id}/{action}")
+async def replay_answer_review(review_id: int, action: str, bot: int = 1):
+    return await _answer_review(_replay_engine(bot), review_id, action)
 
 
 @app.get("/api/replay/state")
@@ -1463,6 +1495,11 @@ async def bot_pause(bot: int):
 @app.post("/api/bots/{bot}/bot/force")
 async def bot_force(bot: int, body: ForceOrder):
     return await _force_order(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/bot/review/{review_id}/{action}")
+async def bot_answer_review(bot: int, review_id: int, action: str):
+    return await _answer_review(_bot(bot), review_id, action)
 
 
 @app.post("/api/bots/{bot}/bot/close")

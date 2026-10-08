@@ -11,6 +11,7 @@ import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
+import { ReviewCards } from "./ReviewCard";
 import { ownSummary } from "./StrategyConfigPanel";
 import { ArmPrompt } from "./ArmPrompt";
 import { inTab, type TerminalTab } from "./SectionTabs";
@@ -648,6 +649,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             {error || state?.halt_reason || state?.last_error}
           </div>
         )}
+        {/* A 1-minute review stays in reach until it is answered or ends. */}
+        <ReviewCards state={state} onChanged={onChanged} />
       </header>
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">

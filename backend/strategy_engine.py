@@ -54,7 +54,8 @@ from candles import bucket_start, candle_minutes, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
-from models import BotConfig, TradeLog, trade_ref
+from models import BotConfig, ReviewLog, TradeLog, trade_ref
+import review
 import paper_wallet
 import tick_sizes
 import tick_store
@@ -181,6 +182,7 @@ SNAPSHOT_FIELDS = (
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
+    "review_on", "review_gap_pct", "review_cooldown_min",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -713,6 +715,18 @@ class StrategyEngine:
         self._ticks_retry_at = 0.0
         self._ticks_job = None
         self._realized_mode: str | None = None
+        # 1-minute human review (review.py). The raw 1-minute tape of each
+        # watched stock (the strategy reads its own candle from _frames), the
+        # closed candle each held stock was last reviewed on, the uncertain
+        # stretch per stock ({trade_id, open, last_at}), and recent reviews.
+        self._tapes: dict[str, pd.DataFrame] = {}
+        self._review_bar: dict[str, int] = {}
+        self._review_episode: dict[str, dict] = {}
+        self.reviews: list[dict] = []
+        self._reviews_loaded = False
+        self._review_lock = asyncio.Lock()
+        #: Called with each new review (a replay pauses so it can be answered).
+        self.on_review = None
 
     def _now(self) -> dt.datetime:
         """The engine's clock. A replay engine runs on the replayed day instead."""
@@ -978,6 +992,8 @@ class StrategyEngine:
                 continue
             if frame is not None and not frame.empty and len(frame) > 2500:
                 frame = frame.iloc[-2500:].reset_index(drop=True)
+            # The 1-minute tape is kept only for the human review's read-out.
+            self._tapes[symbol] = frame
             # Candles of the chosen interval (candles.py); the bot never sees the 1-minute tape then.
             frame = resample(frame, candle_minutes(cfg, stock_overrides(cfg, symbol)))
             self._frames[symbol] = frame
@@ -1024,6 +1040,8 @@ class StrategyEngine:
         # Practice books close at square-off whether or not the bot is
         # running, and never carry into the next session.
         await self._close_finished_paper_books(now, cfg)
+        self._load_reviews(cfg)
+        self._expire_reviews()
 
         if self.status != "RUNNING":
             return
@@ -1079,6 +1097,11 @@ class StrategyEngine:
                 self._judged_bar[symbol] = judged
             if self.status != "RUNNING":
                 break
+        # After every exit and cross of this pass: a trade the strategy just
+        # closed is not reviewed.
+        if self.status == "RUNNING":
+            self._expire_reviews()
+            await self._review_positions(cfg, now)
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
@@ -1103,7 +1126,10 @@ class StrategyEngine:
         A removed stock is no longer quoted or judged. If it is armed again,
         hold_for_next_cross makes it wait for a fresh cross.
         """
-        for table in (self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending):
+        for table in (
+            self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending,
+            self._tapes, self._review_bar, self._review_episode,
+        ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
 
@@ -1690,8 +1716,12 @@ class StrategyEngine:
         )
         return result
 
-    async def close_symbol(self, symbol: str) -> str:
-        """Close one open book. Does not stop the bot or touch the other stocks."""
+    async def close_symbol(self, symbol: str, reason: str = "MANUAL_CLOSE", trade_id: int | None = None) -> str:
+        """Close one open book. Does not stop the bot or touch the other stocks.
+
+        `trade_id` (the review's EXIT): close only that trade; if the stock now
+        holds another trade, or none, nothing is sent.
+        """
         name = (symbol or "").upper().strip()
         if not name or name not in self.positions:
             raise ForceRefused(f"{name or 'That stock'} has no open position")
@@ -1706,6 +1736,8 @@ class StrategyEngine:
                 pos = self.position
                 if pos is None:
                     raise ForceRefused(f"{name} has no open position")
+                if trade_id is not None and pos.trade_id != trade_id:
+                    raise ForceRefused(f"{name}: that trade has already closed")
                 try:
                     await self._cancel_sl_verified(pos)
                 except SlCancelFailed as exc:
@@ -1717,7 +1749,7 @@ class StrategyEngine:
                 px = self._exit_price(name, self.position)
                 try:
                     await self._close_position(
-                        self.position, px, "MANUAL_CLOSE", self._now(), _cfg_for(cfg, name)
+                        self.position, px, reason, self._now(), _cfg_for(cfg, name)
                     )
                 except SlCancelFailed as exc:
                     self.last_error = str(exc)
@@ -3097,7 +3129,190 @@ class StrategyEngine:
             "max_daily_loss": cfg.max_daily_loss if cfg else 5000,
             "kpis": kpis,
             "connected": self.data_source != "ERROR",
+            "reviews": [dict(item) for item in self.reviews],
         }
+
+    # --- 1-minute human review (review.py) ---------------------------------
+
+    def _load_reviews(self, cfg: BotConfig) -> None:
+        """Once per engine: the recent reviews of this book, so a restart keeps them."""
+        if self._reviews_loaded:
+            return
+        self._reviews_loaded = True
+        run_id = getattr(self, "run_id", None)
+        try:
+            with session_factory()() as db:
+                query = db.query(ReviewLog).filter(
+                    ReviewLog.bot == self.bot_id, ReviewLog.mode == (cfg.trading_mode or "PAPER").upper()
+                )
+                query = query.filter(ReviewLog.run_id == run_id) if run_id is not None else query.filter(ReviewLog.run_id.is_(None))
+                rows = query.order_by(ReviewLog.id.desc()).limit(REVIEWS_KEPT).all()
+                self.reviews = [_review_dict(row) for row in reversed(rows)]
+        except Exception:  # noqa: BLE001
+            self.reviews = []
+
+    def _set_review(self, item: dict, status: str, note: str) -> None:
+        """Record an answer (or that none came). Saved before any order is sent."""
+        at = self._now()
+        item.update(status=status, note=note, action_at=at.replace(tzinfo=None).isoformat(timespec="seconds"))
+        try:
+            with session_factory()() as db:
+                row = db.get(ReviewLog, int(item["id"]))
+                if row is not None:
+                    row.status, row.note, row.action_at = status, note, at.replace(tzinfo=None)
+                    db.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("could not save review %s", item.get("id"))
+
+    def _expire_reviews(self, symbol: str | None = None, note: str = "trade closed before an answer") -> None:
+        """A pending review whose trade has closed (or, for `symbol`, any pending one) ends unanswered."""
+        for item in self.reviews:
+            if item["status"] != review.PENDING:
+                continue
+            if symbol is not None:
+                if item["symbol"] == symbol:
+                    self._set_review(item, review.NO_RESPONSE, note)
+                continue
+            pos = self.positions.get(item["symbol"])
+            if pos is None or pos.trade_id != item["trade_id"]:
+                self._set_review(item, review.NO_RESPONSE, note)
+
+    async def _review_positions(self, cfg: BotConfig, now: dt.datetime) -> None:
+        """Once per newly closed candle of each held stock: raise a review if its SMAs are uncertain.
+
+        Never closes, delays or changes anything; the strategy has already run.
+        """
+        for symbol, pos in list(self.positions.items()):
+            episode = self._review_episode.get(symbol)
+            if episode is not None and episode.get("trade_id") != pos.trade_id:
+                episode = None
+                self._review_episode.pop(symbol, None)
+            scfg = _cfg_for(cfg, symbol)
+            if not review.review_on(scfg) or uses_patterns(scfg):
+                continue
+            minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+            if minutes < 2:
+                continue  # a 1-minute strategy has nothing finer to show
+            frame = self._frames.get(symbol)
+            if frame is None or getattr(frame, "empty", True) or len(frame) < 3:
+                continue
+            closed_ts = _closed_bar_ts(frame)
+            if closed_ts is None or _candle_is_behind(closed_ts, now, minutes):
+                continue
+            if self._review_bar.get(symbol) == closed_ts:
+                continue
+            self._review_bar[symbol] = closed_ts
+            enriched = enrich(frame, scfg.sma_fast, scfg.sma_slow, scfg.atr_period)
+            band = review.gap_band(scfg)
+            if episode is not None and episode.get("open") and review.episode_over(review.last_gap(enriched), band):
+                episode["open"] = False
+                self._expire_reviews(symbol, "SMA gap moved clear before an answer")
+            if episode is not None and episode.get("open"):
+                continue  # one review per uncertain stretch
+            hit = review.uncertainty(enriched, pos.signal_direction, band, cross_exits(scfg))
+            if hit is None:
+                continue
+            last = episode.get("last_at") if episode else None
+            if last is not None and now - last < review.cooldown(scfg):
+                continue
+            self._review_episode[symbol] = {"trade_id": pos.trade_id, "open": True, "last_at": now}
+            self._raise_review(symbol, pos, scfg, minutes, hit, now)
+
+    def _raise_review(self, symbol: str, pos: OpenPosition, cfg: BotConfig, minutes: int, hit, now: dt.datetime) -> None:
+        mode = (cfg.trading_mode or "PAPER").upper()
+        band = review.gap_band(cfg)
+        five = hit.as_dict()
+        one = review.one_minute_evidence(self._tapes.get(symbol), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period))
+        text = review.review_text(
+            symbol=symbol,
+            mode=mode,
+            direction=pos.direction,
+            qty=int(pos.qty),
+            entry=float(pos.entry_price),
+            minutes=minutes,
+            five=five,
+            one=one,
+            sma_fast=int(cfg.sma_fast),
+            sma_slow=int(cfg.sma_slow),
+            band=band,
+        )
+        self._expire_reviews(symbol, "replaced by a newer review")
+        try:
+            with session_factory()() as db:
+                row = ReviewLog(
+                    created_at=now.replace(tzinfo=None),
+                    bot=self.bot_id,
+                    mode=mode,
+                    run_id=getattr(self, "run_id", None),
+                    trade_id=int(pos.trade_id),
+                    symbol=symbol,
+                    direction=pos.direction,
+                    candle_minutes=minutes,
+                    five_min=json.dumps({**five, "band_pct": band, "sma_fast_len": int(cfg.sma_fast), "sma_slow_len": int(cfg.sma_slow)}),
+                    one_min=json.dumps(one or {}),
+                    message=text,
+                    status=review.PENDING,
+                )
+                db.add(row)
+                db.commit()
+                db.refresh(row)
+                item = _review_dict(row)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not save the review for %s", symbol)
+            return
+        item["entry_price"] = float(pos.entry_price)
+        item["qty"] = int(pos.qty)
+        self.reviews.append(item)
+        # Keep every pending one; drop the oldest answered ones.
+        while len(self.reviews) > REVIEWS_KEPT:
+            old = next((i for i, r in enumerate(self.reviews) if r["status"] != review.PENDING), 0)
+            self.reviews.pop(old)
+        note = f"{symbol} review — SMA gap {hit.gap_pct:+.3f}% is uncertain; EXIT or WAIT (no answer keeps it open)"
+        self._signals[symbol] = note
+        self.last_signal = note
+        self._alert(text)
+        callback = self.on_review
+        if callback is not None:
+            try:
+                callback(item)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def answer_review(self, review_id: int, action: str) -> dict:
+        """EXIT or WAIT on a review. Only EXIT ever sends an order, and only for the reviewed trade."""
+        action = (action or "").upper()
+        if action not in ("EXIT", "WAIT"):
+            raise ForceRefused("Answer EXIT or WAIT")
+        async with self._review_lock:
+            item = next((r for r in self.reviews if r["id"] == int(review_id)), None)
+            if item is None:
+                raise ForceRefused("That review is not on this desk")
+            if item["status"] != review.PENDING:
+                return {**item, "result": "Already answered — nothing sent"}
+            symbol, trade_id = item["symbol"], item["trade_id"]
+            pos = self.positions.get(symbol)
+            if pos is None or pos.trade_id != trade_id:
+                self._set_review(item, review.ALREADY_CLOSED, f"{action} after the trade had closed")
+                return {**item, "result": f"{symbol}: that trade had already closed — nothing sent"}
+            if action == "WAIT":
+                self._set_review(item, review.WAIT, "kept open")
+                text = f"{symbol} kept open — the strategy carries on"
+                self._signals[symbol] = text
+                return {**item, "result": text}
+            # Marked first, so a second tap or another screen cannot send a second exit.
+            self._set_review(item, review.EXIT, "exit sent")
+            try:
+                result = await self.close_symbol(symbol, reason=review.EXIT, trade_id=trade_id)
+            except ForceRefused as exc:
+                if "already closed" in str(exc) or "no open position" in str(exc):
+                    self._set_review(item, review.ALREADY_CLOSED, "EXIT after the trade had closed")
+                    return {**item, "result": f"{symbol}: that trade had already closed — nothing sent"}
+                # Nothing closed: the review can be answered again.
+                self._set_review(item, review.PENDING, f"exit refused: {exc}")
+                raise
+            if result.endswith("already flat"):
+                self._set_review(item, review.ALREADY_CLOSED, "the stop closed it first")
+            return {**item, "result": result}
 
     def _marker_book(self, cfg: BotConfig | None):
         """Chart markers come from this engine's own book only.
@@ -3393,7 +3608,38 @@ _ALERT_REASON = {
     "NOT_ON_GROWW": "not on Groww — no order sent",
     "SL_REJECTED": "stop refused — closed at once",
     "MANUAL_CLOSE": "closed from the screen",
+    "USER_REVIEW_EXIT": "EXIT on the 1-minute review",
 }
+
+
+REVIEWS_KEPT = 10
+
+
+def _review_dict(row: ReviewLog) -> dict:
+    def load(text: str | None) -> dict:
+        try:
+            data = json.loads(text) if text else {}
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    return {
+        "id": int(row.id),
+        "created_at": row.created_at.isoformat(timespec="seconds") if row.created_at else None,
+        "bot": row.bot,
+        "mode": row.mode,
+        "run_id": row.run_id,
+        "trade_id": int(row.trade_id),
+        "symbol": row.symbol,
+        "direction": row.direction,
+        "candle_minutes": row.candle_minutes,
+        "five_min": load(row.five_min),
+        "one_min": load(row.one_min),
+        "message": row.message,
+        "status": row.status,
+        "action_at": row.action_at.isoformat(timespec="seconds") if row.action_at else None,
+        "note": row.note or "",
+    }
 
 
 def bot_down_alert(status: str, reason: str, when: dt.datetime) -> str:

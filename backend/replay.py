@@ -30,7 +30,7 @@ import pandas as pd
 from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
-from models import BotConfig, ReplayRun, TradeLog
+from models import BotConfig, ReplayRun, ReviewLog, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
 from scalp_picks import PickRule, picks_for_day
@@ -360,6 +360,14 @@ def _drop_unfinished_days(run_id: int, days: list[str]) -> int:
         return 0
     with session_factory()() as db:
         n = db.query(TradeLog).filter(TradeLog.run_id == run_id, TradeLog.date.in_(days)).delete(synchronize_session=False)
+        # Its 1-minute reviews on those days go too; the replay raises them again.
+        for day in days:
+            start = dt.datetime.fromisoformat(day)
+            db.query(ReviewLog).filter(
+                ReviewLog.run_id == run_id,
+                ReviewLog.created_at >= start,
+                ReviewLog.created_at < start + dt.timedelta(days=1),
+            ).delete(synchronize_session=False)
         db.commit()
         return int(n)
 
@@ -519,6 +527,7 @@ def delete_run(run_id: int) -> bool:
         if run is None:
             return False
         db.query(TradeLog).filter(TradeLog.run_id == run_id).delete()
+        db.query(ReviewLog).filter(ReviewLog.run_id == run_id).delete()
         db.delete(run)
         db.commit()
         return True
@@ -753,6 +762,9 @@ class ReplaySession:
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
             engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved)
+            # A 1-minute review pauses the replay so it can be answered as it
+            # would have been live. Play again without answering = no answer.
+            engine.on_review = lambda _item: self.control("pause")
             engine.load_config()
             await engine.tick(clock)
             engine.hold_for_next_cross(symbols)

@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -147,6 +147,34 @@ class ReplayRun(Base):
     days_total: Mapped[int] = mapped_column(Integer, default=0)
     days_done: Mapped[int] = mapped_column(Integer, default=0)
     days: Mapped[str] = mapped_column(String, default="")  # comma-separated trading days played
+
+
+class ReviewLog(Base):
+    """One 1-minute human review of an uncertain SMA position (review.py).
+
+    Written when the review is raised, with the evidence shown, then updated
+    once with the person's answer. No answer leaves the trade alone.
+    """
+
+    __tablename__ = "review_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)  # engine clock (the replayed time in a replay)
+    bot: Mapped[int] = mapped_column(Integer, default=1)
+    mode: Mapped[str] = mapped_column(String, default="PAPER")  # PAPER | LIVE | REPLAY | RESEARCH
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    trade_id: Mapped[int] = mapped_column(Integer, index=True)
+    symbol: Mapped[str] = mapped_column(String)
+    direction: Mapped[str] = mapped_column(String)
+    candle_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    # JSON: the bot's candle (gap, SMAs) and the 1-minute read-out shown.
+    five_min: Mapped[str] = mapped_column(Text, default="{}")
+    one_min: Mapped[str] = mapped_column(Text, default="{}")
+    message: Mapped[str] = mapped_column(Text, default="")
+    # PENDING | USER_REVIEW_EXIT | USER_REVIEW_WAIT | NO_RESPONSE | ALREADY_CLOSED
+    status: Mapped[str] = mapped_column(String, default="PENDING", index=True)
+    action_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str] = mapped_column(String, default="")
 
 
 class BotConfig(Base):
@@ -279,3 +307,11 @@ class BotConfig(Base):
     # Only STOCK_FIELDS (strategy_engine.py) are read from it; the account-wide
     # risk limits, cut-off, square-off and mode always come from this row.
     stock_settings: Mapped[str] = mapped_column(String, default="{}")
+    # 1-minute human review (review.py), off by default: when an open trade's
+    # SMA gap narrows to within review_gap_pct % around a cross on the bot's
+    # candle, show the closed 1-minute candles and ask EXIT or WAIT. No answer
+    # changes nothing. At most one review per uncertain stretch, and none
+    # within review_cooldown_min minutes of the last one on that trade.
+    review_on: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    review_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.03)
+    review_cooldown_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)

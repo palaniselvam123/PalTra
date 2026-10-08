@@ -25,6 +25,7 @@ const REASON: Record<string, string> = {
   NOT_ON_GROWW: "NOT ON GROWW",
   SL_REJECTED: "STOP REFUSED",
   MANUAL_CLOSE: "MANUAL CLOSE",
+  USER_REVIEW_EXIT: "EXIT ON 1-MIN REVIEW",
 };
 
 type Book = "PAPER" | "LIVE" | "REPLAY" | "RESEARCH";
@@ -915,6 +916,7 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   KILL_SWITCH: "red",
   SL_REJECTED: "red",
   MANUAL_CLOSE: "blue",
+  USER_REVIEW_EXIT: "violet",
   NOT_ON_GROWW: "slate",
 };
 
@@ -932,6 +934,7 @@ export const REASON_SHORT: Record<string, string> = {
   KILL_SWITCH: "Kill switch",
   SL_REJECTED: "Stop refused",
   MANUAL_CLOSE: "Manual",
+  USER_REVIEW_EXIT: "Review",
   NOT_ON_GROWW: "Not on Groww",
 };
 

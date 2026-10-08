@@ -264,6 +264,25 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   terminal's Strategy card and Settings warn when no exit is on
   (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
   stock research baseline keeps it on.
+- `backend/review.py` – 1-minute human review (`review_on`, off by default, per
+  bot and per stock, PAPER and LIVE, replay and research too). The bot's own
+  candle stays the strategy; nothing here trades. Once per newly closed candle
+  of each held stock (`StrategyEngine._review_positions`, after every exit and
+  cross of the tick), when the candle is 2 minutes or longer, an open trade whose
+  signed SMA gap is within `review_gap_pct` and narrowing toward a cross (or,
+  with the cross exit off, has just crossed inside the band) raises a review: a
+  `ReviewLog` row (evidence: the candle's SMAs/gap and `one_minute_evidence` of
+  the closed 1-minute tape kept in `_tapes`), a Telegram text, and the terminal's
+  `ReviewCards` (EXIT / WAIT) in the sticky header. One review per uncertain
+  stretch (ends at 1.5× the band), none within `review_cooldown_min` of the last
+  on that trade. `answer_review`: EXIT marks the row first, then closes only
+  that `trade_id` through `close_symbol(reason="USER_REVIEW_EXIT")`; WAIT only
+  records; an answer after the trade closed sends nothing (`ALREADY_CLOSED`).
+  **No answer never exits**: the row ends `NO_RESPONSE` when the trade closes or
+  the stretch ends. A replay pauses at each review (`engine.on_review`); Play
+  without answering = no answer. Routes: `POST /api/bot/review/{id}/{exit|wait}`
+  (and the research, `/api/bots/{n}/bot/…` and `/api/replay/bot/…?bot=` forms).
+  The stock research baseline keeps it off.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
