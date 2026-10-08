@@ -28,6 +28,7 @@ from replay import (
     SPEEDS,
     ReplaySession,
     close_orphan_replay_rows,
+    resumable_runs,
     delete_run,
     get_run,
     list_runs,
@@ -99,7 +100,8 @@ def boot_engine() -> asyncio.Task | None:
         return _task
     _booted = True
     init_db()
-    close_orphan_replay_rows()
+    # A deploy or restart mid-replay: those runs can be resumed where they stopped.
+    close_orphan_replay_rows(interrupted=True)
     cfg = engine.load_config()
     tick_store.set_enabled(getattr(cfg, "second_ticks", None) is not False)
     engine.restore_open_books()
@@ -1006,6 +1008,50 @@ async def replay_start(body: ReplayStart):
         bot=body.bot,
         bot_name=bot_label,
     )
+    return session.info()
+
+
+class ReplayResume(BaseModel):
+    run_id: int
+    speed: int = 60
+
+
+@app.get("/api/replay/resumable")
+async def replay_resumable(bot: int = 1):
+    """This bot's runs cut short (a restart, or Stop) with days left to play, newest first."""
+    _replay_for(bot)
+    return resumable_runs(bot)
+
+
+@app.post("/api/replay/resume")
+async def replay_resume(body: ReplayResume, bot: int = 1):
+    """Carry on a cut-short run from the first day it had not finished, with its saved settings."""
+    runs = {r["id"]: r for r in resumable_runs(None)}
+    found = runs.get(body.run_id)
+    if found is None:
+        raise HTTPException(404, f"Run #{body.run_id} cannot be resumed (finished, deleted or a Scalp-pick run).")
+    run_bot = int(found["bot"])
+    if run_bot != int(bot):
+        raise HTTPException(409, f"Run #{body.run_id} belongs to Bot {run_bot}. Resume it from that bot's desk.")
+    eng = engine if run_bot == 1 else bot_engines.get(run_bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {run_bot}")
+    cfg = eng.load_config()
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, f"Switch {getattr(cfg, 'bot_name', None) or f'Bot {run_bot}'} to PAPER before replaying.")
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    if any(s.run_id == body.run_id and s.active for s in replays.values()):
+        raise HTTPException(409, "That run is already playing.")
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
+    session = _replay_for(run_bot)
+    try:
+        await session.resume(engine.broker, body.run_id, body.speed)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return session.info()
 
 

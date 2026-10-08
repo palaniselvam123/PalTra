@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { History, Loader2, Pause, Play, Square } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { History, Loader2, Pause, Play, RotateCcw, Square } from "lucide-react";
 import clsx from "clsx";
-import { smaApi, replayActive, type ReplayInfo } from "@/lib/smaApi";
+import { smaApi, replayActive, type ReplayInfo, type ResumableRun } from "@/lib/smaApi";
 
+const HIDE_KEY = "replay.resumeHidden";
 const SESSION_START = 9 * 60 + 15;
 const SESSION_END = 15 * 60 + 30;
+
+/** "05 Oct" from YYYY-MM-DD. */
+function shortDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00+05:30`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
+}
 
 /** The last finished weekday, as YYYY-MM-DD in IST. */
 function lastTradingDay(): string {
@@ -157,6 +164,38 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
     }
   };
 
+  // A run a deploy (or Stop) cut short: offer to carry on from the first unfinished day.
+  const [resumable, setResumable] = useState<ResumableRun | null>(null);
+  useEffect(() => {
+    if (active) return;
+    let live = true;
+    smaApi
+      .replayResumable(bot)
+      .then((runs) => {
+        if (!live) return;
+        let hidden: string[] = [];
+        try {
+          hidden = JSON.parse(localStorage.getItem(HIDE_KEY) ?? "[]");
+        } catch {
+          /* private window */
+        }
+        setResumable(runs.find((r) => !hidden.includes(String(r.id))) ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [active, bot, info?.status]);
+  const hideResume = (id: number) => {
+    try {
+      const hidden: string[] = JSON.parse(localStorage.getItem(HIDE_KEY) ?? "[]");
+      localStorage.setItem(HIDE_KEY, JSON.stringify([...hidden, String(id)].slice(-50)));
+    } catch {
+      /* private window */
+    }
+    setResumable(null);
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot));
@@ -165,6 +204,36 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   if (!active) {
     return (
       <section aria-label="Replay a past day" className="rounded-xl border border-violet-400/25 bg-violet-500/[0.06]">
+        {resumable ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-400/30 bg-amber-400/[0.08] px-3 py-2 text-sm">
+            <RotateCcw size={15} aria-hidden className="text-amber-300" />
+            <span className="text-amber-100">
+              Run #{resumable.id} ({shortDay(resumable.start_date)} → {shortDay(resumable.end_date)}) stopped after day{" "}
+              {resumable.days_done} of {resumable.days_total}
+              {resumable.status === "INTERRUPTED" ? " when the server restarted" : ""}. Carry on from day {resumable.days_done + 1}
+              {resumable.next_day ? ` (${shortDay(resumable.next_day)})` : ""}?
+            </span>
+            <span className="ml-auto flex gap-1.5">
+              <button
+                type="button"
+                disabled={busy || live}
+                onClick={() => void run(() => smaApi.replayResume(resumable.id, speed, resumable.bot))}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md bg-violet-500 px-3 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-50"
+                title={live ? "Switch this bot to PAPER to replay" : "Finished days keep their results; the unfinished day plays again from 09:15 with the run's saved settings"}
+              >
+                {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Play size={13} aria-hidden />} Resume
+              </button>
+              <button
+                type="button"
+                onClick={() => hideResume(resumable.id)}
+                className="min-h-8 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+              >
+                Not now
+              </button>
+            </span>
+            {msg ? <p role="alert" className="basis-full text-xs text-rose-300">{msg}</p> : null}
+          </div>
+        ) : null}
         <button
           type="button"
           aria-expanded={open}

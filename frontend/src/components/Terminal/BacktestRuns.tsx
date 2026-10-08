@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, Loader2, Play, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
@@ -353,6 +353,7 @@ export function BacktestRuns() {
                           {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
                           {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}
                           {run.status === "STOPPED" ? <Badge color="slate">Stopped</Badge> : null}
+                          {run.status === "INTERRUPTED" ? <Badge color="amber">Cut short</Badge> : null}
                         </div>
                         <div className="text-slate-400">
                           {shortDate(run.start_date)}
@@ -395,6 +396,29 @@ export function BacktestRuns() {
                       </td>
                       <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
                       <td className="px-2 py-2 text-right align-top">
+                        {(run.status === "INTERRUPTED" || run.status === "STOPPED") &&
+                        run.days_done < run.days_total &&
+                        !scalpPickOf(run.settings) ? (
+                          <button
+                            type="button"
+                            aria-label={`Resume run ${run.id}`}
+                            title={`Carry on from day ${run.days_done + 1} of ${run.days_total}: finished days keep their results, the unfinished day plays again with the run's saved settings`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const bot = Number(run.settings.bot ?? 1) || 1;
+                              smaApi
+                                .replayResume(run.id, 300, bot)
+                                .then(() => {
+                                  setError(null);
+                                  load();
+                                })
+                                .catch((err: unknown) => setError(err instanceof Error ? err.message : "Resume failed"));
+                            }}
+                            className="mr-1 inline-flex min-h-8 items-center gap-1 rounded-md border border-violet-400/50 px-2 text-[11px] font-semibold text-violet-200 hover:bg-violet-500/10"
+                          >
+                            <Play size={12} aria-hidden /> Resume
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           aria-label={`Download run ${run.id} as PDF`}
