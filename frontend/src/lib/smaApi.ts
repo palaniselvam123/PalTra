@@ -572,7 +572,7 @@ export type ReplayRun = {
   symbols: string[];
   /** Snapshot of the strategy settings the run used. */
   settings: Record<string, string | number | boolean | null>;
-  status: "RUNNING" | "FINISHED" | "STOPPED";
+  status: "RUNNING" | "FINISHED" | "STOPPED" | "INTERRUPTED";
   days_total: number;
   days_done: number;
   totals: ReplayRunTotals;
@@ -581,6 +581,20 @@ export type ReplayRun = {
   days?: ReplayDayRow[];
   /** Per-stock split, on the run detail only. */
   stocks?: ReplayStockRow[];
+};
+
+/** A replay run cut short with days still to play (GET /api/replay/resumable). */
+export type ResumableRun = {
+  id: number;
+  bot: number;
+  /** INTERRUPTED: a deploy or restart cut it; STOPPED: Stop was pressed. */
+  status: "INTERRUPTED" | "STOPPED";
+  start_date: string;
+  end_date: string;
+  days_total: number;
+  days_done: number;
+  next_day: string | null;
+  symbols: string[];
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {
@@ -895,6 +909,17 @@ export const smaApi = {
   }) =>
     request<ReplayInfo>("/api/replay/scalp-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   /** `symbols` replays those stocks instead of the armed ones (they are not armed); `bot` whose settings (default 1). */
+  /** This desk's bot's replay runs cut short (a deploy/restart, or Stop) with days left, newest first. */
+  replayResumable: (bot?: number) =>
+    request<ResumableRun[]>(bot ? `/api/replay/resumable?bot=${bot}` : replayPath("/api/replay/resumable"), undefined, undefined, false),
+  /** Carry on a cut-short run from its first unfinished day, on the bot it belongs to. */
+  replayResume: (runId: number, speed: number, bot: number) =>
+    request<ReplayInfo>(
+      `/api/replay/resume?bot=${bot}`,
+      { method: "POST", body: JSON.stringify({ run_id: runId, speed }) },
+      20000,
+      false
+    ),
   replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[], bot = 1) =>
     request<ReplayInfo>(
       "/api/replay/start",

@@ -216,9 +216,18 @@ class ReplayEngine(StrategyEngine):
     records_ticks = False  # its prices are walked from minute candles
     uses_wallet = True  # a replay takes margin from the bots' practice wallet (owner's choice)
 
-    def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None, bot: int = 1):
+    def __init__(
+        self,
+        feed: ReplayFeed,
+        symbols: list[str],
+        run_id: int | None = None,
+        bot: int = 1,
+        settings: dict | None = None,
+    ):
         self.feed = feed
         self.run_id = run_id
+        # A resumed run plays the settings it was started with, not today's.
+        self.saved_settings = dict(settings) if settings else None
         # Whose settings it plays: bot 1 (the main desk) or bots 2-4 (settings rows 3-5).
         # Only read here; a replay never writes to a bot's settings row.
         self.bot_id = int(bot)
@@ -239,6 +248,12 @@ class ReplayEngine(StrategyEngine):
     def load_config(self) -> BotConfig:
         row = super().load_config()
         data = {col.name: getattr(row, col.name) for col in BotConfig.__table__.columns}
+        if self.saved_settings:
+            for name, value in self.saved_settings.items():
+                if name == "stock_settings":
+                    data[name] = value if isinstance(value, str) else json.dumps(value or {})
+                elif name in data and name not in ("id", "symbol", "trade_symbols", "trading_mode"):
+                    data[name] = value
         data["trading_mode"] = "REPLAY"
         data["max_trades_per_day"] = REPLAY_TRADE_CAP
         data["trade_symbols"] = ",".join(self.replay_symbols)
@@ -263,11 +278,13 @@ class ReplayEngine(StrategyEngine):
         return snap
 
 
-def close_orphan_replay_rows(run_id: int | None = None) -> int:
+def close_orphan_replay_rows(run_id: int | None = None, interrupted: bool = False) -> int:
     """A restart mid-replay leaves REPLAY rows open. Close them flat.
 
     With `run_id`, only that run's rows: each bot has its own replay, and
     stopping one must not touch another bot's replay still playing.
+    `interrupted` (at boot): a run that was playing is marked INTERRUPTED, so
+    it can be resumed from the first day it had not finished.
     """
     now = dt.datetime.now(IST).replace(tzinfo=None)
     with session_factory()() as db:
@@ -287,9 +304,64 @@ def close_orphan_replay_rows(run_id: int | None = None) -> int:
         if run_id is not None:
             runs = runs.filter(ReplayRun.id == run_id)
         for run in runs.all():
-            run.status = "STOPPED"
+            run.status = "INTERRUPTED" if interrupted else "STOPPED"
         db.commit()
         return len(rows)
+
+
+def _run_settings(run: ReplayRun) -> dict:
+    try:
+        data = json.loads(run.settings or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def resumable_runs(bot: int | None = None) -> list[dict]:
+    """Runs cut short (a server restart, or Stop) with days still to play, newest first.
+
+    Scalp-pick runs are left out: their stock universe is not kept on the run.
+    """
+    out: list[dict] = []
+    with session_factory()() as db:
+        rows = (
+            db.query(ReplayRun)
+            .filter(ReplayRun.status.in_(("INTERRUPTED", "STOPPED")), ReplayRun.days_done < ReplayRun.days_total)
+            .order_by(ReplayRun.id.desc())
+            .limit(20)
+            .all()
+        )
+        for run in rows:
+            settings = _run_settings(run)
+            if settings.get("scalp_pick"):
+                continue
+            run_bot = int(settings.get("bot") or 1)
+            if bot is not None and run_bot != int(bot):
+                continue
+            out.append(
+                {
+                    "id": run.id,
+                    "bot": run_bot,
+                    "status": run.status,
+                    "start_date": run.start_date,
+                    "end_date": run.end_date,
+                    "days_total": run.days_total,
+                    "days_done": run.days_done,
+                    "next_day": (run.days or "").split(",")[run.days_done] if run.days else None,
+                    "symbols": [s for s in (run.symbols or "").split(",") if s],
+                }
+            )
+    return out
+
+
+def _drop_unfinished_days(run_id: int, days: list[str]) -> int:
+    """Delete a run's trades on days it had not finished, so a resume plays them afresh."""
+    if not days:
+        return 0
+    with session_factory()() as db:
+        n = db.query(TradeLog).filter(TradeLog.run_id == run_id, TradeLog.date.in_(days)).delete(synchronize_session=False)
+        db.commit()
+        return int(n)
 
 
 def _day_rows(trades: list[TradeLog]) -> list[dict]:
@@ -538,7 +610,48 @@ class ReplaySession:
         self._stop = False
         self._task = asyncio.create_task(self._load_and_play(broker, symbols, settings or {}))
 
-    async def _load_and_play(self, broker, symbols: list[str], settings: dict) -> None:
+    async def resume(self, broker, run_id: int, speed: int) -> None:
+        """Carry on a run that was cut short, from the first day it had not finished.
+
+        The finished days keep their trades; the unfinished day's partial
+        trades are dropped and that day plays again from 09:15, with the
+        settings the run was started with.
+        """
+        with session_factory()() as db:
+            run = db.get(ReplayRun, int(run_id))
+            if run is None:
+                raise ValueError("No such replay run.")
+            settings = _run_settings(run)
+            if settings.get("scalp_pick"):
+                raise ValueError("A Scalp-pick run cannot be resumed. Start it again from the Scalp page.")
+            if run.status not in ("INTERRUPTED", "STOPPED") or run.days_done >= run.days_total:
+                raise ValueError(f"Run #{run.id} has nothing left to play.")
+            all_days = [dt.date.fromisoformat(d) for d in (run.days or "").split(",") if d]
+            done = int(run.days_done or 0)
+            symbols = [x for x in (run.symbols or "").split(",") if x]
+            start = dt.datetime.strptime(run.start_time or "09:15", "%H:%M").time()
+            bot = int(settings.get("bot") or 1)
+            bot_name = str(settings.get("bot_name") or f"Bot {bot}")
+        if not symbols or done >= len(all_days):
+            raise ValueError(f"Run #{run_id} has nothing left to play.")
+        await self.stop("REPLAY_STOPPED")
+        _drop_unfinished_days(int(run_id), [d.isoformat() for d in all_days[done:]])
+        self.bot, self.bot_name = bot, bot_name
+        self.rule, self.picks, self.universe = None, {}, []
+        self.status = "LOADING"
+        self.day, self.end_day, self.start, self.speed = all_days[done], all_days[-1], start, speed
+        self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
+        self.days, self.day_index, self.run_id = [], done, None
+        self._want = len(symbols)
+        self.engine = None
+        self._stop = False
+        self._task = asyncio.create_task(
+            self._load_and_play(broker, symbols, settings, resume=(int(run_id), all_days, done))
+        )
+
+    async def _load_and_play(
+        self, broker, symbols: list[str], settings: dict, resume: tuple[int, list[dt.date], int] | None = None
+    ) -> None:
         assert self.day is not None and self.end_day is not None
         first_day, last_day = self.day, self.end_day
         frames: dict[str, pd.DataFrame] = {}
@@ -580,33 +693,45 @@ class ReplaySession:
             return
         self.symbols = list(frames)
         self.universe = list(frames)
+        done = 0
+        if resume is not None:
+            # The run's own day list: finished days count, the rest play now.
+            _, all_days, done = resume
+            days = all_days
         self.days = days
         if self.rule is not None:
             settings = {**settings, "scalp_pick": {**self.rule.as_dict(), "universe": len(frames), "picks": {}}}
         self._settings = settings
-        with session_factory()() as db:
-            run = ReplayRun(
-                created_at=dt.datetime.now(IST).replace(tzinfo=None),
-                start_date=days[0].isoformat(),
-                end_date=days[-1].isoformat(),
-                start_time=self.start.strftime("%H:%M"),
-                symbols=",".join(self.symbols),
-                settings=json.dumps(settings, default=str),
-                status="RUNNING",
-                days_total=len(days),
-                days_done=0,
-                days=",".join(d.isoformat() for d in days),
-            )
-            db.add(run)
-            db.commit()
-            self.run_id = int(run.id)
+        if resume is not None:
+            self.run_id = resume[0]
+            self._mark_run(status="RUNNING")
+        else:
+            with session_factory()() as db:
+                run = ReplayRun(
+                    created_at=dt.datetime.now(IST).replace(tzinfo=None),
+                    start_date=days[0].isoformat(),
+                    end_date=days[-1].isoformat(),
+                    start_time=self.start.strftime("%H:%M"),
+                    symbols=",".join(self.symbols),
+                    settings=json.dumps(settings, default=str),
+                    status="RUNNING",
+                    days_total=len(days),
+                    days_done=0,
+                    days=",".join(d.isoformat() for d in days),
+                )
+                db.add(run)
+                db.commit()
+                self.run_id = int(run.id)
         notes = []
         if self.skipped:
             notes.append(f"No candles for {', '.join(self.skipped)}.")
         self.error = " ".join(notes)
-        feed = ReplayFeed(frames, dt.datetime.combine(days[0], self.start, tzinfo=IST))
+        feed = ReplayFeed(frames, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST))
         bot_paused = False
+        saved = settings if resume is not None else None
         for index, day in enumerate(days):
+            if index < done:
+                continue  # finished before the run was cut short
             if self._stop:
                 return
             self.day_index, self.day = index, day
@@ -627,7 +752,7 @@ class ReplaySession:
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot)
+            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved)
             engine.load_config()
             await engine.tick(clock)
             engine.hold_for_next_cross(symbols)

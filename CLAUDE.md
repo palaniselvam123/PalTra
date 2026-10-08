@@ -166,6 +166,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `?bot=` on the `/api/replay*` routes; `main.replay` is bot 1's), so all four can
   replay together after market hours; playing replays split `replay.CPU_SHARE`,
   and stopping one closes only its own run's open rows.
+  A run cut short survives a deploy: at boot `close_orphan_replay_rows(interrupted=True)`
+  marks a run that was playing `INTERRUPTED` (a Stop leaves `STOPPED`), and
+  `resumable_runs(bot)` lists runs with days left (not Scalp-pick runs).
+  `ReplaySession.resume(run_id)` drops the unfinished day's partial trades and
+  plays from that day with the run's saved settings (`ReplayEngine(settings=)`),
+  keeping the finished days, so the run ends as if it never stopped. The replay
+  bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
+  the Backtests tab has a Resume button.
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE.
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
