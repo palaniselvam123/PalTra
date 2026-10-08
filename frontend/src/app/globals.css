@@ -182,6 +182,16 @@ select {
 [data-theme="light"] .text-amber-400 { color: #a16207; }
 [data-theme="light"] .text-violet-300 { color: #6d28d9; }
 
+/* Dark terminal contrast (display only). Muted slate text was under the 4.5:1
+   AA ratio on the near-black surfaces; lift it a step, and give hairline card
+   borders enough weight to see. Light theme keeps its own remap above. */
+:root:not([data-theme="light"]) .terminal-dark .text-slate-500 { color: #94a3b8; }
+:root:not([data-theme="light"]) .terminal-dark .text-slate-600 { color: #8391a7; }
+:root:not([data-theme="light"]) .terminal-dark .border-white\/5 { border-color: rgb(255 255 255 / 0.1); }
+:root:not([data-theme="light"]) .terminal-dark .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(255 255 255 / 0.08); }
+:root:not([data-theme="light"]) .terminal-dark input::placeholder,
+:root:not([data-theme="light"]) .terminal-dark textarea::placeholder { color: #8391a7; -webkit-text-fill-color: #8391a7; opacity: 1; }
+
 /* A wide blotter or chip row must not stretch the phone wider than the screen. */
 .terminal-dark {
   max-width: 100%;
