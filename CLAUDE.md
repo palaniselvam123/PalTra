@@ -162,7 +162,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only
-  its own bot's replays; one replay runs at a time.
+  its own bot's replays. Each bot has its own replay player (`main.replays[1-4]`,
+  `?bot=` on the `/api/replay*` routes; `main.replay` is bot 1's), so all four can
+  replay together after market hours; playing replays split `replay.CPU_SHARE`,
+  and stopping one closes only its own run's open rows.
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE.
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the

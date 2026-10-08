@@ -97,35 +97,6 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
     void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot));
   };
 
-  // One replay plays at a time. Another bot's replay is shown here, not followed.
-  const otherBot = active && (info?.bot ?? 1) !== bot;
-  if (otherBot) {
-    const theirs = info?.bot ?? 1;
-    return (
-      <section aria-label="Replay on another bot" className="flex flex-wrap items-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2 text-sm">
-        <History size={16} aria-hidden className="text-violet-300" />
-        <span className="text-violet-100">
-          A replay of <b>{info?.bot_name ?? `Bot ${theirs}`}</b>&apos;s settings is {info?.status === "LOADING" ? "loading" : "playing"}.
-          One replay runs at a time.
-        </span>
-        <a
-          href={theirs === 1 ? "/terminal/" : `/terminal/?desk=bot${theirs}`}
-          className="ml-auto rounded-md px-2 py-1 text-xs font-semibold text-violet-200 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10"
-        >
-          Watch it on that desk
-        </a>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void run(() => smaApi.replayControl("stop"))}
-          className="rounded-md px-2 py-1 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5 disabled:opacity-50"
-        >
-          Stop it
-        </button>
-      </section>
-    );
-  }
-
   if (!active) {
     return (
       <section aria-label="Replay a past day" className="rounded-xl border border-violet-400/25 bg-violet-500/[0.06]">

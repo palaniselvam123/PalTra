@@ -824,7 +824,8 @@ def test_api_replays_any_bot_and_refuses_only_that_bot_in_live(tmp_path, monkeyp
         seen.update(symbols=symbols, bot=bot, bot_name=bot_name, settings=settings)
 
     monkeypatch.setattr(main.engine.broker, "token", "test-token")
-    monkeypatch.setattr(main.replay, "begin", fake_begin)
+    for session in main.replays.values():  # each bot has its own replay player
+        monkeypatch.setattr(session, "begin", fake_begin)
     with TestClient(main.app) as client:
         client.put("/api/bots/3/config", json={"bot_name": "Scalper"})
         client.post("/api/bots/3/trade-symbols", json={"symbol": "INFY", "armed": True})

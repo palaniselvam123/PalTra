@@ -60,7 +60,17 @@ from strategy_engine import (
 )
 
 engine = StrategyEngine()
-replay = ReplaySession()
+#: One replay player per SMA bot (1-4), so all four bots can replay at once
+#: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
+replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
+replay = replays[1]
+
+
+def _replay_for(bot: int) -> ReplaySession:
+    session = replays.get(int(bot))
+    if session is None:
+        raise HTTPException(422, "bot must be 1 to 4")
+    return session
 # Paper-only second bot on the same live quotes (research.py). It reads quotes
 # through the live client's refresh and nothing else.
 
@@ -478,9 +488,10 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
     _reload(eng, payload)
     if changed_cap:
         eng.release_trade_cap(cap)
-        # A replay halted on the same cap resumes from the same Save.
-        if eng is engine and replay.engine is not None:
-            replay.engine.release_trade_cap(cap)
+        # A replay of this bot halted on the same cap resumes from the same Save.
+        session = replays.get(getattr(eng, "bot_id", 0)) if eng is not research_engine else None
+        if session is not None and session.engine is not None:
+            session.engine.release_trade_cap(cap)
     return payload
 
 
@@ -873,16 +884,23 @@ class ReplayControl(BaseModel):
     speed: int | None = None
 
 
-def _replay_engine():
-    eng = replay.engine
+def _replay_engine(bot: int = 1):
+    eng = _replay_for(bot).engine
     if eng is None:
         raise HTTPException(409, "No replay is playing. Start one first.")
     return eng
 
 
 @app.get("/api/replay")
-async def replay_info():
-    return replay.info()
+async def replay_info(bot: int = 1):
+    """One bot's replay (`bot` 1-4, default 1). Each bot has its own and they can run together."""
+    return _replay_for(bot).info()
+
+
+@app.get("/api/replay/all")
+async def replay_all():
+    """Every bot's replay, for screens that show what the other bots are replaying."""
+    return {str(n): s.info() for n, s in replays.items()}
 
 
 @app.post("/api/replay/scalp-picks")
@@ -973,7 +991,8 @@ async def replay_start(body: ReplayStart):
         engine.broker.adopt_saved_session()
     if not engine.broker.token:
         raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the desk Settings page first.")
-    await replay.begin(
+    session = _replay_for(body.bot)
+    await session.begin(
         engine.broker,
         symbols,
         day,
@@ -984,7 +1003,7 @@ async def replay_start(body: ReplayStart):
         bot=body.bot,
         bot_name=bot_label,
     )
-    return replay.info()
+    return session.info()
 
 
 @app.get("/api/replay/runs")
@@ -1004,7 +1023,7 @@ async def replay_run(run_id: int):
 
 @app.delete("/api/replay/runs/{run_id}")
 async def replay_run_delete(run_id: int):
-    if replay.run_id == run_id and replay.active:
+    if any(s.run_id == run_id and s.active for s in replays.values()):
         raise HTTPException(409, "Stop this replay before deleting it.")
     if not delete_run(run_id):
         raise HTTPException(404, "No such replay run")
@@ -1012,32 +1031,33 @@ async def replay_run_delete(run_id: int):
 
 
 @app.post("/api/replay/control")
-async def replay_control(body: ReplayControl):
+async def replay_control(body: ReplayControl, bot: int = 1):
+    session = _replay_for(bot)
     if body.action == "stop":
-        await replay.stop()
-        return replay.info()
+        await session.stop()
+        return session.info()
     try:
-        replay.control(body.action, body.speed)
+        session.control(body.action, body.speed)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return replay.info()
+    return session.info()
 
 
 @app.get("/api/replay/state")
-async def replay_state():
-    eng = _replay_engine()
-    return {**eng.snapshot(), "replay": replay.info()}
+async def replay_state(bot: int = 1):
+    eng = _replay_engine(bot)
+    return {**eng.snapshot(), "replay": _replay_for(bot).info()}
 
 
 @app.get("/api/replay/chart")
-async def replay_chart(limit: int = 240, symbol: str | None = None):
+async def replay_chart(limit: int = 240, symbol: str | None = None, bot: int = 1):
     # Off the event loop: building the chart must not hold up /api/state.
-    return await _chart(_replay_engine(), limit, symbol)
+    return await _chart(_replay_engine(bot), limit, symbol)
 
 
 @app.post("/api/replay/bot/start")
-async def replay_bot_start():
-    eng = _replay_engine()
+async def replay_bot_start(bot: int = 1):
+    eng = _replay_engine(bot)
     eng.release_manual_panic()
     eng.release_trade_cap()
     if eng.status in ("HALTED", "DAY_COMPLETED"):
@@ -1049,16 +1069,16 @@ async def replay_bot_start():
 
 
 @app.post("/api/replay/bot/pause")
-async def replay_bot_pause():
-    eng = _replay_engine()
+async def replay_bot_pause(bot: int = 1):
+    eng = _replay_engine(bot)
     if eng.status == "RUNNING":
         eng.status = "PAUSED"
     return {"bot_status": eng.status}
 
 
 @app.post("/api/replay/bot/force")
-async def replay_bot_force(body: ForceOrder):
-    eng = _replay_engine()
+async def replay_bot_force(body: ForceOrder, bot: int = 1):
+    eng = _replay_engine(bot)
     try:
         result = await eng.force_order(body.symbol)
     except ForceRefused as exc:
@@ -1067,8 +1087,8 @@ async def replay_bot_force(body: ForceOrder):
 
 
 @app.post("/api/replay/bot/close")
-async def replay_bot_close(body: CloseOrder):
-    eng = _replay_engine()
+async def replay_bot_close(body: CloseOrder, bot: int = 1):
+    eng = _replay_engine(bot)
     try:
         result = await eng.close_symbol(body.symbol)
     except ForceRefused as exc:
@@ -1077,8 +1097,8 @@ async def replay_bot_close(body: CloseOrder):
 
 
 @app.post("/api/replay/bot/kill")
-async def replay_bot_kill():
-    eng = _replay_engine()
+async def replay_bot_kill(bot: int = 1):
+    eng = _replay_engine(bot)
     await eng.kill("Manual PANIC SQUARE-OFF (replay)")
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
 
