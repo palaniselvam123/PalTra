@@ -497,7 +497,7 @@ export default function TerminalPage() {
           ) : null
         }
       />
-      <main className="mx-auto w-full min-w-0 space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <main className="mx-auto w-full min-w-0 space-y-4 px-3 pb-24 pt-3 sm:px-4 sm:pt-4">
         {loadNote && !unreachable && (
           <div role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             {loadNote}

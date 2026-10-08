@@ -94,8 +94,14 @@ export function ControlBar({
           type="button"
           disabled={busy || forceBlocked}
           onClick={() => setAsk("force")}
-          title={forceBlocked ? `${symbol || "The chart stock"} is not armed. Switch it on in the stock list first.` : undefined}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 text-sm font-semibold text-[#1a1203] hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          title={
+            forceBlocked
+              ? `${symbol || "The chart stock"} is not armed. Switch it on in the stock list first.`
+              : busy
+                ? "Wait for the last action to finish."
+                : undefined
+          }
+          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 text-sm font-semibold text-[#1a1203] hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-amber-400"
         >
           <Zap size={16} aria-hidden />
           Force order
