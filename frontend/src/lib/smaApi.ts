@@ -483,6 +483,15 @@ export type ReplayStockRow = {
   strategy: Record<string, string | number | boolean | null> | null;
 };
 
+/** The most money a run had in open trades at one moment (entry price × qty, full value). */
+export type ReplayCapitalPeak = {
+  peak_value: number;
+  /** ISO time of the peak (replay clock), null when the run never traded. */
+  peak_at: string | null;
+  /** Positions open at the peak. */
+  peak_positions: number;
+};
+
 export type ReplayRun = {
   id: number;
   created_at: string | null;
@@ -496,6 +505,8 @@ export type ReplayRun = {
   days_total: number;
   days_done: number;
   totals: ReplayRunTotals;
+  /** Money in open trades at the run's busiest moment, and each day's own peak. */
+  capital?: ReplayCapitalPeak & { days: (ReplayCapitalPeak & { date: string })[] };
   days?: ReplayDayRow[];
   /** Per-stock split, on the run detail only. */
   stocks?: ReplayStockRow[];

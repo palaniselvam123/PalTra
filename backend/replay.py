@@ -351,6 +351,43 @@ def _stock_rows(trades: list[TradeLog], symbols: list[str]) -> list[dict]:
     return out
 
 
+def _capital(trades: list[TradeLog]) -> dict:
+    """The most money the run had in open trades at one moment (entry price x qty).
+
+    Trades overlap when several stocks are held together; their entry values
+    add up. A trade still open (stopped run) counts until the end of its day.
+    Returned per run and per day, with when the peak happened and how many
+    positions were open then. Margin and the trader's own capital are applied
+    on screen; this is the full value of the shares.
+    """
+    events: dict[str, list[tuple[dt.datetime, int, float]]] = {}
+    for row in trades:
+        if row.entry_time is None or not row.entry_price or not row.qty:
+            continue
+        value = float(row.entry_price) * abs(int(row.qty))
+        start = row.entry_time
+        end = row.exit_time or dt.datetime.combine(start.date(), dt.time(23, 59))
+        day = events.setdefault(row.date or start.date().isoformat(), [])
+        # A close at the same moment as another entry frees its money first (order 0 before 1).
+        day.append((start, 1, value))
+        day.append((end, 0, -value))
+    by_day = []
+    best = {"peak_value": 0.0, "peak_at": None, "peak_positions": 0}
+    for date in sorted(events):
+        open_value, open_count = 0.0, 0
+        top = {"date": date, "peak_value": 0.0, "peak_at": None, "peak_positions": 0}
+        for when, kind, change in sorted(events[date], key=lambda e: (e[0], e[1])):
+            open_value += change
+            open_count += 1 if kind == 1 else -1
+            if kind == 1 and open_value > top["peak_value"] + 1e-9:
+                top.update(peak_value=open_value, peak_at=when.isoformat(), peak_positions=open_count)
+        top["peak_value"] = round(top["peak_value"], 2)
+        by_day.append(top)
+        if top["peak_value"] > best["peak_value"]:
+            best = {k: top[k] for k in ("peak_value", "peak_at", "peak_positions")}
+    return {**best, "days": by_day}
+
+
 def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     day_rows = _day_rows(trades)
     out = {
@@ -365,6 +402,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         "days_total": run.days_total,
         "days_done": run.days_done,
         "totals": _totals(day_rows),
+        "capital": _capital(trades),
     }
     if with_days:
         out["days"] = day_rows
