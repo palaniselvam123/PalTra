@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
-import { strategyNotes } from "@/lib/strategyChecks";
+import { crossExitOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
 
 type Props = {
   config: SmaConfig | null;
@@ -35,6 +35,7 @@ const LABELS: Record<string, string> = {
   use_gap_short: "SMA gap (sell)",
   use_gap_mode: "Gap mode",
   use_candle_dir: "candle direction",
+  cross_exit: "cross exit",
   flip_orders: "flip",
 };
 
@@ -108,6 +109,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     setScope(next);
   };
   const isOwn = (key: keyof SmaConfig) => stockScope && key in own;
+  const squareOff = form.square_off_time || config?.square_off_time || "15:15";
+  // The no-exit warning sits with the exits, the rest with gap mode.
+  const gapNotes = strategyNotes(form).filter((n) => n.id !== "no-exit");
 
   const set = (key: keyof SmaConfig, value: string | boolean) => {
     markDirty(true);
@@ -173,6 +177,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_confirm_sma: Boolean(form.gap_fade_confirm_sma),
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
+    cross_exit: crossExitOn(form),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -470,8 +475,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
           <SectionTitle>Entry filters</SectionTitle>
           <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored. A
-            close still happens on the opposite cross.
+            These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored.
+            {crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
           </p>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -644,7 +649,43 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             “Candles” on the chart. Force order skips this check.
           </p>
           <SectionTitle>Exits</SectionTitle>
-          <label className="mt-2 block text-sm text-slate-300">
+          <label
+            className={clsx(
+              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+              crossExitOn(form) ? "ring-white/10" : "bg-amber-400/[0.08] ring-amber-400/40"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={crossExitOn(form)}
+              onChange={(e) => set("cross_exit", e.target.checked)}
+              className="mt-1 accent-[#10B981]"
+            />
+            <span>
+              {isOwn("cross_exit") && <OwnTag />}
+              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes the trade and opens the reverse.
+              Uncheck to hold through opposite crosses: crosses then only open a trade while flat, and the stop / target,
+              gap fade, Bollinger exit or the {squareOff} square-off closes it. Works with any of
+              those, or alone. Not used with candle patterns (they close at the end of their candle).
+            </span>
+          </label>
+          {noExitOn(form) ? (
+            <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
+              No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
+              held, with no stop, until the {squareOff} square-off.
+              <button
+                type="button"
+                onClick={() => {
+                  set("cross_exit", true);
+                  setMsg("Changed — press Save to keep it.");
+                }}
+                className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+              >
+                Turn the SMA cross exit on
+              </button>
+            </p>
+          ) : null}
+          <label className="mt-3 block text-sm text-slate-300">
             <span className="text-[11px] uppercase tracking-wider text-slate-400">
               Bollinger exit{isOwn("bb_exit") && <OwnTag />}
             </span>
@@ -653,7 +694,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               onChange={(e) => set("bb_exit", e.target.value)}
               className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
-              <option value="OFF">Off — exit only on the stop, target, cross or square-off</option>
+              <option value="OFF">Off — no Bollinger exit</option>
               <option value="BAND">Band target — book profit when a candle closes at the far band</option>
               <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
               <option value="BOTH">Both — band target or middle band, whichever comes first</option>
@@ -764,9 +805,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("gap_fade_min_candles")}
             />
           </div>
-          {strategyNotes(form).length ? (
+          {gapNotes.length ? (
             <ul aria-label="Setting notes" className="mt-2 space-y-1.5">
-              {strategyNotes(form).map((note) => (
+              {gapNotes.map((note) => (
                 <li
                   key={note.id}
                   className="rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-[12px] leading-snug text-amber-100"
@@ -777,7 +818,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                       type="button"
                       onClick={() => {
                         for (const [key, value] of Object.entries(note.fix!.values)) {
-                          set(key as keyof SmaConfig, String(value));
+                          set(key as keyof SmaConfig, typeof value === "boolean" ? value : String(value));
                         }
                         setMsg("Changed — press Save to keep it.");
                       }}

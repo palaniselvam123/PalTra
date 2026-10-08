@@ -99,6 +99,8 @@ export type SmaConfig = {
   gap_fade_min_candles?: number;
   /** Judge the fade on the live price about once a second, not only on closed candles. */
   gap_fade_intrabar?: boolean;
+  /** SMA cross exit (on unless false): an opposite cross closes the trade. Off: other exits or square-off. */
+  cross_exit?: boolean;
   /** Flip strategy: a buy signal sells, a sell signal buys. */
   flip_orders?: boolean;
   gap_entry_delay_min?: number;

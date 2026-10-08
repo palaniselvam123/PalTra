@@ -23,26 +23,56 @@ function balanced(inLong: number, inShort: number): StrategyNote["fix"] {
   };
 }
 
+/** The SMA cross exit is on unless set off (older servers do not send it). */
+export const crossExitOn = (cfg: Partial<SmaConfig>): boolean => cfg.cross_exit !== false;
+
 /**
- * Overlaps and slips in the gap-mode settings. Nothing here changes a trade;
- * it only points out settings that do the same job twice or are lopsided.
+ * No exit is on: SMA entries with the cross exit, stop-loss, gap mode and
+ * Bollinger exit all off, so a trade is held until the square-off. (Candle
+ * patterns always close at the end of their candle.)
+ */
+export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
+  if (!cfg) return false;
+  return (
+    (cfg.entry_mode ?? "SMA") !== "PATTERN" &&
+    !crossExitOn(cfg) &&
+    cfg.use_stop === false &&
+    !cfg.use_gap_mode &&
+    String(cfg.bb_exit ?? "OFF").toUpperCase() === "OFF"
+  );
+}
+
+/**
+ * Overlaps and slips in the strategy settings (mostly gap mode). Nothing here
+ * changes a trade; it only points out settings that do the same job twice, are
+ * lopsided, or leave a trade with no exit.
  */
 export function strategyNotes(cfg: Partial<SmaConfig> | null | undefined): StrategyNote[] {
-  if (!cfg || !cfg.use_gap_mode) return [];
+  if (!cfg) return [];
   const notes: StrategyNote[] = [];
+  if (noExitOn(cfg)) {
+    notes.push({
+      id: "no-exit",
+      text: "No exit is on: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade opened on a cross is held, with no stop, until the square-off.",
+      fix: { label: "Turn the SMA cross exit on", values: { cross_exit: true } },
+    });
+  }
+  if (!cfg.use_gap_mode) return notes;
+  const crossCloses = crossExitOn(cfg);
   const inLong = num(cfg.gap_entry_long, 0.05);
   const outLong = num(cfg.gap_exit_long, 0.02);
   const inShort = num(cfg.gap_entry_short, -0.05);
   const outShort = num(cfg.gap_exit_short, -0.02);
 
-  if (outLong <= 0) {
+  // With the cross exit off, a fade exit at 0% is the only thing that closes at the cross, so it is not a repeat.
+  if (crossCloses && outLong <= 0) {
     notes.push({
       id: "buy-exit-zero",
       text: `Buy exit at ${outLong}% is the SMA cross itself: the gap reaches 0% where SMA 9 crosses back below SMA 21, and that cross already closes the trade. This fade exit never fires first.`,
       fix: inLong > 0.02 ? { label: `Set buy exit to ${round(inLong * 0.4)}%`, values: { gap_exit_long: round(inLong * 0.4) } } : undefined,
     });
   }
-  if (outShort >= 0) {
+  if (crossCloses && outShort >= 0) {
     notes.push({
       id: "sell-exit-zero",
       text: `Sell exit at ${outShort}% is the SMA cross itself: the opposite cross already closes the trade there, so this fade exit never fires first.`,
@@ -67,7 +97,7 @@ export function strategyNotes(cfg: Partial<SmaConfig> | null | undefined): Strat
     if (room < 0) {
       notes.push({
         id: `lock-in-${side}`,
-        text: `The ${side} exit (${outLevel}%) is beyond the ${side} entry (${inLevel}%): a lock-in level. The gap exit only arms once the gap has reached ${outLevel}%, then closes when it comes back to it${num(cfg.gap_giveback_pct, 0) > 0 ? " (the give-back waits for that too)" : ""}. A ${side} whose gap never gets that wide is closed only by the stop, the opposite cross or square-off.`,
+        text: `The ${side} exit (${outLevel}%) is beyond the ${side} entry (${inLevel}%): a lock-in level. The gap exit only arms once the gap has reached ${outLevel}%, then closes when it comes back to it${num(cfg.gap_giveback_pct, 0) > 0 ? " (the give-back waits for that too)" : ""}. A ${side} whose gap never gets that wide is closed only by ${crossCloses ? "the stop, the opposite cross or square-off" : "the stop or square-off"}.`,
       });
     }
   }

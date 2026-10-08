@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Loader2, Settings2 } from "lucide-react";
 import { BB_EXITS, inr, smaApi, type BbExit, type SmaConfig, type StopType } from "@/lib/smaApi";
-import { strategyNotes } from "@/lib/strategyChecks";
+import { crossExitOn as crossExitIsOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
 
 /** The settings page section for this desk's strategy. */
 export function strategySettingsHref(research: boolean): string {
@@ -21,7 +21,11 @@ type Toggle = {
   detail: (c: SmaConfig) => string;
   /** Shown only when this is true (e.g. gap-mode exits need gap mode). */
   when?: (c: SmaConfig) => boolean;
+  /** Read the switch when it is not a plain flag (e.g. on unless set off). */
+  on?: (c: SmaConfig) => boolean;
 };
+
+const isOn = (t: Toggle, c: SmaConfig) => (t.on ? t.on(c) : Boolean(c[t.key]));
 
 const ENTRY: Toggle[] = [
   {
@@ -138,7 +142,14 @@ export function StrategySummary({
   };
 
   const flip = (t: Toggle) => {
-    const next = !c[t.key];
+    const next = !isOn(t, c);
+    if (t.key === "cross_exit" && !next) {
+      const sure = window.confirm(
+        `Turn the SMA cross exit OFF${liveMoney ? " with LIVE money" : ""}? An opposite cross will no longer close or reverse an open trade; ` +
+          `only the stop / target, gap fade, Bollinger exit or the ${config.square_off_time} square-off will.`
+      );
+      if (!sure) return;
+    }
     if (t.key === "flip_orders" && liveMoney) {
       const sure = window.confirm(
         next
@@ -163,12 +174,15 @@ export function StrategySummary({
     save({ use_stop: !stopOn }, `Stop-loss ${stopOn ? "off" : "on"}`);
   };
 
-  const notes = strategyNotes(c);
+  const crossExitOn = crossExitIsOn(c);
+  const noExit = noExitOn(c);
+  // The no-exit warning has its own banner here.
+  const notes = strategyNotes(c).filter((n) => n.id !== "no-exit");
   const busy = saving != null;
 
   const switchChip = (t: Toggle) => {
     if (t.when && !t.when(c)) return null;
-    const on = Boolean(c[t.key]);
+    const on = isOn(t, c);
     const others = overrides(t.key);
     const mine = scope !== ALL && t.key in own;
     return (
@@ -405,8 +419,21 @@ export function StrategySummary({
                   </span>
                 </span>
               </button>
+              {switchChip({
+                key: "cross_exit",
+                label: "SMA cross exit",
+                detail: () => (crossExitOn ? "opposite cross closes and reverses" : "off: a cross does not close the trade"),
+                when: () => (c.entry_mode ?? "SMA") !== "PATTERN",
+                on: () => crossExitOn,
+              })}
               {gapExits.map(switchChip)}
             </div>
+            {noExit ? (
+              <p role="alert" className="rounded-md border border-amber-400/50 bg-amber-400/[0.1] px-2 py-1.5 text-xs font-semibold text-amber-200">
+                No exit is on: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off, so an open trade is
+                held until the {config.square_off_time} square-off.
+              </p>
+            ) : null}
             {stopOn
               ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP"], STOP_LABEL, (v) =>
                   save({ stop_type: v }, `Stop type ${STOP_LABEL[v]}`)
@@ -416,7 +443,11 @@ export function StrategySummary({
               save({ bb_exit: v }, `Bollinger exit ${BB_LABEL[v]}`)
             )}
             <p className="text-[11px] text-slate-400">
-              {(c.entry_mode ?? "SMA") === "PATTERN" ? "Always: the trade closes at the end of its candle" : "Always: the opposite cross closes the trade"}
+              {(c.entry_mode ?? "SMA") === "PATTERN"
+                ? "Always: the trade closes at the end of its candle"
+                : crossExitOn
+                  ? "The opposite cross closes the trade"
+                  : "An opposite cross does not close the trade"}
               {c.use_gap_mode ? ` · gap fades back to ${c.gap_exit_long ?? 0.02}% / ${c.gap_exit_short ?? -0.02}%` : ""}
               {c.use_gap_mode && Number(c.gap_giveback_pct ?? 0) > 0 ? ` or gives back ${c.gap_giveback_pct}%` : ""} · square-off{" "}
               {config.square_off_time}.
