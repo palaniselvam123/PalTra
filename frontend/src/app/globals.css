@@ -192,6 +192,17 @@ select {
 :root:not([data-theme="light"]) .terminal-dark input::placeholder,
 :root:not([data-theme="light"]) .terminal-dark textarea::placeholder { color: #8391a7; -webkit-text-fill-color: #8391a7; opacity: 1; }
 
+/* Blotter: Trade ID and Stock stay put while the table scrolls sideways. Sticky
+   cells need a solid fill, matched to the card and its striped rows. */
+.terminal-dark .blotter-sticky { position: sticky; z-index: 1; background-color: #151921; }
+.terminal-dark tbody tr:nth-child(odd) > .blotter-sticky { background-color: #191d25; }
+.terminal-dark thead .blotter-sticky { z-index: 2; background-color: #1b2130; }
+.terminal-dark .blotter-sticky-edge { box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.1); }
+[data-theme="light"] .terminal-dark .blotter-sticky,
+[data-theme="light"] .terminal-dark tbody tr:nth-child(odd) > .blotter-sticky { background-color: #ffffff; }
+[data-theme="light"] .terminal-dark thead .blotter-sticky { background-color: #f8fafc; }
+[data-theme="light"] .terminal-dark .blotter-sticky-edge { box-shadow: inset -1px 0 0 rgb(15 23 42 / 0.1); }
+
 /* A wide blotter or chip row must not stretch the phone wider than the screen. */
 .terminal-dark {
   max-width: 100%;

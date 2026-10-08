@@ -884,7 +884,7 @@ export function TradeHistoryTable({
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
 const COLUMNS: Col[] = [
-  { key: "id", label: "Trade ID", num: true },
+  { key: "id", label: "Trade ID" },
   { key: "stock", label: "Stock" },
   { key: "side", label: "Side" },
   { key: "entry_time", label: "Entry time" },
@@ -1214,11 +1214,13 @@ function OrderTable({
 
       {/* Tablet and desktop: a table with a sticky header. */}
       <div className="hidden max-h-[70vh] overflow-auto md:block">
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
+        <table className="w-full text-left text-sm tabular-nums">
+          <thead className="sticky top-0 z-20 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
             <tr>
               {COLUMNS.map((col) => {
                 if (col.key === "action") return <th key={col.key} scope="col" className="px-3 py-2" />;
+                // Trade ID and Stock stay in view while the table scrolls sideways.
+                const pin = col.key === "id" ? "blotter-sticky left-0 w-24 min-w-24" : col.key === "stock" ? "blotter-sticky blotter-sticky-edge left-24" : null;
                 const key = col.key;
                 const on = sort?.key === key;
                 const Icon = !on ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
@@ -1227,7 +1229,7 @@ function OrderTable({
                     key={key}
                     scope="col"
                     aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right")}
+                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right", pin)}
                   >
                     <button
                       type="button"
@@ -1356,8 +1358,8 @@ function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
       <td colSpan={12} className="px-3 py-2 text-slate-200">
         Subtotal · {label}
       </td>
-      <td className="px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
-      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
       <td />
     </tr>
   );
@@ -1418,16 +1420,16 @@ function OrderRowView({
   const { open, market, points, net } = rowFigures(t, state);
   return (
     <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
-      <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
+      <td className="blotter-sticky left-0 w-24 min-w-24 whitespace-nowrap px-3 py-2 font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
+      <td className="blotter-sticky blotter-sticky-edge left-24 whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
       <td className="whitespace-nowrap px-3 py-2">
         <ResultSideBadge trade={t} net={net} />
         <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
       </td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
-      <td className="px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
-      <td className="px-3 py-2 text-right font-mono">
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
         {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
       </td>
       <td className="px-3 py-2 text-right">
@@ -1436,17 +1438,17 @@ function OrderRowView({
       <td className="px-3 py-2 text-right">
         <Extreme trade={t} which="low" />
       </td>
-      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
         <ReasonBadge trade={t} />
       </td>
       <td className="max-w-[13rem] px-3 py-2">
         <StrategyCell settings={settingsOf(t, runs)} />
       </td>
-      <td className="px-3 py-2 text-right font-mono text-amber-300">
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">
         {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
       </td>
-      <td className={clsx("px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
         {signedInr(net)}
       </td>
       <td className="px-3 py-1.5 text-right">{open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}</td>
