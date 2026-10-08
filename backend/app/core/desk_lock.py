@@ -27,7 +27,19 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 COOKIE = "desk_session"
-TTL_SEC = 12 * 60 * 60
+DEFAULT_SESSION_DAYS = 7
+
+
+def _session_days() -> int:
+    """How long a sign-in lasts: DESK_SESSION_DAYS (1-30), else 7 days."""
+    try:
+        days = int(os.environ.get("DESK_SESSION_DAYS", DEFAULT_SESSION_DAYS))
+    except ValueError:
+        days = DEFAULT_SESSION_DAYS
+    return min(30, max(1, days))
+
+
+TTL_SEC = _session_days() * 24 * 60 * 60
 _JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 _JWKS_TTL_SEC = 60 * 60
 _FAIL_LIMIT = 8
