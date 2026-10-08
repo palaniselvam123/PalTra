@@ -87,6 +87,50 @@ class PriceTick(Base):
     price: Mapped[float] = mapped_column(Float)
 
 
+class PaperWallet(Base):
+    """The practice account the PAPER bots trade from (one row, id 1), like one Groww account.
+
+    Only the money loaded, the margin rate and when the account started are
+    stored. What is free is worked out from the PAPER trades themselves
+    (paper_wallet.summary), so it can never drift from the trade book.
+    """
+
+    __tablename__ = "paper_wallet"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    funds: Mapped[float] = mapped_column(Float, default=0.0)  # money loaded and borrowed, net of withdrawals
+    loan: Mapped[float] = mapped_column(Float, default=0.0)  # borrowed to cover margin, still to pay back
+    margin_pct: Mapped[float] = mapped_column(Float, default=20.0)  # share of the trade value blocked (20 = 5x)
+    since: Mapped[dt.datetime] = mapped_column(DateTime)  # closed trades count from here
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class WalletEntry(Base):
+    """One line of the practice wallet's statement (paper_wallet).
+
+    ADD, WITHDRAW, LOAN, REPAY, RESET and MARGIN, with the free balance and
+    the loan owed right after it. A LOAN row is also that loan's record: the
+    entry it paid for (bot, stock, qty, price, margin needed) and how much of
+    it is repaid; repayments clear the oldest open loan first.
+    """
+
+    __tablename__ = "wallet_entry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+    kind: Mapped[str] = mapped_column(String)  # ADD | WITHDRAW | LOAN | REPAY | RESET | MARGIN
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    balance_after: Mapped[float | None] = mapped_column(Float, nullable=True)  # free balance after it
+    loan_after: Mapped[float | None] = mapped_column(Float, nullable=True)  # total owed after it
+    bot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    need: Mapped[float | None] = mapped_column(Float, nullable=True)  # LOAN: margin the entry needed
+    repaid: Mapped[float] = mapped_column(Float, default=0.0)  # LOAN: paid back so far
+    note: Mapped[str] = mapped_column(String, default="")
+
+
 class ReplayRun(Base):
     """One replay over one or more past days, with the settings it used."""
 

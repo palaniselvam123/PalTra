@@ -3,52 +3,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import {
-  inr,
-  smaApi,
-  type ReplayCapitalPeak,
-  type ReplayRun,
-  type ReplayStockRow,
-  type ScalpPick,
-  type ScalpPickRule,
-} from "@/lib/smaApi";
+import { inr, smaApi, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 
 export type Settings = ReplayRun["settings"];
-
-/** Share of the full trade value a broker holds as margin: 1 = full value, 0.2 = MIS 5×. */
-const MARGINS: [number, string][] = [
-  [1, "Full value (no leverage)"],
-  [0.5, "2× (50% margin)"],
-  [0.25, "4× (25% margin)"],
-  [0.2, "5× intraday MIS (20% margin)"],
-];
-const MONEY_KEY = "backtests.money";
-const MARGIN_KEY = "backtests.margin";
-
-function readNumber(key: string, fallback: number): number {
-  try {
-    const v = Number(localStorage.getItem(key));
-    return localStorage.getItem(key) != null && Number.isFinite(v) ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/** What a run needed: money in trades at the peak (after margin) plus room for its worst losing stretch. */
-export function moneyNeeded(peak: ReplayCapitalPeak | undefined, maxDrawdown: number, margin: number) {
-  const inTrades = (peak?.peak_value ?? 0) * margin;
-  const forLosses = Math.abs(Math.min(0, maxDrawdown));
-  return { inTrades, forLosses, total: inTrades + forLosses };
-}
-
-function peakWhen(at: string | null | undefined): string {
-  if (!at) return "";
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return at;
-  return `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} ${at.slice(11, 16)}`;
-}
 
 function signed(v: number): string {
   return `${v > 0 ? "+" : ""}${inr(v)}`;
@@ -231,31 +190,6 @@ export function BacktestRuns() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReplayRun | null>(null);
   const [printing, setPrinting] = useState<number | null>(null);
-  // "Your money" and the margin, kept per browser; they only change what is shown.
-  const [money, setMoney] = useState<string>("");
-  const [margin, setMargin] = useState<number>(1);
-  useEffect(() => {
-    const m = readNumber(MONEY_KEY, 0);
-    setMoney(m > 0 ? String(m) : "");
-    setMargin(readNumber(MARGIN_KEY, 1));
-  }, []);
-  const saveMoney = (v: string) => {
-    setMoney(v);
-    try {
-      localStorage.setItem(MONEY_KEY, String(Number(v) || 0));
-    } catch {
-      /* not kept in a private window */
-    }
-  };
-  const saveMargin = (v: number) => {
-    setMargin(v);
-    try {
-      localStorage.setItem(MARGIN_KEY, String(v));
-    } catch {
-      /* not kept in a private window */
-    }
-  };
-  const capital = Number(money) > 0 ? Number(money) : 0;
 
   /** One run as a PDF: its settings, totals, day-wise P&L and every trade. */
   const downloadPdf = useCallback(async (run: ReplayRun) => {
@@ -353,40 +287,6 @@ export function BacktestRuns() {
         Each replay run with the strategy settings it used. Run the same days again with other settings to compare. P&amp;L
         is practice money on Groww&apos;s past candles.
       </p>
-      <div className="flex flex-wrap items-end gap-3 px-4 pt-3 text-xs">
-        <label className="flex flex-col gap-1 text-slate-400">
-          <span>Your money (virtual) ₹</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step={1000}
-            placeholder="e.g. 100000"
-            value={money}
-            onChange={(e) => saveMoney(e.target.value)}
-            className="min-h-9 w-40 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm text-slate-100"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-slate-400">
-          <span>Count trades at</span>
-          <select
-            value={margin}
-            onChange={(e) => saveMargin(Number(e.target.value))}
-            className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
-          >
-            {MARGINS.map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="max-w-xl pb-1 text-[11px] leading-snug text-slate-400">
-          <b className="text-slate-300">Money needed</b> = the most money tied up in open trades at one moment (all stocks
-          together, entry price × qty, at the margin chosen) + the run&apos;s worst losing stretch (max DD). Leverage varies by
-          stock on Groww; full value is the safe figure.
-        </p>
-      </div>
       {error ? (
         <p role="alert" className="px-4 pt-2 text-xs text-rose-300">
           {error}
@@ -410,9 +310,6 @@ export function BacktestRuns() {
                 <th className="px-2 py-2 text-right">Loss</th>
                 <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
                 <th className="px-2 py-2 text-right">Max DD</th>
-                <th className="px-2 py-2 text-right" title="Money in open trades at the busiest moment + room for the worst losing stretch">
-                  Money needed
-                </th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -474,9 +371,6 @@ export function BacktestRuns() {
                       </td>
                       <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
                       <td className="px-2 py-2 text-right align-top">
-                        <NeedCell run={run} margin={margin} capital={capital} />
-                      </td>
-                      <td className="px-2 py-2 text-right align-top">
                         <button
                           type="button"
                           aria-label={`Download run ${run.id} as PDF`}
@@ -510,8 +404,8 @@ export function BacktestRuns() {
                     </tr>
                     {on ? (
                       <tr id={`run-${run.id}-days`} className="hidden bg-white/[0.015] sm:table-row">
-                        <td colSpan={11} className="p-0 whitespace-normal">
-                          <RunDetail run={detail?.id === run.id ? detail : null} margin={margin} />
+                        <td colSpan={10} className="p-0 whitespace-normal">
+                          <RunDetail run={detail?.id === run.id ? detail : null} />
                         </td>
                       </tr>
                     ) : null}
@@ -525,30 +419,7 @@ export function BacktestRuns() {
       {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width. */}
       {openId != null ? (
         <div className="sm:hidden">
-          <RunDetail run={detail?.id === openId ? detail : null} margin={margin} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** A run's money needed, and against "your money": fits, or short by how much, and the return on it. */
-function NeedCell({ run, margin, capital }: { run: ReplayRun; margin: number; capital: number }) {
-  if (!run.capital || run.totals.trades === 0) return <span className="text-slate-500">—</span>;
-  const need = moneyNeeded(run.capital, run.totals.max_drawdown, margin);
-  const fits = capital > 0 ? capital >= need.total : null;
-  return (
-    <div className="font-mono">
-      <div className="font-semibold text-slate-100" title={`In trades ${inr(need.inTrades)} + losses ${inr(need.forLosses)}`}>
-        {inr(need.total)}
-      </div>
-      <div className="font-sans text-[11px] text-slate-400">
-        peak {peakWhen(run.capital.peak_at)} · {run.capital.peak_positions} open
-      </div>
-      {fits != null ? (
-        <div className={clsx("font-sans text-[11px] font-semibold", fits ? "text-emerald-300" : "text-rose-300")}>
-          {fits ? "fits your money" : `short by ${inr(need.total - capital)}`} · {signed(run.totals.net)} ={" "}
-          {((run.totals.net / capital) * 100).toFixed(2)}%
+          <RunDetail run={detail?.id === openId ? detail : null} />
         </div>
       ) : null}
     </div>
@@ -562,11 +433,8 @@ export function RunDetail({
   subheading,
   settingsTitle = "Settings used",
   settingsRows,
-  margin = 1,
 }: {
   run: ReplayRun | null;
-  /** Share of the trade value counted as money needed (1 = full value). */
-  margin?: number;
   heading?: string;
   subheading?: string;
   settingsTitle?: string;
@@ -581,7 +449,6 @@ export function RunDetail({
   }
   const t = run.totals;
   const days = run.days ?? [];
-  const peakByDay = run.capital ? new Map(run.capital.days.map((d) => [d.date, d])) : null;
   return (
     <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-2">
@@ -611,17 +478,12 @@ export function RunDetail({
               <th className="px-2 py-2 text-right">Charges</th>
               <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
               <th className="px-2 py-2 text-right">Running total</th>
-              {peakByDay ? (
-                <th className="px-2 py-2 text-right" title="Most money in open trades at one moment that day">
-                  Money in trades
-                </th>
-              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
             {days.length === 0 ? (
               <tr>
-                <td colSpan={peakByDay ? 10 : 9} className="px-2 py-4 font-sans text-slate-400">
+                <td colSpan={9} className="px-2 py-4 font-sans text-slate-400">
                   {heading ? "No closed trades match these filters." : "No closed trades in this run yet."}
                 </td>
               </tr>
@@ -639,16 +501,6 @@ export function RunDetail({
                   <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>
                   <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>
                   <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
-                  {peakByDay ? (
-                    <td className="px-2 py-1.5 text-right text-slate-200" title={peakByDay.get(d.date)?.peak_at ?? undefined}>
-                      {peakByDay.get(d.date) ? inr((peakByDay.get(d.date)?.peak_value ?? 0) * margin) : "—"}
-                      {peakByDay.get(d.date)?.peak_at ? (
-                        <span className="ml-1 font-sans text-[11px] text-slate-400">
-                          {peakByDay.get(d.date)?.peak_at?.slice(11, 16)} · {peakByDay.get(d.date)?.peak_positions} open
-                        </span>
-                      ) : null}
-                    </td>
-                  ) : null}
                 </tr>
               ))
             )}
@@ -667,11 +519,6 @@ export function RunDetail({
                 <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>
                 <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>
                 <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
-                {peakByDay ? (
-                  <td className="px-2 py-2 text-right" title="Money in trades at the busiest moment + the worst losing stretch">
-                    needs {inr(moneyNeeded(run.capital, t.max_drawdown, margin).total)}
-                  </td>
-                ) : null}
               </tr>
             </tfoot>
           ) : null}
