@@ -54,15 +54,13 @@
 }
 
 [data-theme="light"] {
-  /* A tinted ground, not white. Cards stay near-white so they lift off the
-     background — that separation is what a flat white-on-white page lacked.
-     Text is a deep navy rather than neutral grey: on a blue-tinted ground,
-     grey text reads as washed out, while navy looks intentional and holds
-     contrast (about 13:1 on the card surface). */
-  --c-base: 232 240 252;
+  /* A bright white ground (the owner's choice). Cards are white too, so they
+     separate by a crisp border and a soft shadow rather than by a tinted page.
+     Text is a deep navy (about 13:1 on white). */
+  --c-base: 255 255 255;
   --c-surface: 255 255 255;
-  --c-surface-2: 238 245 255;
-  --c-border: 205 216 233;
+  --c-surface-2: 245 247 251;
+  --c-border: 214 222 233;
 
   --c-profit: 0 166 118;
   --c-loss: 226 55 78;
@@ -101,6 +99,11 @@ body::before {
   background:
     radial-gradient(58% 45% at 2% -14%, rgb(var(--c-bot) / 0.22), transparent 60%),
     radial-gradient(52% 42% at 100% -6%, rgb(var(--c-violet) / 0.16), transparent 62%);
+}
+
+/* Light: plain bright white, no coloured glow behind the page. */
+[data-theme="light"] body::before {
+  background: none;
 }
 
 [data-theme="dark"] body::before {
@@ -212,9 +215,14 @@ select {
 
 /* Surfaces */
 [data-theme="light"] .terminal-dark.bg-\[\#0B0E14\],
-[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #eef3fb; }
+[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #ffffff; }
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/90 { background-color: rgb(255 255 255 / 0.94); }
 [data-theme="light"] .terminal-dark .bg-\[\#151921\] { background-color: #ffffff; }
+/* White cards on the white page: a visible edge and a soft lift. */
+[data-theme="light"] .terminal-dark .rounded-xl.bg-\[\#151921\] {
+  border-color: rgb(var(--c-border));
+  box-shadow: 0 1px 2px rgb(15 28 51 / 0.06), 0 4px 12px -6px rgb(15 28 51 / 0.1);
+}
 [data-theme="light"] .terminal-dark .bg-\[\#1A1F29\] { background-color: #f1f5f9; }
 [data-theme="light"] .terminal-dark .bg-\[\#1b2130\] { background-color: #f8fafc; }
 [data-theme="light"] .terminal-dark .bg-black\/20,

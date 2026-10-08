@@ -52,6 +52,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const [scope, setScope] = useState<string>(ALL);
   const [own, setOwn] = useState<Partial<SmaConfig>>({});
   const dirty = useRef(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   // Shown on the Save bar; the browser also asks before the page is left with these edits.
   const [unsaved, setUnsaved] = useState(false);
   const markDirty = (on: boolean) => {
@@ -220,6 +221,29 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     }
   };
 
+  // Every stock with its own settings back to the shared ones, one reset each, after a confirm.
+  const clearAllOwn = async () => {
+    setBusy(true);
+    setMsg(null);
+    const failed: string[] = [];
+    for (const name of withOwn) {
+      try {
+        await smaApi.resetStockConfig(name);
+      } catch {
+        failed.push(name);
+      }
+    }
+    setBusy(false);
+    setConfirmClear(false);
+    const done = withOwn.length - failed.length;
+    setMsg(
+      failed.length
+        ? `Cleared ${done} of ${withOwn.length}. Not cleared: ${failed.join(", ")} — try again.`
+        : `Saved. ${done} stock${done === 1 ? "" : "s"} follow the shared settings again.`
+    );
+    onChanged();
+  };
+
   const save = async () => {
     if (!form) return;
     if (stockScope) return saveStock();
@@ -296,7 +320,37 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   ({ownSummary(config?.stock_settings?.[name] as Record<string, unknown>)})
                 </span>
               ))}
-              . Changing a shared value here does not change those.
+              . Changing a shared value here does not change those.{" "}
+              {confirmClear ? (
+                <span className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[11px] text-slate-200">
+                  Clear the own settings of {withOwn.length} stock{withOwn.length === 1 ? "" : "s"} ({withOwn.join(", ")})? Each
+                  then trades with the shared settings from its next order.
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={clearAllOwn}
+                    className="rounded-md bg-amber-500 px-2 py-1 font-semibold text-white hover:bg-amber-400 disabled:opacity-50"
+                  >
+                    {busy ? "Clearing…" : "Yes, clear all"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setConfirmClear(false)}
+                    className="rounded-md px-2 py-1 text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(true)}
+                  className="mt-1 inline-flex rounded-md px-2 py-0.5 font-semibold text-rose-300 ring-1 ring-inset ring-rose-400/40 hover:bg-rose-500/10"
+                >
+                  Clear all own settings
+                </button>
+              )}
             </p>
           ) : null}
           <SectionTitle>Size and signal</SectionTitle>
