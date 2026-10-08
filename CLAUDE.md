@@ -159,7 +159,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
   settings it used, and its trades carry `run_id` (day-wise P&L in
   `get_run`, shown in the blotter's Backtests tab).
-  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused in LIVE mode.
+  A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
+  default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
+  and tags its trades with that bot). Each terminal desk starts and follows only
+  its own bot's replays; one replay runs at a time.
+  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE.
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
   chart focus. The terminal shows stock tabs above the chart (the replay's

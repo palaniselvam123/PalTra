@@ -45,10 +45,13 @@ export default function TerminalPage() {
   const mainDesk = desk === "live";
   const botNo = deskBot(desk);
   const researchRef = useRef(false);
+  // The bot whose replays this desk follows (null on the research desk, which never follows one).
+  const replayBotRef = useRef<number | null>(1);
   useEffect(() => {
     const chosen = initialDesk();
     setDesk(chosen);
     researchRef.current = chosen !== "live";
+    replayBotRef.current = deskBot(chosen);
     setDeskState(chosen);
   }, []);
   const changeDesk = useCallback((next: Desk) => {
@@ -67,6 +70,8 @@ export default function TerminalPage() {
         ? trades
         : trades.filter((t) => {
             const mode = (t.mode || "PAPER").toUpperCase();
+            // Replays sit on the desk of the bot whose settings they played; research rows on the main desk.
+            if (mode === "REPLAY") return (t.bot ?? 1) === botNo;
             if (mode !== "PAPER" && mode !== "LIVE") return botNo === 1;
             return (t.bot ?? 1) === botNo;
           }),
@@ -226,10 +231,10 @@ export default function TerminalPage() {
   // replay engine (smaApi routes them) and update every second.
   const onReplay = useCallback(
     (info: ReplayInfo) => {
-      // Replays belong to the live desk; the research desk never follows one.
-      if (researchRef.current) return;
+      // Each bot's desk follows the replays of its own settings; the research desk never follows one.
+      if (replayBotRef.current == null) return;
       setReplay(info);
-      const on = replayRouted(info);
+      const on = replayRouted(info) && (info.bot ?? 1) === replayBotRef.current;
       if (on && info.symbols?.length) {
         for (const name of info.symbols) if (!runSymbols.current.includes(name)) runSymbols.current.push(name);
       }
@@ -282,7 +287,7 @@ export default function TerminalPage() {
       clearTimeout(timer);
     };
   }, [onReplay, replay?.status]);
-  const routed = replayRouted(replay);
+  const routed = replayRouted(replay) && (replay?.bot ?? 1) === botNo;
   // The chart marks only the book on screen: this replay run, or the PAPER /
   // LIVE book. Each earlier replay of the same day would otherwise add its own
   // EXIT at the same time and price.
@@ -480,12 +485,22 @@ export default function TerminalPage() {
           </div>
         )}
         {botNo != null && botNo > 1 ? (
-          <div role="note" className="rounded-xl border border-sky-400/30 bg-sky-500/[0.07] px-3 py-2 text-sm text-sky-100">
-            <span className="font-semibold">{state?.bot_name ?? `Bot ${botNo}`}</span> — its own settings, Trade list,
-            trades ({state?.mode === "LIVE" ? "N" : "P"}
-            {botNo}-1, …), P&amp;L, limits and panic. PAPER or LIVE on its own switch. A stock can be traded LIVE by only
-            one bot at a time.
-          </div>
+          <>
+            <div role="note" className="rounded-xl border border-sky-400/30 bg-sky-500/[0.07] px-3 py-2 text-sm text-sky-100">
+              <span className="font-semibold">{config?.bot_name ?? `Bot ${botNo}`}</span> — its own settings, Trade list,
+              trades ({config?.trading_mode === "LIVE" ? "N" : "P"}
+              {botNo}-1, …), P&amp;L, limits and panic. PAPER or LIVE on its own switch. A stock can be traded LIVE by only
+              one bot at a time.
+            </div>
+            <ReplayBar
+              info={replay}
+              live={config?.trading_mode === "LIVE"}
+              armedCount={config?.trade_symbols?.length ?? 0}
+              onChanged={onReplay}
+              bot={botNo}
+              botName={config?.bot_name ?? `Bot ${botNo}`}
+            />
+          </>
         ) : research ? (
           <div role="note" className="rounded-xl border border-teal-400/30 bg-teal-500/[0.07] px-3 py-2 text-sm text-teal-100">
             <span className="font-semibold">Research desk</span> — a second bot on today&apos;s live prices with practice
@@ -498,6 +513,8 @@ export default function TerminalPage() {
             live={config?.trading_mode === "LIVE"}
             armedCount={config?.trade_symbols?.length ?? 0}
             onChanged={onReplay}
+            bot={1}
+            botName={config?.bot_name ?? "Bot 1"}
           />
         )}
         {/* Movable, resizable panels: drag by the grip, resize by the bottom edge, change the width on a wide screen. */}

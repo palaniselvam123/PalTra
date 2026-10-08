@@ -43,6 +43,8 @@ export function scalpPickOf(s: Settings): ScalpPickInfo | null {
 export function strategyLabel(s: Settings): string {
   const pick = scalpPickOf(s);
   const parts: string[] = pick ? [`Scalp top ${pick.top_n} @ ${pick.pick_time}`] : [];
+  // Runs of bots 2-4 name the bot whose settings they played.
+  if (Number(s.bot ?? 1) > 1) parts.push(`${String(s.bot_name ?? `Bot ${s.bot}`)}'s settings`);
   if (String(s.entry_mode ?? "SMA") === "PATTERN") {
     parts.push(
       `Candle patterns ${s.pattern_tf ?? 1}m (${String(s.pattern_set ?? "STRONG") === "ALL" ? "all" : "strong"}${

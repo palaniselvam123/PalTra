@@ -211,9 +211,13 @@ class ReplayEngine(StrategyEngine):
 
     records_ticks = False  # its prices are walked from minute candles
 
-    def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None):
+    def __init__(self, feed: ReplayFeed, symbols: list[str], run_id: int | None = None, bot: int = 1):
         self.feed = feed
         self.run_id = run_id
+        # Whose settings it plays: bot 1 (the main desk) or bots 2-4 (settings rows 3-5).
+        # Only read here; a replay never writes to a bot's settings row.
+        self.bot_id = int(bot)
+        self.config_id = 1 if self.bot_id == 1 else self.bot_id + 1
         self.replay_symbols = [s.upper() for s in symbols][:MAX_TRADE_SYMBOLS]
         super().__init__(broker=ReplayBroker(feed))
         self._session_date = feed.clock.date().isoformat()
@@ -413,6 +417,9 @@ class ReplaySession:
     days: list[dt.date] = field(default_factory=list)
     day_index: int = 0
     run_id: int | None = None
+    #: The SMA bot whose settings the replay plays (1 = main desk, 2-4).
+    bot: int = 1
+    bot_name: str = "Bot 1"
     loaded: int = 0
     error: str = ""
     effective_speed: float = 0.0
@@ -448,6 +455,8 @@ class ReplaySession:
             "day_index": self.day_index,
             "days_total": len(self.days),
             "run_id": self.run_id,
+            "bot": self.bot,
+            "bot_name": self.bot_name,
             "loaded": self.loaded,
             "total": len(self.universe or self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
             "error": self.error,
@@ -465,8 +474,11 @@ class ReplaySession:
         end_day: dt.date | None = None,
         settings: dict | None = None,
         rule: PickRule | None = None,
+        bot: int = 1,
+        bot_name: str | None = None,
     ) -> None:
         await self.stop("REPLAY_STOPPED")
+        self.bot, self.bot_name = int(bot), bot_name or f"Bot {int(bot)}"
         self.rule, self.picks, self.universe = rule, {}, []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = day, end_day or day, start, speed
@@ -566,7 +578,7 @@ class ReplaySession:
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(feed, symbols, run_id=self.run_id)
+            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot)
             engine.load_config()
             await engine.tick(clock)
             engine.hold_for_next_cross(symbols)

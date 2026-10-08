@@ -848,6 +848,9 @@ class ReplayStart(BaseModel):
     #: Stocks to replay. Empty replays the armed stocks, as before. Lets the
     #: Scalp page test a shortlist without arming it.
     symbols: list[str] | None = None
+    #: The SMA bot whose settings and armed stocks to replay: 1 (main desk, the
+    #: default) or 2-4. Practice money whichever bot; never sends an order.
+    bot: int = Field(default=1, ge=1, le=4)
 
 
 class ScalpPickStart(BaseModel):
@@ -935,10 +938,14 @@ async def replay_scalp_picks(body: ScalpPickStart):
 
 @app.post("/api/replay/start")
 async def replay_start(body: ReplayStart):
-    """Practice on a past day's Groww candles. Never sends an order."""
-    cfg = engine.load_config()
+    """Practice on a past day's Groww candles with one bot's settings. Never sends an order."""
+    eng = engine if body.bot == 1 else bot_engines.get(body.bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {body.bot}")
+    cfg = eng.load_config()
+    bot_label = getattr(cfg, "bot_name", None) or f"Bot {body.bot}"
     if (cfg.trading_mode or "PAPER").upper() == "LIVE":
-        raise HTTPException(409, "Switch to PAPER before starting a replay.")
+        raise HTTPException(409, f"Switch {bot_label} to PAPER before replaying its settings.")
     if body.speed not in SPEEDS:
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
@@ -971,7 +978,9 @@ async def replay_start(body: ReplayStart):
         start,
         body.speed,
         end_day=end_day,
-        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg)},
+        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg), "bot": body.bot, "bot_name": bot_label},
+        bot=body.bot,
+        bot_name=bot_label,
     )
     return replay.info()
 

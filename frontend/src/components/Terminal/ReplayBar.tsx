@@ -64,10 +64,13 @@ type Props = {
   live: boolean;
   armedCount: number;
   onChanged: (info: ReplayInfo) => void;
+  /** The desk's bot: its settings and armed stocks are what a replay started here plays. */
+  bot?: number;
+  botName?: string;
 };
 
 /** Practise on a past day's real Groww candles. Never sends an order. */
-export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
+export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName }: Props) {
   const [day, setDay] = useState(lastTradingDay);
   const [endDay, setEndDay] = useState(lastTradingDay);
   const [start, setStart] = useState("09:15");
@@ -91,8 +94,37 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined));
+    void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot));
   };
+
+  // One replay plays at a time. Another bot's replay is shown here, not followed.
+  const otherBot = active && (info?.bot ?? 1) !== bot;
+  if (otherBot) {
+    const theirs = info?.bot ?? 1;
+    return (
+      <section aria-label="Replay on another bot" className="flex flex-wrap items-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2 text-sm">
+        <History size={16} aria-hidden className="text-violet-300" />
+        <span className="text-violet-100">
+          A replay of <b>{info?.bot_name ?? `Bot ${theirs}`}</b>&apos;s settings is {info?.status === "LOADING" ? "loading" : "playing"}.
+          One replay runs at a time.
+        </span>
+        <a
+          href={theirs === 1 ? "/terminal/" : `/terminal/?desk=bot${theirs}`}
+          className="ml-auto rounded-md px-2 py-1 text-xs font-semibold text-violet-200 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10"
+        >
+          Watch it on that desk
+        </a>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run(() => smaApi.replayControl("stop"))}
+          className="rounded-md px-2 py-1 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5 disabled:opacity-50"
+        >
+          Stop it
+        </button>
+      </section>
+    );
+  }
 
   if (!active) {
     return (
@@ -168,10 +200,10 @@ export function ReplayBar({ info, live, armedCount, onChanged }: Props) {
             </button>
             <p className="basis-full text-[11px] leading-snug text-slate-400">
               {live
-                ? "Switch to PAPER to replay. "
+                ? `Switch ${botName ?? "this bot"} to PAPER to replay its settings. `
                 : armedCount === 0
                   ? "Arm at least one stock in the Stocks panel first. "
-                  : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with your current settings. `}
+                  : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with ${botName ? `${botName}'s` : "your current"} settings. `}
               The bot trades each day as it would live (crosses, filters, stop, target, 15:00 cut-off, 15:15
               square-off), then moves to the next trading day; weekends and holidays are skipped. A range is up to 45
               days (about 30 trading days). Each run, with the settings it used, is saved in the Backtests tab of the trade blotter.
