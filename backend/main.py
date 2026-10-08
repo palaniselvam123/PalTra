@@ -1245,6 +1245,7 @@ def _bot_summary(eng: StrategyEngine) -> dict:
         "held": sorted(eng.positions),
         "trades_today": eng.trades_today,
         "net_today": float(kpis["net"]),
+        "gross_today": float(kpis["actual_gross"]),
     }
 
 

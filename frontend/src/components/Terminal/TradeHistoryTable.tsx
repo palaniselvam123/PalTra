@@ -86,7 +86,7 @@ type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
 const SORT_CHOICES: { key: SortKey; label: string }[] = [
   { key: "entry_time", label: "Entry time" },
   { key: "exit_time", label: "Exit time" },
-  { key: "net", label: "Net P&L" },
+  { key: "net", label: "P&L" },
   { key: "points", label: "Points" },
   { key: "charges", label: "Charges" },
   { key: "stock", label: "Stock" },
@@ -897,7 +897,7 @@ const COLUMNS: Col[] = [
   { key: "reason", label: "Exit reason" },
   { key: "strategy", label: "Strategy" },
   { key: "charges", label: "Charges", num: true },
-  { key: "net", label: "Net P&L", num: true },
+  { key: "net", label: "P&L", num: true },
   { key: "action", label: "" },
 ];
 
@@ -944,7 +944,6 @@ function BookSummary({
   profit,
   loss,
   charges,
-  net,
   filtered,
 }: {
   closed: number;
@@ -955,7 +954,8 @@ function BookSummary({
   profit: number;
   loss: number;
   charges: number;
-  net: number;
+  /** Kept for callers; the summary shows P&L before charges (profit + loss). */
+  net?: number;
   filtered: boolean;
 }) {
   const gross = profit + loss;
@@ -968,7 +968,7 @@ function BookSummary({
         Closed trades{filtered ? " matching the filters" : " in this book"}
         {open ? ` · ${open} still open (not counted)` : ""}
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <div className={tile}>
           <div className={label}>Trades</div>
           <div className="font-mono text-[16px] font-semibold text-slate-100">{closed}</div>
@@ -987,19 +987,14 @@ function BookSummary({
           <div className="text-[11px] text-slate-400">from {losses} losing</div>
         </div>
         <div className={tile}>
-          <div className={label}>Gross P&amp;L</div>
+          <div className={label}>P&amp;L</div>
           <div className={clsx("font-mono text-[16px] font-semibold", pnlTone(gross))}>{signed(gross)}</div>
-          <div className="text-[11px] text-slate-400">profit + loss</div>
+          <div className="text-[11px] text-slate-400">profit + loss, before charges</div>
         </div>
         <div className={tile}>
           <div className={label}>Charges</div>
           <div className="font-mono text-[16px] font-semibold text-amber-300">{inr(charges)}</div>
-          <div className="text-[11px] text-slate-400">brokerage &amp; taxes</div>
-        </div>
-        <div className={tile}>
-          <div className={label}>Net P&amp;L</div>
-          <div className={clsx("font-mono text-[16px] font-semibold", pnlTone(net))}>{signed(net)}</div>
-          <div className="text-[11px] text-slate-400">after charges</div>
+          <div className="text-[11px] text-slate-400">brokerage &amp; taxes · not taken off</div>
         </div>
       </div>
     </section>

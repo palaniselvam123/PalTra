@@ -48,7 +48,8 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const noCap = state?.mode === "REPLAY";
   const cap = noCap ? null : state?.max_trades ?? config?.max_trades_per_day ?? null;
   const nearCap = used != null && cap != null && cap > 0 && used / cap >= 0.9;
-  const net = state ? state.kpis?.net ?? state.realized_net_pnl ?? 0 : null;
+  // Before charges (the screens' basis); charges are on the P&L row.
+  const net = state ? state.kpis?.actual_gross ?? state.realized_net_pnl ?? 0 : null;
 
   return (
     <div role="status" aria-label="Terminal status" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-stretch">
@@ -86,11 +87,11 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
         />
         {mode == null ? "Mode…" : live ? "LIVE MONEY" : replaying ? "REPLAY" : research ? "RESEARCH" : "PAPER"}
       </button>
-      <Cell label="Net today" title="Closed trades today, after charges">
+      <Cell label="P&L today" title="Closed trades today, before charges">
         {net == null ? (
           <Skeleton className="h-4 w-20" />
         ) : (
-          <span className={clsx("font-mono font-semibold", pnlTone(net))} title="Closed trades today, after charges">
+          <span className={clsx("font-mono font-semibold", pnlTone(net))} title="Closed trades today, before charges">
             {net > 0 ? "+" : ""}
             {inr(net)}
           </span>

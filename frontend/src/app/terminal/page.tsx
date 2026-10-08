@@ -426,7 +426,7 @@ export default function TerminalPage() {
         .filter((b) => armed.has(b.symbol.toUpperCase()) || b.direction !== "FLAT" || (b.closed_trades ?? 0) > 0)
         .map((b) => ({
           symbol: b.symbol.toUpperCase(),
-          net: b.day_net ?? b.closed_net ?? null,
+          net: b.day_gross ?? b.closed_gross ?? b.day_net ?? b.closed_net ?? null,
           trades: b.closed_trades ?? 0,
           side: b.direction !== "FLAT" ? b.direction : null,
         })),

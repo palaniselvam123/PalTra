@@ -95,7 +95,9 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
         label: name,
         live: info?.mode === "LIVE",
         title: `${name}: ${info?.mode ?? "PAPER"} · ${info?.status?.toLowerCase() ?? "…"}${
-          info ? ` · ${info.armed.length} armed · today ${info.net_today >= 0 ? "+" : ""}₹${info.net_today.toFixed(2)}` : ""
+          info
+            ? ` · ${info.armed.length} armed · today ${(info.gross_today ?? info.net_today) >= 0 ? "+" : ""}₹${(info.gross_today ?? info.net_today).toFixed(2)} before charges`
+            : ""
         }`,
       };
     }),
@@ -264,7 +266,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const bookBySymbol = new Map(books.map((book) => [book.symbol.toUpperCase(), book]));
   const openBooks = books.filter((b) => (b.direction === "LONG" || b.direction === "SHORT") && b.qty > 0);
   const openCount = openBooks.length;
-  const openNet = state?.open_net_total ?? openBooks.reduce((sum, b) => sum + (b.open_net ?? 0), 0);
+  // Open P&L before charges (the screens' basis); the net fields stand in on an older server.
+  const openOf = (b: (typeof books)[number]) => (b.open_gross !== undefined ? b.open_gross : b.open_net) ?? null;
+  const openNet = state?.open_gross_total ?? state?.open_net_total ?? openBooks.reduce((sum, b) => sum + (openOf(b) ?? 0), 0);
   const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${inr(Math.abs(v))}`;
   // Armed first, then the rest, each alphabetically. A held stock is never
   // dropped; a removed one stays off unless it is armed, held or on the chart.
@@ -623,7 +627,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 {openCount > 0 ? (
                   // Every open position and its live net, in the bar's empty middle.
                   <span className="flex min-w-0 flex-1 items-center gap-x-3 overflow-hidden whitespace-nowrap pl-2 font-mono text-xs" aria-label="Open positions">
-                    <span className={clsx("shrink-0 font-semibold", openNet >= 0 ? "text-emerald-300" : "text-rose-300")} title="Unrealized net of every open position, after estimated charges">
+                    <span className={clsx("shrink-0 font-semibold", openNet >= 0 ? "text-emerald-300" : "text-rose-300")} title="Unrealized P&L of every open position, before charges">
                       Open {signed(openNet)}
                     </span>
                     <span className="hidden min-w-0 items-center gap-x-3 overflow-hidden sm:flex">
@@ -632,8 +636,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                           <span className="font-sans text-slate-200">{b.symbol}</span>{" "}
                           <span className={b.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}>{b.direction === "LONG" ? "L" : "S"}</span>
                           <span className="text-slate-500">×{b.qty}</span>{" "}
-                          <span className={(b.open_net ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>
-                            {b.open_net == null ? "—" : signed(b.open_net)}
+                          <span className={(openOf(b) ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                            {openOf(b) == null ? "—" : signed(openOf(b) ?? 0)}
                           </span>
                         </span>
                       ))}
@@ -800,10 +804,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       stopOff: book?.stop_active === false,
                       armed: armed.has(s),
                       onChart,
-                      openNet: book?.open_net ?? null,
-                      closedNet: book?.closed_net ?? 0,
+                      openNet: book ? openOf(book) : null,
+                      closedNet: book?.closed_gross ?? book?.closed_net ?? 0,
                       closedTrades: book?.closed_trades ?? 0,
-                      dayNet: book?.day_net,
+                      dayNet: book?.day_gross ?? book?.day_net,
                       reject: book?.last_reject ?? null,
                       ownStrategy: ownSummary(config?.stock_settings?.[s] as Record<string, unknown> | undefined),
                       rejectAt: book?.last_reject_at ?? null,

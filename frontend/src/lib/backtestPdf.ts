@@ -153,7 +153,7 @@ export async function downloadBacktestPdf({
       ["Win rate", `${t.win_rate.toFixed(1)}%`],
       ["Total profit", pdfMoney(t.profit)],
       ["Total loss", pdfMoney(t.loss)],
-      ["Net P&L (after charges)", pdfMoney(t.net)],
+      ["P&L (before charges)", pdfMoney(t.net)],
       ["Max drawdown", pdfMoney(t.max_drawdown)],
       ["Green / red days", `${t.green_days} / ${t.red_days}`],
       ...rangeRows,
@@ -164,7 +164,7 @@ export async function downloadBacktestPdf({
     didParseCell: (cell) => {
       if (cell.section !== "body" || cell.column.index !== 1) return;
       const label = String(cell.row.raw instanceof Array ? cell.row.raw[0] : "");
-      if (label.startsWith("Net")) cell.cell.styles.textColor = tone(t.net);
+      if (label.startsWith("P&L")) cell.cell.styles.textColor = tone(t.net);
       if (label === "Total profit") cell.cell.styles.textColor = GREEN;
       if (label === "Total loss" || label === "Max drawdown") cell.cell.styles.textColor = RED;
       if (label in rangeTone) cell.cell.styles.textColor = tone(rangeTone[label]);
@@ -192,7 +192,7 @@ export async function downloadBacktestPdf({
       startY: y + 6,
       margin: { left: margin, right: margin },
       theme: "striped",
-      head: [["Stock", "Trades", "Won", "Lost", "Win %", "Profit", "Loss", "Gross", "Charges", "Net", "Max DD"]],
+      head: [["Stock", "Trades", "Won", "Lost", "Win %", "Profit", "Loss", "Gross", "Charges", "P&L", "Max DD"]],
       body: stocks.map((s) => [
         s.symbol,
         s.totals.trades,
@@ -230,7 +230,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Date", "Trades", "Won", "Lost", "Profit", "Loss", "Gross", "Charges", "Net", "Cumulative"]],
+    head: [["Date", "Trades", "Won", "Lost", "Profit", "Loss", "Gross", "Charges", "P&L", "Cumulative"]],
     body: days.length
       ? days.map((d) => [
           day(d.date),
@@ -272,7 +272,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "Net P&L"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "P&L (before charges)"]],
     body: rows.length
       ? rows.map((r) => [
           r.trade_ref || `#${r.id}`,

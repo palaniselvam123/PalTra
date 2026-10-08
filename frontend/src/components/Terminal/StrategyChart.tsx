@@ -197,6 +197,8 @@ type TradeTip = {
   points: number | null;
   gross: number | null;
   net: number | null;
+  /** Brokerage and taxes of a closed trade (shown on their own, not taken off the P&L). */
+  charges: number | null;
   /** SMA fast vs slow gap % on the entry / exit candle: (fast − slow) ÷ slow × 100. */
   gapEntry: number | null;
   gapExit: number | null;
@@ -211,12 +213,14 @@ function resultColor(net: number | null | undefined): string {
 
 /** The closed trade a marker belongs to: same stock, side, fill price and bar. */
 function entryResult(
-  m: { time: number; direction: string; price: number; net_pnl?: number | null },
+  m: { time: number; direction: string; price: number; net_pnl?: number | null; gross_pnl?: number | null },
   lookup: TradeRow[],
   symbol: string,
   snap: (sec: number) => number
 ): number | null {
-  if (m.net_pnl != null) return m.net_pnl;
+  // Coloured by P&L before charges (the screens' basis); older servers send only the net.
+  if (m.gross_pnl != null) return m.gross_pnl;
+  if (m.net_pnl != null && lookup.length === 0) return m.net_pnl;
   const bar = snap(m.time);
   for (const t of lookup) {
     if (t.exit_price == null || t.symbol.toUpperCase() !== symbol || t.direction !== m.direction) continue;
@@ -225,7 +229,7 @@ function entryResult(
     if (!when || snap(Math.floor(when.getTime() / 1000)) !== bar) continue;
     return t.net_pnl ?? t.gross_pnl ?? null;
   }
-  return null;
+  return m.net_pnl ?? null;
 }
 
 /** The number part of a trade id ("P-12" -> "12", "R7-3" -> "3"). */
@@ -495,7 +499,7 @@ function tradeTip(
     entryPrice != null && mark != null ? (m.direction === "SHORT" ? entryPrice - mark : mark - entryPrice) : null;
   const qty = row?.qty ?? null;
   // Charges are booked at the exit, so an open trade has no net P&L yet.
-  const net = open ? null : ex?.net_pnl ?? en?.net_pnl ?? row?.net_pnl ?? null;
+  const net = open ? null : row?.net_pnl ?? ex?.net_pnl ?? en?.net_pnl ?? null;
   const byPoints = points != null && qty ? points * qty : null;
   return {
     ref: m.trade_ref ?? row?.trade_ref ?? null,
@@ -509,7 +513,8 @@ function tradeTip(
     reason: ex?.reason ?? row?.exit_reason ?? null,
     open,
     points,
-    gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? byPoints,
+    gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? m.gross_pnl ?? byPoints,
+    charges: open ? null : row?.brokerage_and_taxes ?? null,
     net,
     gapEntry: gapAt(rows, entryTime, snap),
     gapExit: open ? gapAt(rows, rows[rows.length - 1]?.time ?? null, snap) : gapAt(rows, exitTime, snap),
@@ -2074,8 +2079,8 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
         row("P&L now (before charges)", money(t.gross), clsx("font-semibold", tone(t.gross)))
       ) : (
         <>
-          {t.gross != null ? row("Gross P&L", money(t.gross), tone(t.gross)) : null}
-          {row("Net P&L", money(t.net), clsx("font-semibold", tone(t.net)))}
+          {row("P&L (before charges)", money(t.gross ?? t.net), clsx("font-semibold", tone(t.gross ?? t.net)))}
+          {t.charges != null ? row("Charges (not taken off)", inr(t.charges), "text-amber-300") : null}
         </>
       )}
     </div>
