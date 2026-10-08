@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Brain, CheckCircle2, Loader2, Trash2, XCircle } from "lucide-react";
@@ -132,18 +133,24 @@ export function AiKeyForm() {
         )}
       </div>
 
-      <p className="text-xs text-slate-500">
-        The expert is asked for the read your ORB engine cannot produce: news flow, results and guidance,
-        analyst actions, sector read-across, macro and policy, flows, and retail sentiment. It is explicitly
-        instructed <span className="text-slate-300">not</span> to analyse the stock&apos;s price behaviour — no chart
-        patterns, levels or indicators — because the engine already owns that and running it twice would just
-        double-count the same signal.
-      </p>
-      <p className="text-xs text-slate-500">
-        The key is Fernet-encrypted at rest, same vault as your broker credentials, and is never returned by
-        any endpoint after you save it. It buys analysis only: there is no path from a model response to an
-        order.
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          What the expert does
+          <InfoTip label="About the AI expert">
+            The expert is asked for the read your ORB engine cannot produce: news flow, results and guidance, analyst
+            actions, sector read-across, macro and policy, flows, and retail sentiment. It is explicitly instructed not to
+            analyse the stock&apos;s price behaviour — no chart patterns, levels or indicators — because the engine already
+            owns that and running it twice would just double-count the same signal.
+          </InfoTip>
+        </span>
+        <span className="inline-flex items-center gap-1">
+          How the key is kept
+          <InfoTip label="About how the AI key is kept">
+            The key is Fernet-encrypted at rest, same vault as your broker credentials, and is never returned by any endpoint
+            after you save it. It buys analysis only: there is no path from a model response to an order.
+          </InfoTip>
+        </span>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="text-xs text-slate-400 flex flex-col gap-1">

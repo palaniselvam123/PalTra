@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
@@ -366,7 +367,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </div>
           {!stockScope && (
             <>
-              <SectionTitle>Daily limits (this bot)</SectionTitle>
+              <SectionTitle
+                info={
+                  <>
+                    Max daily loss and trades a day are for this bot only. If the bot stopped on the trade cap, type a higher
+                    max and press Save, then Start. Open positions stay open. A loss-limit stop stays locked for the day.
+                  </>
+                }
+              >
+                Daily limits (this bot)
+              </SectionTitle>
               <div className="mt-2 grid grid-cols-2 items-end gap-2">
                 <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
                 <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
@@ -377,10 +387,6 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 />
                 <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
               </div>
-              <p className="mt-2 text-[11px] leading-snug text-slate-400">
-                If the bot stopped on the trade cap, type a higher max and press Save, then Start. Open positions
-                stay open. A loss-limit stop stays locked.
-              </p>
             </>
           )}
           <SectionTitle>Order direction</SectionTitle>
@@ -398,10 +404,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("flip_orders") && <OwnTag />}
-              <b className="text-amber-200">Flip strategy</b> — every buy signal places a SELL order and every sell signal a
-              BUY. All conditions (cross, filters, gap mode) stay the same, and the trade closes when the signal&apos;s trade
-              would (opposite cross, gap fade, Bollinger exit, square-off). The stop-loss and target guard the real, flipped
-              position. Works in PAPER, LIVE, Research and Replay — try it on Replay or Research first.
+              <b className="text-amber-200">Flip strategy</b> — buy signals sell, sell signals buy{" "}
+              <InfoTip label="About the flip strategy">
+                Every buy signal places a SELL order and every sell signal a BUY. All conditions (cross, filters, gap mode) stay
+                the same, and the trade closes when the signal&apos;s trade would (opposite cross, gap fade, Bollinger exit,
+                square-off). The stop-loss and target guard the real, flipped position. Works in PAPER, LIVE, Research and Replay
+                — try it on Replay or Research first.
+              </InfoTip>
             </span>
           </label>
           <SectionTitle>Stop-loss</SectionTitle>
@@ -414,10 +423,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("use_stop") && <OwnTag />}
             {form.stop_type === "SMA_GAP"
-              ? "Stop-loss on new entries (moving, from the SMA gap). Uncheck to enter with no stop."
+              ? "Stop-loss on new entries (moving, from the SMA gap)"
               : form.stop_type === "TSL"
-                ? "Trailing stop-loss on new entries. Uncheck to enter with no stop order."
-                : `Exchange stop-loss at ${form.atr_multiplier}× ATR. Uncheck to enter with no stop order.`}
+                ? "Trailing stop-loss on new entries"
+                : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+            <InfoTip label="About the stop-loss">
+              Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
+              and the square-off close them.
+            </InfoTip>
           </label>
           <label className="mt-3 block text-sm text-slate-300">
             <span className="text-[11px] uppercase tracking-wider text-slate-400">
@@ -446,12 +459,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} own={isOwn("gap_tp_mult")} />
                 <Field label="Min gap %" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
               </div>
-              <p className="mt-2 text-[11px] leading-snug text-slate-400">
+              <Hint label="About the SMA gap stop">
                 Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
                 gap × stop multiple and target = price + gap × target multiple; a sell is the mirror. Recalculated every
                 closed 1-minute candle: the stop only moves in your favour, the target follows the gap both ways.
                 PAPER only — in LIVE the bot keeps the {String(form.atr_multiplier)}× ATR exchange stop.
-              </p>
+              </Hint>
             </div>
           ) : null}
           {form.stop_type === "TSL" ? (
@@ -461,7 +474,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <Field label="Trail every ₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
                 <Field label="Target ₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
               </div>
-              <p className="mt-2 text-[11px] leading-snug text-slate-400">
+              <Hint label="About the trailing stop">
                 Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
                 {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
                 {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
@@ -470,14 +483,19 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   ? `The trade also closes at ₹${String(form.tsl_target_points)} profit per share.`
                   : "No target: the trailing stop, an opposite cross or square-off closes the trade."}{" "}
                 In LIVE the bot moves your Groww stop order in place, so the position always has a stop.
-              </p>
+              </Hint>
             </div>
           ) : null}
-          <SectionTitle>Entry filters</SectionTitle>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            These apply only when checked, on a crossover. Force order skips them. An unchecked box is ignored.
-            {crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
-          </p>
+          <SectionTitle
+            info={
+              <>
+                These apply only when ticked, on a crossover; an unticked box is ignored. A trade needs every ticked filter to
+                agree. Force order skips them.{crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
+              </>
+            }
+          >
+            Entry filters
+          </SectionTitle>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -486,7 +504,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_adx_filter") && <OwnTag />}
-            ADX trend filter (block entries when ADX is below the threshold)
+            ADX trend filter
+            <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
           </label>
           <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -497,7 +516,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_vwap") && <OwnTag />}
-            VWAP. Buy at or above today’s VWAP. Sell at or below it.
+            VWAP
+            <InfoTip label="About the VWAP filter">A buy needs the close at or above today&apos;s VWAP; a sell at or below it.</InfoTip>
           </label>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -507,7 +527,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_volume") && <OwnTag />}
-            Volume. The closed candle must be at least this multiple of the previous 20 candles.
+            Volume
+            <InfoTip label="About the volume filter">
+              The closed candle&apos;s volume must be at least the multiple below of the average of the previous 20 candles.
+            </InfoTip>
           </label>
           <Field
             label="Volume multiple"
@@ -522,7 +545,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_density") && <OwnTag />}
-            Density. The candle body must cover at least this percent of its high-to-low range.
+            Density (candle body)
+            <InfoTip label="About the density filter">
+              The candle body must cover at least the percent below of its high-to-low range: skips doji-like, undecided candles.
+            </InfoTip>
           </label>
           <Field
             label="Density %"
@@ -537,7 +563,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_rsi") && <OwnTag />}
-            RSI(14). A buy must sit in the buy range. A sell must sit in the sell range.
+            RSI(14)
+            <InfoTip label="About the RSI filter">A buy needs RSI inside the buy range below; a sell inside the sell range.</InfoTip>
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
@@ -556,20 +583,26 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_bollinger") && <OwnTag />}
-            Bollinger Bands. Skip a buy that closed above the upper band (or a sell below the lower): it is chasing a
-            spike. Skip any cross while the bands are squeezed: the stock is going sideways.
+            Bollinger Bands
+            <InfoTip label="About the Bollinger filter">
+              Skips a buy that closed above the upper band (or a sell below the lower): it is chasing a spike. Skips any cross
+              while the bands are squeezed: the stock is going sideways. Squeeze is the band width as % of price on 1-minute
+              candles; 0 turns the squeeze check off.
+            </InfoTip>
           </label>
           <div className="mt-2 grid grid-cols-3 items-end gap-2">
             <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
             <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
             <Field label="Squeeze below %" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
           </div>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Squeeze is the band width as % of price on 1-minute candles; 0 turns the squeeze check off.
-          </p>
-          <div className="mt-4 text-sm text-slate-300">
-            SMA 9/21 gap range. Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is
-            above, negative when below. Tick the side(s) to check; an unticked side trades as before.
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            SMA 9/21 gap range
+            <InfoTip label="About the SMA gap range filter">
+              Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
+              Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
+              usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
+              crosses; skipped crosses show as ✕ on the chart with the gap. Force order skips this check.
+            </InfoTip>
           </div>
           <div className="mt-2 grid items-end gap-2 sm:grid-cols-2">
             <div className="rounded-md border border-white/10 p-2">
@@ -605,11 +638,6 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </div>
             </div>
           </div>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Negative numbers are allowed (a sell gap is usually negative, e.g. −0.5 to −0.02). On the cross candle the
-            gap is usually small, so a tight range skips most crosses; skipped crosses show as ✕ on the chart with the
-            gap. Force order skips this check.
-          </p>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -618,7 +646,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_candle_dir") && <OwnTag />}
-            Candle direction — the candles before the entry must move the trade&apos;s way.
+            Candle direction
+            <InfoTip label="About the candle direction filter">
+              The last N closed candles before the order must move the trade&apos;s way: on the cross candle normally, or in gap
+              mode on the candle where the gap reaches the entry level. Closes: each close beyond the one before (with 2, a buy
+              needs e.g. 100.0 → 100.4 → 100.9). Colour: each candle green for a buy, red for a sell. Both: both rules. Refused
+              crosses show as ✕ “Candles” on the chart. Force order skips this check.
+            </InfoTip>
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field
@@ -642,12 +676,6 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           </div>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Checked on the closed candles just before the order: on the cross candle normally, or in gap mode on the
-            candle where the gap reaches the entry level. With 2 and Closes, a buy needs the last two closes to have
-            each risen (e.g. 100.0 → 100.4 → 100.9); a sell needs them each to have fallen. Refused crosses show as ✕
-            “Candles” on the chart. Force order skips this check.
-          </p>
           <SectionTitle>Exits</SectionTitle>
           <label
             className={clsx(
@@ -663,10 +691,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("cross_exit") && <OwnTag />}
-              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes the trade and opens the reverse.
-              Uncheck to hold through opposite crosses: crosses then only open a trade while flat, and the stop / target,
-              gap fade, Bollinger exit or the {squareOff} square-off closes it. Works with any of
-              those, or alone. Not used with candle patterns (they close at the end of their candle).
+              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes and reverses{" "}
+              <InfoTip label="About the SMA cross exit">
+                Ticked, an opposite cross closes the trade and opens the reverse. Unticked, the trade is held through opposite
+                crosses: crosses then only open a trade while flat, and the stop / target, gap fade, Bollinger exit or the{" "}
+                {squareOff} square-off closes it. Works with any of those, or alone. Not used with candle patterns (they close at
+                the end of their candle).
+              </InfoTip>
             </span>
           </label>
           {noExitOn(form) ? (
@@ -688,6 +719,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <label className="mt-3 block text-sm text-slate-300">
             <span className="text-[11px] uppercase tracking-wider text-slate-400">
               Bollinger exit{isOwn("bb_exit") && <OwnTag />}
+              <InfoTip label="About the Bollinger exit">
+                Read once per closed 1-minute candle after the entry, on the Bollinger Period and Width (the bands show on the
+                chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first. Your
+                stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
+              </InfoTip>
             </span>
             <select
               value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
@@ -700,15 +736,18 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="BOTH">Both — band target or middle band, whichever comes first</option>
             </select>
           </label>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Read once per closed 1-minute candle after the entry, on the Period and Width above (the bands show on the
-            chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first.
-            Your stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
-          </p>
           <SectionTitle>How a trade opens</SectionTitle>
           <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
-            <div className="text-sm text-slate-300">
+            <div className="flex items-center gap-1 text-sm text-slate-300">
               Entry — what opens a trade{isOwn("entry_mode") && <OwnTag />}
+              <InfoTip label="About candle-pattern entries">
+                SMA cross: the 9/21 crossover opens trades. Candle patterns: each time a candle of the chosen size closes its
+                pattern is read (the names in the chart&apos;s data table). A bullish pattern buys and a bearish one sells short
+                at the start of the next candle; the trade closes at the end of that candle (exit “end of the pattern
+                candle”), then the next candle is judged afresh. Entry filters, the stop, the flip, market hours, the cut-off
+                and the caps still apply; gap mode does not. Each trade pays a full round of charges, so the charge check
+                skips candles that usually move less than N× those charges for this quantity. Try it in Replay first.
+              </InfoTip>
             </div>
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <label className="block text-sm text-slate-300">
@@ -761,18 +800,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
               <span>
                 {isOwn("pattern_trend") && <OwnTag />}
-                Only with the SMA trend — a bullish pattern only while SMA {form.sma_fast ?? 9} is above SMA{" "}
-                {form.sma_slow ?? 21}, a bearish one only below.
+                Only with the SMA trend{" "}
+                <InfoTip label="About trading patterns with the trend">
+                  A bullish pattern trades only while SMA {form.sma_fast ?? 9} is above SMA {form.sma_slow ?? 21}, a bearish one
+                  only below.
+                </InfoTip>
               </span>
             </label>
-            <p className="mt-1 text-[11px] leading-snug text-slate-400">
-              With Candle patterns, each time a candle of this size closes its pattern is read (the names in the chart&apos;s
-              data table). A bullish pattern buys and a bearish one sells short at the start of the next candle; the trade
-              closes at the end of that candle (exit “end of the pattern candle”), then the next candle is judged afresh.
-              Entry filters, the stop, the flip, market hours, the cut-off and the caps still apply; gap mode does not. Each
-              trade pays a full round of charges, so the charge check skips candles that usually move less than N× those
-              charges for this quantity. Try it in Replay first.
-            </p>
           </div>
           <SectionTitle>SMA gap mode</SectionTitle>
           {form.entry_mode === "PATTERN" ? (
@@ -788,7 +822,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_gap_mode") && <OwnTag />}
-            SMA gap mode — enter when the gap widens past a level, exit when it fades back.
+            SMA gap mode — enter when the gap widens, exit when it fades
+            <InfoTip label="About SMA gap mode">
+              A cross only arms the trade; the order goes on the first closed candle whose gap reaches the entry level (plus
+              the wait, if set — the gap must still be there). While the gap keeps widening the trade is held; once it has
+              cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes (exit
+              reason “Gap fade”). An opposite cross still closes at once, and the reverse waits for its own gap. The stop,
+              filters, entry cut-off and square-off still apply. An exit level beyond the entry level (e.g. sell in at −0.08,
+              out at −0.39) is a lock-in level: the gap exit waits until the gap has been that wide, then closes when it comes
+              back to it; a trade whose gap never gets that wide is left to the stop, the opposite cross and square-off.
+            </InfoTip>
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field label="Buy: enter at gap ≥ %" signed value={String(form.gap_entry_long ?? 0.05)} onChange={(v) => set("gap_entry_long", v)} own={isOwn("gap_entry_long")} />
@@ -840,8 +883,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("gap_fade_confirm_sma") && <OwnTag />}
-              Ride out pullbacks — exit on a fade only when a candle also closes on the wrong side of SMA {form.sma_slow ?? 21}{" "}
-              (below it for a buy, above it for a sell).
+              Ride out pullbacks{" "}
+              <InfoTip label="About riding out pullbacks">
+                Exit on a fade only when a candle also closes on the wrong side of SMA {form.sma_slow ?? 21} (below it for a buy,
+                above it for a sell). A narrowing that keeps the candles on the trade&apos;s side is treated as a pullback and
+                held.
+              </InfoTip>
             </span>
           </label>
           <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
@@ -853,23 +900,15 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("gap_fade_intrabar") && <OwnTag />}
-              Check the fade every second — judge the exit on the live price, as if that second closed the candle, instead of
-              waiting for the minute to close. Faster on a sharp reversal; a candle that turns back inside the minute can
-              exit too early. Entries still wait for the candle to close. With “1s OFF” in the status bar it checks at the
-              slower quote pace (every few seconds).
+              Check the fade every second{" "}
+              <InfoTip label="About checking the fade every second">
+                Judges the exit on the live price, as if that second closed the candle, instead of waiting for the minute to
+                close. Faster on a sharp reversal; a candle that turns back inside the minute can exit too early. Entries still
+                wait for the candle to close. With “1s OFF” in the status bar it checks at the slower quote pace (every few
+                seconds).
+              </InfoTip>
             </span>
           </label>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            A cross only arms the trade; the order goes on the first closed candle whose gap reaches the entry level
-            (plus the wait, if set — the gap must still be there). While the gap keeps widening the trade is held; once it
-            has cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes
-            (exit reason “Gap fade”). With “Ride out pullbacks”, a narrowing that keeps the candles on the trade&apos;s side of
-            SMA {form.sma_slow ?? 21} is treated as a pullback and held; the exit waits for a close through it. An opposite cross still closes at once, and the reverse waits for its own gap. The
-            stop, filters, entry cut-off and square-off still apply. An exit level beyond the entry level (e.g. sell in at
-            −0.08, out at −0.39) is a lock-in level: the gap exit waits until the gap has been that wide, then closes when it
-            comes back to it; a trade whose gap never gets that wide is left to the stop, the opposite cross and
-            square-off.
-          </p>
         </div>
       </div>
       <div
@@ -965,10 +1004,21 @@ function Field({
 }
 
 /** A small heading that splits the settings into groups. */
-function SectionTitle({ children }: { children: ReactNode }) {
+function SectionTitle({ children, info }: { children: ReactNode; info?: ReactNode }) {
   return (
-    <div className="mt-5 border-t border-white/10 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
+    <div className="mt-5 flex items-center gap-1 border-t border-white/10 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
       {children}
+      {info ? <InfoTip label={`About ${typeof children === "string" ? children : "this section"}`}>{info}</InfoTip> : null}
+    </div>
+  );
+}
+
+/** A one-line "How it works" with the explanation in an ⓘ popover, under a group of fields. */
+function Hint({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <div className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-400">
+      <InfoTip label={label}>{children}</InfoTip>
+      How it works
     </div>
   );
 }

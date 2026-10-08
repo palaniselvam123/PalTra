@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Loader2, Settings2 } from "lucide-react";
@@ -339,10 +340,13 @@ export function StrategySummary({
             </div>
             {(c.entry_mode ?? "SMA") === "PATTERN" ? (
               <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
-                <p className="text-[11px] leading-snug text-slate-400">
-                  When a candle closes: a bullish pattern buys and a bearish one sells short at the start of the next
-                  candle; the trade closes at that candle&apos;s end. Each trade pays a full round of charges.
-                </p>
+                <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                  <InfoTip label="About candle-pattern entries">
+                    When a candle closes: a bullish pattern buys and a bearish one sells short at the start of the next candle;
+                    the trade closes at that candle&apos;s end. Each trade pays a full round of charges.
+                  </InfoTip>
+                  How pattern trades work
+                </div>
                 {segmented<"1" | "3" | "5">(
                   "Candle",
                   String(c.pattern_tf ?? 1) as "1" | "3" | "5",

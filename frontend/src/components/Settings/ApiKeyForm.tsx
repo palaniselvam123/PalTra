@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { CheckCircle2, XCircle, Loader2, LogIn } from "lucide-react";
@@ -135,14 +136,22 @@ export function ApiKeyForm() {
           </div>
         </div>
       )}
-      <p className="text-xs text-slate-500">
-        Credentials are encrypted at rest (Fernet) before being written to the local database. Groww is the only broker
-        with a live adapter — Zerodha/Angel One store credentials but have no login implementation yet.
-      </p>
-      <p className="text-xs text-slate-500">
-        These keys read market data and the Groww cash balance. Orders stay on the practice book until you confirm
-        Send orders to Groww on the Trade page, and a real order still waits until 09:15 IST.
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          How keys are kept
+          <InfoTip label="About how broker keys are kept">
+            Credentials are encrypted at rest (Fernet) before being written to the local database. Groww is the only broker
+            with a live adapter — Zerodha/Angel One store credentials but have no login implementation yet.
+          </InfoTip>
+        </span>
+        <span className="inline-flex items-center gap-1">
+          What these keys do
+          <InfoTip label="About what broker keys do">
+            These keys read market data and the Groww cash balance. Orders stay on the practice book until you confirm Send
+            orders to Groww on the Trade page, and a real order still waits until 09:15 IST.
+          </InfoTip>
+        </span>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs text-slate-400 flex flex-col gap-1">

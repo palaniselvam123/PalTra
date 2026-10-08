@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
@@ -124,13 +125,15 @@ export function RiskSettings() {
 
   return (
     <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">ORB desk risk (ORB bot and manual desk)</h2>
-      <p className="text-xs text-slate-500">
-        Not the SMA bots: each SMA bot has its own daily loss and trade limits under SMA strategy above.
-        Enforced server-side before every ORB order — the ORB bot and the manual form both go through it, and neither can
-        bypass it. Saved values stay on disk and survive a restart; they do not snap back to ₹1,00,000 / 2% / 5
-        trades. The 15:30 IST auto square-off (the NSE close) is fixed and applies on live market data.
-      </p>
+      <h2 className="flex items-center gap-1 text-sm font-medium text-slate-200">
+        ORB desk risk (ORB bot and manual desk)
+        <InfoTip label="About ORB desk risk">
+          Not the SMA bots: each SMA bot has its own daily loss and trade limits under SMA strategy. Enforced server-side
+          before every ORB order — the ORB bot and the manual form both go through it, and neither can bypass it. Saved values
+          stay on disk and survive a restart; they do not snap back to ₹1,00,000 / 2% / 5 trades. The 15:30 IST auto
+          square-off (the NSE close) is fixed and applies on live market data.
+        </InfoTip>
+      </h2>
 
       <div className="grid grid-cols-2 gap-3">
         {FIELDS.map((f) => {
@@ -169,11 +172,13 @@ export function RiskSettings() {
       </div>
 
       <div className="border-t border-border pt-3 space-y-2">
-        <div className="text-xs font-medium text-slate-300">Load virtual money</div>
-        <p className="text-[11px] text-slate-500 leading-relaxed">
-          Credits extra paper capital. Daily loss %, max trades and the other knobs stay as you saved them —
-          this does not reset the page to defaults.
-        </p>
+        <div className="flex items-center gap-1 text-xs font-medium text-slate-300">
+          Load virtual money
+          <InfoTip label="About loading virtual money">
+            Credits extra paper capital to the ORB desk. Daily loss %, max trades and the other knobs stay as you saved them —
+            this does not reset the page to defaults.
+          </InfoTip>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {PRESETS.map((n) => (
             <button
