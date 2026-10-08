@@ -840,8 +840,23 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 Unarm all{armedList.length ? ` (${armedList.length})` : ""}
               </button>
             </div>
-            <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
-              {symbols.map((s) => {
+            <div className="relative overflow-x-auto px-1 pb-1 sm:px-2">
+            <table className="w-full text-left" aria-label="Stocks">
+              <thead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="w-8 py-1.5 sm:w-10"><span className="sr-only">Select</span></th>
+                  <th className="py-1.5 pr-2">Stock</th>
+                  <th className="py-1.5 pr-2 text-right">LTP</th>
+                  <th className="py-1.5 pr-2 text-right">Chg</th>
+                  <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Today</th>
+                  <th className="py-1.5 pr-1">Trade</th>
+                  <th className="py-1.5 pr-1"><span className="sr-only">Chart</span></th>
+                  <th className="py-1.5 pr-1"><span className="sr-only">Remove</span></th>
+                </tr>
+              </thead>
+              <tbody>
+              {/* Armed stocks first (display order only). */}
+              {[...symbols].sort((a, b) => Number(armed.has(b)) - Number(armed.has(a))).map((s) => {
                 const book = bookBySymbol.get(s);
                 const side = book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : "FLAT";
                 const onChart = Boolean(config?.symbol) && symbol === s;
@@ -877,7 +892,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   />
                 );
               })}
-            </ul>
+            </tbody>
+            </table>
+            </div>
             </>
             )}
             </div>
