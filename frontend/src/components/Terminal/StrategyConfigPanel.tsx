@@ -961,15 +961,15 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       <div
         className={clsx(
           "mt-3 flex flex-wrap items-center gap-3",
-          wide && "sticky bottom-0 -mx-4 border-t border-white/10 bg-[#151921] px-4 py-3 lg:-mx-6 lg:px-6",
+          wide && "sticky bottom-0 z-10 -mx-4 border-t border-white/10 bg-[#151921] px-4 py-3 shadow-[0_-8px_16px_-8px_rgba(0,0,0,0.5)] lg:-mx-6 lg:px-6",
         )}
       >
         <button
           disabled={busy}
           onClick={save}
           className={clsx(
-            "rounded-md px-3 py-1.5 text-sm font-medium",
-            unsaved ? "bg-emerald-500 text-white hover:bg-emerald-400" : "bg-white/10 text-slate-100 hover:bg-white/15"
+            "inline-flex h-11 items-center rounded-md px-5 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9",
+            unsaved ? "bg-emerald-600 hover:bg-emerald-500" : "bg-sky-600 hover:bg-sky-500"
           )}
         >
           {stockScope ? `Save for ${scope}` : "Save"}
@@ -983,7 +983,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <button
             disabled={busy}
             onClick={resetStock}
-            className="rounded-md px-3 py-1.5 text-sm text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+            className="inline-flex h-11 items-center rounded-md px-4 text-sm text-slate-200 ring-1 ring-inset ring-white/15 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 sm:h-9"
           >
             Use shared settings
           </button>

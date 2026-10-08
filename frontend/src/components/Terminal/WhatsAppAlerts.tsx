@@ -201,12 +201,12 @@ export function WhatsAppAlerts() {
         </>
       )}
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="sticky bottom-0 z-10 -mx-4 mt-3 flex items-center gap-2 border-t border-white/10 bg-[#151921] px-4 py-3">
         <button
           type="button"
           disabled={busy || !canSave}
           onClick={save}
-          className="rounded-md bg-[#10B981] px-3 py-1.5 text-xs font-semibold text-[#04140d] disabled:opacity-40"
+          className="inline-flex h-11 items-center rounded-md bg-[#10B981] px-4 text-sm font-semibold text-[#04140d] hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           Save & enable
         </button>
@@ -214,7 +214,7 @@ export function WhatsAppAlerts() {
           type="button"
           disabled={busy || !active}
           onClick={test}
-          className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-slate-300 disabled:opacity-40"
+          className="inline-flex h-11 items-center rounded-md border border-white/15 px-4 text-sm text-slate-200 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           Send test
         </button>
