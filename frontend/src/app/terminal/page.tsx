@@ -447,6 +447,8 @@ export default function TerminalPage() {
         onChanged={refresh}
         desk={desk}
         onDeskChange={changeDesk}
+        replay={research ? null : replay}
+        onReplay={onReplay}
         notice={
           unreachable ? (
               <div
