@@ -68,7 +68,7 @@ export function ThemeToggle() {
       onClick={toggle}
       aria-label={light ? "Switch to the dark theme" : "Switch to the light theme"}
       title={light ? "Dark theme" : "Light theme"}
-      className="flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+      className="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
     >
       {light ? <Moon size={15} aria-hidden /> : <Sun size={15} aria-hidden />}
     </button>
@@ -557,7 +557,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         aria-label="Desk pages"
         className="sticky top-0 z-40 flex h-11 items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14]/95 px-2 backdrop-blur sm:gap-2 sm:px-4"
       >
-        <a href="/" className="mr-1 flex shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
+        <a href="/" className="mr-1 flex min-h-10 min-w-10 shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
           <span className="grad-brand grid h-7 w-7 place-items-center rounded-full text-white">
             <CandlestickChart size={14} aria-hidden />
           </span>

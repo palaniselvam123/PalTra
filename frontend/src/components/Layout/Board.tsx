@@ -407,7 +407,7 @@ function BoardPanel({
 
   const style: CSSProperties & Record<string, string | number> = { "--span": span };
   if (resize === "var" && shownHeight != null) style["--panel-h"] = `${shownHeight}px`;
-  const tool = "inline-flex h-7 min-w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30";
+  const tool = "inline-flex h-10 min-w-10 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30";
 
   return (
     <section

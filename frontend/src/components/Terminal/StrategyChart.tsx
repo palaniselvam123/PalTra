@@ -1422,7 +1422,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             onClick={toggleFull}
             aria-label={full ? "Exit full screen" : "Full screen"}
             title={full ? "Exit full screen (Esc)" : "Full screen"}
-            className="flex min-h-8 min-w-9 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+            className="flex min-h-10 min-w-10 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
           >
             {full ? <Minimize2 size={15} aria-hidden /> : <Maximize2 size={15} aria-hidden />}
           </button>

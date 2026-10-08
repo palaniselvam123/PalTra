@@ -203,6 +203,13 @@ select {
 [data-theme="light"] .terminal-dark thead .blotter-sticky { background-color: #f8fafc; }
 [data-theme="light"] .terminal-dark .blotter-sticky-edge { box-shadow: inset -1px 0 0 rgb(15 23 42 / 0.1); }
 
+/* Keyboard focus on the terminal: a 2px sky ring (ring-2 ring-sky-400) on every
+   control, shown only for keyboard focus. */
+.terminal-dark :is(a, button, summary, select, input, textarea, [role="tab"], [tabindex]):focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 /* A wide blotter or chip row must not stretch the phone wider than the screen. */
 .terminal-dark {
   max-width: 100%;
