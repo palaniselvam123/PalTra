@@ -192,3 +192,20 @@ def test_lock_stays_off_until_google_is_configured(monkeypatch):
     install_desk_lock(app)
     http = TestClient(app)
     assert http.get("/api/manual/account").status_code == 200
+
+
+def test_a_sign_in_lasts_seven_days_by_default(monkeypatch):
+    monkeypatch.setenv("ENCRYPTION_KEY", "test-signing-key")
+    now = 1_800_000_000
+    token = desk_lock.issue_token(now=now)
+    assert desk_lock.TTL_SEC == 7 * 24 * 60 * 60
+    assert desk_lock.token_ok(token, now=now + 6 * 24 * 60 * 60)
+    assert not desk_lock.token_ok(token, now=now + 8 * 24 * 60 * 60)
+
+
+def test_session_days_come_from_the_environment_within_1_to_30(monkeypatch):
+    for raw, days in (("2", 2), ("0", 1), ("90", 30), ("soon", 7)):
+        monkeypatch.setenv("DESK_SESSION_DAYS", raw)
+        assert desk_lock._session_days() == days
+    monkeypatch.delenv("DESK_SESSION_DAYS")
+    assert desk_lock._session_days() == 7
