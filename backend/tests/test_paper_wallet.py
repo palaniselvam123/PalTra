@@ -161,3 +161,41 @@ def test_load_limits_and_api(tmp_path, monkeypatch):
         assert client.post("/api/wallet/repay", json={}).status_code == 422  # nothing owed
         assert client.post("/api/wallet/reset").json()["active"] is False
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_loans_are_kept_as_records_and_repaid_oldest_first(eng):
+    import paper_wallet
+
+    _load(100)
+    await _buy(eng, _cfg(eng, "RELIANCE", qty=100), 10.0)  # needs 200, 100 free -> loan #1 Rs 100
+    await _buy(eng, _cfg(eng, "TCS", qty=10), 30.0)  # needs 60, 0 free -> loan #2 Rs 60
+    loans = paper_wallet.loans()
+    assert [(l["symbol"], l["amount"], l["status"]) for l in loans] == [("TCS", 60.0, "OPEN"), ("RELIANCE", 100.0, "OPEN")]
+    first = loans[-1]
+    assert first["bot"] == 1 and first["qty"] == 100 and first["price"] == 10.0 and first["need"] == 200.0
+    assert paper_wallet.summary()["loan"] == pytest.approx(160.0)
+    assert paper_wallet.summary()["open_loans"] == 2
+
+    paper_wallet.add(130)  # free 130
+    paper_wallet.repay(130)  # clears loan #1 (100) and 30 of loan #2
+    by_symbol = {l["symbol"]: l for l in paper_wallet.loans()}
+    assert by_symbol["RELIANCE"]["status"] == "REPAID" and by_symbol["RELIANCE"]["due"] == 0
+    assert by_symbol["TCS"]["repaid"] == pytest.approx(30.0) and by_symbol["TCS"]["due"] == pytest.approx(30.0)
+    assert paper_wallet.summary()["loan"] == pytest.approx(30.0)
+
+    lines = paper_wallet.statement()
+    assert [l["kind"] for l in lines] == ["REPAY", "ADD", "LOAN", "LOAN", "ADD"]
+    assert lines[0]["amount"] == 130.0 and lines[0]["loan_after"] == pytest.approx(30.0)
+    assert "RELIANCE" in lines[0]["note"] and "TCS" in lines[0]["note"]
+
+
+def test_close_writes_off_the_loan_on_the_statement(eng):
+    import paper_wallet
+
+    paper_wallet.add(50)
+    paper_wallet.set_margin(50)
+    paper_wallet.reset()
+    kinds = [l["kind"] for l in paper_wallet.statement()]
+    assert kinds == ["RESET", "MARGIN", "ADD"]
+    assert "Margin 20% -> 50%" in paper_wallet.statement()[1]["note"]

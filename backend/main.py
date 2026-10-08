@@ -1298,6 +1298,18 @@ async def wallet_reset():
     return paper_wallet.reset()
 
 
+@app.get("/api/wallet/statement")
+async def wallet_statement(limit: int = 500):
+    """Every wallet line, newest first: adds, withdrawals, loans, repayments, closes, margin changes."""
+    return paper_wallet.statement(limit)
+
+
+@app.get("/api/wallet/loans")
+async def wallet_loans(limit: int = 500):
+    """Every loan record, newest first, with what is repaid and what is still due."""
+    return paper_wallet.loans(limit)
+
+
 @app.put("/api/wallet/margin")
 async def wallet_margin(body: WalletMargin):
     return _wallet_call(paper_wallet.set_margin, body.margin_pct)

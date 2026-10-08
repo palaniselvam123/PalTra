@@ -252,7 +252,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the trade closes. Free balance = loaded + P&L of PAPER trades opened since the
   start − margin of open PAPER trades, worked out from the trade book. A short
   balance never stops the order: the wallet borrows the shortfall (`loan`) and
-  the screens pop it up (`last_loan`) until it is repaid. LIVE (real Groww
+  the screens pop it up (`last_loan`) until it is repaid. Every add,
+  withdrawal, loan, repayment, close and margin change is a `WalletEntry` row
+  (`/api/wallet/statement`); each LOAN row is that loan's record (bot, stock,
+  qty, price, margin needed, borrowed, repaid, due; `/api/wallet/loans`), and
+  repayments clear the oldest loan first. No interest. LIVE (real Groww
   balance), replay and research engines (`uses_wallet = False`) never touch it.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched

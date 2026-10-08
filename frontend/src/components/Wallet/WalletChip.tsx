@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { Landmark, Loader2, Wallet as WalletIcon, X } from "lucide-react";
-import { inr, smaApi, type Wallet, type WalletLoan } from "@/lib/smaApi";
+import { inr, smaApi, type Wallet, type WalletEntry, type WalletLoan } from "@/lib/smaApi";
 
 const POLL_MS = 10_000;
 const SEEN_KEY = "wallet.loanSeen";
@@ -102,7 +102,17 @@ export function WalletChip({ className }: { className?: string }) {
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -113,7 +123,16 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   // Portaled: a header with a backdrop blur would otherwise clip a fixed overlay to its own box.
   return createPortal(
     <div className="terminal-dark fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={box} role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-md rounded-xl border border-border bg-surface p-4 text-sm shadow-xl">
+      <div
+        ref={box}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={clsx(
+          "max-h-[90vh] w-full overflow-y-auto rounded-xl border border-border bg-surface p-4 text-sm shadow-xl",
+          wide ? "max-w-4xl" : "max-w-md"
+        )}
+      >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-semibold text-slate-100">{title}</h2>
           <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white/5">
@@ -132,6 +151,7 @@ function LoanPopup({ loan, onClose, onOpenWallet }: { loan: WalletLoan; onClose:
     <Modal title="Loan taken for an order" onClose={onClose}>
       <div role="alert" className="space-y-2">
         <p className="text-slate-200">
+          {loan.bot ? <>Bot {loan.bot}: </> : null}
           <b>{loan.symbol}</b> ×{loan.qty} at {inr(loan.price)} needed <b>{inr(loan.need)}</b> margin, but only{" "}
           <b>{inr(Math.max(0, loan.available))}</b> was free. The order was placed with a loan of{" "}
           <b className="text-amber-300">{inr(loan.borrowed)}</b>.
@@ -177,8 +197,34 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
   };
 
   const w = wallet;
+  const [tab, setTab] = useState<"wallet" | "loans" | "statement">("wallet");
   return (
-    <Modal title="Practice wallet (PAPER bots)" onClose={onClose}>
+    <Modal title="Practice wallet (PAPER bots)" onClose={onClose} wide={tab !== "wallet"}>
+      <div role="tablist" aria-label="Wallet" className="mb-3 flex gap-1 border-b border-white/10">
+        {(
+          [
+            ["wallet", "Wallet"],
+            ["loans", `Loans${w?.open_loans ? ` (${w.open_loans} open)` : ""}`],
+            ["statement", "Statement"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={clsx(
+              "-mb-px min-h-9 border-b-2 px-3 text-xs font-semibold",
+              tab === id ? "border-sky-400 text-sky-300" : "border-transparent text-slate-400 hover:text-slate-200"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "loans" ? <LoanRecords /> : tab === "statement" ? <Statement /> : (
+      <>
       {w?.active ? (
         <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1">
           <dt className="text-slate-400">Free balance</dt>
@@ -294,9 +340,147 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
           {msg.text}
         </p>
       ) : null}
+      </>
+      )}
       <p className="mt-3 text-[11px] text-slate-500">
         Practice money only. LIVE bots use your real Groww balance; replays and the Research desk keep their own.
       </p>
     </Modal>
+  );
+}
+
+const KIND_LABEL: Record<WalletEntry["kind"], string> = {
+  ADD: "Money added",
+  WITHDRAW: "Withdrawn",
+  LOAN: "Loan taken",
+  REPAY: "Loan repaid",
+  RESET: "Wallet closed",
+  MARGIN: "Margin changed",
+};
+
+function when(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return at;
+  return `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} ${at.slice(11, 16)}`;
+}
+
+function useRecords(load: () => Promise<WalletEntry[]>) {
+  const [rows, setRows] = useState<WalletEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    load()
+      .then((r) => live && setRows(r))
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "Could not load the records"));
+    return () => {
+      live = false;
+    };
+  }, [load]);
+  return { rows, error };
+}
+
+/** Every loan the wallet took: what it paid for, borrowed, repaid and still due. */
+function LoanRecords() {
+  const { rows, error } = useRecords(smaApi.walletLoans);
+  if (error) return <p className="text-xs text-rose-300">{error}</p>;
+  if (!rows) return <p className="text-xs text-slate-400">Loading…</p>;
+  if (!rows.length) return <p className="text-slate-400">No loans yet. A loan is taken only when the free balance is short of an entry&apos;s margin.</p>;
+  const due = rows.reduce((sum, r) => sum + (r.due ?? 0), 0);
+  return (
+    <div className="overflow-x-auto">
+      <p className="mb-2 text-xs text-slate-400">
+        {rows.length} loan{rows.length === 1 ? "" : "s"} · still due <b className="text-amber-300">{inr(due)}</b>. Repayments clear the
+        oldest loan first. No interest.
+      </p>
+      <table className="w-full min-w-[640px] whitespace-nowrap text-left text-xs">
+        <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+          <tr>
+            <th className="px-2 py-1.5">#</th>
+            <th className="px-2 py-1.5">Taken</th>
+            <th className="px-2 py-1.5">For</th>
+            <th className="px-2 py-1.5 text-right">Margin needed</th>
+            <th className="px-2 py-1.5 text-right">Borrowed</th>
+            <th className="px-2 py-1.5 text-right">Repaid</th>
+            <th className="px-2 py-1.5 text-right">Due</th>
+            <th className="px-2 py-1.5">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/5 font-mono">
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td className="px-2 py-1.5 text-slate-400">L{r.id}</td>
+              <td className="px-2 py-1.5 font-sans text-slate-300">{when(r.at)}</td>
+              <td className="px-2 py-1.5 font-sans text-slate-200">
+                Bot {r.bot ?? 1} · <b>{r.symbol}</b> ×{r.qty} @ {inr(r.price ?? 0)}
+              </td>
+              <td className="px-2 py-1.5 text-right text-slate-300">{inr(r.need ?? 0)}</td>
+              <td className="px-2 py-1.5 text-right text-slate-100">{inr(r.amount)}</td>
+              <td className="px-2 py-1.5 text-right text-emerald-300">{inr(r.repaid ?? 0)}</td>
+              <td className={clsx("px-2 py-1.5 text-right", (r.due ?? 0) > 0 ? "font-semibold text-amber-300" : "text-slate-400")}>
+                {inr(r.due ?? 0)}
+              </td>
+              <td className="px-2 py-1.5 font-sans">
+                <span
+                  className={clsx(
+                    "rounded px-1.5 py-0.5 text-[10px] font-bold",
+                    r.status === "OPEN" ? "bg-amber-400/15 text-amber-300" : "bg-emerald-500/15 text-emerald-300"
+                  )}
+                >
+                  {r.status === "OPEN" ? "OPEN" : "REPAID"}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Every money movement in the wallet, newest first, with the balance and loan after it. */
+function Statement() {
+  const { rows, error } = useRecords(smaApi.walletStatement);
+  if (error) return <p className="text-xs text-rose-300">{error}</p>;
+  if (!rows) return <p className="text-xs text-slate-400">Loading…</p>;
+  if (!rows.length) return <p className="text-slate-400">Nothing yet. Add money to open the wallet.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[640px] whitespace-nowrap text-left text-xs">
+        <thead className="text-[11px] uppercase tracking-wider text-slate-400">
+          <tr>
+            <th className="px-2 py-1.5">When</th>
+            <th className="px-2 py-1.5">What</th>
+            <th className="px-2 py-1.5 text-right">Amount</th>
+            <th className="px-2 py-1.5 text-right">Free after</th>
+            <th className="px-2 py-1.5 text-right">Loan after</th>
+            <th className="px-2 py-1.5">Details</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/5">
+          {rows.map((r) => {
+            const plus = r.kind === "ADD" || r.kind === "LOAN";
+            const minus = r.kind === "WITHDRAW" || r.kind === "REPAY";
+            return (
+              <tr key={r.id}>
+                <td className="px-2 py-1.5 text-slate-300">{when(r.at)}</td>
+                <td className={clsx("px-2 py-1.5 font-semibold", r.kind === "LOAN" ? "text-amber-300" : "text-slate-200")}>
+                  {KIND_LABEL[r.kind] ?? r.kind}
+                </td>
+                <td className={clsx("px-2 py-1.5 text-right font-mono", plus ? "text-emerald-300" : minus ? "text-rose-300" : "text-slate-400")}>
+                  {r.amount ? `${plus ? "+" : minus ? "−" : ""}${inr(r.amount)}` : "—"}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-slate-200">{r.balance_after == null ? "—" : inr(r.balance_after)}</td>
+                <td className={clsx("px-2 py-1.5 text-right font-mono", (r.loan_after ?? 0) > 0 ? "text-amber-300" : "text-slate-400")}>
+                  {inr(r.loan_after ?? 0)}
+                </td>
+                <td className="max-w-[18rem] truncate px-2 py-1.5 text-slate-400" title={r.note}>
+                  {r.kind === "LOAN" ? `Bot ${r.bot ?? 1} · ${r.symbol} ×${r.qty} @ ${inr(r.price ?? 0)} · L${r.id}` : r.note}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

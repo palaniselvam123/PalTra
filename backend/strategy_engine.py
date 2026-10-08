@@ -1887,7 +1887,7 @@ class StrategyEngine:
         if self.uses_wallet and (cfg.trading_mode or "PAPER").upper() == "PAPER":
             # Practice wallet: block the margin, borrowing any shortfall. Never stops the order.
             try:
-                loan = paper_wallet.cover(cfg.symbol, qty, order_price)
+                loan = paper_wallet.cover(cfg.symbol, qty, order_price, bot=self.bot_id)
             except Exception:  # noqa: BLE001
                 logger.exception("paper wallet margin check failed for %s", cfg.symbol)
                 loan = None

@@ -290,6 +290,8 @@ export type ChartFilters = {
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */
 export type WalletLoan = {
+  id?: number;
+  bot?: number;
   symbol: string;
   qty: number;
   price: number;
@@ -319,6 +321,30 @@ export type Wallet = {
   since: string | null;
   open: { symbol: string; bot: number; direction: string; qty: number; entry_price: number; margin: number }[];
   last_loan: WalletLoan | null;
+  /** Loans not fully repaid. */
+  open_loans?: number;
+};
+
+/** One line of the wallet's statement; a LOAN line is also that loan's record. */
+export type WalletEntry = {
+  id: number;
+  at: string;
+  kind: "ADD" | "WITHDRAW" | "LOAN" | "REPAY" | "RESET" | "MARGIN";
+  amount: number;
+  /** Free balance and total loan owed right after this line. */
+  balance_after: number | null;
+  loan_after: number | null;
+  note: string;
+  bot: number | null;
+  symbol: string | null;
+  qty: number | null;
+  price: number | null;
+  /** LOAN: margin the entry needed. */
+  need: number | null;
+  /** LOAN only. */
+  repaid?: number;
+  due?: number;
+  status?: "OPEN" | "REPAID";
 };
 
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
@@ -752,6 +778,8 @@ export const smaApi = {
     request<Wallet>("/api/wallet/withdraw", { method: "POST", body: JSON.stringify({ amount }) }, undefined, false),
   walletRepay: (amount?: number) =>
     request<Wallet>("/api/wallet/repay", { method: "POST", body: JSON.stringify(amount ? { amount } : {}) }, undefined, false),
+  walletStatement: () => request<WalletEntry[]>("/api/wallet/statement", undefined, undefined, false),
+  walletLoans: () => request<WalletEntry[]>("/api/wallet/loans", undefined, undefined, false),
   walletReset: () => request<Wallet>("/api/wallet/reset", { method: "POST" }, undefined, false),
   walletMargin: (margin_pct: number) =>
     request<Wallet>("/api/wallet/margin", { method: "PUT", body: JSON.stringify({ margin_pct }) }, undefined, false),
