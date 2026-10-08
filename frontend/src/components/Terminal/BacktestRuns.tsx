@@ -3,7 +3,8 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, Loader2, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import { inr, smaApi, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { SortTh, useSort } from "./sortable";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 
@@ -255,6 +256,29 @@ export function BacktestRuns() {
     };
   }, [openId]);
 
+  type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
+  const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(runs ?? [], (r, k) =>
+    k === "id"
+      ? r.id
+      : k === "days"
+        ? r.start_date
+        : k === "strategy"
+          ? strategyLabel(r.settings)
+          : k === "trades"
+            ? r.totals.trades
+            : k === "win"
+              ? r.totals.trades
+                ? r.totals.win_rate
+                : null
+              : k === "profit"
+                ? r.totals.profit
+                : k === "loss"
+                  ? r.totals.loss
+                  : k === "net"
+                    ? r.totals.net
+                    : r.totals.max_drawdown
+  );
+
   const remove = (run: ReplayRun) => {
     if (!window.confirm(`Delete run #${run.id} (${run.start_date} → ${run.end_date}) and its replay trades?`)) return;
     smaApi
@@ -301,20 +325,20 @@ export function BacktestRuns() {
           <table className="w-full min-w-[860px] whitespace-nowrap text-left text-xs">
             <thead className="text-[11px] uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="px-2 py-2">Run</th>
-                <th className="px-2 py-2">Days</th>
-                <th className="px-2 py-2">Strategy</th>
-                <th className="px-2 py-2 text-right">Trades</th>
-                <th className="px-2 py-2 text-right">Win %</th>
-                <th className="px-2 py-2 text-right">Profit</th>
-                <th className="px-2 py-2 text-right">Loss</th>
-                <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
-                <th className="px-2 py-2 text-right">Max DD</th>
+                <SortTh label="Run" k="id" sort={runSort} onSort={onRunSort} />
+                <SortTh label="Days" k="days" text sort={runSort} onSort={onRunSort} />
+                <SortTh label="Strategy" k="strategy" text sort={runSort} onSort={onRunSort} />
+                <SortTh label="Trades" k="trades" num sort={runSort} onSort={onRunSort} />
+                <SortTh label="Win %" k="win" num sort={runSort} onSort={onRunSort} />
+                <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} />
+                <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} />
+                <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={runSort} onSort={onRunSort} />
+                <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} />
                 <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {runs.map((run) => {
+              {sortedRuns.map((run) => {
                 const t = run.totals;
                 const on = openId === run.id;
                 return (
@@ -449,6 +473,41 @@ export function RunDetail({
   }
   const t = run.totals;
   const days = run.days ?? [];
+  return <RunDetailBody run={run} t={t} days={days} heading={heading} subheading={subheading} settingsTitle={settingsTitle} settingsRows={settingsRows} />;
+}
+
+/** Each stock's result on one day of the run, best first. */
+function stocksOnDay(stocks: ReplayStockRow[], date: string): { symbol: string; day: ReplayDayRow }[] {
+  const out: { symbol: string; day: ReplayDayRow }[] = [];
+  for (const s of stocks) {
+    const day = s.days.find((d) => d.date === date);
+    if (day && day.trades > 0) out.push({ symbol: s.symbol, day });
+  }
+  return out.sort((a, b) => b.day.net - a.day.net);
+}
+
+function RunDetailBody({
+  run,
+  t,
+  days,
+  heading,
+  subheading,
+  settingsTitle,
+  settingsRows,
+}: {
+  run: ReplayRun;
+  t: ReplayRun["totals"];
+  days: ReplayDayRow[];
+  heading?: string;
+  subheading?: string;
+  settingsTitle: string;
+  settingsRows?: [string, string][];
+}) {
+  // A day opens to show how each stock did that day (the stock table below opens the other way).
+  const [openDay, setOpenDay] = useState<string | null>(null);
+  const stocks = run.stocks ?? [];
+  type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
+  const { sorted: sortedDays, sort: daySort, onSort: onDaySort } = useSort<ReplayDayRow, DayKey>(days, (d, k) => d[k]);
   return (
     <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-2">
@@ -469,15 +528,15 @@ export function RunDetail({
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
           <thead className="text-[11px] uppercase tracking-wider text-slate-400">
             <tr>
-              <th className="px-2 py-2">Day</th>
-              <th className="px-2 py-2 text-right">Trades</th>
-              <th className="px-2 py-2 text-right">W / L</th>
-              <th className="px-2 py-2 text-right">Profit</th>
-              <th className="px-2 py-2 text-right">Loss</th>
-              <th className="px-2 py-2 text-right">Gross</th>
-              <th className="px-2 py-2 text-right">Charges</th>
-              <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
-              <th className="px-2 py-2 text-right">Running total</th>
+              <SortTh label="Day" k="date" text sort={daySort} onSort={onDaySort} />
+              <SortTh label="Trades" k="trades" num sort={daySort} onSort={onDaySort} />
+              <SortTh label="W / L" k="wins" num title="Sort by wins" sort={daySort} onSort={onDaySort} />
+              <SortTh label="Profit" k="profit" num sort={daySort} onSort={onDaySort} />
+              <SortTh label="Loss" k="loss" num sort={daySort} onSort={onDaySort} />
+              <SortTh label="Gross" k="gross" num sort={daySort} onSort={onDaySort} />
+              <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} />
+              <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} />
+              <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} />
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
@@ -488,9 +547,28 @@ export function RunDetail({
                 </td>
               </tr>
             ) : (
-              days.map((d) => (
-                <tr key={d.date}>
-                  <td className="px-2 py-1.5 font-sans text-slate-200">{dayLabel(d.date)}</td>
+              sortedDays.map((d) => {
+                const isOpen = openDay === d.date;
+                const perStock = stocks.length ? stocksOnDay(stocks, d.date) : [];
+                return (
+                <Fragment key={d.date}>
+                <tr>
+                  <td className="px-2 py-1.5 font-sans text-slate-200">
+                    {perStock.length ? (
+                      <button
+                        type="button"
+                        onClick={() => setOpenDay(isOpen ? null : d.date)}
+                        aria-expanded={isOpen}
+                        title="Show each stock on this day"
+                        className="inline-flex items-center gap-1 hover:text-white"
+                      >
+                        {isOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+                        {dayLabel(d.date)}
+                      </button>
+                    ) : (
+                      dayLabel(d.date)
+                    )}
+                  </td>
                   <td className="px-2 py-1.5 text-right text-slate-200">{d.trades}</td>
                   <td className="px-2 py-1.5 text-right text-slate-300">
                     {d.wins} / {d.losses}
@@ -502,7 +580,28 @@ export function RunDetail({
                   <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>
                   <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
                 </tr>
-              ))
+                {isOpen
+                  ? perStock.map(({ symbol, day: sd }) => (
+                      <tr key={`${d.date}-${symbol}`} className="bg-white/[0.02] text-slate-300">
+                        <td className="px-2 py-1 pl-8 font-sans font-semibold text-amber-300">{symbol}</td>
+                        <td className="px-2 py-1 text-right">{sd.trades}</td>
+                        <td className="px-2 py-1 text-right">
+                          {sd.wins} / {sd.losses}
+                        </td>
+                        <td className="px-2 py-1 text-right text-emerald-300">{signed(sd.profit)}</td>
+                        <td className="px-2 py-1 text-right text-rose-300">{signed(sd.loss)}</td>
+                        <td className={clsx("px-2 py-1 text-right", pnlTone(sd.gross))}>{signed(sd.gross)}</td>
+                        <td className="px-2 py-1 text-right text-amber-300">{inr(sd.charges)}</td>
+                        <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.net)}</td>
+                        <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
+                          {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
+                        </td>
+                      </tr>
+                    ))
+                  : null}
+                </Fragment>
+                );
+              })
             )}
           </tbody>
           {days.length > 0 ? (
@@ -549,6 +648,18 @@ export function RunDetail({
 function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Settings }) {
   const [open, setOpen] = useState<string | null>(null);
   const base = strategyLabel(settings);
+  type StockKey = "symbol" | "trades" | "wins" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
+  const { sorted, sort, onSort } = useSort<ReplayStockRow, StockKey>(stocks, (r, k) =>
+    k === "symbol"
+      ? r.symbol
+      : k === "win"
+        ? r.totals.trades
+          ? r.totals.win_rate
+          : null
+        : k === "dd"
+          ? r.totals.max_drawdown
+          : r.totals[k]
+  );
   return (
     <div className="mb-4">
       <div className="mb-1 px-2 text-[11px] uppercase tracking-wider text-slate-400">By stock</div>
@@ -556,20 +667,20 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
         <table className="w-full min-w-[760px] whitespace-nowrap text-left text-xs">
           <thead className="text-[11px] uppercase tracking-wider text-slate-400">
             <tr>
-              <th className="px-2 py-2">Stock</th>
-              <th className="px-2 py-2 text-right">Trades</th>
-              <th className="px-2 py-2 text-right">W / L</th>
-              <th className="px-2 py-2 text-right">Win %</th>
-              <th className="px-2 py-2 text-right">Profit</th>
-              <th className="px-2 py-2 text-right">Loss</th>
-              <th className="px-2 py-2 text-right">Gross</th>
-              <th className="px-2 py-2 text-right">Charges</th>
-              <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
-              <th className="px-2 py-2 text-right">Max DD</th>
+              <SortTh label="Stock" k="symbol" text sort={sort} onSort={onSort} />
+              <SortTh label="Trades" k="trades" num sort={sort} onSort={onSort} />
+              <SortTh label="W / L" k="wins" num title="Sort by wins" sort={sort} onSort={onSort} />
+              <SortTh label="Win %" k="win" num sort={sort} onSort={onSort} />
+              <SortTh label="Profit" k="profit" num sort={sort} onSort={onSort} />
+              <SortTh label="Loss" k="loss" num sort={sort} onSort={onSort} />
+              <SortTh label="Gross" k="gross" num sort={sort} onSort={onSort} />
+              <SortTh label="Charges" k="charges" num sort={sort} onSort={onSort} />
+              <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={sort} onSort={onSort} />
+              <SortTh label="Max DD" k="dd" num sort={sort} onSort={onSort} />
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
-            {stocks.map((s) => {
+            {sorted.map((s) => {
               const t = s.totals;
               const own = s.strategy ? strategyLabel({ ...settings, ...s.strategy }) : null;
               const isOpen = open === s.symbol;
