@@ -50,6 +50,7 @@ from indicators import (
     sma_gap_signed,
 )
 from candle_patterns import closes_bucket, pattern_call, setting as pattern_setting, uses_patterns
+from candles import bucket_start, candle_minutes, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
@@ -179,7 +180,7 @@ SNAPSHOT_FIELDS = (
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit",
-    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge",
+    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -977,6 +978,8 @@ class StrategyEngine:
                 continue
             if frame is not None and not frame.empty and len(frame) > 2500:
                 frame = frame.iloc[-2500:].reset_index(drop=True)
+            # Candles of the chosen interval (candles.py); the bot never sees the 1-minute tape then.
+            frame = resample(frame, candle_minutes(cfg, stock_overrides(cfg, symbol)))
             self._frames[symbol] = frame
             self._ltps[symbol] = float(ltp)
             if seconds and tick_store.records(source) and market_is_open(now):
@@ -1052,7 +1055,7 @@ class StrategyEngine:
             closed_ts = _closed_bar_ts(frame)
             if closed_ts is None:
                 continue
-            if _candle_is_behind(closed_ts, now):
+            if _candle_is_behind(closed_ts, now, candle_minutes(cfg, stock_overrides(cfg, symbol))):
                 # The bar that just closed is not in this frame yet. Judging
                 # now would burn the cross, and the next minute would no
                 # longer see it.
@@ -1618,6 +1621,7 @@ class StrategyEngine:
                 raise ForceRefused(str(exc)) from exc
             if frame is None or getattr(frame, "empty", True):
                 raise ForceRefused(f"{name} has no candles yet")
+            frame = resample(frame, candle_minutes(cfg, stock_overrides(cfg, name)))
             self._frames[name] = frame
             self._ltps[name] = float(ltp)
             if name == (cfg.symbol or "").upper():
@@ -3036,6 +3040,8 @@ class StrategyEngine:
             "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
             "flip_orders": flips_orders(view_cfg) if view_cfg is not None else False,
             "cross_exit": cross_exits(view_cfg) if view_cfg is not None else True,
+            # Candle interval in minutes the chart stock trades on (candles.py).
+            "candle_minutes": candle_minutes(view_cfg) if view_cfg is not None else 1,
             # The last loan the practice wallet took for this bot's entry (the screens pop it up once).
             "wallet_loan": getattr(self, "wallet_loan", None),
             # Stocks with their own strategy settings, and which fields they set.
@@ -3244,6 +3250,8 @@ class StrategyEngine:
             "atr_multiplier": float(cfg.atr_multiplier) if cfg else 1.5,
             "blocked": blocked,
             "filters": chart_filters(cfg),
+            # Minutes per candle sent (candles.py); the chart only merges up from it.
+            "candle_minutes": candle_minutes(cfg, stock_overrides(cfg, view)) if cfg else 1,
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
@@ -3667,14 +3675,18 @@ def _entry_day(pos: OpenPosition) -> dt.date:
     return when.astimezone(IST).date()
 
 
-def _candle_is_behind(closed_ts: int, now: dt.datetime) -> bool:
-    """True when the frame is missing the bar that should already be closed."""
+def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> bool:
+    """True when the frame is missing the candle that should already be closed.
+
+    `minutes` is the candle interval: the candle before the one `now` is in
+    must be the last closed one.
+    """
     if now.tzinfo is None:
         now = now.replace(tzinfo=IST)
     else:
         now = now.astimezone(IST)
-    now_minute = int(now.replace(second=0, microsecond=0).timestamp())
-    return closed_ts < now_minute - 60
+    current = bucket_start(int(now.timestamp()), max(1, int(minutes)))
+    return closed_ts < current - max(1, int(minutes)) * 60
 
 
 # Exits the bot sends itself while an exchange stop may still be working.

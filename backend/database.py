@@ -103,6 +103,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "bot_name": "VARCHAR",
             "entry_mode": "VARCHAR DEFAULT 'SMA'",
             "pattern_tf": "INTEGER DEFAULT 1",
+            "candle_minutes": "INTEGER DEFAULT 1",
             "pattern_trend": "BOOLEAN DEFAULT 0",
             "pattern_set": "VARCHAR DEFAULT 'STRONG'",
             "pattern_min_edge": "FLOAT DEFAULT 1.5",

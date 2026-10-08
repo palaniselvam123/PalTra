@@ -30,7 +30,7 @@ _REQUEST_TIMEOUT_SEC = 15
 _TOTAL_TIMEOUT_SEC = 60
 # Candle sizes the chart offers, in minutes. Bigger bars are built from the
 # 1-minute download, aligned to the 09:15 open like NSE charts.
-INTERVALS = (1, 5, 15, 30, 60)
+INTERVALS = (1, 2, 3, 5, 10, 15, 30, 60)  # 2, 3 and 10 match the bot's candle intervals (candles.py)
 _SESSION_OPEN_MIN = 9 * 60 + 15
 _SYMBOL = re.compile(r"^[A-Z0-9&_-]{1,20}$")
 _FORMATS = ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")

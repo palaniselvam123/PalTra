@@ -779,7 +779,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     });
   };
   const [full, setFull] = useState(false);
-  const [bar, setBar] = useState<BarMinutes>(1);
+  const [pickedBar, setBar] = useState<number>(1);
+  // The bot's candle interval: live candles come at that size, so the chart
+  // offers it and the bigger sizes it divides into.
+  const liveSource = Math.max(1, Number(chart?.candle_minutes) || 1);
+  const barChoices: number[] =
+    liveSource === 1 ? [...BAR_MINUTES] : [liveSource, ...BAR_MINUTES.filter((m) => m > liveSource && m % liveSource === 0)];
+  const bar: number = barChoices.includes(pickedBar) ? pickedBar : liveSource;
   const measureLineRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [measuring, setMeasuring] = useState(false);
   const measuringRef = useRef(false);
@@ -791,7 +797,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   useEffect(() => {
     try {
       const saved = Number(localStorage.getItem(BAR_KEY));
-      if ((BAR_MINUTES as readonly number[]).includes(saved)) setBar(saved as BarMinutes);
+      if ((BAR_MINUTES as readonly number[]).includes(saved)) setBar(saved);
     } catch {
       /* private mode */
     }
@@ -830,12 +836,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   }, [symbol]);
   const view = past ?? chart;
 
-  // Candles as drawn: live 1-minute bars merged into the chosen size, or the
-  // past range Groww already built at that size.
+  // Candles as drawn: live bars (the bot's candle interval, 1 minute by
+  // default) merged into the chosen size, or the past range Groww already built
+  // at that size. A size the live candles cannot make shows them as they are.
   const rows = useMemo(() => {
     if (!view) return [];
     const base = sessionCandles(view.candles);
-    const source = past ? past.interval ?? 1 : 1;
+    const source = past ? past.interval ?? 1 : liveSource;
     if (bar === source) return base;
     if (bar > source && bar % source === 0) return withIndicators(resampleCandles(base, bar), !past);
     return base;
@@ -952,7 +959,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     setMeasure(NO_MEASURE);
   };
 
-  const pickBar = (next: BarMinutes) => {
+  const pickBar = (next: number) => {
     setBar(next);
     try {
       localStorage.setItem(BAR_KEY, String(next));
@@ -1394,7 +1401,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
           <span className="font-normal text-slate-300">{bar === 60 ? "1-hour" : `${bar}-minute`}</span>
           <span role="group" aria-label="Candle size" className="ml-1 inline-flex rounded-md ring-1 ring-inset ring-white/10">
-            {BAR_MINUTES.map((m) => (
+            {barChoices.map((m) => (
               <button
                 key={m}
                 type="button"

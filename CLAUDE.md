@@ -216,6 +216,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   to narrow N closed candles in a row. `gap_fade_intrabar` judges the fade
   about once a second on the live price as if that second closed the candle
   (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state).
+- `backend/candles.py` – candle interval (`candle_minutes`: 1 default, 2, 3, 5,
+  10, 15; per bot and per stock, PAPER and LIVE). `StrategyEngine.tick` groups
+  each stock's 1-minute Groww tape into candles of that length from 09:15 IST
+  (`resample`; open / high / low / close, Groww's running volume total of the
+  last minute) before it is stored in `_frames`, so the SMAs, ATR stop, filters,
+  gap mode, Bollinger exit, chart and replays all read the longer candles and a
+  signal is judged once each one closes (`_candle_is_behind(..., minutes)`).
+  Candle patterns keep the 1-minute tape (`pattern_tf`). The chart is told the
+  size (`candle_minutes` in the chart payload) and only merges up from it. The
+  stock research baseline keeps 1.
 - `backend/candle_patterns.py` – candle-pattern entries (`entry_mode =
   "PATTERN"`, default `"SMA"`, per bot and per stock, PAPER and LIVE). Each
   time a candle of `pattern_tf` minutes (1/3/5, built from the 1-minute tape
