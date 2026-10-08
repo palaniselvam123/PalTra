@@ -6,6 +6,7 @@ routes are mounted at `/sma` on this host, so the browser must not call
 */
 
 import { runBeforeCharges, tradeBeforeCharges } from "./pnlBasis";
+import { onSignedOut } from "./session";
 
 function resolveSmaApi(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SMA_API_URL;
@@ -700,6 +701,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000, r
       headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     });
     if (!res.ok) {
+      onSignedOut(res.status);
       let detail = res.statusText;
       try {
         const body = await res.json();

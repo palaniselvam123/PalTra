@@ -1,3 +1,5 @@
+import { onSignedOut } from "./session";
+
 export type BotConfig = {
   session_mode: "demo" | "market";
   candle_interval_sec: number;
@@ -687,6 +689,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
     });
     if (!res.ok) {
+      onSignedOut(res.status);
       const body = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(body.detail ?? `Request failed: ${res.status}`);
     }
