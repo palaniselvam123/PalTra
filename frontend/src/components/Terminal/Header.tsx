@@ -5,7 +5,7 @@ import { WalletChip } from "@/components/Wallet/WalletChip";
 import { AlertTriangle, CandlestickChart, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
-import { inr, smaApi, px, type BotSummary, type Desk, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
@@ -47,6 +47,9 @@ type Props = {
   notice?: ReactNode;
   /** The bot this page drives: live desk or the paper-only research desk. */
   desk?: Desk;
+  /** This desk's replay, shown small in the top strip while it runs. */
+  replay?: ReplayInfo | null;
+  onReplay?: (info: ReplayInfo) => void;
   onDeskChange?: (desk: Desk) => void;
 };
 
@@ -136,7 +139,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
   );
 }
 
-export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay }: Props) {
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
@@ -611,6 +614,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             onModeClick={() => (live ? switchMode("PAPER") : setConfirm(true))}
             onResetTrades={state?.mode === "REPLAY" ? undefined : resetTrades}
             onToggleSeconds={state?.mode === "REPLAY" ? undefined : toggleSeconds}
+            replay={replay}
+            onReplay={onReplay}
           />
         </div>
         {(error || state?.halt_reason || state?.last_error) && (

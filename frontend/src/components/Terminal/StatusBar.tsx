@@ -2,7 +2,8 @@
 
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import { inr, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, replayActive, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { ReplayChip } from "./ReplayBar";
 import { Skeleton, pnlTone } from "./ui";
 
 const BOT: Record<string, { label: string; short?: string; dot: string; text: string }> = {
@@ -31,10 +32,13 @@ type Props = {
   onResetTrades?: () => void;
   /** Turn the per-second Groww price fetch on or off. Hidden during a replay. */
   onToggleSeconds?: () => void;
+  /** This desk's replay: shown as a small cell (time, day, pause, stop) while it runs. */
+  replay?: ReplayInfo | null;
+  onReplay?: (info: ReplayInfo) => void;
 };
 
 /** One always-visible strip with everything that decides what the bot may do. */
-export function StatusBar({ state, config, connected, busy, onModeClick, onResetTrades, onToggleSeconds }: Props) {
+export function StatusBar({ state, config, connected, busy, onModeClick, onResetTrades, onToggleSeconds, replay, onReplay }: Props) {
   const mode = state?.mode ?? config?.trading_mode ?? null;
   const live = mode === "LIVE";
   const replaying = mode === "REPLAY";
@@ -227,6 +231,15 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           </span>
         )}
       </Cell>
+      {replay && replayActive(replay) ? (
+        <Cell
+          label={replay.status === "PAUSED" ? "Replay · paused" : replay.status === "FINISHED" ? "Replay · done" : "Replay"}
+          className="col-span-3 bg-violet-500/[0.12] ring-violet-400/40 sm:col-span-1 sm:min-w-[11rem]"
+          title="The replayed time, day and progress. Pause or stop it here."
+        >
+          <ReplayChip info={replay} onChanged={onReplay} />
+        </Cell>
+      ) : null}
     </div>
   );
 }

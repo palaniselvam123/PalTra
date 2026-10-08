@@ -32,7 +32,7 @@ function lastTradingDay(): string {
   return fmt(d);
 }
 
-function clockParts(iso: string | null): { label: string; minute: number } | null {
+export function clockParts(iso: string | null): { label: string; minute: number } | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
@@ -56,6 +56,71 @@ function clockParts(iso: string | null): { label: string; minute: number } | nul
   }).formatToParts(d);
   const n = (t: string) => Number(p.find((x) => x.type === t)?.value ?? 0);
   return { label, minute: n("hour") * 60 + n("minute") + n("second") / 60 };
+}
+
+/** How far the replay is, 0 to 1 (over every day of a multi-day run). */
+export function replayProgress(info: ReplayInfo | null): number {
+  if (!info) return 0;
+  if (info.status === "FINISHED") return 1;
+  const clock = clockParts(info.clock ?? null);
+  const dayProgress = clock ? Math.min(1, Math.max(0, (clock.minute - SESSION_START) / (SESSION_END - SESSION_START))) : 0;
+  const daysTotal = info.days_total ?? 1;
+  return daysTotal > 1 ? Math.min(1, ((info.day_index ?? 0) + dayProgress) / daysTotal) : dayProgress;
+}
+
+/** The replay in the terminal's top strip: replayed time, day, progress, pause and stop. */
+export function ReplayChip({ info, onChanged }: { info: ReplayInfo; onChanged?: (info: ReplayInfo) => void }) {
+  const [busy, setBusy] = useState(false);
+  const clock = clockParts(info.clock ?? null);
+  const short = clock ? clock.label.replace(/^\w+,?\s*/, "").replace(/\s*\d{4},?/, "").replace(/:\d{2}$/, "") : "—";
+  const daysTotal = info.days_total ?? 1;
+  const playing = info.status === "PLAYING";
+  const act = async (action: "pause" | "play" | "stop") => {
+    setBusy(true);
+    try {
+      const next = await smaApi.replayControl(action);
+      onChanged?.(next);
+    } catch {
+      /* the replay bar below shows the error on its next poll */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="min-w-0">
+        <span className="block truncate font-mono text-xs text-violet-100">
+          {info.status === "LOADING" ? "Loading…" : short}
+          {daysTotal > 1 ? <span className="ml-1 font-sans text-[11px] font-normal text-violet-300">D{Math.min((info.day_index ?? 0) + 1, daysTotal)}/{daysTotal}</span> : null}
+        </span>
+        <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-black/40" aria-hidden>
+          <span className="block h-full rounded-full bg-violet-400" style={{ width: `${replayProgress(info) * 100}%` }} />
+        </span>
+      </span>
+      {info.status === "PLAYING" || info.status === "PAUSED" ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void act(playing ? "pause" : "play")}
+          aria-label={playing ? "Pause replay" : "Play replay"}
+          title={playing ? "Pause replay" : "Play replay"}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-violet-100 ring-1 ring-inset ring-violet-300/40 hover:bg-violet-400/15 disabled:opacity-50"
+        >
+          {playing ? <Pause size={12} aria-hidden /> : <Play size={12} aria-hidden />}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void act("stop")}
+        aria-label="Stop replay"
+        title="Stop replay. Open replay positions close at the replay price."
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white/10 text-white hover:bg-white/15 disabled:opacity-50"
+      >
+        <Square size={11} aria-hidden />
+      </button>
+    </span>
+  );
 }
 
 type Props = {
@@ -193,21 +258,24 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   }
 
   const clock = clockParts(info?.clock ?? null);
-  const dayProgress = clock ? Math.min(1, Math.max(0, (clock.minute - SESSION_START) / (SESSION_END - SESSION_START))) : 0;
   const daysTotal = info?.days_total ?? 1;
   const multi = daysTotal > 1;
   const dayIndex = info?.day_index ?? 0;
-  const progress =
-    info?.status === "FINISHED" ? 1 : multi ? Math.min(1, (dayIndex + dayProgress) / daysTotal) : dayProgress;
+  const progress = replayProgress(info);
   const playing = info?.status === "PLAYING";
   const lagging = playing && info && info.effective_speed > 0 && info.effective_speed < info.speed * 0.8;
+  // Playing or paused, the bar shrinks: the top strip already shows the time, day, pause and stop.
+  const compact = info?.status === "PLAYING" || info?.status === "PAUSED";
 
   return (
     <section
       aria-label="Replay"
-      className="rounded-xl border-2 border-violet-400/60 bg-violet-500/[0.10] px-3 py-2 shadow-[0_0_24px_rgba(139,92,246,0.15)]"
+      className={clsx(
+        "rounded-xl bg-violet-500/[0.10]",
+        compact ? "border border-violet-400/40 px-2 py-1" : "border-2 border-violet-400/60 px-3 py-2 shadow-[0_0_24px_rgba(139,92,246,0.15)]"
+      )}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className={clsx("flex flex-wrap items-center gap-x-3", compact ? "gap-y-1" : "gap-y-2")}>
         <span className="rounded-md bg-violet-500 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
           Replay
         </span>
@@ -217,7 +285,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
             Loading Groww candles… {info.loaded}/{info.total} stocks
           </span>
         ) : (
-          <span className="font-mono text-sm text-violet-50" aria-live="off">
+          <span className={clsx("font-mono text-violet-50", compact ? "text-xs" : "text-sm")} aria-live="off">
             {clock?.label ?? "—"} IST
           </span>
         )}
@@ -277,10 +345,10 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
           </button>
         </span>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/40" aria-hidden>
+      <div className={clsx("overflow-hidden rounded-full bg-black/40", compact ? "mt-1 h-1" : "mt-2 h-1.5")} aria-hidden>
         <div className="h-full rounded-full bg-violet-400 transition-[width]" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className="mt-1 flex flex-wrap justify-between gap-x-3 text-[11px] text-violet-200/80">
+      <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-[11px] text-violet-200/80", compact ? "hidden" : "flex")}>
         <span>
           {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
         </span>
