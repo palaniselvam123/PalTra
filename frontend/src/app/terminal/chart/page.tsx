@@ -148,7 +148,7 @@ export default function StockChartPage() {
             <ArrowLeft size={14} aria-hidden /> Terminal
           </a>
           <span className="text-base font-semibold text-amber-300">{symbol || "—"}</span>
-          <span className="rounded px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ring-white/15 text-slate-300">
+          <span className="rounded px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ring-white/15 text-slate-300">
             {p?.date
               ? following.current
                 ? `Replay · ${replayRun?.clock ? new Date(replayRun.clock).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : p.date}`

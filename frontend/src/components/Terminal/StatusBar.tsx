@@ -62,7 +62,12 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const net = state ? state.kpis?.actual_gross ?? state.realized_net_pnl ?? 0 : null;
 
   return (
-    <div role="status" aria-label="Terminal status" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-stretch">
+    <div
+      role="status"
+      aria-label="Terminal status"
+      // One swipeable row on a phone (the strip stays one line tall while pinned); wraps on wider screens.
+      className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:items-stretch sm:overflow-visible sm:px-0 [&>*]:shrink-0"
+    >
       <button
         type="button"
         disabled={busy || mode == null || replaying || research}
@@ -145,7 +150,7 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
                     : "Per-second prices OFF: stocks are quoted every few seconds and nothing is recorded. Press to fetch and record every second again."
                 }
                 className={clsx(
-                  "rounded px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset disabled:opacity-50",
+                  "rounded px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset disabled:opacity-50",
                   state.second_ticks
                     ? "text-emerald-300 ring-emerald-400/40 hover:bg-emerald-500/10"
                     : "text-slate-400 ring-white/15 hover:bg-white/5"
@@ -223,7 +228,7 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
                 disabled={busy}
                 onClick={onResetTrades}
                 title="Set today's trade count back to 0 so the bot can keep trading. Today's trades, P&L and the daily loss limit are kept."
-                className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+                className="rounded px-1.5 py-0.5 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
               >
                 Reset
               </button>
@@ -263,7 +268,7 @@ function Cell({
         className
       )}
     >
-      <span className="truncate text-[11px] font-medium uppercase leading-4 tracking-wider text-slate-400">{label}</span>
+      <span className="truncate text-xs font-medium uppercase leading-4 tracking-wider text-slate-400">{label}</span>
       <span className="truncate text-sm font-semibold leading-5">{children}</span>
     </div>
   );

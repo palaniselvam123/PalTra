@@ -31,7 +31,7 @@ export function StockTabs({
   if (tabs.length < 2) return null;
   return (
     <nav aria-label={label} className="mb-2 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-      <span className="shrink-0 self-center pr-1 text-[11px] uppercase tracking-wider text-slate-400">{label}</span>
+      <span className="shrink-0 self-center pr-1 text-xs uppercase tracking-wider text-slate-400">{label}</span>
       {tabs.map((tab) => {
         const on = active != null && tab.symbol.toUpperCase() === active.toUpperCase();
         const net = tab.net ?? null;
@@ -52,14 +52,14 @@ export function StockTabs({
             {tab.side ? (
               <span
                 className={clsx(
-                  "rounded px-1 text-[10px] font-bold",
-                  tab.side === "LONG" ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"
+                  "rounded px-1 text-xs font-bold",
+                  tab.side === "LONG" ? "bg-sky-500/20 text-sky-300" : "bg-violet-500/20 text-violet-300"
                 )}
               >
                 {tab.side === "LONG" ? "B" : "S"}
               </span>
             ) : null}
-            {tab.trades ? <span className="text-[11px] text-slate-400">{tab.trades} tr</span> : null}
+            {tab.trades ? <span className="text-xs text-slate-400">{tab.trades} tr</span> : null}
             {net != null && (tab.trades || tab.side) ? (
               <span className={clsx("font-mono text-xs", net > 0 ? "text-emerald-300" : net < 0 ? "text-rose-300" : "text-slate-400")}>
                 {net > 0 ? "+" : ""}

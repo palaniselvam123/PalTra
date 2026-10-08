@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 /** Shared pieces for the SMA terminal. One palette, one type scale.
 
 Colours are picked for WCAG AA (4.5:1) on the terminal surfaces #0B0E14 and
-#151921. Green and red mean profit/loss or long/short only.
+#151921. Green and red mean profit/loss only; sky is long and violet is short.
 */
 export const tone = {
   profit: "text-emerald-400",
@@ -47,7 +47,7 @@ export function Badge({
     <span
       title={title}
       className={clsx(
-        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide ring-1 ring-inset",
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-semibold uppercase leading-4 tracking-wide ring-1 ring-inset",
         BADGE[color],
         className
       )}
@@ -58,8 +58,8 @@ export function Badge({
 }
 
 export function SideBadge({ side }: { side: "LONG" | "SHORT" | "FLAT" | string | null | undefined }) {
-  if (side === "LONG") return <Badge color="green">Long</Badge>;
-  if (side === "SHORT") return <Badge color="red">Short</Badge>;
+  if (side === "LONG") return <Badge color="sky">Long</Badge>;
+  if (side === "SHORT") return <Badge color="violet">Short</Badge>;
   return <Badge color="slate">Flat</Badge>;
 }
 

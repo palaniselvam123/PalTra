@@ -69,14 +69,14 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-title"
         className={clsx(
-          "w-full max-w-md rounded-xl border bg-[#151921] p-5 shadow-2xl",
+          "w-full max-w-md rounded-xl border bg-[#151921] p-4 shadow-2xl sm:p-6",
           danger ? "border-rose-500/50" : "border-white/15"
         )}
       >
         <div className="flex gap-3">
           <AlertTriangle aria-hidden className={clsx("mt-0.5 shrink-0", danger ? "text-rose-400" : "text-amber-300")} size={20} />
           <div className="min-w-0 flex-1">
-            <h2 id="confirm-title" className="text-[17px] font-semibold text-slate-100">
+            <h2 id="confirm-title" className="text-xl font-semibold text-slate-100">
               {title}
             </h2>
             <div className="mt-2 space-y-2 text-sm leading-relaxed text-slate-300">{children}</div>

@@ -98,7 +98,7 @@ export function ReplayChip({ info, onChanged }: { info: ReplayInfo; onChanged?: 
       <span className="min-w-0">
         <span className="block truncate font-mono text-xs text-violet-100">
           {info.status === "LOADING" ? "Loading…" : short}
-          {daysTotal > 1 ? <span className="ml-1 font-sans text-[11px] font-normal text-violet-300">D{Math.min((info.day_index ?? 0) + 1, daysTotal)}/{daysTotal}</span> : null}
+          {daysTotal > 1 ? <span className="ml-1 font-sans text-xs font-normal text-violet-300">D{Math.min((info.day_index ?? 0) + 1, daysTotal)}/{daysTotal}</span> : null}
         </span>
         <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-black/40" aria-hidden>
           <span className="block h-full rounded-full bg-violet-400" style={{ width: `${replayProgress(info) * 100}%` }} />
@@ -218,7 +218,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 type="button"
                 disabled={busy || live}
                 onClick={() => void run(() => smaApi.replayResume(resumable.id, speed, resumable.bot))}
-                className="inline-flex min-h-8 items-center gap-1 rounded-md bg-violet-500 px-3 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-50"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md bg-violet-500 px-3 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-50"
                 title={live ? "Switch this bot to PAPER to replay" : "Finished days keep their results; the unfinished day plays again from 09:15 with the run's saved settings"}
               >
                 {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Play size={13} aria-hidden />} Resume
@@ -226,7 +226,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
               <button
                 type="button"
                 onClick={() => hideResume(resumable.id)}
-                className="min-h-8 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+                className="min-h-9 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
               >
                 Not now
               </button>
@@ -249,7 +249,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
         </button>
         {open || info?.status === "ERROR" ? (
           <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t border-violet-400/15 px-3 py-2">
-            <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+            <label className="flex flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400">
               From
               <input
                 type="date"
@@ -261,7 +261,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
               />
             </label>
-            <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+            <label className="flex flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400">
               To
               <input
                 type="date"
@@ -271,7 +271,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
               />
             </label>
-            <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+            <label className="flex flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400">
               Start (IST)
               <input
                 type="time"
@@ -282,7 +282,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
               />
             </label>
-            <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+            <label className="flex flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400">
               Speed
               <select
                 value={speed}
@@ -303,7 +303,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
               {busy ? <Loader2 size={14} aria-hidden className="animate-spin" /> : <Play size={14} aria-hidden />}
               {endDay && endDay !== day ? "Start multi-day replay" : "Start replay"}
             </button>
-            <p className="basis-full text-[11px] leading-snug text-slate-400">
+            <p className="basis-full text-xs leading-snug text-slate-400">
               {live
                 ? `Switch ${botName ?? "this bot"} to PAPER to replay its settings. `
                 : armedCount === 0
@@ -345,7 +345,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
       )}
     >
       <div className={clsx("flex flex-wrap items-center gap-x-3", compact ? "gap-y-1" : "gap-y-2")}>
-        <span className="rounded-md bg-violet-500 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+        <span className="rounded-md bg-violet-500 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-white">
           Replay
         </span>
         {info?.status === "LOADING" ? (
@@ -369,7 +369,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
           </span>
         ) : null}
         {lagging ? (
-          <span className="text-[11px] text-amber-300" title="The server is busy; the replay plays as fast as it can.">
+          <span className="text-xs text-amber-300" title="The server is busy; the replay plays as fast as it can.">
             running at ~{Math.round(info!.effective_speed)}×
           </span>
         ) : null}
@@ -383,7 +383,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 disabled={busy || info?.status === "LOADING" || info?.status === "FINISHED"}
                 onClick={() => void run(() => smaApi.replayControl("speed", s))}
                 className={clsx(
-                  "min-h-8 min-w-10 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
+                  "min-h-9 min-w-10 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
                   info?.speed === s ? "bg-violet-400/30 font-semibold text-white" : "text-violet-100 hover:bg-violet-400/10"
                 )}
               >
@@ -396,7 +396,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
               type="button"
               disabled={busy}
               onClick={() => void run(() => smaApi.replayControl(playing ? "pause" : "play"))}
-              className="flex min-h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-violet-50 ring-1 ring-inset ring-violet-300/40 hover:bg-violet-400/15 disabled:opacity-50"
+              className="flex min-h-9 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-violet-50 ring-1 ring-inset ring-violet-300/40 hover:bg-violet-400/15 disabled:opacity-50"
             >
               {playing ? <Pause size={13} aria-hidden /> : <Play size={13} aria-hidden />}
               {playing ? "Pause" : "Play"}
@@ -407,7 +407,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
             disabled={busy}
             onClick={() => void run(() => smaApi.replayControl("stop"))}
             title="End the replay. The chart stays on the replayed day; use Back to live on the chart for today. Open replay positions close at the replay price."
-            className="flex min-h-8 items-center gap-1 rounded-md bg-white/10 px-2.5 text-xs font-semibold text-white hover:bg-white/15 disabled:opacity-50"
+            className="flex min-h-9 items-center gap-1 rounded-md bg-white/10 px-2.5 text-xs font-semibold text-white hover:bg-white/15 disabled:opacity-50"
           >
             <Square size={12} aria-hidden />
             {info?.status === "FINISHED" ? "End replay" : "Stop replay"}
@@ -417,7 +417,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
       <div className={clsx("overflow-hidden rounded-full bg-black/40", compact ? "mt-1 h-1" : "mt-2 h-1.5")} aria-hidden>
         <div className="h-full rounded-full bg-violet-400 transition-[width]" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-[11px] text-violet-200/80", compact ? "hidden" : "flex")}>
+      <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact ? "hidden" : "flex")}>
         <span>
           {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
         </span>

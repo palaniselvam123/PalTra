@@ -182,6 +182,34 @@ select {
 [data-theme="light"] .text-amber-400 { color: #a16207; }
 [data-theme="light"] .text-violet-300 { color: #6d28d9; }
 
+/* Dark terminal contrast (display only). Muted slate text was under the 4.5:1
+   AA ratio on the near-black surfaces; lift it a step, and give hairline card
+   borders enough weight to see. Light theme keeps its own remap above. */
+:root:not([data-theme="light"]) .terminal-dark .text-slate-500 { color: #94a3b8; }
+:root:not([data-theme="light"]) .terminal-dark .text-slate-600 { color: #8391a7; }
+:root:not([data-theme="light"]) .terminal-dark .border-white\/5 { border-color: rgb(255 255 255 / 0.1); }
+:root:not([data-theme="light"]) .terminal-dark .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(255 255 255 / 0.08); }
+:root:not([data-theme="light"]) .terminal-dark input::placeholder,
+:root:not([data-theme="light"]) .terminal-dark textarea::placeholder { color: #8391a7; -webkit-text-fill-color: #8391a7; opacity: 1; }
+
+/* Blotter: Trade ID and Stock stay put while the table scrolls sideways. Sticky
+   cells need a solid fill, matched to the card and its striped rows. */
+.terminal-dark .blotter-sticky { position: sticky; z-index: 1; background-color: #151921; }
+.terminal-dark tbody tr:nth-child(odd) > .blotter-sticky { background-color: #191d25; }
+.terminal-dark thead .blotter-sticky { z-index: 2; background-color: #1b2130; }
+.terminal-dark .blotter-sticky-edge { box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.1); }
+[data-theme="light"] .terminal-dark .blotter-sticky,
+[data-theme="light"] .terminal-dark tbody tr:nth-child(odd) > .blotter-sticky { background-color: #ffffff; }
+[data-theme="light"] .terminal-dark thead .blotter-sticky { background-color: #f8fafc; }
+[data-theme="light"] .terminal-dark .blotter-sticky-edge { box-shadow: inset -1px 0 0 rgb(15 23 42 / 0.1); }
+
+/* Keyboard focus on the terminal: a 2px sky ring (ring-2 ring-sky-400) on every
+   control, shown only for keyboard focus. */
+.terminal-dark :is(a, button, summary, select, input, textarea, [role="tab"], [tabindex]):focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 /* A wide blotter or chip row must not stretch the phone wider than the screen. */
 .terminal-dark {
   max-width: 100%;
@@ -217,6 +245,7 @@ select {
 [data-theme="light"] .terminal-dark.bg-\[\#0B0E14\],
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #ffffff; }
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/90 { background-color: rgb(255 255 255 / 0.94); }
+[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/95 { background-color: rgb(255 255 255 / 0.95); }
 [data-theme="light"] .terminal-dark .bg-\[\#151921\] { background-color: #ffffff; }
 /* White cards on the white page: a visible edge and a soft lift. */
 [data-theme="light"] .terminal-dark .rounded-xl.bg-\[\#151921\] {

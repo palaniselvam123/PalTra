@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, EyeOff, GripVertical, MoveHorizontal, PanelBottomClose, PictureInPicture2, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, EyeOff, GripVertical, MoveHorizontal, PanelBottomClose, PictureInPicture2, RotateCcw } from "lucide-react";
 
 export type PanelSpec = {
   id: string;
@@ -33,6 +33,10 @@ export type PanelSpec = {
   minHeight?: number;
   /** Can the panel be hidden (default true). */
   hideable?: boolean;
+  /** Out of view (the page shows another section): kept mounted, hidden with CSS. */
+  out?: boolean;
+  /** Show a section header with a chevron that folds the panel's body (kept mounted). */
+  collapsible?: boolean;
 };
 
 const SPANS = [3, 4, 6, 8, 9, 12] as const;
@@ -48,9 +52,11 @@ type Saved = {
   height: Record<string, number>;
   hidden: string[];
   floating: Record<string, Rect>;
+  /** Panels folded to their header (display only). */
+  collapsed?: string[];
 };
 
-const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [], floating: {} };
+const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [], floating: {}, collapsed: [] };
 
 function validRect(v: unknown): v is Rect {
   const r = v as Rect;
@@ -89,6 +95,7 @@ function read(key: string): Saved {
         v.floating && typeof v.floating === "object"
           ? Object.fromEntries(Object.entries(v.floating).filter(([, r]) => validRect(r)))
           : {},
+      collapsed: Array.isArray(v.collapsed) ? v.collapsed.filter((x): x is string => typeof x === "string") : [],
     };
   } catch {
     return EMPTY;
@@ -206,7 +213,7 @@ export function Board({
   return (
     <div ref={rootRef} className={clsx("space-y-2", className)}>
       {floating.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           <span>Popped out:</span>
           {floating.map((id) => (
             <button
@@ -240,7 +247,7 @@ export function Board({
           )
         : null}
       {hidden.length > 0 || customised ? (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           {hidden.length > 0 ? (
             <>
               <span>Hidden:</span>
@@ -308,6 +315,13 @@ export function Board({
               }
               onHide={() => update((prev) => ({ ...prev, hidden: [...prev.hidden.filter((x) => x !== id), id] }))}
               onPopOut={() => popOut(id)}
+              collapsed={ready && (saved.collapsed ?? []).includes(id)}
+              onCollapse={() =>
+                update((prev) => {
+                  const list = prev.collapsed ?? [];
+                  return { ...prev, collapsed: list.includes(id) ? list.filter((x) => x !== id) : [...list, id] };
+                })
+              }
             />
           );
         })}
@@ -334,7 +348,11 @@ function BoardPanel({
   onHeight,
   onHide,
   onPopOut,
+  collapsed = false,
+  onCollapse,
 }: {
+  collapsed?: boolean;
+  onCollapse?: () => void;
   spec: PanelSpec;
   span: Span;
   widths: boolean;
@@ -389,7 +407,7 @@ function BoardPanel({
 
   const style: CSSProperties & Record<string, string | number> = { "--span": span };
   if (resize === "var" && shownHeight != null) style["--panel-h"] = `${shownHeight}px`;
-  const tool = "inline-flex h-7 min-w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30";
+  const tool = "inline-flex h-10 min-w-10 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30";
 
   return (
     <section
@@ -412,6 +430,7 @@ function BoardPanel({
       style={style}
       className={clsx(
         "board-panel group/panel relative min-w-0",
+        spec.out && "hidden",
         dropBefore && "before:absolute before:-top-2.5 before:left-0 before:right-0 before:h-1 before:rounded before:bg-sky-400",
         dropAfter && "after:absolute after:-bottom-2.5 after:left-0 after:right-0 after:h-1 after:rounded after:bg-sky-400"
       )}
@@ -422,7 +441,7 @@ function BoardPanel({
         aria-label={`${spec.title} layout`}
         className="pointer-events-none absolute -top-3 right-2 z-30 flex items-center gap-0.5 rounded-lg border border-white/10 bg-[#0f131a]/95 p-0.5 opacity-0 shadow-lg transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100"
       >
-        <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{spec.title}</span>
+        <span className="px-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{spec.title}</span>
         <button
           type="button"
           aria-label={`Drag to move ${spec.title}`}
@@ -447,7 +466,7 @@ function BoardPanel({
         </button>
         <button
           type="button"
-          className={clsx(tool, "hidden gap-1 px-1.5 text-[11px]", widths && "xl:inline-flex")}
+          className={clsx(tool, "hidden gap-1 px-1.5 text-xs", widths && "xl:inline-flex")}
           onClick={onSpan}
           aria-label={`Width of ${spec.title}: ${SPAN_LABEL[span]}. Change`}
           title="Change the width (wide screens)"
@@ -455,7 +474,7 @@ function BoardPanel({
           <MoveHorizontal size={13} aria-hidden /> {SPAN_LABEL[span]}
         </button>
         {resize !== "none" && height != null ? (
-          <button type="button" className={clsx(tool, "px-1.5 text-[11px]")} onClick={() => onHeight(null)} title="Back to the normal height">
+          <button type="button" className={clsx(tool, "px-1.5 text-xs")} onClick={() => onHeight(null)} title="Back to the normal height">
             Auto height
           </button>
         ) : null}
@@ -474,14 +493,30 @@ function BoardPanel({
           </button>
         ) : null}
       </div>
+      {spec.collapsible ? (
+        <h2 className="mb-1">
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-controls={`panel-${spec.id}-body`}
+            onClick={onCollapse}
+            title={collapsed ? `Show ${spec.title}` : `Fold ${spec.title} to its header`}
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-1 text-left text-sm font-semibold text-slate-100 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          >
+            <ChevronDown size={16} aria-hidden className={clsx("shrink-0 text-slate-400 transition-transform", collapsed && "-rotate-90")} />
+            {spec.title}
+          </button>
+        </h2>
+      ) : null}
       <div
+        id={`panel-${spec.id}-body`}
         data-panel-content
-        className={clsx(resize === "box" && shownHeight != null && "overflow-auto rounded-xl")}
+        className={clsx(resize === "box" && shownHeight != null && "overflow-auto rounded-xl", collapsed && "hidden")}
         style={resize === "box" && shownHeight != null ? { height: shownHeight } : undefined}
       >
         {spec.node}
       </div>
-      {resize !== "none" ? (
+      {resize !== "none" && !collapsed ? (
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -583,7 +618,7 @@ function FloatingPanel({
           <button
             type="button"
             onClick={onDock}
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/10"
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/10"
             title="Put it back in the page"
           >
             <PanelBottomClose size={12} aria-hidden /> Dock

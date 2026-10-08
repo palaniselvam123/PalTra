@@ -182,7 +182,7 @@ export function Navbar({
   const sourceLocked = switching || botRunning;
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-[1720px] items-center gap-2 px-3 sm:h-16 sm:gap-6 sm:px-5">
         {/* --- Zone 1: identity + navigation ---------------------------- */}
         <Link href="/" className="flex shrink-0 items-center gap-2">
@@ -202,15 +202,13 @@ export function Navbar({
                 key={href}
                 href={href}
                 prefetch={false}
+                aria-current={active ? "page" : undefined}
                 className={clsx(
-                  "relative whitespace-nowrap px-1 py-5 text-body font-medium transition-colors",
-                  active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
+                  "flex min-h-11 items-center self-stretch whitespace-nowrap border-b-2 px-1 text-sm font-medium tracking-normal transition-colors",
+                  active ? "border-sky-400 text-slate-100" : "border-transparent text-slate-400 hover:text-slate-100"
                 )}
               >
                 {label}
-                {/* A green rule under the active item, flush with the bar's
-                    bottom edge — the reference's only navigation affordance. */}
-                {active && <span className="absolute inset-x-0 bottom-0 h-[3px] rounded-t bg-bot" />}
               </Link>
             );
           })}
@@ -415,7 +413,7 @@ export function Navbar({
           their own scroll row instead. */}
       <nav
         aria-label="Pages"
-        className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 xl:hidden"
+        className="flex gap-1 overflow-x-auto border-t border-border px-3 xl:hidden"
       >
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = isActive(pathname, href);
@@ -424,9 +422,10 @@ export function Navbar({
               key={href}
               href={href}
               prefetch={false}
+              aria-current={active ? "page" : undefined}
               className={clsx(
-                "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-caption font-medium transition-colors",
-                active ? "bg-bot/15 text-bot" : "text-slate-300 hover:bg-white/[0.05] hover:text-slate-100"
+                "flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-sm font-medium tracking-normal transition-colors",
+                active ? "border-sky-400 text-slate-100" : "border-transparent text-slate-300 hover:bg-white/[0.05] hover:text-slate-100"
               )}
             >
               <Icon size={14} />

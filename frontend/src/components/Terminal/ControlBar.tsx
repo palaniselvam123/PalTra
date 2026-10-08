@@ -22,6 +22,12 @@ type Props = {
   onPanicAll?: () => void;
   /** This bot's name, for the dialogs. */
   botName?: string;
+  /**
+   * Which buttons this copy shows (layout only; every button keeps its handler
+   * and dialog): "pinned" = Start/Pause and the two Panics, for the sticky
+   * header; "rest" = Force order and How it works; "all" = everything.
+   */
+  part?: "all" | "pinned" | "rest";
 };
 
 /** Start/Pause, Force order and Panic in one group, with named confirmations. */
@@ -37,7 +43,10 @@ export function ControlBar({
   onPanic,
   onPanicAll,
   botName,
+  part = "all",
 }: Props) {
+  const pinned = part !== "rest";
+  const rest = part !== "pinned";
   const [ask, setAsk] = useState<"force" | "panic" | "panic-all" | null>(null);
   const open = (state?.books ?? []).filter((b) => b.direction === "LONG" || b.direction === "SHORT");
   const forceBlocked = !symbol || !symbolArmed;
@@ -50,39 +59,76 @@ export function ControlBar({
   const money = live ? "real Groww" : "practice";
 
   return (
-    <section aria-label="Bot controls" className="rounded-xl border border-white/10 bg-[#151921] p-2">
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+    <section
+      aria-label={part === "rest" ? "Order tools" : "Bot controls"}
+      className={clsx(
+        part === "pinned" ? "" : "rounded-xl border border-white/10 bg-[#151921] p-2"
+      )}
+    >
+      <div
+        className={clsx(
+          part === "pinned"
+            ? "grid grid-cols-[auto_1fr_auto] gap-1.5 whitespace-nowrap sm:flex sm:items-center sm:gap-2"
+            : part === "rest"
+              ? "flex flex-wrap items-center gap-2"
+              : "grid grid-cols-2 gap-2 sm:flex sm:items-center"
+        )}
+      >
+        {pinned ? (
         <button
           type="button"
           disabled={busy || !state}
           onClick={onToggleBot}
           className={clsx(
-            "flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold disabled:opacity-50",
+            "flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:px-4",
             running ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-emerald-500 text-[#04140d] hover:bg-emerald-400"
           )}
         >
           {running ? <Pause size={16} aria-hidden /> : <Play size={16} aria-hidden />}
           {running ? "Pause bot" : "Start bot"}
         </button>
+        ) : null}
+        {rest ? (
+        <>
         <button
           type="button"
           disabled={busy || forceBlocked}
           onClick={() => setAsk("force")}
-          title={forceBlocked ? `${symbol || "The chart stock"} is not armed. Switch it on in the stock list first.` : undefined}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 text-sm font-semibold text-[#1a1203] hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          title={
+            forceBlocked
+              ? `${symbol || "The chart stock"} is not armed. Switch it on in the stock list first.`
+              : busy
+                ? "Wait for the last action to finish."
+                : undefined
+          }
+          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 text-sm font-semibold text-[#1a1203] hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-amber-400"
         >
           <Zap size={16} aria-hidden />
           Force order
         </button>
         <HowItWorks />
+        </>
+        ) : null}
+        {pinned ? (
+        <>
         <button
           type="button"
           disabled={busy}
           onClick={() => setAsk("panic")}
-          className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-bold tracking-wide text-white shadow-[0_0_20px_rgba(225,29,72,0.35)] hover:bg-rose-500 sm:ml-auto"
+          className={clsx(
+            "flex min-h-11 items-center justify-center gap-2 rounded-lg bg-rose-600 px-3 text-sm font-bold tracking-wide text-white shadow-[0_0_20px_rgba(225,29,72,0.35)] hover:bg-rose-500 sm:ml-auto sm:px-4",
+            part === "all" && "col-span-2"
+          )}
         >
           <Siren size={16} aria-hidden />
-          Panic square-off
+          {part === "pinned" ? (
+            <>
+              <span className="sm:hidden">Panic</span>
+              <span className="hidden sm:inline">Panic square-off</span>
+            </>
+          ) : (
+            "Panic square-off"
+          )}
         </button>
         {onPanicAll ? (
           <button
@@ -90,11 +136,23 @@ export function ControlBar({
             disabled={busy}
             onClick={() => setAsk("panic-all")}
             title="Square off and halt every bot (all four), not only this one"
-            className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold text-rose-300 ring-1 ring-inset ring-rose-500/60 hover:bg-rose-500/15 sm:col-span-1"
+            className={clsx(
+              "flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-300 ring-1 ring-inset ring-rose-500/60 hover:bg-rose-500/15 sm:px-3",
+              part === "all" && "col-span-2 sm:col-span-1"
+            )}
           >
             <Siren size={14} aria-hidden />
-            Panic all bots
+            {part === "pinned" ? (
+              <>
+                <span className="sm:hidden">All bots</span>
+                <span className="hidden sm:inline">Panic all bots</span>
+              </>
+            ) : (
+              "Panic all bots"
+            )}
           </button>
+        ) : null}
+        </>
         ) : null}
       </div>
 

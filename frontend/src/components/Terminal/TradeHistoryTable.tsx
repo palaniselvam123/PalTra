@@ -572,7 +572,7 @@ export function TradeHistoryTable({
     >
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
+          <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
           <h2
             className={clsx(
               "text-sm font-medium",
@@ -664,7 +664,7 @@ export function TradeHistoryTable({
       ) : (
       <>
       <div className="flex flex-wrap items-end gap-2 px-4 pb-3">
-        <label className="flex min-w-[8.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Stock
           <select
             value={stockFilter}
@@ -679,7 +679,7 @@ export function TradeHistoryTable({
             ))}
           </select>
         </label>
-        <label className="flex min-w-[6.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex min-w-[6.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Side
           <select value={side} onChange={(e) => setSide(e.target.value as SideFilter)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
             <option value="ALL">Both</option>
@@ -687,7 +687,7 @@ export function TradeHistoryTable({
             <option value="SHORT">Short (sell)</option>
           </select>
         </label>
-        <label className="flex min-w-[8.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Exit reason
           <select value={reasonFilter} onChange={(e) => setReason(e.target.value)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
             <option value="ALL">Any reason</option>
@@ -698,7 +698,7 @@ export function TradeHistoryTable({
             ))}
           </select>
         </label>
-        <label className="flex min-w-[9rem] max-w-[16rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex min-w-[9rem] max-w-[16rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Strategy
           <select value={strategyFilter} onChange={(e) => setStrategy(e.target.value)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
             <option value="ALL">Any strategy</option>
@@ -709,7 +709,7 @@ export function TradeHistoryTable({
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           From
           <input
             type="date"
@@ -718,7 +718,7 @@ export function TradeHistoryTable({
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           To
           <input
             type="date"
@@ -727,7 +727,7 @@ export function TradeHistoryTable({
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex min-w-[7.5rem] flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex min-w-[7.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           P&L
           <select
             value={pnlSide}
@@ -740,7 +740,7 @@ export function TradeHistoryTable({
             <option value="open">Open only</option>
           </select>
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex w-24 flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Min ₹
           <input
             inputMode="decimal"
@@ -750,7 +750,7 @@ export function TradeHistoryTable({
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <label className="flex w-24 flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           Max ₹
           <input
             inputMode="decimal"
@@ -760,7 +760,7 @@ export function TradeHistoryTable({
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           />
         </label>
-        <div className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <div className="flex flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
           <label htmlFor="blotter-sort">Sort</label>
           <div className="flex gap-1">
             <select
@@ -884,7 +884,7 @@ export function TradeHistoryTable({
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
 const COLUMNS: Col[] = [
-  { key: "id", label: "Trade ID", num: true },
+  { key: "id", label: "Trade ID" },
   { key: "stock", label: "Stock" },
   { key: "side", label: "Side" },
   { key: "entry_time", label: "Entry time" },
@@ -961,10 +961,10 @@ function BookSummary({
   const gross = profit + loss;
   const signed = (v: number) => `${v > 0 ? "+" : ""}${inr(v)}`;
   const tile = "min-w-0 rounded-lg bg-black/25 px-3 py-2 ring-1 ring-inset ring-white/10";
-  const label = "text-[11px] uppercase tracking-wider text-slate-400";
+  const label = "text-xs uppercase tracking-wider text-slate-400";
   return (
     <section aria-label="Closed trades summary" className="border-t border-white/10 px-4 py-3">
-      <div className="mb-2 text-[11px] text-slate-400">
+      <div className="mb-2 text-xs text-slate-400">
         Closed trades{filtered ? " matching the filters" : " in this book"}
         {open ? ` · ${open} still open (not counted)` : ""}
       </div>
@@ -972,29 +972,29 @@ function BookSummary({
         <div className={tile}>
           <div className={label}>Trades</div>
           <div className="font-mono text-[16px] font-semibold text-slate-100">{closed}</div>
-          <div className="text-[11px] text-slate-400">
+          <div className="text-xs text-slate-400">
             {wins} W · {losses} L{flat ? ` · ${flat} flat` : ""}
           </div>
         </div>
         <div className={tile}>
           <div className={label}>Total profit</div>
           <div className="font-mono text-[16px] font-semibold text-emerald-300">{signed(profit)}</div>
-          <div className="text-[11px] text-slate-400">from {wins} winning</div>
+          <div className="text-xs text-slate-400">from {wins} winning</div>
         </div>
         <div className={tile}>
           <div className={label}>Total loss</div>
           <div className="font-mono text-[16px] font-semibold text-rose-300">{signed(loss)}</div>
-          <div className="text-[11px] text-slate-400">from {losses} losing</div>
+          <div className="text-xs text-slate-400">from {losses} losing</div>
         </div>
         <div className={tile}>
           <div className={label}>P&amp;L</div>
           <div className={clsx("font-mono text-[16px] font-semibold", pnlTone(gross))}>{signed(gross)}</div>
-          <div className="text-[11px] text-slate-400">profit + loss, before charges</div>
+          <div className="text-xs text-slate-400">profit + loss, before charges</div>
         </div>
         <div className={tile}>
           <div className={label}>Charges</div>
           <div className="font-mono text-[16px] font-semibold text-amber-300">{inr(charges)}</div>
-          <div className="text-[11px] text-slate-400">brokerage &amp; taxes · not taken off</div>
+          <div className="text-xs text-slate-400">brokerage &amp; taxes · not taken off</div>
         </div>
       </div>
     </section>
@@ -1011,11 +1011,11 @@ function ReasonBadge({ trade }: { trade: TradeRow }) {
   );
 }
 
-/** Long / Short in green when the trade made money, red when it lost, grey while open. */
+/** Long in sky, Short in violet; the result (open, profit, loss) is in the title and the P&L column. */
 function ResultSideBadge({ trade, net }: { trade: TradeRow; net: number | null }) {
   const word = trade.direction === "LONG" ? "Long" : trade.direction === "SHORT" ? "Short" : "Flat";
   const open = trade.exit_price == null;
-  const color = open || net == null || net === 0 ? "slate" : net > 0 ? "green" : "red";
+  const color = trade.direction === "LONG" ? "sky" : trade.direction === "SHORT" ? "violet" : "slate";
   const result = open ? "open" : net == null || net === 0 ? "flat" : net > 0 ? "profit" : "loss";
   return (
     <Badge
@@ -1059,11 +1059,11 @@ function Extreme({ trade, which, left }: { trade: TradeRow; which: "high" | "low
       title={`${which === "high" ? "Highest" : "Lowest"} price while open (${label}, before charges)`}
     >
       <span className="font-mono">{px(price)}</span>
-      <span className={clsx("font-mono text-[11px]", tone)}>
+      <span className={clsx("font-mono text-xs", tone)}>
         {move > 0 ? "+" : ""}
         {move.toFixed(2)} pts
       </span>
-      <span className={clsx("font-mono text-[11px] font-semibold", tone)}>{signedInr(amount)}</span>
+      <span className={clsx("font-mono text-xs font-semibold", tone)}>{signedInr(amount)}</span>
     </span>
   );
 }
@@ -1081,7 +1081,7 @@ function StrategyCell({ settings }: { settings: Settings | null }) {
       <div className="truncate text-xs text-slate-200">
         SMA {settings.sma_fast ?? 9}/{settings.sma_slow ?? 21} · {stopShort(settings)}
       </div>
-      <div className="truncate text-[11px] text-slate-400">{filtersShort(settings)}</div>
+      <div className="truncate text-xs text-slate-400">{filtersShort(settings)}</div>
     </div>
   );
 }
@@ -1214,11 +1214,13 @@ function OrderTable({
 
       {/* Tablet and desktop: a table with a sticky header. */}
       <div className="hidden max-h-[70vh] overflow-auto md:block">
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
+        <table className="w-full text-left text-sm tabular-nums">
+          <thead className="sticky top-0 z-20 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
             <tr>
               {COLUMNS.map((col) => {
                 if (col.key === "action") return <th key={col.key} scope="col" className="px-3 py-2" />;
+                // Trade ID and Stock stay in view while the table scrolls sideways.
+                const pin = col.key === "id" ? "blotter-sticky left-0 w-24 min-w-24" : col.key === "stock" ? "blotter-sticky blotter-sticky-edge left-24" : null;
                 const key = col.key;
                 const on = sort?.key === key;
                 const Icon = !on ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
@@ -1227,14 +1229,14 @@ function OrderTable({
                     key={key}
                     scope="col"
                     aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right")}
+                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right", pin)}
                   >
                     <button
                       type="button"
                       onClick={() => onSort(key)}
                       title={`Sort by ${col.label === "#" ? "trade number" : col.label.toLowerCase()}`}
                       className={clsx(
-                        "inline-flex min-h-8 items-center gap-1 rounded px-1.5 uppercase tracking-wider hover:bg-white/5 hover:text-white",
+                        "inline-flex min-h-9 items-center gap-1 rounded px-1.5 uppercase tracking-wider hover:bg-white/5 hover:text-white",
                         col.num && "flex-row-reverse",
                         on ? "text-white" : "text-slate-300"
                       )}
@@ -1296,7 +1298,7 @@ function Pager({
   const first = page * size + 1;
   const last = Math.min(total, (page + 1) * size);
   const button =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-white/15 px-2 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40 sm:min-h-8 sm:min-w-8";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-white/15 px-2 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40 sm:min-h-9 sm:min-w-8";
   return (
     <nav aria-label="Pages" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs text-slate-400">
       <span>
@@ -1324,7 +1326,7 @@ function Pager({
         <select
           value={size}
           onChange={(e) => onSize(Number(e.target.value))}
-          className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-slate-100 sm:min-h-8"
+          className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-slate-100 sm:min-h-9"
         >
           {PAGE_SIZES.map((n) => (
             <option key={n} value={n}>
@@ -1356,8 +1358,8 @@ function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
       <td colSpan={12} className="px-3 py-2 text-slate-200">
         Subtotal · {label}
       </td>
-      <td className="px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
-      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
       <td />
     </tr>
   );
@@ -1379,7 +1381,7 @@ function CloseButton({ trade, closing, onClose }: { trade: TradeRow; closing: bo
       type="button"
       disabled={closing}
       onClick={() => onClose(trade)}
-      className="min-h-11 rounded-md px-3 text-xs font-semibold text-rose-200 ring-1 ring-inset ring-rose-400/50 hover:bg-rose-500/15 disabled:opacity-50 md:min-h-8"
+      className="min-h-11 rounded-md px-3 text-xs font-semibold text-rose-200 ring-1 ring-inset ring-rose-400/50 hover:bg-rose-500/15 disabled:opacity-50 md:min-h-9"
     >
       {closing ? "Closing…" : "Close"}
     </button>
@@ -1418,16 +1420,16 @@ function OrderRowView({
   const { open, market, points, net } = rowFigures(t, state);
   return (
     <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
-      <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
+      <td className="blotter-sticky left-0 w-24 min-w-24 whitespace-nowrap px-3 py-2 font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
+      <td className="blotter-sticky blotter-sticky-edge left-24 whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
       <td className="whitespace-nowrap px-3 py-2">
         <ResultSideBadge trade={t} net={net} />
         <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
       </td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
-      <td className="px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
-      <td className="px-3 py-2 text-right font-mono">
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
         {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
       </td>
       <td className="px-3 py-2 text-right">
@@ -1436,17 +1438,17 @@ function OrderRowView({
       <td className="px-3 py-2 text-right">
         <Extreme trade={t} which="low" />
       </td>
-      <td className={clsx("px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
         <ReasonBadge trade={t} />
       </td>
       <td className="max-w-[13rem] px-3 py-2">
         <StrategyCell settings={settingsOf(t, runs)} />
       </td>
-      <td className="px-3 py-2 text-right font-mono text-amber-300">
+      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">
         {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
       </td>
-      <td className={clsx("px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
+      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
         {signedInr(net)}
       </td>
       <td className="px-3 py-1.5 text-right">{open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}</td>
@@ -1476,7 +1478,7 @@ function TradeCardView({
           <ResultSideBadge trade={t} net={net} />
           <span className="font-mono text-xs text-slate-400">{t.qty}</span>
         </div>
-        <span className={clsx("shrink-0 font-mono text-[17px] font-semibold", pnlTone(net))}>{signedInr(net)}</span>
+        <span className={clsx("shrink-0 font-mono text-base font-semibold", pnlTone(net))}>{signedInr(net)}</span>
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
         <Field k="Entry" v={px(t.entry_price)} sub={istStamp(t.entry_time)} />
@@ -1484,20 +1486,20 @@ function TradeCardView({
         <Field k="Points" v={signedPts(points)} tone={pnlTone(points)} />
         <Field k="Charges" v={t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)} tone="text-amber-300" />
         <div className="min-w-0">
-          <dt className="text-[11px] uppercase tracking-wider text-slate-400">Max high</dt>
+          <dt className="text-xs uppercase tracking-wider text-slate-400">Max high</dt>
           <dd className="text-sm text-slate-200">
             <Extreme trade={t} which="high" left />
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-[11px] uppercase tracking-wider text-slate-400">Max low</dt>
+          <dt className="text-xs uppercase tracking-wider text-slate-400">Max low</dt>
           <dd className="text-sm text-slate-200">
             <Extreme trade={t} which="low" left />
           </dd>
         </div>
       </dl>
       <div className="mt-2 text-xs">
-        <div className="text-[11px] uppercase tracking-wider text-slate-400">Strategy</div>
+        <div className="text-xs uppercase tracking-wider text-slate-400">Strategy</div>
         <StrategyCell settings={settingsOf(t, runs)} />
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -1513,9 +1515,9 @@ function TradeCardView({
 function Field({ k, v, sub, tone: color }: { k: string; v: string; sub?: string; tone?: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] uppercase tracking-wider text-slate-400">{k}</dt>
+      <dt className="text-xs uppercase tracking-wider text-slate-400">{k}</dt>
       <dd className={clsx("truncate font-mono text-sm text-slate-200", color)}>{v}</dd>
-      {sub ? <dd className="truncate font-mono text-[11px] text-slate-400">{sub}</dd> : null}
+      {sub ? <dd className="truncate font-mono text-xs text-slate-400">{sub}</dd> : null}
     </div>
   );
 }

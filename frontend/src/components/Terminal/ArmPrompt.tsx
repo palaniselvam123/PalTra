@@ -147,7 +147,7 @@ export function ArmPrompt({
     <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
       <div>
         <div className="text-slate-200">{label}</div>
-        <div className="text-[11px] text-slate-500">
+        <div className="text-xs text-slate-500">
           {hint}
           {fromStock(ownKeys) ? " · this stock's own" : " · from Settings"}
         </div>
@@ -186,7 +186,7 @@ export function ArmPrompt({
           <h2 className="font-semibold text-slate-100">
             Arm {symbol}
             {deskName ? <span className="font-normal text-slate-400"> on {deskName}</span> : null}
-            {live ? <span className="ml-2 rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">LIVE</span> : null}
+            {live ? <span className="ml-2 rounded bg-rose-500/20 px-1.5 py-0.5 text-xs font-bold text-rose-300">LIVE</span> : null}
           </h2>
           <button type="button" aria-label="Close" disabled={busy} onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white/5">
             <X size={16} />
@@ -205,7 +205,7 @@ export function ArmPrompt({
             <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
               <div>
                 <div className="text-slate-200">Entry price</div>
-                <div className="text-[11px] text-slate-500">The bot enters at the market price when its signal fires</div>
+                <div className="text-xs text-slate-500">The bot enters at the market price when its signal fires</div>
               </div>
               <span className="font-mono text-slate-300">{price != null && price > 0 ? `now ${inr(price)}` : "at market"}</span>
             </div>
@@ -278,7 +278,7 @@ export function ArmPrompt({
             </>
           )}
         </div>
-        {editing && bad ? <p className="mt-2 text-right text-[11px] text-amber-300">{bad}</p> : null}
+        {editing && bad ? <p className="mt-2 text-right text-xs text-amber-300">{bad}</p> : null}
       </div>
     </div>,
     document.body

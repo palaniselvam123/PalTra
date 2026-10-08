@@ -212,12 +212,12 @@ export function StrategySummary({
         <span className="min-w-0">
           <span className={clsx("block text-sm font-semibold", on ? "text-slate-100" : "text-slate-300")}>
             {t.label}
-            {mine ? <span className="ml-1 rounded bg-violet-500/20 px-1 text-[10px] font-semibold text-violet-200">own</span> : null}
+            {mine ? <span className="ml-1 rounded bg-violet-500/20 px-1 text-xs font-semibold text-violet-200">own</span> : null}
             {others.length ? (
-              <span className="ml-1 rounded bg-white/10 px-1 text-[10px] font-normal text-slate-300">{others.length} own</span>
+              <span className="ml-1 rounded bg-white/10 px-1 text-xs font-normal text-slate-300">{others.length} own</span>
             ) : null}
           </span>
-          <span className="block truncate text-[11px] text-slate-400">{t.detail(c)}</span>
+          <span className="block truncate text-xs text-slate-400">{t.detail(c)}</span>
         </span>
       </button>
     );
@@ -241,7 +241,7 @@ export function StrategySummary({
             disabled={busy}
             onClick={() => value !== o && onPick(o)}
             className={clsx(
-              "min-h-8 px-2.5 text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-60",
+              "min-h-9 px-2.5 text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-60",
               value === o ? "bg-sky-500/25 font-semibold text-sky-100" : "text-slate-300 hover:bg-white/5"
             )}
           >
@@ -254,7 +254,7 @@ export function StrategySummary({
 
   const group = (title: string, children: ReactNode) => (
     <div>
-      <div className="mb-1.5 text-[11px] uppercase tracking-wider text-slate-400">{title}</div>
+      <div className="mb-1.5 text-xs uppercase tracking-wider text-slate-400">{title}</div>
       {children}
     </div>
   );
@@ -265,7 +265,7 @@ export function StrategySummary({
     <section aria-label="Strategy" className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">
+          <span className="text-xs uppercase tracking-[0.14em] text-slate-400">
             Strategy{research ? " · research desk" : ""}
           </span>
           <label className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -276,7 +276,7 @@ export function StrategySummary({
                 setMsg(null);
                 setScope(e.target.value);
               }}
-              className="min-h-8 rounded-md border border-white/15 bg-black/30 px-2 text-xs text-slate-100"
+              className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-xs text-slate-100"
             >
               <option value={ALL}>All stocks</option>
               {scopes.map((name) => (
@@ -351,7 +351,7 @@ export function StrategySummary({
             ) : null}
             {(c.entry_mode ?? "SMA") === "PATTERN" ? (
               <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
-                <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                <div className="flex items-center gap-1 text-xs text-slate-400">
                   <InfoTip label="About candle-pattern entries">
                     When a candle closes: a bullish pattern buys and a bearish one sells short at the start of the next candle;
                     the trade closes at that candle&apos;s end. Each trade pays a full round of charges.
@@ -378,7 +378,7 @@ export function StrategySummary({
                     label: "Only with the SMA trend",
                     detail: (cc) => `bullish only while SMA ${cc.sma_fast} > SMA ${cc.sma_slow}, bearish only below`,
                   })}
-                  <div className="flex min-h-12 items-center rounded-lg px-3 py-2 text-[11px] text-slate-400 ring-1 ring-inset ring-white/10">
+                  <div className="flex min-h-12 items-center rounded-lg px-3 py-2 text-xs text-slate-400 ring-1 ring-inset ring-white/10">
                     {Number(c.pattern_min_edge ?? 1.5) > 0
                       ? `Skips candles smaller than ${c.pattern_min_edge ?? 1.5}× the charges`
                       : "No charge check (set it in Settings)"}
@@ -423,7 +423,7 @@ export function StrategySummary({
                   <span className={clsx("block text-sm font-semibold", stopOn ? "text-slate-100" : "text-amber-200")}>
                     Stop-loss {stopOn ? "ON" : "OFF"}
                   </span>
-                  <span className="block text-[11px] text-slate-400">
+                  <span className="block text-xs text-slate-400">
                     {stopOn
                       ? c.stop_type === "TSL"
                         ? `TSL ₹${c.tsl_sl_points ?? 20} · trail ₹${c.tsl_trail_points ?? 10}`
@@ -457,7 +457,7 @@ export function StrategySummary({
             {segmented<BbExit>("Bollinger exit", ((c.bb_exit ?? "OFF").toUpperCase() as BbExit), BB_EXITS, BB_LABEL, (v) =>
               save({ bb_exit: v }, `Bollinger exit ${BB_LABEL[v]}`)
             )}
-            <p className="text-[11px] text-slate-400">
+            <p className="text-xs text-slate-400">
               {(c.entry_mode ?? "SMA") === "PATTERN"
                 ? "Always: the trade closes at the end of its candle"
                 : crossExitOn
@@ -475,7 +475,7 @@ export function StrategySummary({
         {group("Entry filters (an entry must pass every one that is on)", <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{FILTERS.map(switchChip)}</div>)}
       </div>
 
-      <p className="mt-3 text-[11px] text-slate-400">
+      <p className="mt-3 text-xs text-slate-400">
         Limits: qty {c.qty} · max loss {inr(Number(config.max_daily_loss))} · {config.max_trades_per_day} trades/day · no
         entries after {config.entry_cutoff_time || "15:00"}.
       </p>

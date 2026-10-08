@@ -13,6 +13,7 @@ import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
 import { ownSummary } from "./StrategyConfigPanel";
 import { ArmPrompt } from "./ArmPrompt";
+import { inTab, type TerminalTab } from "./SectionTabs";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -47,6 +48,10 @@ type Props = {
   notice?: ReactNode;
   /** The bot this page drives: live desk or the paper-only research desk. */
   desk?: Desk;
+  /** The section tabs, shown above the page's sections. */
+  tabs?: ReactNode;
+  /** Which section is in view: the stock list shows on Watchlist, Force order on Live (both on All). */
+  tab?: TerminalTab;
   /** This desk's replay, shown small in the top strip while it runs. */
   replay?: ReplayInfo | null;
   onReplay?: (info: ReplayInfo) => void;
@@ -63,7 +68,7 @@ export function ThemeToggle() {
       onClick={toggle}
       aria-label={light ? "Switch to the dark theme" : "Switch to the light theme"}
       title={light ? "Dark theme" : "Light theme"}
-      className="flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+      className="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
     >
       {light ? <Moon size={15} aria-hidden /> : <Sun size={15} aria-hidden />}
     </button>
@@ -139,7 +144,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
   );
 }
 
-export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay, tabs, tab = "all" }: Props) {
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
@@ -550,9 +555,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       ) : null}
       <nav
         aria-label="Desk pages"
-        className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14] px-2 sm:gap-2 sm:px-4"
+        className="sticky top-0 z-40 flex h-11 items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14]/95 px-2 backdrop-blur sm:gap-2 sm:px-4"
       >
-        <a href="/" className="mr-1 flex shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
+        <a href="/" className="mr-1 flex min-h-10 min-w-10 shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
           <span className="grad-brand grid h-7 w-7 place-items-center rounded-full text-white">
             <CandlestickChart size={14} aria-hidden />
           </span>
@@ -565,13 +570,12 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               href={href === "/" ? "/" : `${href}/`}
               aria-current={active ? "page" : undefined}
               className={clsx(
-                "relative flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-xs font-medium sm:min-h-10",
-                active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
+                "flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2 text-sm font-medium tracking-normal",
+                active ? "border-sky-400 text-slate-100" : "border-transparent text-slate-400 hover:text-slate-100"
               )}
             >
-              <Icon size={13} aria-hidden className="hidden sm:block" />
+              <Icon size={14} aria-hidden className="hidden sm:block" />
               {label}
-              {active ? <span className="absolute inset-x-1 bottom-0 h-[2px] rounded-t bg-emerald-400" /> : null}
             </a>
           );
         })}
@@ -579,13 +583,13 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       <header
         aria-label="SMA terminal"
         className={clsx(
-          "sticky top-0 z-30 bg-[#0B0E14]",
+          "sticky top-11 z-30 bg-[#0B0E14]",
           live ? "border-2 border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]" : "border-b border-white/10"
         )}
       >
         <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="hidden truncate text-sm font-semibold tracking-tight text-slate-100 sm:inline">
                 SMA × ATR Terminal
               </span>
@@ -606,6 +610,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </span>
             </div>
           </div>
+          <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center">
+          <div className="min-w-0 xl:flex-1">
           <StatusBar
             state={state}
             config={config}
@@ -617,6 +623,25 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             replay={replay}
             onReplay={onReplay}
           />
+          </div>
+          {/* Start/Pause and Panic stay in reach while the page scrolls. */}
+          <div className="shrink-0">
+          <ControlBar
+            part="pinned"
+            state={state}
+            live={live}
+            running={running}
+            busy={busy}
+            symbol={(symbol || config?.symbol || "").toUpperCase()}
+            symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+            onToggleBot={toggleBot}
+            onForce={forceOrder}
+            onPanic={panic}
+            onPanicAll={desk === "research" ? undefined : panicAll}
+            botName={state?.bot_name}
+          />
+          </div>
+          </div>
         </div>
         {(error || state?.halt_reason || state?.last_error) && (
           <div role="alert" className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs text-rose-300">
@@ -627,7 +652,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
         {notice}
+        {tabs}
+        <div className={clsx(!inTab(tab, "live") && "hidden")}>
         <ControlBar
+          part="rest"
           state={state}
           live={live}
           running={running}
@@ -640,7 +668,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
           onPanicAll={desk === "research" ? undefined : panicAll}
           botName={state?.bot_name}
         />
-        <div ref={searchRef} className="relative min-w-0">
+        </div>
+        <div ref={searchRef} className={clsx("relative min-w-0", !inTab(tab, "watchlist") && "hidden")}>
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <h2 className={clsx(!folded && "border-b border-white/10")}>
               <button
@@ -667,7 +696,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       {openBooks.map((b) => (
                         <span key={b.symbol} className="shrink-0" title={`${b.symbol} ${b.direction} ${b.qty}${b.entry_price ? ` @ ${px(b.entry_price)}` : ""}`}>
                           <span className="font-sans text-slate-200">{b.symbol}</span>{" "}
-                          <span className={b.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}>{b.direction === "LONG" ? "L" : "S"}</span>
+                          <span className={b.direction === "LONG" ? "text-sky-300" : "text-violet-300"}>{b.direction === "LONG" ? "L" : "S"}</span>
                           <span className="text-slate-500">×{b.qty}</span>{" "}
                           <span className={(openOf(b) ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>
                             {openOf(b) == null ? "—" : signed(openOf(b) ?? 0)}
@@ -696,7 +725,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   return (
                     <span key={s}>
                       {i > 0 && ", "}
-                      <span className={dir === "LONG" ? "text-emerald-300" : dir === "SHORT" ? "text-rose-300" : "text-slate-300"}>
+                      <span className={dir === "LONG" ? "text-sky-300" : dir === "SHORT" ? "text-violet-300" : "text-slate-300"}>
                         {s}
                       </span>
                     </span>
@@ -741,7 +770,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                     className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
                   >
                     <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
-                    <span className="truncate text-[11px] text-slate-400">{hit.name}</span>
+                    <span className="truncate text-xs text-slate-400">{hit.name}</span>
                   </button>
                 ))}
               </div>
@@ -811,8 +840,23 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 Unarm all{armedList.length ? ` (${armedList.length})` : ""}
               </button>
             </div>
-            <ul className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="Stocks">
-              {symbols.map((s) => {
+            <div className="relative overflow-x-auto px-1 pb-1 sm:px-2">
+            <table className="w-full text-left" aria-label="Stocks">
+              <thead className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="w-8 py-1.5 sm:w-10"><span className="sr-only">Select</span></th>
+                  <th className="py-1.5 pr-2">Stock</th>
+                  <th className="py-1.5 pr-2 text-right">LTP</th>
+                  <th className="py-1.5 pr-2 text-right">Chg</th>
+                  <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Today</th>
+                  <th className="py-1.5 pr-1">Trade</th>
+                  <th className="py-1.5 pr-1"><span className="sr-only">Chart</span></th>
+                  <th className="py-1.5 pr-1"><span className="sr-only">Remove</span></th>
+                </tr>
+              </thead>
+              <tbody>
+              {/* Armed stocks first (display order only). */}
+              {[...symbols].sort((a, b) => Number(armed.has(b)) - Number(armed.has(a))).map((s) => {
                 const book = bookBySymbol.get(s);
                 const side = book?.direction === "LONG" || book?.direction === "SHORT" ? book.direction : "FLAT";
                 const onChart = Boolean(config?.symbol) && symbol === s;
@@ -848,7 +892,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   />
                 );
               })}
-            </ul>
+            </tbody>
+            </table>
+            </div>
             </>
             )}
             </div>
@@ -858,11 +904,11 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       </div>
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-5">
+          <div className="w-full max-w-md rounded-xl border border-[#F43F5E]/40 bg-[#151921] p-4 sm:p-6">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 text-[#F43F5E]" size={20} />
               <div>
-                <h2 className="text-[17px] font-semibold text-slate-100">
+                <h2 className="text-xl font-semibold text-slate-100">
                   Enable LIVE REAL MONEY{state?.bot_name ? ` for ${state.bot_name}` : ""}?
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">

@@ -112,8 +112,8 @@ function Card({
         strong ? "border-white/20" : "border-white/10"
       )}
     >
-      <div className="text-xs font-medium uppercase tracking-wider text-slate-400">{label}</div>
-      <div className="mt-1 font-mono text-xl font-semibold leading-tight sm:text-2xl xl:text-[28px]">
+      <div className="truncate text-xs font-medium uppercase leading-4 tracking-wider text-slate-400">{label}</div>
+      <div className="mt-1 whitespace-nowrap font-mono text-xl font-semibold leading-9 tabular-nums sm:text-[28px]">
         {children ?? <Skeleton className="mt-1 h-7 w-28" />}
       </div>
       {extra}
