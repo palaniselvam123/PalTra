@@ -288,6 +288,9 @@ export type ChartFilters = {
   atr_stop: boolean;
 };
 
+/** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
+export type ArmTarget = 1 | 2 | 3 | 4 | "research";
+
 export type BotSummary = {
   bot: number;
   name: string;
@@ -611,8 +614,9 @@ export function answered(err: unknown): boolean {
   return err instanceof ApiError;
 }
 
-async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000): Promise<T> {
-  path = route(path);
+/** `routed` false sends `path` as given, not to this page's desk (a call that names its own desk). */
+async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000, routed = true): Promise<T> {
+  if (routed) path = route(path);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -683,6 +687,19 @@ export const smaApi = {
       method: "POST",
       body: JSON.stringify({ symbol, armed }),
     }),
+  /**
+   * Arm or unarm a stock on a chosen desk, whatever desk this page is on:
+   * 1 = main desk, 2-4 = bots 2-4, "research" = the practice research desk.
+   */
+  setTradeSymbolOn: (target: ArmTarget, symbol: string, armed: boolean) =>
+    request<SmaConfig>(
+      target === "research" ? "/api/research/trade-symbols" : target === 1 ? "/api/trade-symbols" : `/api/bots/${target}/trade-symbols`,
+      { method: "POST", body: JSON.stringify({ symbol, armed }) },
+      undefined,
+      false
+    ),
+  /** The research desk's settings (its Trade list), whatever desk this page is on. */
+  researchConfig: () => request<SmaConfig>("/api/research/config", undefined, undefined, false),
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
