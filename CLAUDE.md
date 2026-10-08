@@ -259,8 +259,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   withdrawal, loan, repayment, close and margin change is a `WalletEntry` row
   (`/api/wallet/statement`); each LOAN row is that loan's record (bot, stock,
   qty, price, margin needed, borrowed, repaid, due; `/api/wallet/loans`), and
-  repayments clear the oldest loan first. No interest. LIVE (real Groww
-  balance), replay and research engines (`uses_wallet = False`) never touch it.
+  repayments clear the oldest loan first. No interest. Replays use the same
+  wallet (owner's choice): REPLAY trades of runs started since the start
+  (`ReplayRun.created_at`, since a replayed trade's times are the past day)
+  block margin and return P&L like PAPER ones, and deleting a run takes its
+  P&L back off. LIVE (real Groww balance) and the research engines
+  (`uses_wallet = False`: Research desk, `sma_research`) never touch it.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still
