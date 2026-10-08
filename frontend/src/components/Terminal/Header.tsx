@@ -585,7 +585,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       >
         <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 py-2 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="hidden truncate text-sm font-semibold tracking-tight text-slate-100 sm:inline">
                 SMA × ATR Terminal
               </span>
@@ -606,6 +606,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </span>
             </div>
           </div>
+          <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center">
+          <div className="min-w-0 xl:flex-1">
           <StatusBar
             state={state}
             config={config}
@@ -617,6 +619,25 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             replay={replay}
             onReplay={onReplay}
           />
+          </div>
+          {/* Start/Pause and Panic stay in reach while the page scrolls. */}
+          <div className="shrink-0">
+          <ControlBar
+            part="pinned"
+            state={state}
+            live={live}
+            running={running}
+            busy={busy}
+            symbol={(symbol || config?.symbol || "").toUpperCase()}
+            symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+            onToggleBot={toggleBot}
+            onForce={forceOrder}
+            onPanic={panic}
+            onPanicAll={desk === "research" ? undefined : panicAll}
+            botName={state?.bot_name}
+          />
+          </div>
+          </div>
         </div>
         {(error || state?.halt_reason || state?.last_error) && (
           <div role="alert" className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs text-rose-300">
@@ -628,6 +649,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
         {notice}
         <ControlBar
+          part="rest"
           state={state}
           live={live}
           running={running}

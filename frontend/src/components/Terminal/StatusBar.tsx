@@ -62,7 +62,12 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const net = state ? state.kpis?.actual_gross ?? state.realized_net_pnl ?? 0 : null;
 
   return (
-    <div role="status" aria-label="Terminal status" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-stretch">
+    <div
+      role="status"
+      aria-label="Terminal status"
+      // One swipeable row on a phone (the strip stays one line tall while pinned); wraps on wider screens.
+      className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:items-stretch sm:overflow-visible sm:px-0 [&>*]:shrink-0"
+    >
       <button
         type="button"
         disabled={busy || mode == null || replaying || research}
