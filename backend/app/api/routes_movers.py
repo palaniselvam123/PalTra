@@ -55,6 +55,7 @@ def _mover_dict(m) -> dict:
         "last_ts": m.last_ts,
         "last_time_ist": m.last_time_ist,
         "points": m.points,
+        "volume": getattr(m, "volume", None),
         "first_time_ist": m.first_time_ist,
         "baseline_is_session_open": m.baseline_is_session_open,
     }
