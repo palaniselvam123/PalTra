@@ -6,12 +6,15 @@
  * Each panel can be dragged to a new place by its grip (or moved with the
  * arrow buttons, for keyboards and touch screens), made narrower or wider on
  * wide screens (¼ … full of a 12-column grid), made taller or shorter by its
- * bottom edge, and hidden. The layout is kept per page in this browser only;
- * "Reset layout" puts the page back as it was built.
+ * bottom edge, and hidden. "Pop out" turns a panel into a floating window
+ * that can be dragged anywhere on the screen by its title bar and resized
+ * from its corner; "Dock" puts it back. The layout is kept per page in this
+ * browser only; "Reset layout" puts the page back as it was built.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, EyeOff, GripVertical, MoveHorizontal, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, EyeOff, GripVertical, MoveHorizontal, PanelBottomClose, PictureInPicture2, RotateCcw } from "lucide-react";
 
 export type PanelSpec = {
   id: string;
@@ -36,14 +39,41 @@ const SPANS = [3, 4, 6, 8, 9, 12] as const;
 type Span = (typeof SPANS)[number];
 const SPAN_LABEL: Record<Span, string> = { 3: "¼", 4: "⅓", 6: "½", 8: "⅔", 9: "¾", 12: "full" };
 
+/** A popped-out panel's window: left/top/width/height in screen pixels. */
+type Rect = { x: number; y: number; w: number; h: number };
+
 type Saved = {
   order: string[];
   span: Record<string, Span>;
   height: Record<string, number>;
   hidden: string[];
+  floating: Record<string, Rect>;
 };
 
-const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [] };
+const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [], floating: {} };
+
+function validRect(v: unknown): v is Rect {
+  const r = v as Rect;
+  return !!r && [r.x, r.y, r.w, r.h].every((n) => typeof n === "number" && Number.isFinite(n));
+}
+
+/** Keep a window on screen (at least its title bar), whatever the screen size is now. */
+function clampRect(r: Rect): Rect {
+  if (typeof window === "undefined") return r;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const w = Math.min(Math.max(280, r.w), vw);
+  const h = Math.min(Math.max(160, r.h), vh);
+  return { w, h, x: Math.min(Math.max(0, r.x), vw - Math.min(w, 120)), y: Math.min(Math.max(0, r.y), vh - 40) };
+}
+
+function defaultRect(index: number): Rect {
+  const vw = typeof window === "undefined" ? 1200 : window.innerWidth;
+  const vh = typeof window === "undefined" ? 800 : window.innerHeight;
+  const w = Math.min(960, vw - 32);
+  const h = Math.min(560, vh - 120);
+  return clampRect({ x: Math.max(16, (vw - w) / 2) + index * 24, y: 80 + index * 24, w, h });
+}
 
 function read(key: string): Saved {
   try {
@@ -55,6 +85,10 @@ function read(key: string): Saved {
       span: v.span && typeof v.span === "object" ? (v.span as Saved["span"]) : {},
       height: v.height && typeof v.height === "object" ? (v.height as Saved["height"]) : {},
       hidden: Array.isArray(v.hidden) ? v.hidden.filter((x): x is string => typeof x === "string") : [],
+      floating:
+        v.floating && typeof v.floating === "object"
+          ? Object.fromEntries(Object.entries(v.floating).filter(([, r]) => validRect(r)))
+          : {},
     };
   } catch {
     return EMPTY;
@@ -110,8 +144,31 @@ export function Board({
   }, [saved.order, ids.join("|")]);
   const byId = new Map(panels.map((p) => [p.id, p]));
   const hidden = saved.hidden.filter((id) => ids.includes(id));
-  const shown = order.filter((id) => !hidden.includes(id));
-  const customised = saved.order.length > 0 || Object.keys(saved.span).length > 0 || Object.keys(saved.height).length > 0 || hidden.length > 0;
+  const floating = order.filter((id) => !hidden.includes(id) && saved.floating?.[id] != null);
+  const shown = order.filter((id) => !hidden.includes(id) && !floating.includes(id));
+  const customised =
+    saved.order.length > 0 ||
+    Object.keys(saved.span).length > 0 ||
+    Object.keys(saved.height).length > 0 ||
+    hidden.length > 0 ||
+    floating.length > 0;
+  // A popped-out window keeps the page's theme rules (the terminal scopes its light theme).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [themeClass, setThemeClass] = useState("");
+  useEffect(() => {
+    setThemeClass(rootRef.current?.closest(".terminal-dark") ? "terminal-dark" : "");
+  }, []);
+  // The window clicked last comes to the front.
+  const [front, setFront] = useState<string | null>(null);
+  const popOut = (id: string) =>
+    update((prev) => ({ ...prev, floating: { ...(prev.floating ?? {}), [id]: defaultRect(Object.keys(prev.floating ?? {}).length) } }));
+  const dock = (id: string) =>
+    update((prev) => {
+      const next = { ...(prev.floating ?? {}) };
+      delete next[id];
+      return { ...prev, floating: next };
+    });
+  const moveWindow = (id: string, r: Rect) => update((prev) => ({ ...prev, floating: { ...(prev.floating ?? {}), [id]: r } }));
 
   /** Put `id` just before or after `target` (both by id). */
   const place = (id: string, target: string, after: boolean) =>
@@ -147,7 +204,41 @@ export function Board({
   };
 
   return (
-    <div className={clsx("space-y-2", className)}>
+    <div ref={rootRef} className={clsx("space-y-2", className)}>
+      {floating.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+          <span>Popped out:</span>
+          {floating.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => dock(id)}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-sky-400/40 hover:bg-white/5"
+              title="Put this panel back in the page"
+            >
+              {byId.get(id)?.title ?? id} <PanelBottomClose size={11} aria-hidden />
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {ready && typeof document !== "undefined"
+        ? floating.map((id) =>
+            createPortal(
+              <FloatingPanel
+                key={id}
+                spec={byId.get(id)!}
+                rect={clampRect(saved.floating[id])}
+                themeClass={themeClass}
+                onTop={front === id}
+                onFocus={() => setFront(id)}
+                onMove={(r) => moveWindow(id, r)}
+                onDock={() => dock(id)}
+              />,
+              document.body,
+              id
+            )
+          )
+        : null}
       {hidden.length > 0 || customised ? (
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
           {hidden.length > 0 ? (
@@ -216,6 +307,7 @@ export function Board({
                 })
               }
               onHide={() => update((prev) => ({ ...prev, hidden: [...prev.hidden.filter((x) => x !== id), id] }))}
+              onPopOut={() => popOut(id)}
             />
           );
         })}
@@ -241,6 +333,7 @@ function BoardPanel({
   onSpan,
   onHeight,
   onHide,
+  onPopOut,
 }: {
   spec: PanelSpec;
   span: Span;
@@ -258,6 +351,7 @@ function BoardPanel({
   onSpan: () => void;
   onHeight: (h: number | null) => void;
   onHide: () => void;
+  onPopOut: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [draggable, setDraggable] = useState(false);
@@ -365,6 +459,15 @@ function BoardPanel({
             Auto height
           </button>
         ) : null}
+        <button
+          type="button"
+          className={clsx(tool, "hidden md:inline-flex")}
+          onClick={onPopOut}
+          aria-label={`Pop out ${spec.title}`}
+          title="Pop out: a floating window you can drag anywhere"
+        >
+          <PictureInPicture2 size={13} aria-hidden />
+        </button>
         {spec.hideable !== false ? (
           <button type="button" className={tool} onClick={onHide} aria-label={`Hide ${spec.title}`} title="Hide (show it again from the Hidden list)">
             <EyeOff size={13} aria-hidden />
@@ -392,5 +495,113 @@ function BoardPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * A popped-out panel: a window fixed on the screen, dragged by its title bar
+ * and resized from its bottom-right corner. Its place and size are saved.
+ */
+function FloatingPanel({
+  spec,
+  rect,
+  themeClass,
+  onTop,
+  onFocus,
+  onMove,
+  onDock,
+}: {
+  spec: PanelSpec;
+  rect: Rect;
+  themeClass: string;
+  onTop: boolean;
+  onFocus: () => void;
+  onMove: (r: Rect) => void;
+  onDock: () => void;
+}) {
+  const [live, setLive] = useState<Rect | null>(null);
+  const r = live ?? rect;
+
+  // One pointer gesture: move the window (title bar) or resize it (corner).
+  const gesture = (e: ReactPointerEvent<HTMLElement>, kind: "move" | "size") => {
+    if (e.button !== 0) return;
+    if (kind === "move" && (e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    onFocus();
+    const start = { x: e.clientX, y: e.clientY };
+    const base = r;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    let last = base;
+    const onPointerMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      last = clampRect(kind === "move" ? { ...base, x: base.x + dx, y: base.y + dy } : { ...base, w: base.w + dx, h: base.h + dy });
+      setLive(last);
+    };
+    const onUp = () => {
+      target.removeEventListener("pointermove", onPointerMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+      setLive(null);
+      onMove(last);
+    };
+    target.addEventListener("pointermove", onPointerMove);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
+  };
+
+  // Keep it on screen when the window shrinks.
+  useEffect(() => {
+    const onResize = () => {
+      const next = clampRect(rect);
+      if (next.x !== rect.x || next.y !== rect.y || next.w !== rect.w || next.h !== rect.h) onMove(next);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [rect, onMove]);
+
+  return (
+    <div className={themeClass}>
+      <section
+        aria-label={`${spec.title} (floating window)`}
+        onPointerDown={onFocus}
+        style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+        className={clsx(
+          "fixed flex flex-col overflow-hidden rounded-xl border border-sky-400/40 bg-base shadow-2xl",
+          onTop ? "z-[60]" : "z-[55]"
+        )}
+      >
+        <header
+          onPointerDown={(e) => gesture(e, "move")}
+          onDoubleClick={onDock}
+          title="Drag to move · double-click to dock"
+          className="flex h-9 shrink-0 cursor-move touch-none select-none items-center gap-2 border-b border-white/10 bg-surface2 px-3"
+        >
+          <GripVertical size={14} aria-hidden className="text-slate-500" />
+          <span className="truncate text-xs font-semibold uppercase tracking-wider text-slate-300">{spec.title}</span>
+          <button
+            type="button"
+            onClick={onDock}
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/10"
+            title="Put it back in the page"
+          >
+            <PanelBottomClose size={12} aria-hidden /> Dock
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto p-2">{spec.node}</div>
+        <div
+          role="separator"
+          aria-label={`Resize ${spec.title}`}
+          title="Drag to resize"
+          onPointerDown={(e) => gesture(e, "size")}
+          className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize touch-none"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden className="h-4 w-4 text-slate-500">
+            <path d="M15 6 6 15M15 10l-5 5M15 14l-1 1" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          </svg>
+        </div>
+      </section>
+    </div>
   );
 }
