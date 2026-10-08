@@ -243,6 +243,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   terminal's Strategy card and Settings warn when no exit is on
   (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
   stock research baseline keeps it on.
+- `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
+  Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
+  reset / margin; the WalletChip top right in the Navbar and terminal header).
+  Off until money is loaded (₹1 to ₹100 crore a time); then each PAPER entry
+  (`StrategyEngine._open`, `uses_wallet`) blocks `margin_pct` (default 20% =
+  5×) of its value, and the margin comes back with the P&L before charges when
+  the trade closes. Free balance = loaded + P&L of PAPER trades opened since the
+  start − margin of open PAPER trades, worked out from the trade book. A short
+  balance never stops the order: the wallet borrows the shortfall (`loan`) and
+  the screens pop it up (`last_loan`) until it is repaid. Every add,
+  withdrawal, loan, repayment, close and margin change is a `WalletEntry` row
+  (`/api/wallet/statement`); each LOAN row is that loan's record (bot, stock,
+  qty, price, margin needed, borrowed, repaid, due; `/api/wallet/loans`), and
+  repayments clear the oldest loan first. No interest. LIVE (real Groww
+  balance), replay and research engines (`uses_wallet = False`) never touch it.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still
@@ -362,7 +377,7 @@ No credentials are needed. The desk starts on the simulated feed.
 
 - `fly.toml`: app `paltra`, region `sin`, `internal_port = 3000`, HTTPS
   forced, one machine always running (`auto_stop_machines = 'off'`,
-  `min_machines_running = 1`), one dedicated CPU (`performance`, 1 CPU,
+  `min_machines_running = 1`), four shared CPUs (`shared-cpu-4x`, 4 CPUs,
   2 GB), and a volume `data` mounted at `/data`. Change the machine size in
   `[[vm]]`: every deploy applies it and undoes a resize made in the Fly
   dashboard.

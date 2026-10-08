@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { WalletChip } from "@/components/Wallet/WalletChip";
 import { AlertTriangle, CandlestickChart, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
@@ -561,6 +562,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </span>
               {onDeskChange ? <DeskSwitch desk={desk} onChange={onDeskChange} /> : null}
               <ThemeToggle />
+              <WalletChip />
             </span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
               {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}

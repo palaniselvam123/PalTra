@@ -90,6 +90,7 @@ class ResearchEngine(StrategyEngine):
     """The SMA bot on today's live market, paper only, with its own book."""
 
     config_id = RESEARCH_CONFIG_ID
+    uses_wallet = False  # practice money of its own, never the bots' wallet
 
     def __init__(self, quote: Quote):
         super().__init__(broker=ResearchBroker(quote))

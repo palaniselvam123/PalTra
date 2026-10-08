@@ -1,5 +1,6 @@
 "use client";
 
+import { WalletChip } from "@/components/Wallet/WalletChip";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -297,6 +298,7 @@ export function Navbar({
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
           <div className="flex items-center gap-1 pl-1">
+            <WalletChip className="mr-1" />
             <div className="text-right leading-tight">
               <div className="text-[9px] uppercase tracking-[0.08em] text-slate-500">P&amp;L</div>
               <div className={clsx("font-mono text-body font-semibold tabular-nums", pnlColor)}>
