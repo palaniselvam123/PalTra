@@ -84,7 +84,11 @@ export type AccountSummary = {
 
 export type Transaction = {
   id: number;
+  /** The id people see, on SMA trades (N-12, P2-4, R7-3). */
+  ref?: string | null;
   mode: string;
+  /** Wallet (ORB desk) or book (SMA bots). */
+  account?: string;
   symbol: string;
   side: "BUY" | "SELL";
   quantity: number;

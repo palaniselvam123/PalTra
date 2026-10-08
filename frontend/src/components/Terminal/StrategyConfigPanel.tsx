@@ -52,6 +52,21 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const [scope, setScope] = useState<string>(ALL);
   const [own, setOwn] = useState<Partial<SmaConfig>>({});
   const dirty = useRef(false);
+  // Shown on the Save bar; the browser also asks before the page is left with these edits.
+  const [unsaved, setUnsaved] = useState(false);
+  const markDirty = (on: boolean) => {
+    dirty.current = on;
+    setUnsaved(on);
+  };
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsaved]);
 
   const armed = (config?.trade_symbols ?? []).map((s) => s.toUpperCase());
   const withOwn = Object.keys(config?.stock_settings ?? {});
@@ -73,7 +88,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       .stockConfig(scope)
       .then((row) => {
         if (!live) return;
-        dirty.current = false;
+        markDirty(false);
         setForm(row);
         setOwn(row.own ?? {});
       })
@@ -86,7 +101,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   if (!form) return null;
 
   const pick = (next: string) => {
-    dirty.current = false;
+    markDirty(false);
     setMsg(null);
     if (next === ALL) setForm(config);
     setScope(next);
@@ -94,7 +109,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const isOwn = (key: keyof SmaConfig) => stockScope && key in own;
 
   const set = (key: keyof SmaConfig, value: string | boolean) => {
-    dirty.current = true;
+    markDirty(true);
     setForm((prev) => {
       if (!prev) return prev;
       if (typeof value === "boolean" || typeof prev[key] === "boolean") {
@@ -172,7 +187,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     setMsg(null);
     try {
       const row = await smaApi.saveStockConfig(scope, strategyBody());
-      dirty.current = false;
+      markDirty(false);
       setForm(row);
       setOwn(row.own ?? {});
       setMsg(
@@ -193,7 +208,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     setMsg(null);
     try {
       const row = await smaApi.resetStockConfig(scope);
-      dirty.current = false;
+      markDirty(false);
       setForm(row);
       setOwn({});
       setMsg(`Saved. ${scope} follows the shared settings again.`);
@@ -224,7 +239,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         square_off_time: form.square_off_time,
         entry_cutoff_time: form.entry_cutoff_time || "15:00",
       });
-      dirty.current = false;
+      markDirty(false);
       setMsg("Saved. Press Start bot. Open positions stay open.");
       onChanged();
     } catch (e: unknown) {
@@ -771,10 +786,18 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         <button
           disabled={busy}
           onClick={save}
-          className="rounded-md bg-white/10 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-white/15"
+          className={clsx(
+            "rounded-md px-3 py-1.5 text-sm font-medium",
+            unsaved ? "bg-emerald-500 text-white hover:bg-emerald-400" : "bg-white/10 text-slate-100 hover:bg-white/15"
+          )}
         >
           {stockScope ? `Save for ${scope}` : "Save"}
         </button>
+        {unsaved && !busy ? (
+          <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
+            Unsaved changes
+          </span>
+        ) : null}
         {stockScope && Object.keys(own).length > 0 && (
           <button
             disabled={busy}
