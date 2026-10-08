@@ -800,7 +800,7 @@ function PickList({ pick }: { pick: ScalpPickInfo }) {
                     <span key={p.symbol} className="font-mono" title={`ATR ${p.atr_pct ?? "—"}%/min · ₹${p.value_cr ?? "—"} cr · 5m ${p.move_5m_pct ?? "—"}%`}>
                       <span className="font-semibold text-amber-300">{p.symbol}</span>{" "}
                       <span className="text-slate-400">{p.score.toFixed(0)}</span>{" "}
-                      <span className={p.bias === "LONG" ? "text-emerald-400" : p.bias === "SHORT" ? "text-rose-400" : "text-slate-500"}>
+                      <span className={p.bias === "LONG" ? "text-sky-300" : p.bias === "SHORT" ? "text-violet-300" : "text-slate-500"}>
                         {p.bias === "NONE" ? "" : p.bias}
                       </span>
                     </span>

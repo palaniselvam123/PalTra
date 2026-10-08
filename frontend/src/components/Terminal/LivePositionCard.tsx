@@ -6,7 +6,7 @@ import clsx from "clsx";
 export function LivePositionCard({ state, pending }: { state: SmaState | null; pending?: boolean }) {
   const pos = state?.position;
   const direction = pos?.direction;
-  const tone = direction === "LONG" ? "text-[#10B981]" : direction === "SHORT" ? "text-[#F43F5E]" : "text-slate-400";
+  const tone = direction === "LONG" ? "text-sky-300" : direction === "SHORT" ? "text-violet-300" : "text-slate-400";
   const mult = state?.atr_multiplier ?? 1.5;
   // The open position decides. With no position, the setting for the next entry does.
   const stopOff = pos ? pos.stop_active === false : state?.stop_enabled === false;
@@ -92,9 +92,9 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
               <span
                 className={
                   book.direction === "LONG"
-                    ? "text-[#10B981]"
+                    ? "text-sky-300"
                     : book.direction === "SHORT"
-                      ? "text-[#F43F5E]"
+                      ? "text-violet-300"
                       : "text-slate-400"
                 }
               >

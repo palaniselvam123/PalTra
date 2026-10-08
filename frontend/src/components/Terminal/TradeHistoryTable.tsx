@@ -1011,11 +1011,11 @@ function ReasonBadge({ trade }: { trade: TradeRow }) {
   );
 }
 
-/** Long / Short in green when the trade made money, red when it lost, grey while open. */
+/** Long in sky, Short in violet; the result (open, profit, loss) is in the title and the P&L column. */
 function ResultSideBadge({ trade, net }: { trade: TradeRow; net: number | null }) {
   const word = trade.direction === "LONG" ? "Long" : trade.direction === "SHORT" ? "Short" : "Flat";
   const open = trade.exit_price == null;
-  const color = open || net == null || net === 0 ? "slate" : net > 0 ? "green" : "red";
+  const color = trade.direction === "LONG" ? "sky" : trade.direction === "SHORT" ? "violet" : "slate";
   const result = open ? "open" : net == null || net === 0 ? "flat" : net > 0 ? "profit" : "loss";
   return (
     <Badge

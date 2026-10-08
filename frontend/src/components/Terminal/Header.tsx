@@ -696,7 +696,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       {openBooks.map((b) => (
                         <span key={b.symbol} className="shrink-0" title={`${b.symbol} ${b.direction} ${b.qty}${b.entry_price ? ` @ ${px(b.entry_price)}` : ""}`}>
                           <span className="font-sans text-slate-200">{b.symbol}</span>{" "}
-                          <span className={b.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}>{b.direction === "LONG" ? "L" : "S"}</span>
+                          <span className={b.direction === "LONG" ? "text-sky-300" : "text-violet-300"}>{b.direction === "LONG" ? "L" : "S"}</span>
                           <span className="text-slate-500">×{b.qty}</span>{" "}
                           <span className={(openOf(b) ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>
                             {openOf(b) == null ? "—" : signed(openOf(b) ?? 0)}
@@ -725,7 +725,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   return (
                     <span key={s}>
                       {i > 0 && ", "}
-                      <span className={dir === "LONG" ? "text-emerald-300" : dir === "SHORT" ? "text-rose-300" : "text-slate-300"}>
+                      <span className={dir === "LONG" ? "text-sky-300" : dir === "SHORT" ? "text-violet-300" : "text-slate-300"}>
                         {s}
                       </span>
                     </span>

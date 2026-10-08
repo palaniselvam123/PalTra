@@ -53,7 +53,7 @@ export function StockTabs({
               <span
                 className={clsx(
                   "rounded px-1 text-[10px] font-bold",
-                  tab.side === "LONG" ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"
+                  tab.side === "LONG" ? "bg-sky-500/20 text-sky-300" : "bg-violet-500/20 text-violet-300"
                 )}
               >
                 {tab.side === "LONG" ? "B" : "S"}
