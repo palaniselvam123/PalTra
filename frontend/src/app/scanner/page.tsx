@@ -1,5 +1,6 @@
 "use client";
 
+import { InfoTip } from "@/components/ui/InfoTip";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { ChevronDown, ChevronRight, Loader2, Play, RefreshCw, Send, Square, Trash2, Radar } from "lucide-react";
@@ -413,6 +414,11 @@ export default function ScannerPage() {
                     className="accent-cyan-500"
                   />
                   Require a real trend — ADX ≥ {config.adx_threshold}
+                  <InfoTip label="About the ADX trend filter">
+                    A crossover is a trend-following signal. In a flat range it sells the dip and buys the bounce — the classic
+                    whipsaw. ADX measures trend strength regardless of direction; below 20 means there is no trend to follow. On
+                    real NSE data this removed 45% of crossovers.
+                  </InfoTip>
                 </label>
                 {config.adx_filter && (
                   <div className="space-y-1 pl-6">
@@ -424,11 +430,6 @@ export default function ScannerPage() {
                       onChange={(e) => patch({ adx_threshold: +e.target.value })}
                       className="w-full accent-cyan-500"
                     />
-                    <p className="text-[10px] text-slate-600 leading-relaxed">
-                      A crossover is a trend-following signal. In a flat range it sells the dip and buys the bounce —
-                      the classic whipsaw. ADX measures trend strength regardless of direction; below 20 means there
-                      is no trend to follow. On real NSE data this removed 45% of crossovers.
-                    </p>
                   </div>
                 )}
 
@@ -440,6 +441,10 @@ export default function ScannerPage() {
                     className="accent-cyan-500"
                   />
                   Block buys when RSI ≥ {config.rsi_overbought ?? 70}
+                  <InfoTip label="About the RSI filter">
+                    A golden cross into RSI 80 is chasing an already-stretched move. Death-cross exits are not blocked — those
+                    still close a long you hold.
+                  </InfoTip>
                 </label>
                 {config.rsi_filter && (
                   <div className="space-y-1 pl-6">
@@ -451,10 +456,6 @@ export default function ScannerPage() {
                       onChange={(e) => patch({ rsi_overbought: +e.target.value })}
                       className="w-full accent-cyan-500"
                     />
-                    <p className="text-[10px] text-slate-600 leading-relaxed">
-                      A golden cross into RSI 80 is chasing an already-stretched move. Death-cross exits are not
-                      blocked — those still close a long you hold.
-                    </p>
                   </div>
                 )}
 
@@ -466,6 +467,11 @@ export default function ScannerPage() {
                     className="accent-cyan-500"
                   />
                   Require a confirming candlestick pattern
+                  <InfoTip label="About pattern confirmation">
+                    A hammer/engulfing/marubozu matching the signal direction must appear on the signal bar or up to this many
+                    bars before it. A doji never confirms — it means neither side kept control, which is not agreement. On real
+                    NSE data this kept ~20% of crossovers at 3 bars, ~7% at 1 bar.
+                  </InfoTip>
                 </label>
                 {config.pattern_filter && (
                   <div className="space-y-1 pl-6">
@@ -482,11 +488,6 @@ export default function ScannerPage() {
                         within {config.pattern_lookback} bar{config.pattern_lookback === 1 ? "" : "s"}
                       </span>
                     </div>
-                    <p className="text-[10px] text-slate-600 leading-relaxed">
-                      A hammer/engulfing/marubozu matching the signal direction must appear on the signal bar or up to
-                      this many bars before it. A doji never confirms — it means neither side kept control, which is
-                      not agreement. On real NSE data this kept ~20% of crossovers at 3 bars, ~7% at 1 bar.
-                    </p>
                   </div>
                 )}
 
@@ -514,11 +515,14 @@ export default function ScannerPage() {
                     />
                   </Field>
                 </div>
-                <p className="text-[10px] text-slate-600 leading-relaxed -mt-1">
-                  Only scan stocks whose current price is inside this band. Leave blank for no limit. Useful because a
-                  ₹1 lakh account cannot meaningfully size a position in a ₹13,000 stock — scanning it just produces
-                  alerts you cannot act on.
-                </p>
+                <div className="-mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+                  <InfoTip label="About the price band">
+                    Only scan stocks whose current price is inside this band. Leave blank for no limit. Useful because a ₹1 lakh
+                    account cannot meaningfully size a position in a ₹13,000 stock — scanning it just produces alerts you cannot
+                    act on.
+                  </InfoTip>
+                  Price band
+                </div>
                 {config.max_price > 0 && config.min_price > config.max_price && (
                   <p className="text-[11px] text-loss">Min price cannot be above max price.</p>
                 )}
@@ -640,10 +644,13 @@ export default function ScannerPage() {
             </div>
 
             {channelMsg && <p className="text-[11px] text-slate-300">{channelMsg}</p>}
-            <p className="text-[10px] text-slate-600">
-              Credentials are Fernet-encrypted at rest and never returned by the API. A signal with no enabled channel
-              is still logged below with status SKIPPED, so nothing disappears silently.
-            </p>
+            <div className="flex items-center gap-1 text-[11px] text-slate-500">
+              <InfoTip label="About how credentials are kept">
+                Credentials are Fernet-encrypted at rest and never returned by the API. A signal with no enabled channel is
+                still logged below with status SKIPPED, so nothing disappears silently.
+              </InfoTip>
+              How credentials are kept
+            </div>
             {provider === "callmebot" && (
               <p className="text-[10px] text-slate-600">
                 CallMeBot is a free community service and its bots do go down — numbers have changed before. Check{" "}
