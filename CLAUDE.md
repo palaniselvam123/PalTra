@@ -234,6 +234,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   mode/fade and Bollinger exits judge that, so a flipped trade opens and closes
   when the unflipped one would. Stops and targets guard the real position.
   The offline stock research baseline keeps it off.
+- SMA cross exit (`cross_exit`, on by default, per bot and per stock, PAPER and
+  LIVE; `strategy_engine.cross_exits`): on, an opposite cross closes the trade
+  and opens the reverse (`MA_CROSS`). Off, `_apply_locked` and `_gap_minute`
+  hold the position through an opposite cross (crosses only open trades while
+  flat); the stop / target, gap fade, Bollinger exit and the square-off still
+  close it, and with none of them on the trade runs to the square-off. The
+  terminal's Strategy card and Settings warn when no exit is on
+  (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
+  stock research baseline keeps it on.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still

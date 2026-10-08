@@ -203,6 +203,11 @@ class BotConfig(Base):
     # Flip strategy: a buy signal places a sell order and a sell signal a buy.
     # Every condition stays the same; signal exits follow the signal.
     flip_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    # SMA cross exit (on by default): an opposite cross closes the open trade
+    # (and reverses it; in gap mode it closes and the reverse waits for its gap).
+    # Off: crosses only open trades while flat; the stop / target, gap fade,
+    # Bollinger exit, candle end or the square-off close them.
+    cross_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
     # candle and close at its end.

@@ -204,6 +204,7 @@ class ConfigUpdate(BaseModel):
     gap_fade_min_candles: int | None = Field(default=None, ge=0, le=30)
     gap_fade_intrabar: bool | None = None
     flip_orders: bool | None = None
+    cross_exit: bool | None = None
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
     pattern_trend: bool | None = None
@@ -527,6 +528,7 @@ def _gap_dict(row) -> dict:
         "gap_fade_confirm_sma": bool(getattr(row, "gap_fade_confirm_sma", False)),
         "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
         "flip_orders": bool(getattr(row, "flip_orders", False)),
+        "cross_exit": getattr(row, "cross_exit", None) is not False,
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
     }
 

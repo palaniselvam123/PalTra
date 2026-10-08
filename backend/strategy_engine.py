@@ -92,6 +92,11 @@ def flips_orders(cfg) -> bool:
     return bool(getattr(cfg, "flip_orders", False))
 
 
+def cross_exits(cfg) -> bool:
+    """SMA cross exit (cross_exit, on unless set off): an opposite cross closes the trade."""
+    return getattr(cfg, "cross_exit", None) is not False
+
+
 @dataclass
 class OpenPosition:
     direction: str  # LONG | SHORT
@@ -172,7 +177,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
@@ -1225,7 +1230,8 @@ class StrategyEngine:
         if signal is not None and signal_frame is not None:
             want = "LONG" if signal == "BULLISH" else "SHORT"
             pos = self.positions.get(symbol)
-            if pos is not None and pos.signal_direction != want:
+            # With the SMA cross exit off the trade is held (no close, no armed reverse).
+            if pos is not None and pos.signal_direction != want and cross_exits(cfg):
                 closed = await self._close_on_cross(signal, signal_frame, cfg, now)
                 if symbol in self.positions:
                     return closed  # the close did not go through; do not arm the reverse
@@ -1505,6 +1511,13 @@ class StrategyEngine:
 
         if pos is not None and pos.signal_direction == want:
             return f"already {pos.direction}" + (" (flipped)" if pos.flipped else "")
+
+        if pos is not None and pos.signal_direction != want and not cross_exits(cfg):
+            # SMA cross exit is off: the cross neither closes nor reverses the trade.
+            return (
+                f"holding {pos.direction} — SMA cross exit is off; the stop, target, gap fade, "
+                "Bollinger exit or square-off closes it"
+            )
 
         if pos is not None and pos.signal_direction != want:
             # Opposite cross: cancel SL, verify, flatten, then maybe reverse.
@@ -2552,7 +2565,8 @@ class StrategyEngine:
         else:
             other = "BEARISH" if side == "BULLISH" else "BULLISH"
             self._gate_warning((symbol, "cross", other), None, "")
-            closes = pos is not None and (
+            # With the SMA cross exit off a cross never closes the trade, so no heads-up.
+            closes = pos is not None and cross_exits(cfg) and (
                 (pos.signal_direction == "LONG" and side == "BEARISH")
                 or (pos.signal_direction == "SHORT" and side == "BULLISH")
             )
@@ -3007,6 +3021,7 @@ class StrategyEngine:
             "atr_multiplier": float(view_cfg.atr_multiplier) if view_cfg else 1.5,
             "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
             "flip_orders": flips_orders(view_cfg) if view_cfg is not None else False,
+            "cross_exit": cross_exits(view_cfg) if view_cfg is not None else True,
             # Stocks with their own strategy settings, and which fields they set.
             "stock_settings": stock_settings(cfg) if cfg else {},
             "exchange": cfg.exchange if cfg else "NSE",
