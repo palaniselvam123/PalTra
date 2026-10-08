@@ -8,7 +8,22 @@ import { inr, smaApi, type Wallet, type WalletEntry, type WalletLoan } from "@/l
 
 const POLL_MS = 10_000;
 const SEEN_KEY = "wallet.loanSeen";
-const QUICK = [1_000, 10_000, 1_00_000, 10_00_000];
+const QUICK = [1_000, 10_000, 1_00_000, 10_00_000, 1_00_00_000];
+const MAX = 1_000_000_000;
+
+/**
+ * Reads a typed amount the way people write it: "2100000", "21,00,000",
+ * "₹21,00,000", "21 L", "21 lakh", "2.5 Cr". NaN when it is not a number.
+ */
+export function parseAmount(text: string): number {
+  const t = text.replace(/[₹,\s]/g, "").toLowerCase();
+  if (!t) return NaN;
+  const m = /^(\d+(?:\.\d+)?)(l|lakh|lakhs|lac|cr|crore|crores|k)?$/.exec(t);
+  if (!m) return NaN;
+  const unit = m[2] ?? "";
+  const mult = unit.startsWith("l") ? 1e5 : unit.startsWith("c") ? 1e7 : unit === "k" ? 1e3 : 1;
+  return Math.round(Number(m[1]) * mult * 100) / 100;
+}
 
 /** ₹ in short Indian style for the chip: ₹8,450 · ₹12.3 L · ₹1.4 Cr. */
 function short(v: number): string {
@@ -114,12 +129,17 @@ function Modal({
   wide?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  // The wallet polls every few seconds and re-renders the dialog with a new
+  // onClose; keep it in a ref so focus is set once, not pulled out of the
+  // amount box on every poll.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     window.addEventListener("keydown", onKey);
-    box.current?.querySelector<HTMLElement>("input, button")?.focus();
+    (box.current?.querySelector<HTMLElement>("input") ?? box.current?.querySelector<HTMLElement>("button"))?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
   // Portaled: a header with a backdrop blur would otherwise clip a fixed overlay to its own box.
   return createPortal(
     <div className="terminal-dark fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -178,8 +198,12 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
   const [margin, setMargin] = useState(String(wallet?.margin_pct ?? 20));
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const value = Number(amount);
-  const valid = Number.isFinite(value) && value >= 1 && value <= 1_000_000_000;
+  const value = parseAmount(amount);
+  const valid = Number.isFinite(value) && value >= 1 && value <= MAX;
+  const plus = (q: number) => {
+    const now = parseAmount(amount);
+    setAmount(String(Math.min(MAX, (Number.isFinite(now) ? now : 0) + q)));
+  };
 
   const run = async (label: string, call: () => Promise<Wallet>, done: string) => {
     setBusy(label);
@@ -250,24 +274,34 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
       )}
 
       <label className="block text-xs text-slate-400">
-        Amount ₹ (1 to 100,00,00,000)
+        Amount ₹ (₹1 to ₹100 crore) — type 2100000, 21,00,000 or 21 L
         <input
-          type="number"
+          type="text"
           inputMode="decimal"
-          min={1}
-          max={1_000_000_000}
+          autoComplete="off"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="e.g. 100000"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && valid && busy == null) void run("add", () => smaApi.walletAdd(value), `Added ${inr(value)}.`);
+          }}
+          placeholder="e.g. 21,00,000"
           className="mt-1 block min-h-10 w-full rounded-md border border-white/15 bg-black/30 px-2 font-mono text-base text-slate-100"
         />
       </label>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <p className={clsx("mt-1 min-h-4 text-xs", amount && !valid ? "text-rose-300" : "text-slate-400")}>
+        {!amount ? "" : valid ? `= ${inr(value)} (${short(value)})` : value > MAX ? "Up to ₹100 crore at a time." : "Not an amount."}
+      </p>
+      <div className="mt-1 flex flex-wrap gap-1.5">
         {QUICK.map((q) => (
-          <button key={q} type="button" onClick={() => setAmount(String(q))} className="min-h-8 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5">
-            {short(q)}
+          <button key={q} type="button" onClick={() => plus(q)} title={`Adds ${inr(q)} to the amount`} className="min-h-8 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5">
+            +{short(q)}
           </button>
         ))}
+        {amount ? (
+          <button type="button" onClick={() => setAmount("")} className="min-h-8 rounded-md px-2 text-xs text-slate-400 hover:bg-white/5">
+            Clear
+          </button>
+        ) : null}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button
