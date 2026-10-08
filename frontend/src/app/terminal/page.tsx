@@ -551,6 +551,7 @@ export default function TerminalPage() {
             {
               id: "chart",
               title: "Chart",
+              collapsible: true,
               out: !inTab(shownTab, "live"),
               span: 9,
               resize: "var",
@@ -581,21 +582,24 @@ export default function TerminalPage() {
               id: "side",
               title: "Position",
               span: 3,
+              collapsible: true,
               out: !inTab(shownTab, "live"),
               node: <LivePositionCard state={viewState} pending={Boolean(loadNote)} />,
             },
             {
               id: "strategy",
               title: "Strategy",
+              collapsible: true,
               out: !inTab(shownTab, "strategy"),
               node: <StrategySummary config={config} research={research} onChanged={refresh} />,
             },
             ...(research
               ? []
-              : [{ id: "alerts", title: "Alerts", span: 12 as const, out: !inTab(shownTab, "alerts"), node: <AlertsStatus /> }]),
+              : [{ id: "alerts", title: "Alerts", span: 12 as const, collapsible: true, out: !inTab(shownTab, "alerts"), node: <AlertsStatus /> }]),
             {
               id: "blotter",
               title: "Trades",
+              collapsible: true,
               out: !inTab(shownTab, "blotter"),
               minHeight: 240,
               node: (

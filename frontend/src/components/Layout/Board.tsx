@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, EyeOff, GripVertical, MoveHorizontal, PanelBottomClose, PictureInPicture2, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, EyeOff, GripVertical, MoveHorizontal, PanelBottomClose, PictureInPicture2, RotateCcw } from "lucide-react";
 
 export type PanelSpec = {
   id: string;
@@ -35,6 +35,8 @@ export type PanelSpec = {
   hideable?: boolean;
   /** Out of view (the page shows another section): kept mounted, hidden with CSS. */
   out?: boolean;
+  /** Show a section header with a chevron that folds the panel's body (kept mounted). */
+  collapsible?: boolean;
 };
 
 const SPANS = [3, 4, 6, 8, 9, 12] as const;
@@ -50,9 +52,11 @@ type Saved = {
   height: Record<string, number>;
   hidden: string[];
   floating: Record<string, Rect>;
+  /** Panels folded to their header (display only). */
+  collapsed?: string[];
 };
 
-const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [], floating: {} };
+const EMPTY: Saved = { order: [], span: {}, height: {}, hidden: [], floating: {}, collapsed: [] };
 
 function validRect(v: unknown): v is Rect {
   const r = v as Rect;
@@ -91,6 +95,7 @@ function read(key: string): Saved {
         v.floating && typeof v.floating === "object"
           ? Object.fromEntries(Object.entries(v.floating).filter(([, r]) => validRect(r)))
           : {},
+      collapsed: Array.isArray(v.collapsed) ? v.collapsed.filter((x): x is string => typeof x === "string") : [],
     };
   } catch {
     return EMPTY;
@@ -310,6 +315,13 @@ export function Board({
               }
               onHide={() => update((prev) => ({ ...prev, hidden: [...prev.hidden.filter((x) => x !== id), id] }))}
               onPopOut={() => popOut(id)}
+              collapsed={ready && (saved.collapsed ?? []).includes(id)}
+              onCollapse={() =>
+                update((prev) => {
+                  const list = prev.collapsed ?? [];
+                  return { ...prev, collapsed: list.includes(id) ? list.filter((x) => x !== id) : [...list, id] };
+                })
+              }
             />
           );
         })}
@@ -336,7 +348,11 @@ function BoardPanel({
   onHeight,
   onHide,
   onPopOut,
+  collapsed = false,
+  onCollapse,
 }: {
+  collapsed?: boolean;
+  onCollapse?: () => void;
   spec: PanelSpec;
   span: Span;
   widths: boolean;
@@ -477,14 +493,30 @@ function BoardPanel({
           </button>
         ) : null}
       </div>
+      {spec.collapsible ? (
+        <h2 className="mb-1">
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-controls={`panel-${spec.id}-body`}
+            onClick={onCollapse}
+            title={collapsed ? `Show ${spec.title}` : `Fold ${spec.title} to its header`}
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-1 text-left text-sm font-semibold text-slate-100 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          >
+            <ChevronDown size={16} aria-hidden className={clsx("shrink-0 text-slate-400 transition-transform", collapsed && "-rotate-90")} />
+            {spec.title}
+          </button>
+        </h2>
+      ) : null}
       <div
+        id={`panel-${spec.id}-body`}
         data-panel-content
-        className={clsx(resize === "box" && shownHeight != null && "overflow-auto rounded-xl")}
+        className={clsx(resize === "box" && shownHeight != null && "overflow-auto rounded-xl", collapsed && "hidden")}
         style={resize === "box" && shownHeight != null ? { height: shownHeight } : undefined}
       >
         {spec.node}
       </div>
-      {resize !== "none" ? (
+      {resize !== "none" && !collapsed ? (
         <div
           role="separator"
           aria-orientation="horizontal"
