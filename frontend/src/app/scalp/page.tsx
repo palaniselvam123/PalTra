@@ -8,7 +8,8 @@ import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, RefreshCw }
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
-import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
+import { replayActive, smaApi, type BotSummary } from "@/lib/smaApi";
+import { ArmPicker, armDesks, type ArmDesk } from "@/components/Scalp/ArmPicker";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
@@ -53,8 +54,10 @@ export default function ScalpPage() {
   const [ltpMin, setLtpMin] = useState("");
   const [ltpMax, setLtpMax] = useState("");
 
-  // The SMA terminal's Trade list, so a stock can be armed from here.
-  const [smaConfig, setSmaConfig] = useState<SmaConfig | null>(null);
+  // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them from here.
+  const [bots, setBots] = useState<BotSummary[]>([]);
+  const [researchArmed, setResearchArmed] = useState<string[] | null>(null);
+  const [armFor, setArmFor] = useState<string | null>(null);
   const [arming, setArming] = useState<string | null>(null);
   const [armNote, setArmNote] = useState<string | null>(null);
 
@@ -69,6 +72,14 @@ export default function ScalpPage() {
   const [preview, setPreview] = useState<{ symbol: string; message: string }[] | null>(null);
   const [alertBusy, setAlertBusy] = useState(false);
 
+  const loadDesks = useCallback(() => {
+    smaApi.bots().then(setBots).catch(() => {});
+    smaApi
+      .researchConfig()
+      .then((c) => setResearchArmed(c.trade_symbols ?? []))
+      .catch(() => setResearchArmed(null));
+  }, []);
+
   const refresh = useCallback(() => {
     setLoading(true);
     api
@@ -79,8 +90,8 @@ export default function ScalpPage() {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-    smaApi.config().then(setSmaConfig).catch(() => {});
-  }, [minAtr, maxSpread, minValue]);
+    loadDesks();
+  }, [minAtr, maxSpread, minValue, loadDesks]);
 
   useEffect(() => {
     refresh();
@@ -99,10 +110,13 @@ export default function ScalpPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data === null]);
 
-  const armed = useMemo(
-    () => new Set((smaConfig?.trade_symbols ?? []).map((s) => s.toUpperCase())),
-    [smaConfig]
-  );
+  const desks = useMemo(() => armDesks(bots, researchArmed), [bots, researchArmed]);
+  /** Stock → the desks it is armed on ("Bot 1", "Research", …). */
+  const armed = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const d of desks) for (const s of d.armed) out.set(s, [...(out.get(s) ?? []), d.name]);
+    return out;
+  }, [desks]);
 
   // While the pointer or keyboard focus is in the list, rows keep their places (values still update),
   // so a refresh never moves the row you are reading. They re-sort when you leave the list.
@@ -178,24 +192,32 @@ export default function ScalpPage() {
     }
   };
 
-  const arm = async (symbol: string) => {
-    const live = (smaConfig?.trading_mode ?? "PAPER") === "LIVE";
-    if (live) {
+  // "Arm" asks which bot first; a LIVE bot is confirmed again before it is armed.
+  const arm = (symbol: string) => {
+    setArmNote(null);
+    loadDesks();
+    setArmFor(symbol);
+  };
+  const armOn = async (symbol: string, desk: ArmDesk) => {
+    setArmFor(null);
+    if (desk.mode === "LIVE") {
       const ok = window.confirm(
-        `Arm ${symbol} for LIVE SMA orders? The bot can buy or sell it with real money on its next SMA cross.`
+        `Arm ${symbol} on ${desk.name} for LIVE SMA orders? ${desk.name} can buy or sell it with real money on its next SMA cross.`
       );
       if (!ok) return;
     }
     setArming(symbol);
     setArmNote(null);
     try {
-      const next = await smaApi.setTradeSymbol(symbol, true);
-      setSmaConfig(next);
-      setArmNote(`${symbol} is armed in the SMA terminal. It orders on its next SMA cross, not now.`);
+      await smaApi.setTradeSymbolOn(desk.target, symbol, true);
+      setArmNote(
+        `${symbol} is armed on ${desk.name}${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
+      );
     } catch (e: unknown) {
       setArmNote(e instanceof Error ? e.message : "Could not arm that stock");
     } finally {
       setArming(null);
+      loadDesks();
     }
   };
 
@@ -287,6 +309,10 @@ export default function ScalpPage() {
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
           </button>
         </section>
+
+        {armFor ? (
+          <ArmPicker symbol={armFor} desks={desks} onPick={(d) => armOn(armFor, d)} onClose={() => setArmFor(null)} />
+        ) : null}
 
         <MostActive
           watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
@@ -482,7 +508,7 @@ export default function ScalpPage() {
                     <Row
                       key={r.symbol}
                       row={r}
-                      armed={armed.has(r.symbol)}
+                      armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
                       arming={arming === r.symbol}
                       onArm={() => arm(r.symbol)}
                       picked={picked.has(r.symbol)}
@@ -603,14 +629,15 @@ export default function ScalpPage() {
 
 function Row({
   row: r,
-  armed,
+  armedOn,
   arming,
   onArm,
   picked,
   onPick,
 }: {
   row: ScalpRow;
-  armed: boolean;
+  /** The desks this stock is armed on. */
+  armedOn: string[];
   arming: boolean;
   onArm: () => void;
   picked: boolean;
@@ -671,18 +698,22 @@ function Row({
         )}
       </td>
       <td className="py-1.5 text-right">
-        {armed ? (
-          <span className="text-xs font-semibold text-profit">Armed</span>
-        ) : (
+        <span className="inline-flex items-center justify-end gap-1.5">
+          {armedOn.length ? (
+            <span className="text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
+              {armedOn.join(" · ")}
+            </span>
+          ) : null}
           <button
             type="button"
             disabled={arming}
             onClick={onArm}
+            title="Arm on a bot (asks which)"
             className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
           >
             {arming ? "…" : "Arm"}
           </button>
-        )}
+        </span>
       </td>
     </tr>
   );

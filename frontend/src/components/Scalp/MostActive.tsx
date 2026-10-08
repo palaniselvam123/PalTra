@@ -18,8 +18,8 @@ const MIN_VALUE_STOPS = [0, 10, 25, 50, 100, 250];
 type Props = {
   /** Stocks already on the desk feed (shown in the monitor below). */
   watching: Set<string>;
-  /** Stocks on the SMA terminal's Trade list. */
-  armed: Set<string>;
+  /** Stock → the SMA desks it is armed on. */
+  armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
   /** Called after a stock is added to the desk feed, so the monitor reloads. */
@@ -221,7 +221,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
                   watching={watching.has(r.symbol)}
                   adding={adding === r.symbol}
                   onWatch={() => watch(r.symbol)}
-                  armed={armed.has(r.symbol)}
+                  armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
                   arming={arming === r.symbol}
                   onArm={() => onArm(r.symbol)}
                 />
@@ -240,7 +240,7 @@ function ActiveRowView({
   watching,
   adding,
   onWatch,
-  armed,
+  armedOn,
   arming,
   onArm,
 }: {
@@ -249,7 +249,7 @@ function ActiveRowView({
   watching: boolean;
   adding: boolean;
   onWatch: () => void;
-  armed: boolean;
+  armedOn: string[];
   arming: boolean;
   onArm: () => void;
 }) {
@@ -311,14 +311,20 @@ function ActiveRowView({
             {adding ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
             {watching ? "Watching" : "Watch"}
           </button>
+          {armedOn.length ? (
+            <span className="self-center text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
+              {armedOn.join(" · ")}
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={onArm}
-            disabled={armed || arming}
+            disabled={arming}
+            title="Arm on a bot (asks which)"
             className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-accentViolet ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10 disabled:opacity-50"
           >
             {arming ? <Loader2 size={12} className="animate-spin" /> : null}
-            {armed ? "Armed" : "Arm"}
+            Arm
           </button>
         </div>
       </td>
