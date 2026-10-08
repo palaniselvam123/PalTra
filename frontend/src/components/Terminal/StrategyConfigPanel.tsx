@@ -40,6 +40,9 @@ const LABELS: Record<string, string> = {
   use_candle_dir: "candle direction",
   cross_exit: "cross exit",
   flip_orders: "flip",
+  review_on: "1-min review",
+  review_gap_pct: "review band",
+  review_cooldown_min: "review cooldown",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -192,6 +195,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
     gap_entry_delay_min: Math.round(Number(form.gap_entry_delay_min ?? 0)),
     gap_entry_window_min: Math.round(Number(form.gap_entry_window_min ?? 0)),
+    review_on: Boolean(form.review_on),
+    review_gap_pct: Number(form.review_gap_pct ?? 0.03),
+    review_cooldown_min: Math.max(0, Math.round(Number(form.review_cooldown_min ?? 15))),
   });
 
   const saveStock = async () => {
@@ -924,6 +930,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="BOTH">Both — band target or middle band, whichever comes first</option>
             </select>
           </label>
+          <SectionTitle
+            info={
+              <>
+                Not an exit by itself. When an open trade&apos;s SMA {form.sma_fast}/{form.sma_slow} gap on the bot&apos;s own candle
+                narrows to within the band (or, with the cross exit off, has just crossed inside it), the terminal and Telegram show
+                the last closed 1-minute candles and ask EXIT or WAIT. EXIT closes that trade (exit reason USER_REVIEW_EXIT); WAIT
+                and no answer keep it open and the strategy carries on. One review per uncertain stretch, none within the cooldown
+                of the last one on that trade. Needs a candle of 2 minutes or more. A replay pauses at each review.
+              </>
+            }
+          >
+            1-minute review
+          </SectionTitle>
+          <label className="mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset ring-white/10">
+            <input
+              type="checkbox"
+              checked={Boolean(form.review_on)}
+              onChange={(e) => set("review_on", e.target.checked)}
+              className="mt-1 accent-[#10B981]"
+            />
+            <span>
+              {isOwn("review_on") && <OwnTag />}
+              <b className="text-slate-100">Ask me when the SMAs are uncertain</b> — EXIT or WAIT; no answer keeps the trade
+              {Number(form.candle_minutes ?? 1) < 2 ? (
+                <span className="block text-xs text-amber-300">Needs a candle of 2 minutes or more (now {form.candle_minutes ?? 1} min).</span>
+              ) : null}
+            </span>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Uncertain within ±"
+              suffix="%"
+              own={isOwn("review_gap_pct")}
+              value={String(form.review_gap_pct ?? 0.03)}
+              onChange={(v) => set("review_gap_pct", v)}
+            />
+            <Field
+              label="Cooldown per trade"
+              suffix="min"
+              own={isOwn("review_cooldown_min")}
+              value={String(form.review_cooldown_min ?? 15)}
+              onChange={(v) => set("review_cooldown_min", v)}
+            />
+          </div>
         </div>
       </FieldGroup>
       <FieldGroup title="Risk & session" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>

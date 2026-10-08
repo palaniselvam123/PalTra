@@ -106,6 +106,12 @@ export type SmaConfig = {
   gap_fade_intrabar?: boolean;
   /** SMA cross exit (on unless false): an opposite cross closes the trade. Off: other exits or square-off. */
   cross_exit?: boolean;
+  /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
+  review_on?: boolean;
+  /** The band, in % of the slow SMA, on the bot's own candle. */
+  review_gap_pct?: number;
+  /** No second review on the same trade within this many minutes. */
+  review_cooldown_min?: number;
   /** Flip strategy: a buy signal sells, a sell signal buys. */
   flip_orders?: boolean;
   gap_entry_delay_min?: number;
@@ -136,7 +142,60 @@ export type ChargeBreakdown = {
   total_charges?: number;
 };
 
+/** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
+export type ReviewStatus = "PENDING" | "USER_REVIEW_EXIT" | "USER_REVIEW_WAIT" | "NO_RESPONSE" | "ALREADY_CLOSED";
+
+export type ReviewCandle = { ts: number; open: number; high: number; low: number; close: number; colour: "GREEN" | "RED" | "DOJI" };
+
+export type ReviewItem = {
+  id: number;
+  created_at: string | null;
+  mode: string;
+  run_id: number | null;
+  trade_id: number;
+  symbol: string;
+  direction: "LONG" | "SHORT";
+  candle_minutes: number;
+  entry_price?: number;
+  qty?: number;
+  five_min: {
+    candle_ts?: number;
+    sma_fast?: number;
+    sma_slow?: number;
+    gap_pct?: number;
+    prev_gap_pct?: number;
+    narrowing?: boolean;
+    crossed?: boolean;
+    band_pct?: number;
+    sma_fast_len?: number;
+    sma_slow_len?: number;
+  };
+  one_min: {
+    candle_ts?: number;
+    candles?: ReviewCandle[];
+    close?: number | null;
+    sma_fast?: number | null;
+    sma_slow?: number | null;
+    gap_pct?: number | null;
+    gap_trend?: string;
+    fast_slope?: string;
+    slow_slope?: string;
+    vs_fast?: string | null;
+    vs_slow?: string | null;
+    vwap?: number | null;
+    vs_vwap?: string | null;
+    rsi14?: number | null;
+    volume_ratio?: number | null;
+  };
+  message: string;
+  status: ReviewStatus;
+  action_at: string | null;
+  note: string;
+};
+
 export type SmaState = {
+  /** Recent 1-minute reviews of this desk's open trades (pending first to answer). */
+  reviews?: ReviewItem[];
   /** Which SMA bot this is (1 = main desk) and its name. */
   bot?: number;
   bot_name?: string;
@@ -843,6 +902,9 @@ export const smaApi = {
   /** Today's trade count back to 0; the daily cap counts again from here. Not during a replay. */
   resetTrades: () =>
     request<{ bot_status: string; trades_today: number; was: number }>("/api/bot/reset-trades", { method: "POST" }),
+  /** Answer a 1-minute review. EXIT closes only the reviewed trade; WAIT only records the answer. */
+  answerReview: (id: number, action: "exit" | "wait") =>
+    request<ReviewItem & { result: string }>(`/api/bot/review/${id}/${action}`, { method: "POST" }),
   closePosition: (symbol: string) =>
     request<{ bot_status: string; last_signal: string }>("/api/bot/close", {
       method: "POST",

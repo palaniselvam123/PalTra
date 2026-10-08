@@ -442,6 +442,15 @@ export function StrategySummary({
                 on: () => crossExitOn,
               })}
               {gapExits.map(switchChip)}
+              {switchChip({
+                key: "review_on",
+                label: "1-min review",
+                detail: () =>
+                  Number(c.candle_minutes ?? 1) < 2
+                    ? "needs a candle of 2 minutes or more"
+                    : `asks EXIT / WAIT at a gap within ±${c.review_gap_pct ?? 0.03}% · no answer keeps the trade`,
+                when: () => (c.entry_mode ?? "SMA") !== "PATTERN",
+              })}
             </div>
             {noExit ? (
               <p role="alert" className="rounded-md border border-amber-400/50 bg-amber-400/[0.1] px-2 py-1.5 text-xs font-semibold text-amber-200">

@@ -43,6 +43,7 @@ BASELINE_OFF = {
     "cross_exit": True,
     "entry_mode": "SMA",
     "candle_minutes": 1,
+    "review_on": False,
     "stock_settings": "{}",
 }
 
