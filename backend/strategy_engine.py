@@ -54,6 +54,7 @@ from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_ga
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, TradeLog, trade_ref
+import paper_wallet
 import tick_sizes
 import tick_store
 from tick_sizes import round_price
@@ -651,6 +652,9 @@ class StrategyEngine:
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
+    #: Whether PAPER entries take margin from the practice wallet (paper_wallet).
+    #: Bots 1-4 do; replay and research engines keep their own practice money.
+    uses_wallet = True
 
     def __init__(self, broker: GrowwClient | None = None):
         self.broker = broker or GrowwClient(mode="PAPER")
@@ -1880,6 +1884,15 @@ class StrategyEngine:
         # The order goes out at the market price now. cross_price stays the
         # signal candle's close, so entry minus cross is the real fill lag.
         order_price = self._market_price(cfg.symbol, cross_price)
+        if self.uses_wallet and (cfg.trading_mode or "PAPER").upper() == "PAPER":
+            # Practice wallet: block the margin, borrowing any shortfall. Never stops the order.
+            try:
+                loan = paper_wallet.cover(cfg.symbol, qty, order_price)
+            except Exception:  # noqa: BLE001
+                logger.exception("paper wallet margin check failed for %s", cfg.symbol)
+                loan = None
+            if loan is not None:
+                self.wallet_loan = loan
         try:
             ack = await self.broker.place_entry(cfg.symbol, side, qty, order_price)
         except Exception as exc:  # noqa: BLE001
@@ -3022,6 +3035,8 @@ class StrategyEngine:
             "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
             "flip_orders": flips_orders(view_cfg) if view_cfg is not None else False,
             "cross_exit": cross_exits(view_cfg) if view_cfg is not None else True,
+            # The last loan the practice wallet took for this bot's entry (the screens pop it up once).
+            "wallet_loan": getattr(self, "wallet_loan", None),
             # Stocks with their own strategy settings, and which fields they set.
             "stock_settings": stock_settings(cfg) if cfg else {},
             "exchange": cfg.exchange if cfg else "NSE",

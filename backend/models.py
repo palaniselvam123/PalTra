@@ -87,6 +87,24 @@ class PriceTick(Base):
     price: Mapped[float] = mapped_column(Float)
 
 
+class PaperWallet(Base):
+    """The practice account the PAPER bots trade from (one row, id 1), like one Groww account.
+
+    Only the money loaded, the margin rate and when the account started are
+    stored. What is free is worked out from the PAPER trades themselves
+    (paper_wallet.summary), so it can never drift from the trade book.
+    """
+
+    __tablename__ = "paper_wallet"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    funds: Mapped[float] = mapped_column(Float, default=0.0)  # money loaded and borrowed, net of withdrawals
+    loan: Mapped[float] = mapped_column(Float, default=0.0)  # borrowed to cover margin, still to pay back
+    margin_pct: Mapped[float] = mapped_column(Float, default=20.0)  # share of the trade value blocked (20 = 5x)
+    since: Mapped[dt.datetime] = mapped_column(DateTime)  # closed trades count from here
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class ReplayRun(Base):
     """One replay over one or more past days, with the settings it used."""
 

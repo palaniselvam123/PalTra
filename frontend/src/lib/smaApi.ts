@@ -288,6 +288,39 @@ export type ChartFilters = {
   atr_stop: boolean;
 };
 
+/** A loan the practice wallet took because the free balance was short of an entry's margin. */
+export type WalletLoan = {
+  symbol: string;
+  qty: number;
+  price: number;
+  need: number;
+  available: number;
+  borrowed: number;
+  /** Total owed after this loan. */
+  loan: number;
+  at: string;
+  text: string;
+};
+
+/** Practice wallet of the PAPER bots (like one Groww account); inactive until money is loaded. */
+export type Wallet = {
+  active: boolean;
+  /** Money loaded and borrowed, net of withdrawals. */
+  funds: number;
+  /** Borrowed to cover margin, still to pay back. */
+  loan: number;
+  /** P&L before charges of PAPER trades closed since the wallet started. */
+  realized: number;
+  /** Margin held by open PAPER trades. */
+  blocked: number;
+  /** Free balance. */
+  available: number;
+  margin_pct: number;
+  since: string | null;
+  open: { symbol: string; bot: number; direction: string; qty: number; entry_price: number; margin: number }[];
+  last_loan: WalletLoan | null;
+};
+
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
 export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 
@@ -711,6 +744,17 @@ export const smaApi = {
     ),
   /** The research desk's settings (its Trade list), whatever desk this page is on. */
   researchConfig: () => request<SmaConfig>("/api/research/config", undefined, undefined, false),
+  /** The PAPER bots' practice wallet (shared by bots 1-4, whatever desk this page is on). */
+  wallet: () => request<Wallet>("/api/wallet", undefined, undefined, false),
+  walletAdd: (amount: number) =>
+    request<Wallet>("/api/wallet/add", { method: "POST", body: JSON.stringify({ amount }) }, undefined, false),
+  walletWithdraw: (amount: number) =>
+    request<Wallet>("/api/wallet/withdraw", { method: "POST", body: JSON.stringify({ amount }) }, undefined, false),
+  walletRepay: (amount?: number) =>
+    request<Wallet>("/api/wallet/repay", { method: "POST", body: JSON.stringify(amount ? { amount } : {}) }, undefined, false),
+  walletReset: () => request<Wallet>("/api/wallet/reset", { method: "POST" }, undefined, false),
+  walletMargin: (margin_pct: number) =>
+    request<Wallet>("/api/wallet/margin", { method: "PUT", body: JSON.stringify({ margin_pct }) }, undefined, false),
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */

@@ -243,6 +243,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   terminal's Strategy card and Settings warn when no exit is on
   (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
   stock research baseline keeps it on.
+- `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
+  Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
+  reset / margin; the WalletChip top right in the Navbar and terminal header).
+  Off until money is loaded (₹1 to ₹100 crore a time); then each PAPER entry
+  (`StrategyEngine._open`, `uses_wallet`) blocks `margin_pct` (default 20% =
+  5×) of its value, and the margin comes back with the P&L before charges when
+  the trade closes. Free balance = loaded + P&L of PAPER trades opened since the
+  start − margin of open PAPER trades, worked out from the trade book. A short
+  balance never stops the order: the wallet borrows the shortfall (`loan`) and
+  the screens pop it up (`last_loan`) until it is repaid. LIVE (real Groww
+  balance), replay and research engines (`uses_wallet = False`) never touch it.
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still

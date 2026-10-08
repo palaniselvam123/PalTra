@@ -41,6 +41,7 @@ from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
 import candle_patterns
+import paper_wallet
 import tick_store
 from research import MAX_RESEARCH_SYMBOLS, ResearchEngine, ensure_research_config
 import bots as bots_mod
@@ -1249,6 +1250,57 @@ def _bot_summary(eng: StrategyEngine) -> dict:
         "net_today": float(kpis["net"]),
         "gross_today": float(kpis["actual_gross"]),
     }
+
+
+class WalletMoney(BaseModel):
+    amount: float = Field(gt=0, le=paper_wallet.MAX_LOAD)
+
+
+class WalletRepay(BaseModel):
+    #: None repays as much of the loan as the free balance allows.
+    amount: float | None = Field(default=None, gt=0)
+
+
+class WalletMargin(BaseModel):
+    margin_pct: float = Field(ge=1, le=100)
+
+
+def _wallet_call(fn, *args):
+    try:
+        return fn(*args)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/wallet")
+async def wallet():
+    """The practice wallet the PAPER bots trade from: loaded, loan, blocked margin, free balance."""
+    return paper_wallet.summary()
+
+
+@app.post("/api/wallet/add")
+async def wallet_add(body: WalletMoney):
+    return _wallet_call(paper_wallet.add, body.amount)
+
+
+@app.post("/api/wallet/withdraw")
+async def wallet_withdraw(body: WalletMoney):
+    return _wallet_call(paper_wallet.withdraw, body.amount)
+
+
+@app.post("/api/wallet/repay")
+async def wallet_repay(body: WalletRepay):
+    return _wallet_call(paper_wallet.repay, body.amount)
+
+
+@app.post("/api/wallet/reset")
+async def wallet_reset():
+    return paper_wallet.reset()
+
+
+@app.put("/api/wallet/margin")
+async def wallet_margin(body: WalletMargin):
+    return _wallet_call(paper_wallet.set_margin, body.margin_pct)
 
 
 @app.get("/api/bots")
