@@ -373,7 +373,7 @@ No credentials are needed. The desk starts on the simulated feed.
 
 - `fly.toml`: app `paltra`, region `sin`, `internal_port = 3000`, HTTPS
   forced, one machine always running (`auto_stop_machines = 'off'`,
-  `min_machines_running = 1`), one dedicated CPU (`performance`, 1 CPU,
+  `min_machines_running = 1`), four shared CPUs (`shared-cpu-4x`, 4 CPUs,
   2 GB), and a volume `data` mounted at `/data`. Change the machine size in
   `[[vm]]`: every deploy applies it and undoes a resize made in the Fly
   dashboard.

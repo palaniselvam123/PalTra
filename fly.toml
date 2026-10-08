@@ -26,6 +26,6 @@ primary_region = 'sin'
 # Size the machine here: a deploy applies this section and undoes any resize
 # made in the Fly dashboard.
 [[vm]]
-  cpu_kind = 'performance'
-  cpus = 1
+  cpu_kind = 'shared'
+  cpus = 4
   memory_mb = 2048
