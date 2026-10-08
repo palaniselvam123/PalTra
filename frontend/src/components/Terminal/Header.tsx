@@ -13,6 +13,7 @@ import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
 import { ownSummary } from "./StrategyConfigPanel";
 import { ArmPrompt } from "./ArmPrompt";
+import { inTab, type TerminalTab } from "./SectionTabs";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -47,6 +48,10 @@ type Props = {
   notice?: ReactNode;
   /** The bot this page drives: live desk or the paper-only research desk. */
   desk?: Desk;
+  /** The section tabs, shown above the page's sections. */
+  tabs?: ReactNode;
+  /** Which section is in view: the stock list shows on Watchlist, Force order on Live (both on All). */
+  tab?: TerminalTab;
   /** This desk's replay, shown small in the top strip while it runs. */
   replay?: ReplayInfo | null;
   onReplay?: (info: ReplayInfo) => void;
@@ -139,7 +144,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
   );
 }
 
-export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay }: Props) {
+export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay, tabs, tab = "all" }: Props) {
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
@@ -647,6 +652,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
         {notice}
+        {tabs}
+        <div className={clsx(!inTab(tab, "live") && "hidden")}>
         <ControlBar
           part="rest"
           state={state}
@@ -661,7 +668,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
           onPanicAll={desk === "research" ? undefined : panicAll}
           botName={state?.bot_name}
         />
-        <div ref={searchRef} className="relative min-w-0">
+        </div>
+        <div ref={searchRef} className={clsx("relative min-w-0", !inTab(tab, "watchlist") && "hidden")}>
           <div className="rounded-xl border border-white/10 bg-[#151921]">
             <h2 className={clsx(!folded && "border-b border-white/10")}>
               <button

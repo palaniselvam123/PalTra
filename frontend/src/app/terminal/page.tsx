@@ -9,6 +9,7 @@ import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { AlertsStatus } from "@/components/Terminal/WhatsAppAlerts";
+import { SectionTabs, TAB_KEY, TERMINAL_TABS, inTab, type TerminalTab } from "@/components/Terminal/SectionTabs";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
 import { Board } from "@/components/Layout/Board";
 import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
@@ -41,6 +42,25 @@ export default function TerminalPage() {
   // order), so every call below already goes to the right desk.
   const [desk, setDeskState] = useState<Desk>("live");
   const research = desk === "research";
+  // Which section is in view (display only; every section stays mounted). Remembered per browser.
+  const [tab, setTabState] = useState<TerminalTab>("all");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TAB_KEY);
+      if (saved && TERMINAL_TABS.some(([id]) => id === saved)) setTabState(saved as TerminalTab);
+    } catch {
+      /* private window */
+    }
+  }, []);
+  const shownTab: TerminalTab = research && tab === "alerts" ? "all" : tab;
+  const setTab = useCallback((next: TerminalTab) => {
+    setTabState(next);
+    try {
+      localStorage.setItem(TAB_KEY, next);
+    } catch {
+      /* private window */
+    }
+  }, []);
   // Bots 2-4 and the research desk have no stream and never follow a replay.
   const mainDesk = desk === "live";
   const botNo = deskBot(desk);
@@ -449,6 +469,8 @@ export default function TerminalPage() {
         onDeskChange={changeDesk}
         replay={research ? null : replay}
         onReplay={onReplay}
+        tab={shownTab}
+        tabs={<SectionTabs tab={shownTab} onTab={setTab} alerts={!research} />}
         notice={
           unreachable ? (
               <div
@@ -486,6 +508,7 @@ export default function TerminalPage() {
             {closeNote}
           </div>
         )}
+        <div className={inTab(shownTab, "live") ? "space-y-4" : "hidden"}>
         {botNo != null && botNo > 1 ? (
           <>
             <div role="note" className="rounded-xl border border-sky-400/30 bg-sky-500/[0.07] px-3 py-2 text-sm text-sky-100">
@@ -519,14 +542,16 @@ export default function TerminalPage() {
             botName={config?.bot_name ?? "Bot 1"}
           />
         )}
+        </div>
         {/* Movable, resizable panels: drag by the grip, resize by the bottom edge, change the width on a wide screen. */}
         <Board
           page={`terminal.${desk}`}
           panels={[
-            { id: "metrics", title: "P&L", node: <PnlMetricsRow state={state} />, resize: "none" },
+            { id: "metrics", title: "P&L", out: !inTab(shownTab, "live"), node: <PnlMetricsRow state={state} />, resize: "none" },
             {
               id: "chart",
               title: "Chart",
+              out: !inTab(shownTab, "live"),
               span: 9,
               resize: "var",
               minHeight: 220,
@@ -554,19 +579,24 @@ export default function TerminalPage() {
             },
             {
               id: "side",
-              title: "Side panel",
+              title: "Position",
               span: 3,
-              node: (
-                <div className="space-y-3">
-                  <LivePositionCard state={viewState} pending={Boolean(loadNote)} />
-                  {research ? null : <AlertsStatus />}
-                </div>
-              ),
+              out: !inTab(shownTab, "live"),
+              node: <LivePositionCard state={viewState} pending={Boolean(loadNote)} />,
             },
-            { id: "strategy", title: "Strategy", node: <StrategySummary config={config} research={research} onChanged={refresh} /> },
+            {
+              id: "strategy",
+              title: "Strategy",
+              out: !inTab(shownTab, "strategy"),
+              node: <StrategySummary config={config} research={research} onChanged={refresh} />,
+            },
+            ...(research
+              ? []
+              : [{ id: "alerts", title: "Alerts", span: 12 as const, out: !inTab(shownTab, "alerts"), node: <AlertsStatus /> }]),
             {
               id: "blotter",
               title: "Trades",
+              out: !inTab(shownTab, "blotter"),
               minHeight: 240,
               node: (
                 <TradeHistoryTable

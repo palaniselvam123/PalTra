@@ -33,6 +33,8 @@ export type PanelSpec = {
   minHeight?: number;
   /** Can the panel be hidden (default true). */
   hideable?: boolean;
+  /** Out of view (the page shows another section): kept mounted, hidden with CSS. */
+  out?: boolean;
 };
 
 const SPANS = [3, 4, 6, 8, 9, 12] as const;
@@ -412,6 +414,7 @@ function BoardPanel({
       style={style}
       className={clsx(
         "board-panel group/panel relative min-w-0",
+        spec.out && "hidden",
         dropBefore && "before:absolute before:-top-2.5 before:left-0 before:right-0 before:h-1 before:rounded before:bg-sky-400",
         dropAfter && "after:absolute after:-bottom-2.5 after:left-0 after:right-0 after:h-1 after:rounded after:bg-sky-400"
       )}

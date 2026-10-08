@@ -69,7 +69,9 @@ export function ControlBar({
         className={clsx(
           part === "pinned"
             ? "grid grid-cols-[auto_1fr_auto] gap-1.5 whitespace-nowrap sm:flex sm:items-center sm:gap-2"
-            : "grid grid-cols-2 gap-2 sm:flex sm:items-center"
+            : part === "rest"
+              ? "flex flex-wrap items-center gap-2"
+              : "grid grid-cols-2 gap-2 sm:flex sm:items-center"
         )}
       >
         {pinned ? (
