@@ -25,17 +25,15 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
 
   const book = state?.mode === "LIVE" ? "Live book" : state?.mode === "RESEARCH" ? "Research book" : "Paper book";
   const trades = k?.trades ?? 0;
-  const wins = k?.wins ?? 0;
+  // Wins counted before charges, like the P&L shown (older servers: after charges).
+  const wins = k?.gross_wins ?? k?.wins ?? 0;
   const losses = Math.max(0, trades - wins);
   const winPct = trades > 0 ? (wins / trades) * 100 : 0;
 
   return (
-    <section aria-label={`Today's results, ${book.toLowerCase()}`} className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
-      <Card label="MA-cross gross" hint="If filled at the cross">
+    <section aria-label={`Today's results, ${book.toLowerCase()}`} className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
+      <Card label="MA-cross P&L" hint="If filled at the cross">
         {k ? <span className={pnlTone(k.theoretical_gross)}>{signed(k.theoretical_gross)}</span> : null}
-      </Card>
-      <Card label="Actual gross" hint="With real fill lag">
-        {k ? <span className={pnlTone(k.actual_gross)}>{signed(k.actual_gross)}</span> : null}
       </Card>
       <div ref={chargesRef} className="relative">
         <button
@@ -44,7 +42,7 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
           onClick={() => setOpen((v) => !v)}
           className="h-full w-full text-left"
         >
-          <Card label="Charges" hint={open ? "Tap to hide breakdown" : "Tap for breakdown"}>
+          <Card label="Charges" hint={open ? "Tap to hide breakdown" : "Not taken off the P&L · tap for breakdown"}>
             {k ? <span className="text-amber-300">{inr(k.total_charges)}</span> : null}
           </Card>
         </button>
@@ -60,8 +58,8 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
         )}
       </div>
       <Card
-        label="Net P&L"
-        hint="After charges"
+        label="P&L"
+        hint="Before charges, with real fill lag"
         strong
         extra={
           k ? (
@@ -88,7 +86,7 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
           ) : null
         }
       >
-        {k ? <span className={pnlTone(k.net)}>{signed(k.net)}</span> : null}
+        {k ? <span className={pnlTone(k.actual_gross)}>{signed(k.actual_gross)}</span> : null}
       </Card>
     </section>
   );

@@ -94,7 +94,8 @@ function tradesFromMarkers(markers: Marker[], lookup: TradeRow[], snap: (sec: nu
       exitTime: exit ? snap(exit.time) : null,
       exitPrice: exit ? exit.price : null,
       exitReason: exit?.reason ?? "",
-      net: exit?.net_pnl ?? m.net_pnl ?? null,
+      // P&L before charges (the screens' basis); older servers send only the net.
+      net: row?.net_pnl ?? exit?.gross_pnl ?? m.gross_pnl ?? exit?.net_pnl ?? m.net_pnl ?? null,
       qty: row?.qty ?? null,
     });
   }
@@ -259,7 +260,7 @@ export const COLUMNS: Column[] = [
   { id: "bestRs", label: "Best so far ₹", kind: "num", get: (r) => r.bestRs, digits: 2, money: true, visible: false, title: "Best price since the entry (max high for a buy, min low for a sell)" },
   { id: "worstRs", label: "Worst so far ₹", kind: "num", get: (r) => r.worstRs, digits: 2, money: true, visible: false, title: "Worst price since the entry" },
   { id: "exitReason", label: "Exit reason", kind: "text", get: (r) => r.exitReason, visible: false },
-  { id: "tradeNet", label: "Trade net ₹", kind: "num", get: (r) => r.tradeNet, digits: 2, money: true, visible: false, title: "The trade's net P&L after charges, on its exit candle" },
+  { id: "tradeNet", label: "Trade P&L ₹", kind: "num", get: (r) => r.tradeNet, digits: 2, money: true, visible: false, title: "The trade's P&L before charges, on its exit candle" },
 ];
 
 export const COLUMN_BY_ID = new Map(COLUMNS.map((c) => [c.id, c]));

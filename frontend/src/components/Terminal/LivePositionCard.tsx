@@ -76,15 +76,15 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         <Row label="ADX 14" value={state?.adx14 == null ? "—" : state.adx14.toFixed(1)} />
       </dl>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <Meter label="Unrealized gross" value={state?.unrealized_gross_pnl ?? 0} />
-        <Meter label="Unrealized net" value={state?.unrealized_net_pnl ?? 0} hint={`est. charges ${inr(state?.estimated_charges ?? 0)}`} />
+        <Meter label="Unrealized P&L" value={state?.unrealized_gross_pnl ?? 0} hint="before charges" />
+        <Meter label="Est. charges" value={-(state?.estimated_charges ?? 0)} hint="not taken off the P&L" />
       </div>
       {state?.last_signal && <p className="mt-3 text-xs text-slate-400">{state.last_signal}</p>}
       {(state?.books ?? []).length > 0 && (
         <div className="mt-3 space-y-1 border-t border-white/5 pt-3">
           <div className="flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-slate-400">
             <span>Armed stocks</span>
-            <span>Today net</span>
+            <span>Today P&amp;L</span>
           </div>
           {(state?.books ?? []).map((book) => (
             <div key={book.symbol} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 font-mono text-xs">
@@ -105,15 +105,15 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
               <span
                 className={clsx(
                   "min-w-[5.5rem] text-right",
-                  (book.day_net ?? 0) > 0 ? "text-[#10B981]" : (book.day_net ?? 0) < 0 ? "text-[#F43F5E]" : "text-slate-500"
+                  dayPnl(book) > 0 ? "text-[#10B981]" : dayPnl(book) < 0 ? "text-[#F43F5E]" : "text-slate-500"
                 )}
                 title={
-                  book.open_net != null
-                    ? `open ${inr(book.open_net)} · closed ${inr(book.closed_net ?? 0)} (${book.closed_trades ?? 0})`
-                    : `${book.closed_trades ?? 0} closed trade(s)`
+                  openPnl(book) != null
+                    ? `open ${inr(openPnl(book))} · closed ${inr(closedPnl(book))} (${book.closed_trades ?? 0}), before charges`
+                    : `${book.closed_trades ?? 0} closed trade(s), before charges`
                 }
               >
-                {inr(book.day_net ?? 0)}
+                {inr(dayPnl(book))}
               </span>
             </div>
           ))}
@@ -124,12 +124,18 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
   );
 }
 
-/** Every armed or held stock together: today's closed net plus all open P&L. */
+type Book = NonNullable<SmaState["books"]>[number];
+// Before charges (the screens' basis); the older net fields stand in if the server has no gross yet.
+const openPnl = (b: Book) => (b.open_gross !== undefined ? b.open_gross : b.open_net) ?? null;
+const closedPnl = (b: Book) => b.closed_gross ?? b.closed_net ?? 0;
+const dayPnl = (b: Book) => b.day_gross ?? b.day_net ?? 0;
+
+/** Every armed or held stock together: today's closed P&L plus all open P&L, before charges. */
 function AllStocksTotal({ state }: { state: SmaState | null }) {
   const books = state?.books ?? [];
   if (books.length < 2) return null;
-  const open = books.reduce((sum, b) => sum + (b.open_net ?? 0), 0);
-  const closed = state?.realized_net_pnl ?? books.reduce((sum, b) => sum + (b.closed_net ?? 0), 0);
+  const open = books.reduce((sum, b) => sum + (openPnl(b) ?? 0), 0);
+  const closed = state?.kpis?.actual_gross ?? books.reduce((sum, b) => sum + closedPnl(b), 0);
   const total = closed + open;
   return (
     <div className="mt-1 grid grid-cols-[1fr_auto] items-center gap-3 border-t border-white/5 pt-1 font-mono text-xs">

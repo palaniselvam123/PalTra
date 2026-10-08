@@ -2860,6 +2860,11 @@ class StrategyEngine:
 
     def _open_net(self, symbol: str) -> float | None:
         """Unrealized net of one held stock at its last price. None when flat."""
+        unreal = self._open_pnl(symbol)
+        return float(unreal["net"]) if unreal else None
+
+    def _open_pnl(self, symbol: str) -> dict | None:
+        """Unrealized gross, charges and net of one held stock at its last price. None when flat."""
         name = (symbol or "").upper()
         if name not in self.positions:
             return None
@@ -2867,8 +2872,7 @@ class StrategyEngine:
         try:
             self._focus = name
             self.ltp = float(self._ltps.get(name) or 0)
-            unreal = self._unrealized()
-            return float(unreal["net"]) if unreal else None
+            return self._unrealized()
         finally:
             self._focus, self.ltp = view, ltp
 
@@ -2946,11 +2950,15 @@ class StrategyEngine:
             closed_by = kpis.get("by_symbol", {})
             books = []
             open_total = 0.0
+            open_gross_total = 0.0
             for symbol in shown:
                 book = self.positions.get(symbol)
-                open_net = self._open_net(symbol)
+                unreal_one = self._open_pnl(symbol)
+                open_net = float(unreal_one["net"]) if unreal_one else None
+                open_gross = float(unreal_one["gross"]) if unreal_one else None
                 open_total += open_net or 0.0
-                closed = closed_by.get(symbol, {"net": 0.0, "trades": 0})
+                open_gross_total += open_gross or 0.0
+                closed = closed_by.get(symbol, {"net": 0.0, "gross": 0.0, "trades": 0})
                 books.append(
                     {
                         "symbol": symbol,
@@ -2969,6 +2977,10 @@ class StrategyEngine:
                         "closed_net": closed["net"],
                         "closed_trades": closed["trades"],
                         "day_net": closed["net"] + (open_net or 0.0),
+                        # The same before charges (display only; limits use the net).
+                        "open_gross": open_gross,
+                        "closed_gross": closed.get("gross", 0.0),
+                        "day_gross": closed.get("gross", 0.0) + (open_gross or 0.0),
                         # Groww's last refusal on this stock today, until an order fills.
                         "last_reject": self._rejects[symbol][0] if symbol in self._rejects else None,
                         "last_reject_at": self._rejects[symbol][1].strftime("%H:%M")
@@ -3037,6 +3049,7 @@ class StrategyEngine:
             "unrealized_net_pnl": unreal["net"] if unreal else 0.0,
             # Every held stock, not only the one on the chart.
             "open_net_total": open_total,
+            "open_gross_total": open_gross_total,
             "sl_room": unreal["room"] if unreal else None,
             "sl_room_pct": unreal["room_pct"] if unreal else None,
             "charge_estimate": unreal["breakdown"] if unreal else None,
@@ -3168,6 +3181,7 @@ class StrategyEngine:
                         "price": row.entry_price,
                         "kind": "ENTRY",
                         "net_pnl": net,
+                        "gross_pnl": row.gross_pnl,
                         "trade_ref": ref,
                         "open": row.exit_time is None,
                     }
@@ -3180,6 +3194,7 @@ class StrategyEngine:
                         "price": row.exit_price,
                         "kind": "EXIT",
                         "net_pnl": net,
+                        "gross_pnl": row.gross_pnl,
                         "reason": row.exit_reason,
                         "trade_ref": ref,
                         "open": False,
@@ -3219,6 +3234,7 @@ class StrategyEngine:
         charges = 0.0
         net = 0.0
         wins = 0
+        gross_wins = 0
         by_symbol: dict[str, dict] = {}
         breakdown = {
             "brokerage": 0.0,
@@ -3239,8 +3255,11 @@ class StrategyEngine:
             net += float(row.net_pnl or 0)
             if (row.net_pnl or 0) > 0:
                 wins += 1
-            per = by_symbol.setdefault((row.symbol or "").upper(), {"net": 0.0, "trades": 0})
+            if (row.gross_pnl or 0) > 0:
+                gross_wins += 1
+            per = by_symbol.setdefault((row.symbol or "").upper(), {"net": 0.0, "gross": 0.0, "trades": 0})
             per["net"] += float(row.net_pnl or 0)
+            per["gross"] += float(row.gross_pnl or 0)
             per["trades"] += 1
             buy, sell = legs_for(row.direction, row.entry_price, sign_exit)
             part = calculate_charges(buy, sell, row.qty)
@@ -3256,6 +3275,8 @@ class StrategyEngine:
             "win_rate": (wins / n * 100) if n else 0.0,
             "trades": n,
             "wins": wins,
+            # Wins counted before charges, for screens that show P&L before charges.
+            "gross_wins": gross_wins,
             "by_symbol": by_symbol,
         }
 

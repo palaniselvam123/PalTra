@@ -304,7 +304,7 @@ export function BacktestRuns() {
                 <th className="px-2 py-2 text-right">Win %</th>
                 <th className="px-2 py-2 text-right">Profit</th>
                 <th className="px-2 py-2 text-right">Loss</th>
-                <th className="px-2 py-2 text-right">Net</th>
+                <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
                 <th className="px-2 py-2 text-right">Max DD</th>
                 <th className="px-2 py-2" />
               </tr>
@@ -457,7 +457,7 @@ export function RunDetail({
                 : "")}
           </span>
         </h3>
-        <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>Net {signed(t.net)}</span>
+        <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
       </div>
       {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} /> : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
@@ -472,7 +472,7 @@ export function RunDetail({
               <th className="px-2 py-2 text-right">Loss</th>
               <th className="px-2 py-2 text-right">Gross</th>
               <th className="px-2 py-2 text-right">Charges</th>
-              <th className="px-2 py-2 text-right">Net</th>
+              <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
               <th className="px-2 py-2 text-right">Running total</th>
             </tr>
           </thead>
@@ -560,7 +560,7 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
               <th className="px-2 py-2 text-right">Loss</th>
               <th className="px-2 py-2 text-right">Gross</th>
               <th className="px-2 py-2 text-right">Charges</th>
-              <th className="px-2 py-2 text-right">Net</th>
+              <th className="px-2 py-2 text-right" title="Profit + loss, before charges">P&amp;L</th>
               <th className="px-2 py-2 text-right">Max DD</th>
             </tr>
           </thead>

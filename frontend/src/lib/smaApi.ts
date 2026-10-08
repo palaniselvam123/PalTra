@@ -5,6 +5,8 @@ routes are mounted at `/sma` on this host, so the browser must not call
 127.0.0.1.
 */
 
+import { runBeforeCharges, tradeBeforeCharges } from "./pnlBasis";
+
 function resolveSmaApi(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SMA_API_URL;
   if (fromEnv) return fromEnv.replace(/\/$/, "");
@@ -169,12 +171,17 @@ export type SmaState = {
     closed_trades?: number;
     /** closed_net + open_net. */
     day_net?: number;
+    /** The same three before charges (what the screens show). */
+    open_gross?: number | null;
+    closed_gross?: number;
+    day_gross?: number;
     /** Groww's last refusal on this stock today (its own words), until an order fills. */
     last_reject?: string | null;
     last_reject_at?: string | null;
   }[];
   /** Unrealized net of every held stock, not only the chart's. */
   open_net_total?: number;
+  open_gross_total?: number;
   /** Stocks with their own strategy settings, and the fields each sets. */
   stock_settings?: Record<string, Record<string, unknown>>;
   /** use_stop in the config. False means new entries get no stop order. */
@@ -236,6 +243,8 @@ export type SmaState = {
     win_rate: number;
     trades: number;
     wins: number;
+    /** Wins counted before charges. */
+    gross_wins?: number;
   };
 };
 
@@ -286,6 +295,8 @@ export type BotSummary = {
   held: string[];
   trades_today: number;
   net_today: number;
+  /** Today's P&L before charges (what the screens show). */
+  gross_today?: number;
 };
 
 export type ChartPayload = {
@@ -299,6 +310,8 @@ export type ChartPayload = {
     kind: "ENTRY" | "EXIT" | string;
     /** The trade's net P&L once it has closed, when the API sends it. */
     net_pnl?: number | null;
+    /** The same before charges (what the screens show). */
+    gross_pnl?: number | null;
     /** Only on EXIT markers: why the trade closed. */
     reason?: string | null;
     /** The trade's id inside its book: N-12 (NSE live), P-12 (simulation), R7-12 (replay run 7). */
@@ -694,7 +707,7 @@ export const smaApi = {
       body: JSON.stringify({ symbol }),
     }),
   /** Newest 200 trades across all books; the page polls this. */
-  trades: () => request<TradeRow[]>("/api/trades"),
+  trades: (): Promise<TradeRow[]> => request<TradeRow[]>("/api/trades").then((rows) => rows.map((r) => tradeBeforeCharges(r))),
   /** Recorded second-by-second prices, [[epoch seconds, price], ...]. Live market minutes only. */
   ticks: (symbol: string, start: number, end: number) =>
     request<{ symbol: string; ticks: [number, number][] }>(
@@ -713,10 +726,12 @@ export const smaApi = {
     ).then(
       (body): TradeBook => ({
         total: body.total,
-        rows: body.rows.map(({ strategy_ref, ...row }) => ({
-          ...row,
-          strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
-        })),
+        rows: body.rows.map(({ strategy_ref, ...row }) =>
+          tradeBeforeCharges({
+            ...row,
+            strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
+          })
+        ),
       })
     ),
   /** One whole book for the Reports page: every SMA bot's trades (rows carry `bot`), whatever desk is open. */
@@ -724,10 +739,12 @@ export const smaApi = {
     request<TradeBookPayload>(`/api/trades/book?mode=${mode}`, undefined, 30000).then(
       (body): TradeBook => ({
         total: body.total,
-        rows: body.rows.map(({ strategy_ref, ...row }) => ({
-          ...row,
-          strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
-        })),
+        rows: body.rows.map(({ strategy_ref, ...row }) =>
+          tradeBeforeCharges({
+            ...row,
+            strategy: strategy_ref == null ? null : body.strategies[strategy_ref] ?? null,
+          })
+        ),
       })
     ),
   tradeCounts: () =>
@@ -756,8 +773,10 @@ export const smaApi = {
       },
       20000
     ),
-  replayRuns: () => request<ReplayRun[]>("/api/replay/runs"),
-  replayRun: (id: number) => request<ReplayRun>(`/api/replay/runs/${id}`),
+  replayRuns: (): Promise<ReplayRun[]> =>
+    request<ReplayRun[]>("/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
+  replayRun: (id: number): Promise<ReplayRun> =>
+    request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
     request<ReplayInfo>("/api/replay/control", { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),

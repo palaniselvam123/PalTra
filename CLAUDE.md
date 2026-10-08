@@ -245,6 +245,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`PUT /api/ticks/feed`, `BotConfig.second_ticks` on row 1, default on) turns
   the per-second fetch and record off for both desks; quotes then come on the
   normal few-second interval.
+- P&L on the SMA screens is shown **before charges** (owner's choice; display
+  only). `frontend/src/lib/pnlBasis.ts` turns loaded trade lists and backtest
+  runs to that basis (a trade's `net_pnl` then holds its gross), and the server
+  sends gross figures next to the net ones (`books[].open_gross/closed_gross/
+  day_gross`, `open_gross_total`, `kpis.gross_wins`, `/api/bots` `gross_today`,
+  chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
+  daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

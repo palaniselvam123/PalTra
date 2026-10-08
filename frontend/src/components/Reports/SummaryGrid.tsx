@@ -38,7 +38,7 @@ export function SummaryGrid({ summary, capital = true }: { summary: ReportSummar
     <div className="space-y-2">
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
         <Tile
-          label="Net P&L"
+          label={capital ? "Net P&L" : "P&L (before charges)"}
           value={money(summary.net_pnl, true)}
           tone={pnlClass(summary.net_pnl)}
           sub={`${summary.trades_closed} closed · ${summary.trades_open} open`}
