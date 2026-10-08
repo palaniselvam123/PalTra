@@ -3,6 +3,7 @@
 import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
+import { ChevronDown } from "lucide-react";
 import { BB_EXITS, CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
 
@@ -292,8 +293,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     >
       {/* Two fixed columns on a wide screen: setup, stop and entry filters on the left; Bollinger, gap and
           candle-direction rules on the right. Each block stays whole. */}
-      <div className={clsx(wide && "lg:grid lg:grid-cols-2 lg:gap-x-10")}>
-        <div className="min-w-0">
+      <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
           <label className="mt-3 block text-sm text-slate-300">
             <span className="text-[11px] uppercase tracking-wider text-slate-400">Settings for</span>
@@ -363,401 +363,33 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               )}
             </p>
           ) : null}
-          <SectionTitle>Size and signal</SectionTitle>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
-            <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
+      </div>
+      <FieldGroup title="Entry signal" hint="Moving averages, candle, how a trade opens, order direction, SMA gap mode" wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle>Moving averages</SectionTitle>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field label="Fast MA" own={isOwn("sma_fast")} value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
             <Field label="Slow MA" own={isOwn("sma_slow")} value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
           </div>
-          <label className="mt-2 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
-              Candle interval{isOwn("candle_minutes") ? " (own)" : ""}
-            </span>
+          <div className="mt-2 flex items-center gap-1 text-xs text-slate-300">
+            <label htmlFor="sma-candle-interval">Candle interval{isOwn("candle_minutes") ? " (own)" : ""}</label>
+            <InfoTip label="About the candle interval">
+              The SMAs, ATR stop, filters and exits read candles of this length, built from the 1-minute tape from 09:15.
+              A signal is judged when each candle closes. Candle patterns keep their own candle.
+            </InfoTip>
+          </div>
+          <label className="block text-sm text-slate-300">
             <select
+              id="sma-candle-interval"
               value={String(form.candle_minutes ?? 1)}
               onChange={(e) => set("candle_minutes", e.target.value)}
-              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              className="mt-1 block h-10 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
             >
               {CANDLE_MINUTES.map((m) => (
                 <option key={m} value={String(m)}>
                   {m} minute{m === 1 ? "" : "s"}
                 </option>
               ))}
-            </select>
-            <span className="mt-1 block text-[11px] text-slate-500">
-              The SMAs, ATR stop, filters and exits read candles of this length, built from the 1-minute tape from 09:15.
-              A signal is judged when each candle closes. Candle patterns keep their own candle.
-            </span>
-          </label>
-          {!stockScope && (
-            <>
-              <SectionTitle
-                info={
-                  <>
-                    Max daily loss and trades a day are for this bot only. If the bot stopped on the trade cap, type a higher
-                    max and press Save, then Start. Open positions stay open. A loss-limit stop stays locked for the day.
-                  </>
-                }
-              >
-                Daily limits (this bot)
-              </SectionTitle>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Max daily loss ₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
-                <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
-                <Field
-                  label="No new entries after"
-                  value={form.entry_cutoff_time || "15:00"}
-                  onChange={(v) => set("entry_cutoff_time", v)}
-                />
-                <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
-              </div>
-            </>
-          )}
-          <SectionTitle>Order direction</SectionTitle>
-          <label
-            className={clsx(
-              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
-              form.flip_orders ? "bg-amber-400/[0.08] ring-amber-400/40" : "ring-white/10"
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={Boolean(form.flip_orders)}
-              onChange={(e) => set("flip_orders", e.target.checked)}
-              className="mt-1 accent-[#F59E0B]"
-            />
-            <span>
-              {isOwn("flip_orders") && <OwnTag />}
-              <b className="text-amber-200">Flip strategy</b> — buy signals sell, sell signals buy{" "}
-              <InfoTip label="About the flip strategy">
-                Every buy signal places a SELL order and every sell signal a BUY. All conditions (cross, filters, gap mode) stay
-                the same, and the trade closes when the signal&apos;s trade would (opposite cross, gap fade, Bollinger exit,
-                square-off). The stop-loss and target guard the real, flipped position. Works in PAPER, LIVE, Research and Replay
-                — try it on Replay or Research first.
-              </InfoTip>
-            </span>
-          </label>
-          <SectionTitle>Stop-loss</SectionTitle>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={form.use_stop !== false}
-              onChange={(e) => set("use_stop", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_stop") && <OwnTag />}
-            {form.stop_type === "SMA_GAP"
-              ? "Stop-loss on new entries (moving, from the SMA gap)"
-              : form.stop_type === "TSL"
-                ? "Trailing stop-loss on new entries"
-                : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
-            <InfoTip label="About the stop-loss">
-              Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
-              and the square-off close them.
-            </InfoTip>
-          </label>
-          <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
-              Stop type{isOwn("stop_type") && <OwnTag />}
-            </span>
-            <select
-              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR"}
-              onChange={(e) => set("stop_type", e.target.value)}
-              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-            >
-              <option value="ATR">ATR — fixed stop at {String(form.atr_multiplier)}× ATR</option>
-              <option value="SMA_GAP">SMA gap — moving stop + target</option>
-              <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
-            </select>
-          </label>
-          {form.stop_type !== "TSL" ? (
-            <div className="mt-2 grid grid-cols-2 items-end gap-2">
-              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-            </div>
-          ) : null}
-          {form.stop_type === "SMA_GAP" ? (
-            <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
-              <div className="grid grid-cols-3 items-end gap-2">
-                <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} own={isOwn("gap_sl_mult")} />
-                <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} own={isOwn("gap_tp_mult")} />
-                <Field label="Min gap %" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
-              </div>
-              <Hint label="About the SMA gap stop">
-                Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
-                gap × stop multiple and target = price + gap × target multiple; a sell is the mirror. Recalculated every
-                closed 1-minute candle: the stop only moves in your favour, the target follows the gap both ways.
-                PAPER only — in LIVE the bot keeps the {String(form.atr_multiplier)}× ATR exchange stop.
-              </Hint>
-            </div>
-          ) : null}
-          {form.stop_type === "TSL" ? (
-            <div className="mt-2 rounded-md border border-emerald-400/20 bg-emerald-400/[0.04] p-2">
-              <div className="grid grid-cols-3 items-end gap-2">
-                <Field label="Stop ₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} own={isOwn("tsl_sl_points")} />
-                <Field label="Trail every ₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
-                <Field label="Target ₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
-              </div>
-              <Hint label="About the trailing stop">
-                Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
-                {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
-                {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
-                price gains past its best so far moves the stop up ₹{String(form.tsl_trail_points ?? 10)}; it never moves back. A
-                sell is the mirror. {Number(form.tsl_target_points ?? 0) > 0
-                  ? `The trade also closes at ₹${String(form.tsl_target_points)} profit per share.`
-                  : "No target: the trailing stop, an opposite cross or square-off closes the trade."}{" "}
-                In LIVE the bot moves your Groww stop order in place, so the position always has a stop.
-              </Hint>
-            </div>
-          ) : null}
-          <SectionTitle
-            info={
-              <>
-                These apply only when ticked, on a crossover; an unticked box is ignored. A trade needs every ticked filter to
-                agree. Force order skips them.{crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
-              </>
-            }
-          >
-            Entry filters
-          </SectionTitle>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={form.use_adx_filter}
-              onChange={(e) => set("use_adx_filter", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_adx_filter") && <OwnTag />}
-            ADX trend filter
-            <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
-          </label>
-          <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_vwap)}
-              onChange={(e) => set("use_vwap", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_vwap") && <OwnTag />}
-            VWAP
-            <InfoTip label="About the VWAP filter">A buy needs the close at or above today&apos;s VWAP; a sell at or below it.</InfoTip>
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_volume)}
-              onChange={(e) => set("use_volume", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_volume") && <OwnTag />}
-            Volume
-            <InfoTip label="About the volume filter">
-              The closed candle&apos;s volume must be at least the multiple below of the average of the previous 20 candles.
-            </InfoTip>
-          </label>
-          <Field
-            label="Volume multiple"
-            value={String(form.volume_min_ratio ?? 1)}
-            onChange={(v) => set("volume_min_ratio", v)} own={isOwn("volume_min_ratio")}
-          />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_density)}
-              onChange={(e) => set("use_density", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_density") && <OwnTag />}
-            Density (candle body)
-            <InfoTip label="About the density filter">
-              The candle body must cover at least the percent below of its high-to-low range: skips doji-like, undecided candles.
-            </InfoTip>
-          </label>
-          <Field
-            label="Density %"
-            value={String(form.density_min_pct ?? 50)}
-            onChange={(v) => set("density_min_pct", v)} own={isOwn("density_min_pct")}
-          />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_rsi)}
-              onChange={(e) => set("use_rsi", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_rsi") && <OwnTag />}
-            RSI(14)
-            <InfoTip label="About the RSI filter">A buy needs RSI inside the buy range below; a sell inside the sell range.</InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
-            <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} own={isOwn("rsi_long_max")} />
-            <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
-            <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
-          </div>
-        </div>
-        <div className="min-w-0">
-          <SectionTitle>Entry filters (more)</SectionTitle>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_bollinger)}
-              onChange={(e) => set("use_bollinger", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_bollinger") && <OwnTag />}
-            Bollinger Bands
-            <InfoTip label="About the Bollinger filter">
-              Skips a buy that closed above the upper band (or a sell below the lower): it is chasing a spike. Skips any cross
-              while the bands are squeezed: the stock is going sideways. Squeeze is the band width as % of price on 1-minute
-              candles; 0 turns the squeeze check off.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
-            <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
-            <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
-            <Field label="Squeeze below %" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            SMA 9/21 gap range
-            <InfoTip label="About the SMA gap range filter">
-              Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
-              Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
-              usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
-              crosses; skipped crosses show as ✕ on the chart with the gap. Force order skips this check.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid items-end gap-2 sm:grid-cols-2">
-            <div className="rounded-md border border-white/10 p-2">
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form.use_gap_long)}
-                  onChange={(e) => set("use_gap_long", e.target.checked)}
-                  className="accent-[#10B981]"
-                />
-                {isOwn("use_gap_long") && <OwnTag />}
-                Buy (LONG)
-              </label>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Min %" signed value={String(form.gap_long_min ?? 0.02)} onChange={(v) => set("gap_long_min", v)} own={isOwn("gap_long_min")} />
-                <Field label="Max %" signed value={String(form.gap_long_max ?? 0.5)} onChange={(v) => set("gap_long_max", v)} own={isOwn("gap_long_max")} />
-              </div>
-            </div>
-            <div className="rounded-md border border-white/10 p-2">
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form.use_gap_short)}
-                  onChange={(e) => set("use_gap_short", e.target.checked)}
-                  className="accent-[#10B981]"
-                />
-                {isOwn("use_gap_short") && <OwnTag />}
-                Sell (SHORT)
-              </label>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Min %" signed value={String(form.gap_short_min ?? -0.5)} onChange={(v) => set("gap_short_min", v)} own={isOwn("gap_short_min")} />
-                <Field label="Max %" signed value={String(form.gap_short_max ?? -0.02)} onChange={(v) => set("gap_short_max", v)} own={isOwn("gap_short_max")} />
-              </div>
-            </div>
-          </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_candle_dir)}
-              onChange={(e) => set("use_candle_dir", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_candle_dir") && <OwnTag />}
-            Candle direction
-            <InfoTip label="About the candle direction filter">
-              The last N closed candles before the order must move the trade&apos;s way: on the cross candle normally, or in gap
-              mode on the candle where the gap reaches the entry level. Closes: each close beyond the one before (with 2, a buy
-              needs e.g. 100.0 → 100.4 → 100.9). Colour: each candle green for a buy, red for a sell. Both: both rules. Refused
-              crosses show as ✕ “Candles” on the chart. Force order skips this check.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Last candles to check (1–10)"
-              value={String(form.candle_dir_count ?? 2)}
-              onChange={(v) => set("candle_dir_count", v)}
-              own={isOwn("candle_dir_count")}
-            />
-            <label className="block text-sm text-slate-300">
-              <span className="text-[11px] uppercase tracking-wider text-slate-400">
-                Rule{isOwn("candle_dir_rule") && <OwnTag />}
-              </span>
-              <select
-                value={form.candle_dir_rule ?? "CLOSES"}
-                onChange={(e) => set("candle_dir_rule", e.target.value)}
-                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-              >
-                <option value="CLOSES">Closes rising (buy) / falling (sell)</option>
-                <option value="COLOUR">Colour green (buy) / red (sell)</option>
-                <option value="BOTH">Both</option>
-              </select>
-            </label>
-          </div>
-          <SectionTitle>Exits</SectionTitle>
-          <label
-            className={clsx(
-              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
-              crossExitOn(form) ? "ring-white/10" : "bg-amber-400/[0.08] ring-amber-400/40"
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={crossExitOn(form)}
-              onChange={(e) => set("cross_exit", e.target.checked)}
-              className="mt-1 accent-[#10B981]"
-            />
-            <span>
-              {isOwn("cross_exit") && <OwnTag />}
-              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes and reverses{" "}
-              <InfoTip label="About the SMA cross exit">
-                Ticked, an opposite cross closes the trade and opens the reverse. Unticked, the trade is held through opposite
-                crosses: crosses then only open a trade while flat, and the stop / target, gap fade, Bollinger exit or the{" "}
-                {squareOff} square-off closes it. Works with any of those, or alone. Not used with candle patterns (they close at
-                the end of their candle).
-              </InfoTip>
-            </span>
-          </label>
-          {noExitOn(form) ? (
-            <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
-              No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
-              held, with no stop, until the {squareOff} square-off.
-              <button
-                type="button"
-                onClick={() => {
-                  set("cross_exit", true);
-                  setMsg("Changed — press Save to keep it.");
-                }}
-                className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
-              >
-                Turn the SMA cross exit on
-              </button>
-            </p>
-          ) : null}
-          <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-[11px] uppercase tracking-wider text-slate-400">
-              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
-              <InfoTip label="About the Bollinger exit">
-                Read once per closed 1-minute candle after the entry, on the Bollinger Period and Width (the bands show on the
-                chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first. Your
-                stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
-              </InfoTip>
-            </span>
-            <select
-              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
-              onChange={(e) => set("bb_exit", e.target.value)}
-              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-            >
-              <option value="OFF">Off — no Bollinger exit</option>
-              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
-              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
-              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
             </select>
           </label>
           <SectionTitle>How a trade opens</SectionTitle>
@@ -832,6 +464,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </span>
             </label>
           </div>
+          <SectionTitle>Order direction</SectionTitle>
+          <label
+            className={clsx(
+              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+              form.flip_orders ? "bg-amber-400/[0.08] ring-amber-400/40" : "ring-white/10"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.flip_orders)}
+              onChange={(e) => set("flip_orders", e.target.checked)}
+              className="mt-1 accent-[#F59E0B]"
+            />
+            <span>
+              {isOwn("flip_orders") && <OwnTag />}
+              <b className="text-amber-200">Flip strategy</b> — buy signals sell, sell signals buy{" "}
+              <InfoTip label="About the flip strategy">
+                Every buy signal places a SELL order and every sell signal a BUY. All conditions (cross, filters, gap mode) stay
+                the same, and the trade closes when the signal&apos;s trade would (opposite cross, gap fade, Bollinger exit,
+                square-off). The stop-loss and target guard the real, flipped position. Works in PAPER, LIVE, Research and Replay
+                — try it on Replay or Research first.
+              </InfoTip>
+            </span>
+          </label>
+        </div>
+        <div className="min-w-0">
           <SectionTitle>SMA gap mode</SectionTitle>
           {form.entry_mode === "PATTERN" ? (
             <p className="mt-1 text-[11px] leading-snug text-amber-300">
@@ -858,12 +516,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </InfoTip>
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field label="Buy: enter at gap ≥ %" signed value={String(form.gap_entry_long ?? 0.05)} onChange={(v) => set("gap_entry_long", v)} own={isOwn("gap_entry_long")} />
-            <Field label="Buy: exit at gap ≤ %" signed value={String(form.gap_exit_long ?? 0.02)} onChange={(v) => set("gap_exit_long", v)} own={isOwn("gap_exit_long")} />
-            <Field label="Sell: enter at gap ≤ %" signed value={String(form.gap_entry_short ?? -0.05)} onChange={(v) => set("gap_entry_short", v)} own={isOwn("gap_entry_short")} />
-            <Field label="Sell: exit at gap ≥ %" signed value={String(form.gap_exit_short ?? -0.02)} onChange={(v) => set("gap_exit_short", v)} own={isOwn("gap_exit_short")} />
+            <Field label="Buy: enter at gap ≥" suffix="%" signed value={String(form.gap_entry_long ?? 0.05)} onChange={(v) => set("gap_entry_long", v)} own={isOwn("gap_entry_long")} />
+            <Field label="Buy: exit at gap ≤" suffix="%" signed value={String(form.gap_exit_long ?? 0.02)} onChange={(v) => set("gap_exit_long", v)} own={isOwn("gap_exit_long")} />
+            <Field label="Sell: enter at gap ≤" suffix="%" signed value={String(form.gap_entry_short ?? -0.05)} onChange={(v) => set("gap_entry_short", v)} own={isOwn("gap_entry_short")} />
+            <Field label="Sell: exit at gap ≥" suffix="%" signed value={String(form.gap_exit_short ?? -0.02)} onChange={(v) => set("gap_exit_short", v)} own={isOwn("gap_exit_short")} />
             <Field label="Also exit after giving back % of peak (0 = off)" value={String(form.gap_giveback_pct ?? 0)} onChange={(v) => set("gap_giveback_pct", v)} own={isOwn("gap_giveback_pct")} />
-            <Field label="Wait after the level is met (min)" value={String(form.gap_entry_delay_min ?? 0)} onChange={(v) => set("gap_entry_delay_min", v)} own={isOwn("gap_entry_delay_min")} />
+            <Field label="Wait after the level is met" suffix="min" value={String(form.gap_entry_delay_min ?? 0)} onChange={(v) => set("gap_entry_delay_min", v)} own={isOwn("gap_entry_delay_min")} />
             <Field label="Give up after the cross (min, 0 = never)" value={String(form.gap_entry_window_min ?? 0)} onChange={(v) => set("gap_entry_window_min", v)} own={isOwn("gap_entry_window_min")} />
             <Field
               label="Fade exit: gap narrowing for N candles in a row (0 = off)"
@@ -934,7 +592,372 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </span>
           </label>
         </div>
-      </div>
+      </FieldGroup>
+      <FieldGroup title="Filters" hint="ADX, VWAP, volume, density, RSI, Bollinger, gap range, candle direction" wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle
+            info={
+              <>
+                These apply only when ticked, on a crossover; an unticked box is ignored. A trade needs every ticked filter to
+                agree. Force order skips them.{crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
+              </>
+            }
+          >
+            Entry filters
+          </SectionTitle>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.use_adx_filter}
+              onChange={(e) => set("use_adx_filter", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_adx_filter") && <OwnTag />}
+            ADX trend filter
+            <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
+          </label>
+          <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_vwap)}
+              onChange={(e) => set("use_vwap", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_vwap") && <OwnTag />}
+            VWAP
+            <InfoTip label="About the VWAP filter">A buy needs the close at or above today&apos;s VWAP; a sell at or below it.</InfoTip>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_volume)}
+              onChange={(e) => set("use_volume", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_volume") && <OwnTag />}
+            Volume
+            <InfoTip label="About the volume filter">
+              The closed candle&apos;s volume must be at least the multiple below of the average of the previous 20 candles.
+            </InfoTip>
+          </label>
+          <Field
+            label="Volume multiple"
+            value={String(form.volume_min_ratio ?? 1)}
+            onChange={(v) => set("volume_min_ratio", v)} own={isOwn("volume_min_ratio")}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_density)}
+              onChange={(e) => set("use_density", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_density") && <OwnTag />}
+            Density (candle body)
+            <InfoTip label="About the density filter">
+              The candle body must cover at least the percent below of its high-to-low range: skips doji-like, undecided candles.
+            </InfoTip>
+          </label>
+          <Field
+            label="Density" suffix="%"
+            value={String(form.density_min_pct ?? 50)}
+            onChange={(v) => set("density_min_pct", v)} own={isOwn("density_min_pct")}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_rsi)}
+              onChange={(e) => set("use_rsi", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_rsi") && <OwnTag />}
+            RSI(14)
+            <InfoTip label="About the RSI filter">A buy needs RSI inside the buy range below; a sell inside the sell range.</InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
+            <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} own={isOwn("rsi_long_max")} />
+            <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
+            <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
+          </div>
+        </div>
+        <div className="min-w-0">
+          <SectionTitle>Entry filters (more)</SectionTitle>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_bollinger)}
+              onChange={(e) => set("use_bollinger", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_bollinger") && <OwnTag />}
+            Bollinger Bands
+            <InfoTip label="About the Bollinger filter">
+              Skips a buy that closed above the upper band (or a sell below the lower): it is chasing a spike. Skips any cross
+              while the bands are squeezed: the stock is going sideways. Squeeze is the band width as % of price on 1-minute
+              candles; 0 turns the squeeze check off.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
+            <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
+            <Field label="Squeeze below" suffix="%" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
+          </div>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            SMA 9/21 gap range
+            <InfoTip label="About the SMA gap range filter">
+              Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
+              Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
+              usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
+              crosses; skipped crosses show as ✕ on the chart with the gap. Force order skips this check.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid items-end gap-2 sm:grid-cols-2">
+            <div className="rounded-md border border-white/10 p-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.use_gap_long)}
+                  onChange={(e) => set("use_gap_long", e.target.checked)}
+                  className="accent-[#10B981]"
+                />
+                {isOwn("use_gap_long") && <OwnTag />}
+                Buy (LONG)
+              </label>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Min" suffix="%" signed value={String(form.gap_long_min ?? 0.02)} onChange={(v) => set("gap_long_min", v)} own={isOwn("gap_long_min")} />
+                <Field label="Max" suffix="%" signed value={String(form.gap_long_max ?? 0.5)} onChange={(v) => set("gap_long_max", v)} own={isOwn("gap_long_max")} />
+              </div>
+            </div>
+            <div className="rounded-md border border-white/10 p-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.use_gap_short)}
+                  onChange={(e) => set("use_gap_short", e.target.checked)}
+                  className="accent-[#10B981]"
+                />
+                {isOwn("use_gap_short") && <OwnTag />}
+                Sell (SHORT)
+              </label>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Min" suffix="%" signed value={String(form.gap_short_min ?? -0.5)} onChange={(v) => set("gap_short_min", v)} own={isOwn("gap_short_min")} />
+                <Field label="Max" suffix="%" signed value={String(form.gap_short_max ?? -0.02)} onChange={(v) => set("gap_short_max", v)} own={isOwn("gap_short_max")} />
+              </div>
+            </div>
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_candle_dir)}
+              onChange={(e) => set("use_candle_dir", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_candle_dir") && <OwnTag />}
+            Candle direction
+            <InfoTip label="About the candle direction filter">
+              The last N closed candles before the order must move the trade&apos;s way: on the cross candle normally, or in gap
+              mode on the candle where the gap reaches the entry level. Closes: each close beyond the one before (with 2, a buy
+              needs e.g. 100.0 → 100.4 → 100.9). Colour: each candle green for a buy, red for a sell. Both: both rules. Refused
+              crosses show as ✕ “Candles” on the chart. Force order skips this check.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Last candles to check (1–10)"
+              value={String(form.candle_dir_count ?? 2)}
+              onChange={(v) => set("candle_dir_count", v)}
+              own={isOwn("candle_dir_count")}
+            />
+            <label className="block text-sm text-slate-300">
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">
+                Rule{isOwn("candle_dir_rule") && <OwnTag />}
+              </span>
+              <select
+                value={form.candle_dir_rule ?? "CLOSES"}
+                onChange={(e) => set("candle_dir_rule", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="CLOSES">Closes rising (buy) / falling (sell)</option>
+                <option value="COLOUR">Colour green (buy) / red (sell)</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </FieldGroup>
+      <FieldGroup title="Exits & stops" hint="Stop type, ₹ stop / trail / target, ATR stop, cross exit, Bollinger exit" wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle>Stop-loss</SectionTitle>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.use_stop !== false}
+              onChange={(e) => set("use_stop", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_stop") && <OwnTag />}
+            {form.stop_type === "SMA_GAP"
+              ? "Stop-loss on new entries (moving, from the SMA gap)"
+              : form.stop_type === "TSL"
+                ? "Trailing stop-loss on new entries"
+                : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+            <InfoTip label="About the stop-loss">
+              Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
+              and the square-off close them.
+            </InfoTip>
+          </label>
+          <label className="mt-3 block text-sm text-slate-300">
+            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+              Stop type{isOwn("stop_type") && <OwnTag />}
+            </span>
+            <select
+              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR"}
+              onChange={(e) => set("stop_type", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="ATR">ATR — fixed stop at {String(form.atr_multiplier)}× ATR</option>
+              <option value="SMA_GAP">SMA gap — moving stop + target</option>
+              <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
+            </select>
+          </label>
+          {form.stop_type !== "TSL" ? (
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+            </div>
+          ) : null}
+          {form.stop_type === "SMA_GAP" ? (
+            <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
+              <div className="grid grid-cols-3 items-end gap-2">
+                <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} own={isOwn("gap_sl_mult")} />
+                <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} own={isOwn("gap_tp_mult")} />
+                <Field label="Min gap" suffix="%" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
+              </div>
+              <Hint label="About the SMA gap stop">
+                Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
+                gap × stop multiple and target = price + gap × target multiple; a sell is the mirror. Recalculated every
+                closed 1-minute candle: the stop only moves in your favour, the target follows the gap both ways.
+                PAPER only — in LIVE the bot keeps the {String(form.atr_multiplier)}× ATR exchange stop.
+              </Hint>
+            </div>
+          ) : null}
+          {form.stop_type === "TSL" ? (
+            <div className="mt-2 rounded-md border border-emerald-400/20 bg-emerald-400/[0.04] p-2">
+              <div className="grid grid-cols-3 items-end gap-2">
+                <Field label="Stop" suffix="₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} own={isOwn("tsl_sl_points")} />
+                <Field label="Trail every" suffix="₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
+                <Field label="Target" suffix="₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
+              </div>
+              <Hint label="About the trailing stop">
+                Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
+                {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
+                {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
+                price gains past its best so far moves the stop up ₹{String(form.tsl_trail_points ?? 10)}; it never moves back. A
+                sell is the mirror. {Number(form.tsl_target_points ?? 0) > 0
+                  ? `The trade also closes at ₹${String(form.tsl_target_points)} profit per share.`
+                  : "No target: the trailing stop, an opposite cross or square-off closes the trade."}{" "}
+                In LIVE the bot moves your Groww stop order in place, so the position always has a stop.
+              </Hint>
+            </div>
+          ) : null}
+        </div>
+        <div className="min-w-0">
+          <SectionTitle>Exits</SectionTitle>
+          <label
+            className={clsx(
+              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+              crossExitOn(form) ? "ring-white/10" : "bg-amber-400/[0.08] ring-amber-400/40"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={crossExitOn(form)}
+              onChange={(e) => set("cross_exit", e.target.checked)}
+              className="mt-1 accent-[#10B981]"
+            />
+            <span>
+              {isOwn("cross_exit") && <OwnTag />}
+              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes and reverses{" "}
+              <InfoTip label="About the SMA cross exit">
+                Ticked, an opposite cross closes the trade and opens the reverse. Unticked, the trade is held through opposite
+                crosses: crosses then only open a trade while flat, and the stop / target, gap fade, Bollinger exit or the{" "}
+                {squareOff} square-off closes it. Works with any of those, or alone. Not used with candle patterns (they close at
+                the end of their candle).
+              </InfoTip>
+            </span>
+          </label>
+          {noExitOn(form) ? (
+            <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
+              No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
+              held, with no stop, until the {squareOff} square-off.
+              <button
+                type="button"
+                onClick={() => {
+                  set("cross_exit", true);
+                  setMsg("Changed — press Save to keep it.");
+                }}
+                className="ml-2 rounded px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+              >
+                Turn the SMA cross exit on
+              </button>
+            </p>
+          ) : null}
+          <label className="mt-3 block text-sm text-slate-300">
+            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
+              <InfoTip label="About the Bollinger exit">
+                Read once per closed 1-minute candle after the entry, on the Bollinger Period and Width (the bands show on the
+                chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first. Your
+                stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
+              </InfoTip>
+            </span>
+            <select
+              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
+              onChange={(e) => set("bb_exit", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="OFF">Off — no Bollinger exit</option>
+              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
+              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
+              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
+            </select>
+          </label>
+        </div>
+      </FieldGroup>
+      <FieldGroup title="Risk & session" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle>Size</SectionTitle>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
+          </div>
+          {!stockScope && (
+            <>
+              <SectionTitle
+                info={
+                  <>
+                    Max daily loss and trades a day are for this bot only. If the bot stopped on the trade cap, type a higher
+                    max and press Save, then Start. Open positions stay open. A loss-limit stop stays locked for the day.
+                  </>
+                }
+              >
+                Daily limits (this bot)
+              </SectionTitle>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
+                <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+                <Field
+                  label="No new entries after"
+                  value={form.entry_cutoff_time || "15:00"}
+                  onChange={(v) => set("entry_cutoff_time", v)}
+                />
+                <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
+              </div>
+            </>
+          )}
+        </div>
+      </FieldGroup>
       <div
         className={clsx(
           "mt-3 flex flex-wrap items-center gap-3",
@@ -975,6 +998,20 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   );
 }
 
+/** A collapsible group of settings (open by default). */
+function FieldGroup({ title, hint, wide, children }: { title: string; hint: string; wide: boolean; children: ReactNode }) {
+  return (
+    <details open className="group/fs mt-4 rounded-lg border border-white/10 bg-white/[0.02]">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 [&::-webkit-details-marker]:hidden">
+        <ChevronDown size={16} aria-hidden className="shrink-0 text-slate-400 transition-transform group-[:not([open])]/fs:-rotate-90" />
+        {title}
+        <span className="hidden truncate text-xs font-normal text-slate-400 sm:inline">— {hint}</span>
+      </summary>
+      <div className={clsx("px-3 pb-3", wide && "lg:grid lg:grid-cols-2 lg:gap-x-10")}>{children}</div>
+    </details>
+  );
+}
+
 function OwnTag() {
   return <span className="ml-1 shrink-0 text-[11px] normal-case tracking-normal text-violet-300">· own</span>;
 }
@@ -985,6 +1022,7 @@ function Field({
   onChange,
   own,
   signed,
+  suffix,
 }: {
   label: string;
   value: string;
@@ -993,6 +1031,8 @@ function Field({
   own?: boolean;
   /** Allows a minus sign: phones' decimal keypads have none. */
   signed?: boolean;
+  /** Unit shown inside the box (₹, %, min). Display only. */
+  suffix?: string;
 }) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
@@ -1001,28 +1041,34 @@ function Field({
   }, [value]);
   return (
     <label className="block">
-      <span className="text-[11px] uppercase leading-tight tracking-wider text-slate-400">
+      <span className="block text-xs leading-tight text-slate-300">
         {label}
         {own && <span className="ml-1 whitespace-nowrap normal-case tracking-normal text-violet-300">· own</span>}
       </span>
-      <input
-        inputMode={signed ? "text" : "decimal"}
-        value={text}
-        onFocus={() => {
-          focused.current = true;
-        }}
-        onBlur={() => {
-          focused.current = false;
-        }}
-        onChange={(e) => {
-          setText(e.target.value);
-          onChange(e.target.value);
-        }}
-        className={clsx(
-          "mt-0.5 w-full min-w-[4.5rem] rounded-md border bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none focus:border-[#10B981]/50",
-          own ? "border-violet-400/50" : "border-white/10"
-        )}
-      />
+      <span className="relative mt-1 block">
+        <input
+          inputMode={signed ? "text" : "decimal"}
+          value={text}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onBlur={() => {
+            focused.current = false;
+          }}
+          onChange={(e) => {
+            setText(e.target.value);
+            onChange(e.target.value);
+          }}
+          className={clsx(
+            "block h-10 w-full min-w-[4.5rem] rounded-md border bg-black/40 px-2 font-mono text-sm tabular-nums text-[#f8fafc] outline-none focus:border-[#10B981]/50 focus-visible:ring-2 focus-visible:ring-sky-400",
+            suffix && "pr-9",
+            own ? "border-violet-400/50" : "border-white/10"
+          )}
+        />
+        {suffix ? (
+          <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center font-mono text-xs text-slate-400">{suffix}</span>
+        ) : null}
+      </span>
     </label>
   );
 }
