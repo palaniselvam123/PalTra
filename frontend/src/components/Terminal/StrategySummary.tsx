@@ -4,7 +4,7 @@ import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Loader2, Settings2 } from "lucide-react";
-import { BB_EXITS, inr, smaApi, type BbExit, type SmaConfig, type StopType } from "@/lib/smaApi";
+import { BB_EXITS, inr, smaApi, type BbExit, type CandleMinutes, type SmaConfig, type StopType } from "@/lib/smaApi";
 import { crossExitOn as crossExitIsOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
 
 /** The settings page section for this desk's strategy. */
@@ -338,6 +338,17 @@ export function StrategySummary({
                 (v) => save({ entry_mode: v }, v === "PATTERN" ? "Entry on candle patterns" : "Entry on the SMA cross")
               )}
             </div>
+            {(c.entry_mode ?? "SMA") !== "PATTERN" ? (
+              <div className="sm:col-span-2">
+                {segmented<"1" | "2" | "3" | "5" | "10" | "15">(
+                  "Candle",
+                  String(c.candle_minutes ?? 1) as "1" | "2" | "3" | "5" | "10" | "15",
+                  ["1", "2", "3", "5", "10", "15"],
+                  { "1": "1m", "2": "2m", "3": "3m", "5": "5m", "10": "10m", "15": "15m" },
+                  (v) => save({ candle_minutes: Number(v) as CandleMinutes }, `${v}-minute candles`)
+                )}
+              </div>
+            ) : null}
             {(c.entry_mode ?? "SMA") === "PATTERN" ? (
               <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
                 <div className="flex items-center gap-1 text-[11px] text-slate-400">

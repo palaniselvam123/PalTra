@@ -257,6 +257,9 @@ class BotConfig(Base):
     # candle and close at its end.
     entry_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="SMA")
     pattern_tf: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Candle interval in minutes (candles.py: 1, 2, 3, 5, 10, 15). The 1-minute
+    # tape is grouped into candles of this length before the strategy reads it.
+    candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     pattern_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     pattern_set: Mapped[str | None] = mapped_column(String, nullable=True, default="STRONG")
     pattern_min_edge: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

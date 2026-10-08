@@ -31,6 +31,8 @@ export type SmaConfig = {
   entry_mode?: "SMA" | "PATTERN";
   /** Pattern candle size in minutes. */
   pattern_tf?: 1 | 3 | 5;
+  /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
+  candle_minutes?: CandleMinutes;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";
@@ -351,6 +353,9 @@ export type WalletEntry = {
 };
 
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
+export type CandleMinutes = 1 | 2 | 3 | 5 | 10 | 15;
+export const CANDLE_MINUTES: CandleMinutes[] = [1, 2, 3, 5, 10, 15];
+
 export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 
 export type BotSummary = {
@@ -369,6 +374,8 @@ export type BotSummary = {
 export type ChartPayload = {
   /** The stock drawn (the chart focus, or the one asked for). */
   symbol?: string;
+  /** Minutes per candle the server sends (the bot's candle interval); 1 when absent. */
+  candle_minutes?: number;
   candles: Candle[];
   markers: {
     time: number;

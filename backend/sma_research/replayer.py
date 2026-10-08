@@ -42,6 +42,7 @@ BASELINE_OFF = {
     "flip_orders": False,
     "cross_exit": True,
     "entry_mode": "SMA",
+    "candle_minutes": 1,
     "stock_settings": "{}",
 }
 

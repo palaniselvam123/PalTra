@@ -218,6 +218,7 @@ class ConfigUpdate(BaseModel):
     cross_exit: bool | None = None
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
+    candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
@@ -541,6 +542,7 @@ def _gap_dict(row) -> dict:
         "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
         "flip_orders": bool(getattr(row, "flip_orders", False)),
         "cross_exit": getattr(row, "cross_exit", None) is not False,
+        "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
     }
 

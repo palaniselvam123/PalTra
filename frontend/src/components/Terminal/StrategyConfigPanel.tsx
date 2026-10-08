@@ -3,7 +3,7 @@
 import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { BB_EXITS, smaApi, type BbExit, type SmaConfig } from "@/lib/smaApi";
+import { BB_EXITS, CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
 
 type Props = {
@@ -20,6 +20,7 @@ const LABELS: Record<string, string> = {
   qty: "qty",
   sma_fast: "fast MA",
   sma_slow: "slow MA",
+  candle_minutes: "candle",
   atr_period: "ATR period",
   atr_multiplier: "ATR ×",
   use_stop: "stop on/off",
@@ -131,6 +132,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     qty: Number(form.qty),
     sma_fast: Number(form.sma_fast),
     sma_slow: Number(form.sma_slow),
+    candle_minutes: (CANDLE_MINUTES.includes(Number(form.candle_minutes) as CandleMinutes)
+      ? Number(form.candle_minutes)
+      : 1) as CandleMinutes,
     atr_period: Number(form.atr_period),
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
@@ -365,6 +369,26 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <Field label="Fast MA" own={isOwn("sma_fast")} value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
             <Field label="Slow MA" own={isOwn("sma_slow")} value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
           </div>
+          <label className="mt-2 block text-sm text-slate-300">
+            <span className="text-[11px] uppercase tracking-wider text-slate-400">
+              Candle interval{isOwn("candle_minutes") ? " (own)" : ""}
+            </span>
+            <select
+              value={String(form.candle_minutes ?? 1)}
+              onChange={(e) => set("candle_minutes", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              {CANDLE_MINUTES.map((m) => (
+                <option key={m} value={String(m)}>
+                  {m} minute{m === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-[11px] text-slate-500">
+              The SMAs, ATR stop, filters and exits read candles of this length, built from the 1-minute tape from 09:15.
+              A signal is judged when each candle closes. Candle patterns keep their own candle.
+            </span>
+          </label>
           {!stockScope && (
             <>
               <SectionTitle
