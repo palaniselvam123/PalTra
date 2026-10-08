@@ -217,6 +217,7 @@ select {
 [data-theme="light"] .terminal-dark.bg-\[\#0B0E14\],
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #ffffff; }
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/90 { background-color: rgb(255 255 255 / 0.94); }
+[data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/95 { background-color: rgb(255 255 255 / 0.95); }
 [data-theme="light"] .terminal-dark .bg-\[\#151921\] { background-color: #ffffff; }
 /* White cards on the white page: a visible edge and a soft lift. */
 [data-theme="light"] .terminal-dark .rounded-xl.bg-\[\#151921\] {

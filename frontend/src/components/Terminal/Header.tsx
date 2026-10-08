@@ -550,7 +550,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       ) : null}
       <nav
         aria-label="Desk pages"
-        className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14] px-2 sm:gap-2 sm:px-4"
+        className="sticky top-0 z-40 flex h-11 items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14]/95 px-2 backdrop-blur sm:gap-2 sm:px-4"
       >
         <a href="/" className="mr-1 flex shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
           <span className="grad-brand grid h-7 w-7 place-items-center rounded-full text-white">
@@ -565,13 +565,12 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               href={href === "/" ? "/" : `${href}/`}
               aria-current={active ? "page" : undefined}
               className={clsx(
-                "relative flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-xs font-medium sm:min-h-10",
-                active ? "text-slate-100" : "text-slate-400 hover:text-slate-100"
+                "flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2 text-sm font-medium tracking-normal",
+                active ? "border-sky-400 text-slate-100" : "border-transparent text-slate-400 hover:text-slate-100"
               )}
             >
-              <Icon size={13} aria-hidden className="hidden sm:block" />
+              <Icon size={14} aria-hidden className="hidden sm:block" />
               {label}
-              {active ? <span className="absolute inset-x-1 bottom-0 h-[2px] rounded-t bg-emerald-400" /> : null}
             </a>
           );
         })}
@@ -579,7 +578,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       <header
         aria-label="SMA terminal"
         className={clsx(
-          "sticky top-0 z-30 bg-[#0B0E14]",
+          "sticky top-11 z-30 bg-[#0B0E14]",
           live ? "border-2 border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]" : "border-b border-white/10"
         )}
       >
