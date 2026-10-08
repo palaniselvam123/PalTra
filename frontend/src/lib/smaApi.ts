@@ -151,6 +151,8 @@ export type SmaState = {
   second_ticks?: boolean;
   /** The chart stock's flip strategy is on (buy signals sell, sell signals buy). */
   flip_orders?: boolean;
+  /** Candle interval in minutes the chart stock trades on (1 for candle patterns). */
+  candle_minutes?: number;
   /** Present only on /api/replay/state. */
   replay?: ReplayInfo;
   last_error: string;

@@ -44,6 +44,12 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const stopOn = state?.stop_enabled ?? config?.use_stop;
   const mult = state?.atr_multiplier ?? config?.atr_multiplier ?? 1.5;
   const cutoff = config?.entry_cutoff_time ?? (config ? "15:00" : null);
+  const patterns = (config?.entry_mode ?? "SMA") === "PATTERN";
+  const candle = state?.candle_minutes ?? config?.candle_minutes ?? (config ? 1 : null);
+  // Stocks set to a different candle than the bot's own (their own strategy settings).
+  const ownCandles = Object.entries(state?.stock_settings ?? {})
+    .filter(([, own]) => own.candle_minutes != null && Number(own.candle_minutes) !== Number(config?.candle_minutes ?? 1))
+    .map(([name, own]) => `${name} ${own.candle_minutes}m`);
   const used = state?.trades_today ?? null;
   const noCap = state?.mode === "REPLAY";
   const cap = noCap ? null : state?.max_trades ?? config?.max_trades_per_day ?? null;
@@ -173,6 +179,25 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           <span className="font-bold text-amber-300">ON ⇄</span>
         </Cell>
       ) : null}
+      <Cell
+        label="Candle"
+        title={
+          patterns
+            ? "Candle patterns read their own candle size"
+            : `The bot reads ${candle ?? 1}-minute candles${ownCandles.length ? `. Own candle: ${ownCandles.join(", ")}` : ""}`
+        }
+      >
+        {candle == null ? (
+          <Skeleton className="h-4 w-10" />
+        ) : (
+          <span className="text-slate-100">
+            {patterns ? `Pattern ${config?.pattern_tf ?? 1}m` : `${candle} min`}
+            {!patterns && ownCandles.length ? (
+              <span className="ml-1 font-sans text-xs font-normal text-slate-400">+{ownCandles.length} own</span>
+            ) : null}
+          </span>
+        )}
+      </Cell>
       <Cell label="Cut-off" title="No new entries from this time">
         {cutoff ? <span className="text-slate-100">{cutoff}</span> : <Skeleton className="h-4 w-12" />}
       </Cell>
