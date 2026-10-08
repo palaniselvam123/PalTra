@@ -12,6 +12,7 @@ import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
 import { ownSummary } from "./StrategyConfigPanel";
+import { ArmPrompt } from "./ArmPrompt";
 
 const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
@@ -319,6 +320,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
+  // Arming asks for the stock's quantity, stop, trail and target first (ArmPrompt).
+  const [armAsk, setArmAsk] = useState<string | null>(null);
+
   const toggleTrade = async (next: string) => {
     const cleaned = next.trim().toUpperCase();
     if (!cleaned) return;
@@ -327,6 +331,16 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       setError(`Trade is limited to ${armLimit} stocks at once. Turn one off before adding another.`);
       return;
     }
+    if (turningOn) {
+      setError(null);
+      setArmAsk(cleaned);
+      return;
+    }
+    await setTrade(cleaned, false);
+  };
+
+  /** Arm or unarm. Arming saves the prompt's changes (`save`) just before. */
+  const setTrade = async (cleaned: string, turningOn: boolean, save?: () => Promise<void>) => {
     if (turningOn && live) {
       const ok = window.confirm(
         `Arm ${cleaned} for live SMA orders? The bot can buy or sell it while this chart stays on ${symbol || "the stock you are viewing"}.`
@@ -336,10 +350,12 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     setBusy(true);
     setError(null);
     try {
+      if (save) await save();
       await smaApi.setTradeSymbol(cleaned, turningOn);
       remember(cleaned);
       onChanged();
     } catch (e: unknown) {
+      if (save) throw e; // the prompt shows it
       setError(e instanceof Error ? e.message : "Could not change the trade button");
     } finally {
       setBusy(false);
@@ -519,6 +535,16 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
 
   return (
     <>
+      {armAsk ? (
+        <ArmPrompt
+          symbol={armAsk}
+          deskName={state?.bot_name || (desk === "research" ? "Research" : undefined)}
+          live={live}
+          price={bookBySymbol.get(armAsk)?.ltp ?? (state?.symbol?.toUpperCase() === armAsk ? state?.ltp : null)}
+          onArm={(save) => setTrade(armAsk, true, save)}
+          onClose={() => setArmAsk(null)}
+        />
+      ) : null}
       <nav
         aria-label="Desk pages"
         className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14] px-2 sm:gap-2 sm:px-4"

@@ -721,6 +721,12 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 12000, r
   }
 }
 
+function stockPath(target: ArmTarget, symbol: string): string {
+  const name = encodeURIComponent(symbol);
+  if (target === "research") return `/api/research/config/stock/${name}`;
+  return target === 1 ? `/api/config/stock/${name}` : `/api/bots/${target}/config/stock/${name}`;
+}
+
 export const smaApi = {
   state: () => request<SmaState>("/api/state"),
   /** `symbol` draws that watched stock without moving the chart focus (another tab, a held view). */
@@ -772,6 +778,11 @@ export const smaApi = {
       undefined,
       false
     ),
+  /** One stock's settings on a chosen desk, whatever desk this page is on. */
+  stockConfigOn: (target: ArmTarget, symbol: string) =>
+    request<StockConfig>(stockPath(target, symbol), undefined, undefined, false),
+  saveStockConfigOn: (target: ArmTarget, symbol: string, body: Partial<SmaConfig>) =>
+    request<StockConfig>(stockPath(target, symbol), { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   /** The research desk's settings (its Trade list), whatever desk this page is on. */
   researchConfig: () => request<SmaConfig>("/api/research/config", undefined, undefined, false),
   /** The PAPER bots' practice wallet (shared by bots 1-4, whatever desk this page is on). */
