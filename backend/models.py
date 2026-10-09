@@ -203,6 +203,12 @@ class BotConfig(Base):
     tsl_sl_points: Mapped[float] = mapped_column(Float, default=20.0)
     tsl_trail_points: Mapped[float] = mapped_column(Float, default=10.0)
     tsl_target_points: Mapped[float] = mapped_column(Float, default=0.0)
+    # Units for TSL (tsl.py): POINTS (rupee, today's default) or PERCENT (of entry price).
+    # The percent fields are read when tsl_mode is PERCENT; otherwise the points fields win.
+    tsl_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="POINTS")
+    tsl_sl_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
+    tsl_trail_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    tsl_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
     # When false, entries are sent without an exchange stop. Square-off, the
     # panic button, and an opposite crossover still close the position.

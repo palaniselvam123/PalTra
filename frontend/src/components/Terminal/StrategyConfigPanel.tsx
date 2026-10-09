@@ -150,6 +150,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
+    tsl_mode: String(form.tsl_mode ?? "POINTS") as "POINTS" | "PERCENT",
+    tsl_sl_pct: Number(form.tsl_sl_pct ?? 1.0),
+    tsl_trail_pct: Number(form.tsl_trail_pct ?? 0.5),
+    tsl_target_pct: Number(form.tsl_target_pct ?? 0),
     gap_sl_mult: Number(form.gap_sl_mult ?? 1),
     gap_tp_mult: Number(form.gap_tp_mult ?? 2),
     gap_min_pct: Number(form.gap_min_pct ?? 0.2),
@@ -857,18 +861,63 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
           {form.stop_type === "TSL" ? (
             <div className="mt-2 rounded-md border border-emerald-400/20 bg-emerald-400/[0.04] p-2">
-              <div className="grid grid-cols-3 items-end gap-2">
-                <Field label="Stop" suffix="₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} own={isOwn("tsl_sl_points")} />
-                <Field label="Trail every" suffix="₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
-                <Field label="Target" suffix="₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
+              <div className="mb-2 flex items-center gap-2 text-xs text-slate-300">
+                <span>Units:</span>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="tsl_mode"
+                    checked={(form.tsl_mode ?? "POINTS") === "POINTS"}
+                    onChange={() => set("tsl_mode", "POINTS")}
+                    className="accent-sky-400"
+                  />
+                  Points (₹)
+                </label>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="tsl_mode"
+                    checked={form.tsl_mode === "PERCENT"}
+                    onChange={() => set("tsl_mode", "PERCENT")}
+                    className="accent-sky-400"
+                  />
+                  Percent (%)
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  % scales with the stock price — 1% is ₹1 on a ₹100 stock and ₹10 on a ₹1,000 stock.
+                </span>
               </div>
+              {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+                <div className="grid grid-cols-3 items-end gap-2">
+                  <Field label="Stop" suffix="%" value={String(form.tsl_sl_pct ?? 1)} onChange={(v) => set("tsl_sl_pct", v)} own={isOwn("tsl_sl_pct")} />
+                  <Field label="Trail every" suffix="%" value={String(form.tsl_trail_pct ?? 0.5)} onChange={(v) => set("tsl_trail_pct", v)} own={isOwn("tsl_trail_pct")} />
+                  <Field label="Target" suffix="%" value={String(form.tsl_target_pct ?? 0)} onChange={(v) => set("tsl_target_pct", v)} own={isOwn("tsl_target_pct")} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 items-end gap-2">
+                  <Field label="Stop" suffix="₹" value={String(form.tsl_sl_points ?? 20)} onChange={(v) => set("tsl_sl_points", v)} own={isOwn("tsl_sl_points")} />
+                  <Field label="Trail every" suffix="₹" value={String(form.tsl_trail_points ?? 10)} onChange={(v) => set("tsl_trail_points", v)} own={isOwn("tsl_trail_points")} />
+                  <Field label="Target" suffix="₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
+                </div>
+              )}
               <Hint label="About the trailing stop">
-                Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
-                {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
-                {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
-                price gains past its best so far moves the stop up ₹{String(form.tsl_trail_points ?? 10)}; it never moves back. A
-                sell is the mirror. {Number(form.tsl_target_points ?? 0) > 0
-                  ? `The trade also closes at ₹${String(form.tsl_target_points)} profit per share.`
+                {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+                  <>
+                    <b>Percent mode:</b> Stop % is the distance from entry; Target % 0 means no target. A buy at ₹1,000 with stop
+                    {" "}{String(form.tsl_sl_pct ?? 1)}% starts its stop at ₹
+                    {(1000 * (1 - Number(form.tsl_sl_pct ?? 1) / 100)).toLocaleString("en-IN")}. Each {String(form.tsl_trail_pct ?? 0.5)}%
+                    the price gains past its best so far moves the stop {String(form.tsl_trail_pct ?? 0.5)}%; it never moves back. A sell is the mirror.
+                  </>
+                ) : (
+                  <>
+                    Stop ₹ is the distance from your entry; Target ₹ 0 means no target. A buy at ₹1,000 with stop ₹
+                    {String(form.tsl_sl_points ?? 20)} starts its stop at ₹
+                    {(1000 - Number(form.tsl_sl_points ?? 20)).toLocaleString("en-IN")}. Each ₹{String(form.tsl_trail_points ?? 10)} the
+                    price gains past its best so far moves the stop up ₹{String(form.tsl_trail_points ?? 10)}; it never moves back. A sell is the mirror.
+                  </>
+                )}{" "}
+                {Number((form.tsl_mode ?? "POINTS") === "PERCENT" ? form.tsl_target_pct : form.tsl_target_points) > 0
+                  ? `The trade also closes at the target.`
                   : "No target: the trailing stop, an opposite cross or square-off closes the trade."}{" "}
                 In LIVE the bot moves your Groww stop order in place, so the position always has a stop.
               </Hint>

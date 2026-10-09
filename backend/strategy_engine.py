@@ -173,6 +173,7 @@ SNAPSHOT_FIELDS = (
     "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
+    "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -862,7 +863,7 @@ class StrategyEngine:
             if stop_active and own is not None and not trailing and uses_tsl(own):
                 # The trailed stop was saved on each move. It never loosens,
                 # so trailing resumes from it with the best price reset to entry.
-                tsl_points, tsl_step, tgt_points = tsl_settings(own)
+                tsl_points, tsl_step, tgt_points = tsl_settings(own, entry_price=entry)
                 _sl, target = tsl_entry_levels(direction, entry, tsl_points, tgt_points)
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
@@ -1975,7 +1976,7 @@ class StrategyEngine:
             target = round_price(cfg.symbol, tp_gap)
         tsl_points = tsl_step = None
         if uses_tsl(cfg):
-            tsl_points, tsl_step, tgt_points = tsl_settings(cfg)
+            tsl_points, tsl_step, tgt_points = tsl_settings(cfg, entry_price=fill)
             sl_tsl, tp_tsl = tsl_entry_levels(direction, fill, tsl_points, tgt_points)
             sl = round_price(cfg.symbol, sl_tsl)
             target = round_price(cfg.symbol, tp_tsl) if tp_tsl is not None else None
@@ -3728,14 +3729,24 @@ CHART_INTERVALS = (1, 2, 3, 5, 10, 15, 30, 60, 240)
 
 
 def _stop_points(cfg) -> dict | None:
-    """Stop, trail and target of one stock's settings, for the screens."""
+    """Stop, trail and target of one stock's settings, for the screens.
+
+    Reports both the ₹ (points) numbers and the % numbers, so the frontend
+    can show whichever matches `tsl_mode`.
+    """
     if cfg is None:
         return None
-    sl_points, step, target = tsl_settings(cfg)
+    import tsl as _tsl
+
+    sl_pct, step_pct, target_pct = _tsl.tsl_pcts(cfg)
     return {
-        "tsl_sl_points": sl_points,
-        "tsl_trail_points": step,
-        "tsl_target_points": target,
+        "tsl_mode": _tsl.tsl_mode(cfg),
+        "tsl_sl_points": float(getattr(cfg, "tsl_sl_points", 20.0) or 20.0),
+        "tsl_trail_points": float(getattr(cfg, "tsl_trail_points", 10.0) or 10.0),
+        "tsl_target_points": float(getattr(cfg, "tsl_target_points", 0.0) or 0.0),
+        "tsl_sl_pct": sl_pct,
+        "tsl_trail_pct": step_pct,
+        "tsl_target_pct": target_pct,
         "gap_sl_mult": float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
         "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
     }
