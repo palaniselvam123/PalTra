@@ -183,6 +183,7 @@ SNAPSHOT_FIELDS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
+    "review_check_minutes", "review_check_mode", "review_default_answer",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -3227,17 +3228,52 @@ class StrategyEngine:
             last = episode.get("last_at") if episode else None
             if last is not None and now - last < review.cooldown(scfg):
                 continue
+            # Smart check: read a shorter candle (1/2/3/5/10/15 min, built from the
+            # 1-minute tape) and decide whether the main candle's "narrowing" really
+            # looks like trouble. The verdict is reused in `_raise_review`, so this
+            # does the work only once.
+            one = review.check_candle_evidence(
+                self._tapes.get(symbol),
+                review.check_minutes(scfg),
+                int(scfg.sma_fast),
+                int(scfg.sma_slow),
+                int(scfg.atr_period),
+            )
+            verdict = review.verdict(one, pos.direction) if one is not None else None
+            mode = review.check_mode(scfg)
+            if verdict is not None:
+                if mode == "ONLY_IF_AGAINST" and verdict.get("label") != review.AGAINST:
+                    continue  # The check candle disagrees with the main one: don't fire.
+                if mode == "ONLY_IF_NOT_WITH" and verdict.get("label") == review.WITH:
+                    continue
+            # Otherwise: not enough 1-minute tape to judge, so err on the safe side
+            # and fire the review as today.
             self._review_episode[symbol] = {"trade_id": pos.trade_id, "open": True, "last_at": now}
-            self._raise_review(symbol, pos, scfg, minutes, hit, now)
+            await self._raise_review(symbol, pos, scfg, minutes, hit, now, one=one, verdict=verdict)
 
-    def _raise_review(self, symbol: str, pos: OpenPosition, cfg: BotConfig, minutes: int, hit, now: dt.datetime) -> None:
+    async def _raise_review(
+        self,
+        symbol: str,
+        pos: OpenPosition,
+        cfg: BotConfig,
+        minutes: int,
+        hit,
+        now: dt.datetime,
+        one: dict | None = None,
+        verdict: dict | None = None,
+    ) -> None:
         mode = (cfg.trading_mode or "PAPER").upper()
         band = review.gap_band(cfg)
         five = hit.as_dict()
-        one = review.one_minute_evidence(self._tapes.get(symbol), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period))
+        if one is None:
+            # Caller did not read the check candle (older code paths, tests).
+            one = review.check_candle_evidence(
+                self._tapes.get(symbol), review.check_minutes(cfg), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period)
+            )
+            verdict = review.verdict(one, pos.direction) if one is not None else None
         if one is not None:
             # Saved with the evidence and shown on the card. Never read by the strategy.
-            one["verdict"] = review.verdict(one, pos.direction)
+            one["verdict"] = verdict
         text = review.review_text(
             symbol=symbol,
             mode=mode,
@@ -3251,7 +3287,14 @@ class StrategyEngine:
             sma_slow=int(cfg.sma_slow),
             band=band,
         )
+        default = review.default_answer(cfg)
         self._expire_reviews(symbol, "replaced by a newer review")
+        if default == "EXIT":
+            status, note_tail = review.AUTO_EXIT, "closed at once (default answer: Exit)"
+        elif default == "CONTINUE":
+            status, note_tail = review.AUTO_CONTINUE, "held (default answer: Continue)"
+        else:
+            status, note_tail = review.PENDING, "EXIT or WAIT (no answer keeps it open)"
         try:
             with session_factory()() as db:
                 row = ReviewLog(
@@ -3266,7 +3309,7 @@ class StrategyEngine:
                     five_min=json.dumps({**five, "band_pct": band, "sma_fast_len": int(cfg.sma_fast), "sma_slow_len": int(cfg.sma_slow)}),
                     one_min=json.dumps(one or {}),
                     message=text,
-                    status=review.PENDING,
+                    status=status,
                 )
                 db.add(row)
                 db.commit()
@@ -3282,16 +3325,23 @@ class StrategyEngine:
         while len(self.reviews) > REVIEWS_KEPT:
             old = next((i for i, r in enumerate(self.reviews) if r["status"] != review.PENDING), 0)
             self.reviews.pop(old)
-        note = f"{symbol} review — SMA gap {hit.gap_pct:+.3f}% is uncertain; EXIT or WAIT (no answer keeps it open)"
+        note = f"{symbol} review — SMA gap {hit.gap_pct:+.3f}% is uncertain; {note_tail}"
         self._signals[symbol] = note
         self.last_signal = note
-        self._alert(text)
-        callback = self.on_review
-        if callback is not None:
+        if default == "PROMPT":
+            self._alert(text)
+            callback = self.on_review
+            if callback is not None:
+                try:
+                    callback(item)
+                except Exception:  # noqa: BLE001
+                    pass
+        elif default == "EXIT":
+            # Close only this trade; the stop and the other exits never change.
             try:
-                callback(item)
+                await self.close_symbol(symbol, reason=review.AUTO_EXIT, trade_id=int(pos.trade_id))
             except Exception:  # noqa: BLE001
-                pass
+                logger.exception("auto-exit from the 1-minute review failed for %s", symbol)
 
     async def answer_review(self, review_id: int, action: str) -> dict:
         """EXIT or WAIT on a review. Only EXIT ever sends an order, and only for the reviewed trade."""
@@ -3667,6 +3717,7 @@ _ALERT_REASON = {
     "SL_REJECTED": "stop refused — closed at once",
     "MANUAL_CLOSE": "closed from the screen",
     "USER_REVIEW_EXIT": "EXIT on the 1-minute review",
+    "AUTO_REVIEW_EXIT": "the 1-minute review's default answer was Exit",
 }
 
 

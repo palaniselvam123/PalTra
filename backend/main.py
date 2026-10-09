@@ -235,6 +235,9 @@ class ConfigUpdate(BaseModel):
     review_on: bool | None = None
     review_gap_pct: float | None = Field(default=None, gt=0, le=2)
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
+    review_check_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    review_check_mode: Literal["ALWAYS", "ONLY_IF_AGAINST", "ONLY_IF_NOT_WITH"] | None = None
+    review_default_answer: Literal["PROMPT", "EXIT", "CONTINUE"] | None = None
     bot_name: str | None = Field(default=None, min_length=1, max_length=24)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
@@ -578,6 +581,9 @@ def _gap_dict(row) -> dict:
         "review_on": review.review_on(row),
         "review_gap_pct": review.gap_band(row),
         "review_cooldown_min": int(review.cooldown(row).total_seconds() // 60),
+        "review_check_minutes": review.check_minutes(row),
+        "review_check_mode": review.check_mode(row),
+        "review_default_answer": review.default_answer(row),
     }
 
 

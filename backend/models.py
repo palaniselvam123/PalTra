@@ -315,3 +315,12 @@ class BotConfig(Base):
     review_on: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     review_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.03)
     review_cooldown_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)
+    # Smart review (review.py): once the bot's own candle is uncertain, read a
+    # shorter check candle (1/2/3/5/10/15 min, built from the 1-minute tape) and
+    # prompt only when it reads against or not-with the trade. If nobody answers,
+    # review_default_answer decides: PROMPT (default: today's behaviour, keeps
+    # the trade), EXIT (close at once, reason AUTO_REVIEW_EXIT) or CONTINUE
+    # (no prompt sent, just a record). No answer never trades on its own.
+    review_check_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    review_check_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="ALWAYS")
+    review_default_answer: Mapped[str | None] = mapped_column(String, nullable=True, default="PROMPT")

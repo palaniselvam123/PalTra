@@ -197,7 +197,9 @@ async def test_a_one_minute_strategy_is_never_reviewed(db):  # noqa: F811
 
 # --- answers ------------------------------------------------------------------
 
-def _engine_with_trade(database, symbol: str = "TCS", on_review=None):
+async def _engine_with_trade(database, symbol: str = "TCS", on_review=None, default_answer: str = "PROMPT"):
+    import asyncio
+
     from strategy_engine import OpenPosition, StrategyEngine
 
     eng = StrategyEngine()  # PAPER client: local fills only
@@ -205,6 +207,7 @@ def _engine_with_trade(database, symbol: str = "TCS", on_review=None):
     cfg = eng.load_config()
     cfg = type(cfg)(**{c.name: getattr(cfg, c.name) for c in type(cfg).__table__.columns})
     cfg.symbol = symbol
+    cfg.review_default_answer = default_answer
     now = dt.datetime(2026, 10, 8, 13, 40, tzinfo=IST)
     tid = eng._insert_open_trade(cfg=cfg, direction="LONG", fill=2109.8, cross_price=2109.5, atr=2.0, sl=2100.0, now=now, qty=10)
     eng.positions[symbol] = OpenPosition(
@@ -214,7 +217,7 @@ def _engine_with_trade(database, symbol: str = "TCS", on_review=None):
     eng._ltps[symbol] = 2104.0
     eng._reviews_loaded = True
     hit = review.Uncertain(1_000_000, 2104.96, 2104.35, 0.029, 0.04, False)
-    eng._raise_review(symbol, eng.positions[symbol], cfg, 5, hit, now + dt.timedelta(minutes=20))
+    await eng._raise_review(symbol, eng.positions[symbol], cfg, 5, hit, now + dt.timedelta(minutes=20))
     return eng, tid
 
 
@@ -228,7 +231,7 @@ def _trade(database, tid):
 
 @pytest.mark.asyncio
 async def test_exit_closes_the_reviewed_trade_once(db):  # noqa: F811
-    eng, tid = _engine_with_trade(db)
+    eng, tid = await _engine_with_trade(db)
     item = eng.reviews[-1]
     assert item["status"] == review.PENDING and item["trade_id"] == tid
     assert "UNCERTAIN" in item["message"]
@@ -252,7 +255,7 @@ async def test_a_review_sends_one_alert_and_tells_the_replay_to_pause(db, _no_al
     import asyncio
 
     paused: list[dict] = []
-    eng, _ = _engine_with_trade(db, on_review=paused.append)
+    eng, _ = await _engine_with_trade(db, on_review=paused.append)
     await asyncio.sleep(0.05)
     assert [m for m in _no_alert_delivery if "SMA REVIEW" in m] and len(paused) == 1
     assert paused[0]["status"] == review.PENDING
@@ -262,7 +265,7 @@ async def test_a_review_sends_one_alert_and_tells_the_replay_to_pause(db, _no_al
 async def test_the_saved_review_carries_the_verdict_and_never_changes_the_trade(db):  # noqa: F811
     from models import ReviewLog
 
-    eng, tid = _engine_with_trade(db)
+    eng, tid = await _engine_with_trade(db)
     item = eng.reviews[-1]
     with db.session_factory()() as s:
         saved = s.get(ReviewLog, item["id"]).one_min
@@ -273,7 +276,7 @@ async def test_the_saved_review_carries_the_verdict_and_never_changes_the_trade(
 
 @pytest.mark.asyncio
 async def test_wait_and_no_answer_keep_the_trade_open(db):  # noqa: F811
-    eng, tid = _engine_with_trade(db)
+    eng, tid = await _engine_with_trade(db)
     item = eng.reviews[-1]
     out = await eng.answer_review(item["id"], "WAIT")
     assert out["status"] == review.WAIT
@@ -283,7 +286,7 @@ async def test_wait_and_no_answer_keep_the_trade_open(db):  # noqa: F811
 
 @pytest.mark.asyncio
 async def test_an_answer_after_the_trade_closed_sends_nothing(db):  # noqa: F811
-    eng, tid = _engine_with_trade(db)
+    eng, tid = await _engine_with_trade(db)
     item = eng.reviews[-1]
     await eng.close_symbol("TCS")  # closed some other way first
     assert _trade(db, tid)[0] == "MANUAL_CLOSE"
@@ -294,7 +297,7 @@ async def test_an_answer_after_the_trade_closed_sends_nothing(db):  # noqa: F811
 
 @pytest.mark.asyncio
 async def test_exit_never_closes_a_newer_trade_on_the_same_stock(db):  # noqa: F811
-    eng, tid = _engine_with_trade(db)
+    eng, tid = await _engine_with_trade(db)
     item = eng.reviews[-1]
     eng.positions["TCS"].trade_id = tid + 1000  # the stock now holds another trade
     out = await eng.answer_review(item["id"], "EXIT")
@@ -304,7 +307,7 @@ async def test_exit_never_closes_a_newer_trade_on_the_same_stock(db):  # noqa: F
 
 @pytest.mark.asyncio
 async def test_a_pending_review_ends_unanswered_when_its_trade_closes(db):  # noqa: F811
-    eng, _ = _engine_with_trade(db)
+    eng, _ = await _engine_with_trade(db)
     item = eng.reviews[-1]
     eng.positions.pop("TCS")
     eng._expire_reviews()
@@ -335,3 +338,85 @@ def test_api_saves_the_settings_and_answers_need_a_real_review(tmp_path, monkeyp
         assert client.post("/api/bot/review/1/close").status_code == 404
         assert "reviews" in client.get("/api/state").json()
     database.reset_engine()
+
+
+# --- smart check + default answer --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_default_answer_exit_closes_the_trade_at_once_no_prompt(db):  # noqa: F811
+    sent = []
+    eng, tid = await _engine_with_trade(db, on_review=sent.append, default_answer="EXIT")
+    # The trade is already gone, the review row is AUTO_REVIEW_EXIT, no card is pending.
+    assert "TCS" not in eng.positions
+    item = eng.reviews[-1]
+    assert item["status"] == review.AUTO_EXIT and item["trade_id"] == tid
+    assert sent == []  # on_review (the "please answer" callback) is not called
+    assert _trade(db, tid)[0] == "AUTO_REVIEW_EXIT"
+
+
+@pytest.mark.asyncio
+async def test_default_answer_continue_records_the_review_and_leaves_the_trade(db):  # noqa: F811
+    sent = []
+    eng, tid = await _engine_with_trade(db, on_review=sent.append, default_answer="CONTINUE")
+    item = eng.reviews[-1]
+    assert item["status"] == review.AUTO_CONTINUE and item["trade_id"] == tid
+    assert "TCS" in eng.positions
+    assert sent == [] and _trade(db, tid)[0] is None
+
+
+def test_check_mode_filters_the_prompt_only_when_the_verdict_disagrees():
+    # Smart check: with-the-trade verdict skips, against fires, mixed depends on the mode.
+    def judge(mode, label):
+        verdict = {"label": label}
+        if verdict is not None:
+            if mode == "ONLY_IF_AGAINST" and verdict.get("label") != review.AGAINST:
+                return "skip"
+            if mode == "ONLY_IF_NOT_WITH" and verdict.get("label") == review.WITH:
+                return "skip"
+        return "prompt"
+
+    assert judge("ALWAYS", review.WITH) == "prompt"  # old behaviour
+    assert judge("ONLY_IF_AGAINST", review.WITH) == "skip"
+    assert judge("ONLY_IF_AGAINST", review.MIXED) == "skip"
+    assert judge("ONLY_IF_AGAINST", review.AGAINST) == "prompt"
+    assert judge("ONLY_IF_NOT_WITH", review.WITH) == "skip"
+    assert judge("ONLY_IF_NOT_WITH", review.MIXED) == "prompt"
+    assert judge("ONLY_IF_NOT_WITH", review.AGAINST) == "prompt"
+
+
+def test_review_helpers_read_the_smart_settings_safely():
+    from types import SimpleNamespace
+
+    row = SimpleNamespace()  # nothing set at all: safe defaults
+    assert review.check_minutes(row) == 1
+    assert review.check_mode(row) == "ALWAYS"
+    assert review.default_answer(row) == "PROMPT"
+    good = SimpleNamespace(review_check_minutes=5, review_check_mode="ONLY_IF_NOT_WITH", review_default_answer="EXIT")
+    assert (review.check_minutes(good), review.check_mode(good), review.default_answer(good)) == (5, "ONLY_IF_NOT_WITH", "EXIT")
+    bad = SimpleNamespace(review_check_minutes=7, review_check_mode="JUNK", review_default_answer="")
+    assert (review.check_minutes(bad), review.check_mode(bad), review.default_answer(bad)) == (1, "ALWAYS", "PROMPT")
+
+
+def test_check_candle_evidence_reads_a_longer_candle_from_the_1_minute_tape():
+    import datetime as dt2
+
+    import pandas as pd
+    tape = pd.DataFrame(
+        [
+            {
+                "ts": int((dt2.datetime(2026, 10, 8, 9, 15, tzinfo=IST) + dt2.timedelta(minutes=i)).timestamp()),
+                "open": 100 + i * 0.1,
+                "high": 100 + i * 0.1 + 0.2,
+                "low": 100 + i * 0.1 - 0.1,
+                "close": 100 + i * 0.1,
+                "volume": 500,
+            }
+            for i in range(60)
+        ]
+    )
+    long = review.check_candle_evidence(tape, 5, 9, 21)
+    short = review.check_candle_evidence(tape, 1, 9, 21)
+    assert long is not None and short is not None
+    # The 5-minute read has fewer candles than the 1-minute read on the same tape.
+    assert len(long["candles"]) <= len(short["candles"])

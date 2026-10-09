@@ -53,6 +53,54 @@ def cooldown(cfg) -> dt.timedelta:
     return dt.timedelta(minutes=max(0, value))
 
 
+# Smart-review knobs.
+CHECK_MINUTES_CHOICES = (1, 2, 3, 5, 10, 15)
+# When the check candle fires the prompt: ALWAYS = like today; ONLY_IF_AGAINST
+# = only when the 1-minute verdict reads against the trade; ONLY_IF_NOT_WITH =
+# also when it reads mixed (anything but with the trade). An unreadable verdict
+# (too little tape) always prompts — safer than silently skipping.
+CHECK_MODES = ("ALWAYS", "ONLY_IF_AGAINST", "ONLY_IF_NOT_WITH")
+# What happens when a prompt would fire and nobody is around: PROMPT = today's
+# behaviour, EXIT = close the trade now (reason AUTO_REVIEW_EXIT), CONTINUE =
+# log the uncertain stretch but never message.
+DEFAULT_ANSWERS = ("PROMPT", "EXIT", "CONTINUE")
+AUTO_EXIT = "AUTO_REVIEW_EXIT"
+AUTO_CONTINUE = "AUTO_REVIEW_CONTINUE"
+
+
+def check_minutes(cfg) -> int:
+    try:
+        value = int(getattr(cfg, "review_check_minutes", None) or 1)
+    except (TypeError, ValueError):
+        return 1
+    return value if value in CHECK_MINUTES_CHOICES else 1
+
+
+def check_mode(cfg) -> str:
+    raw = str(getattr(cfg, "review_check_mode", None) or "ALWAYS").upper()
+    return raw if raw in CHECK_MODES else "ALWAYS"
+
+
+def default_answer(cfg) -> str:
+    raw = str(getattr(cfg, "review_default_answer", None) or "PROMPT").upper()
+    return raw if raw in DEFAULT_ANSWERS else "PROMPT"
+
+
+def check_candle_evidence(tape: pd.DataFrame | None, minutes: int, sma_fast: int, sma_slow: int, atr_period: int = 14) -> dict | None:
+    """`one_minute_evidence` read on the check candle (1-min tape resampled to `minutes`).
+
+    Reuses the same SMAs, VWAP and verdict as the 1-minute readout, so the
+    smart check reads the market the same way the card already shows it.
+    """
+    if minutes <= 1:
+        return one_minute_evidence(tape, sma_fast, sma_slow, atr_period)
+    # Imported here to keep review.py's import graph the same at module load.
+    from candles import resample
+
+    resampled = resample(tape, minutes)
+    return one_minute_evidence(resampled, sma_fast, sma_slow, atr_period)
+
+
 def _gap(row) -> float | None:
     return sma_gap_pct(row.get("sma_9"), row.get("sma_21"))
 

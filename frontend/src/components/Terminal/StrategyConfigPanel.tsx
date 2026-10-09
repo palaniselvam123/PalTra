@@ -43,6 +43,9 @@ const LABELS: Record<string, string> = {
   review_on: "1-min review",
   review_gap_pct: "review band",
   review_cooldown_min: "review cooldown",
+  review_check_minutes: "review check candle",
+  review_check_mode: "review check mode",
+  review_default_answer: "review default",
 };
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -119,7 +122,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   // The no-exit warning sits with the exits, the rest with gap mode.
   const gapNotes = strategyNotes(form).filter((n) => n.id !== "no-exit");
 
-  const set = (key: keyof SmaConfig, value: string | boolean) => {
+  const set = (key: keyof SmaConfig, value: string | boolean | number) => {
     markDirty(true);
     setForm((prev) => {
       if (!prev) return prev;
@@ -198,6 +201,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     review_on: Boolean(form.review_on),
     review_gap_pct: Number(form.review_gap_pct ?? 0.03),
     review_cooldown_min: Math.max(0, Math.round(Number(form.review_cooldown_min ?? 15))),
+    review_check_minutes: Number(form.review_check_minutes ?? 1),
+    review_check_mode: String(form.review_check_mode ?? "ALWAYS") as "ALWAYS" | "ONLY_IF_AGAINST" | "ONLY_IF_NOT_WITH",
+    review_default_answer: String(form.review_default_answer ?? "PROMPT") as "PROMPT" | "EXIT" | "CONTINUE",
   });
 
   const saveStock = async () => {
@@ -974,6 +980,58 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               onChange={(v) => set("review_cooldown_min", v)}
             />
           </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <label className="block text-xs text-slate-400">
+              Check candle{isOwn("review_check_minutes") && <OwnTag />}
+              <select
+                value={String(form.review_check_minutes ?? 1)}
+                onChange={(e) => set("review_check_minutes", Number(e.target.value))}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+              >
+                {[1, 2, 3, 5, 10, 15].map((m) => (
+                  <option key={m} value={m}>
+                    {m} min
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs text-slate-400">
+              Check mode{isOwn("review_check_mode") && <OwnTag />}
+              <select
+                value={String(form.review_check_mode ?? "ALWAYS")}
+                onChange={(e) => set("review_check_mode", e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+              >
+                <option value="ALWAYS">Prompt whenever uncertain</option>
+                <option value="ONLY_IF_NOT_WITH">Only if the check candle is not with the trade</option>
+                <option value="ONLY_IF_AGAINST">Only if the check candle is against the trade</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-2 block text-xs text-slate-400">
+            If I don&apos;t answer{isOwn("review_default_answer") && <OwnTag />}
+            <select
+              value={String(form.review_default_answer ?? "PROMPT")}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (
+                  next === "EXIT" &&
+                  String(form.trading_mode ?? "").toUpperCase() === "LIVE" &&
+                  !window.confirm(
+                    "Exit automatically on LIVE: the bot will close the reviewed trade without asking you. Continue?"
+                  )
+                ) {
+                  return;
+                }
+                set("review_default_answer", next);
+              }}
+              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+            >
+              <option value="PROMPT">Prompt me (default) — no answer keeps the trade</option>
+              <option value="CONTINUE">Continue automatically — no prompt, trade stays</option>
+              <option value="EXIT">Exit automatically — no prompt, trade is closed</option>
+            </select>
+          </label>
         </div>
       </FieldGroup>
       <FieldGroup title="Risk & session" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
