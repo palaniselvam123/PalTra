@@ -201,6 +201,8 @@ export type ChopScanRow = {
   avg_move_pct: number | null;
   last_cross_direction: "BULLISH" | "BEARISH" | null;
   score: ChopScore;
+  /** Had crosses earlier today and has been quiet for ≥ quiet_min minutes — possible strong trend forming. */
+  quiet_runner: boolean;
   ltp: number | null;
   candle_ts: number;
   volume?: number | null;
@@ -219,6 +221,7 @@ export type ChopScan = {
   minutes: CrossScanMinutes;
   sma_fast: number;
   sma_slow: number;
+  quiet_min: number;
   as_of: string | null;
   market_open: boolean;
   rows: ChopScanRow[];
@@ -994,10 +997,24 @@ export const smaApi = {
     ),
   crossScan: () => request<CrossScan>("/api/cross-scan", undefined, undefined, false),
   /** Start a chop/trend scan (read-only; today's SMA crosses, TRENDING / MIXED / CHOPPY per stock). */
-  chopScanStart: (symbols: string[], minutes: CrossScanMinutes = 5, force = false) =>
+  chopScanStart: (
+    symbols: string[],
+    minutes: CrossScanMinutes = 5,
+    force = false,
+    opts: { quiet_min?: number; alert_on_quiet?: boolean } = {}
+  ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
-      { method: "POST", body: JSON.stringify({ symbols, minutes, force }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          symbols,
+          minutes,
+          force,
+          quiet_min: opts.quiet_min ?? 60,
+          alert_on_quiet: opts.alert_on_quiet ?? false,
+        }),
+      },
       20000,
       false
     ),

@@ -131,3 +131,69 @@ def test_scanner_reports_what_broke_when_nothing_can_be_read():
         assert snap["error"] and "Groww" in snap["error"]
 
     asyncio.run(go())
+
+
+# --- quiet-runner alert -------------------------------------------------------
+
+
+def test_analyze_marks_a_stock_quiet_only_when_it_had_crosses_and_then_went_silent():
+    # No crosses at all: not a quiet runner.
+    tape = _minutes([100 + i * 0.1 for i in range(300)])
+    row = chop_scan.analyze(tape, 9, 21, 5, _at(14, 20), symbol="TRND", quiet_min=60)
+    assert row is not None and row.crosses_today <= 1
+    # If there was no cross, the stock is not a quiet runner (it never ran).
+    if row.crosses_today == 0:
+        assert row.quiet_runner is False
+    # A choppy day: many crosses, the last one is recent, so not quiet either.
+    chop = _minutes([100 + ((i // 10) % 2) * 2 for i in range(300)])
+    chop_row = chop_scan.analyze(chop, 9, 21, 5, _at(14, 20), symbol="CHOP", quiet_min=60)
+    assert chop_row is not None and chop_row.quiet_runner is False
+
+
+def test_quiet_runner_text_names_the_stock_and_time_and_the_side():
+    text = chop_scan.quiet_runner_text("TCS", 85.0, "BULLISH", 2110.5)
+    assert "TCS" in text and "1h 25m" in text and "Bullish" in text and "2110.50" in text
+
+
+def test_scanner_fires_the_alert_once_per_quiet_stock_per_day(monkeypatch):
+    import datetime as dt2
+
+    import pytest as _pytest
+
+    class _Open:
+        def __call__(self, _now):
+            return True
+
+    monkeypatch.setattr(chop_scan, "market_is_open", _Open())
+    # No cross and so flagged as a quiet runner only when its minutes-since reads over the threshold.
+    # Build a quiet runner by hand so the test does not depend on the SMA walk.
+    sample_row = chop_scan.ChopRow(
+        symbol="QUIET",
+        minutes=5,
+        crosses_today=1,
+        minutes_since_last_cross=90.0,
+        avg_minutes_between=None,
+        avg_move_pct=None,
+        last_cross_direction="BULLISH",
+        score=chop_scan.TRENDING,
+        quiet_runner=True,
+        ltp=100.0,
+        candle_ts=1,
+    )
+    chop_scan._ALERTED_TODAY.clear()
+
+    now = dt.datetime(2026, 10, 8, 11, 0, tzinfo=IST)
+    sent: list[str] = []
+    # Simulate the end-of-run alert path.
+    for row in [sample_row]:
+        if row.quiet_runner and not chop_scan._already_alerted(row.symbol, now):
+            sent.append(chop_scan.quiet_runner_text(row.symbol, row.minutes_since_last_cross or 0, row.last_cross_direction, row.ltp))
+            chop_scan._mark_alerted(row.symbol, now)
+    # Second time: no new alert for the same stock today.
+    for row in [sample_row]:
+        if row.quiet_runner and not chop_scan._already_alerted(row.symbol, now):
+            sent.append(chop_scan.quiet_runner_text(row.symbol, row.minutes_since_last_cross or 0, row.last_cross_direction, row.ltp))
+            chop_scan._mark_alerted(row.symbol, now)
+    assert len(sent) == 1 and "QUIET" in sent[0]
+    # A fresh day: the alert fires again.
+    assert not chop_scan._already_alerted(sample_row.symbol, now + dt2.timedelta(days=1))

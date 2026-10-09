@@ -317,6 +317,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   strategy reads it. Lifecycle mirrors `CrossScanner` (manual Scan now, one pass at a
   time, `CROSS_SCAN_CONCURRENCY` downloads in parallel). `POST /api/chop-scan/start`
   (symbols, minutes, force) and `GET /api/chop-scan` on the SMA terminal.
+  **Quiet runner alert**: when a stock had crosses earlier today and has stayed quiet
+  for `quiet_min` minutes (default 60), its row shows a `🔔 Quiet Nm` chip and the page shows
+  a dismissible popup; a Telegram ping is sent through the main engine's alert path, at most
+  once per stock per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
+  defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
+  Trade list are downloaded (quick enough to run quietly).
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
