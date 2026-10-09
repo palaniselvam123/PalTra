@@ -309,7 +309,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   that fails 5 times before any success stops and says why (e.g. no Groww login).
   `POST /api/cross-scan/start` (symbols, minutes, force) and `GET /api/cross-scan`
   on the SMA terminal; the stock list comes from `GET /api/scalp/universe` on the
-  desk. No order path: Arm only opens the arm prompt.
+  desk. Each row also carries the stock's activity from the same 1-minute candles
+  (`cross_scan.activity`, no `enrich()`, so no volume warnings): shares traded today
+  (Groww's running total), shares in the last 10 minutes, and the signed price speed
+  in % per minute over those 10 minutes. No order path: Arm only opens the arm prompt.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).

@@ -77,7 +77,7 @@ export function SortTh<K extends string>({
         }}
         title={title ?? "Sort by this column"}
         className={clsx(
-          "inline-flex min-h-7 items-center gap-1 rounded px-1 uppercase tracking-wider hover:bg-white/5 hover:text-slate-100",
+          "inline-flex min-h-7 items-center gap-1 rounded px-1 uppercase tracking-wider hover:bg-white/5",
           num && "flex-row-reverse",
           on ? "text-slate-100" : "text-slate-400"
         )}
