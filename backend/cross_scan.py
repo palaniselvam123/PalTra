@@ -131,7 +131,9 @@ def scan_one(symbol: str, frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, 
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), LOOKBACK) + 1:
         return None
-    enriched = enrich(bars, sma_fast, sma_slow)
+    # The cross reads closes only. Dropping Groww's running volume keeps enrich() from working out
+    # each candle's volume, which logs a warning at every day boundary: four days of 213 stocks flooded the log.
+    enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     ltp = float(frame_1m["close"].iloc[-1])
     return outlook(enriched, minutes, symbol=symbol, ltp=round(ltp, 2))
 
