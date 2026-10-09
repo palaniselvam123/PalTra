@@ -830,6 +830,7 @@ class StrategyEngine:
                     row.mode or "PAPER",
                     row.stop_active is not False,
                     bool(getattr(row, "flipped", False)),
+                    _strategy_of(row) or {},
                 )
                 for row in rows
             ]
@@ -837,22 +838,29 @@ class StrategyEngine:
             cfg = self.load_config()
         except Exception:  # noqa: BLE001
             cfg = None
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry in pending:
             if not symbol or symbol in self.positions:
                 continue
+            # The stop the trade was opened with: this stock's own settings,
+            # then the copy saved with the trade at entry (never the shared ones).
+            own = None if cfg is None else _cfg_for(cfg, symbol)
+            if own is not None:
+                for key in ("use_stop", "stop_type", "tsl_sl_points", "tsl_trail_points", "tsl_target_points"):
+                    if at_entry.get(key) is not None:
+                        setattr(own, key, at_entry[key])
             # A practice book on the moving stop keeps trailing from the saved
             # stop; its target comes back on the next closed candle.
             trailing = bool(
                 stop_active
-                and cfg is not None
-                and uses_gap_stop(cfg, live=(mode or "PAPER").upper() == "LIVE")
+                and own is not None
+                and uses_gap_stop(own, live=(mode or "PAPER").upper() == "LIVE")
             )
             tsl_points = tsl_step = None
             target = None
-            if stop_active and cfg is not None and not trailing and uses_tsl(cfg):
+            if stop_active and own is not None and not trailing and uses_tsl(own):
                 # The trailed stop was saved on each move. It never loosens,
                 # so trailing resumes from it with the best price reset to entry.
-                tsl_points, tsl_step, tgt_points = tsl_settings(cfg)
+                tsl_points, tsl_step, tgt_points = tsl_settings(own)
                 _sl, target = tsl_entry_levels(direction, entry, tsl_points, tgt_points)
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
@@ -3070,6 +3078,8 @@ class StrategyEngine:
             "stop_enabled": True if view_cfg is None or view_cfg.use_stop is None else bool(view_cfg.use_stop),
             "atr_multiplier": float(view_cfg.atr_multiplier) if view_cfg else 1.5,
             "stop_type": (getattr(view_cfg, "stop_type", None) or "ATR") if view_cfg else "ATR",
+            # The chart stock's own stop numbers (its overrides over the shared row).
+            "stop_points": _stop_points(view_cfg),
             "flip_orders": flips_orders(view_cfg) if view_cfg is not None else False,
             "cross_exit": cross_exits(view_cfg) if view_cfg is not None else True,
             # Candle interval in minutes the chart stock trades on (candles.py).
@@ -3613,6 +3623,20 @@ _ALERT_REASON = {
 
 
 REVIEWS_KEPT = 10
+
+
+def _stop_points(cfg) -> dict | None:
+    """Stop, trail and target of one stock's settings, for the screens."""
+    if cfg is None:
+        return None
+    sl_points, step, target = tsl_settings(cfg)
+    return {
+        "tsl_sl_points": sl_points,
+        "tsl_trail_points": step,
+        "tsl_target_points": target,
+        "gap_sl_mult": float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
+        "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
+    }
 
 
 def _review_dict(row: ReviewLog) -> dict:

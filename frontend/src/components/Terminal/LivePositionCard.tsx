@@ -56,7 +56,7 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
             pos?.trailing
               ? "Moving stop (SMA gap)"
               : pos?.tsl_step
-                ? `Trailing stop (every ₹${pos.tsl_step})`
+                ? `Trailing stop (₹${pos.tsl_points ?? "—"} · trail every ₹${pos.tsl_step})`
                 : `${mult}× ATR stop`
           }
           value={stopOff ? "OFF" : px(state?.active_sl_trigger)}
