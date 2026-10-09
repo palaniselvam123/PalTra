@@ -3335,7 +3335,7 @@ class StrategyEngine:
             return or_(TradeLog.mode == "PAPER", TradeLog.mode.is_(None))
         return TradeLog.mode == mode
 
-    def _chart_parts(self, frame: pd.DataFrame, cfg, symbol: str = "") -> tuple[list[dict], list[dict]]:
+    def _chart_parts(self, frame: pd.DataFrame, cfg, symbol: str = "", with_blocks: bool = True) -> tuple[list[dict], list[dict]]:
         """Closed candle rows and refused crosses, reused until a candle closes.
 
         Both depend only on closed candles (and the filter settings), so the
@@ -3360,7 +3360,8 @@ class StrategyEngine:
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
         rows = candle_rows(frame)[:-1]
-        blocks = filter_blocks(frame, cfg)
+        # Refused crosses belong to the bot's own candle; another chart size shows none.
+        blocks = filter_blocks(frame, cfg) if with_blocks else []
         if symbol not in caches and len(caches) >= 12:
             caches.pop(next(iter(caches)))
         caches[symbol] = (key, rows, blocks)
@@ -3381,12 +3382,44 @@ class StrategyEngine:
         caches[symbol] = (key, enriched)
         return enriched
 
-    def chart_payload(self, limit: int = 240, symbol: str | None = None) -> dict:
+    def _interval_frame(self, symbol: str, tape: pd.DataFrame, minutes: int, cfg) -> pd.DataFrame:
+        """The stock's 1-minute tape grouped into `minutes` candles and enriched, for the chart only.
+
+        Redone only when a candle closes (the forming row is refreshed from the tape in between),
+        like `_view_frame`. The bot never reads it.
+        """
+        bars = resample(tape, minutes)
+        if bars is None or len(bars) < 2:
+            return bars
+        closed = bars.iloc[-2]
+        key = (len(bars), int(bars["ts"].iloc[0]), int(closed["ts"]), float(closed["close"]), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period))
+        caches = getattr(self, "_interval_frames", None)
+        if caches is None:
+            caches = self._interval_frames = {}
+        hit = caches.get((symbol, minutes))
+        if hit is not None and hit[0] == key:
+            out = hit[1].copy()
+            cols = [c for c in ("open", "high", "low", "close", "volume") if c in bars.columns and c in out.columns]
+            out.iloc[-1, [out.columns.get_loc(c) for c in cols]] = bars[cols].iloc[-1].to_numpy()
+            return out
+        enriched = enrich(bars, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        if (symbol, minutes) not in caches and len(caches) >= 12:
+            caches.pop(next(iter(caches)))
+        caches[(symbol, minutes)] = (key, enriched)
+        return enriched
+
+    def chart_payload(self, limit: int = 240, symbol: str | None = None, interval: int | None = None) -> dict:
         """The chart's candles, markers and levels.
 
         `symbol` draws another watched stock without moving the chart focus
         (a second browser tab on one stock of a replay). An unknown stock gives
         an empty chart.
+
+        `interval` (minutes, one of CHART_INTERVALS) draws the stock's 1-minute
+        tape in candles of that size instead of the bot's own candle: finer
+        than the bot trades on (1 or 3 minutes for a 5-minute bot), or a size
+        the bot's candle does not divide into. Display only: the bot's signals,
+        stops and refused crosses stay on its own candle, so none are drawn.
         """
         frame = self.candles
         markers = []
@@ -3410,10 +3443,20 @@ class StrategyEngine:
                 frame = self._other_frame(other, frame, cfg)
         candles: list[dict] = []
         all_blocks: list[dict] = []
+        shown_symbol = other or focus
+        native = candle_minutes(cfg, stock_overrides(cfg, shown_symbol)) if cfg else 1
+        alt = 0
+        if cfg is not None and interval in CHART_INTERVALS and interval != native:
+            tape = self._tapes.get(shown_symbol)
+            if tape is not None and not getattr(tape, "empty", True):
+                frame = self._interval_frame(shown_symbol, tape, int(interval), cfg)
+                alt = int(interval)
         if frame is not None and not frame.empty:
             if len(frame) >= 2:
                 # VWAP and RSI need the whole session, so compute before trimming.
-                closed_rows, all_blocks = self._chart_parts(frame, cfg, other or focus)
+                closed_rows, all_blocks = self._chart_parts(
+                    frame, cfg, f"{shown_symbol}@{alt}" if alt else shown_symbol, with_blocks=not alt
+                )
                 candles = [*closed_rows, _forming_row(frame.iloc[-1])][-limit:]
             else:
                 candles = [_forming_row(frame.iloc[-1])]
@@ -3476,7 +3519,7 @@ class StrategyEngine:
             "blocked": blocked,
             "filters": chart_filters(cfg),
             # Minutes per candle sent (candles.py); the chart only merges up from it.
-            "candle_minutes": candle_minutes(cfg, stock_overrides(cfg, view)) if cfg else 1,
+            "candle_minutes": alt or (candle_minutes(cfg, stock_overrides(cfg, view)) if cfg else 1),
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
@@ -3623,6 +3666,9 @@ _ALERT_REASON = {
 
 
 REVIEWS_KEPT = 10
+
+#: Candle sizes (minutes) the chart can draw from the 1-minute tape (`chart_payload(interval=)`).
+CHART_INTERVALS = (1, 2, 3, 5, 10, 15, 30, 60, 240)
 
 
 def _stop_points(cfg) -> dict | None:

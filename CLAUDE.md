@@ -177,7 +177,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE.
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
-  chart focus. The terminal shows stock tabs above the chart (the replay's
+  chart focus, and an optional `interval` (1, 2, 3, 5, 10, 15, 30, 60 or 240
+  minutes) to draw the 1-minute tape (`engine._tapes`) in candles of that size
+  instead of the bot's own: the chart's candle-size menu asks for it for sizes
+  finer than the bot's candle (1 or 3 minutes for a 5-minute bot) or ones it does
+  not divide into; bigger multiples are still merged in the browser. Display only
+  (no refused-cross marks on another size; the bot's frames are untouched). The terminal shows stock tabs above the chart (the replay's
   stocks, or the armed/held ones); each opens `/terminal/chart/?symbol=…`
   (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
   chart that follows the replay while it plays and shows the replayed day
