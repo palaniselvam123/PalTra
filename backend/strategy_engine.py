@@ -3233,6 +3233,9 @@ class StrategyEngine:
         band = review.gap_band(cfg)
         five = hit.as_dict()
         one = review.one_minute_evidence(self._tapes.get(symbol), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period))
+        if one is not None:
+            # Saved with the evidence and shown on the card. Never read by the strategy.
+            one["verdict"] = review.verdict(one, pos.direction)
         text = review.review_text(
             symbol=symbol,
             mode=mode,

@@ -94,6 +94,54 @@ def test_one_minute_read_out_uses_closed_minutes_only():
     assert "TCS" in text and "+0.029%" in text and "UNCERTAIN" in text and "No answer = keep holding" in text
 
 
+# --- the 1-minute trend verdict (information only) ------------------------------
+
+def _evidence(**over):
+    one = {
+        "candles": [{"close": c} for c in (2105.2, 2104.6, 2104.1, 2103.2, 2102.6)],
+        "fast_slope": "falling", "vs_fast": "below", "vs_slow": "below", "vs_vwap": "below",
+    }
+    one.update(over)
+    return one
+
+
+def test_falling_minutes_are_against_a_long_and_with_a_short():
+    long_v = review.verdict(_evidence(), "LONG")
+    assert long_v["label"] == review.AGAINST and (long_v["against"], long_v["with"], long_v["of"]) == (5, 0, 5)
+    short_v = review.verdict(_evidence(), "SHORT")
+    assert short_v["label"] == review.WITH and short_v["with"] == 5
+    assert long_v["checks"]["price vs VWAP"] == "against" and short_v["checks"]["price vs VWAP"] == "with"
+
+
+def test_the_verdict_needs_a_net_score_of_three_either_way():
+    # 2 with, 3 against: net -1, so a split read.
+    split = review.verdict(_evidence(fast_slope="rising", vs_fast="above"), "LONG")
+    assert (split["with"], split["against"], split["score"], split["label"]) == (2, 3, -1, review.MIXED)
+    # 1 with, 4 against: net -3, enough.
+    lean = review.verdict(_evidence(fast_slope="rising"), "LONG")
+    assert (lean["with"], lean["against"], lean["score"], lean["label"]) == (1, 4, -3, review.AGAINST)
+    # Flat readings count as neither.
+    flat = review.verdict(_evidence(fast_slope="flat", vs_fast="at", vs_slow="above", vs_vwap="above"), "LONG")
+    assert (flat["flat"], flat["score"], flat["label"]) == (2, 1, review.MIXED)
+
+
+def test_too_little_data_gives_no_verdict_and_never_raises():
+    assert review.verdict(None, "LONG") is None
+    assert review.verdict({"candles": [{"close": 1}]}, "LONG") is None
+    assert review.verdict(_evidence(fast_slope=None, vs_fast=None, vs_slow=None, vs_vwap=None), "LONG") is None
+    assert "not enough" in review.verdict_line(None, "LONG")
+
+
+def test_the_verdict_is_in_the_alert_text_and_says_it_is_information_only():
+    one = _evidence(candle_ts=0, vwap=2118.52, gap_trend="widening", slow_slope="flat", rsi14=38.0, volume_ratio=1.4)
+    one["verdict"] = review.verdict(one, "LONG")
+    one["candles"] = [dict(c, colour="RED") for c in one["candles"]]
+    text = review.review_text(symbol="TCS", mode="PAPER", direction="LONG", qty=10, entry=2109.8, minutes=5,
+                              five={"candle_ts": 0, "sma_fast": 2104.96, "sma_slow": 2104.35, "gap_pct": 0.029},
+                              one=one, sma_fast=9, sma_slow=21, band=0.03)
+    assert "1-min trend is AGAINST this LONG" in text and "Information only" in text
+
+
 # --- in the engine: replays on local fills -------------------------------------
 
 async def _replay(database, **over):
@@ -208,6 +256,19 @@ async def test_a_review_sends_one_alert_and_tells_the_replay_to_pause(db, _no_al
     await asyncio.sleep(0.05)
     assert [m for m in _no_alert_delivery if "SMA REVIEW" in m] and len(paused) == 1
     assert paused[0]["status"] == review.PENDING
+
+
+@pytest.mark.asyncio
+async def test_the_saved_review_carries_the_verdict_and_never_changes_the_trade(db):  # noqa: F811
+    from models import ReviewLog
+
+    eng, tid = _engine_with_trade(db)
+    item = eng.reviews[-1]
+    with db.session_factory()() as s:
+        saved = s.get(ReviewLog, item["id"]).one_min
+    # No 1-minute tape in this test, so there is nothing to read and no verdict; the trade is untouched.
+    assert "verdict" not in saved or '"verdict": null' in saved
+    assert eng.positions["TCS"].trade_id == tid and _trade(db, tid) == (None, None)
 
 
 @pytest.mark.asyncio

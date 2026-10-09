@@ -16,6 +16,13 @@ function clock(ts: number | undefined, plusMinutes = 0): string {
 
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
+// Not green / red: those stay for profit and loss.
+const VERDICT_STYLE = {
+  WITH: "bg-sky-500/15 text-sky-200 ring-sky-400/40",
+  AGAINST: "bg-amber-400/15 text-amber-200 ring-amber-400/50",
+  MIXED: "bg-white/5 text-slate-200 ring-white/20",
+} as const;
+
 /**
  * The 1-minute human review: the bot's candle says its SMA lines are too close
  * to call, so it shows the last closed 1-minute candles and asks. EXIT closes
@@ -115,6 +122,22 @@ export function ReviewCards({ state, onChanged }: { state: SmaState | null; onCh
                 </button>
               </span>
             </div>
+            {one.verdict ? (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-300">
+                <span
+                  title="How the last closed 1-minute candles read for this trade. Information only: the bot does not act on it."
+                  className={clsx("rounded-md px-2 py-0.5 font-semibold ring-1 ring-inset", VERDICT_STYLE[one.verdict.label])}
+                >
+                  1-min trend: {one.verdict.label} your {r.direction}
+                </span>
+                <span>
+                  {one.verdict.with} with · {one.verdict.against} against · {one.verdict.flat} flat of {one.verdict.of} checks
+                </span>
+                <span className="text-slate-400">Information only — you decide.</span>
+              </p>
+            ) : candles.length ? (
+              <p className="mt-1 text-xs text-slate-400">1-min trend: not enough data to read.</p>
+            ) : null}
             <details className="mt-1 text-xs text-slate-300">
               <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-200">1-minute read-out</summary>
               <div className="mt-1 grid gap-x-6 gap-y-1 sm:grid-cols-2">
@@ -147,6 +170,14 @@ export function ReviewCards({ state, onChanged }: { state: SmaState | null; onCh
                       {one.rsi14 != null ? ` · RSI ${one.rsi14.toFixed(0)}` : ""}
                       {one.volume_ratio != null ? ` · vol ${one.volume_ratio.toFixed(1)}× avg` : ""}
                     </p>
+                    {one.verdict ? (
+                      <p className="text-slate-400">
+                        Checks:{" "}
+                        {Object.entries(one.verdict.checks)
+                          .map(([name, v]) => `${name} ${v}`)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
                     <p className="text-slate-400">
                       Highs / lows:{" "}
                       {candles.map((c) => `${num(c.high)}/${num(c.low)}`).join(" · ")}

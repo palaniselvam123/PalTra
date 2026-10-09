@@ -283,6 +283,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   on that trade. `answer_review`: EXIT marks the row first, then closes only
   that `trade_id` through `close_symbol(reason="USER_REVIEW_EXIT")`; WAIT only
   records; an answer after the trade closed sends nothing (`ALREADY_CLOSED`).
+  The evidence carries a **1-minute trend verdict** (`review.verdict`, saved in
+  `ReviewLog.one_min`, shown as a chip on the card and a line in the alert):
+  five checks on the closed 1-minute tape (fast SMA slope, price vs the fast and
+  slow SMA, price vs VWAP, net move of the last three closes), each with / against
+  / flat for the trade's side; net score ≥ 3 is `WITH`, ≤ -3 `AGAINST`, else
+  `MIXED`. Information only: nothing in the strategy reads it, and it never
+  answers for the person.
   **No answer never exits**: the row ends `NO_RESPONSE` when the trade closes or
   the stretch ends. A replay pauses at each review (`engine.on_review`); Play
   without answering = no answer. Routes: `POST /api/bot/review/{id}/{exit|wait}`
