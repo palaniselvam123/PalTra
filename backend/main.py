@@ -20,12 +20,13 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
+import deep_health as deep_health_mod
 from replay import (
     SPEEDS,
     ReplaySession,
@@ -39,7 +40,7 @@ from replay import (
     settings_snapshot,
 )
 import gap_mode
-from groww_client import preferred_quote_token
+from groww_client import market_is_open, preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
@@ -302,6 +303,23 @@ def _config_dict(row: BotConfig) -> dict:
 @app.get("/api/health")
 async def health():
     return {"ok": True, "mode": engine.load_config().trading_mode, "bot": engine.status}
+
+
+def deep_health() -> tuple[dict, bool]:
+    """What a watcher needs: the loop is beating and every bot has ticked lately."""
+    tasks = {1: _task, **{n: t for n, t in zip(bot_engines, _bot_tasks)}}
+    rows = [deep_health_mod.bot_row(1, engine, tasks.get(1))]
+    rows += [deep_health_mod.bot_row(n, eng, tasks.get(n)) for n, eng in bot_engines.items()]
+    out = deep_health_mod.evaluate(
+        market_open=market_is_open(engine._now()), tracer=stall_tracer.snapshot(), bots=rows
+    )
+    return out, out["ok"]
+
+
+@app.get("/api/health/deep")
+async def health_deep():
+    body, ok = deep_health()
+    return JSONResponse(body, status_code=200 if ok else 503)
 
 
 async def _state(eng: StrategyEngine):

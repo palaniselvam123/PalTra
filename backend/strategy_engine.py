@@ -706,6 +706,7 @@ class StrategyEngine:
         self.last_signal = ""
         self.candles = pd.DataFrame()
         self._stop = False
+        self.last_tick_at: float | None = None  # monotonic time the 1-second loop last finished a pass (deep health)
         self._sleep = asyncio.sleep
         self.realized_net = 0.0
         self.trades_today = 0
@@ -933,6 +934,7 @@ class StrategyEngine:
                 raise
             except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
+            self.last_tick_at = time.monotonic()
             # A stopped book after the close does not need two quotes a second.
             # That loop was keeping the only CPU busy while the desk waited.
             pause = 5.0 if (not market_is_open(self._now()) and self.status != "RUNNING") else 0.5

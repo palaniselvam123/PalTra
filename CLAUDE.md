@@ -361,6 +361,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   threads and the stack of the thread running the loop (faulthandler adds every
   thread's stack to stderr), then `STALL over: …` with how long it lasted. Started
   first in `boot_engine`; `GET /api/stall` reports it. Search the Fly log for `STALL`.
+- `backend/deep_health.py` – deep health for an outside watcher (read-only, no
+  secrets, no mode/stocks/money in the answer). `GET /api/health/deep` on the desk
+  (public: listed in `desk_lock._api_public`; also `/sma/api/health/deep`) answers
+  200 `{ok:true}` or 503 `{ok:false, reasons:[…]}`. It fails when the event loop is
+  blocked right now (stall tracer heartbeat older than 10 s), when a bot's loop task
+  has ended, or when a bot has not finished a pass (`StrategyEngine.last_tick_at`,
+  stamped after every `run` pass) for 30 s in market hours or while RUNNING (180 s
+  otherwise). A stall that already recovered is not a failure. `/api/health` still
+  only means the web server replies. Not wired to Fly routing (one machine).
 - `backend/main.py` – the terminal's API (`/api/state`, `/api/config`,
   `/api/mode`, `/api/bot/*`, `/api/trades`, `/ws/stream`) and
   `boot_engine`/`stop_engine`.
