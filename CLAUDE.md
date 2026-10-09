@@ -288,9 +288,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   five checks on the closed 1-minute tape (fast SMA slope, price vs the fast and
   slow SMA, price vs VWAP, net move of the last three closes), each with / against
   / flat for the trade's side; net score ≥ 3 is `WITH`, ≤ -3 `AGAINST`, else
-  `MIXED`. Information only: nothing in the strategy reads it, and it never
-  answers for the person.
-  **No answer never exits**: the row ends `NO_RESPONSE` when the trade closes or
+  `MIXED`. The same verdict is read on an optional **check candle** (`review_check_minutes`
+  1/2/3/5/10/15, built from the 1-minute tape by `review.check_candle_evidence`): under
+  `review_check_mode = ONLY_IF_NOT_WITH` or `ONLY_IF_AGAINST` (default `ALWAYS`), the
+  review is only raised when the check candle disagrees with the trade (an unreadable
+  verdict always raises). Information only otherwise: nothing in the strategy reads it,
+  and it never answers for the person.
+  **Default answer** (`review_default_answer`, per bot and per stock): `PROMPT`
+  (default, today's behaviour), `EXIT` (no card, no alert; the trade is closed at once
+  with `AUTO_REVIEW_EXIT` through `close_symbol`, LIVE paths included) or `CONTINUE`
+  (no card, no alert; the uncertain stretch is recorded as `AUTO_REVIEW_CONTINUE`).
+  Switching a LIVE stock to `EXIT` asks for a confirm in the terminal. The stop,
+  Bollinger exit, SMA cross exit, gap fade and square-off are untouched; they still
+  guard the trade.
+  **No answer never exits** under `PROMPT`: the row ends `NO_RESPONSE` when the trade closes or
   the stretch ends. A replay pauses at each review (`engine.on_review`); Play
   without answering = no answer. Routes: `POST /api/bot/review/{id}/{exit|wait}`
   (and the research, `/api/bots/{n}/bot/…` and `/api/replay/bot/…?bot=` forms).
