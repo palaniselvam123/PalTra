@@ -306,6 +306,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   without answering = no answer. Routes: `POST /api/bot/review/{id}/{exit|wait}`
   (and the research, `/api/bots/{n}/bot/…` and `/api/replay/bot/…?bot=` forms).
   The stock research baseline keeps it off.
+- `backend/chop_scan.py` – Chop/Trend scan (read-only; the Scalp page's "Trend quality"
+  section): the same 1-minute Groww candles the Cross scan downloads are resampled to the
+  user's chosen candle, enriched with SMA fast / slow, and today's **closed** SMA crosses
+  are counted per stock. Each row carries `crosses_today`, `minutes_since_last_cross`,
+  `avg_minutes_between`, `avg_move_pct` (abs close-to-close between consecutive crosses)
+  and `activity` (volume, speed) from `cross_scan.activity`, and `chop_scan.score_for`
+  labels the stock `TRENDING` (0-1 crosses, long run), `CHOPPY` (CHOP_MIN_CROSSES+ or
+  average gap under CHOP_SHORT_GAP_MIN min) or `MIXED`. Information only: nothing in the
+  strategy reads it. Lifecycle mirrors `CrossScanner` (manual Scan now, one pass at a
+  time, `CROSS_SCAN_CONCURRENCY` downloads in parallel). `POST /api/chop-scan/start`
+  (symbols, minutes, force) and `GET /api/chop-scan` on the SMA terminal.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
