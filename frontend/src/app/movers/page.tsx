@@ -29,6 +29,7 @@ import {
   type RecorderStatus,
 } from "@/lib/api";
 import { istDay } from "@/lib/format";
+import { useArming } from "@/components/Scalp/useArming";
 
 const REFRESH_MS = 15_000;
 
@@ -48,6 +49,17 @@ export default function MoversPage() {
   const [recorder, setRecorder] = useState<RecorderStatus | null>(null);
   const [movers, setMovers] = useState<MoversResponse | null>(null);
   const [fast, setFast] = useState<FastMoversResponse | null>(null);
+  // Arm a mover on any SMA bot from here: which bot, then quantity / stop / trail / target.
+  // Arming only puts it on that bot's Trade list; it orders on the bot's next SMA cross.
+  const { armed, arming, armNote, arm, loadDesks, dialogs } = useArming(
+    (symbol) =>
+      [...(movers?.gainers ?? []), ...(movers?.losers ?? [])].find((m) => m.symbol === symbol)?.last_price ??
+      fast?.movers.find((f) => f.symbol === symbol)?.last_price ??
+      null
+  );
+  useEffect(() => {
+    loadDesks();
+  }, [loadDesks]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -248,6 +260,13 @@ export default function MoversPage() {
           </Explain>
         </header>
 
+        {dialogs}
+        {armNote && (
+          <p role="status" className="rounded-lg border border-accentSky/30 bg-accentSky/10 px-4 py-2 text-sm text-accentSky">
+            {armNote}
+          </p>
+        )}
+
         {error && (
           <div className="flex items-start gap-2 rounded-lg border border-loss/40 bg-loss/10 px-4 py-3 text-sm text-loss">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -305,7 +324,7 @@ export default function MoversPage() {
               </button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-2 text-sm">
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             <CalendarDays size={14} className="text-slate-500" />
             <label className="text-slate-400">Day</label>
             <input
@@ -535,6 +554,7 @@ export default function MoversPage() {
                     <Th right>Volume</Th>
                     <Th right>Price</Th>
                     <Th right>{peak ? "Peaked at" : "At"}</Th>
+                    <Th right>Arm</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -556,6 +576,9 @@ export default function MoversPage() {
                       <Td right className="tabular-nums text-slate-400">{vol(f.volume)}</Td>
                       <Td right className="tabular-nums">{f.last_price.toFixed(2)}</Td>
                       <Td right className="text-slate-400">{f.last_time_ist}</Td>
+                      <Td right>
+                        <ArmCell symbol={f.symbol} armedOn={armed.get(f.symbol.toUpperCase()) ?? []} arming={arming === f.symbol} onArm={() => arm(f.symbol)} />
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -603,6 +626,9 @@ export default function MoversPage() {
               fromLabel={fromLabel}
               openLabel={openLabel}
               emptyText={emptyMsg("above")}
+              armed={armed}
+              arming={arming}
+              onArm={arm}
             />
           ) : (
             <MoverTable
@@ -613,6 +639,9 @@ export default function MoversPage() {
               fromLabel={fromLabel}
               openLabel={openLabel}
               emptyText={emptyMsg("below")}
+              armed={armed}
+              arming={arming}
+              onArm={arm}
             />
           )}
         </section>
@@ -877,6 +906,39 @@ function RangeSlider({
   );
 }
 
+/** The bots a stock is armed on, and a button that asks which bot to arm it on. */
+function ArmCell({
+  symbol,
+  armedOn,
+  arming,
+  onArm,
+}: {
+  symbol: string;
+  armedOn: string[];
+  arming: boolean;
+  onArm: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5">
+      {armedOn.length ? (
+        <span className="text-[11px] font-semibold text-profit" title={`${symbol} is armed on ${armedOn.join(", ")}`}>
+          {armedOn.join(" · ")}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        disabled={arming}
+        onClick={onArm}
+        aria-label={`Arm ${symbol} on a bot`}
+        title="Arm on a bot (asks which)"
+        className="min-h-9 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
+      >
+        {arming ? "…" : "Arm"}
+      </button>
+    </span>
+  );
+}
+
 function StockCell({ symbol, name }: { symbol: string; name?: string }) {
   // The symbol always shows — it is what the rest of the app (lookup, chat,
   // orders) keys on — with the company name in front when the instrument
@@ -900,7 +962,14 @@ function MoverTable({
   emptyText,
   fromLabel = "From open",
   openLabel = "Open",
+  armed,
+  arming,
+  onArm,
 }: {
+  /** Stock → the SMA bots it is armed on. */
+  armed: Map<string, string[]>;
+  arming: string | null;
+  onArm: (symbol: string) => void;
   fromLabel?: string;
   openLabel?: string;
   rows: MoverRow[];
@@ -940,6 +1009,7 @@ function MoverTable({
                 <Th right>{openLabel}</Th>
                 <Th right>Volume</Th>
                 <Th right>At</Th>
+                <Th right>Arm</Th>
               </tr>
             </thead>
             <tbody>
@@ -958,6 +1028,9 @@ function MoverTable({
                   <Td right className="tabular-nums text-slate-400">{m.open_price.toFixed(2)}</Td>
                   <Td right className="tabular-nums">{vol(m.volume)}</Td>
                   <Td right className="text-slate-400">{m.last_time_ist}</Td>
+                  <Td right>
+                    <ArmCell symbol={m.symbol} armedOn={armed.get(m.symbol.toUpperCase()) ?? []} arming={arming === m.symbol} onArm={() => onArm(m.symbol)} />
+                  </Td>
                 </tr>
               ))}
             </tbody>
