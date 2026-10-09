@@ -307,3 +307,62 @@ async def test_groww_client_modifies_the_stop_in_place(monkeypatch):
     assert (call["order_type"], call["segment"], call["groww_order_id"], call["quantity"]) == ("SL", "CASH", "GSL1", 10)
     assert call["trigger_price"] == pytest.approx(1010.0)
     assert call["price"] < call["trigger_price"]  # SELL stop limit sits below the trigger
+
+
+# --- Percent mode -------------------------------------------------------------
+
+
+def test_tsl_mode_defaults_to_points_and_reads_overrides():
+    from types import SimpleNamespace
+
+    import tsl as _tsl
+    assert _tsl.tsl_mode(SimpleNamespace()) == _tsl.POINTS
+    assert _tsl.tsl_mode(SimpleNamespace(tsl_mode="percent")) == _tsl.PERCENT
+    assert _tsl.tsl_mode(SimpleNamespace(tsl_mode="junk")) == _tsl.POINTS
+
+
+def test_tsl_settings_converts_percent_to_rupees_using_entry_price():
+    from types import SimpleNamespace
+
+    import tsl as _tsl
+    cfg = SimpleNamespace(
+        stop_type="TSL",
+        use_stop=True,
+        tsl_mode="PERCENT",
+        tsl_sl_pct=1.0,
+        tsl_trail_pct=0.5,
+        tsl_target_pct=2.0,
+    )
+    # ₹1,000 entry: 1% = ₹10, 0.5% = ₹5, 2% = ₹20.
+    assert _tsl.tsl_settings(cfg, entry_price=1_000.0) == (10.0, 5.0, 20.0)
+    # ₹100 entry: 1% = ₹1, 0.5% = ₹0.5, 2% = ₹2.
+    assert _tsl.tsl_settings(cfg, entry_price=100.0) == (1.0, 0.5, 2.0)
+    # No target when target_pct is 0.
+    cfg.tsl_target_pct = 0.0
+    assert _tsl.tsl_settings(cfg, entry_price=500.0) == (5.0, 2.5, 0.0)
+
+
+def test_tsl_settings_points_mode_is_unchanged_whatever_the_entry_price():
+    from types import SimpleNamespace
+
+    import tsl as _tsl
+    cfg = SimpleNamespace(tsl_mode="POINTS", tsl_sl_points=20.0, tsl_trail_points=10.0, tsl_target_points=50.0)
+    assert _tsl.tsl_settings(cfg, entry_price=1_000.0) == (20.0, 10.0, 50.0)
+    assert _tsl.tsl_settings(cfg, entry_price=None) == (20.0, 10.0, 50.0)
+
+
+def test_tsl_settings_percent_without_entry_falls_back_to_points_for_display():
+    from types import SimpleNamespace
+
+    import tsl as _tsl
+    cfg = SimpleNamespace(
+        tsl_mode="PERCENT",
+        tsl_sl_points=20.0,
+        tsl_trail_points=10.0,
+        tsl_target_points=0.0,
+        tsl_sl_pct=1.0,
+        tsl_trail_pct=0.5,
+        tsl_target_pct=0.0,
+    )
+    # No entry price (display path, e.g. _stop_points): returns the stored points, never nonsense.
+    assert _tsl.tsl_settings(cfg, entry_price=None) == (20.0, 10.0, 0.0)

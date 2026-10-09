@@ -112,6 +112,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the old stop, and a position restored after a restart (no stop id) stays at
   its saved stop. A LIVE target cancels the exchange stop before the exit.
   Exits are `TSL_HIT` / `TARGET_HIT`.
+  Units are **₹ (points)** or **% of entry price** via `tsl_mode`
+  (`POINTS` default | `PERCENT`): with PERCENT, `tsl_sl_pct`,
+  `tsl_trail_pct` and `tsl_target_pct` are read instead, and
+  `tsl_settings(cfg, entry_price=fill)` turns them into ₹ at trade
+  entry so the trail / target maths is unchanged. The display always
+  reports both sets of numbers plus `tsl_mode`.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
