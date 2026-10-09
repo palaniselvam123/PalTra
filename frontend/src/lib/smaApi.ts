@@ -162,6 +162,15 @@ export type CrossScanRow = {
   /** CROSSED only: 0 = on the last closed candle. */
   crossed_candles_ago: number | null;
   candle_ts: number;
+  /** Shares traded today so far (Groww's running total at the last 1-minute candle); null when not reported. */
+  volume?: number | null;
+  /** Shares traded in the last `window_min` minutes; null when the running total reset. */
+  volume_window?: number | null;
+  /** Price change over the last `window_min` minutes, signed %. */
+  move_pct?: number | null;
+  /** `move_pct` per minute, signed. */
+  speed_pct_per_min?: number | null;
+  window_min?: number;
 };
 
 export type CrossScan = {

@@ -19,7 +19,7 @@ import datetime as dt
 import logging
 import re
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable
 
 import pandas as pd
@@ -37,6 +37,7 @@ WARMUP_DAYS = 4  # calendar days of 1-minute candles before now, so SMA 21 is fo
 MIN_RESCAN_SEC = 60  # "Scan now" at most once a minute
 LOOKBACK = 3  # closed candles whose gap slope is read (the bot's heads-up uses the same)
 GIVE_UP_AFTER = 5  # this many failures before any success: stop and say why
+ACTIVITY_WINDOW_MIN = 10  # minutes the price speed and the recent volume look back over
 _SYMBOL = re.compile(r"^[A-Z0-9&_-]{1,20}$")
 
 APPROACHING = "APPROACHING"
@@ -61,10 +62,19 @@ class ScanRow:
     minutes_to_cross: float | None
     crossed_candles_ago: int | None  # CROSSED only: 0 = the last closed candle
     candle_ts: int  # start of the last closed candle (epoch seconds)
+    # How busy the stock is, from the same 1-minute candles (None when they do not say).
+    volume: float | None = None  # shares traded today so far
+    volume_window: float | None = None  # shares traded in the last `window_min` minutes
+    move_pct: float | None = None  # price change over the last `window_min` minutes, signed
+    speed_pct_per_min: float | None = None  # move_pct / minutes it took, signed
+    window_min: int = ACTIVITY_WINDOW_MIN
 
     def as_dict(self) -> dict:
         out = asdict(self)
         for key in ("gap_pct", "slope_pct", "sma_fast", "sma_slow", "candles_to_cross", "minutes_to_cross"):
+            if out[key] is not None:
+                out[key] = round(out[key], 4)
+        for key in ("move_pct", "speed_pct_per_min"):
             if out[key] is not None:
                 out[key] = round(out[key], 4)
         return out
@@ -125,6 +135,43 @@ def closed_bars(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime) -> pd.Da
     return bars.reset_index(drop=True)
 
 
+def activity(frame_1m: pd.DataFrame, window: int = ACTIVITY_WINDOW_MIN) -> dict:
+    """Volume and price speed from today's 1-minute candles. Read-only; no indicator code.
+
+    Speed is the signed price change over the last `window` minutes divided by the
+    minutes it took (the same idea as the Movers page's "fast movers"). Volume is
+    Groww's running total for the session at the last candle, and the shares in the
+    window are the difference of two running totals. A running total that fell
+    (a reset) gives no window volume rather than a wrong one.
+    """
+    none = {"volume": None, "volume_window": None, "move_pct": None, "speed_pct_per_min": None, "window_min": window}
+    if frame_1m is None or getattr(frame_1m, "empty", True) or not {"ts", "close"}.issubset(frame_1m.columns):
+        return none
+    df = frame_1m.sort_values("ts")
+    last_ts = int(df["ts"].iloc[-1])
+    today = df[(df["ts"].astype("int64") + 19_800) // 86_400 == (last_ts + 19_800) // 86_400]
+    if len(today) < 2:
+        return none
+    last = today.iloc[-1]
+    older = today[today["ts"] <= last_ts - window * 60]
+    base = older.iloc[-1] if len(older) else today.iloc[0]
+    span_min = (last_ts - int(base["ts"])) / 60
+    out = dict(none)
+    base_close, last_close = float(base["close"]), float(last["close"])
+    if span_min > 0 and base_close > 0:
+        move = (last_close / base_close - 1) * 100
+        out["move_pct"] = move
+        out["speed_pct_per_min"] = move / span_min
+    if "volume" in today.columns:
+        total = pd.to_numeric(today["volume"], errors="coerce")
+        now_vol, then_vol = total.iloc[-1], total.loc[base.name]
+        if pd.notna(now_vol) and now_vol > 0:
+            out["volume"] = float(now_vol)
+            if pd.notna(then_vol) and 0 <= then_vol <= now_vol:
+                out["volume_window"] = float(now_vol - then_vol)
+    return out
+
+
 def scan_one(symbol: str, frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime) -> ScanRow | None:
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
@@ -135,7 +182,8 @@ def scan_one(symbol: str, frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, 
     # each candle's volume, which logs a warning at every day boundary: four days of 213 stocks flooded the log.
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     ltp = float(frame_1m["close"].iloc[-1])
-    return outlook(enriched, minutes, symbol=symbol, ltp=round(ltp, 2))
+    row = outlook(enriched, minutes, symbol=symbol, ltp=round(ltp, 2))
+    return None if row is None else replace(row, **activity(frame_1m))
 
 
 def clean_symbols(raw: list[str]) -> list[str]:

@@ -252,4 +252,47 @@ def test_a_scan_over_days_with_volume_resets_logs_nothing_and_reads_the_same(cap
 
     # The same candles without any volume column give the same answer.
     plain = cross_scan.scan_one("TCS", frame.drop(columns=["volume"]), 9, 21, 5, now)
-    assert row is not None and plain is not None and row.as_dict() == plain.as_dict()
+    assert row is not None and plain is not None
+    cross_only = lambda r: {k: v for k, v in r.as_dict().items() if k not in ("volume", "volume_window")}  # noqa: E731
+    assert cross_only(row) == cross_only(plain)
+    assert row.volume is not None and plain.volume is None  # the volume itself is read separately, without enrich()
+
+
+def test_activity_reads_price_speed_and_volume_over_the_last_ten_minutes():
+    closes = [1000 + 0.5 * i for i in range(40)]  # +0.5 a minute
+    frame = _minutes(closes)  # running volume 1000, 2000, ... per minute
+    out = cross_scan.activity(frame)
+    last, base = closes[-1], closes[-1 - 10]
+    assert out["move_pct"] == pytest.approx((last / base - 1) * 100)
+    assert out["speed_pct_per_min"] == pytest.approx(out["move_pct"] / 10)
+    assert out["volume"] == 40_000  # the running total at the last minute
+    assert out["volume_window"] == 10_000  # ten minutes of 1,000 shares
+    assert out["window_min"] == 10
+
+
+def test_a_falling_price_has_a_negative_speed_and_a_volume_reset_gives_no_window_volume():
+    closes = [1000 - 0.5 * i for i in range(40)]
+    frame = _minutes(closes)
+    frame.loc[frame.index >= 35, "volume"] = 50  # the running total fell back: a reset
+    out = cross_scan.activity(frame)
+    assert out["speed_pct_per_min"] < 0 and out["move_pct"] < 0
+    assert out["volume"] == 50 and out["volume_window"] is None
+
+
+def test_activity_uses_only_the_last_session_and_copes_with_thin_data():
+    two_days = pd.concat([_minutes([100.0] * 30, dt.date(2026, 10, 7)), _minutes([200 + i for i in range(30)], DAY)], ignore_index=True)
+    out = cross_scan.activity(two_days)
+    assert out["move_pct"] > 0 and out["move_pct"] < 10  # not the jump from 100 to 200 between days
+    assert cross_scan.activity(two_days.iloc[:1])["speed_pct_per_min"] is None
+    assert cross_scan.activity(pd.DataFrame())["volume"] is None
+    assert cross_scan.activity(None)["volume"] is None
+
+
+def test_scan_rows_carry_the_activity_figures(caplog):
+    frame = _minutes(_path(FALL_THEN_RISE))
+    with caplog.at_level("WARNING"):
+        row = cross_scan.scan_one("TCS", frame, 9, 21, 5, _at(12, 0))
+    assert row is not None
+    d = row.as_dict()
+    assert d["volume"] and d["volume_window"] and d["speed_pct_per_min"] is not None and d["window_min"] == 10
+    assert [r for r in caplog.records if "minute volume unavailable" in r.getMessage()] == []
