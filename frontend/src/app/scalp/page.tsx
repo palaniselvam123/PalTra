@@ -14,15 +14,13 @@ import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { CrossScan } from "@/components/Scalp/CrossScan";
+import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
 const MAX_BACKTEST_STOCKS = 24;
 
 const REFRESH_MS = 10_000;
-const ATR_STOPS = [0, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2];
-const SPREAD_STOPS = [0.02, 0.03, 0.05, 0.1, 0.2, 1];
-const VALUE_STOPS = [0, 1, 5, 10, 25, 50, 100];
 
 type SortKey =
   | "score"
@@ -49,6 +47,8 @@ export default function ScalpPage() {
   const [maxSpread, setMaxSpread] = useState(0.05);
   const [minValue, setMinValue] = useState(5);
   const [readyOnly, setReadyOnly] = useState(false);
+  const [query, setQuery] = useState("");
+  const [minScore, setMinScore] = useState(0);
   const [bias, setBias] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "score", desc: true });
   // LTP range: blank = no limit on that side.
@@ -109,6 +109,8 @@ export default function ScalpPage() {
   const sorted = useMemo(() => {
     let list = data?.rows ?? [];
     if (readyOnly) list = list.filter((r) => r.ready);
+    if (query.trim()) list = list.filter((r) => matchesText(query, r.symbol));
+    if (minScore > 0) list = list.filter((r) => r.score >= minScore);
     if (bias !== "ALL") list = list.filter((r) => r.bias === bias);
     const lo = ltpMin.trim() === "" ? null : Number(ltpMin);
     const hi = ltpMax.trim() === "" ? null : Number(ltpMax);
@@ -131,7 +133,7 @@ export default function ScalpPage() {
       if (bv == null) return -1;
       return dir * (av - bv);
     });
-  }, [data, readyOnly, bias, sort, ltpMin, ltpMax]);
+  }, [data, readyOnly, bias, sort, ltpMin, ltpMax, query, minScore]);
 
   const rows = useMemo(() => {
     if (!holdOrder || order.current.length === 0) return sorted;
@@ -295,9 +297,11 @@ export default function ScalpPage() {
 
         <section className="rounded-xl border border-slate-800 bg-card p-4">
           <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
-            <Select label="Min ATR %/min" value={minAtr} options={ATR_STOPS} suffix="%" onChange={setMinAtr} />
-            <Select label="Max spread" value={maxSpread} options={SPREAD_STOPS} suffix="%" onChange={setMaxSpread} />
-            <Select label="Min traded today" value={minValue} options={VALUE_STOPS} prefix="₹" suffix=" cr" onChange={setMinValue} />
+            <NumberFilter label="Min ATR %/min" value={minAtr} onChange={setMinAtr} min={0} max={0.5} step={0.01} suffix="%" />
+            <NumberFilter label="Max spread" value={maxSpread} onChange={setMaxSpread} min={0.01} max={2} step={0.01} suffix="%" />
+            <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={200} step={1} prefix="₹" suffix="cr" />
+            <NumberFilter label="Min score" value={minScore} onChange={setMinScore} min={0} max={100} step={1} />
+            <TextFilter value={query} onChange={setQuery} />
             <fieldset className="flex flex-col gap-1">
               <legend className="mb-1">LTP range ₹</legend>
               <span className="flex items-center gap-1">
@@ -694,41 +698,6 @@ function Pct({ value }: { value: number | null }) {
       {value > 0 ? "+" : ""}
       {value.toFixed(2)}%
     </span>
-  );
-}
-
-function Select({
-  label,
-  value,
-  options,
-  onChange,
-  prefix = "",
-  suffix = "",
-}: {
-  label: string;
-  value: number;
-  options: number[];
-  onChange: (v: number) => void;
-  prefix?: string;
-  suffix?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-      >
-        {options.map((v) => (
-          <option key={v} value={v}>
-            {prefix}
-            {v}
-            {suffix}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 

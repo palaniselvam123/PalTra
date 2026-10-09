@@ -77,13 +77,13 @@ export function SortTh<K extends string>({
         }}
         title={title ?? "Sort by this column"}
         className={clsx(
-          "inline-flex min-h-7 items-center gap-1 rounded px-1 uppercase tracking-wider hover:bg-white/5 hover:text-white",
+          "inline-flex min-h-7 items-center gap-1 rounded px-1 uppercase tracking-wider hover:bg-white/5 hover:text-slate-100",
           num && "flex-row-reverse",
-          on ? "text-white" : "text-slate-400"
+          on ? "text-slate-100" : "text-slate-400"
         )}
       >
         {label}
-        <Icon size={11} aria-hidden className={on ? "text-sky-300" : "text-slate-600"} />
+        <Icon size={11} aria-hidden className={on ? "text-accentSky" : "text-slate-600"} />
       </button>
     </th>
   );

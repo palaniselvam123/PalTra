@@ -1,7 +1,7 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -18,10 +18,13 @@ import {
   Zap,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
+import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { useTradingState } from "@/hooks/useTradingState";
 import {
   api,
   type AlertScanResponse,
+  type FastMoverRow,
   type FastMoversResponse,
   type MoverRow,
   type MoversResponse,
@@ -86,8 +89,6 @@ export default function MoversPage() {
   const [peak, setPeak] = useState(false);
   // Fast-mover thresholds. The API defaults (0.1%/min, 0.75% from open) are
   // strict on a quiet day, so both are adjustable here; alerts keep their own.
-  const SPEED_STOPS = [0, 0.01, 0.02, 0.03, 0.05, 0.1, 0.15, 0.2];
-  const MOVE_STOPS = [0, 0.25, 0.5, 0.75, 1, 1.5];
   const [minSpeed, setMinSpeed] = useState(0.1);
   const [minMove, setMinMove] = useState(0.75);
   const [top, setTop] = useState(15);
@@ -500,34 +501,8 @@ export default function MoversPage() {
               />
               Peak of the session (to 11:00)
             </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-400">
-              Min speed
-              <select
-                value={minSpeed}
-                onChange={(e) => setMinSpeed(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-base px-1.5 py-0.5 text-xs text-slate-200"
-              >
-                {SPEED_STOPS.map((v) => (
-                  <option key={v} value={v}>
-                    {v}%/min
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-400">
-              Min move from open
-              <select
-                value={minMove}
-                onChange={(e) => setMinMove(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-base px-1.5 py-0.5 text-xs text-slate-200"
-              >
-                {MOVE_STOPS.map((v) => (
-                  <option key={v} value={v}>
-                    {v}%
-                  </option>
-                ))}
-              </select>
-            </label>
+            <NumberFilter label="Min speed (% per minute)" value={minSpeed} onChange={setMinSpeed} min={0} max={0.5} step={0.01} suffix="%/min" className="w-48" />
+            <NumberFilter label="Min move from open (%)" value={minMove} onChange={setMinMove} min={0} max={5} step={0.05} suffix="%" className="w-48" />
           </div>
           <p className="mb-3 text-xs text-slate-500">
             {peak
@@ -542,48 +517,7 @@ export default function MoversPage() {
               {" "}Lower Min speed or Min move from open to see slower stocks.
             </Empty>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500">
-                  <tr>
-                    <Th>Stock</Th>
-                    <Th right>Speed</Th>
-                    <Th right>{peak ? "Best window" : `Last ${fast.window_min}m`}</Th>
-                    <Th right>From open</Th>
-                    <Th right>{peak ? "Vol in window" : `Vol ${fast.window_min}m`}</Th>
-                    <Th right>Volume</Th>
-                    <Th right>Price</Th>
-                    <Th right>{peak ? "Peaked at" : "At"}</Th>
-                    <Th right>Arm</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fast.movers.map((f) => (
-                    <tr key={f.symbol} className="border-t border-slate-800/70">
-                      <Td>
-                        <StockCell symbol={f.symbol} name={f.name} />
-                      </Td>
-                      <Td right>
-                        <Pct value={f.speed_pct_per_min} suffix="%/min" digits={3} />
-                      </Td>
-                      <Td right>
-                        <Pct value={f.window_move_pct} />
-                      </Td>
-                      <Td right>
-                        <Pct value={f.pct_from_open} />
-                      </Td>
-                      <Td right className="tabular-nums">{vol(f.window_volume)}</Td>
-                      <Td right className="tabular-nums text-slate-400">{vol(f.volume)}</Td>
-                      <Td right className="tabular-nums">{f.last_price.toFixed(2)}</Td>
-                      <Td right className="text-slate-400">{f.last_time_ist}</Td>
-                      <Td right>
-                        <ArmCell symbol={f.symbol} armedOn={armed.get(f.symbol.toUpperCase()) ?? []} arming={arming === f.symbol} onArm={() => arm(f.symbol)} />
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <FastTable rows={fast.movers} windowMin={fast.window_min} peak={peak} armed={armed} arming={arming} onArm={arm} />
           )}
         </section>
 
@@ -978,6 +912,28 @@ function MoverTable({
   tracked: number;
   emptyText: string;
 }) {
+  const [query, setQuery] = useState("");
+  const found = useMemo(() => rows.filter((m) => matchesText(query, m.symbol, m.name)), [rows, query]);
+  const { sorted: list, sort, onSort } = useSort<MoverRow, MoverKey>(found, (m, k) => {
+    switch (k) {
+      case "symbol":
+        return m.symbol;
+      case "pct":
+        return m.pct_from_open;
+      case "price":
+        return m.last_price;
+      case "high":
+        return m.high_price;
+      case "low":
+        return m.low_price;
+      case "open":
+        return m.open_price;
+      case "volume":
+        return m.volume;
+      case "at":
+        return m.last_time_ist;
+    }
+  });
   // A short list can mean a quiet day or a small universe. Those call for
   // different responses, so say which it is rather than just showing fewer rows.
   const short = rows.length < requested;
@@ -996,40 +952,147 @@ function MoverTable({
       {rows.length === 0 ? (
         <Empty>{emptyText}</Empty>
       ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <TextFilter value={query} onChange={setQuery} />
+            {query ? <span className="pb-2 text-xs text-slate-500">{list.length} of {rows.length} match</span> : null}
+          </div>
+          {list.length === 0 ? (
+            <Empty>No stock here matches &quot;{query}&quot;.</Empty>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs uppercase text-slate-500">
+                  <tr>
+                    <Th>#</Th>
+                    <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+                    <SortTh label={fromLabel} k="pct" sort={sort} onSort={onSort} num />
+                    <SortTh label="Price" k="price" sort={sort} onSort={onSort} num />
+                    <SortTh label="High" k="high" sort={sort} onSort={onSort} num />
+                    <SortTh label="Low" k="low" sort={sort} onSort={onSort} num />
+                    <SortTh label={openLabel} k="open" sort={sort} onSort={onSort} num />
+                    <SortTh label="Volume" k="volume" sort={sort} onSort={onSort} num />
+                    <SortTh label="At" k="at" sort={sort} onSort={onSort} num text />
+                    <Th right>Arm</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((m, i) => (
+                    <tr key={m.symbol} className="border-t border-slate-800/70">
+                      <Td className="tabular-nums text-slate-500">{i + 1}</Td>
+                      <Td>
+                        <StockCell symbol={m.symbol} name={m.name} />
+                      </Td>
+                      <Td right>
+                        <Pct value={m.pct_from_open} />
+                      </Td>
+                      <Td right className="tabular-nums">{m.last_price.toFixed(2)}</Td>
+                      <Td right className="tabular-nums text-profit/80">{m.high_price.toFixed(2)}</Td>
+                      <Td right className="tabular-nums text-loss/80">{m.low_price.toFixed(2)}</Td>
+                      <Td right className="tabular-nums text-slate-400">{m.open_price.toFixed(2)}</Td>
+                      <Td right className="tabular-nums">{vol(m.volume)}</Td>
+                      <Td right className="text-slate-400">{m.last_time_ist}</Td>
+                      <Td right>
+                        <ArmCell symbol={m.symbol} armedOn={armed.get(m.symbol.toUpperCase()) ?? []} arming={arming === m.symbol} onArm={() => onArm(m.symbol)} />
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+type MoverKey = "symbol" | "pct" | "price" | "high" | "low" | "open" | "volume" | "at";
+type FastKey = "symbol" | "speed" | "window" | "pct" | "winVol" | "volume" | "price" | "at";
+
+/** The fast-movers table: click a column to sort it, type to find a stock. */
+function FastTable({
+  rows,
+  windowMin,
+  peak,
+  armed,
+  arming,
+  onArm,
+}: {
+  rows: FastMoverRow[];
+  windowMin: number;
+  peak: boolean;
+  armed: Map<string, string[]>;
+  arming: string | null;
+  onArm: (symbol: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const found = useMemo(() => rows.filter((f) => matchesText(query, f.symbol, f.name)), [rows, query]);
+  const { sorted: list, sort, onSort } = useSort<FastMoverRow, FastKey>(found, (f, k) => {
+    switch (k) {
+      case "symbol":
+        return f.symbol;
+      case "speed":
+        return f.speed_pct_per_min;
+      case "window":
+        return f.window_move_pct;
+      case "pct":
+        return f.pct_from_open;
+      case "winVol":
+        return f.window_volume;
+      case "volume":
+        return f.volume;
+      case "price":
+        return f.last_price;
+      case "at":
+        return f.last_time_ist;
+    }
+  });
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <TextFilter value={query} onChange={setQuery} />
+        {query ? <span className="pb-2 text-xs text-slate-500">{list.length} of {rows.length} match</span> : null}
+      </div>
+      {list.length === 0 ? (
+        <Empty>No stock here matches &quot;{query}&quot;.</Empty>
+      ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
-                <Th>#</Th>
-                <Th>Stock</Th>
-                <Th right>{fromLabel}</Th>
-                <Th right>Price</Th>
-                <Th right>High</Th>
-                <Th right>Low</Th>
-                <Th right>{openLabel}</Th>
-                <Th right>Volume</Th>
-                <Th right>At</Th>
+                <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+                <SortTh label="Speed" k="speed" sort={sort} onSort={onSort} num />
+                <SortTh label={peak ? "Best window" : `Last ${windowMin}m`} k="window" sort={sort} onSort={onSort} num />
+                <SortTh label="From open" k="pct" sort={sort} onSort={onSort} num />
+                <SortTh label={peak ? "Vol in window" : `Vol ${windowMin}m`} k="winVol" sort={sort} onSort={onSort} num />
+                <SortTh label="Volume" k="volume" sort={sort} onSort={onSort} num />
+                <SortTh label="Price" k="price" sort={sort} onSort={onSort} num />
+                <SortTh label={peak ? "Peaked at" : "At"} k="at" sort={sort} onSort={onSort} num text />
                 <Th right>Arm</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((m, i) => (
-                <tr key={m.symbol} className="border-t border-slate-800/70">
-                  <Td className="tabular-nums text-slate-500">{i + 1}</Td>
+              {list.map((f) => (
+                <tr key={f.symbol} className="border-t border-slate-800/70">
                   <Td>
-                    <StockCell symbol={m.symbol} name={m.name} />
+                    <StockCell symbol={f.symbol} name={f.name} />
                   </Td>
                   <Td right>
-                    <Pct value={m.pct_from_open} />
+                    <Pct value={f.speed_pct_per_min} suffix="%/min" digits={3} />
                   </Td>
-                  <Td right className="tabular-nums">{m.last_price.toFixed(2)}</Td>
-                  <Td right className="tabular-nums text-profit/80">{m.high_price.toFixed(2)}</Td>
-                  <Td right className="tabular-nums text-loss/80">{m.low_price.toFixed(2)}</Td>
-                  <Td right className="tabular-nums text-slate-400">{m.open_price.toFixed(2)}</Td>
-                  <Td right className="tabular-nums">{vol(m.volume)}</Td>
-                  <Td right className="text-slate-400">{m.last_time_ist}</Td>
                   <Td right>
-                    <ArmCell symbol={m.symbol} armedOn={armed.get(m.symbol.toUpperCase()) ?? []} arming={arming === m.symbol} onArm={() => onArm(m.symbol)} />
+                    <Pct value={f.window_move_pct} />
+                  </Td>
+                  <Td right>
+                    <Pct value={f.pct_from_open} />
+                  </Td>
+                  <Td right className="tabular-nums">{vol(f.window_volume)}</Td>
+                  <Td right className="tabular-nums text-slate-400">{vol(f.volume)}</Td>
+                  <Td right className="tabular-nums">{f.last_price.toFixed(2)}</Td>
+                  <Td right className="text-slate-400">{f.last_time_ist}</Td>
+                  <Td right>
+                    <ArmCell symbol={f.symbol} armedOn={armed.get(f.symbol.toUpperCase()) ?? []} arming={arming === f.symbol} onArm={() => onArm(f.symbol)} />
                   </Td>
                 </tr>
               ))}
@@ -1037,7 +1100,7 @@ function MoverTable({
           </table>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

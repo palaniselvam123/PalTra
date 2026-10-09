@@ -1,10 +1,12 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react";
 import { api, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
+import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -13,7 +15,7 @@ const SORT_LABEL: Record<ActiveSort, string> = {
   change: "Biggest move",
   pressure: "Buyer/seller imbalance",
 };
-const MIN_VALUE_STOPS = [0, 10, 25, 50, 100, 250];
+type ColKey = "symbol" | "ltp" | "change" | "value" | "rvol" | "buy" | "vwap" | "bias";
 
 type Props = {
   /** Stocks already on the desk feed (shown in the monitor below). */
@@ -36,6 +38,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
   const [sort, setSort] = useState<ActiveSort>("value");
   const [bias, setBias] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minValue, setMinValue] = useState(0);
+  const [query, setQuery] = useState("");
   const [scanning, setScanning] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -96,7 +99,27 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
     }
   };
 
-  const rows = data?.rows ?? [];
+  const found = useMemo(() => (data?.rows ?? []).filter((r) => matchesText(query, r.symbol)), [data?.rows, query]);
+  const { sorted: rows, sort: colSort, onSort } = useSort<ActiveStock, ColKey>(found, (r, k) => {
+    switch (k) {
+      case "symbol":
+        return r.symbol;
+      case "ltp":
+        return r.ltp;
+      case "change":
+        return r.change_pct;
+      case "value":
+        return r.value_cr;
+      case "rvol":
+        return r.rvol;
+      case "buy":
+        return r.buy_share;
+      case "vwap":
+        return r.vwap_dist_pct;
+      case "bias":
+        return r.bias;
+    }
+  });
   const asOf = data?.as_of
     ? new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST"
     : null;
@@ -149,20 +172,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
             <option value="SHORT">Short (down, below avg price)</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1">
-          Min traded
-          <select
-            value={minValue}
-            onChange={(e) => setMinValue(Number(e.target.value))}
-            className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            {MIN_VALUE_STOPS.map((v) => (
-              <option key={v} value={v}>
-                ₹{v} cr
-              </option>
-            ))}
-          </select>
-        </label>
+        <NumberFilter label="Min traded today (₹ crore)" value={minValue} onChange={setMinValue} min={0} max={500} step={5} prefix="₹" suffix="cr" />
+        <TextFilter value={query} onChange={setQuery} />
         {data && (
           <span className="ml-auto">
             {asOf ? `Scanned ${asOf} · ${data.scanned} of ${data.universe} stocks` : "No scan yet"}
@@ -192,24 +203,16 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
-                <th className="pb-2 text-left font-medium">#</th>
-                <th className="pb-2 text-left font-medium">Stock</th>
-                <th className="pb-2 text-right font-medium">LTP</th>
-                <th className="pb-2 text-right font-medium">Day</th>
-                <th className="pb-2 text-right font-medium" title="Volume × average price today">
-                  ₹ cr
-                </th>
-                <th className="pb-2 text-right font-medium" title="Volume so far against the 20-day average scaled to the time of day">
-                  Vol vs usual
-                </th>
-                <th className="pb-2 text-left font-medium" title="Total buy vs sell quantity waiting in the order book">
-                  Buyers vs sellers
-                </th>
-                <th className="pb-2 text-right font-medium" title="Price against Groww's average traded price today (VWAP)">
-                  vs avg
-                </th>
-                <th className="pb-2 text-left font-medium">Bias</th>
-                <th className="pb-2 text-right font-medium">Actions</th>
+                <th className="px-1 pb-2 text-left font-medium">#</th>
+                <SortTh label="Stock" k="symbol" sort={colSort} onSort={onSort} text />
+                <SortTh label="LTP" k="ltp" sort={colSort} onSort={onSort} num />
+                <SortTh label="Day" k="change" sort={colSort} onSort={onSort} num />
+                <SortTh label="₹ cr" k="value" sort={colSort} onSort={onSort} num title="Volume × average price today" />
+                <SortTh label="Vol vs usual" k="rvol" sort={colSort} onSort={onSort} num title="Volume so far against the 20-day average scaled to the time of day" />
+                <SortTh label="Buyers vs sellers" k="buy" sort={colSort} onSort={onSort} title="Total buy vs sell quantity waiting in the order book" />
+                <SortTh label="vs avg" k="vwap" sort={colSort} onSort={onSort} num title="Price against Groww's average traded price today (VWAP)" />
+                <SortTh label="Bias" k="bias" sort={colSort} onSort={onSort} text />
+                <th className="px-1 pb-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
