@@ -1029,6 +1029,18 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinSeq]);
 
+  // A past range is drawn in the size it was asked for. The bot's own candle size can arrive
+  // after the range was asked (the first load sees 1 minute, then the state says 5), and merging
+  // 1-minute candles here would rebuild SMA 21 from that one day only, so it would start late.
+  // Ask the server again at the size on screen: it adds the days before and draws every line.
+  useEffect(() => {
+    if (!past || loadingPast) return;
+    if (bar === (past.interval ?? 1)) return;
+    loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, bar, pastRunRef.current, past.symbol);
+    // Only a size change reloads; loadPast reads the current refs and state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bar, past]);
+
   useEffect(() => {
     if (!rootRef.current) return;
     // Phones: smaller axis text, and line names stay in the legend instead of
