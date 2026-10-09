@@ -117,6 +117,8 @@ export default function TerminalPage() {
     null
   );
   const liveBars = useRef(240);
+  // A candle size the bot's own candle cannot make (set by the chart's candle-size menu); null = the bot's own.
+  const liveInterval = useRef<number | null>(null);
   // "Hold view" keeps the stock on screen: the chart asks for it by name, so a
   // replay moving its focus (a new day, another stock) does not swap the chart.
   const heldRef = useRef<string | null>(null);
@@ -129,10 +131,11 @@ export default function TerminalPage() {
   // The replay last played (its day, run and stocks), for the stock tabs after it ends.
   const [endedRun, setEndedRun] = useState<{ date: string; runId: number | null; symbols: string[] } | null>(null);
   const runSymbols = useRef<string[]>([]);
-  const askLiveBars = useCallback((count: number) => {
-    if (count === liveBars.current) return;
+  const askLiveBars = useCallback((count: number, interval: number | null = null) => {
+    if (count === liveBars.current && interval === liveInterval.current) return;
     liveBars.current = count;
-    smaApi.chart(count, heldRef.current).then(setChart).catch(() => {});
+    liveInterval.current = interval;
+    smaApi.chart(count, heldRef.current, interval).then(setChart).catch(() => {});
   }, []);
 
   // What this page shows, for the "Ask the bot" chat: the bot, the books,
@@ -202,7 +205,7 @@ export default function TerminalPage() {
         }
       })
       .finally(finish);
-    smaApi.chart(liveBars.current, heldRef.current).then(setChart).catch(() => {});
+    smaApi.chart(liveBars.current, heldRef.current, liveInterval.current).then(setChart).catch(() => {});
     smaApi
       .trades()
       .then((rows) => {
@@ -227,7 +230,7 @@ export default function TerminalPage() {
       smaApi
         .closePosition(name)
         .then(() =>
-          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current, heldRef.current)]).then(([next, rows, nextChart]) => {
+          Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current, heldRef.current, liveInterval.current)]).then(([next, rows, nextChart]) => {
             if (next.status === "fulfilled") {
               setState((prev) => (next.value.ltp > 0 || !prev || prev.ltp <= 0 ? next.value : prev));
             }
@@ -339,7 +342,7 @@ export default function TerminalPage() {
             smaApi.replayInfo().then(onReplay).catch(() => {});
           }
         });
-      if (n % 2 === 0) smaApi.chart(liveBars.current, heldRef.current).then(setChart).catch(() => {});
+      if (n % 2 === 0) smaApi.chart(liveBars.current, heldRef.current, liveInterval.current).then(setChart).catch(() => {});
       if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
     }, 1000);
     return () => clearInterval(poll);

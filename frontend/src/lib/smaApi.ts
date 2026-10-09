@@ -822,10 +822,12 @@ function stockPath(target: ArmTarget, symbol: string): string {
 export const smaApi = {
   state: () => request<SmaState>("/api/state"),
   /** `symbol` draws that watched stock without moving the chart focus (another tab, a held view). */
-  chart: (limit = 240, symbol?: string | null) => {
+  chart: (limit = 240, symbol?: string | null, interval?: number | null) => {
     const q = new URLSearchParams();
     if (limit !== 240) q.set("limit", String(limit));
     if (symbol) q.set("symbol", symbol);
+    // Candles of this many minutes drawn from the 1-minute tape (finer than the bot's own, or a size it does not divide into).
+    if (interval) q.set("interval", String(interval));
     const qs = q.toString();
     return request<ChartPayload>(qs ? `/api/chart?${qs}` : "/api/chart");
   },

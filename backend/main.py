@@ -321,20 +321,21 @@ def _chart_symbol(symbol: str | None) -> str | None:
     return name
 
 
-async def _chart(eng: StrategyEngine, limit: int = 240, symbol: str | None = None):
+async def _chart(eng: StrategyEngine, limit: int = 240, symbol: str | None = None, interval: int | None = None):
     # The 5/15/30/60-minute views build their bars from more 1-minute candles.
+    # `interval` draws the 1-minute tape in candles of that size (finer than the bot's own).
     # Off the event loop: building the chart must not hold up /api/state.
-    return await asyncio.to_thread(eng.chart_payload, max(30, min(int(limit), 2500)), _chart_symbol(symbol))
+    return await asyncio.to_thread(eng.chart_payload, max(30, min(int(limit), 2500)), _chart_symbol(symbol), interval)
 
 
 @app.get("/api/chart")
-async def chart(limit: int = 240, symbol: str | None = None):
-    return await _chart(engine, limit, symbol)
+async def chart(limit: int = 240, symbol: str | None = None, interval: int | None = None):
+    return await _chart(engine, limit, symbol, interval)
 
 
 @app.get("/api/research/chart")
-async def research_chart(limit: int = 240, symbol: str | None = None):
-    return await _chart(_research(), limit, symbol)
+async def research_chart(limit: int = 240, symbol: str | None = None, interval: int | None = None):
+    return await _chart(_research(), limit, symbol, interval)
 
 
 async def _history(eng: StrategyEngine, symbol: str, start: str, end: str, interval: int = 1, run_id: int | None = None):
@@ -1131,9 +1132,9 @@ async def replay_state(bot: int = 1):
 
 
 @app.get("/api/replay/chart")
-async def replay_chart(limit: int = 240, symbol: str | None = None, bot: int = 1):
+async def replay_chart(limit: int = 240, symbol: str | None = None, bot: int = 1, interval: int | None = None):
     # Off the event loop: building the chart must not hold up /api/state.
-    return await _chart(_replay_engine(bot), limit, symbol)
+    return await _chart(_replay_engine(bot), limit, symbol, interval)
 
 
 @app.post("/api/replay/bot/start")
@@ -1437,8 +1438,8 @@ async def bot_state(bot: int):
 
 
 @app.get("/api/bots/{bot}/chart")
-async def bot_chart(bot: int, limit: int = 240, symbol: str | None = None):
-    return await _chart(_bot(bot), limit, symbol)
+async def bot_chart(bot: int, limit: int = 240, symbol: str | None = None, interval: int | None = None):
+    return await _chart(_bot(bot), limit, symbol, interval)
 
 
 @app.get("/api/bots/{bot}/history")

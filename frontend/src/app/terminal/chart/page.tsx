@@ -48,6 +48,8 @@ export default function StockChartPage() {
   const [desk, setDeskName] = useState<Desk>("live");
   const following = useRef(false);
   const bars = useRef(400);
+  // A candle size the bot's own candle cannot make (from the chart's candle-size menu); null = the bot's own.
+  const barInterval = useRef<number | null>(null);
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -98,7 +100,7 @@ export default function StockChartPage() {
     following.current = follow;
     if (follow) {
       try {
-        const [next, nextChart] = await Promise.all([smaApi.state(), smaApi.chart(bars.current, p.symbol)]);
+        const [next, nextChart] = await Promise.all([smaApi.state(), smaApi.chart(bars.current, p.symbol, barInterval.current)]);
         setState(next);
         setChart(nextChart);
         setNote(null);
@@ -178,8 +180,9 @@ export default function StockChartPage() {
             allTrades={trades}
             pin={pin}
             closing={false}
-            onLiveBars={(count) => {
+            onLiveBars={(count, interval) => {
               bars.current = count;
+              barInterval.current = interval ?? null;
             }}
           />
         )}

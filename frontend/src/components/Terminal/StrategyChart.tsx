@@ -34,7 +34,8 @@ type Props = {
   /** Closes the chart stock's position. Left out on a read-only chart (no Close button). */
   onClose?: () => void;
   /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
-  onLiveBars?: (count: number) => void;
+  /** How many candles the live chart needs, and the candle size to ask the server for (null: the bot's own, merged up here). */
+  onLiveBars?: (count: number, interval?: number | null) => void;
   /**
    * Set by the page when a replay starts or ends. `date` holds the chart on that
    * past day (with `runId`'s trades) until the user changes it; null goes live.
@@ -45,7 +46,7 @@ type Props = {
   onHoldChange?: (held: boolean, symbol: string) => void;
 };
 
-export const BAR_MINUTES = [1, 5, 15, 30, 60] as const;
+export const BAR_MINUTES = [1, 3, 5, 15, 30, 60, 240] as const;
 export type BarMinutes = (typeof BAR_MINUTES)[number];
 const BAR_KEY = "sma.chart.interval";
 
@@ -56,7 +57,12 @@ export function liveBarsFor(bar: number): number {
 }
 
 function barLabel(bar: number): string {
-  return bar === 60 ? "1h" : `${bar}m`;
+  return bar === 240 ? "4h" : bar === 60 ? "1h" : `${bar}m`;
+}
+
+/** "5-minute", "1-hour", "4-hour". */
+function barWords(bar: number): string {
+  return bar === 240 ? "4-hour" : bar === 60 ? "1-hour" : `${bar}-minute`;
 }
 
 const SESSION_OPEN_MIN = 9 * 60 + 15;
@@ -779,13 +785,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     });
   };
   const [full, setFull] = useState(false);
-  const [pickedBar, setBar] = useState<number>(1);
-  // The bot's candle interval: live candles come at that size, so the chart
-  // offers it and the bigger sizes it divides into.
+  // 0 = nothing picked yet: the chart opens on the bot's own candle.
+  const [pickedBar, setBar] = useState<number>(0);
+  // The size of the candles in the payload, and the bot's own candle. Live candles
+  // come at the bot's size and bigger sizes are merged from them here; a smaller size
+  // (1 or 3 minutes for a 5-minute bot) or one the bot's candle does not divide into
+  // is asked of the server, which draws it from the 1-minute tape.
   const liveSource = Math.max(1, Number(chart?.candle_minutes) || 1);
-  const barChoices: number[] =
-    liveSource === 1 ? [...BAR_MINUTES] : [liveSource, ...BAR_MINUTES.filter((m) => m > liveSource && m % liveSource === 0)];
-  const bar: number = barChoices.includes(pickedBar) ? pickedBar : liveSource;
+  const botCandle = Math.max(1, Number(state?.candle_minutes) || liveSource);
+  const barChoices: number[] = Array.from(new Set<number>([...BAR_MINUTES, botCandle])).sort((a, b) => a - b);
+  const bar: number = barChoices.includes(pickedBar) ? pickedBar : botCandle;
+  const serverInterval = bar !== botCandle && !(bar > botCandle && bar % botCandle === 0) ? bar : null;
   const measureLineRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [measuring, setMeasuring] = useState(false);
   const measuringRef = useRef(false);
@@ -803,8 +813,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     }
   }, []);
   useEffect(() => {
-    onLiveBars?.(liveBarsFor(bar));
-  }, [bar, onLiveBars]);
+    onLiveBars?.(liveBarsFor(bar), serverInterval);
+  }, [bar, serverInterval, onLiveBars]);
   const symbol = (state?.symbol ?? "").toUpperCase();
   // "Hold view": new candles keep coming, but the zoom and scroll stay where
   // the user left them (a replay otherwise drags the chart along every bar).
@@ -1399,24 +1409,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <h2 className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-slate-100">
           {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
-          <span className="font-normal text-slate-300">{bar === 60 ? "1-hour" : `${bar}-minute`}</span>
-          <span role="group" aria-label="Candle size" className="ml-1 inline-flex rounded-md ring-1 ring-inset ring-white/10">
+          <span className="font-normal text-slate-300">{barWords(bar)}</span>
+          <select
+            aria-label="Candle size"
+            title="Candle size. The bot still trades on its own candle."
+            value={bar}
+            disabled={loadingPast}
+            onChange={(e) => pickBar(Number(e.target.value))}
+            className="ml-1 min-h-10 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-xs font-semibold text-sky-100 disabled:opacity-50 sm:min-h-9"
+          >
             {barChoices.map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={bar === m}
-                disabled={loadingPast}
-                onClick={() => pickBar(m)}
-                className={clsx(
-                  "min-h-9 min-w-9 px-2 font-mono text-xs first:rounded-l-md last:rounded-r-md disabled:opacity-50",
-                  bar === m ? "bg-sky-500/25 font-semibold text-sky-100" : "font-normal text-slate-300 hover:bg-white/5"
-                )}
-              >
+              <option key={m} value={m}>
                 {barLabel(m)}
-              </button>
+                {m === botCandle ? " · bot" : ""}
+              </option>
             ))}
-          </span>
+          </select>
           <button
             type="button"
             onClick={toggleFull}
@@ -1718,7 +1726,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           trades={allTrades ?? trades}
           snap={snapToBar}
           symbol={(past?.symbol ?? state?.symbol ?? "").toUpperCase()}
-          barLabel={bar === 60 ? "1-hour" : `${bar}-minute`}
+          barLabel={barWords(bar)}
           barSeconds={bar * 60}
           source={past ? "Past view" : state?.mode === "REPLAY" ? "Replay" : state?.mode === "LIVE" ? "Live" : "Paper"}
         />
