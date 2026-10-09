@@ -248,6 +248,15 @@ async def most_active(
     return out
 
 
+@router.get("/universe")
+async def fno_universe():
+    """The F&O stock names, for scans on the SMA terminal (it downloads the candles itself).
+
+    Same list as the most-active scan. Empty, with the reason, when the list could not be loaded."""
+    symbols = active_scanner.universe_symbols()
+    return {"symbols": symbols, "error": None if symbols else active_scanner.error}
+
+
 @router.post("/active/scan")
 async def most_active_scan():
     """Start a scan now (at most once a minute). Returns at once; the page polls."""

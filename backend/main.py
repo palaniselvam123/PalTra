@@ -23,7 +23,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from candle_history import HistoryError, load_history
+from candle_history import HistoryError, fetch_frame, load_history
+from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from replay import (
     SPEEDS,
     ReplaySession,
@@ -63,6 +64,7 @@ from strategy_engine import (
 )
 
 engine = StrategyEngine()
+cross_scanner = CrossScanner()
 #: One replay player per SMA bot (1-4), so all four bots can replay at once
 #: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
 replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
@@ -1182,6 +1184,38 @@ async def replay_bot_kill(bot: int = 1):
     eng = _replay_engine(bot)
     await eng.kill("Manual PANIC SQUARE-OFF (replay)")
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
+
+
+class CrossScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    minutes: Literal[1, 2, 3, 5, 10, 15] = 5
+    force: bool = False
+
+
+@app.post("/api/cross-scan/start")
+async def cross_scan_start(body: CrossScanStart):
+    """Start a cross scan (read-only: candles only, no order). Returns at once; poll GET /api/cross-scan.
+
+    Uses the main desk's SMA periods. The same candle (and the same stocks) is
+    not scanned twice, and a rescan waits a minute.
+    """
+    cfg = engine.load_config()
+    try:
+        return cross_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            minutes=body.minutes,
+            sma_fast=int(cfg.sma_fast),
+            sma_slow=int(cfg.sma_slow),
+            force=body.force,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/cross-scan")
+async def cross_scan_status():
+    return cross_scanner.snapshot()
 
 
 @app.get("/api/ticks")
