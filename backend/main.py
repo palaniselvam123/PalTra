@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
+from stall_tracer import tracer as stall_tracer
 from replay import (
     SPEEDS,
     ReplaySession,
@@ -102,6 +103,8 @@ def boot_engine() -> asyncio.Task | None:
     if _booted:
         return _task
     _booted = True
+    # First, so a stall while the rest boots is traced too. Logging only; see stall_tracer.py.
+    stall_tracer.start()
     init_db()
     # A deploy or restart mid-replay: those runs can be resumed where they stopped.
     close_orphan_replay_rows(interrupted=True)
@@ -127,6 +130,7 @@ def boot_engine() -> asyncio.Task | None:
 
 
 def stop_engine() -> None:
+    stall_tracer.stop()
     engine.stop()
     research_engine.stop()
     for eng in bot_engines.values():
@@ -1217,6 +1221,12 @@ async def cross_scan_start(body: CrossScanStart):
 @app.get("/api/cross-scan")
 async def cross_scan_status():
     return cross_scanner.snapshot()
+
+
+@app.get("/api/stall")
+async def stall_status():
+    """Has the event loop stalled since boot, and for how long (see stall_tracer.py). Read-only."""
+    return stall_tracer.snapshot()
 
 
 @app.get("/api/ticks")
