@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
+import chop_scan
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -1252,7 +1253,17 @@ async def cross_scan_status():
 class ChopScanStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
     minutes: Literal[1, 2, 3, 5, 10, 15] = 5
+    quiet_min: int = Field(default=chop_scan.QUIET_MIN_DEFAULT, ge=1, le=375)
+    alert_on_quiet: bool = False
     force: bool = False
+
+
+def _chop_alert(message: str) -> None:
+    """Hand a chop-scan Telegram off to the same path the bots use. Logging only on failure."""
+    try:
+        engine._alert(message)  # noqa: SLF001 - the shared helper is private but owned here
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @app.post("/api/chop-scan/start")
@@ -1261,7 +1272,9 @@ async def chop_scan_start(body: ChopScanStart):
 
     Counts today's SMA fast / slow crosses on the N-minute candle for each stock,
     with the main desk's SMA periods, and labels each one TRENDING / MIXED /
-    CHOPPY. No bot setting is read or changed.
+    CHOPPY. No bot setting is read or changed. With `alert_on_quiet` on, the
+    first time a stock reads as a quiet runner during NSE hours gets a Telegram
+    alert; a stock is alerted at most once per day.
     """
     cfg = engine.load_config()
     try:
@@ -1271,6 +1284,9 @@ async def chop_scan_start(body: ChopScanStart):
             minutes=body.minutes,
             sma_fast=int(cfg.sma_fast),
             sma_slow=int(cfg.sma_slow),
+            quiet_min=body.quiet_min,
+            alert_on_quiet=body.alert_on_quiet,
+            alert_cb=_chop_alert if body.alert_on_quiet else None,
             force=body.force,
         )
     except ValueError as exc:

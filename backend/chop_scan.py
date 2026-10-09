@@ -64,6 +64,41 @@ TRENDING = "TRENDING"
 MIXED = "MIXED"
 CHOPPY = "CHOPPY"
 
+# Quiet-runner alert. When a stock had crosses earlier today and has then stayed
+# quiet for `quiet_min` minutes, the scanner marks it a "quiet runner" (possible
+# strong trend forming) and sends one Telegram per stock per day. Information
+# only: nothing in the strategy reads it; the person decides.
+QUIET_MIN_DEFAULT = 60
+# Keyed by IST date so a brand-new day sends the alert again.
+_ALERTED_TODAY: dict[dt.date, set[str]] = {}
+
+
+def _already_alerted(symbol: str, now: dt.datetime) -> bool:
+    today = now.astimezone(IST).date()
+    _ALERTED_TODAY.setdefault(today, set())
+    # Keep only today's set, so the dict stays bounded across days.
+    for day in list(_ALERTED_TODAY):
+        if day != today:
+            _ALERTED_TODAY.pop(day, None)
+    return symbol in _ALERTED_TODAY[today]
+
+
+def _mark_alerted(symbol: str, now: dt.datetime) -> None:
+    today = now.astimezone(IST).date()
+    _ALERTED_TODAY.setdefault(today, set()).add(symbol)
+
+
+def quiet_runner_text(symbol: str, minutes: float, side: str | None, ltp: float | None) -> str:
+    bias = "Bullish ↑" if side == "BULLISH" else "Bearish ↓" if side == "BEARISH" else "trend forming"
+    price = f" at {ltp:.2f}" if ltp is not None else ""
+    hrs = int(minutes // 60)
+    mins = int(minutes - hrs * 60)
+    quiet = f"{hrs}h {mins}m" if hrs else f"{mins}m"
+    return (
+        f"QUIET RUNNER · {symbol}{price} has had no SMA cross for {quiet} after crossing earlier today. "
+        f"May be a strong {bias}. Open Trend quality to review."
+    )
+
 # Thresholds. Picked on the plain-language reading of the owner's example: one
 # cross-only morning that then runs for 60+ minutes is TRENDING; a stock that
 # crosses four or more times in a day, or whose crosses come on average less
@@ -85,6 +120,7 @@ class ChopRow:
     avg_move_pct: float | None  # abs % move between consecutive crosses, on average
     last_cross_direction: str | None  # "BULLISH" or "BEARISH" from the last cross's new side
     score: str
+    quiet_runner: bool  # had crosses earlier today and has stayed quiet for `quiet_min` minutes
     ltp: float | None
     candle_ts: int  # start of the last closed candle (epoch seconds)
     volume: float | None = None
@@ -128,7 +164,7 @@ def _crosses(closed: pd.DataFrame, today: int) -> list[dict]:
     return hits
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "") -> ChopRow | None:
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT) -> ChopRow | None:
     """One stock's chop/trend read. None when the tape isn't long enough yet."""
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
@@ -157,6 +193,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
             avg_gap = sum(gaps) / len(gaps) if gaps else None
             avg_move = sum(moves) / len(moves) if moves else None
     score = score_for(len(hits), minutes_since, avg_gap)
+    quiet = bool(hits) and minutes_since is not None and minutes_since >= max(1, int(quiet_min or 0))
     base = ChopRow(
         symbol=symbol,
         minutes=minutes,
@@ -166,6 +203,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         avg_move_pct=avg_move,
         last_cross_direction=last_side,
         score=score,
+        quiet_runner=quiet,
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
@@ -193,6 +231,7 @@ class Status:
     minutes: int = 5
     sma_fast: int = 9
     sma_slow: int = 21
+    quiet_min: int = QUIET_MIN_DEFAULT
     as_of: str | None = None
     market_open: bool = False
     rows: list[dict] = field(default_factory=list)
@@ -218,6 +257,7 @@ class ChopScanner:
             "minutes": s.minutes,
             "sma_fast": s.sma_fast,
             "sma_slow": s.sma_slow,
+            "quiet_min": s.quiet_min,
             "as_of": s.as_of,
             "market_open": s.market_open,
             "rows": s.rows,
@@ -231,6 +271,9 @@ class ChopScanner:
         minutes: int = 5,
         sma_fast: int = 9,
         sma_slow: int = 21,
+        quiet_min: int = QUIET_MIN_DEFAULT,
+        alert_on_quiet: bool = False,
+        alert_cb: Callable[[str], None] | None = None,
         force: bool = False,
         now: dt.datetime | None = None,
     ) -> dict:
@@ -255,10 +298,25 @@ class ChopScanner:
         self.status.failed = 0
         self.status.error = None
         self.status.minutes, self.status.sma_fast, self.status.sma_slow = minutes, sma_fast, sma_slow
-        self._task = asyncio.get_running_loop().create_task(self._run(names, fetch, key, minutes, sma_fast, sma_slow, now))
+        self.status.quiet_min = max(1, int(quiet_min or QUIET_MIN_DEFAULT))
+        self._task = asyncio.get_running_loop().create_task(
+            self._run(names, fetch, key, minutes, sma_fast, sma_slow, now, alert_on_quiet=alert_on_quiet, alert_cb=alert_cb)
+        )
         return self.snapshot()
 
-    async def _run(self, names: list[str], fetch: Fetch, key: tuple, minutes: int, sma_fast: int, sma_slow: int, now: dt.datetime) -> None:
+    async def _run(
+        self,
+        names: list[str],
+        fetch: Fetch,
+        key: tuple,
+        minutes: int,
+        sma_fast: int,
+        sma_slow: int,
+        now: dt.datetime,
+        *,
+        alert_on_quiet: bool = False,
+        alert_cb: Callable[[str], None] | None = None,
+    ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
         rows: list[ChopRow] = []
@@ -277,7 +335,7 @@ class ChopScanner:
                     return
                 try:
                     frame = await fetch(symbol, start, end)
-                    row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol)
+                    row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min)
                     ok += 1
                     if row is not None:
                         rows.append(row)
@@ -307,6 +365,17 @@ class ChopScanner:
         self.status.rows = [r.as_dict() for r in rows]
         self.status.as_of = now.isoformat(timespec="seconds")
         self.status.market_open = market_is_open(now)
+        # One alert per quiet runner per day. Nothing is traded here.
+        if alert_on_quiet and alert_cb is not None and market_is_open(now):
+            for row in rows:
+                if not row.quiet_runner or _already_alerted(row.symbol, now):
+                    continue
+                try:
+                    alert_cb(quiet_runner_text(row.symbol, row.minutes_since_last_cross or 0.0, row.last_cross_direction, row.ltp))
+                except Exception:  # noqa: BLE001
+                    log.exception("could not send a quiet-runner alert for %s", row.symbol)
+                    continue
+                _mark_alerted(row.symbol, now)
         if ok == 0 and errors:
             self.status.error = max(errors, key=errors.get)
             self._key = None
