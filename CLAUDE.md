@@ -353,6 +353,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
+- `backend/stall_tracer.py` – stall tracer (logging only; `STALL_TRACE=off` turns it
+  off, `STALL_TRACE_SEC` sets the 5-second threshold). The desk, every bot, replays
+  and all page requests share one event loop, so a call that blocks it freezes the
+  whole site. A heartbeat task on the loop, a watchdog thread and `faulthandler`'s
+  timer notice when the loop stops beating and log `STALL: …` with memory, CPU,
+  threads and the stack of the thread running the loop (faulthandler adds every
+  thread's stack to stderr), then `STALL over: …` with how long it lasted. Started
+  first in `boot_engine`; `GET /api/stall` reports it. Search the Fly log for `STALL`.
 - `backend/main.py` – the terminal's API (`/api/state`, `/api/config`,
   `/api/mode`, `/api/bot/*`, `/api/trades`, `/ws/stream`) and
   `boot_engine`/`stop_engine`.
