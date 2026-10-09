@@ -346,6 +346,24 @@ async def health():
     return {"status": "ok", "mode": state.mode}
 
 
+@app.get("/api/health/deep")
+async def health_deep():
+    """For an outside watcher: 200 when the loop is beating and every bot has ticked lately, else 503.
+
+    Public (no sign-in) and read-only: it reports no money, stocks or mode.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.sma_host import load_terminal
+
+    mod = load_terminal()
+    if mod is None or not hasattr(mod, "deep_health"):
+        body = {"ok": False, "reasons": ["The SMA terminal is not loaded."], "bots": []}
+        return JSONResponse(body, status_code=503)
+    body, ok = mod.deep_health()
+    return JSONResponse(body, status_code=200 if ok else 503)
+
+
 def _mount_exported_ui() -> None:
     """Serve the Next.js static export at `/` when the image includes it.
 

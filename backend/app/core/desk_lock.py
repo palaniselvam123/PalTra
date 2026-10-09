@@ -208,7 +208,7 @@ def session_ok(conn) -> bool:
 
 
 def _api_public(path: str) -> bool:
-    return path in ("/api/health", "/api/session/google")
+    return path in ("/api/health", "/api/health/deep", "/api/session/google")
 
 
 def _open_page(path: str) -> bool:
