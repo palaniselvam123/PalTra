@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
-import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
@@ -168,63 +168,51 @@ export function CrossScan({ armed, arming, onArm }: Props) {
         responsive.
       </Explain>
 
-      <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
-        <label className="flex flex-col gap-1">
-          Candle
-          <select
-            value={minutes}
-            onChange={(e) => setMinutes(Number(e.target.value) as CrossScanMinutes)}
-            className="min-h-9 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            {CANDLE_CHOICES.map((m) => (
-              <option key={m} value={m}>
-                {m} min
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          Direction
-          <select
-            value={side}
-            onChange={(e) => setSide(e.target.value as Side)}
-            className="min-h-9 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            <option value="ALL">Both</option>
-            <option value="BULLISH">Bullish (fast above slow)</option>
-            <option value="BEARISH">Bearish (fast below slow)</option>
-          </select>
-        </label>
-        <NumberFilter label="Crossing within (minutes)" value={within} onChange={setWithin} min={1} max={240} step={1} suffix="min" />
+      <FilterRow
+        status={
+          data
+            ? data.running
+              ? `Scanning ${data.done} of ${data.total}…`
+              : asOf && scannedThisCandle
+                ? `Closed candles to ${asOf}${data.market_open ? "" : " · market closed"}`
+                : "No scan yet"
+            : null
+        }
+      >
+        <SelectFilter
+          label="Candle"
+          value={minutes}
+          onChange={(v) => setMinutes(v as CrossScanMinutes)}
+          options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+          className="w-28"
+        />
+        <SelectFilter
+          label="Direction"
+          value={side}
+          onChange={(v) => setSide(v as Side)}
+          options={[
+            { value: "ALL", label: "Both" },
+            { value: "BULLISH", label: "Bullish" },
+            { value: "BEARISH", label: "Bearish" },
+          ]}
+          className="w-32"
+        />
+        <NumberFilter label="Crossing within" value={within} onChange={setWithin} min={1} max={240} step={1} suffix="min" />
         <TextFilter value={query} onChange={setQuery} />
         <NumberFilter
-          label="Fast movers: min speed (last 10 min)"
+          label="Min speed (10 min)"
           value={minSpeed}
           onChange={setMinSpeed}
           min={0}
           max={0.5}
           step={0.01}
           suffix="%/min"
-          className="w-52"
         />
-        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
-          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={fastOnly} onChange={(e) => setFastOnly(e.target.checked)} />
-          Fast movers only
-        </label>
-        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
-          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={showCrossed} onChange={(e) => setShowCrossed(e.target.checked)} />
-          Also show stocks that just crossed
-        </label>
-        {data && (
-          <span className="ml-auto">
-            {data.running
-              ? `Scanning ${data.done} of ${data.total}…`
-              : asOf && scannedThisCandle
-                ? `Closed candles to ${asOf}${data.market_open ? "" : " · market closed"}`
-                : "No scan yet"}
-          </span>
-        )}
-      </div>
+        <div className="flex min-h-9 flex-wrap items-end gap-2 self-end">
+          <Toggle label="Fast movers only" checked={fastOnly} onChange={setFastOnly} />
+          <Toggle label="Just-crossed" checked={showCrossed} onChange={setShowCrossed} title="Also show stocks that just crossed" />
+        </div>
+      </FilterRow>
 
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}
       {data?.error && !error && (

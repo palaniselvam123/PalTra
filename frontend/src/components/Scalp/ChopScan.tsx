@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type CrossScanMinutes } from "@/lib/smaApi";
-import { TextFilter, matchesText } from "@/components/ui/tableTools";
+import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
@@ -226,73 +226,53 @@ export function ChopScan({ armed, arming, onArm }: Props) {
         <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
-      <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
-        <label className="flex flex-col gap-1">
-          Candle
-          <select
-            value={minutes}
-            onChange={(e) => setMinutes(Number(e.target.value) as CrossScanMinutes)}
-            className="min-h-9 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            {CANDLE_CHOICES.map((m) => (
-              <option key={m} value={m}>
-                {m} min
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          Show
-          <select
-            value={score}
-            onChange={(e) => setScore(e.target.value as ScoreFilter)}
-            className="min-h-9 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            <option value="ALL">All</option>
-            <option value="TRENDING">Trending only</option>
-            <option value="MIXED">Mixed only</option>
-            <option value="CHOPPY">Choppy only</option>
-          </select>
-        </label>
-        <TextFilter value={query} onChange={setQuery} />
-        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
-          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={armedOnly} onChange={(e) => setArmedOnly(e.target.checked)} />
-          Armed stocks only
-        </label>
-        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
-          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-          Rescan every 30 min
-        </label>
-        <label className="flex flex-col gap-1">
-          Alert when quiet for ≥
-          <input
-            type="number"
-            min={1}
-            max={375}
-            step={5}
-            value={quietMin}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v) && v > 0) setQuietMin(Math.min(375, Math.max(1, Math.round(v))));
-            }}
-            className="min-h-9 w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs tabular-nums text-slate-200"
-          />
-          <span className="text-[11px] text-slate-500">min</span>
-        </label>
-        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
-          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={alertOnQuiet} onChange={(e) => setAlertOnQuiet(e.target.checked)} />
-          Telegram too
-        </label>
-        {data && (
-          <span className="ml-auto">
-            {data.running
+      <FilterRow
+        status={
+          data
+            ? data.running
               ? `Scanning ${data.done} of ${data.total}…`
               : asOf && scannedThisCandle
                 ? `Closed candles to ${asOf}${data.market_open ? "" : " · market closed"}`
-                : "No scan yet"}
-          </span>
-        )}
-      </div>
+                : "No scan yet"
+            : null
+        }
+      >
+        <SelectFilter
+          label="Candle"
+          value={minutes}
+          onChange={(v) => setMinutes(v as CrossScanMinutes)}
+          options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+          className="w-28"
+        />
+        <SelectFilter
+          label="Show"
+          value={score}
+          onChange={(v) => setScore(v as ScoreFilter)}
+          options={[
+            { value: "ALL", label: "All" },
+            { value: "TRENDING", label: "Trending only" },
+            { value: "MIXED", label: "Mixed only" },
+            { value: "CHOPPY", label: "Choppy only" },
+          ]}
+          className="w-36"
+        />
+        <TextFilter value={query} onChange={setQuery} />
+        <NumberFilter
+          label="Alert when quiet for ≥"
+          value={quietMin}
+          onChange={(v) => setQuietMin(Math.min(375, Math.max(1, Math.round(v))))}
+          min={5}
+          max={240}
+          step={5}
+          suffix="min"
+          className="w-40"
+        />
+        <div className="flex min-h-9 flex-wrap items-end gap-2 self-end">
+          <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
+          <Toggle label="Rescan 30 min" checked={auto} onChange={setAuto} title="Rescan every 30 minutes while the market is open" />
+          <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
+        </div>
+      </FilterRow>
       {toast && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           <span>🔔 Quiet runner — {toast}</span>
