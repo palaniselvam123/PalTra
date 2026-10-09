@@ -13,6 +13,7 @@ import { useArming } from "@/components/Scalp/useArming";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
+import { CrossScan } from "@/components/Scalp/CrossScan";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -264,6 +265,8 @@ export default function ScalpPage() {
         </section>
 
         {dialogs}
+
+        <CrossScan armed={armed} arming={arming} onArm={arm} />
 
         <MostActive
           watching={new Set((data?.rows ?? []).map((r) => r.symbol))}

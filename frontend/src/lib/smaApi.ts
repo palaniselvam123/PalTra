@@ -142,6 +142,42 @@ export type ChargeBreakdown = {
   total_charges?: number;
 };
 
+export type CrossScanMinutes = 1 | 2 | 3 | 5 | 10 | 15;
+
+/** One stock whose SMA fast / slow are about to cross (or just did) on the scan's candle. */
+export type CrossScanRow = {
+  symbol: string;
+  state: "APPROACHING" | "CROSSED";
+  /** BULLISH: the fast SMA is (or will be) above the slow one. */
+  side: "BULLISH" | "BEARISH";
+  ltp: number | null;
+  sma_fast: number;
+  sma_slow: number;
+  /** (fast − slow) / slow × 100 on the last closed candle. */
+  gap_pct: number;
+  /** Gap change per candle. */
+  slope_pct: number;
+  candles_to_cross: number | null;
+  minutes_to_cross: number | null;
+  /** CROSSED only: 0 = on the last closed candle. */
+  crossed_candles_ago: number | null;
+  candle_ts: number;
+};
+
+export type CrossScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  minutes: CrossScanMinutes;
+  sma_fast: number;
+  sma_slow: number;
+  as_of: string | null;
+  market_open: boolean;
+  rows: CrossScanRow[];
+};
+
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
 export type ReviewStatus = "PENDING" | "USER_REVIEW_EXIT" | "USER_REVIEW_WAIT" | "NO_RESPONSE" | "ALREADY_CLOSED";
 
@@ -892,6 +928,15 @@ export const smaApi = {
   walletReset: () => request<Wallet>("/api/wallet/reset", { method: "POST" }, undefined, false),
   walletMargin: (margin_pct: number) =>
     request<Wallet>("/api/wallet/margin", { method: "PUT", body: JSON.stringify({ margin_pct }) }, undefined, false),
+  /** Start a cross scan (read-only; candles only). Returns at once; poll `crossScan`. */
+  crossScanStart: (symbols: string[], minutes: CrossScanMinutes = 5, force = false) =>
+    request<CrossScan>(
+      "/api/cross-scan/start",
+      { method: "POST", body: JSON.stringify({ symbols, minutes, force }) },
+      20000,
+      false
+    ),
+  crossScan: () => request<CrossScan>("/api/cross-scan", undefined, undefined, false),
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */

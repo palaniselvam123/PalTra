@@ -892,6 +892,8 @@ export const api = {
   scalpActive: (params: { sort?: ActiveSort; top?: number; bias?: "LONG" | "SHORT"; min_value_cr?: number } = {}) =>
     request<ActiveStocksResponse>(`/api/scalp/active${queryString(stringifyParams(params))}`),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
+  /** The F&O stock names (for scans on the SMA terminal). `error` says why the list is empty. */
+  scalpUniverse: () => request<{ symbols: string[]; error: string | null }>("/api/scalp/universe"),
   scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),
