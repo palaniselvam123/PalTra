@@ -296,3 +296,11 @@ def test_scan_rows_carry_the_activity_figures(caplog):
     d = row.as_dict()
     assert d["volume"] and d["volume_window"] and d["speed_pct_per_min"] is not None and d["window_min"] == 10
     assert [r for r in caplog.records if "minute volume unavailable" in r.getMessage()] == []
+
+
+def test_download_concurrency_is_one_by_default_and_clamped(monkeypatch):
+    monkeypatch.delenv("CROSS_SCAN_CONCURRENCY", raising=False)
+    assert cross_scan._concurrency() == 1
+    for raw, want in (("3", 3), ("0", 1), ("99", 4), ("junk", 1), ("", 1)):
+        monkeypatch.setenv("CROSS_SCAN_CONCURRENCY", raw)
+        assert cross_scan._concurrency() == want

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import os
 import re
 import time
 from dataclasses import asdict, dataclass, field, replace
@@ -31,7 +32,17 @@ from indicators import enrich, sma_gap_pct
 log = logging.getLogger("sma.crossscan")
 
 MAX_SYMBOLS = 250
-CONCURRENCY = 3  # parallel candle downloads: gentle on Groww's rate limit
+
+
+def _concurrency() -> int:
+    """Downloads at once. One by default so a pass never competes with the bots for the process; 1-4 via CROSS_SCAN_CONCURRENCY."""
+    try:
+        return min(4, max(1, int(os.environ.get("CROSS_SCAN_CONCURRENCY", "1"))))
+    except ValueError:
+        return 1
+
+
+CONCURRENCY = _concurrency()  # parallel candle downloads: gentle on Groww's rate limit and on the desk
 CALL_GAP_SEC = 0.2  # between starting two downloads
 WARMUP_DAYS = 4  # calendar days of 1-minute candles before now, so SMA 21 is formed at the open
 MIN_RESCAN_SEC = 60  # "Scan now" at most once a minute

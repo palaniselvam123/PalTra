@@ -299,12 +299,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
   crossed. Groww has no indicator feed, so each stock's 1-minute candles are
-  downloaded (`candle_history.fetch_frame`, 3 at a time, 4 days back so SMA 21 is
+  downloaded (`candle_history.fetch_frame`, one at a time by default: `CROSS_SCAN_CONCURRENCY` 1-4; 4 days back so SMA 21 is
   formed at the open), grouped with `candles.resample` and averaged with
   `indicators.enrich` on the main desk's SMA periods: the same candles and
   arithmetic as the bot. Closed candles only (the forming one is dropped). The
   "in N min" estimate is the bot's heads-up slope arithmetic
-  (`strategy_engine.minutes_until_cross`) × the candle length. One pass at a time;
+  (`strategy_engine.minutes_until_cross`) × the candle length. A scan starts only when Scan now
+  is pressed (opening the page just shows the last result). One pass at a time;
   the same closed candle is not scanned twice, a rescan waits a minute, and a pass
   that fails 5 times before any success stops and says why (e.g. no Groww login).
   `POST /api/cross-scan/start` (symbols, minutes, force) and `GET /api/cross-scan`
