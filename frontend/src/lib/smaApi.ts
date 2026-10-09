@@ -254,6 +254,14 @@ export type SmaState = {
   stop_enabled?: boolean;
   atr_multiplier?: number;
   stop_type?: StopType;
+  /** The chart stock's own stop numbers (its overrides over the shared settings). */
+  stop_points?: {
+    tsl_sl_points: number;
+    tsl_trail_points: number;
+    tsl_target_points: number;
+    gap_sl_mult: number;
+    gap_tp_mult: number;
+  } | null;
   exchange: string;
   ltp: number;
   day_open?: number | null;

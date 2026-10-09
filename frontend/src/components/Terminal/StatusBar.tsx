@@ -47,6 +47,30 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const source = state ? SOURCE[state.data_source] ?? state.data_source : null;
   const stopOn = state?.stop_enabled ?? config?.use_stop;
   const mult = state?.atr_multiplier ?? config?.atr_multiplier ?? 1.5;
+  // The chart stock's stop, trail and target: the open trade's own levels when
+  // it is held, else that stock's settings (its own over the shared ones).
+  const pos = state?.position;
+  const points = state?.stop_points;
+  const stopType = state?.stop_type ?? config?.stop_type;
+  const rupees = (v: number | null | undefined) =>
+    v == null ? "—" : `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  const stopText = (() => {
+    if (pos?.tsl_step) {
+      const target = pos.target != null ? rupees(Math.abs(pos.target - pos.entry_price)) : "none";
+      return `SL ${rupees(pos.tsl_points)} · Trail ${rupees(pos.tsl_step)} · Target ${target}`;
+    }
+    if (pos?.trailing) return `SMA gap · Target ${pos.target != null ? rupees(Math.abs(pos.target - pos.entry_price)) : "next candle"}`;
+    if (stopType === "TSL") {
+      const sl = points?.tsl_sl_points ?? config?.tsl_sl_points ?? 20;
+      const trail = points?.tsl_trail_points ?? config?.tsl_trail_points ?? 10;
+      const target = points?.tsl_target_points ?? config?.tsl_target_points ?? 0;
+      return `SL ${rupees(sl)} · Trail ${rupees(trail)} · Target ${target > 0 ? rupees(target) : "none"}`;
+    }
+    if (stopType === "SMA_GAP" && !live) {
+      return `SMA gap ×${points?.gap_sl_mult ?? config?.gap_sl_mult ?? 1} · Target ×${points?.gap_tp_mult ?? config?.gap_tp_mult ?? 2}`;
+    }
+    return `${mult}× ATR · Target none`;
+  })();
   const cutoff = config?.entry_cutoff_time ?? (config ? "15:00" : null);
   const patterns = (config?.entry_mode ?? "SMA") === "PATTERN";
   const candle = state?.candle_minutes ?? config?.candle_minutes ?? (config ? 1 : null);
@@ -164,20 +188,17 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           <Skeleton className="h-4 w-16" />
         )}
       </Cell>
-      <Cell label="Stop" title="Exchange stop-loss on new entries">
+      <Cell
+        label="Stop"
+        title={`${config?.symbol ?? "Chart stock"}: ${pos ? "the open trade's stop, trail and target" : "stop, trail and target for its next entry (its own settings over the shared ones)"}`}
+      >
         {stopOn == null ? (
           <Skeleton className="h-4 w-12" />
         ) : stopOn ? (
           <span className="text-emerald-300">
             ON
-            <span className="hidden sm:inline">
-              {" · "}
-              {(state?.stop_type ?? config?.stop_type) === "TSL"
-                ? `TSL ₹${config?.tsl_sl_points ?? 20} / ₹${config?.tsl_trail_points ?? 10}`
-                : (state?.stop_type ?? config?.stop_type) === "SMA_GAP" && !live
-                  ? "SMA gap"
-                  : `${mult}× ATR`}
-            </span>
+            {" · "}
+            {stopText}
           </span>
         ) : (
           <span className="font-bold text-amber-300">OFF</span>
