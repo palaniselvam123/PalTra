@@ -192,6 +192,76 @@ def one_minute_evidence(tape: pd.DataFrame | None, sma_fast: int, sma_slow: int,
     }
 
 
+# Verdict labels: how the closed 1-minute candles read against the open trade.
+WITH, AGAINST, MIXED = "WITH", "AGAINST", "MIXED"
+# The net score (with minus against) needed for WITH / AGAINST, and the fewest readable checks.
+VERDICT_MIN = 3
+
+
+def verdict(one: dict | None, direction: str) -> dict | None:
+    """How the closed 1-minute candles read for an open trade. Information only.
+
+    Five plain checks, each +1 (with the trade), -1 (against it) or 0 (flat):
+    the 1-minute fast SMA slope, price against the fast SMA, against the slow
+    SMA, against VWAP, and the net move of the last three closes. The score is
+    checks with the trade minus checks against it: VERDICT_MIN or more is WITH,
+    -VERDICT_MIN or less is AGAINST, anything between is MIXED. Nothing
+    reads this to trade: the person decides, and no answer keeps the trade.
+    Returns None when fewer than three checks could be read.
+    """
+    if not one:
+        return None
+    side = 1 if direction == "LONG" else -1
+
+    def word(value: str | None, up: str, down: str) -> int | None:
+        if value is None or value == "unknown":
+            return None
+        return 1 if value == up else -1 if value == down else 0
+
+    closes = [c["close"] for c in (one.get("candles") or [])]
+    move = None
+    if len(closes) >= 3:
+        net = closes[-1] - closes[-3]
+        move = 1 if net > 0 else -1 if net < 0 else 0
+    readings = [
+        ("SMA slope", word(one.get("fast_slope"), "rising", "falling")),
+        ("price vs fast SMA", word(one.get("vs_fast"), "above", "below")),
+        ("price vs slow SMA", word(one.get("vs_slow"), "above", "below")),
+        ("price vs VWAP", word(one.get("vs_vwap"), "above", "below")),
+        ("last 3 closes", move),
+    ]
+    read = [(name, v * side) for name, v in readings if v is not None]
+    if len(read) < VERDICT_MIN:
+        return None
+    score = sum(v for _, v in read)
+    behind = sum(1 for _, v in read if v > 0)
+    against = sum(1 for _, v in read if v < 0)
+    flat = len(read) - behind - against
+    label = WITH if score >= VERDICT_MIN else AGAINST if score <= -VERDICT_MIN else MIXED
+    return {
+        "label": label,
+        "score": score,
+        "of": len(read),
+        "with": behind,
+        "against": against,
+        "flat": flat,
+        "checks": {name: ("with" if v > 0 else "against" if v < 0 else "flat") for name, v in read},
+    }
+
+
+def verdict_line(v: dict | None, direction: str) -> str:
+    if not v:
+        return "Verdict: not enough 1-minute data to read a trend."
+    tally = f"{v['with']} with · {v['against']} against · {v['flat']} flat of {v['of']}"
+    if v["label"] == AGAINST:
+        head = f"1-min trend is AGAINST this {direction}"
+    elif v["label"] == WITH:
+        head = f"1-min trend is WITH this {direction}"
+    else:
+        head = f"1-min trend is MIXED for this {direction}"
+    return f"Verdict: {head} ({tally}). Information only — you decide."
+
+
 _DOT = {"GREEN": "🟢", "RED": "🔴", "DOJI": "⚪"}
 
 
@@ -243,6 +313,7 @@ def review_text(
             + (f" · RSI {one['rsi14']:.0f}" if one.get("rsi14") is not None else "")
             + (f" · vol {one['volume_ratio']:.1f}× avg" if one.get("volume_ratio") is not None else ""),
         ]
+        lines.append(verdict_line(one.get("verdict"), direction))
     else:
         lines += ["", "1-min review: not enough closed 1-minute candles yet."]
     lines += [

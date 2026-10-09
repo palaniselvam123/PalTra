@@ -186,6 +186,16 @@ export type ReviewItem = {
     vs_vwap?: string | null;
     rsi14?: number | null;
     volume_ratio?: number | null;
+    /** How the closed 1-minute candles read for the open trade. Information only; null when too little data. */
+    verdict?: {
+      label: "WITH" | "AGAINST" | "MIXED";
+      score: number;
+      of: number;
+      with: number;
+      against: number;
+      flat: number;
+      checks: Record<string, "with" | "against" | "flat">;
+    } | null;
   };
   message: string;
   status: ReviewStatus;
