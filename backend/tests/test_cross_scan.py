@@ -233,3 +233,23 @@ def test_the_endpoints_start_a_scan_with_the_desks_sma_periods_and_never_touch_o
         assert client.get("/api/cross-scan").status_code == 200
         assert client.get("/api/state").json()["mode"] == "PAPER"
     database.reset_engine()
+
+
+def test_a_scan_over_days_with_volume_resets_logs_nothing_and_reads_the_same(caplog):
+    """enrich() warns at every volume reset; four days of 213 stocks flooded the log. The cross reads closes only."""
+    import indicators
+
+    days = [dt.date(2026, 10, 6), dt.date(2026, 10, 7), DAY]
+    frame = pd.concat([_minutes(_path(FALL_THEN_RISE), d) for d in days], ignore_index=True)
+    # Groww's running total falls back to 0 mid-session (a reset), and the next bar starts over.
+    frame.loc[(frame.index % 60) < 10, "volume"] = 0  # whole 5-minute candles, so the reset survives the grouping
+    now = _at(12, 0)
+
+    indicators._VOLUME_WARNED.clear()
+    with caplog.at_level("WARNING"):
+        row = cross_scan.scan_one("TCS", frame, 9, 21, 5, now)
+    assert [r for r in caplog.records if "minute volume unavailable" in r.getMessage()] == []
+
+    # The same candles without any volume column give the same answer.
+    plain = cross_scan.scan_one("TCS", frame.drop(columns=["volume"]), 9, 21, 5, now)
+    assert row is not None and plain is not None and row.as_dict() == plain.as_dict()
