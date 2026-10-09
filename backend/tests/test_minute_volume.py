@@ -240,3 +240,40 @@ def test_the_forming_bar_does_not_move_vwap_or_the_cross():
     assert snap is not None
     assert snap.close == float(frame.iloc[-2]["close"])
     assert snap.timestamp == int(frame.iloc[-2]["ts"])
+
+
+def _reset_volume_warnings(monkeypatch, clock):
+    import indicators
+
+    indicators._VOLUME_WARNED.clear()
+    indicators._volume_window[:] = [0.0, 0, 0]
+    monkeypatch.setattr(indicators.time, "monotonic", lambda: clock[0])
+    return indicators
+
+
+def test_bad_volume_prints_are_remembered_not_forgotten_all_at_once(monkeypatch, caplog):
+    """A full list used to be cleared, so every print was logged again on the next quote."""
+    clock = [1000.0]
+    indicators = _reset_volume_warnings(monkeypatch, clock)
+    with caplog.at_level("WARNING", logger="sma.indicators"):
+        for i in range(600):  # more distinct prints than the old 400-entry list held
+            indicators._warn_volume_once("cumulative volume fell", 1_790_000_000 + i * 60, 5000.0, 0.0)
+        first = len(caplog.records)
+        for _ in range(3):  # the same prints come round on the next quotes
+            for i in range(600):
+                indicators._warn_volume_once("cumulative volume fell", 1_790_000_000 + i * 60, 5000.0, 0.0)
+    assert len(caplog.records) == first
+
+
+def test_a_burst_of_bad_prints_logs_a_few_lines_then_one_summary(monkeypatch, caplog):
+    clock = [1000.0]
+    indicators = _reset_volume_warnings(monkeypatch, clock)
+    with caplog.at_level("WARNING", logger="sma.indicators"):
+        for i in range(500):
+            indicators._warn_volume_once("cumulative volume fell", 1_790_000_000 + i * 60, 5000.0, 0.0)
+        assert len(caplog.records) == indicators._VOLUME_WARN_PER_MIN
+        clock[0] += 61  # the next minute: one line says how many were held back, then logging resumes
+        indicators._warn_volume_once("cumulative volume fell", 1_791_000_000, 5000.0, 0.0)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("480 more bad prints were not logged" in m for m in messages)
+    assert "ts=1791000000" in messages[-1]

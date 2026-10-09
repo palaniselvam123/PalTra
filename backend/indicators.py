@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import math
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,8 +21,15 @@ import pandas as pd
 logger = logging.getLogger("sma.indicators")
 
 NSE_TICK = 0.05
-# One warning per bad cumulative print. Enrich runs on every quote.
-_VOLUME_WARNED: set[tuple] = set()
+# One warning per bad cumulative print. Enrich runs on every quote, over several
+# days of candles for every watched stock, so the same prints come round all day.
+# Remember the most recent 20,000 (oldest forgotten first, never all at once: a
+# full clear re-logged every print and flooded the log), and log at most 20 lines
+# a minute; the rest are counted and summed up in one line.
+_VOLUME_WARNED: "OrderedDict[tuple, None]" = OrderedDict()
+_VOLUME_WARN_REMEMBER = 20_000
+_VOLUME_WARN_PER_MIN = 20
+_volume_window = [0.0, 0, 0]  # when the minute began, lines logged in it, lines held back
 
 
 def round_to_nse_tick(price: float, tick: float = NSE_TICK) -> float:
@@ -73,16 +82,27 @@ def _warn_volume_once(kind: str, ts: int, previous: float, current: float) -> No
     key = (kind, int(ts), round(float(previous), 4), round(float(current), 4))
     if key in _VOLUME_WARNED:
         return
-    if len(_VOLUME_WARNED) > 400:
-        _VOLUME_WARNED.clear()
-    _VOLUME_WARNED.add(key)
-    logger.warning(
-        "minute volume unavailable (%s) at ts=%s previous_cumulative=%s current_cumulative=%s",
-        kind,
-        int(ts),
-        previous,
-        current,
-    )
+    _VOLUME_WARNED[key] = None
+    while len(_VOLUME_WARNED) > _VOLUME_WARN_REMEMBER:
+        _VOLUME_WARNED.popitem(last=False)
+    now = time.monotonic()
+    began, logged, held = _volume_window
+    if now - began >= 60:
+        if held:
+            logger.warning("minute volume unavailable: %d more bad prints were not logged in the last minute", held)
+        began, logged, held = now, 0, 0
+    if logged >= _VOLUME_WARN_PER_MIN:
+        held += 1
+    else:
+        logged += 1
+        logger.warning(
+            "minute volume unavailable (%s) at ts=%s previous_cumulative=%s current_cumulative=%s",
+            kind,
+            int(ts),
+            previous,
+            current,
+        )
+    _volume_window[:] = [began, logged, held]
 
 
 def sma_gap_pct(fast: float, slow: float) -> float | None:
