@@ -11,7 +11,6 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
-const RECHECK_MS = 30_000; // a new candle may have closed: the server skips a scan it already has
 
 type Props = {
   /** Stock → the SMA bots it is armed on. */
@@ -73,10 +72,20 @@ export function CrossScan({ armed, arming, onArm }: Props) {
     [minutes]
   );
 
-  // Start when the section opens or the candle size changes; the server keeps one result per candle.
+  // Nothing is scanned until "Scan now" is pressed. Opening the page only looks at the last result the
+  // server already holds (one pass is hundreds of downloads, so it never starts by itself).
   useEffect(() => {
-    void start(false);
-  }, [start]);
+    let live = true;
+    smaApi
+      .crossScan()
+      .then((d) => live && setData(d))
+      .catch(() => {
+        /* the terminal is not answering: the page shows "No scan yet" and Scan now still works */
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // While a pass runs, watch its progress.
   useEffect(() => {
@@ -90,27 +99,20 @@ export function CrossScan({ armed, arming, onArm }: Props) {
     return () => clearInterval(id);
   }, [data?.running]);
 
-  // While the market is open, look again for a newly closed candle.
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      if (data?.market_open) void start(false);
-    }, RECHECK_MS);
-    return () => clearInterval(id);
-  }, [data?.market_open, start]);
-
   const speedOf = useCallback((r: CrossScanRow) => (r.speed_pct_per_min == null ? null : Math.abs(r.speed_pct_per_min)), []);
 
+  // The server holds one result, for the candle size it last scanned.
+  const scannedThisCandle = data?.minutes === minutes;
   const filtered = useMemo(
     () =>
-      (data?.rows ?? []).filter((r) => {
+      (scannedThisCandle ? (data?.rows ?? []) : []).filter((r) => {
         if (!matchesText(query, r.symbol)) return false;
         if (side !== "ALL" && r.side !== side) return false;
         if (fastOnly && (speedOf(r) ?? 0) < minSpeed) return false;
         if (r.state === "CROSSED") return showCrossed;
         return (r.minutes_to_cross ?? Infinity) <= within;
       }),
-    [data?.rows, query, side, fastOnly, minSpeed, speedOf, showCrossed, within]
+    [data?.rows, scannedThisCandle, query, side, fastOnly, minSpeed, speedOf, showCrossed, within]
   );
   const { sorted: rows, sort, onSort } = useSort<CrossScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
@@ -162,7 +164,8 @@ export function CrossScan({ armed, arming, onArm }: Props) {
         -minute candles from 09:15 and averaged exactly as the bot does it, on closed candles only (the candle still forming is
         ignored). &quot;In&quot; is how long the cross is away if the gap keeps closing at the pace of the last few candles; it is an estimate,
         not a promise, and a stock can turn away. Arm puts a stock on a bot&apos;s Trade list; it orders only on that bot&apos;s own
-        cross.
+        cross. A scan starts only when you press Scan now, and reads the stocks one at a time so the desk and the bots stay
+        responsive.
       </Explain>
 
       <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
@@ -216,7 +219,7 @@ export function CrossScan({ armed, arming, onArm }: Props) {
           <span className="ml-auto">
             {data.running
               ? `Scanning ${data.done} of ${data.total}…`
-              : asOf
+              : asOf && scannedThisCandle
                 ? `Closed candles to ${asOf}${data.market_open ? "" : " · market closed"}`
                 : "No scan yet"}
           </span>
@@ -233,9 +236,9 @@ export function CrossScan({ armed, arming, onArm }: Props) {
             ? "Scanning…"
             : data?.error && (data.failed ?? 0) > 0 && (data.done ?? 0) <= (data.failed ?? 0)
               ? "The scan could not read any stock, so there is nothing to show yet."
-              : data?.as_of
-                ? `No stock matches these filters right now. Widen "Crossing within", clear the stock or fast-mover filter, or check back after the next candle closes.`
-                : "Starting the scan…"}
+              : data?.as_of && scannedThisCandle
+                ? `No stock matches these filters. Widen "Crossing within", clear the stock or fast-mover filter, or press Scan now after the next candle closes.`
+                : `Nothing is scanned until you press Scan now. A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
         </p>
       ) : (
         <div className="overflow-x-auto">
