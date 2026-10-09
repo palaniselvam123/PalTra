@@ -13,6 +13,7 @@ import { useArming } from "@/components/Scalp/useArming";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
+import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 
@@ -269,6 +270,7 @@ export default function ScalpPage() {
         {dialogs}
 
         <CrossScan armed={armed} arming={arming} onArm={arm} />
+        <ChopScan armed={armed} arming={arming} onArm={arm} />
 
         <MostActive
           watching={new Set((data?.rows ?? []).map((r) => r.symbol))}

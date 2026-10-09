@@ -187,6 +187,40 @@ export type CrossScan = {
   rows: CrossScanRow[];
 };
 
+/** How choppy or trending a stock has looked today — information only, never traded on. */
+export type ChopScore = "TRENDING" | "MIXED" | "CHOPPY";
+export type ChopScanRow = {
+  symbol: string;
+  minutes: CrossScanMinutes;
+  crosses_today: number;
+  minutes_since_last_cross: number | null;
+  avg_minutes_between: number | null;
+  avg_move_pct: number | null;
+  last_cross_direction: "BULLISH" | "BEARISH" | null;
+  score: ChopScore;
+  ltp: number | null;
+  candle_ts: number;
+  volume?: number | null;
+  volume_window?: number | null;
+  move_pct?: number | null;
+  speed_pct_per_min?: number | null;
+  window_min?: number;
+};
+
+export type ChopScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  minutes: CrossScanMinutes;
+  sma_fast: number;
+  sma_slow: number;
+  as_of: string | null;
+  market_open: boolean;
+  rows: ChopScanRow[];
+};
+
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
 export type ReviewStatus = "PENDING" | "USER_REVIEW_EXIT" | "USER_REVIEW_WAIT" | "NO_RESPONSE" | "ALREADY_CLOSED";
 
@@ -956,6 +990,15 @@ export const smaApi = {
       false
     ),
   crossScan: () => request<CrossScan>("/api/cross-scan", undefined, undefined, false),
+  /** Start a chop/trend scan (read-only; today's SMA crosses, TRENDING / MIXED / CHOPPY per stock). */
+  chopScanStart: (symbols: string[], minutes: CrossScanMinutes = 5, force = false) =>
+    request<ChopScan>(
+      "/api/chop-scan/start",
+      { method: "POST", body: JSON.stringify({ symbols, minutes, force }) },
+      20000,
+      false
+    ),
+  chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
