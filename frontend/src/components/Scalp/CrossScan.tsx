@@ -1,14 +1,16 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
+import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
-const WITHIN_STOPS = [10, 15, 30, 60, 120]; // minutes
+const SPEED_WINDOW_MIN = 10; // the fast-movers feed's own window
 const POLL_MS = 3_000;
 const RECHECK_MS = 30_000; // a new candle may have closed: the server skips a scan it already has
 
@@ -20,6 +22,7 @@ type Props = {
 };
 
 type Side = "ALL" | "BULLISH" | "BEARISH";
+type SortKey = "symbol" | "side" | "mins" | "ltp" | "gap" | "slope" | "speed";
 
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
@@ -35,6 +38,11 @@ export function CrossScan({ armed, arming, onArm }: Props) {
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
   const [side, setSide] = useState<Side>("ALL");
   const [within, setWithin] = useState(30);
+  const [query, setQuery] = useState("");
+  // Fast movers (Movers page feed): how fast each stock has moved lately, in % per minute.
+  const [fastOnly, setFastOnly] = useState(false);
+  const [minSpeed, setMinSpeed] = useState(0.1);
+  const [speeds, setSpeeds] = useState<Map<string, number> | null>(null);
   const [showCrossed, setShowCrossed] = useState(true);
   const [busy, setBusy] = useState(false);
   const universe = useRef<string[] | null>(null);
@@ -85,10 +93,54 @@ export function CrossScan({ armed, arming, onArm }: Props) {
     return () => clearInterval(id);
   }, [data?.market_open, start]);
 
-  const rows = (data?.rows ?? []).filter((r) => {
-    if (side !== "ALL" && r.side !== side) return false;
-    if (r.state === "CROSSED") return showCrossed;
-    return (r.minutes_to_cross ?? Infinity) <= within;
+  // How fast each stock has moved lately (the Movers page's fast-movers feed, every stock it measures).
+  useEffect(() => {
+    let live = true;
+    const load = () => {
+      api
+        .moversFast({ min_speed: 0, min_move: 0, window_min: SPEED_WINDOW_MIN })
+        .then((r) => live && setSpeeds(new Map(r.movers.map((m) => [m.symbol.toUpperCase(), Math.abs(m.speed_pct_per_min)]))))
+        .catch(() => live && setSpeeds(null));
+    };
+    load();
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) load();
+    }, RECHECK_MS);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, []);
+  const speedOf = useCallback((symbol: string) => speeds?.get(symbol.toUpperCase()) ?? null, [speeds]);
+
+  const filtered = useMemo(
+    () =>
+      (data?.rows ?? []).filter((r) => {
+        if (!matchesText(query, r.symbol)) return false;
+        if (side !== "ALL" && r.side !== side) return false;
+        if (fastOnly && (speedOf(r.symbol) ?? 0) < minSpeed) return false;
+        if (r.state === "CROSSED") return showCrossed;
+        return (r.minutes_to_cross ?? Infinity) <= within;
+      }),
+    [data?.rows, query, side, fastOnly, minSpeed, speedOf, showCrossed, within]
+  );
+  const { sorted: rows, sort, onSort } = useSort<CrossScanRow, SortKey>(filtered, (r, k) => {
+    switch (k) {
+      case "symbol":
+        return r.symbol;
+      case "side":
+        return r.side;
+      case "mins":
+        return r.state === "CROSSED" ? -1 : r.minutes_to_cross;
+      case "ltp":
+        return r.ltp;
+      case "gap":
+        return r.gap_pct;
+      case "slope":
+        return r.slope_pct;
+      case "speed":
+        return speedOf(r.symbol);
+    }
   });
   const asOf = data?.as_of
     ? new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST"
@@ -148,19 +200,21 @@ export function CrossScan({ armed, arming, onArm }: Props) {
             <option value="BEARISH">Bearish (fast below slow)</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1">
-          Crossing within
-          <select
-            value={within}
-            onChange={(e) => setWithin(Number(e.target.value))}
-            className="min-h-9 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            {WITHIN_STOPS.map((m) => (
-              <option key={m} value={m}>
-                {m < 60 ? `${m} min` : `${m / 60} h`}
-              </option>
-            ))}
-          </select>
+        <NumberFilter label="Crossing within (minutes)" value={within} onChange={setWithin} min={1} max={240} step={1} suffix="min" />
+        <TextFilter value={query} onChange={setQuery} />
+        <NumberFilter
+          label={`Fast movers: min speed (last ${SPEED_WINDOW_MIN} min)`}
+          value={minSpeed}
+          onChange={setMinSpeed}
+          min={0}
+          max={0.5}
+          step={0.01}
+          suffix="%/min"
+          className="w-52"
+        />
+        <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
+          <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={fastOnly} onChange={(e) => setFastOnly(e.target.checked)} />
+          Fast movers only
         </label>
         <label className="flex min-h-9 items-center gap-2 self-end text-slate-300">
           <input type="checkbox" className="h-5 w-5 accent-sky-400" checked={showCrossed} onChange={(e) => setShowCrossed(e.target.checked)} />
@@ -188,7 +242,7 @@ export function CrossScan({ armed, arming, onArm }: Props) {
             : data?.error && (data.failed ?? 0) > 0 && (data.done ?? 0) <= (data.failed ?? 0)
               ? "The scan could not read any stock, so there is nothing to show yet."
               : data?.as_of
-                ? `No stock is within ${within < 60 ? `${within} minutes` : `${within / 60} h`} of crossing right now. Widen "Crossing within", or check back after the next candle closes.`
+                ? `No stock matches these filters right now. Widen "Crossing within", clear the stock or fast-mover filter, or check back after the next candle closes.`
                 : "Starting the scan…"}
         </p>
       ) : (
@@ -196,25 +250,27 @@ export function CrossScan({ armed, arming, onArm }: Props) {
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
-                <th className="pb-2 text-left font-medium">Stock</th>
-                <th className="pb-2 text-left font-medium">Cross</th>
-                <th className="pb-2 text-right font-medium" title="Estimated time to the cross at the pace of the last few candles">
-                  In
-                </th>
-                <th className="pb-2 text-right font-medium">LTP</th>
-                <th className="pb-2 text-right font-medium" title="(fast SMA − slow SMA) / slow SMA, on the last closed candle">
-                  Gap %
-                </th>
-                <th className="pb-2 text-right font-medium" title="How much the gap changes each candle">
-                  Closing / candle
-                </th>
-                <th className="pb-2 text-right font-medium">{label}</th>
-                <th className="pb-2 text-right font-medium">Arm</th>
+                <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+                <SortTh label="Cross" k="side" sort={sort} onSort={onSort} text />
+                <SortTh label="In" k="mins" sort={sort} onSort={onSort} num title="Estimated time to the cross at the pace of the last few candles" />
+                <SortTh label="LTP" k="ltp" sort={sort} onSort={onSort} num />
+                <SortTh label="Gap %" k="gap" sort={sort} onSort={onSort} num title="(fast SMA − slow SMA) / slow SMA, on the last closed candle" />
+                <SortTh label="Closing / candle" k="slope" sort={sort} onSort={onSort} num title="How much the gap changes each candle" />
+                <SortTh
+                  label="Speed"
+                  k="speed"
+                  sort={sort}
+                  onSort={onSort}
+                  num
+                  title={`How fast the price moved over the last ${SPEED_WINDOW_MIN} minutes, in % per minute (the Movers page's fast-movers feed)`}
+                />
+                <th className="px-1 pb-2 text-right font-medium">{label}</th>
+                <th className="px-1 pb-2 text-right font-medium">Arm</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <Row key={r.symbol} row={r} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} row={r} speed={speedOf(r.symbol)} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -224,7 +280,21 @@ export function CrossScan({ armed, arming, onArm }: Props) {
   );
 }
 
-function Row({ row: r, armedOn, arming, onArm }: { row: CrossScanRow; armedOn: string[]; arming: boolean; onArm: () => void }) {
+function Row({
+  row: r,
+  speed,
+  fastAt,
+  armedOn,
+  arming,
+  onArm,
+}: {
+  row: CrossScanRow;
+  speed: number | null;
+  fastAt: number;
+  armedOn: string[];
+  arming: boolean;
+  onArm: () => void;
+}) {
   const crossed = r.state === "CROSSED";
   const bullish = r.side === "BULLISH";
   return (
@@ -256,6 +326,16 @@ function Row({ row: r, armedOn, arming, onArm }: { row: CrossScanRow; armedOn: s
       <td className="py-1.5 text-right tabular-nums text-slate-400">
         {r.slope_pct >= 0 ? "+" : ""}
         {num(r.slope_pct, 3)}
+      </td>
+      <td className="py-1.5 text-right tabular-nums">
+        {speed == null ? (
+          <span className="text-slate-600" title="Not in the fast-movers feed">—</span>
+        ) : (
+          <span className={speed >= fastAt ? "font-semibold text-amber-300" : "text-slate-400"} title={speed >= fastAt ? "Fast mover" : "Moving, but under the fast-mover speed"}>
+            {speed >= fastAt ? "⚡ " : ""}
+            {num(speed, 3)}
+          </span>
+        )}
       </td>
       <td className="py-1.5 text-right tabular-nums text-slate-400">
         {num(r.sma_fast)} / {num(r.sma_slow)}
