@@ -362,6 +362,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   threads and the stack of the thread running the loop (faulthandler adds every
   thread's stack to stderr), then `STALL over: …` with how long it lasted. Started
   first in `boot_engine`; `GET /api/stall` reports it. Search the Fly log for `STALL`.
+- `scripts/health_watch.sh`, `.github/workflows/health-watch.yml` – outside watcher
+  for the owner's phone. GitHub Actions asks `https://paltra.fly.dev/api/health/deep`
+  every 5 minutes between 03:00 and 10:55 UTC (08:30-16:25 IST) on weekdays and, when
+  the answer is not 200 for two runs in a row and the time is between 09:10 and 15:40
+  IST, rings the owner through CallMeBot Telegram, repeating about every 30 minutes
+  until the check passes. GitHub starts scheduled runs best-effort, so a run can be a
+  few minutes late. Read-only (nothing but a GET), the Telegram handle is the repo
+  secret `CALLMEBOT_USER` (never printed), and the owner's number is never in code.
+  "Run workflow" with `test_call` ticked rings once to check the setup.
 - `backend/deep_health.py` – deep health for an outside watcher (read-only, no
   secrets, no mode/stocks/money in the answer). `GET /api/health/deep` on the desk
   (public: listed in `desk_lock._api_public`; also `/sma/api/health/deep`) answers

@@ -1,0 +1,61 @@
+name: Health watch
+
+# Rings the owner on Telegram (CallMeBot) when PalTra is not working during NSE
+# market hours. It runs on GitHub's machines, not on Fly, so a frozen or crashed
+# app cannot silence it. It only reads https://paltra.fly.dev/api/health/deep and
+# never touches an order. Set the repo secret CALLMEBOT_USER (see
+# scripts/health_watch.sh). "Run workflow" with test_call ticked rings once to
+# check the setup.
+#
+# GitHub starts scheduled runs best-effort, so a run can be a few minutes late.
+
+on:
+  schedule:
+    # Every 5 minutes, Mon-Fri, 08:30-16:25 IST (03:00-10:55 UTC). The script
+    # itself only rings between 09:10 and 15:40 IST.
+    - cron: "*/5 3-10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      test_call:
+        description: "Ring once with a test message (checks CALLMEBOT_USER)"
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: health-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Check the app
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Count the failed runs in a row before this one
+        id: streak
+        if: ${{ !inputs.test_call }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          # Newest first, this run excluded (it is still in progress). Only a failed
+          # run extends the streak; anything else ends it.
+          n=0
+          for c in $(gh run list --workflow health-watch.yml --status completed --limit 12 \
+              --json conclusion --jq '.[].conclusion'); do
+            [ "$c" = "failure" ] || break
+            n=$((n + 1))
+          done
+          echo "streak=$n" >> "$GITHUB_OUTPUT"
+          echo "Failed runs in a row before this one: $n"
+      - name: Ask the app
+        env:
+          CALLMEBOT_USER: ${{ secrets.CALLMEBOT_USER }}
+          STREAK: ${{ steps.streak.outputs.streak || '0' }}
+          TEST_CALL: ${{ inputs.test_call && '1' || '0' }}
+        run: scripts/health_watch.sh
