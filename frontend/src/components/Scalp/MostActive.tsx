@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react";
 import { api, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
-import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
 const POLL_MS = 30_000;
@@ -145,42 +145,34 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
         waiting. Watch adds a stock to the desk feed so the monitor below scores it for scalping.
       </Explain>
 
-      <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
-        <label className="flex flex-col gap-1">
-          Rank by
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as ActiveSort)}
-            className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            {(Object.keys(SORT_LABEL) as ActiveSort[]).map((k) => (
-              <option key={k} value={k}>
-                {SORT_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          Bias
-          <select
-            value={bias}
-            onChange={(e) => setBias(e.target.value as "ALL" | "LONG" | "SHORT")}
-            className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          >
-            <option value="ALL">All</option>
-            <option value="LONG">Long (up, above avg price)</option>
-            <option value="SHORT">Short (down, below avg price)</option>
-          </select>
-        </label>
-        <NumberFilter label="Min traded today (₹ crore)" value={minValue} onChange={setMinValue} min={0} max={500} step={5} prefix="₹" suffix="cr" />
+      <FilterRow
+        status={
+          data
+            ? `${asOf ? `Scanned ${asOf} · ${data.scanned} of ${data.universe} stocks` : "No scan yet"}${data.failed ? ` · ${data.failed} failed` : ""}`
+            : null
+        }
+      >
+        <SelectFilter
+          label="Rank by"
+          value={sort}
+          onChange={(v) => setSort(v as ActiveSort)}
+          options={(Object.keys(SORT_LABEL) as ActiveSort[]).map((k) => ({ value: k, label: SORT_LABEL[k] }))}
+          className="w-40"
+        />
+        <SelectFilter
+          label="Bias"
+          value={bias}
+          onChange={(v) => setBias(v as "ALL" | "LONG" | "SHORT")}
+          options={[
+            { value: "ALL", label: "All" },
+            { value: "LONG", label: "Long" },
+            { value: "SHORT", label: "Short" },
+          ]}
+          className="w-28"
+        />
+        <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={500} step={5} prefix="₹" suffix="cr" />
         <TextFilter value={query} onChange={setQuery} />
-        {data && (
-          <span className="ml-auto">
-            {asOf ? `Scanned ${asOf} · ${data.scanned} of ${data.universe} stocks` : "No scan yet"}
-            {data.failed ? ` · ${data.failed} failed` : ""}
-          </span>
-        )}
-      </div>
+      </FilterRow>
 
       {note && <p className="mb-2 text-xs text-accentSky">{note}</p>}
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}

@@ -15,7 +15,7 @@ import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
-import { NumberFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
+import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -298,15 +298,15 @@ export default function ScalpPage() {
         ))}
 
         <section className="rounded-xl border border-slate-800 bg-card p-4">
-          <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
+          <FilterRow>
             <NumberFilter label="Min ATR %/min" value={minAtr} onChange={setMinAtr} min={0} max={0.5} step={0.01} suffix="%" />
             <NumberFilter label="Max spread" value={maxSpread} onChange={setMaxSpread} min={0.01} max={2} step={0.01} suffix="%" />
             <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={200} step={1} prefix="₹" suffix="cr" />
             <NumberFilter label="Min score" value={minScore} onChange={setMinScore} min={0} max={100} step={1} />
             <TextFilter value={query} onChange={setQuery} />
-            <fieldset className="flex flex-col gap-1">
-              <legend className="mb-1">LTP range ₹</legend>
-              <span className="flex items-center gap-1">
+            <div className="w-44">
+              <div className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">LTP range ₹</div>
+              <div className="flex min-h-9 items-stretch rounded-md border border-slate-700 bg-base">
                 <input
                   type="number"
                   inputMode="decimal"
@@ -315,9 +315,9 @@ export default function ScalpPage() {
                   aria-label="Lowest LTP"
                   value={ltpMin}
                   onChange={(e) => setLtpMin(e.target.value)}
-                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                  className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
                 />
-                <span aria-hidden>–</span>
+                <span aria-hidden className="flex items-center text-slate-600">–</span>
                 <input
                   type="number"
                   inputMode="decimal"
@@ -326,7 +326,7 @@ export default function ScalpPage() {
                   aria-label="Highest LTP"
                   value={ltpMax}
                   onChange={(e) => setLtpMax(e.target.value)}
-                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                  className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
                 />
                 {ltpMin || ltpMax ? (
                   <button
@@ -335,36 +335,29 @@ export default function ScalpPage() {
                       setLtpMin("");
                       setLtpMax("");
                     }}
-                    className="px-1 text-slate-400 hover:text-slate-200"
+                    className="px-2 text-slate-400 hover:text-slate-200"
                     aria-label="Clear the LTP range"
                   >
                     ×
                   </button>
                 ) : null}
-              </span>
-            </fieldset>
-            <label className="flex flex-col gap-1">
-              Bias
-              <select
-                value={bias}
-                onChange={(e) => setBias(e.target.value as "ALL" | "LONG" | "SHORT")}
-                className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-              >
-                <option value="ALL">All</option>
-                <option value="LONG">Long (above VWAP, rising)</option>
-                <option value="SHORT">Short (below VWAP, falling)</option>
-              </select>
-            </label>
-            <label className="flex min-h-9 cursor-pointer items-center gap-1.5 self-end">
-              <input
-                type="checkbox"
-                checked={readyOnly}
-                onChange={(e) => setReadyOnly(e.target.checked)}
-                className="accent-bot"
-              />
-              Scalp-ready only
-            </label>
-          </div>
+              </div>
+            </div>
+            <SelectFilter
+              label="Bias"
+              value={bias}
+              onChange={(v) => setBias(v as "ALL" | "LONG" | "SHORT")}
+              options={[
+                { value: "ALL", label: "All" },
+                { value: "LONG", label: "Long" },
+                { value: "SHORT", label: "Short" },
+              ]}
+              className="w-28"
+            />
+            <div className="flex min-h-9 items-end self-end">
+              <Toggle label="Scalp-ready only" checked={readyOnly} onChange={setReadyOnly} />
+            </div>
+          </FilterRow>
 
           {armNote && <p className="mb-2 text-xs text-accentSky">{armNote}</p>}
 
