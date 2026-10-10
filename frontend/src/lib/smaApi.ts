@@ -115,7 +115,8 @@ export type SmaConfig = {
   cross_exit?: boolean;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
-  review_check_minutes?: number;
+  /** One or more check candle sizes (minutes). The smart review reads each in turn. */
+  review_check_minutes?: number[] | number;
   review_check_mode?: "ALWAYS" | "ONLY_IF_AGAINST" | "ONLY_IF_NOT_WITH";
   review_default_answer?: "PROMPT" | "EXIT" | "CONTINUE";
   /** The band, in % of the slow SMA, on the bot's own candle. */

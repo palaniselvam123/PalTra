@@ -244,7 +244,7 @@ class ConfigUpdate(BaseModel):
     review_on: bool | None = None
     review_gap_pct: float | None = Field(default=None, gt=0, le=2)
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
-    review_check_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    review_check_minutes: list[Literal[1, 2, 3, 5, 10, 15]] | Literal[1, 2, 3, 5, 10, 15] | None = None
     review_check_mode: Literal["ALWAYS", "ONLY_IF_AGAINST", "ONLY_IF_NOT_WITH"] | None = None
     review_default_answer: Literal["PROMPT", "EXIT", "CONTINUE"] | None = None
     bot_name: str | None = Field(default=None, min_length=1, max_length=24)
@@ -604,6 +604,8 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             _validate_hhmm(data["square_off_time"])
         if "entry_cutoff_time" in data:
             _validate_hhmm(data["entry_cutoff_time"], "entry_cutoff_time")
+        if "review_check_minutes" in data:
+            data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -683,7 +685,7 @@ def _gap_dict(row) -> dict:
         "review_on": review.review_on(row),
         "review_gap_pct": review.gap_band(row),
         "review_cooldown_min": int(review.cooldown(row).total_seconds() // 60),
-        "review_check_minutes": review.check_minutes(row),
+        "review_check_minutes": review.check_minutes_list(row),
         "review_check_mode": review.check_mode(row),
         "review_default_answer": review.default_answer(row),
     }
@@ -740,6 +742,8 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
             raise HTTPException(500, "BotConfig missing")
         everything = stock_settings(row)
         own = dict(everything.get(name, {}))
+        if "review_check_minutes" in data:
+            data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         for key, value in data.items():
             if value == getattr(row, key):
                 own.pop(key, None)
@@ -809,6 +813,22 @@ def _stock_name(symbol: str) -> str:
     if not name or not name.isalnum():
         raise HTTPException(400, "Symbol must be an NSE trading symbol")
     return name
+
+
+def _as_check_minutes_csv(value) -> str:
+    """Serialize `review_check_minutes` into the comma-separated string stored on the row."""
+    if isinstance(value, (list, tuple, set)):
+        parts = [int(v) for v in value]
+    else:
+        parts = [int(value)]
+    allowed = {1, 2, 3, 5, 10, 15}
+    kept: list[int] = []
+    for v in parts:
+        if v in allowed and v not in kept:
+            kept.append(v)
+    if not kept:
+        raise HTTPException(400, "review_check_minutes must be at least one of 1, 2, 3, 5, 10, 15")
+    return ",".join(str(v) for v in kept)
 
 
 def _validate_hhmm(value: str, field: str = "square_off_time") -> None:

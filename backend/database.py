@@ -128,7 +128,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "review_on": "BOOLEAN DEFAULT 0",
             "review_gap_pct": "FLOAT DEFAULT 0.03",
             "review_cooldown_min": "INTEGER DEFAULT 15",
-            "review_check_minutes": "INTEGER DEFAULT 1",
+            "review_check_minutes": "VARCHAR DEFAULT '1'",
             "review_check_mode": "VARCHAR DEFAULT 'ALWAYS'",
             "review_default_answer": "VARCHAR DEFAULT 'PROMPT'",
         }

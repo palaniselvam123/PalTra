@@ -68,12 +68,30 @@ AUTO_EXIT = "AUTO_REVIEW_EXIT"
 AUTO_CONTINUE = "AUTO_REVIEW_CONTINUE"
 
 
+def check_minutes_list(cfg) -> list[int]:
+    """One or more check candle sizes. The settings column stores them as "1,15";
+    an older row with a plain integer still parses cleanly."""
+    raw = getattr(cfg, "review_check_minutes", None)
+    if raw is None:
+        return [1]
+    if isinstance(raw, (list, tuple, set)):
+        parts = list(raw)
+    else:
+        parts = str(raw).split(",")
+    out: list[int] = []
+    for part in parts:
+        try:
+            value = int(str(part).strip())
+        except (TypeError, ValueError):
+            continue
+        if value in CHECK_MINUTES_CHOICES and value not in out:
+            out.append(value)
+    return out or [1]
+
+
 def check_minutes(cfg) -> int:
-    try:
-        value = int(getattr(cfg, "review_check_minutes", None) or 1)
-    except (TypeError, ValueError):
-        return 1
-    return value if value in CHECK_MINUTES_CHOICES else 1
+    """First check-candle size — kept for callers that only need one."""
+    return check_minutes_list(cfg)[0]
 
 
 def check_mode(cfg) -> str:
@@ -99,6 +117,19 @@ def check_candle_evidence(tape: pd.DataFrame | None, minutes: int, sma_fast: int
 
     resampled = resample(tape, minutes)
     return one_minute_evidence(resampled, sma_fast, sma_slow, atr_period)
+
+
+def check_candles_evidence(
+    tape: pd.DataFrame | None,
+    minutes_list: list[int],
+    sma_fast: int,
+    sma_slow: int,
+    atr_period: int = 14,
+) -> dict[int, dict | None]:
+    """Evidence per requested check-candle size, keyed by minutes."""
+    return {
+        m: check_candle_evidence(tape, m, sma_fast, sma_slow, atr_period) for m in minutes_list
+    }
 
 
 def _gap(row) -> float | None:
@@ -295,6 +326,33 @@ def verdict(one: dict | None, direction: str) -> dict | None:
         "flat": flat,
         "checks": {name: ("with" if v > 0 else "against" if v < 0 else "flat") for name, v in read},
     }
+
+
+def combined_verdict(evidence_by_minutes: dict[int, dict | None], direction: str) -> dict | None:
+    """One verdict rolled up from several check candles. AGAINST if any says AGAINST;
+    WITH only when every readable one says WITH; MIXED otherwise. None when nothing could be read."""
+    if not evidence_by_minutes:
+        return None
+    labels: list[str] = []
+    readable: list[tuple[int, dict]] = []
+    for m, ev in evidence_by_minutes.items():
+        if ev is None:
+            continue
+        v = verdict(ev, direction)
+        if v is None:
+            continue
+        labels.append(v.get("label", MIXED))
+        readable.append((m, v))
+    if not readable:
+        return None
+    if AGAINST in labels:
+        label = AGAINST
+    elif all(l == WITH for l in labels):
+        label = WITH
+    else:
+        label = MIXED
+    totals = {k: sum(v.get(k, 0) for _, v in readable) for k in ("score", "of", "with", "against", "flat")}
+    return {"label": label, "by_candle": [{"minutes": m, **v} for m, v in readable], **totals}
 
 
 def verdict_line(v: dict | None, direction: str) -> str:
