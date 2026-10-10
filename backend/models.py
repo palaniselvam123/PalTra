@@ -332,6 +332,8 @@ class BotConfig(Base):
     # review_default_answer decides: PROMPT (default: today's behaviour, keeps
     # the trade), EXIT (close at once, reason AUTO_REVIEW_EXIT) or CONTINUE
     # (no prompt sent, just a record). No answer never trades on its own.
-    review_check_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Comma-separated list of check candle sizes (e.g. "1,15") so the smart review can
+    # cross-check several timeframes at once. Legacy integer values (just "5") still read fine.
+    review_check_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="1")
     review_check_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="ALWAYS")
     review_default_answer: Mapped[str | None] = mapped_column(String, nullable=True, default="PROMPT")

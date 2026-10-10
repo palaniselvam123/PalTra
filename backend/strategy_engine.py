@@ -3263,22 +3263,24 @@ class StrategyEngine:
             last = episode.get("last_at") if episode else None
             if last is not None and now - last < review.cooldown(scfg):
                 continue
-            # Smart check: read a shorter candle (1/2/3/5/10/15 min, built from the
-            # 1-minute tape) and decide whether the main candle's "narrowing" really
-            # looks like trouble. The verdict is reused in `_raise_review`, so this
-            # does the work only once.
-            one = review.check_candle_evidence(
+            # Smart check: read one or more shorter candles (1/2/3/5/10/15 min, built from
+            # the 1-minute tape) and decide whether the main candle's "narrowing" really
+            # looks like trouble. The combined verdict is reused in `_raise_review`, so
+            # this does the work only once.
+            minutes_list = review.check_minutes_list(scfg)
+            evidence_by_minutes = review.check_candles_evidence(
                 self._tapes.get(symbol),
-                review.check_minutes(scfg),
+                minutes_list,
                 int(scfg.sma_fast),
                 int(scfg.sma_slow),
                 int(scfg.atr_period),
             )
-            verdict = review.verdict(one, pos.direction) if one is not None else None
+            one = evidence_by_minutes.get(minutes_list[0])
+            verdict = review.combined_verdict(evidence_by_minutes, pos.direction)
             mode = review.check_mode(scfg)
             if verdict is not None:
                 if mode == "ONLY_IF_AGAINST" and verdict.get("label") != review.AGAINST:
-                    continue  # The check candle disagrees with the main one: don't fire.
+                    continue  # The check candles disagree with the main one: don't fire.
                 if mode == "ONLY_IF_NOT_WITH" and verdict.get("label") == review.WITH:
                     continue
             # Otherwise: not enough 1-minute tape to judge, so err on the safe side
@@ -3302,10 +3304,12 @@ class StrategyEngine:
         five = hit.as_dict()
         if one is None:
             # Caller did not read the check candle (older code paths, tests).
-            one = review.check_candle_evidence(
-                self._tapes.get(symbol), review.check_minutes(cfg), int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period)
+            minutes_list = review.check_minutes_list(cfg)
+            evidence_by_minutes = review.check_candles_evidence(
+                self._tapes.get(symbol), minutes_list, int(cfg.sma_fast), int(cfg.sma_slow), int(cfg.atr_period)
             )
-            verdict = review.verdict(one, pos.direction) if one is not None else None
+            one = evidence_by_minutes.get(minutes_list[0])
+            verdict = review.combined_verdict(evidence_by_minutes, pos.direction)
         if one is not None:
             # Saved with the evidence and shown on the card. Never read by the strategy.
             one["verdict"] = verdict

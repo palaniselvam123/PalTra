@@ -398,6 +398,38 @@ def test_review_helpers_read_the_smart_settings_safely():
     assert (review.check_minutes(bad), review.check_mode(bad), review.default_answer(bad)) == (1, "ALWAYS", "PROMPT")
 
 
+def test_check_minutes_list_parses_single_values_and_comma_separated_strings():
+    from types import SimpleNamespace
+
+    assert review.check_minutes_list(SimpleNamespace()) == [1]
+    assert review.check_minutes_list(SimpleNamespace(review_check_minutes=5)) == [5]
+    assert review.check_minutes_list(SimpleNamespace(review_check_minutes="1,15")) == [1, 15]
+    # Garbage values and duplicates are dropped; order the user picked is kept.
+    assert review.check_minutes_list(SimpleNamespace(review_check_minutes="15,7,15, 3")) == [15, 3]
+    # A list input also works (the Pydantic schema sends one).
+    assert review.check_minutes_list(SimpleNamespace(review_check_minutes=[3, 10])) == [3, 10]
+
+
+def test_combined_verdict_rolls_several_check_candles_into_one_label():
+    # Fake per-size evidence, one WITH and one AGAINST → combined is AGAINST.
+    with_ev = {
+        "fast_slope": "rising", "vs_fast": "above", "vs_slow": "above", "vs_vwap": "above",
+        "candles": [{"close": 100.0}, {"close": 101.0}, {"close": 102.0}],
+    }
+    against_ev = {
+        "fast_slope": "falling", "vs_fast": "below", "vs_slow": "below", "vs_vwap": "below",
+        "candles": [{"close": 102.0}, {"close": 101.0}, {"close": 100.0}],
+    }
+    out = review.combined_verdict({1: with_ev, 15: against_ev}, "LONG")
+    assert out["label"] == review.AGAINST
+    assert {c["minutes"] for c in out["by_candle"]} == {1, 15}
+    # Two WITH readings → WITH overall.
+    both_with = review.combined_verdict({1: with_ev, 15: with_ev}, "LONG")
+    assert both_with["label"] == review.WITH
+    # Nothing readable → None.
+    assert review.combined_verdict({1: None, 15: None}, "LONG") is None
+
+
 def test_check_candle_evidence_reads_a_longer_candle_from_the_1_minute_tape():
     import datetime as dt2
 

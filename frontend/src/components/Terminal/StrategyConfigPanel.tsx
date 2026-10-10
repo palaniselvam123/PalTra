@@ -16,6 +16,23 @@ type Props = {
 
 /** "" edits the shared settings; a symbol edits that stock's own. */
 const ALL = "";
+const CHECK_MINUTES_OPTIONS = [1, 2, 3, 5, 10, 15] as const;
+
+function toCheckMinutes(value: unknown): number[] {
+  const allowed = new Set<number>(CHECK_MINUTES_OPTIONS);
+  const parts = Array.isArray(value)
+    ? value
+    : String(value ?? "1")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const kept: number[] = [];
+  for (const part of parts) {
+    const n = Number(part);
+    if (Number.isFinite(n) && allowed.has(n) && !kept.includes(n)) kept.push(n);
+  }
+  return kept.length ? kept : [1];
+}
 
 const LABELS: Record<string, string> = {
   qty: "qty",
@@ -122,7 +139,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   // The no-exit warning sits with the exits, the rest with gap mode.
   const gapNotes = strategyNotes(form).filter((n) => n.id !== "no-exit");
 
-  const set = (key: keyof SmaConfig, value: string | boolean | number) => {
+  const set = (key: keyof SmaConfig, value: string | boolean | number | number[]) => {
     markDirty(true);
     setForm((prev) => {
       if (!prev) return prev;
@@ -205,7 +222,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     review_on: Boolean(form.review_on),
     review_gap_pct: Number(form.review_gap_pct ?? 0.03),
     review_cooldown_min: Math.max(0, Math.round(Number(form.review_cooldown_min ?? 15))),
-    review_check_minutes: Number(form.review_check_minutes ?? 1),
+    review_check_minutes: toCheckMinutes(form.review_check_minutes),
     review_check_mode: String(form.review_check_mode ?? "ALWAYS") as "ALWAYS" | "ONLY_IF_AGAINST" | "ONLY_IF_NOT_WITH",
     review_default_answer: String(form.review_default_answer ?? "PROMPT") as "PROMPT" | "EXIT" | "CONTINUE",
   });
@@ -1029,34 +1046,49 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               onChange={(v) => set("review_cooldown_min", v)}
             />
           </div>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <label className="block text-xs text-slate-400">
-              Check candle{isOwn("review_check_minutes") && <OwnTag />}
-              <select
-                value={String(form.review_check_minutes ?? 1)}
-                onChange={(e) => set("review_check_minutes", Number(e.target.value))}
-                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
-              >
-                {[1, 2, 3, 5, 10, 15].map((m) => (
-                  <option key={m} value={m}>
+          <div className="mt-2">
+            <div className="text-xs text-slate-400">
+              Check candles{isOwn("review_check_minutes") && <OwnTag />}
+              <span className="ml-2 text-[11px] text-slate-500">Pick one or more; AGAINST on any fires the review.</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {CHECK_MINUTES_OPTIONS.map((m) => {
+                const current = toCheckMinutes(form.review_check_minutes);
+                const on = current.includes(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => {
+                      const next = on ? current.filter((x) => x !== m) : [...current, m].sort((a, b) => a - b);
+                      set("review_check_minutes", next.length ? next : [1]);
+                    }}
+                    className={clsx(
+                      "min-h-9 rounded-md px-2.5 text-xs font-semibold ring-1 ring-inset",
+                      on
+                        ? "bg-sky-500/15 text-sky-200 ring-sky-400/50"
+                        : "bg-black/20 text-slate-300 ring-white/15 hover:bg-white/5"
+                    )}
+                  >
                     {m} min
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-xs text-slate-400">
-              Check mode{isOwn("review_check_mode") && <OwnTag />}
-              <select
-                value={String(form.review_check_mode ?? "ALWAYS")}
-                onChange={(e) => set("review_check_mode", e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
-              >
-                <option value="ALWAYS">Prompt whenever uncertain</option>
-                <option value="ONLY_IF_NOT_WITH">Only if the check candle is not with the trade</option>
-                <option value="ONLY_IF_AGAINST">Only if the check candle is against the trade</option>
-              </select>
-            </label>
+                  </button>
+                );
+              })}
+            </div>
           </div>
+          <label className="mt-2 block text-xs text-slate-400">
+            Check mode{isOwn("review_check_mode") && <OwnTag />}
+            <select
+              value={String(form.review_check_mode ?? "ALWAYS")}
+              onChange={(e) => set("review_check_mode", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="ALWAYS">Prompt whenever uncertain</option>
+              <option value="ONLY_IF_NOT_WITH">Only if a check candle is not with the trade</option>
+              <option value="ONLY_IF_AGAINST">Only if a check candle is against the trade</option>
+            </select>
+          </label>
           <label className="mt-2 block text-xs text-slate-400">
             If I don&apos;t answer{isOwn("review_default_answer") && <OwnTag />}
             <select
@@ -1074,7 +1106,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 }
                 set("review_default_answer", next);
               }}
-              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
               <option value="PROMPT">Prompt me (default) — no answer keeps the trade</option>
               <option value="CONTINUE">Continue automatically — no prompt, trade stays</option>
