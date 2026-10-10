@@ -598,6 +598,10 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
         ):
             raise HTTPException(409, "Close the open position before changing quantity")
         data = body.model_dump(exclude_none=True)
+        # sma_medium is the only nullable column that can be explicitly cleared to NULL;
+        # exclude_none above would silently drop it, so re-insert when the client sent null.
+        if "sma_medium" in body.model_fields_set and body.sma_medium is None:
+            data["sma_medium"] = None
         if "symbol" in data:
             data["symbol"] = data["symbol"].upper().strip()
             if not data["symbol"].isalnum():
@@ -743,6 +747,9 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
     """
     name = _stock_name(symbol)
     data = body.model_dump(exclude_none=True)
+    # sma_medium can be explicitly cleared to NULL; re-insert when the client sent null.
+    if "sma_medium" in body.model_fields_set and body.sma_medium is None:
+        data["sma_medium"] = None
     data.pop("symbol", None)
     shared_only = sorted(k for k in data if k not in STOCK_FIELDS)
     if shared_only:
