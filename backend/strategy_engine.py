@@ -313,6 +313,40 @@ def trade_names(cfg: BotConfig) -> list[str]:
     return names[:MAX_TRADE_SYMBOLS]
 
 
+def trade_sources(cfg: BotConfig) -> dict[str, str]:
+    """Where each armed stock came from: {SYMBOL: source string}. Safe on bad JSON."""
+    raw = getattr(cfg, "trade_sources", None) or "{}"
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in data.items():
+        name = str(key).upper().strip()
+        text = str(value).strip()[:40]
+        if name.isalnum() and text:
+            out[name] = text
+    return out
+
+
+def apply_trade_sources(cfg: BotConfig, updates: dict[str, str | None], current_names: list[str]) -> str:
+    """Return the new `trade_sources` JSON after applying the updates and dropping
+    symbols that are not on `current_names`. `updates[symbol]` set to None removes it."""
+    sources = trade_sources(cfg)
+    for symbol, source in updates.items():
+        sym = (symbol or "").upper().strip()
+        if source is None:
+            sources.pop(sym, None)
+            continue
+        text = str(source).strip()[:40]
+        if sym and text:
+            sources[sym] = text
+    kept = {s: sources[s] for s in sources if s in current_names}
+    return json.dumps(kept, separators=(",", ":"), sort_keys=True)
+
+
 def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
     """This stock's settings: the shared row with the stock's own overrides on top."""
     data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}

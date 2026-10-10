@@ -64,7 +64,9 @@ from strategy_engine import (
     ForceRefused,
     StrategyEngine,
     attach_market_prices,
+    apply_trade_sources,
     trade_names,
+    trade_sources,
 )
 
 engine = StrategyEngine()
@@ -264,6 +266,7 @@ def _config_dict(row: BotConfig) -> dict:
         "bot_name": getattr(row, "bot_name", None) or None,
         "symbol": row.symbol,
         "trade_symbols": trade_names(row),
+        "trade_sources": trade_sources(row),
         "exchange": row.exchange,
         "qty": row.qty,
         "sma_fast": row.sma_fast,
@@ -419,6 +422,17 @@ async def research_get_config():
 class TradeSymbolUpdate(BaseModel):
     symbol: str
     armed: bool
+    # Where the arm came from, shown as a chip on the Stocks panel. Information only.
+    source: str | None = Field(default=None, max_length=40)
+
+
+class TradeSymbolCopy(BaseModel):
+    """Copy stocks from one bot's Trade list onto another bot's. The source bot keeps them."""
+
+    from_bot: Literal[1, 2, 3, 4]
+    to_bot: Literal[1, 2, 3, 4]
+    symbols: list[str] = Field(default_factory=list, max_length=MAX_TRADE_SYMBOLS)
+    source: str | None = Field(default=None, max_length=40)
 
 
 def _research() -> ResearchEngine:
@@ -451,6 +465,7 @@ async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
         if row is None:
             raise HTTPException(500, "BotConfig missing")
         names = trade_names(row)
+        source_update: dict[str, str | None] = {}
         if body.armed:
             if symbol not in names:
                 cap = _symbol_cap(eng)
@@ -462,11 +477,15 @@ async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
                         raise HTTPException(409, why)
                 names.append(symbol)
                 eng.hold_for_next_cross([symbol])
+            if body.source:
+                source_update[symbol] = body.source
         else:
             if symbol in _open_symbols(eng):
                 raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
             names = [name for name in names if name != symbol]
+            source_update[symbol] = None
         row.trade_symbols = ",".join(names)
+        row.trade_sources = apply_trade_sources(row, source_update, names)
         db.commit()
         db.refresh(row)
         payload = _config_dict(row)
@@ -483,6 +502,78 @@ async def set_trade_symbol(body: TradeSymbolUpdate):
 @app.post("/api/research/trade-symbols")
 async def research_set_trade_symbol(body: TradeSymbolUpdate):
     return await _set_trade_symbol(_research(), body)
+
+
+def _bot_engine_for(bot: int) -> StrategyEngine:
+    return engine if bot == 1 else bot_engines[bot]
+
+
+@app.post("/api/trade-symbols/copy")
+async def copy_trade_symbols(body: TradeSymbolCopy):
+    """Copy stocks onto another bot's Trade list. The source bot keeps them."""
+    if body.from_bot not in (1, *EXTRA_BOTS) or body.to_bot not in (1, *EXTRA_BOTS):
+        raise HTTPException(400, "Pick a bot between 1 and 4")
+    if body.from_bot == body.to_bot:
+        raise HTTPException(400, "Pick a different destination bot")
+    wanted = [s.strip().upper() for s in body.symbols if s and s.strip().isalnum()]
+    wanted = [s for s in dict.fromkeys(wanted) if s]
+    if not wanted:
+        raise HTTPException(400, "No stocks to copy")
+    src_eng = _bot_engine_for(body.from_bot)
+    dst_eng = _bot_engine_for(body.to_bot)
+    # In tests (and the first touch after a fresh DB) the extra bots' rows have not been
+    # created yet; the live app does this at boot but tests ask ad-hoc. No-op otherwise.
+    for bot in (body.from_bot, body.to_bot):
+        if bot in EXTRA_BOTS:
+            ensure_bot_config(bot)
+    added: list[str] = []
+    skipped: list[dict] = []
+    with session_factory()() as db:
+        src_row = db.get(BotConfig, src_eng.config_id)
+        dst_row = db.get(BotConfig, dst_eng.config_id)
+        if src_row is None or dst_row is None:
+            raise HTTPException(500, "BotConfig missing")
+        src_names = trade_names(src_row)
+        on_source = [s for s in wanted if s in src_names]
+        off_source = [s for s in wanted if s not in src_names]
+        for name in off_source:
+            skipped.append({"symbol": name, "why": f"not on bot {body.from_bot}'s Trade list"})
+        dst_names = trade_names(dst_row)
+        cap = _symbol_cap(dst_eng)
+        source_label = (body.source or f"Copied from bot {body.from_bot}").strip() or f"Copied from bot {body.from_bot}"
+        src_sources = trade_sources(src_row)
+        source_update: dict[str, str | None] = {}
+        is_live = (dst_row.trading_mode or "PAPER").upper() == "LIVE"
+        for name in on_source:
+            if name in dst_names:
+                skipped.append({"symbol": name, "why": f"already on bot {body.to_bot}'s Trade list"})
+                continue
+            if len(dst_names) >= cap:
+                skipped.append({"symbol": name, "why": f"bot {body.to_bot} is at its {cap} stock cap"})
+                continue
+            if is_live:
+                why = bots_mod.live_conflict(dst_eng.bot_id, [name])
+                if why:
+                    skipped.append({"symbol": name, "why": why})
+                    continue
+            dst_names.append(name)
+            added.append(name)
+            # Keep each stock's own source note if any; else say which bot the copy came from.
+            source_update[name] = src_sources.get(name) or source_label
+        if added:
+            dst_row.trade_symbols = ",".join(dst_names)
+            dst_row.trade_sources = apply_trade_sources(dst_row, source_update, dst_names)
+            db.commit()
+            db.refresh(dst_row)
+            dst_eng.hold_for_next_cross(added)
+            payload = _config_dict(dst_row)
+            db.expunge(dst_row)
+        else:
+            payload = _config_dict(dst_row)
+            db.expunge(dst_row)
+    if added:
+        _reload(dst_eng, payload)
+    return {"added": added, "skipped": skipped, "config": payload}
 
 
 async def _put_config(eng: StrategyEngine, body: ConfigUpdate):

@@ -269,14 +269,14 @@ export default function ScalpPage() {
 
         {dialogs}
 
-        <CrossScan armed={armed} arming={arming} onArm={arm} />
-        <ChopScan armed={armed} arming={arming} onArm={arm} />
+        <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} />
+        <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} />
 
         <MostActive
           watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
           armed={armed}
           arming={arming}
-          onArm={arm}
+          onArm={(s) => arm(s, "Scalp monitor")}
           onWatched={refresh}
         />
 
@@ -463,7 +463,7 @@ export default function ScalpPage() {
                       row={r}
                       armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
                       arming={arming === r.symbol}
-                      onArm={() => arm(r.symbol)}
+                      onArm={() => arm(r.symbol, "Scalp monitor")}
                       picked={picked.has(r.symbol)}
                       onPick={(on) => pick(r.symbol, on)}
                     />
