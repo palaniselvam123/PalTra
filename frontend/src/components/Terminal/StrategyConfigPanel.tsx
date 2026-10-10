@@ -37,6 +37,7 @@ function toCheckMinutes(value: unknown): number[] {
 const LABELS: Record<string, string> = {
   qty: "qty",
   sma_fast: "fast MA",
+  sma_medium: "medium MA",
   sma_slow: "slow MA",
   candle_minutes: "candle",
   atr_period: "ATR period",
@@ -155,6 +156,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const strategyBody = (): Partial<SmaConfig> => ({
     qty: Number(form.qty),
     sma_fast: Number(form.sma_fast),
+    sma_medium: form.sma_medium != null && String(form.sma_medium).trim() !== "" ? Number(form.sma_medium) : null,
     sma_slow: Number(form.sma_slow),
     candle_minutes: (CANDLE_MINUTES.includes(Number(form.candle_minutes) as CandleMinutes)
       ? Number(form.candle_minutes)
@@ -403,6 +405,36 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field label="Fast MA" own={isOwn("sma_fast")} value={String(form.sma_fast)} onChange={(v) => set("sma_fast", v)} />
             <Field label="Slow MA" own={isOwn("sma_slow")} value={String(form.sma_slow)} onChange={(v) => set("sma_slow", v)} />
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-xs text-slate-300">
+            <label>
+              Medium MA{isOwn("sma_medium") ? " (own)" : ""}
+            </label>
+            <InfoTip label="About the medium MA (triple MA)">
+              Optional third SMA between fast and slow. When set, a signal fires only when all
+              three are aligned: fast &gt; medium &gt; slow for a buy, fast &lt; medium &lt; slow
+              for a sell. Leave blank to use the standard two-SMA crossover.
+            </InfoTip>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="number"
+              min={Number(form.sma_fast) + 1}
+              max={Number(form.sma_slow) - 1}
+              placeholder="off"
+              value={form.sma_medium != null && String(form.sma_medium).trim() !== "" ? String(form.sma_medium) : ""}
+              onChange={(e) => set("sma_medium", e.target.value === "" ? "" : e.target.value)}
+              className="h-10 w-28 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            />
+            {form.sma_medium != null && String(form.sma_medium).trim() !== "" ? (
+              <button
+                type="button"
+                onClick={() => set("sma_medium", "")}
+                className="text-xs text-slate-400 hover:text-slate-200"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
           <div className="mt-2 flex items-center gap-1 text-xs text-slate-300">
             <label htmlFor="sma-candle-interval">Candle interval{isOwn("candle_minutes") ? " (own)" : ""}</label>

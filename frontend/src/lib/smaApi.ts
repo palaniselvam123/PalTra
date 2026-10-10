@@ -45,6 +45,8 @@ export type SmaConfig = {
   exchange: string;
   qty: number;
   sma_fast: number;
+  /** Optional third SMA between fast and slow. null / undefined = standard two-SMA mode. */
+  sma_medium?: number | null;
   sma_slow: number;
   atr_period: number;
   atr_multiplier: number;
