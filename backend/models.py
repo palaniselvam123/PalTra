@@ -185,6 +185,11 @@ class BotConfig(Base):
     # Comma-separated NSE names the bot may order. The symbol above is only
     # the chart on screen, so a Trade button can stay armed on another page.
     trade_symbols: Mapped[str] = mapped_column(String, default="")
+    # Where each armed stock came from, as a JSON map {SYMBOL: source string}.
+    # Information only (shown next to the stock on the Stocks panel). An entry
+    # vanishes when a stock is disarmed and is copied when the stock is bulk-
+    # copied to another bot. Older stocks have no entry and read as "—".
+    trade_sources: Mapped[str] = mapped_column(String, default="{}")
     exchange: Mapped[str] = mapped_column(String, default="NSE")
     qty: Mapped[int] = mapped_column(Integer, default=1000)
     sma_fast: Mapped[int] = mapped_column(Integer, default=9)

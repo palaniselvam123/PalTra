@@ -517,7 +517,7 @@ export default function MoversPage() {
               {" "}Lower Min speed or Min move from open to see slower stocks.
             </Empty>
           ) : (
-            <FastTable rows={fast.movers} windowMin={fast.window_min} peak={peak} armed={armed} arming={arming} onArm={arm} />
+            <FastTable rows={fast.movers} windowMin={fast.window_min} peak={peak} armed={armed} arming={arming} onArm={(s) => arm(s, "Movers")} />
           )}
         </section>
 
@@ -562,7 +562,7 @@ export default function MoversPage() {
               emptyText={emptyMsg("above")}
               armed={armed}
               arming={arming}
-              onArm={arm}
+              onArm={(s) => arm(s, "Movers")}
             />
           ) : (
             <MoverTable
@@ -575,7 +575,7 @@ export default function MoversPage() {
               emptyText={emptyMsg("below")}
               armed={armed}
               arming={arming}
-              onArm={arm}
+              onArm={(s) => arm(s, "Movers")}
             />
           )}
         </section>

@@ -26,6 +26,9 @@ export type StockCardData = {
   rejectAt?: string | null;
   /** Which settings this stock sets for itself, e.g. "qty, RSI"; empty when it uses the shared ones. */
   ownStrategy?: string;
+  /** Where this stock came from: "Cross scan", "Movers", "Trend quality", "Scalp monitor", "Manual",
+   * "Copied from bot 2" — information only, shown as a chip under the symbol. */
+  source?: string | null;
 };
 
 function Money({ value }: { value: number }) {
@@ -55,8 +58,25 @@ export function StockCard({
   onSelect,
   onRemove,
 }: Props) {
-  const { symbol, ltp, changePct, side, qty, note, stopOff, armed, onChart, openNet, closedNet, closedTrades, dayNet, reject, rejectAt, ownStrategy } =
-    stock;
+  const {
+    symbol,
+    ltp,
+    changePct,
+    side,
+    qty,
+    note,
+    stopOff,
+    armed,
+    onChart,
+    openNet,
+    closedNet,
+    closedTrades,
+    dayNet,
+    reject,
+    rejectAt,
+    ownStrategy,
+    source,
+  } = stock;
   const traded = openNet != null || (closedTrades ?? 0) > 0;
   const cannotArm = !armed && armLimitReached;
   const today = dayNet ?? (closedNet ?? 0) + (openNet ?? 0);
@@ -111,7 +131,12 @@ export function StockCard({
             ) : null}
           </div>
           <div className="hidden truncate text-xs text-slate-400 lg:block" title={note || undefined}>
-            {note || "No note yet"}
+            {source ? (
+              <span className="mr-1 inline-flex items-center rounded-full border border-slate-700 bg-slate-800/60 px-1.5 py-0.5 text-[10px] font-medium text-slate-300" title={`Armed from ${source}`}>
+                from {source}
+              </span>
+            ) : null}
+            {note || (source ? "" : "No note yet")}
           </div>
         </td>
         <td className="whitespace-nowrap py-1 pr-1.5 text-right font-mono text-sm tabular-nums text-slate-100 sm:pr-2">{px(ltp)}</td>

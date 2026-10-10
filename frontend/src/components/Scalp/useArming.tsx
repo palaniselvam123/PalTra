@@ -17,9 +17,9 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them.
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [researchArmed, setResearchArmed] = useState<string[] | null>(null);
-  const [armFor, setArmFor] = useState<string | null>(null);
+  const [armFor, setArmFor] = useState<{ symbol: string; source?: string | null } | null>(null);
   // After the bot is picked: quantity, stop, trail and target for that bot (ArmPrompt).
-  const [armAsk, setArmAsk] = useState<{ symbol: string; desk: ArmDesk } | null>(null);
+  const [armAsk, setArmAsk] = useState<{ symbol: string; desk: ArmDesk; source?: string | null } | null>(null);
   const [arming, setArming] = useState<string | null>(null);
   const [armNote, setArmNote] = useState<string | null>(null);
 
@@ -40,17 +40,17 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   }, [desks]);
 
   // "Arm" asks which bot first; a LIVE bot is confirmed again before it is armed.
-  const arm = (symbol: string) => {
+  const arm = (symbol: string, source?: string | null) => {
     setArmNote(null);
     loadDesks();
-    setArmFor(symbol);
+    setArmFor({ symbol, source: source ?? null });
   };
-  const armOn = (symbol: string, desk: ArmDesk) => {
+  const armOn = (symbol: string, desk: ArmDesk, source?: string | null) => {
     setArmFor(null);
-    setArmAsk({ symbol, desk });
+    setArmAsk({ symbol, desk, source: source ?? null });
   };
   /** Runs from the prompt: LIVE is confirmed again, the prompt's changes saved, then the stock armed. */
-  const armNow = async (symbol: string, desk: ArmDesk, save: () => Promise<void>) => {
+  const armNow = async (symbol: string, desk: ArmDesk, save: () => Promise<void>, source?: string | null) => {
     if (desk.mode === "LIVE") {
       const ok = window.confirm(
         `Arm ${symbol} on ${desk.name} for LIVE SMA orders? ${desk.name} can buy or sell it with real money on its next SMA cross.`
@@ -61,7 +61,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     setArmNote(null);
     try {
       await save();
-      await smaApi.setTradeSymbolOn(desk.target, symbol, true);
+      await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
       setArmNote(
         `${symbol} is armed on ${desk.name}${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
       );
@@ -74,7 +74,12 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   const dialogs = (
     <>
       {armFor ? (
-        <ArmPicker symbol={armFor} desks={desks} onPick={(d) => armOn(armFor, d)} onClose={() => setArmFor(null)} />
+        <ArmPicker
+          symbol={armFor.symbol}
+          desks={desks}
+          onPick={(d) => armOn(armFor.symbol, d, armFor.source)}
+          onClose={() => setArmFor(null)}
+        />
       ) : null}
       {armAsk ? (
         <ArmPrompt
@@ -83,7 +88,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           target={armAsk.desk.target}
           live={armAsk.desk.mode === "LIVE"}
           price={priceOf?.(armAsk.symbol) ?? null}
-          onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save)}
+          onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source)}
           onClose={() => setArmAsk(null)}
         />
       ) : null}

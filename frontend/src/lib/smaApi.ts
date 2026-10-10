@@ -40,6 +40,8 @@ export type SmaConfig = {
   pattern_min_edge?: number;
   symbol: string;
   trade_symbols?: string[];
+  /** Where each armed stock came from, keyed by symbol (information only). */
+  trade_sources?: Record<string, string>;
   exchange: string;
   qty: number;
   sma_fast: number;
@@ -960,19 +962,30 @@ export const smaApi = {
     }),
   resetStockConfig: (symbol: string) =>
     request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
-  setTradeSymbol: (symbol: string, armed: boolean) =>
+  setTradeSymbol: (symbol: string, armed: boolean, source?: string | null) =>
     request<SmaConfig>("/api/trade-symbols", {
       method: "POST",
-      body: JSON.stringify({ symbol, armed }),
+      body: JSON.stringify({ symbol, armed, source: source ?? undefined }),
     }),
   /**
    * Arm or unarm a stock on a chosen desk, whatever desk this page is on:
    * 1 = main desk, 2-4 = bots 2-4, "research" = the practice research desk.
    */
-  setTradeSymbolOn: (target: ArmTarget, symbol: string, armed: boolean) =>
+  setTradeSymbolOn: (target: ArmTarget, symbol: string, armed: boolean, source?: string | null) =>
     request<SmaConfig>(
       target === "research" ? "/api/research/trade-symbols" : target === 1 ? "/api/trade-symbols" : `/api/bots/${target}/trade-symbols`,
-      { method: "POST", body: JSON.stringify({ symbol, armed }) },
+      { method: "POST", body: JSON.stringify({ symbol, armed, source: source ?? undefined }) },
+      undefined,
+      false
+    ),
+  /** Copy stocks onto another bot's Trade list. The source bot keeps them. */
+  copyTradeSymbols: (fromBot: 1 | 2 | 3 | 4, toBot: 1 | 2 | 3 | 4, symbols: string[], source?: string | null) =>
+    request<{ added: string[]; skipped: { symbol: string; why: string }[]; config: SmaConfig }>(
+      "/api/trade-symbols/copy",
+      {
+        method: "POST",
+        body: JSON.stringify({ from_bot: fromBot, to_bot: toBot, symbols, source: source ?? undefined }),
+      },
       undefined,
       false
     ),

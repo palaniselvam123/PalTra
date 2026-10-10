@@ -147,6 +147,13 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
 
 export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay, tabs, tab = "all" }: Props) {
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
+  const deskBot: 1 | 2 | 3 | 4 | null =
+    desk === "live" ? 1 : desk === "bot2" ? 2 : desk === "bot3" ? 3 : desk === "bot4" ? 4 : null;
+  const [copyBots, setCopyBots] = useState<BotSummary[]>([]);
+  useEffect(() => {
+    if (!deskBot) return;
+    smaApi.bots().then(setCopyBots).catch(() => {});
+  }, [deskBot]);
   const [symbol, setSymbol] = useState(config?.symbol ?? "");
   const [saved, setSaved] = useState<string[]>([]);
   const [hidden, setHidden] = useState<string[]>([]);
@@ -360,7 +367,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     setError(null);
     try {
       if (save) await save();
-      await smaApi.setTradeSymbol(cleaned, turningOn);
+      await smaApi.setTradeSymbol(cleaned, turningOn, turningOn ? "Manual" : null);
       remember(cleaned);
       onChanged();
     } catch (e: unknown) {
@@ -409,6 +416,25 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       if (failed.length) setError(failed.join(" · "));
       setSelected(new Set());
       onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkCopyTo = async (toBot: 1 | 2 | 3 | 4, names: string[]) => {
+    if (!deskBot || toBot === deskBot || !names.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await smaApi.copyTradeSymbols(deskBot, toBot, names);
+      const notes: string[] = [];
+      if (res.added.length) notes.push(`Copied ${res.added.length} to Bot ${toBot}: ${res.added.join(", ")}`);
+      for (const s of res.skipped) notes.push(`${s.symbol}: ${s.why}`);
+      setError(notes.length ? notes.join(" · ") : null);
+      setSelected(new Set());
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Copy refused");
     } finally {
       setBusy(false);
     }
@@ -824,6 +850,33 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   >
                     Remove selected
                   </button>
+                  {deskBot ? (
+                    <select
+                      disabled={busy}
+                      value=""
+                      onChange={(e) => {
+                        const to = Number(e.target.value) as 1 | 2 | 3 | 4;
+                        if (to) bulkCopyTo(to, shownSelected);
+                      }}
+                      title="Copy the ticked stocks to another bot's Trade list. The source bot keeps them."
+                      className="min-h-9 rounded-md border border-sky-400/40 bg-transparent px-2 font-semibold text-sky-200 hover:bg-sky-500/10 disabled:opacity-40"
+                    >
+                      <option value="" className="bg-[#0B0E14]">
+                        Copy to…
+                      </option>
+                      {([1, 2, 3, 4] as const)
+                        .filter((n) => n !== deskBot)
+                        .map((n) => {
+                          const b = copyBots.find((x) => x.bot === n);
+                          const label = b?.name ? `Bot ${n} · ${b.name}` : `Bot ${n}`;
+                          return (
+                            <option key={n} value={n} className="bg-[#0B0E14]">
+                              {label}
+                            </option>
+                          );
+                        })}
+                    </select>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setSelected(new Set())}
@@ -891,6 +944,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       reject: book?.last_reject ?? null,
                       ownStrategy: ownSummary(config?.stock_settings?.[s] as Record<string, unknown> | undefined),
                       rejectAt: book?.last_reject_at ?? null,
+                      source: config?.trade_sources?.[s] ?? null,
                     }}
                   />
                 );
