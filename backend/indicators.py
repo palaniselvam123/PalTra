@@ -216,13 +216,20 @@ def minute_volume_stats(
     return current_f, average, current_f / average
 
 
-def enrich(df: pd.DataFrame, sma_fast: int = 9, sma_slow: int = 21, atr_period: int = 14) -> pd.DataFrame:
+def enrich(
+    df: pd.DataFrame,
+    sma_fast: int = 9,
+    sma_slow: int = 21,
+    atr_period: int = 14,
+    sma_medium: int | None = None,
+) -> pd.DataFrame:
     """Return a copy with SMA, ATR, ADX, and minute volume attached.
 
     `sma_9` / `sma_21` are the configured fast/slow series (defaults 9 and 21).
     `atr_14` / `adx_14` follow `atr_period` (default 14).
     `volume` stays the raw cumulative counter. `minute_volume` is the shares
     traded in that candle.
+    When `sma_medium` is set (triple MA), `sma_medium` column is added.
     """
     out = df.copy()
     out["sma_fast"] = out["close"].rolling(int(sma_fast)).mean()
@@ -230,6 +237,8 @@ def enrich(df: pd.DataFrame, sma_fast: int = 9, sma_slow: int = 21, atr_period: 
     # Aliases named in the strategy spec. They track the configured periods.
     out["sma_9"] = out["sma_fast"]
     out["sma_21"] = out["sma_slow"]
+    if sma_medium is not None:
+        out["sma_medium"] = out["close"].rolling(int(sma_medium)).mean()
     out["tr"] = true_range(out)
     out["atr_14"] = atr_wilder(out, int(atr_period))
     out["adx_14"] = adx_wilder(out, int(atr_period))
@@ -802,5 +811,30 @@ def closed_candle_cross(df: pd.DataFrame) -> str | None:
     if prev.sma_9 <= prev.sma_21 and curr.sma_9 > curr.sma_21:
         return "BULLISH"
     if prev.sma_9 >= prev.sma_21 and curr.sma_9 < curr.sma_21:
+        return "BEARISH"
+    return None
+
+
+def closed_candle_cross_triple(df: pd.DataFrame) -> str | None:
+    """Triple MA alignment signal on closed candles only (requires sma_medium column).
+
+    BULLISH: previous candle was NOT (fast > medium > slow); current IS.
+    BEARISH: previous candle was NOT (fast < medium < slow); current IS.
+    Returns "BULLISH", "BEARISH", or None.  Never inspects the forming bar.
+    """
+    if len(df) < 3 or "sma_medium" not in df.columns:
+        return None
+    prev = df.iloc[-3]
+    curr = df.iloc[-2]
+    needed = ("sma_9", "sma_medium", "sma_21")
+    if any(pd.isna(prev[c]) or pd.isna(curr[c]) for c in needed):
+        return None
+    prev_bull = float(prev.sma_9) > float(prev.sma_medium) > float(prev.sma_21)
+    curr_bull = float(curr.sma_9) > float(curr.sma_medium) > float(curr.sma_21)
+    if not prev_bull and curr_bull:
+        return "BULLISH"
+    prev_bear = float(prev.sma_9) < float(prev.sma_medium) < float(prev.sma_21)
+    curr_bear = float(curr.sma_9) < float(curr.sma_medium) < float(curr.sma_21)
+    if not prev_bear and curr_bear:
         return "BEARISH"
     return None

@@ -193,6 +193,10 @@ class BotConfig(Base):
     exchange: Mapped[str] = mapped_column(String, default="NSE")
     qty: Mapped[int] = mapped_column(Integer, default=1000)
     sma_fast: Mapped[int] = mapped_column(Integer, default=9)
+    # Optional third SMA between fast and slow. When set, a signal requires all
+    # three to be aligned (fast > medium > slow for a buy, fast < medium < slow
+    # for a sell). NULL disables it; the two-SMA system applies unchanged.
+    sma_medium: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sma_slow: Mapped[int] = mapped_column(Integer, default=21)
     atr_period: Mapped[int] = mapped_column(Integer, default=14)
     atr_multiplier: Mapped[float] = mapped_column(Float, default=1.5)

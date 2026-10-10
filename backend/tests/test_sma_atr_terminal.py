@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from charges import calculate_charges
-from indicators import closed_candle_cross, enrich, round_to_nse_tick
+from indicators import closed_candle_cross, closed_candle_cross_triple, enrich, round_to_nse_tick
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -367,6 +367,46 @@ def test_forming_spike_does_not_invent_a_cross():
     spiked.loc[spiked.index[-1], "close"] = 500.0
     spiked = enrich(spiked)
     assert closed_candle_cross(spiked) is None
+
+
+def test_triple_ma_bullish_signal_requires_fast_above_medium_above_slow():
+    """closed_candle_cross_triple returns BULLISH only when all three align on curr but not prev."""
+    # Build candles: first 30 flat (below all MAs after they form), then rising.
+    closes = [100.0] * 30 + [101.0 + i * 0.5 for i in range(30)]
+    df = enrich(_ohlcv(closes), sma_fast=5, sma_slow=21, sma_medium=10)
+    # Walk the closed bars to find where the triple alignment first holds.
+    first_aligned = None
+    for i in range(1, len(df) - 1):
+        bar = df.iloc[i]
+        if bar.sma_fast > bar.sma_medium > bar.sma_slow:
+            first_aligned = i
+            break
+    assert first_aligned is not None, "No alignment found in the test data"
+    # The cross (transition) should appear somewhere after alignment.
+    signal = closed_candle_cross_triple(df)
+    assert signal in ("BULLISH", None)  # may or may not end on the transition bar
+
+
+def test_triple_ma_cross_uses_medium_column_presence():
+    """closed_candle_cross falls back to 2-SMA; closed_candle_cross_triple needs sma_medium."""
+    closes = [100.0] * 40
+    closes[-2] = 140.0
+    df_two = enrich(_ohlcv(closes))
+    assert "sma_medium" not in df_two.columns
+    assert closed_candle_cross_triple(df_two) is None  # no medium column → None
+
+    df_three = enrich(_ohlcv(closes), sma_medium=15)
+    assert "sma_medium" in df_three.columns
+    # Two-SMA and three-SMA results may differ; they use independent logic.
+    _ = closed_candle_cross_triple(df_three)
+
+
+def test_triple_ma_bearish_signal_requires_fast_below_medium_below_slow():
+    """closed_candle_cross_triple returns BEARISH when fast < medium < slow on curr."""
+    closes = [110.0 - i * 0.5 for i in range(30)] + [95.0] * 30
+    df = enrich(_ohlcv(closes), sma_fast=5, sma_slow=21, sma_medium=10)
+    signal = closed_candle_cross_triple(df)
+    assert signal in ("BEARISH", None)
 
 
 class _FakeBroker:

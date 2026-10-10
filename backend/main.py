@@ -183,6 +183,7 @@ class ConfigUpdate(BaseModel):
     symbol: str | None = None
     qty: int | None = Field(default=None, ge=1, le=100_000)
     sma_fast: int | None = Field(default=None, ge=2, le=100)
+    sma_medium: int | None = Field(default=None, ge=3, le=200)
     sma_slow: int | None = Field(default=None, ge=3, le=300)
     atr_period: int | None = Field(default=None, ge=2, le=100)
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
@@ -270,6 +271,7 @@ def _config_dict(row: BotConfig) -> dict:
         "exchange": row.exchange,
         "qty": row.qty,
         "sma_fast": row.sma_fast,
+        "sma_medium": getattr(row, "sma_medium", None),
         "sma_slow": row.sma_slow,
         "atr_period": row.atr_period,
         "atr_multiplier": row.atr_multiplier,
@@ -612,6 +614,7 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             setattr(row, key, value)
         if row.sma_fast >= row.sma_slow:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
+        _check_sma_medium(row)
         if float(row.rsi_long_min) > float(row.rsi_long_max):
             raise HTTPException(400, "Buy RSI low must be at or below the buy RSI high")
         if float(row.rsi_short_min) > float(row.rsi_short_max):
@@ -645,11 +648,21 @@ async def research_put_config(body: ConfigUpdate):
     return await _put_config(_research(), body)
 
 
+def _check_sma_medium(cfg) -> None:
+    med = getattr(cfg, "sma_medium", None)
+    if med is None:
+        return
+    fast, slow = int(cfg.sma_fast), int(cfg.sma_slow)
+    if not (fast < int(med) < slow):
+        raise HTTPException(400, f"Medium SMA period ({med}) must be between fast ({fast}) and slow ({slow})")
+
+
 def _check_settings(cfg: BotConfig, symbol: str = "") -> None:
     """The same consistency checks as Save, on one stock's settings."""
     who = f"{symbol}: " if symbol else ""
     if int(cfg.sma_fast) >= int(cfg.sma_slow):
         raise HTTPException(400, f"{who}Fast SMA period must be shorter than the slow period")
+    _check_sma_medium(cfg)
     if float(cfg.rsi_long_min) > float(cfg.rsi_long_max):
         raise HTTPException(400, f"{who}Buy RSI low must be at or below the buy RSI high")
     if float(cfg.rsi_short_min) > float(cfg.rsi_short_max):

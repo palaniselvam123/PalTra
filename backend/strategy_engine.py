@@ -38,6 +38,7 @@ from indicators import (
     bollinger,
     bollinger_exit,
     closed_candle_cross,
+    closed_candle_cross_triple,
     closed_technical_snapshot,
     derive_minute_volume,
     enrich,
@@ -170,7 +171,7 @@ MAX_TRADE_SYMBOLS = 24
 # The settings that decide a trade. Each trade keeps a copy of them from its
 # entry (TradeLog.strategy), and each replay run keeps one for the whole run.
 SNAPSHOT_FIELDS = (
-    "qty", "sma_fast", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
+    "qty", "sma_fast", "sma_medium", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
@@ -787,7 +788,7 @@ class StrategyEngine:
         if frame is None or frame.empty:
             return frame, True
         if len(frame) < 2:
-            return enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period), True
+            return enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None)), True
         closed = frame.iloc[-2]
         key = (
             view,
@@ -813,7 +814,7 @@ class StrategyEngine:
             out = base.copy()
             out.iloc[-1, [out.columns.get_loc(c) for c in cols]] = now_vals
             return out, False
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         self._view_cache = (key, enriched)
         return enriched, True
 
@@ -1132,7 +1133,7 @@ class StrategyEngine:
                 # Taken off the Trade list while this pass fetched quotes.
                 continue
             symbol_cfg = _cfg_for(cfg, symbol)
-            enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period)
+            enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
             result = await self.on_minute(now, symbol_cfg, enriched)
@@ -1701,7 +1702,7 @@ class StrategyEngine:
                 self.last_error = ""
                 self.data_source = source
         own = _cfg_for(cfg, name)
-        enriched = enrich(frame, own.sma_fast, own.sma_slow, own.atr_period)
+        enriched = enrich(frame, own.sma_fast, own.sma_slow, own.atr_period, getattr(own, "sma_medium", None))
         side = _live_ma_side(enriched)
         if side is None:
             raise ForceRefused(f"{name} has no SMA yet")
@@ -2110,7 +2111,7 @@ class StrategyEngine:
         frame = self._frames.get((symbol or "").upper())
         if frame is None or getattr(frame, "empty", True) or len(frame) < 2:
             return None
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         closed = enriched.iloc[-2]
         return sma_gap_pct(closed.get("sma_9"), closed.get("sma_21"))
 
@@ -2126,7 +2127,7 @@ class StrategyEngine:
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or self._trail_bar.get(symbol) == closed_ts:
             return
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         closed = enriched.iloc[-2]
         gap = sma_gap_pct(closed.get("sma_9"), closed.get("sma_21"))
         price = _finite(closed.get("close"))
@@ -3250,7 +3251,7 @@ class StrategyEngine:
             if self._review_bar.get(symbol) == closed_ts:
                 continue
             self._review_bar[symbol] = closed_ts
-            enriched = enrich(frame, scfg.sma_fast, scfg.sma_slow, scfg.atr_period)
+            enriched = enrich(frame, scfg.sma_fast, scfg.sma_slow, scfg.atr_period, getattr(scfg, "sma_medium", None))
             band = review.gap_band(scfg)
             if episode is not None and episode.get("open") and review.episode_over(review.last_gap(enriched), band):
                 episode["open"] = False
@@ -3470,7 +3471,7 @@ class StrategyEngine:
         hit = caches.get(symbol)
         if hit is not None and hit[0] == key:
             return hit[1]
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         if symbol not in caches and len(caches) >= 12:
             caches.pop(next(iter(caches)))
         caches[symbol] = (key, enriched)
@@ -3496,7 +3497,7 @@ class StrategyEngine:
             cols = [c for c in ("open", "high", "low", "close", "volume") if c in bars.columns and c in out.columns]
             out.iloc[-1, [out.columns.get_loc(c) for c in cols]] = bars[cols].iloc[-1].to_numpy()
             return out
-        enriched = enrich(bars, cfg.sma_fast, cfg.sma_slow, cfg.atr_period)
+        enriched = enrich(bars, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         if (symbol, minutes) not in caches and len(caches) >= 12:
             caches.pop(next(iter(caches)))
         caches[(symbol, minutes)] = (key, enriched)
@@ -4152,6 +4153,18 @@ def _sma_side_text(frame: pd.DataFrame) -> str:
     return "SMA 9 is equal to SMA 21"
 
 
+def _pick_cross(frame: pd.DataFrame) -> str | None:
+    """Return the cross signal for `frame`.
+
+    Uses the triple MA cross when the frame has a `sma_medium` column (i.e.
+    when the strategy is configured with a third SMA), and falls back to the
+    standard two-SMA cross otherwise.
+    """
+    if "sma_medium" in frame.columns:
+        return closed_candle_cross_triple(frame)
+    return closed_candle_cross(frame)
+
+
 def _signal_on_unjudged_bars(frame: pd.DataFrame, judged_ts: int | None) -> tuple[str | None, pd.DataFrame | None]:
     """Newest unjudged cross on the last two closed bars.
 
@@ -4166,11 +4179,11 @@ def _signal_on_unjudged_bars(frame: pd.DataFrame, judged_ts: int | None) -> tupl
     choices: list[tuple[str, int, pd.DataFrame]] = []
     if judged_ts is not None and len(frame) >= 4:
         older = frame.iloc[:-1].reset_index(drop=True)
-        older_signal = closed_candle_cross(older)
+        older_signal = _pick_cross(older)
         older_ts = _closed_bar_ts(older)
         if older_signal and older_ts is not None and older_ts > judged_ts:
             choices.append((older_signal, older_ts, older))
-    newest_signal = closed_candle_cross(frame)
+    newest_signal = _pick_cross(frame)
     if newest_signal and newest_ts is not None and (judged_ts is None or newest_ts > judged_ts):
         choices.append((newest_signal, newest_ts, frame))
     if not choices:
