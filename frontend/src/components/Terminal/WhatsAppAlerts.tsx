@@ -93,7 +93,11 @@ export function WhatsAppAlerts() {
   };
 
   const canSave =
-    provider === "telegram" ? secret.trim().length > 0 : phone.trim().length > 0 && secret.trim().length > 0;
+    provider === "telegram"
+      ? secret.trim().length > 0
+      : provider === "twilio"
+        ? phone.trim().length > 0 && secret.trim().length > 0 && fromNumber.trim().length > 0
+        : phone.trim().length > 0 && secret.trim().length > 0;
 
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
@@ -137,10 +141,13 @@ export function WhatsAppAlerts() {
         </ol>
       )}
       {provider === "twilio" && (
-        <p className="mt-3 text-xs leading-relaxed text-slate-400">
-          In the Twilio WhatsApp sandbox, send the join code from your phone to the sandbox number. Then paste your
-          number, the account SID and auth token as SID:token, and the sandbox from-number.
-        </p>
+        <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
+          <li>In the Twilio console, go to <strong className="text-slate-300">Messaging → Try it out → Send a WhatsApp message</strong> and follow the sandbox join steps from your phone.</li>
+          <li>Paste your own phone number (with country code) into <em>Phone with country code</em>.</li>
+          <li>Paste <code className="rounded bg-white/10 px-1">AccountSID:AuthToken</code> into the SID:token field (copy both from the Twilio console and join with a colon).</li>
+          <li>Paste the <strong className="text-slate-300">Twilio sandbox number</strong> (e.g. <code className="rounded bg-white/10 px-1">+14155238886</code>) — NOT your own number — into the from-number field.</li>
+          <li>Tap Save & enable, then Send test.</li>
+        </ol>
       )}
       {provider === "callmebot" && (
         <p className="mt-3 text-xs leading-relaxed text-amber-200/80">
@@ -189,7 +196,7 @@ export function WhatsAppAlerts() {
           </label>
           {provider === "twilio" && (
             <label className="mt-2 block">
-              <span className="text-xs uppercase tracking-wider text-slate-400">Twilio WhatsApp from number</span>
+              <span className="text-xs uppercase tracking-wider text-slate-400">Twilio sender number (not your phone)</span>
               <input
                 value={fromNumber}
                 onChange={(e) => setFromNumber(e.target.value)}
