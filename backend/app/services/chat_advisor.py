@@ -29,6 +29,7 @@ from app import state
 from app.core.market_clock import IST, ist_now, session_state
 from app.models.database import AiAnalysis, StrategyLog, Trade, async_session
 from app.services.ai_advisor import AiUnavailable, ai_advisor, supports_reasoning
+from app.services.chat_actions import TOOLS, proposals_from
 from app.services.market_data import market_data
 from app.services.paper_engine import (
     BROKERAGE_PCT,
@@ -99,11 +100,26 @@ practice or virtual. Paper-only wording elsewhere in the facts (the ORB desk) do
 If the facts and the screen disagree about LIVE, go with LIVE and say the two disagree. RESEARCH and REPLAY are \
 practice books even while the terminal is LIVE.
 
+PROPOSING CHANGES (SMA bots only):
+You have two tools: `propose_trade_list_change` (arm / unarm stocks on an SMA bot's Trade list) and \
+`propose_stop_change` (stop-loss settings for all stocks or one stock). Calling one only shows the user a card with \
+the change; nothing is saved until they tap Apply. Use them when the user asks you to set up, change, arm, unarm or \
+pick something. Rules:
+- Only propose what the user asked for. Do not add extra changes they did not ask for.
+- Use the bot the user named; otherwise the bot of the page they are on (`screen`), otherwise bot 1.
+- Stocks: arm the stocks the user names. If they ask you to pick, pick only from stocks listed in the facts or \
+`screen` (for example scan or mover rows), say which numbers you used, and arm no more than they asked for. If the \
+facts list no candidates, ask them to name the stocks or run a scan instead of guessing.
+- Stops: send only the fields that change, in the units the user gave (rupees -> tsl_mode POINTS, % -> PERCENT). \
+If a number is ambiguous, ask before proposing.
+- In your text, say in one or two lines what the card will change. Do not claim it is done.
+- If the bot is LIVE, say plainly that the change applies to a real-money bot.
+
 SCOPE:
 The ORB desk is virtual money. The SMA terminal trades PAPER by default and LIVE only when the user switched it; \
 say which book a trade is in. You explain what the bots did, how they work and how to test settings. You do not \
-give investment advice, you do not recommend what stock to buy or sell next, and you never place, change or \
-cancel orders. If asked to predict a price, decline and explain what you can actually tell them instead."""
+give investment advice or predict prices. You can never place, close or cancel orders, switch a bot between PAPER \
+and LIVE, start or stop a bot, or press panic: tell the user to do those themselves on the terminal."""
 
 
 def _mechanics() -> dict:
@@ -344,6 +360,7 @@ async def answer(
         # Generous because reasoning models bill their internal reasoning
         # against this cap before writing a word. It is a ceiling, not a spend.
         "max_output_tokens": 12000,
+        "tools": TOOLS,
     }
     if supports_reasoning(cfg.model):
         # These are lookup-and-explain questions over facts already assembled
@@ -372,11 +389,18 @@ async def answer(
         raise AiUnavailable(f"OpenAI returned an incomplete response ({reason}).", 502)
 
     text, _sources, _searched = ai_advisor._extract(data)
-    if not text.strip():
+    proposals, dropped = proposals_from(data)
+    text = text.strip()
+    if dropped:
+        text = "\n\n".join(filter(None, [text, *dropped]))
+    if not text and proposals:
+        text = "Here is the change. Nothing is saved until you tap Apply."
+    if not text:
         raise AiUnavailable("OpenAI returned an empty response.", 502)
 
     return {
-        "reply": text.strip(),
+        "reply": text,
+        "proposals": proposals,
         "model": cfg.model,
         "facts_summary": {
             "trades_in_context": len(context["trades"]),

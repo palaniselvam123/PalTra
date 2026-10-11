@@ -5,8 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Bot, Eraser, Loader2, MessageSquare, Send, X } from "lucide-react";
-import { api, type ChatTurn } from "@/lib/api";
+import { api, type ChatProposal, type ChatTurn } from "@/lib/api";
 import { chatScreen } from "@/lib/chatScreen";
+import { ChatProposalCard } from "./ChatProposalCard";
+
+type Shown = ChatTurn & { proposals?: ChatProposal[] };
 
 /** Floating "ask the bot" panel, mounted in the root layout so it follows the
  *  user across Dashboard, Reports and Settings — the questions it answers
@@ -14,7 +17,7 @@ import { chatScreen } from "@/lib/chatScreen";
 export function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<{ configured: boolean; model: string; suggestions: string[] } | null>(null);
-  const [messages, setMessages] = useState<ChatTurn[]>([]);
+  const [messages, setMessages] = useState<Shown[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +45,9 @@ export function ChatWidget() {
     setError(null);
 
     try {
-      const res = await api.askChat(question, priorTurns, pathname ?? undefined, chatScreen());
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
+      const history = priorTurns.map(({ role, content }) => ({ role, content }));
+      const res = await api.askChat(question, history, pathname ?? undefined, chatScreen());
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply, proposals: res.proposals }]);
     } catch (e: any) {
       setError(e.message ?? "Could not reach the assistant");
     } finally {
@@ -133,17 +137,20 @@ export function ChatWidget() {
             )}
 
             {messages.map((m, i) => (
-              <div key={i} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={clsx(
-                    "rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap max-w-[92%]",
-                    m.role === "user"
-                      ? "bg-bot/20 text-slate-100"
-                      : "bg-base border border-border text-slate-300"
-                  )}
-                >
-                  {m.content}
+              <div key={i} className="space-y-2">
+                <div className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                  <div
+                    className={clsx(
+                      "rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap max-w-[92%]",
+                      m.role === "user"
+                        ? "bg-bot/20 text-slate-100"
+                        : "bg-base border border-border text-slate-300"
+                    )}
+                  >
+                    {m.content}
+                  </div>
                 </div>
+                {m.proposals?.map((p, j) => <ChatProposalCard key={j} proposal={p} />)}
               </div>
             ))}
 
@@ -168,7 +175,7 @@ export function ChatWidget() {
                     send(draft);
                   }
                 }}
-                placeholder="How many trades today? Which strategy am I using?"
+                placeholder="Ask, or say e.g. “arm SBIN on bot 2” / “1% trailing stop on all stocks”"
                 className="flex-1 resize-none bg-base border border-border rounded-md px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-bot/60 max-h-24"
               />
               <button
@@ -181,7 +188,7 @@ export function ChatWidget() {
               </button>
             </div>
             <p className="text-[10px] text-slate-600 mt-1.5">
-              Reads your trades and this page. Explains — never places orders or picks stocks for you.
+              Reads your trades and this page. Can propose Trade list and stop changes; nothing saves until you tap Apply. Never places orders.
             </p>
           </div>
         </>
