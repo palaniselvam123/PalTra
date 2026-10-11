@@ -992,6 +992,16 @@ export const smaApi = {
       undefined,
       false
     ),
+  /** A chosen bot's settings, whatever desk this page is on. */
+  configOn: (bot: 1 | 2 | 3 | 4) =>
+    request<SmaConfig>(bot === 1 ? "/api/config" : `/api/bots/${bot}/config`, undefined, undefined, false),
+  saveConfigOn: (bot: 1 | 2 | 3 | 4, body: Partial<SmaConfig>) =>
+    request<SmaConfig>(
+      bot === 1 ? "/api/config" : `/api/bots/${bot}/config`,
+      { method: "PUT", body: JSON.stringify(body) },
+      undefined,
+      false
+    ),
   /** One stock's settings on a chosen desk, whatever desk this page is on. */
   stockConfigOn: (target: ArmTarget, symbol: string) =>
     request<StockConfig>(stockPath(target, symbol), undefined, undefined, false),

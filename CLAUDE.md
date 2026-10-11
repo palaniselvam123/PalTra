@@ -388,6 +388,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
+- `backend/app/services/chat_actions.py` – chat assistant actions (the "Ask the bot" widget).
+  The model may only *propose* changes, through two OpenAI function tools:
+  `propose_trade_list_change` (arm / unarm stocks on an SMA bot 1-4) and
+  `propose_stop_change` (stop on/off, type and ATR / TSL / SMA-gap numbers, all stocks or
+  one). `chat_advisor.answer` checks each call against the terminal's own bounds and
+  returns it as `proposals`; nothing is saved server-side. The widget shows each as a
+  `ChatProposalCard` (old → new values, PAPER/LIVE badge) and saves only on Apply,
+  through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
+  LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
+  start/stop or panic.
 - `backend/stall_tracer.py` – stall tracer (logging only; `STALL_TRACE=off` turns it
   off, `STALL_TRACE_SEC` sets the 5-second threshold). The desk, every bot, replays
   and all page requests share one event loop, so a call that blocks it freezes the
