@@ -1,0 +1,130 @@
+"""MCP server: token-gated, read tools, writes only on PAPER bots, no order path."""
+from __future__ import annotations
+
+import json
+import logging
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api import routes_mcp
+
+TOKEN = "t" * 32
+
+
+def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
+    app = FastAPI()
+    writes: list = []
+
+    @app.get("/api/bots")
+    def bots():
+        return [{"bot": n, "mode": m, "armed": []} for n, m in modes.items()]
+
+    @app.get("/api/bots/{bot}/state")
+    def state(bot: int):
+        return {"bot": bot, "mode": modes[bot], "bot_status": "RUNNING", "secret_internal": 1}
+
+    @app.post("/api/bots/{bot}/trade-symbols")
+    def arm(bot: int, body: dict):
+        writes.append(("arm", bot, body))
+        return {"trade_symbols": [body["symbol"]]}
+
+    @app.put("/api/config/stock/{symbol}")
+    def stock(symbol: str, body: dict):
+        writes.append(("stock", 1, symbol, body))
+        return body
+
+    return app, writes
+
+
+@pytest.fixture
+def mcp(monkeypatch):
+    def make(modes=None, token=TOKEN):
+        monkeypatch.setenv("MCP_TOKEN", token)
+        term, writes = _fake_terminal(modes or {1: "PAPER", 2: "PAPER", 3: "LIVE", 4: "PAPER"})
+        monkeypatch.setattr(
+            routes_mcp,
+            "terminal_client",
+            lambda: httpx.AsyncClient(transport=httpx.ASGITransport(app=term), base_url="http://sma"),
+        )
+        app = FastAPI()
+        app.include_router(routes_mcp.router)
+        return TestClient(app), writes
+
+    return make
+
+
+def rpc(client, method, params=None, auth=True, path="/mcp", msg_id=1):
+    headers = {"Authorization": f"Bearer {TOKEN}"} if auth else {}
+    return client.post(path, json={"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}}, headers=headers)
+
+
+def call(client, name, args):
+    res = rpc(client, "tools/call", {"name": name, "arguments": args}).json()["result"]
+    return res["isError"], res["content"][0]["text"]
+
+
+def test_off_without_a_token_and_refuses_a_wrong_one(mcp):
+    client, _ = mcp(token="")
+    assert rpc(client, "ping").status_code == 404
+    client, _ = mcp()
+    assert rpc(client, "ping", auth=False).status_code == 401
+    assert client.post("/mcp", json={}, headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert rpc(client, "ping", auth=False, path=f"/mcp/{TOKEN}").status_code == 200
+
+
+def test_initialize_and_tool_list_have_no_order_path(mcp):
+    client, _ = mcp()
+    init = rpc(client, "initialize", {"protocolVersion": "2025-03-26"}).json()["result"]
+    assert init["protocolVersion"] == "2025-03-26" and "tools" in init["capabilities"]
+    note = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers={"Authorization": f"Bearer {TOKEN}"})
+    assert note.status_code == 202
+    names = {t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    assert names == {"list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans", "set_trade_list", "set_stop"}
+    blob = json.dumps(rpc(client, "tools/list").json()).lower()
+    for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
+        assert forbidden not in blob
+
+
+def test_status_is_trimmed(mcp):
+    client, _ = mcp()
+    err, text = call(client, "get_bot_status", {"bot": 2})
+    assert not err and json.loads(text) == {"bot": 2, "mode": "PAPER", "bot_status": "RUNNING"}
+
+
+def test_writes_reach_paper_bots_only(mcp):
+    client, writes = mcp()
+    err, text = call(client, "set_trade_list", {"bot": 2, "arm": ["sbin"]})
+    assert not err and json.loads(text)["done"] == ["armed SBIN"]
+    assert writes == [("arm", 2, {"symbol": "SBIN", "armed": True, "source": "mcp"})]
+
+    err, text = call(client, "set_trade_list", {"bot": 3, "arm": ["TCS"]})
+    assert err and "LIVE" in text
+    err, text = call(client, "set_stop", {"bot": 3, "use_stop": False})
+    assert err and "LIVE" in text
+    assert len(writes) == 1
+
+
+def test_stop_change_is_validated_and_sent_per_stock(mcp):
+    client, writes = mcp()
+    err, text = call(client, "set_stop", {"bot": 1, "symbol": "reliance", "stop_type": "TSL", "tsl_sl_points": 11, "tsl_target_points": 18, "tsl_trail_points": 18})
+    assert not err
+    assert writes == [("stock", 1, "RELIANCE", {"stop_type": "TSL", "tsl_sl_points": 11.0, "tsl_trail_points": 18.0, "tsl_target_points": 18.0})]
+    err, text = call(client, "set_stop", {"bot": 1, "tsl_sl_pct": 99})
+    assert err and "Invalid" in text
+    err, _ = call(client, "set_stop", {"bot": 1, "trading_mode": "LIVE"})
+    assert err
+
+
+def test_unknown_tool_and_method(mcp):
+    client, _ = mcp()
+    assert rpc(client, "tools/call", {"name": "place_order", "arguments": {}}).json()["error"]["code"] == -32602
+    assert rpc(client, "resources/list").json()["error"]["code"] == -32601
+
+
+def test_token_in_the_path_is_hidden_from_the_access_log():
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d', ("1.2.3.4", "POST", f"/mcp/{TOKEN}", "1.1", 200), None)
+    routes_mcp._HideToken().filter(record)
+    assert TOKEN not in record.getMessage() and "/mcp/<token>" in record.getMessage()

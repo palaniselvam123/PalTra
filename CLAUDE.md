@@ -398,6 +398,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
   LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
   start/stop or panic.
+- `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
+  `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
+  JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`
+  secret (24+ chars) is set; then every call needs it as `Authorization: Bearer …` or as
+  `/mcp/<token>` (the access log shows `/mcp/<token>`, never the value). Exempt from the
+  Google desk lock, which only takes a browser cookie. Read tools: `list_bots`,
+  `get_bot_status`, `get_settings`, `get_trades`, `get_scans`. Write tools (`set_trade_list`,
+  `set_stop`, validated by `chat_actions`) only reach a bot in **PAPER**; a LIVE bot is
+  refused. Calls go through the terminal's own routes (in-process via ASGI on Fly, else
+  `SMA_INTERNAL_URL`, default `127.0.0.1:8001`). No tool for orders, closing, the
+  PAPER/LIVE switch, start/stop or panic. Setup steps: `MCP.md`.
 - `backend/stall_tracer.py` – stall tracer (logging only; `STALL_TRACE=off` turns it
   off, `STALL_TRACE_SEC` sets the 5-second threshold). The desk, every bot, replays
   and all page requests share one event loop, so a call that blocks it freezes the
