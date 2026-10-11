@@ -398,6 +398,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
   LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
   start/stop or panic.
+- Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards):
+  `trade` (fills, closes, warnings; `alert_notifier.send`), `critical` (bot down, app
+  shutting down, no stop; `send_critical`, falls back to trade) and `call` (provider
+  `twilio_voice`: a Twilio phone call that reads the alert out). The engine asks for a call
+  (`_alert(critical=True, call=True)`) on HALTED / STOPPED, the process stopping, and a
+  position with no stop; never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings
+  only 09:00-15:45 IST Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test
+  call button ignores both. Replay and research engines send nothing.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`
@@ -424,7 +432,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   for the owner's phone. GitHub Actions asks `https://paltra.fly.dev/api/health/deep`
   every 5 minutes between 03:00 and 10:55 UTC (08:30-16:25 IST) on weekdays and, when
   the answer is not 200 for two runs in a row and the time is between 09:10 and 15:40
-  IST, rings the owner through CallMeBot Telegram, repeating about every 30 minutes
+  IST, rings the owner through CallMeBot Telegram and, when the repo secrets
+  `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` / `TWILIO_TO` are set, a Twilio
+  voice call (only the HTTP status is printed), repeating about every 30 minutes
   until the check passes. GitHub starts scheduled runs best-effort, so a run can be a
   few minutes late. Read-only (nothing but a GET), the Telegram handle is the repo
   secret `CALLMEBOT_USER` (never printed), and the owner's number is never in code.

@@ -242,7 +242,7 @@ class ReplayEngine(StrategyEngine):
     def _now(self) -> dt.datetime:
         return self.feed.clock
 
-    def _alert(self, message: str, critical: bool = False) -> None:  # noqa: ARG002
+    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:  # noqa: ARG002
         return None
 
     def load_config(self) -> BotConfig:

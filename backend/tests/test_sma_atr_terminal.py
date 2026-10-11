@@ -205,12 +205,22 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
 @pytest.mark.asyncio
 async def test_a_halt_and_the_square_off_tell_telegram(engine, monkeypatch):
     notes: list[str] = []
-    monkeypatch.setattr("strategy_engine._schedule_critical_whatsapp", notes.append)
+    rings: list[bool] = []
+
+    def record(message: str, call: bool = False) -> None:
+        notes.append(message)
+        rings.append(call)
+
+    monkeypatch.setattr("strategy_engine._schedule_critical_whatsapp", record)
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
     engine.status = "RUNNING"
     engine.data_source = "GROWW"
     await engine.kill("Manual PANIC SQUARE-OFF")
     assert any(note.startswith("PalTra bot HALTED") and "Manual PANIC SQUARE-OFF" in note for note in notes)
+    assert rings == [False], "a panic the person pressed does not ring their phone"
+    rings.clear()
+    await engine.kill("max_daily_loss ₹500 breached")
+    assert rings == [True]
 
     notes.clear()
     engine.status = "RUNNING"
@@ -220,15 +230,18 @@ async def test_a_halt_and_the_square_off_tell_telegram(engine, monkeypatch):
     await engine.on_minute(dt.datetime(2026, 9, 30, 15, 16, tzinfo=IST), cfg, _gap_frame([1.0, 1.0, 1.0]))
     assert engine.status == "DAY_COMPLETED"
     assert any("PalTra bot DAY_COMPLETED" in note for note in notes)
+    assert rings[-1] is False, "the normal end of the day does not ring"
 
 
 @pytest.mark.asyncio
 async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeypatch):
     sent: list[str] = []
+    calls: list[bool] = []
 
     class Notifier:
-        async def send_critical(self, message: str):
+        async def send_critical(self, message: str, call: bool = False):
             sent.append(message)
+            calls.append(call)
 
     monkeypatch.setattr("app.services.alert_notifier.alert_notifier", Notifier())
     engine.status = "STOPPED"
@@ -237,6 +250,7 @@ async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeyp
     engine.status = "RUNNING"
     await engine.announce_shutdown()
     assert sent and "process is stopping" in sent[0] and "RUNNING" in sent[0]
+    assert calls == [True]
 
 
 @pytest.mark.asyncio

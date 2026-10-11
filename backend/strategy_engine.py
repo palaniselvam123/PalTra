@@ -770,10 +770,10 @@ class StrategyEngine:
         """The engine's clock. A replay engine runs on the replayed day instead."""
         return _ist_now()
 
-    def _alert(self, message: str, critical: bool = False) -> None:
-        """Telegram/WhatsApp alert. A replay engine sends none."""
+    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:
+        """Telegram/WhatsApp alert, and a phone call with `call`. A replay engine sends none."""
         if critical:
-            _schedule_critical_whatsapp(message)
+            _schedule_critical_whatsapp(message, call=call)
         else:
             _schedule_whatsapp(message)
 
@@ -2103,7 +2103,7 @@ class StrategyEngine:
         except SlCancelFailed as exc:
             self.last_error = f"Stop refused ({why}) and the exit failed: {exc}. Close {symbol} by hand."
             self._signals[symbol] = self.last_error
-            self._alert(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}", critical=True)
+            self._alert(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}", critical=True, call=True)
             return
         self.position = None
         self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
@@ -2805,7 +2805,9 @@ class StrategyEngine:
             self._announce_down("DAY_COMPLETED", self.halt_reason)
 
     def _announce_down(self, status: str, reason: str) -> None:
-        self._alert(bot_down_alert(status, reason, self._now()), critical=True)
+        # The day's normal end and a panic the person pressed are not worth a phone call.
+        ring = status != "DAY_COMPLETED" and not (reason or "").startswith("Manual")
+        self._alert(bot_down_alert(status, reason, self._now()), critical=True, call=ring)
 
     async def announce_shutdown(self) -> None:
         """Tell Telegram before the process exits. A kill signal must not stay silent."""
@@ -2818,7 +2820,7 @@ class StrategyEngine:
         try:
             from app.services.alert_notifier import alert_notifier
 
-            await asyncio.wait_for(alert_notifier.send_critical(message), timeout=5)
+            await asyncio.wait_for(alert_notifier.send_critical(message, call=True), timeout=8)
         except Exception:  # noqa: BLE001
             return
 
@@ -4071,7 +4073,7 @@ def _schedule_whatsapp(message: str) -> None:
     loop.create_task(_send())
 
 
-def _schedule_critical_whatsapp(message: str) -> None:
+def _schedule_critical_whatsapp(message: str, call: bool = False) -> None:
     """Schedule a critical alert (bot down, app hung). Routes to the critical channel."""
     try:
         loop = asyncio.get_running_loop()
@@ -4082,7 +4084,7 @@ def _schedule_critical_whatsapp(message: str) -> None:
         try:
             from app.services.alert_notifier import alert_notifier
 
-            await alert_notifier.send_critical(message)
+            await alert_notifier.send_critical(message, call=call)
         except Exception:  # noqa: BLE001
             return
 

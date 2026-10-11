@@ -31,6 +31,7 @@ async function desk<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function providerLabel(name: string): string {
+  if (name === "twilio_voice") return "Twilio phone call";
   return name === "telegram" ? "Telegram" : name === "twilio" ? "Twilio WhatsApp" : "CallMeBot";
 }
 
@@ -121,7 +122,9 @@ function ChannelForm({
     }
   };
 
-  const reusable = channels.filter((r) => r.configured && r.provider !== active?.provider);
+  const reusable = channels.filter(
+    (r) => r.configured && r.provider !== active?.provider && r.provider !== "twilio_voice"
+  );
 
   const canSave =
     provider === "telegram"
@@ -274,6 +277,113 @@ function ChannelForm({
   );
 }
 
+function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Channel[]) => void }) {
+  const [phone, setPhone] = useState("");
+  const [secret, setSecret] = useState("");
+  const [fromNumber, setFromNumber] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const active = channels.find((r) => r.channel_type === "call" && r.enabled && r.configured);
+  const canSave = phone.trim() && secret.trim().includes(":") && fromNumber.trim();
+
+  const run = async (path: string, init: RequestInit, done: (res: unknown) => string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      setNote(done(await desk<unknown>(path, init)));
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Phone call (bot stopped / app stopped)</div>
+        <span className={active ? "text-xs font-semibold text-[#10B981]" : "text-xs text-slate-400"}>
+          {active ? "on" : "not connected"}
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        Twilio rings your phone and reads the alert when a bot halts or stops on its loss limit, the app shuts down, or a
+        live position has no stop. Not for the normal end of the day or a Panic you pressed. Market hours only (09:00–15:45
+        IST, Mon–Fri), at most one call every 5 minutes.
+      </p>
+      <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
+        <li>
+          In Twilio, open <strong className="text-slate-300">Phone Numbers → Buy a number</strong> and take the free trial
+          number with Voice.
+        </li>
+        <li>
+          On a trial account, add your own phone under <strong className="text-slate-300">Verified Caller IDs</strong>, or
+          Twilio will not call it.
+        </li>
+        <li>Fill in the three boxes below, tap Save & enable, then Test call.</li>
+      </ol>
+      <label className="mt-3 block">
+        <span className="text-xs uppercase tracking-wider text-slate-400">Your phone (verified, with country code)</span>
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" className={inputCls} />
+      </label>
+      <label className="mt-2 block">
+        <span className="text-xs uppercase tracking-wider text-slate-400">account SID:auth token</span>
+        <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} className={inputCls} />
+      </label>
+      <label className="mt-2 block">
+        <span className="text-xs uppercase tracking-wider text-slate-400">Your Twilio phone number (the caller)</span>
+        <input
+          value={fromNumber}
+          onChange={(e) => setFromNumber(e.target.value)}
+          placeholder="+1 Twilio number with Voice"
+          className={inputCls}
+        />
+      </label>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !canSave}
+          onClick={() =>
+            run(
+              "/api/scan/channels",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  provider: "twilio_voice",
+                  channel_type: "call",
+                  enabled: true,
+                  target: phone.trim(),
+                  secret: secret.trim(),
+                  extra: fromNumber.trim(),
+                }),
+              },
+              (res) => {
+                onSaved(res as Channel[]);
+                setSecret("");
+                return "Phone calls are on.";
+              }
+            )
+          }
+          className="inline-flex h-11 items-center rounded-md bg-[#10B981] px-4 text-sm font-semibold text-[#04140d] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+        >
+          Save & enable
+        </button>
+        <button
+          type="button"
+          disabled={busy || !active}
+          onClick={() =>
+            run("/api/scan/test-alert?channel_type=call", { method: "POST" }, () => "Calling your phone now.")
+          }
+          className="inline-flex h-11 items-center rounded-md border border-white/15 px-4 text-sm text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+        >
+          Test call
+        </button>
+      </div>
+      {note && <p className="mt-2 text-xs text-slate-400">{note}</p>}
+    </section>
+  );
+}
+
 export function WhatsAppAlerts() {
   const [channels, setChannels] = useState<Channel[]>([]);
 
@@ -299,6 +409,7 @@ export function WhatsAppAlerts() {
         channels={channels}
         onSaved={setChannels}
       />
+      <CallForm channels={channels} onSaved={setChannels} />
     </div>
   );
 }

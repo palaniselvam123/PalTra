@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import logging
 import re
 from dataclasses import dataclass, field
+from xml.sax.saxutils import escape as xml_escape
 
 import httpx
 from sqlalchemy import select
@@ -42,6 +44,12 @@ from app.models.database import AlertChannel, async_session
 CALLMEBOT = "callmebot"
 TWILIO = "twilio"
 TELEGRAM = "telegram"
+TWILIO_VOICE = "twilio_voice"
+
+# Phone calls ring only in market hours, at most once per cooldown: four bots
+# stopping together is one call, and nobody is woken by an evening deploy.
+CALL_HOURS = (dt.time(9, 0), dt.time(15, 45))
+CALL_COOLDOWN = dt.timedelta(minutes=5)
 
 REQUEST_TIMEOUT = 20.0
 MAX_ATTEMPTS = 3
@@ -110,6 +118,18 @@ def classify_response(status: int, body: str) -> tuple[str, str]:
         return FAILED, f"provider error, HTTP {status}"
     if status >= 400:
         return FAILED, f"request rejected, HTTP {status}"
+
+    # Twilio answers a queued message or call with JSON that always carries
+    # "error_code": null, which the marker scan below would read as a rejection.
+    try:
+        data = json.loads(text) if text.startswith("{") else None
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and data.get("sid") and data.get("status"):
+        state = str(data["status"]).lower()
+        if state in ("failed", "undelivered", "canceled", "busy", "no-answer"):
+            return REJECTED, f"provider reported status {state} (HTTP {status})"
+        return ACCEPTED, f"provider queued it, status {state} (HTTP {status}); delivery unconfirmed"
 
     for marker in _REJECTION_MARKERS:
         if marker in lowered:
@@ -199,6 +219,7 @@ class AlertNotifier:
         self._last_sent: dict[tuple[str, str, str], dt.datetime] = {}
         # (symbol, timeframe) -> alerted at least once this session
         self._session_fired: set[tuple[str, str]] = set()
+        self._last_call: dt.datetime | None = None
 
     def reset_session(self) -> None:
         self._last_sent.clear()
@@ -264,17 +285,37 @@ class AlertNotifier:
             return DeliveryResult(False, None, skipped_reason="No trade alert channel is enabled")
         return await self._deliver(channel, message)
 
-    async def send_critical(self, message: str) -> DeliveryResult:
+    async def send_critical(self, message: str, call: bool = False) -> DeliveryResult:
         """Send a critical alert (bot down, app hung) to the 'critical' channel.
 
         Falls back to the 'trade' channel when no dedicated critical channel is
         configured, so these high-priority messages are never silently dropped.
+        With `call`, the phone-call channel (if on) also rings, in market hours only.
         """
+        if call:
+            try:
+                await self.place_call(message)
+            except Exception:  # noqa: BLE001
+                log.exception("alert.call failed")
         channel = await self.active_channel("critical")
         if channel is None:
             channel = await self.active_channel("trade")
         if channel is None:
             return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
+        return await self._deliver(channel, message)
+
+    async def place_call(self, message: str, *, test: bool = False) -> DeliveryResult:
+        """Ring the owner's phone through Twilio Voice and read the message out."""
+        channel = await self.active_channel("call")
+        if channel is None:
+            return DeliveryResult(False, TWILIO_VOICE, skipped_reason="No phone-call channel is enabled")
+        now = ist_now()
+        if not test:
+            if now.weekday() >= 5 or not (CALL_HOURS[0] <= now.time() <= CALL_HOURS[1]):
+                return DeliveryResult(False, TWILIO_VOICE, skipped_reason="Outside market hours: no call")
+            if self._last_call is not None and now - self._last_call < CALL_COOLDOWN:
+                return DeliveryResult(False, TWILIO_VOICE, skipped_reason="Called less than 5 minutes ago")
+            self._last_call = now
         return await self._deliver(channel, message)
 
     async def _deliver(self, channel: AlertChannel, message: str) -> DeliveryResult:
@@ -292,6 +333,8 @@ class AlertNotifier:
             return await self._send_twilio(target, secret, extra, message)
         if channel.provider == TELEGRAM:
             return await self._send_telegram(target, secret, message)
+        if channel.provider == TWILIO_VOICE:
+            return await self._call_twilio(target, secret, extra, message)
         return DeliveryResult(False, channel.provider, error=f"Unknown provider {channel.provider}")
 
     async def _with_retries(self, call, provider: str, *secrets: str) -> DeliveryResult:
@@ -390,6 +433,28 @@ class AlertNotifier:
                 )
 
         return await self._with_retries(call, TWILIO, token, sid, to_number, from_number)
+
+    async def _call_twilio(self, to_number: str, auth: str, from_number: str, message: str) -> DeliveryResult:
+        sid, _, token = auth.partition(":")
+        if not (sid and token and to_number and from_number):
+            return DeliveryResult(
+                False, TWILIO_VOICE, error="Twilio call needs account SID, auth token, your Twilio number and your phone"
+            )
+        spoken = xml_escape(" ".join(message.replace("PalTra", "Pal Tra").split())[:600])
+        twiml = (
+            '<Response><Say voice="alice" language="en-IN">'
+            f"{spoken}</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-IN\">{spoken}</Say></Response>"
+        )
+
+        async def call():
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                return await client.post(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json",
+                    auth=(sid, token),
+                    data={"From": from_number, "To": to_number, "Twiml": twiml},
+                )
+
+        return await self._with_retries(call, TWILIO_VOICE, token, sid, to_number, from_number)
 
     async def discover_telegram_chat(self, token: str) -> str:
         """Chat id of the last person who messaged this bot."""

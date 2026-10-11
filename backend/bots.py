@@ -123,10 +123,10 @@ class BotEngine(StrategyEngine):
                 pause = 0.5
             await self._sleep(pause)
 
-    def _alert(self, message: str, critical: bool = False) -> None:
+    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:
         cfg = self._cfg_cache
         name = (getattr(cfg, "bot_name", None) or default_name(self.bot_id)) if cfg is not None else default_name(self.bot_id)
-        super()._alert(f"[{name}] {message}", critical=critical)
+        super()._alert(f"[{name}] {message}", critical=critical, call=call)
 
 
 
