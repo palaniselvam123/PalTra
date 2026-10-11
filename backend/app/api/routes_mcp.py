@@ -196,6 +196,67 @@ def _now() -> dt.datetime:
     return ist_now()
 
 
+async def _require_no_backtest(bot: int) -> None:
+    """A multi-day backtest reads the bot's settings again each day: a change mid-run spoils it."""
+    current = await _call("GET", "/api/replay", params={"bot": bot})
+    if current.get("status") in REPLAY_BUSY:
+        raise ToolError(
+            f"Bot {bot} has a backtest {current['status'].lower()}. Wait for it to finish before changing "
+            "settings, or the later days would use the new ones."
+        )
+
+
+async def get_backtest_trades(args: dict) -> Any:
+    try:
+        run_id = int(args.get("run_id"))
+    except (TypeError, ValueError) as exc:
+        raise ToolError("run_id must be a number from list_backtests") from exc
+    params = {"symbol": str(args["symbol"]).strip().upper()} if args.get("symbol") else None
+    rows = await _call("GET", f"/api/replay/runs/{run_id}/trades", params=params)
+    return {"run_id": run_id, "trades": rows[:MAX_TRADES], "truncated": len(rows) > MAX_TRADES}
+
+
+def _stop_fields(settings: dict) -> dict:
+    keys = ("use_stop", "stop_type", "atr_multiplier", *(k for k in STOP_FIELDS if k.startswith(("tsl_", "gap_"))))
+    return {k: settings.get(k) for k in keys if k in settings}
+
+
+async def compare_backtests(args: dict) -> Any:
+    ids = args.get("run_ids") or []
+    if not isinstance(ids, list) or not 2 <= len(ids) <= 6:
+        raise ToolError("run_ids must list 2 to 6 runs from list_backtests")
+    out = []
+    for raw in ids:
+        try:
+            run = await _call("GET", f"/api/replay/runs/{int(raw)}")
+        except (TypeError, ValueError) as exc:
+            raise ToolError(f"{raw!r} is not a run id") from exc
+        settings = run.get("settings") or {}
+        stock_settings = settings.get("stock_settings") or {}
+        if isinstance(stock_settings, str):
+            try:
+                stock_settings = json.loads(stock_settings or "{}")
+            except ValueError:
+                stock_settings = {}
+        out.append(
+            {
+                "run_id": run.get("id"),
+                "bot": _run_bot(run),
+                "dates": [run.get("start_date"), run.get("end_date")],
+                "status": run.get("status"),
+                "symbols": run.get("symbols"),
+                "totals": run.get("totals"),
+                "stop_settings": _stop_fields(settings),
+                "stock_stop_settings": {
+                    sym: _stop_fields(own) for sym, own in stock_settings.items()
+                    if isinstance(own, dict) and _stop_fields(own)
+                },
+                "per_stock": [{"symbol": s.get("symbol"), "totals": s.get("totals")} for s in run.get("stocks") or []],
+            }
+        )
+    return {"runs": out, "note": "Compare only runs over the same dates and stocks; totals.net is after charges."}
+
+
 async def start_backtest(args: dict) -> Any:
     bot = _bot_arg(args)
     now = _now()
@@ -236,6 +297,7 @@ async def set_trade_list(args: dict) -> Any:
     if set(p.arm) & set(p.unarm):
         raise ToolError("A stock cannot be armed and unarmed at once")
     await _require_paper(p.bot)
+    await _require_no_backtest(p.bot)
     done, failed = [], []
     for symbol, armed in [*((s, True) for s in p.arm), *((s, False) for s in p.unarm)]:
         try:
@@ -256,6 +318,7 @@ async def set_stop(args: dict) -> Any:
     if not changes:
         raise ToolError("No stop settings given")
     await _require_paper(p.bot)
+    await _require_no_backtest(p.bot)
     path = f"/api/config/stock/{p.symbol}" if p.symbol else "/api/config"
     saved = await _call("PUT", _bot_path(p.bot, path), json=changes)
     log.info("mcp.set_stop bot=%s symbol=%s fields=%s", p.bot, p.symbol, sorted(changes))
@@ -341,6 +404,31 @@ TOOLS: dict[str, dict] = {
         },
         "annotations": _READ,
     },
+    "get_backtest_trades": {
+        "fn": get_backtest_trades,
+        "description": (
+            "One backtest run's trades (optionally one symbol): side, entry/exit, exit_reason, P&L, and "
+            "best_points / worst_points = the most the price moved for / against the trade from entry "
+            "(rupees per share). Use these to choose a stop (beyond most winners' worst_points) and a target "
+            "(within reach of most winners' best_points)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_id": {"type": "integer"}, "symbol": {"type": "string"}},
+            "required": ["run_id"],
+        },
+        "annotations": _READ,
+    },
+    "compare_backtests": {
+        "fn": compare_backtests,
+        "description": "Side by side: 2-6 runs' totals, stop/target settings used, and per-stock totals.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_ids": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 6}},
+            "required": ["run_ids"],
+        },
+        "annotations": _READ,
+    },
     "start_backtest": {
         "fn": start_backtest,
         "description": (
@@ -390,6 +478,25 @@ TOOLS: dict[str, dict] = {
 }
 
 
+TUNING_GUIDE = (
+    "PalTra SMA trading bots. Read status, settings, trades, scans and backtests. Changes are limited to "
+    "arming stocks and stop settings on PAPER bots, and starting practice backtests outside market hours "
+    "(09:00-15:45 IST, Mon-Fri); orders and LIVE bots are not reachable.\n"
+    "Tuning stop-loss and target with backtests (the person arms the stocks in the app):\n"
+    "1. list_bots / get_settings for the bot: note the armed stocks and current stop settings.\n"
+    "2. start_backtest on that bot and a date range; poll list_backtests until its status is FINISHED.\n"
+    "3. get_backtest_trades for the run: per stock, look at winners' worst_points and best_points. A stop just "
+    "beyond most winners' worst_points and a target most winners reached (e.g. their median best_points) is a "
+    "reasonable candidate; leave room for charges.\n"
+    "4. set_stop per stock (fixed stop + target = stop_type TSL, tsl_mode POINTS, tsl_sl_points = stop, "
+    "tsl_target_points = target, tsl_trail_points = target).\n"
+    "5. start_backtest again over the SAME dates and stocks, wait for FINISHED, then compare_backtests.\n"
+    "6. Keep the better settings; if the new ones were worse, set_stop back to the old values. Report the "
+    "before/after numbers. Settings cannot change while that bot's backtest is running. Results on past days "
+    "do not guarantee future results; tuning on the same days you test on overfits, so check a second date range."
+)
+
+
 # ---- JSON-RPC ----------------------------------------------------------------
 
 def _result(msg_id: Any, result: dict) -> dict:
@@ -414,11 +521,7 @@ async def handle(msg: Any) -> dict | None:
                 "protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": SERVER_INFO,
-                "instructions": (
-                    "PalTra SMA trading bots. Read status, settings, trades, scans and backtests. Changes are limited to "
-                    "arming stocks and stop settings on PAPER bots, and starting practice backtests outside market "
-                    "hours; orders and LIVE bots are not reachable."
-                ),
+                "instructions": TUNING_GUIDE,
             },
         )
     if method == "ping":

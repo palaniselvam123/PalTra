@@ -413,11 +413,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `/mcp/<token>` (the access log shows `/mcp/<token>`, never the value). Exempt from the
   Google desk lock, which only takes a browser cookie. Read tools: `list_bots`,
   `get_bot_status`, `get_settings`, `get_trades`, `get_scans`, `list_backtests` (runs filtered by
-  `settings.bot`; `/api/replay/runs?limit=` up to 500), `get_backtest`. Write tools (`set_trade_list`,
+  `settings.bot`; `/api/replay/runs?limit=` up to 500), `get_backtest`, `get_backtest_trades` (`/api/replay/runs/{id}/trades`, `replay.run_trades`:
+  each trade's `best_points` / `worst_points` from `max_high` / `max_low`), `compare_backtests`.
+  Write tools (`set_trade_list`,
   `set_stop`, validated by `chat_actions`) only reach a bot in **PAPER**; a LIVE bot is
   refused. `start_backtest` starts a replay at full speed through `/api/replay/start` (PAPER
   bot only, refused 09:00-15:45 IST Mon-Fri and while that bot's replay is LOADING /
-  PLAYING / PAUSED, since `ReplaySession.begin` would stop it). Calls go through the terminal's own routes (in-process via ASGI on Fly, else
+  PLAYING / PAUSED, since `ReplaySession.begin` would stop it). `set_stop` / `set_trade_list` are refused while that bot's replay
+  is busy, because a fresh multi-day run re-reads the bot's settings row each day. The
+  `initialize` instructions (`TUNING_GUIDE`) walk an AI through the stop/target tuning loop. Calls go through the terminal's own routes (in-process via ASGI on Fly, else
   `SMA_INTERNAL_URL`, default `127.0.0.1:8001`). No tool for orders, closing, the
   PAPER/LIVE switch, start/stop or panic. Setup steps: `MCP.md`.
 - `backend/stall_tracer.py` – stall tracer (logging only; `STALL_TRACE=off` turns it

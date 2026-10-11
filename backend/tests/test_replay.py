@@ -456,7 +456,7 @@ def test_runs_api_lists_details_and_deletes(tmp_path, monkeypatch):
                 date="2026-09-28", symbol="TCS", direction="LONG", qty=10, entry_time=dt.datetime(2026, 9, 28, 10),
                 entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger_price=99.0,
                 exit_time=dt.datetime(2026, 9, 28, 11), exit_price=101.0, gross_pnl=10.0,
-                brokerage_and_taxes=1.0, net_pnl=9.0, mode="REPLAY", run_id=rid,
+                brokerage_and_taxes=1.0, net_pnl=9.0, mode="REPLAY", run_id=rid, max_high=103.0, max_low=99.5,
             )
         )
         s.commit()
@@ -467,6 +467,10 @@ def test_runs_api_lists_details_and_deletes(tmp_path, monkeypatch):
         detail = client.get(f"/api/replay/runs/{rid}").json()
         assert detail["days"][0]["date"] == "2026-09-28"
         assert client.get("/api/replay/runs/9999").status_code == 404
+        trades = client.get(f"/api/replay/runs/{rid}/trades").json()
+        assert [(t["symbol"], t["best_points"], t["worst_points"], t["net_pnl"]) for t in trades] == [("TCS", 3.0, 0.5, 9.0)]
+        assert client.get(f"/api/replay/runs/{rid}/trades?symbol=INFY").json() == []
+        assert client.get("/api/replay/runs/9999/trades").status_code == 404
         assert client.delete(f"/api/replay/runs/{rid}").status_code == 200
         assert client.get("/api/replay/runs").json() == []
     with database.session_factory()() as s:

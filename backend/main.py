@@ -36,6 +36,7 @@ from replay import (
     resumable_runs,
     delete_run,
     get_run,
+    run_trades,
     list_runs,
     parse_replay_range,
     parse_start,
@@ -1268,6 +1269,15 @@ async def replay_run(run_id: int):
     if run is None:
         raise HTTPException(404, "No such replay run")
     return run
+
+
+@app.get("/api/replay/runs/{run_id}/trades")
+async def replay_run_trades(run_id: int, symbol: str | None = None):
+    """One run's trades with each one's best and worst move from entry (rupees per share)."""
+    rows = await asyncio.to_thread(run_trades, run_id, symbol)
+    if rows is None:
+        raise HTTPException(404, "No such replay run")
+    return rows
 
 
 @app.delete("/api/replay/runs/{run_id}")

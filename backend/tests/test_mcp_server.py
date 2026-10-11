@@ -61,6 +61,11 @@ def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
 
     app.state.replay_status = replay_status
 
+    @app.get("/api/replay/runs/{run_id}/trades")
+    def run_trades(run_id: int, symbol: str | None = None):
+        rows = [{"symbol": "SBIN", "best_points": 6.0, "worst_points": 2.0}, {"symbol": "TCS", "best_points": 1.0, "worst_points": 4.0}]
+        return [r for r in rows if not symbol or r["symbol"] == symbol]
+
     @app.put("/api/config/stock/{symbol}")
     def stock(symbol: str, body: dict):
         writes.append(("stock", 1, symbol, body))
@@ -114,7 +119,8 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
     names = {t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]}
     assert names == {
         "list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans",
-        "list_backtests", "get_backtest", "start_backtest", "set_trade_list", "set_stop",
+        "list_backtests", "get_backtest", "get_backtest_trades", "compare_backtests", "start_backtest",
+        "set_trade_list", "set_stop",
     }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
@@ -224,3 +230,32 @@ def test_start_backtest_refuses_live_bot_and_a_running_backtest(mcp, monkeypatch
     err, text = call(client, "start_backtest", {"bot": 2, "date": "2026-10-01"})
     assert err and "already has a backtest playing" in text
     assert busy_writes == []
+
+
+def test_backtest_trades_and_compare(mcp):
+    client, _ = mcp()
+    err, text = call(client, "get_backtest_trades", {"run_id": 9, "symbol": "sbin"})
+    assert not err and json.loads(text)["trades"] == [{"symbol": "SBIN", "best_points": 6.0, "worst_points": 2.0}]
+    err, text = call(client, "compare_backtests", {"run_ids": [9, 7]})
+    runs = json.loads(text)["runs"]
+    assert not err and [r["run_id"] for r in runs] == [9, 7] and all(r["bot"] == 2 for r in runs)
+    assert call(client, "compare_backtests", {"run_ids": [9]})[0]
+
+
+def test_settings_are_locked_while_that_bots_backtest_runs(mcp, monkeypatch):
+    mcp()
+    term, writes = _fake_terminal({1: "PAPER", 2: "PAPER", 3: "PAPER", 4: "PAPER"})
+    term.state.replay_status["status"] = "PLAYING"
+    monkeypatch.setattr(
+        routes_mcp,
+        "terminal_client",
+        lambda: httpx.AsyncClient(transport=httpx.ASGITransport(app=term), base_url="http://sma"),
+    )
+    app = FastAPI()
+    app.include_router(routes_mcp.router)
+    client = TestClient(app)
+    err, text = call(client, "set_stop", {"bot": 1, "symbol": "SBIN", "tsl_sl_points": 5})
+    assert err and "backtest playing" in text
+    err, text = call(client, "set_trade_list", {"bot": 2, "arm": ["SBIN"]})
+    assert err and "backtest playing" in text
+    assert writes == []
