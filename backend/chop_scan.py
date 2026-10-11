@@ -56,7 +56,8 @@ from cross_scan import (
     closed_bars,
 )
 from groww_client import IST, market_is_open
-from indicators import enrich, sma_gap_pct
+from indicators import _session_vwap, enrich, sma_gap_pct
+import trend_strength
 
 log = logging.getLogger("sma.chopscan")
 
@@ -128,10 +129,18 @@ class ChopRow:
     move_pct: float | None = None
     speed_pct_per_min: float | None = None
     window_min: int = 10
+    # Strong trend read (`trend_strength.read`): STRONG_BULLISH / STRONG_BEARISH or None.
+    trend: str | None = None
+    trend_side: str | None = None
+    trend_score: int = 0
+    trend_checks: dict = field(default_factory=dict)
+    sma_gap_pct: float | None = None
+    vwap: float | None = None
+    day_move_pct: float | None = None  # last close vs today's first open
 
     def as_dict(self) -> dict:
         out = asdict(self)
-        for key in ("minutes_since_last_cross", "avg_minutes_between", "avg_move_pct", "move_pct", "speed_pct_per_min"):
+        for key in ("minutes_since_last_cross", "avg_minutes_between", "avg_move_pct", "move_pct", "speed_pct_per_min", "day_move_pct"):
             if out[key] is not None:
                 out[key] = round(out[key], 4)
         return out
@@ -207,7 +216,29 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
-    return replace(base, **activity(frame_1m))
+    return replace(base, **activity(frame_1m), **trend_strength.read(enriched, _vwap_today(frame_1m, now)), day_move_pct=_day_move(frame_1m))
+
+
+def _today_1m(frame_1m: pd.DataFrame) -> pd.DataFrame:
+    last_ts = int(frame_1m["ts"].iloc[-1])
+    return frame_1m[(frame_1m["ts"].astype("int64") + 19_800) // 86_400 == (last_ts + 19_800) // 86_400]
+
+
+def _vwap_today(frame_1m: pd.DataFrame, now: dt.datetime) -> float | None:
+    """Today's VWAP on the closed 1-minute tape (the bot's own VWAP arithmetic)."""
+    try:
+        return _session_vwap(closed_bars(frame_1m, 1, now))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _day_move(frame_1m: pd.DataFrame) -> float | None:
+    try:
+        today = _today_1m(frame_1m.sort_values("ts"))
+        first = float(today["open"].iloc[0]) if len(today) and "open" in today.columns else 0.0
+        return (float(today["close"].iloc[-1]) / first - 1) * 100 if first > 0 else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def score_for(crosses: int, minutes_since: float | None, avg_gap: float | None) -> str:

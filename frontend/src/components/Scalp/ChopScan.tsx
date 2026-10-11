@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import { smaApi, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type CrossScanMinutes } from "@/lib/smaApi";
+import { smaApi, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
@@ -22,8 +22,8 @@ type Props = {
   onArm: (symbol: string) => void;
 };
 
-type ScoreFilter = "ALL" | ChopScore;
-type SortKey = "symbol" | "score" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
+type SortKey = "symbol" | "score" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -31,6 +31,20 @@ const SCORE_CLASS: Record<ChopScore, string> = {
   MIXED: "bg-slate-700/40 text-slate-300 ring-slate-500/40",
   CHOPPY: "bg-accentViolet/10 text-accentViolet ring-accentViolet/40",
 };
+
+// What each strong-trend check means, in the order the server judges them.
+const CHECK_TEXT: Record<ChopTrendCheck, string> = {
+  stack: "Price beyond the fast SMA, fast beyond the slow SMA",
+  vwap: "Price and the slow SMA on the trend side of VWAP",
+  slope: "Fast and slow SMA both sloping with the trend",
+  fan: "SMAs fanned apart (gap ≥ 0.10%) and not closing up",
+  hold: "≥ 75% of the last 12 closes on the trend side of the fast SMA",
+  structure: "Lower highs and lows (bearish) / higher highs and lows (bullish)",
+  run: "No SMA cross in the last 12 candles",
+};
+const CHECK_ORDER = Object.keys(CHECK_TEXT) as ChopTrendCheck[];
+
+const isStrong = (r: ChopScanRow) => r.trend === "STRONG_BULLISH" || r.trend === "STRONG_BEARISH";
 
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
@@ -60,6 +74,8 @@ export function ChopScan({ armed, arming, onArm }: Props) {
   const [quietMin, setQuietMin] = useState(60);
   const [alertOnQuiet, setAlertOnQuiet] = useState(true);
   const [auto, setAuto] = useState(true);
+  // Fast movers only: |speed| over the last 10 minutes at least this many % per minute (0 = off).
+  const [minSpeed, setMinSpeed] = useState(0);
   // "I have shown this stock as quiet already" — stops the popup repeating each tick while it's open.
   const seenRef = useRef<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
@@ -74,6 +90,8 @@ export function ChopScan({ armed, arming, onArm }: Props) {
         if (typeof saved.quietMin === "number") setQuietMin(saved.quietMin);
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
         if (typeof saved.auto === "boolean") setAuto(saved.auto);
+        if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
+        if (typeof saved.score === "string") setScore(saved.score as ScoreFilter);
       }
     } catch {
       /* private mode */
@@ -81,11 +99,11 @@ export function ChopScan({ armed, arming, onArm }: Props) {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto }));
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score }));
     } catch {
       /* private mode */
     }
-  }, [armedOnly, quietMin, alertOnQuiet, auto]);
+  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score]);
 
   const start = useCallback(
     async (force = false) => {
@@ -174,10 +192,13 @@ export function ChopScan({ armed, arming, onArm }: Props) {
     () =>
       (scannedThisCandle ? (data?.rows ?? []) : []).filter((r) => {
         if (!matchesText(query, r.symbol)) return false;
-        if (score !== "ALL" && r.score !== score) return false;
+        if (score === "STRONG" && !isStrong(r)) return false;
+        if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
+        if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
+        if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
         return true;
       }),
-    [data?.rows, scannedThisCandle, query, score]
+    [data?.rows, scannedThisCandle, query, score, minSpeed]
   );
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
@@ -185,6 +206,10 @@ export function ChopScan({ armed, arming, onArm }: Props) {
         return r.symbol;
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
+      case "trend":
+        return (isStrong(r) ? 1000 : 0) + (r.trend_score ?? 0);
+      case "dayMove":
+        return r.day_move_pct ?? null;
       case "crosses":
         return r.crosses_today;
       case "since":
@@ -223,7 +248,7 @@ export function ChopScan({ armed, arming, onArm }: Props) {
         className="mb-3"
         lead={`Information only. Each stock's ${label} crosses on today's closed candles are counted, with the longest run since the last one and the average time and move between them.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -250,11 +275,24 @@ export function ChopScan({ armed, arming, onArm }: Props) {
           onChange={(v) => setScore(v as ScoreFilter)}
           options={[
             { value: "ALL", label: "All" },
+            { value: "STRONG", label: "Strong trend (both)" },
+            { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
+            { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
             { value: "TRENDING", label: "Trending only" },
             { value: "MIXED", label: "Mixed only" },
             { value: "CHOPPY", label: "Choppy only" },
           ]}
-          className="w-36"
+          className="w-44"
+        />
+        <NumberFilter
+          label="Fast movers: |speed| ≥"
+          value={minSpeed}
+          onChange={(v) => setMinSpeed(Math.min(1, Math.max(0, Math.round(v * 1000) / 1000)))}
+          min={0}
+          max={0.3}
+          step={0.01}
+          suffix="%/min"
+          className="w-44"
         />
         <TextFilter value={query} onChange={setQuery} />
         <NumberFilter
@@ -303,6 +341,8 @@ export function ChopScan({ armed, arming, onArm }: Props) {
               <tr>
                 <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
                 <SortTh label="Score" k="score" sort={sort} onSort={onSort} text />
+                <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" />
+                <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" />
                 <SortTh label="Crosses today" k="crosses" sort={sort} onSort={onSort} num />
                 <SortTh label="Last cross (min)" k="since" sort={sort} onSort={onSort} num title="Minutes since the start of the last cross candle" />
                 <SortTh label="Avg gap (min)" k="avgGap" sort={sort} onSort={onSort} num title="Average time between today's crosses" />
@@ -353,6 +393,19 @@ function Row({ row: r, armedOn, arming, onArm }: { row: ChopScanRow; armedOn: st
           </span>
         )}
       </td>
+      <td className="py-1.5">
+        <TrendChip row={r} />
+      </td>
+      <td className="py-1.5 text-right tabular-nums">
+        {r.day_move_pct == null ? (
+          "—"
+        ) : (
+          <span className={r.day_move_pct >= 0 ? "text-profit" : "text-loss"}>
+            {r.day_move_pct >= 0 ? "+" : ""}
+            {r.day_move_pct.toFixed(2)}%
+          </span>
+        )}
+      </td>
       <td className="py-1.5 text-right tabular-nums">{r.crosses_today}</td>
       <td className="py-1.5 text-right tabular-nums">{r.minutes_since_last_cross == null ? "—" : Math.max(0, Math.round(r.minutes_since_last_cross))}</td>
       <td className="py-1.5 text-right tabular-nums text-slate-400">{num(r.avg_minutes_between, 1)}</td>
@@ -391,5 +444,37 @@ function Row({ row: r, armedOn, arming, onArm }: { row: ChopScanRow; armedOn: st
         </span>
       </td>
     </tr>
+  );
+}
+
+function TrendChip({ row: r }: { row: ChopScanRow }) {
+  const checks = r.trend_checks ?? {};
+  const passed = CHECK_ORDER.filter((k) => checks[k]).length;
+  const title = [
+    r.trend ? `Strong ${r.trend === "STRONG_BULLISH" ? "bullish" : "bearish"} trend` : `Not a strong trend (${r.trend_side?.toLowerCase() ?? "no"} side)`,
+    ...CHECK_ORDER.map((k) => `${checks[k] ? "✓" : "✗"} ${CHECK_TEXT[k]}`),
+    r.vwap != null ? `VWAP ${r.vwap.toFixed(2)}` : "VWAP not available",
+    r.sma_gap_pct != null ? `SMA gap ${r.sma_gap_pct >= 0 ? "+" : ""}${r.sma_gap_pct.toFixed(2)}%` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (!r.trend_side) return <span className="text-slate-600">—</span>;
+  if (!r.trend)
+    return (
+      <span className="text-xs tabular-nums text-slate-500" title={title}>
+        {r.trend_side === "BULLISH" ? "↑" : "↓"} {passed}/7
+      </span>
+    );
+  const bull = r.trend === "STRONG_BULLISH";
+  return (
+    <span
+      className={clsx(
+        "rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
+        bull ? "bg-profit/10 text-profit ring-profit/40" : "bg-loss/10 text-loss ring-loss/40"
+      )}
+      title={title}
+    >
+      {bull ? "Strong ↑" : "Strong ↓"} {passed}/7
+    </span>
   );
 }

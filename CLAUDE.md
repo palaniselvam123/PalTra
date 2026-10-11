@@ -329,6 +329,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once per stock per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
   defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
   Trade list are downloaded (quick enough to run quietly).
+  **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also
+  gets `trend` = `STRONG_BULLISH` / `STRONG_BEARISH` / null, `trend_score` (0-100) and
+  `trend_checks`, judged on the closed candles for the side of fast vs slow SMA: `stack` (close
+  beyond fast beyond slow), `vwap` (close and slow SMA beyond today's 1-minute VWAP), `slope`
+  (both SMAs moving with the trend over 3 candles), `fan` (|gap| ≥ 0.10% and not narrowed by a
+  third), `hold` (≥ 75% of the last 12 closes beyond the fast SMA), `structure` (lower highs and
+  lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
+  6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
+  filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
