@@ -234,23 +234,25 @@ async def test_a_halt_and_the_square_off_tell_telegram(engine, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeypatch):
-    sent: list[str] = []
-    calls: list[bool] = []
+async def test_every_app_stop_is_announced_and_rings_at_any_hour(engine, monkeypatch):
+    from strategy_engine import announce_process_stop
+
+    sent: list[tuple[str, bool, bool]] = []
 
     class Notifier:
-        async def send_critical(self, message: str, call: bool = False):
-            sent.append(message)
-            calls.append(call)
+        async def send_critical(self, message: str, call: bool = False, call_any_time: bool = False):
+            sent.append((message, call, call_any_time))
 
     monkeypatch.setattr("app.services.alert_notifier.alert_notifier", Notifier())
-    engine.status = "STOPPED"
-    await engine.announce_shutdown()
-    assert sent == []
+    engine.status = "DAY_COMPLETED"
+    await announce_process_stop([engine])
+    message, call, any_time = sent[0]
+    assert "app is stopping" in message and "DAY_COMPLETED" in message and "Press Start" not in message
+    assert call and any_time, "a deploy after hours still rings"
+    sent.clear()
     engine.status = "RUNNING"
-    await engine.announce_shutdown()
-    assert sent and "process is stopping" in sent[0] and "RUNNING" in sent[0]
-    assert calls == [True]
+    await announce_process_stop([engine])
+    assert "RUNNING" in sent[0][0] and "Press Start bot on" in sent[0][0]
 
 
 @pytest.mark.asyncio

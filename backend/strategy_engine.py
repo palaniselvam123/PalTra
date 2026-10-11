@@ -2809,21 +2809,6 @@ class StrategyEngine:
         ring = status != "DAY_COMPLETED" and not (reason or "").startswith("Manual")
         self._alert(bot_down_alert(status, reason, self._now()), critical=True, call=ring)
 
-    async def announce_shutdown(self) -> None:
-        """Tell Telegram before the process exits. A kill signal must not stay silent."""
-        if self.status not in ("RUNNING", "PAUSED") and not self.positions:
-            return
-        reason = "The app process is stopping. Press Start bot after it comes back."
-        if self.halt_reason:
-            reason = f"{self.halt_reason}. {reason}"
-        message = bot_down_alert(self.status, reason, self._now())
-        try:
-            from app.services.alert_notifier import alert_notifier
-
-            await asyncio.wait_for(alert_notifier.send_critical(message, call=True), timeout=8)
-        except Exception:  # noqa: BLE001
-            return
-
     def release_manual_panic(self) -> bool:
         """A panic flattens the book. Pressing Start again may trade the same day.
 
@@ -3821,6 +3806,36 @@ def _review_dict(row: ReviewLog) -> dict:
         "action_at": row.action_at.isoformat(timespec="seconds") if row.action_at else None,
         "note": row.note or "",
     }
+
+
+def shutdown_alert(engines: list, when: dt.datetime) -> str:
+    """One message for the whole app stopping: every bot's status, and which need a restart."""
+    lines = ["PalTra app is stopping (deploy or restart)."]
+    restart = []
+    for eng in engines:
+        cfg = getattr(eng, "_cfg_cache", None)
+        name = (getattr(cfg, "bot_name", None) if cfg is not None else None) or f"Bot {getattr(eng, 'bot_id', 1)}"
+        held = len(getattr(eng, "positions", {}) or {})
+        lines.append(f"{name}: {eng.status}" + (f", {held} open position(s)" if held else ""))
+        if eng.status in ("RUNNING", "PAUSED") or held:
+            restart.append(name)
+    if restart:
+        lines.append(f"Press Start bot on {', '.join(restart)} after the app comes back.")
+    lines.append(f"{when.strftime('%d %b %H:%M:%S')} IST")
+    return "\n".join(lines)
+
+
+async def announce_process_stop(engines: list) -> None:
+    """Tell the owner before the process exits, at any hour. A deploy must not stop a bot silently."""
+    if not engines:
+        return
+    message = shutdown_alert(engines, _ist_now())
+    try:
+        from app.services.alert_notifier import alert_notifier
+
+        await asyncio.wait_for(alert_notifier.send_critical(message, call=True, call_any_time=True), timeout=8)
+    except Exception:  # noqa: BLE001
+        return
 
 
 def bot_down_alert(status: str, reason: str, when: dt.datetime) -> str:

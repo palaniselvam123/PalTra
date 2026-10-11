@@ -136,6 +136,13 @@ def boot_engine() -> asyncio.Task | None:
     return _task
 
 
+async def announce_shutdown_all() -> None:
+    """One alert (and a call) for every SMA bot when the process stops."""
+    from strategy_engine import announce_process_stop
+
+    await announce_process_stop([engine, *bot_engines.values()])
+
+
 def stop_engine() -> None:
     stall_tracer.stop()
     engine.stop()
