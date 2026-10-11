@@ -151,6 +151,38 @@ async def get_scans(args: dict) -> Any:
     return {"cross_scan": await _call("GET", "/api/cross-scan"), "trend_quality": await _call("GET", "/api/chop-scan")}
 
 
+def _run_bot(run: dict) -> int:
+    try:
+        return int((run.get("settings") or {}).get("bot") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+async def list_backtests(args: dict) -> Any:
+    bot = args.get("bot")
+    if bot is not None and bot not in (1, 2, 3, 4):
+        raise ToolError("bot must be 1, 2, 3 or 4")
+    limit = max(1, min(int(args.get("limit") or 20), 50))
+    runs = await _call("GET", "/api/replay/runs", params={"limit": 500 if bot is not None else limit})
+    out = []
+    for run in runs:
+        if bot is not None and _run_bot(run) != bot:
+            continue
+        out.append({**{k: v for k, v in run.items() if k != "settings"}, "bot": _run_bot(run)})
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def get_backtest(args: dict) -> Any:
+    try:
+        run_id = int(args.get("run_id"))
+    except (TypeError, ValueError) as exc:
+        raise ToolError("run_id must be a number from list_backtests") from exc
+    run = await _call("GET", f"/api/replay/runs/{run_id}")
+    return {**run, "bot": _run_bot(run)}
+
+
 async def set_trade_list(args: dict) -> Any:
     try:
         p = TradeListProposal.model_validate(args)
@@ -244,6 +276,28 @@ TOOLS: dict[str, dict] = {
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": _READ,
     },
+    "list_backtests": {
+        "fn": list_backtests,
+        "description": (
+            "Backtest (replay) runs, newest first, optionally for one bot: dates, stocks, status, days done, "
+            "and totals (trades, wins, net P&L, charges). Use get_backtest for one run's detail."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"bot": _BOT, "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+        },
+        "annotations": _READ,
+    },
+    "get_backtest": {
+        "fn": get_backtest,
+        "description": "One backtest run: day-by-day P&L, per-stock results and the exact settings it used.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_id": {"type": "integer", "description": "The id from list_backtests."}},
+            "required": ["run_id"],
+        },
+        "annotations": _READ,
+    },
     "set_trade_list": {
         "fn": set_trade_list,
         "description": (
@@ -298,7 +352,7 @@ async def handle(msg: Any) -> dict | None:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": SERVER_INFO,
                 "instructions": (
-                    "PalTra SMA trading bots. Read status, settings, trades and scans. Changes are limited to "
+                    "PalTra SMA trading bots. Read status, settings, trades, scans and backtests. Changes are limited to "
                     "arming stocks and stop settings on PAPER bots; orders and LIVE bots are not reachable."
                 ),
             },

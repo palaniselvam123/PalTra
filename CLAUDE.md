@@ -404,7 +404,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   secret (24+ chars) is set; then every call needs it as `Authorization: Bearer …` or as
   `/mcp/<token>` (the access log shows `/mcp/<token>`, never the value). Exempt from the
   Google desk lock, which only takes a browser cookie. Read tools: `list_bots`,
-  `get_bot_status`, `get_settings`, `get_trades`, `get_scans`. Write tools (`set_trade_list`,
+  `get_bot_status`, `get_settings`, `get_trades`, `get_scans`, `list_backtests` (runs filtered by
+  `settings.bot`; `/api/replay/runs?limit=` up to 500), `get_backtest`. Write tools (`set_trade_list`,
   `set_stop`, validated by `chat_actions`) only reach a bot in **PAPER**; a LIVE bot is
   refused. Calls go through the terminal's own routes (in-process via ASGI on Fly, else
   `SMA_INTERNAL_URL`, default `127.0.0.1:8001`). No tool for orders, closing, the

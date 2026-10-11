@@ -10,6 +10,8 @@ SMA bots and make two kinds of change on **PAPER** bots only.
 | `get_settings` | One bot's strategy and stop settings, or one stock's |
 | `get_trades` | Newest trades of a bot's PAPER or LIVE book |
 | `get_scans` | Last Cross scan and Trend quality results |
+| `list_backtests` | Backtest (replay) runs, newest first, for one bot or all: dates, stocks, status, totals |
+| `get_backtest` | One run's day-by-day P&L, per-stock results and the settings it used |
 | `set_trade_list` | Arm / unarm stocks (PAPER bots only) |
 | `set_stop` | Stop type, stop / trail / target in ₹ or % (PAPER bots only) |
 
