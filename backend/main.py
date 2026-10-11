@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 import chop_scan
+import late_entry
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -244,6 +245,7 @@ class ConfigUpdate(BaseModel):
     gap_fade_intrabar: bool | None = None
     flip_orders: bool | None = None
     cross_exit: bool | None = None
+    late_entry_min: int | None = Field(default=None, ge=0, le=late_entry.MAX_MIN)
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
@@ -705,6 +707,7 @@ def _gap_dict(row) -> dict:
         "gap_fade_intrabar": bool(getattr(row, "gap_fade_intrabar", False)),
         "flip_orders": bool(getattr(row, "flip_orders", False)),
         "cross_exit": getattr(row, "cross_exit", None) is not False,
+        "late_entry_min": late_entry.window_min(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),
