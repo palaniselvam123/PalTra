@@ -14,6 +14,7 @@ their checks apply.
 """
 from __future__ import annotations
 
+import datetime as dt
 import hmac
 import json
 import logging
@@ -183,6 +184,48 @@ async def get_backtest(args: dict) -> Any:
     return {**run, "bot": _run_bot(run)}
 
 
+BACKTEST_SPEED = 300
+REPLAY_BUSY = ("LOADING", "PLAYING", "PAUSED")
+# Same window as the deploy gate: a backtest shares the event loop with the trading bots.
+MARKET_BLOCK = (dt.time(9, 0), dt.time(15, 45))
+
+
+def _now() -> dt.datetime:
+    from app.core.market_clock import ist_now
+
+    return ist_now()
+
+
+async def start_backtest(args: dict) -> Any:
+    bot = _bot_arg(args)
+    now = _now()
+    if now.weekday() < 5 and MARKET_BLOCK[0] <= now.time() <= MARKET_BLOCK[1]:
+        raise ToolError(
+            "Backtests cannot be started from outside tools during market hours (09:00-15:45 IST, Mon-Fri). "
+            "Try after 15:45, or start it in the app."
+        )
+    date = str(args.get("date") or "").strip()
+    if not date:
+        raise ToolError("date is required (YYYY-MM-DD)")
+    symbols = args.get("symbols") or None
+    if symbols is not None and not isinstance(symbols, list):
+        raise ToolError("symbols must be a list of NSE symbols")
+    current = await _call("GET", "/api/replay", params={"bot": bot})
+    if current.get("status") in REPLAY_BUSY:
+        raise ToolError(f"Bot {bot} already has a backtest {current['status'].lower()}. Wait for it to finish.")
+    body = {"bot": bot, "date": date, "end_date": args.get("end_date") or None, "start": "09:15",
+            "speed": BACKTEST_SPEED, "symbols": symbols}
+    info = await _call("POST", "/api/replay/start", json=body)
+    log.info("mcp.start_backtest bot=%s date=%s end=%s symbols=%s", bot, date, body["end_date"], len(symbols or []))
+    return {
+        "bot": bot,
+        "status": info.get("status"),
+        "date": info.get("date"),
+        "end_date": info.get("end_date"),
+        "note": "Started. It runs at full speed in the background; check progress with list_backtests / get_backtest.",
+    }
+
+
 async def set_trade_list(args: dict) -> Any:
     try:
         p = TradeListProposal.model_validate(args)
@@ -298,6 +341,26 @@ TOOLS: dict[str, dict] = {
         },
         "annotations": _READ,
     },
+    "start_backtest": {
+        "fn": start_backtest,
+        "description": (
+            "Start a practice backtest (replay of past days' Groww candles) with one PAPER bot's current settings. "
+            "date and optional end_date are YYYY-MM-DD (a range up to about 30 trading days); symbols defaults to "
+            "the bot's armed stocks. Never sends an order. Refused on a LIVE bot, while that bot already has a "
+            "backtest running, and during market hours (09:00-15:45 IST, Mon-Fri)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bot": _BOT,
+                "date": {"type": "string", "description": "First day, YYYY-MM-DD."},
+                "end_date": {"type": "string", "description": "Last day, YYYY-MM-DD. Omit for one day."},
+                "symbols": {"type": "array", "items": {"type": "string"}, "description": "Stocks; default the armed ones."},
+            },
+            "required": ["date"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
     "set_trade_list": {
         "fn": set_trade_list,
         "description": (
@@ -353,7 +416,8 @@ async def handle(msg: Any) -> dict | None:
                 "serverInfo": SERVER_INFO,
                 "instructions": (
                     "PalTra SMA trading bots. Read status, settings, trades, scans and backtests. Changes are limited to "
-                    "arming stocks and stop settings on PAPER bots; orders and LIVE bots are not reachable."
+                    "arming stocks and stop settings on PAPER bots, and starting practice backtests outside market "
+                    "hours; orders and LIVE bots are not reachable."
                 ),
             },
         )
