@@ -283,6 +283,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   since the cross candle, else re-runs `apply_signal` (alert off; every check, cut-off, cap,
   stop, flip and one-LIVE-bot-per-stock still apply) and the first candle the filters agree
   opens the trade. A new cross replaces it. Gap mode ignores it. Settings → Entry filters.
+- `backend/join_trend.py` – join the morning trend (`join_trend`, off by default, and
+  `join_after_min`, default 15; per bot and per stock, PAPER and LIVE): a stock that opens
+  already trending has no fresh cross, so it is never traded. With it on, once per day per
+  stock, from 09:15 + `join_after_min` while flat, `StrategyEngine._joinable` takes the side
+  the SMAs are on (`join_trend.side_start`: the run's first closed candle, clipped to today)
+  when that run began before the join time, and `_join_minute` asks `apply_signal` (alert off)
+  on each closed candle until every check agrees; in gap mode it arms `_gap_pending` instead.
+  Never twice a day (`_joined_today`) or on a run the bot already entered (`_side_entered`,
+  set in `apply_signal`); a later cross is a normal cross. A cross printed before the stock was
+  armed is still not traded as a cross. Settings → Entry filters.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle
