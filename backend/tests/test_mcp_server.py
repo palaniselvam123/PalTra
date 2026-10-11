@@ -44,6 +44,23 @@ def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
     def run(run_id: int):
         return {"id": run_id, "settings": {"bot": 2}, "days": [{"date": "2026-10-08", "net": 120.0}], "stocks": []}
 
+    replay_status = {"status": "IDLE"}
+
+    @app.get("/api/replay")
+    def replay(bot: int = 1):
+        return replay_status
+
+    @app.post("/api/replay/start")
+    def replay_start(body: dict):
+        if modes[body["bot"]] == "LIVE":
+            from fastapi import HTTPException
+
+            raise HTTPException(409, "Switch Bot to PAPER before replaying its settings.")
+        writes.append(("replay", body))
+        return {"status": "LOADING", "date": body["date"], "end_date": body["end_date"] or body["date"]}
+
+    app.state.replay_status = replay_status
+
     @app.put("/api/config/stock/{symbol}")
     def stock(symbol: str, body: dict):
         writes.append(("stock", 1, symbol, body))
@@ -97,7 +114,7 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
     names = {t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]}
     assert names == {
         "list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans",
-        "list_backtests", "get_backtest", "set_trade_list", "set_stop",
+        "list_backtests", "get_backtest", "start_backtest", "set_trade_list", "set_stop",
     }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
@@ -160,3 +177,50 @@ def test_backtests_for_one_bot(mcp):
     assert not err and detail["bot"] == 2 and detail["days"][0]["net"] == 120.0
     err, text = call(client, "get_backtest", {"run_id": "x"})
     assert err
+
+
+def _at(monkeypatch, y, mo, d, h, mi):
+    import datetime as dt
+
+    monkeypatch.setattr(routes_mcp, "_now", lambda: dt.datetime(y, mo, d, h, mi, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))))
+
+
+def test_start_backtest_outside_market_hours(mcp, monkeypatch):
+    client, writes = mcp()
+    _at(monkeypatch, 2026, 10, 12, 16, 0)  # Monday 16:00 IST
+    err, text = call(client, "start_backtest", {"bot": 2, "date": "2026-10-01", "end_date": "2026-10-09", "symbols": ["SBIN"]})
+    assert not err and json.loads(text)["status"] == "LOADING"
+    assert writes == [("replay", {"bot": 2, "date": "2026-10-01", "end_date": "2026-10-09", "start": "09:15", "speed": 300, "symbols": ["SBIN"]})]
+
+
+def test_start_backtest_is_blocked_in_market_hours_but_not_at_weekends(mcp, monkeypatch):
+    client, writes = mcp()
+    _at(monkeypatch, 2026, 10, 12, 9, 0)  # Monday 09:00
+    err, text = call(client, "start_backtest", {"bot": 2, "date": "2026-10-01"})
+    assert err and "market hours" in text
+    _at(monkeypatch, 2026, 10, 12, 15, 45)
+    assert call(client, "start_backtest", {"bot": 2, "date": "2026-10-01"})[0]
+    assert writes == []
+    _at(monkeypatch, 2026, 10, 11, 11, 0)  # Sunday
+    assert not call(client, "start_backtest", {"bot": 2, "date": "2026-10-01"})[0]
+
+
+def test_start_backtest_refuses_live_bot_and_a_running_backtest(mcp, monkeypatch):
+    client, writes = mcp()
+    _at(monkeypatch, 2026, 10, 12, 18, 0)
+    err, text = call(client, "start_backtest", {"bot": 3, "date": "2026-10-01"})
+    assert err and "PAPER" in text
+    err, text = call(client, "start_backtest", {"bot": 2})
+    assert err and "date is required" in text
+    assert writes == []
+
+    term, busy_writes = _fake_terminal({1: "PAPER", 2: "PAPER", 3: "PAPER", 4: "PAPER"})
+    term.state.replay_status["status"] = "PLAYING"
+    monkeypatch.setattr(
+        routes_mcp,
+        "terminal_client",
+        lambda: httpx.AsyncClient(transport=httpx.ASGITransport(app=term), base_url="http://sma"),
+    )
+    err, text = call(client, "start_backtest", {"bot": 2, "date": "2026-10-01"})
+    assert err and "already has a backtest playing" in text
+    assert busy_writes == []
