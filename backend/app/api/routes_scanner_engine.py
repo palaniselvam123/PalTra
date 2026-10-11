@@ -17,6 +17,7 @@ from app.services.alert_notifier import (
     CALLMEBOT,
     TELEGRAM,
     TWILIO,
+    TWILIO_VOICE,
     TelegramSetupError,
     alert_notifier,
 )
@@ -60,7 +61,8 @@ class ConfigRequest(BaseModel):
 
 class ChannelRequest(BaseModel):
     provider: str
-    # "trade" = fills / closes / warnings; "critical" = bot-down / app-hung only.
+    # "trade" = fills / closes / warnings; "critical" = bot-down / app-hung only;
+    # "call" = a Twilio phone call for bot-down / app-down (provider twilio_voice only).
     channel_type: str = "trade"
     enabled: bool = True
     # CallMeBot: target = phone, secret = apikey.
@@ -206,9 +208,11 @@ async def channels():
 @router.post("/channels")
 async def save_channel(body: ChannelRequest):
     provider = body.provider.lower()
-    if provider not in (CALLMEBOT, TWILIO, TELEGRAM):
-        raise HTTPException(400, f"provider must be '{CALLMEBOT}', '{TWILIO}', or '{TELEGRAM}'")
-    channel_type = body.channel_type if body.channel_type in ("trade", "critical") else "trade"
+    if provider not in (CALLMEBOT, TWILIO, TELEGRAM, TWILIO_VOICE):
+        raise HTTPException(400, f"provider must be '{CALLMEBOT}', '{TWILIO}', '{TELEGRAM}' or '{TWILIO_VOICE}'")
+    channel_type = body.channel_type if body.channel_type in ("trade", "critical", "call") else "trade"
+    if (provider == TWILIO_VOICE) != (channel_type == "call"):
+        raise HTTPException(400, "Phone calls use provider twilio_voice with channel_type call")
     target = body.target.strip()
     secret = body.secret.strip()
     if provider == TELEGRAM:
@@ -221,10 +225,12 @@ async def save_channel(body: ChannelRequest):
                 raise HTTPException(400, str(exc)) from exc
     elif not target or not secret:
         raise HTTPException(400, "target and secret are both required")
-    if provider == TWILIO and ":" not in body.secret:
+    if provider in (TWILIO, TWILIO_VOICE) and ":" not in body.secret:
         raise HTTPException(400, "For Twilio, secret must be 'account_sid:auth_token'")
     if provider == TWILIO and not body.extra:
         raise HTTPException(400, "For Twilio, extra must be the WhatsApp-enabled 'from' number")
+    if provider == TWILIO_VOICE and not body.extra.strip():
+        raise HTTPException(400, "For a Twilio call, extra must be your Twilio phone number (the caller)")
 
     vault = get_vault()
     async with async_session() as session:
@@ -270,6 +276,8 @@ async def assign_channel(provider: str, body: AssignRequest):
     channel_type = body.channel_type
     if channel_type not in ("trade", "critical"):
         raise HTTPException(400, "channel_type must be 'trade' or 'critical'")
+    if provider.lower() == TWILIO_VOICE:
+        raise HTTPException(400, "The phone-call channel stays in its own slot")
     async with async_session() as session:
         row = (
             await session.execute(select(AlertChannel).where(AlertChannel.provider == provider.lower()))
@@ -311,6 +319,13 @@ async def test_alert(channel_type: str = "trade"):
     """Sends a real message through the enabled channel, so credentials are
     proven before a live signal depends on them.
     """
+    if channel_type == "call":
+        result = await alert_notifier.place_call(
+            "This is a test call from Pal Tra. If you can hear this, phone alerts work.", test=True
+        )
+        if not result.ok:
+            raise HTTPException(400, result.error or result.skipped_reason or "Call failed")
+        return {"ok": True, "provider": result.provider}
     if channel_type == "critical":
         channel = await alert_notifier.active_channel("critical")
         if channel is None:

@@ -36,5 +36,9 @@ def _no_alert_delivery(monkeypatch):
         return DeliveryResult(False, None, skipped_reason="tests do not send alerts")
 
     monkeypatch.setattr(alert_notifier, "send", record)
-    monkeypatch.setattr(alert_notifier, "send_critical", record)
+
+    async def record_critical(message: str, call: bool = False) -> DeliveryResult:
+        return await record(message)
+
+    monkeypatch.setattr(alert_notifier, "send_critical", record_critical)
     return sent

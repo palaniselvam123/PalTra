@@ -7,6 +7,9 @@
 # Environment:
 #   HEALTH_URL       default https://paltra.fly.dev/api/health/deep
 #   CALLMEBOT_USER   Telegram @username or phone to ring (a secret: never printed)
+#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO
+#                    optional: also ring TWILIO_TO with a Twilio voice call from the
+#                    Twilio number TWILIO_FROM (secrets: never printed)
 #   STREAK           failed runs in a row before this one (the workflow counts them)
 #   TEST_CALL=1      ring once with a test message and stop (checks the setup)
 #   DRY_RUN=1        say what would be done, call nobody
@@ -18,14 +21,37 @@ STREAK="${STREAK:-0}"
 FIRST_CALL_AT=2   # failed runs in a row before the first call (about 10 minutes at a 5-minute cadence)
 REPEAT_EVERY=6    # then ring again every 6 failed runs (about 30 minutes)
 
+twilio_call() {
+  local text="$1"
+  if [ -z "${TWILIO_ACCOUNT_SID:-}" ] || [ -z "${TWILIO_AUTH_TOKEN:-}" ] || [ -z "${TWILIO_FROM:-}" ] || [ -z "${TWILIO_TO:-}" ]; then
+    return 1
+  fi
+  text=${text//&/ and }; text=${text//</ }; text=${text//>/ }
+  local twiml="<Response><Say voice=\"alice\" language=\"en-IN\">${text}</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-IN\">${text}</Say></Response>"
+  # Only the status code is printed: Twilio's reply names the numbers.
+  local code
+  code=$(curl -sS -m 40 -o /dev/null -w '%{http_code}' -u "${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}" \
+    "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
+    --data-urlencode "From=${TWILIO_FROM}" \
+    --data-urlencode "To=${TWILIO_TO}" \
+    --data-urlencode "Twiml=${twiml}") || code="000"
+  echo "Twilio call: HTTP ${code}"
+  [ "$code" = "201" ]
+}
+
 ring() {
   local text="$1"
   if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "DRY RUN: would ring: $text"
     return 0
   fi
+  local twilio_ok=1
+  twilio_call "$text" && twilio_ok=0
   if [ -z "${CALLMEBOT_USER:-}" ]; then
-    echo "::error::CALLMEBOT_USER is not set, so nobody can be rung"
+    if [ "$twilio_ok" -eq 0 ]; then
+      return 0
+    fi
+    echo "::error::Neither CALLMEBOT_USER nor the TWILIO_* secrets are set, so nobody can be rung"
     return 1
   fi
   curl -sS -m 40 -G "http://api.callmebot.com/start.php" \

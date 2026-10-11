@@ -249,3 +249,83 @@ class TestChannelRouting:
         notifier, delivered = self._notifier(monkeypatch, {"critical": "twilio"})
         result = asyncio.run(notifier.send("fill"))
         assert delivered == [] and not result.ok
+
+
+class TestTwilioReplies:
+    def test_a_queued_twilio_reply_is_accepted_despite_error_code_null(self):
+        body = '{"sid": "CA123", "status": "queued", "error_code": null, "error_message": null}'
+        assert classify_response(201, body)[0] == ACCEPTED
+
+    def test_a_failed_twilio_reply_is_rejected(self):
+        assert classify_response(201, '{"sid": "CA1", "status": "failed", "error_code": 21211}')[0] == REJECTED
+
+
+class TestPhoneCalls:
+    IST = __import__("datetime").timezone(__import__("datetime").timedelta(hours=5, minutes=30))
+
+    def _notifier(self, monkeypatch, when, enabled=True):
+        import datetime as dt
+
+        from app.services import alert_notifier as mod
+
+        notifier = AlertNotifier()
+        rang: list[str] = []
+
+        async def active_channel(channel_type: str = "trade"):
+            if channel_type == "call" and enabled:
+                return type("Row", (), {"provider": mod.TWILIO_VOICE})()
+            return None
+
+        async def deliver(channel, message):
+            rang.append(message)
+            return DeliveryResult(True, channel.provider, classification=ACCEPTED)
+
+        monkeypatch.setattr(notifier, "active_channel", active_channel)
+        monkeypatch.setattr(notifier, "_deliver", deliver)
+        clock = {"now": when}
+        monkeypatch.setattr(mod, "ist_now", lambda: clock["now"])
+        return notifier, rang, clock, dt
+
+    def test_rings_in_market_hours_once_per_cooldown(self, monkeypatch):
+        import datetime as dt
+
+        start = dt.datetime(2026, 10, 12, 11, 0, tzinfo=self.IST)  # Monday
+        notifier, rang, clock, _ = self._notifier(monkeypatch, start)
+        assert asyncio.run(notifier.place_call("bot 2 halted")).ok
+        assert not asyncio.run(notifier.place_call("bot 3 halted")).ok
+        clock["now"] = start + dt.timedelta(minutes=6)
+        assert asyncio.run(notifier.place_call("bot 4 halted")).ok
+        assert rang == ["bot 2 halted", "bot 4 halted"]
+
+    def test_no_call_at_night_or_weekends_but_a_test_call_rings(self, monkeypatch):
+        import datetime as dt
+
+        notifier, rang, clock, _ = self._notifier(monkeypatch, dt.datetime(2026, 10, 12, 20, 0, tzinfo=self.IST))
+        assert asyncio.run(notifier.place_call("x")).skipped_reason
+        clock["now"] = dt.datetime(2026, 10, 11, 11, 0, tzinfo=self.IST)  # Sunday
+        assert asyncio.run(notifier.place_call("x")).skipped_reason
+        assert asyncio.run(notifier.place_call("test", test=True)).ok
+        assert rang == ["test"]
+
+    def test_the_spoken_text_is_escaped(self, monkeypatch):
+        sent = {}
+
+        class Client:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, auth, data):
+                sent.update(data)
+                return httpx.Response(201, text='{"sid": "CA1", "status": "queued", "error_code": null}')
+
+        monkeypatch.setattr(httpx, "AsyncClient", Client)
+        result = asyncio.run(AlertNotifier()._call_twilio(FAKE_PHONE, "AC1:tok", "+15550000000", "PalTra bot HALTED <b>&"))
+        assert result.ok
+        assert "&lt;b&gt;&amp;" in sent["Twiml"] and "<b>" not in sent["Twiml"]
+        assert "Pal Tra bot HALTED" in sent["Twiml"]

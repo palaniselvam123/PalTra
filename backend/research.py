@@ -95,7 +95,7 @@ class ResearchEngine(StrategyEngine):
     def __init__(self, quote: Quote):
         super().__init__(broker=ResearchBroker(quote))
 
-    def _alert(self, message: str, critical: bool = False) -> None:  # noqa: ARG002
+    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:  # noqa: ARG002
         return None
 
     def _restores(self, mode: str) -> bool:
