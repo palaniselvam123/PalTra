@@ -18,6 +18,7 @@ from app.api import (
     routes_instruments,
     routes_manual,
     routes_marketdata,
+    routes_mcp,
     routes_watchlist,
     routes_orders,
     routes_reports,
@@ -321,6 +322,7 @@ app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
+app.include_router(routes_mcp.router)
 # Optional routers that are not in this repository. Skipping a missing module
 # keeps a run working.
 for _extra in ("routes_volatility", "routes_order_book"):

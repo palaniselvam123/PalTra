@@ -224,7 +224,8 @@ async def desk_lock_middleware(request: Request, call_next):
     if not desk_lock_enabled() or request.method == "OPTIONS":
         return await call_next(request)
     path = request.url.path
-    if _api_public(path):
+    # /mcp checks its own MCP_TOKEN; outside tools cannot hold a Google session cookie.
+    if _api_public(path) or path == "/mcp" or path.startswith("/mcp/"):
         return await call_next(request)
     signed_in = session_ok(request)
     if path.startswith("/api/") or path.startswith("/ws") or path.startswith("/sma"):
