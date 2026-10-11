@@ -512,6 +512,50 @@ def list_runs(limit: int = 50) -> list[dict]:
         return [_run_dict(r, by_run.get(r.id, []), with_days=False) for r in runs]
 
 
+def run_trades(run_id: int, symbol: str | None = None) -> list[dict] | None:
+    """One run's closed trades with how far each went for and against it.
+
+    `best_points` / `worst_points` are the most favourable and adverse moves from
+    the entry price while the trade was open (from the recorded high / low), in
+    rupees per share, for the real position's side.
+    """
+    with session_factory()() as db:
+        if db.get(ReplayRun, run_id) is None:
+            return None
+        query = db.query(TradeLog).filter(TradeLog.run_id == run_id)
+        if symbol:
+            query = query.filter(TradeLog.symbol == symbol.upper())
+        rows = query.order_by(TradeLog.id).all()
+    out = []
+    for r in rows:
+        long = (r.direction or "").upper() in ("LONG", "BUY")
+        entry = float(r.entry_price or 0)
+        high, low = r.max_high, r.max_low
+        best = worst = None
+        if entry and high is not None and low is not None:
+            best = round((high - entry) if long else (entry - low), 2)
+            worst = round((entry - low) if long else (high - entry), 2)
+        out.append(
+            {
+                "date": r.date,
+                "symbol": r.symbol,
+                "direction": r.direction,
+                "qty": r.qty,
+                "entry_time": r.entry_time,
+                "entry_price": r.entry_price,
+                "exit_time": r.exit_time,
+                "exit_price": r.exit_price,
+                "exit_reason": r.exit_reason,
+                "gross_pnl": r.gross_pnl,
+                "charges": r.brokerage_and_taxes,
+                "net_pnl": r.net_pnl,
+                "best_points": best,
+                "worst_points": worst,
+            }
+        )
+    return out
+
+
 def get_run(run_id: int) -> dict | None:
     with session_factory()() as db:
         run = db.get(ReplayRun, run_id)
