@@ -31,6 +31,19 @@ def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
         writes.append(("arm", bot, body))
         return {"trade_symbols": [body["symbol"]]}
 
+    @app.get("/api/replay/runs")
+    def runs(limit: int = 50):
+        writes.append(("runs_limit", limit))
+        return [
+            {"id": 9, "settings": {"bot": 2, "qty": 1}, "totals": {"net": 120.0}, "status": "FINISHED"},
+            {"id": 8, "settings": {}, "totals": {"net": -40.0}, "status": "FINISHED"},
+            {"id": 7, "settings": {"bot": 2}, "totals": {"net": 5.0}, "status": "STOPPED"},
+        ][:limit]
+
+    @app.get("/api/replay/runs/{run_id}")
+    def run(run_id: int):
+        return {"id": run_id, "settings": {"bot": 2}, "days": [{"date": "2026-10-08", "net": 120.0}], "stocks": []}
+
     @app.put("/api/config/stock/{symbol}")
     def stock(symbol: str, body: dict):
         writes.append(("stock", 1, symbol, body))
@@ -82,7 +95,10 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
     note = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers={"Authorization": f"Bearer {TOKEN}"})
     assert note.status_code == 202
     names = {t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]}
-    assert names == {"list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans", "set_trade_list", "set_stop"}
+    assert names == {
+        "list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans",
+        "list_backtests", "get_backtest", "set_trade_list", "set_stop",
+    }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
         assert forbidden not in blob
@@ -128,3 +144,19 @@ def test_token_in_the_path_is_hidden_from_the_access_log():
     record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d', ("1.2.3.4", "POST", f"/mcp/{TOKEN}", "1.1", 200), None)
     routes_mcp._HideToken().filter(record)
     assert TOKEN not in record.getMessage() and "/mcp/<token>" in record.getMessage()
+
+
+def test_backtests_for_one_bot(mcp):
+    client, writes = mcp()
+    err, text = call(client, "list_backtests", {"bot": 2})
+    runs = json.loads(text)
+    assert not err and [r["id"] for r in runs] == [9, 7] and all(r["bot"] == 2 for r in runs)
+    assert "settings" not in runs[0]
+    assert ("runs_limit", 500) in writes
+    err, text = call(client, "list_backtests", {})
+    assert [r["bot"] for r in json.loads(text)] == [2, 1, 2]
+    err, text = call(client, "get_backtest", {"run_id": 9})
+    detail = json.loads(text)
+    assert not err and detail["bot"] == 2 and detail["days"][0]["net"] == 120.0
+    err, text = call(client, "get_backtest", {"run_id": "x"})
+    assert err
