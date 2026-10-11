@@ -285,16 +285,17 @@ class AlertNotifier:
             return DeliveryResult(False, None, skipped_reason="No trade alert channel is enabled")
         return await self._deliver(channel, message)
 
-    async def send_critical(self, message: str, call: bool = False) -> DeliveryResult:
+    async def send_critical(self, message: str, call: bool = False, call_any_time: bool = False) -> DeliveryResult:
         """Send a critical alert (bot down, app hung) to the 'critical' channel.
 
         Falls back to the 'trade' channel when no dedicated critical channel is
         configured, so these high-priority messages are never silently dropped.
-        With `call`, the phone-call channel (if on) also rings, in market hours only.
+        With `call`, the phone-call channel (if on) also rings, in market hours only unless
+        `call_any_time` (the app itself stopping, e.g. a deploy after hours).
         """
         if call:
             try:
-                await self.place_call(message)
+                await self.place_call(message, any_time=call_any_time)
             except Exception:  # noqa: BLE001
                 log.exception("alert.call failed")
         channel = await self.active_channel("critical")
@@ -304,14 +305,15 @@ class AlertNotifier:
             return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
         return await self._deliver(channel, message)
 
-    async def place_call(self, message: str, *, test: bool = False) -> DeliveryResult:
+    async def place_call(self, message: str, *, test: bool = False, any_time: bool = False) -> DeliveryResult:
         """Ring the owner's phone through Twilio Voice and read the message out."""
         channel = await self.active_channel("call")
         if channel is None:
             return DeliveryResult(False, TWILIO_VOICE, skipped_reason="No phone-call channel is enabled")
         now = ist_now()
         if not test:
-            if now.weekday() >= 5 or not (CALL_HOURS[0] <= now.time() <= CALL_HOURS[1]):
+            in_hours = now.weekday() < 5 and CALL_HOURS[0] <= now.time() <= CALL_HOURS[1]
+            if not (in_hours or any_time):
                 return DeliveryResult(False, TWILIO_VOICE, skipped_reason="Outside market hours: no call")
             if self._last_call is not None and now - self._last_call < CALL_COOLDOWN:
                 return DeliveryResult(False, TWILIO_VOICE, skipped_reason="Called less than 5 minutes ago")

@@ -402,10 +402,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `trade` (fills, closes, warnings; `alert_notifier.send`), `critical` (bot down, app
   shutting down, no stop; `send_critical`, falls back to trade) and `call` (provider
   `twilio_voice`: a Twilio phone call that reads the alert out). The engine asks for a call
-  (`_alert(critical=True, call=True)`) on HALTED / STOPPED, the process stopping, and a
-  position with no stop; never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings
-  only 09:00-15:45 IST Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test
-  call button ignores both. Replay and research engines send nothing.
+  (`_alert(critical=True, call=True)`) on HALTED / STOPPED and a position with no stop;
+  never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings only 09:00-15:45 IST
+  Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test call button ignores
+  both. The app stopping (any deploy or restart) always alerts and rings, at any hour:
+  `app.main` lifespan → `main.announce_shutdown_all` → `strategy_engine.announce_process_stop`
+  (one message listing every bot, `send_critical(call_any_time=True)`; the cooldown still
+  applies). `fly.toml` `kill_timeout = '15s'` leaves time for it. Replay and research engines send nothing.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`

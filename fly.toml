@@ -5,6 +5,8 @@
 
 app = 'paltra'
 primary_region = 'sin'
+# Time to ring the owner and send the WhatsApp alert before a deploy stops the app.
+kill_timeout = '15s'
 
 [build]
 

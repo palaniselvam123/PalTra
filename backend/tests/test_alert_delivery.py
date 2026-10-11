@@ -329,3 +329,14 @@ class TestPhoneCalls:
         assert result.ok
         assert "&lt;b&gt;&amp;" in sent["Twiml"] and "<b>" not in sent["Twiml"]
         assert "Pal Tra bot HALTED" in sent["Twiml"]
+
+
+def test_an_app_stop_rings_outside_market_hours_but_keeps_the_cooldown(monkeypatch):
+    import datetime as dt
+
+    night = dt.datetime(2026, 10, 11, 22, 0, tzinfo=TestPhoneCalls.IST)  # Sunday night
+    notifier, rang, clock, _ = TestPhoneCalls()._notifier(monkeypatch, night)
+    assert not asyncio.run(notifier.place_call("bot halted")).ok
+    assert asyncio.run(notifier.place_call("app stopping", any_time=True)).ok
+    assert not asyncio.run(notifier.place_call("app stopping again", any_time=True)).ok
+    assert rang == ["app stopping"]
