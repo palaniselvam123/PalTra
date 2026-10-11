@@ -220,7 +220,19 @@ export type ChopScanRow = {
   move_pct?: number | null;
   speed_pct_per_min?: number | null;
   window_min?: number;
+  /** Strong one-way trend (stacked SMAs + VWAP, sloping, fanned, holding, no recent cross). */
+  trend?: ChopTrend | null;
+  trend_side?: "BULLISH" | "BEARISH" | null;
+  /** Share of the seven trend checks that passed, 0-100. */
+  trend_score?: number;
+  trend_checks?: Partial<Record<ChopTrendCheck, boolean>>;
+  sma_gap_pct?: number | null;
+  vwap?: number | null;
+  /** Last close vs today's first open, %. */
+  day_move_pct?: number | null;
 };
+export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
+export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run";
 
 export type ChopScan = {
   running: boolean;
