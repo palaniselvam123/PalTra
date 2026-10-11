@@ -29,7 +29,7 @@ from app import state
 from app.core.market_clock import IST, ist_now, session_state
 from app.models.database import AiAnalysis, StrategyLog, Trade, async_session
 from app.services.ai_advisor import AiUnavailable, ai_advisor, supports_reasoning
-from app.services.chat_actions import TOOLS, proposals_from
+from app.services.chat_actions import TOOLS, proposals_from, summary
 from app.services.market_data import market_data
 from app.services.paper_engine import (
     BROKERAGE_PCT,
@@ -110,8 +110,10 @@ pick something. Rules:
 - Stocks: arm the stocks the user names. If they ask you to pick, pick only from stocks listed in the facts or \
 `screen` (for example scan or mover rows), say which numbers you used, and arm no more than they asked for. If the \
 facts list no candidates, ask them to name the stocks or run a scan instead of guessing.
-- Stops: send only the fields that change, in the units the user gave (rupees -> tsl_mode POINTS, % -> PERCENT). \
-If a number is ambiguous, ask before proposing.
+- Stops: send only the fields that change, in the units the user gave (rupees / points -> tsl_mode POINTS, % -> \
+PERCENT). "Target X, stop Y" with no mention of trailing means a fixed stop: stop_type TSL, tsl_sl_points Y, \
+tsl_target_points X and tsl_trail_points X. One call per stock. If a number is ambiguous ("4.8 or 5"), use the \
+first and say so.
 - In your text, say in one or two lines what the card will change. Do not claim it is done.
 - If the bot is LIVE, say plainly that the change applies to a real-money bot.
 
@@ -393,8 +395,8 @@ async def answer(
     text = text.strip()
     if dropped:
         text = "\n\n".join(filter(None, [text, *dropped]))
-    if not text and proposals:
-        text = "Here is the change. Nothing is saved until you tap Apply."
+    if proposals:
+        text = "\n\n".join(filter(None, [text, summary(proposals)]))
     if not text:
         raise AiUnavailable("OpenAI returned an empty response.", 502)
 
