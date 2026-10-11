@@ -55,6 +55,7 @@ export function strategyLabel(s: Settings): string {
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
     if (s.cross_exit === false) parts.push("no cross exit");
+    if (Number(s.late_entry_min ?? 0) > 0) parts.push(`late entry ${s.late_entry_min}m`);
   }
   if (s.flip_orders) parts.push("FLIPPED (buy signals sell)");
   if (s.use_stop === false) parts.push("no stop");
@@ -153,6 +154,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   ["SMA cross exit", (s) => (s.cross_exit === false ? "Off (a cross does not close the trade)" : "On")],
+  ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],
   ["VWAP filter", (s) => (s.use_vwap ? "On" : "Off")],
   ["Volume filter", (s) => (s.use_volume ? `≥ ${s.volume_min_ratio}× avg of 20` : "Off")],

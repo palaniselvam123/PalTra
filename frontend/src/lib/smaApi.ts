@@ -115,6 +115,8 @@ export type SmaConfig = {
   gap_fade_intrabar?: boolean;
   /** SMA cross exit (on unless false): an opposite cross closes the trade. Off: other exits or square-off. */
   cross_exit?: boolean;
+  /** Late entry: minutes a filter-refused cross stays armed (0 = off). */
+  late_entry_min?: number;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */

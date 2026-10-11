@@ -56,6 +56,7 @@ from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_ga
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
+import late_entry
 import review
 import paper_wallet
 import tick_sizes
@@ -182,7 +183,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -719,6 +720,8 @@ class StrategyEngine:
         self._skip_cross_until: dict[str, int | None] = {}
         # SMA gap mode: a cross waiting for its gap before the order goes.
         self._gap_pending: dict[str, Pending] = {}
+        # Late entry (late_entry.py): a filter-refused cross waiting for its filters.
+        self._late_pending: dict[str, Pending] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
         # Latest order refusal per stock (Groww's own words), kept for the
@@ -960,6 +963,7 @@ class StrategyEngine:
             self._rejects.clear()
             self._reject_sent.clear()
             self._gap_pending.clear()
+            self._late_pending.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1177,7 +1181,7 @@ class StrategyEngine:
         hold_for_next_cross makes it wait for a fresh cross.
         """
         for table in (
-            self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending,
+            self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._tapes, self._review_bar, self._review_episode,
         ):
             for symbol in [key for key in table if key not in watch]:
@@ -1247,6 +1251,8 @@ class StrategyEngine:
         signal, signal_frame = _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
         if uses_gap_mode(cfg):
             return await self._gap_minute(symbol, signal, signal_frame, frame, cfg, now)
+        if (signal is None or signal_frame is None) and symbol in self._late_pending:
+            return await self._late_minute(symbol, frame, cfg, now)
         if signal is None or signal_frame is None:
             relation = _sma_side_text(frame)
             if symbol in self.positions:
@@ -1260,7 +1266,46 @@ class StrategyEngine:
             self._signals[symbol] = text
             self.last_signal = text
             return text
-        return await self.apply_signal(signal, signal_frame, cfg, now)
+        self._late_pending.pop(symbol, None)
+        result = await self.apply_signal(signal, signal_frame, cfg, now)
+        window = late_entry.window_min(cfg)
+        if window > 0 and symbol not in self.positions and late_entry.refused_by_filter(signal, result):
+            cross_ts = _closed_bar_ts(signal_frame) or _closed_bar_ts(frame) or 0
+            want = "LONG" if signal == "BULLISH" else "SHORT"
+            # Already alerted as refused; a later fill sends its own fill alert.
+            self._late_pending[symbol] = Pending(want, int(cross_ts), alerted=True)
+            result = f"{result} · late entry armed for {window} min"
+            self._signals[symbol] = result
+            self.last_signal = result
+        return result
+
+    async def _late_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Late entry, once per closed candle: try a filter-refused cross again (late_entry.py)."""
+        pending = self._late_pending[symbol]
+        window = late_entry.window_min(cfg)
+        bar = frame.iloc[-2]
+        gap = sma_gap_signed(bar.get("sma_9"), bar.get("sma_21"))
+        action, note = late_entry.judge(pending.direction, pending.cross_ts, int(bar["ts"]), gap, window)
+        if symbol in self.positions or window <= 0:
+            action = "drop"
+        if action == "drop":
+            self._late_pending.pop(symbol, None)
+            text = f"{symbol} holding" if symbol in self.positions else f"{symbol} no order — late entry dropped: {note}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        sig = "BULLISH" if pending.direction == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        if result.startswith("blocked — order PENDING"):
+            return result
+        if late_entry.refused_by_filter(sig, result):
+            text = f"{symbol} {pending.direction} late entry waiting ({note}) — {result.split(' — ', 1)[-1]}"
+        else:
+            self._late_pending.pop(symbol, None)
+            text = f"{result} — late entry, {note}" if result.startswith("opened") else result
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
 
     async def _pattern_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
         """Candle-pattern entries (candle_patterns.py), once per closed candle of pattern_tf minutes.

@@ -57,6 +57,7 @@ const LABELS: Record<string, string> = {
   use_gap_mode: "Gap mode",
   use_candle_dir: "candle direction",
   cross_exit: "cross exit",
+  late_entry_min: "late entry",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -213,6 +214,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
     cross_exit: crossExitOn(form),
+    late_entry_min: Math.min(375, Math.max(0, Math.round(Number(form.late_entry_min ?? 0)))),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -746,6 +748,22 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
             <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
           </div>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Late entry
+            <InfoTip label="About late entry">
+              When a filter (VWAP, RSI, ADX or any other ticked one) refuses a cross, keep the cross armed for this many
+              minutes. On each later closed candle the filters are checked again, and the first candle on which they all agree
+              places the order, as long as the fast SMA is still on the cross&apos;s side. It gives up when the SMAs cross back,
+              the time runs out or the entry cut-off is reached. Catches a strong trend whose cross came on the wrong side of
+              VWAP. 0 = off. Gap mode has its own waiting entry and ignores this.
+            </InfoTip>
+          </div>
+          <Field
+            label="Keep a refused cross armed for (min, 0 = off)"
+            value={String(form.late_entry_min ?? 0)}
+            onChange={(v) => set("late_entry_min", v)}
+            own={isOwn("late_entry_min")}
+          />
         </div>
         <div className="min-w-0">
           <SectionTitle>Entry filters (more)</SectionTitle>

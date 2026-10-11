@@ -275,6 +275,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   terminal's Strategy card and Settings warn when no exit is on
   (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
   stock research baseline keeps it on.
+- `backend/late_entry.py` – late entry (`late_entry_min`, 0 = off by default, per bot and
+  per stock, PAPER and LIVE): a fresh cross refused only by a ticked entry filter or ADX
+  (`late_entry.refused_by_filter`: `… ignored — …` / `closed on … — …`, never the cut-off or
+  trade cap) stays armed (`StrategyEngine._late_pending`). On each later closed candle
+  `_late_minute` drops it when the SMAs crossed back or `late_entry_min` minutes have passed
+  since the cross candle, else re-runs `apply_signal` (alert off; every check, cut-off, cap,
+  stop, flip and one-LIVE-bot-per-stock still apply) and the first candle the filters agree
+  opens the trade. A new cross replaces it. Gap mode ignores it. Settings → Entry filters.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

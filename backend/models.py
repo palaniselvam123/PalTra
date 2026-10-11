@@ -295,6 +295,9 @@ class BotConfig(Base):
     # Off: crosses only open trades while flat; the stop / target, gap fade,
     # Bollinger exit, candle end or the square-off close them.
     cross_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Late entry (late_entry.py): minutes a filter-refused cross stays armed,
+    # entering on the first later candle the filters pass (0 = off).
+    late_entry_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
     # candle and close at its end.
