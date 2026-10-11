@@ -205,7 +205,7 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
 @pytest.mark.asyncio
 async def test_a_halt_and_the_square_off_tell_telegram(engine, monkeypatch):
     notes: list[str] = []
-    monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    monkeypatch.setattr("strategy_engine._schedule_critical_whatsapp", notes.append)
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
     engine.status = "RUNNING"
     engine.data_source = "GROWW"
@@ -227,7 +227,7 @@ async def test_a_running_bot_is_announced_when_the_process_stops(engine, monkeyp
     sent: list[str] = []
 
     class Notifier:
-        async def send(self, message: str):
+        async def send_critical(self, message: str):
             sent.append(message)
 
     monkeypatch.setattr("app.services.alert_notifier.alert_notifier", Notifier())

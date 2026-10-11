@@ -230,10 +230,15 @@ class AlertNotifier:
 
     # ---- credentials ----------------------------------------------------
 
-    async def active_channel(self) -> AlertChannel | None:
+    async def active_channel(self, channel_type: str = "trade") -> AlertChannel | None:
         async with async_session() as session:
             rows = (
-                await session.execute(select(AlertChannel).where(AlertChannel.enabled.is_(True)))
+                await session.execute(
+                    select(AlertChannel).where(
+                        AlertChannel.enabled.is_(True),
+                        AlertChannel.channel_type == channel_type,
+                    )
+                )
             ).scalars().all()
         return rows[0] if rows else None
 
@@ -241,17 +246,38 @@ class AlertNotifier:
         async with async_session() as session:
             rows = (await session.execute(select(AlertChannel))).scalars().all()
         return [
-            {"provider": r.provider, "enabled": r.enabled, "configured": bool(r.secret_encrypted)}
+            {
+                "provider": r.provider,
+                "channel_type": getattr(r, "channel_type", "trade"),
+                "enabled": r.enabled,
+                "configured": bool(r.secret_encrypted),
+            }
             for r in rows
         ]
 
     # ---- delivery -------------------------------------------------------
 
     async def send(self, message: str) -> DeliveryResult:
-        channel = await self.active_channel()
+        """Send a trade alert (fills, closes, warnings) to the 'trade' channel."""
+        channel = await self.active_channel("trade")
         if channel is None:
-            return DeliveryResult(False, None, skipped_reason="No WhatsApp channel is enabled")
+            return DeliveryResult(False, None, skipped_reason="No trade alert channel is enabled")
+        return await self._deliver(channel, message)
 
+    async def send_critical(self, message: str) -> DeliveryResult:
+        """Send a critical alert (bot down, app hung) to the 'critical' channel.
+
+        Falls back to the 'trade' channel when no dedicated critical channel is
+        configured, so these high-priority messages are never silently dropped.
+        """
+        channel = await self.active_channel("critical")
+        if channel is None:
+            channel = await self.active_channel("trade")
+        if channel is None:
+            return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
+        return await self._deliver(channel, message)
+
+    async def _deliver(self, channel: AlertChannel, message: str) -> DeliveryResult:
         vault = get_vault()
         try:
             target = vault.decrypt(channel.target_encrypted) if channel.target_encrypted else ""

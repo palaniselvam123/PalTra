@@ -277,7 +277,9 @@ class AlertChannel(Base):
     __tablename__ = "alert_channels"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, unique=True)  # callmebot | twilio
+    provider: Mapped[str] = mapped_column(String, unique=True)  # callmebot | twilio | telegram
+    # "trade" = all trade alerts (fills, closes, warnings); "critical" = bot-down / app-hung only.
+    channel_type: Mapped[str] = mapped_column(String, default="trade")
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # callmebot: phone + apikey. twilio: account_sid + auth_token + from/to.
     target_encrypted: Mapped[str] = mapped_column(String, default="")
@@ -330,6 +332,9 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "daily_profit_target_pct": "FLOAT DEFAULT 0.0",
         "max_leverage": "FLOAT DEFAULT 5.0",
         "min_edge_multiple": "FLOAT DEFAULT 1.5",
+    },
+    "alert_channels": {
+        "channel_type": "TEXT DEFAULT 'trade'",
     },
 }
 

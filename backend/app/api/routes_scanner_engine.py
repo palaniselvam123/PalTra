@@ -60,6 +60,8 @@ class ConfigRequest(BaseModel):
 
 class ChannelRequest(BaseModel):
     provider: str
+    # "trade" = fills / closes / warnings; "critical" = bot-down / app-hung only.
+    channel_type: str = "trade"
     enabled: bool = True
     # CallMeBot: target = phone, secret = apikey.
     # Twilio: target = destination number, secret = "account_sid:auth_token", extra = from number.
@@ -206,6 +208,7 @@ async def save_channel(body: ChannelRequest):
     provider = body.provider.lower()
     if provider not in (CALLMEBOT, TWILIO, TELEGRAM):
         raise HTTPException(400, f"provider must be '{CALLMEBOT}', '{TWILIO}', or '{TELEGRAM}'")
+    channel_type = body.channel_type if body.channel_type in ("trade", "critical") else "trade"
     target = body.target.strip()
     secret = body.secret.strip()
     if provider == TELEGRAM:
@@ -231,17 +234,23 @@ async def save_channel(body: ChannelRequest):
         if row is None:
             row = AlertChannel(provider=provider)
             session.add(row)
+        row.channel_type = channel_type
         row.target_encrypted = vault.encrypt(target)
         row.secret_encrypted = vault.encrypt(secret)
         row.extra_encrypted = vault.encrypt(body.extra) if body.extra else ""
         row.enabled = body.enabled
         row.updated_at = dt.datetime.utcnow()
 
-        # Only one channel delivers at a time; enabling this one disables the
-        # rest so a signal cannot fan out to two providers unexpectedly.
+        # Within the same channel_type only one provider delivers at a time.
+        # A trade channel and a critical channel may both be enabled simultaneously.
         if body.enabled:
             others = (
-                await session.execute(select(AlertChannel).where(AlertChannel.provider != provider))
+                await session.execute(
+                    select(AlertChannel).where(
+                        AlertChannel.provider != provider,
+                        AlertChannel.channel_type == channel_type,
+                    )
+                )
             ).scalars().all()
             for other in others:
                 other.enabled = False
