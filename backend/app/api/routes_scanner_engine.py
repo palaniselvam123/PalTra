@@ -260,6 +260,39 @@ async def save_channel(body: ChannelRequest):
     return await alert_notifier.configured_providers()
 
 
+class AssignRequest(BaseModel):
+    channel_type: str
+
+
+@router.post("/channels/{provider}/assign")
+async def assign_channel(provider: str, body: AssignRequest):
+    """Move an already-saved provider to the trade or critical slot and enable it."""
+    channel_type = body.channel_type
+    if channel_type not in ("trade", "critical"):
+        raise HTTPException(400, "channel_type must be 'trade' or 'critical'")
+    async with async_session() as session:
+        row = (
+            await session.execute(select(AlertChannel).where(AlertChannel.provider == provider.lower()))
+        ).scalar_one_or_none()
+        if row is None or not row.secret_encrypted:
+            raise HTTPException(404, f"No saved channel for '{provider}'")
+        row.channel_type = channel_type
+        row.enabled = True
+        row.updated_at = dt.datetime.utcnow()
+        others = (
+            await session.execute(
+                select(AlertChannel).where(
+                    AlertChannel.provider != row.provider,
+                    AlertChannel.channel_type == channel_type,
+                )
+            )
+        ).scalars().all()
+        for other in others:
+            other.enabled = False
+        await session.commit()
+    return await alert_notifier.configured_providers()
+
+
 @router.delete("/channels/{provider}")
 async def delete_channel(provider: str):
     async with async_session() as session:
@@ -274,12 +307,19 @@ async def delete_channel(provider: str):
 
 
 @router.post("/test-alert")
-async def test_alert():
+async def test_alert(channel_type: str = "trade"):
     """Sends a real message through the enabled channel, so credentials are
     proven before a live signal depends on them.
     """
-    message = "PalTra test\nAlerts are connected. No order was placed."
-    result = await alert_notifier.send(message)
+    if channel_type == "critical":
+        channel = await alert_notifier.active_channel("critical")
+        if channel is None:
+            raise HTTPException(400, "No critical alert channel is enabled")
+        message = "PalTra test\nCritical alerts are connected. Only bot-down and app-hung alerts come here."
+        result = await alert_notifier._deliver(channel, message)
+    else:
+        message = "PalTra test\nAlerts are connected. No order was placed."
+        result = await alert_notifier.send(message)
     if not result.ok:
         raise HTTPException(400, result.error or result.skipped_reason or "Send failed")
     return {"ok": True, "provider": result.provider}

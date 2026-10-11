@@ -770,9 +770,12 @@ class StrategyEngine:
         """The engine's clock. A replay engine runs on the replayed day instead."""
         return _ist_now()
 
-    def _alert(self, message: str) -> None:
+    def _alert(self, message: str, critical: bool = False) -> None:
         """Telegram/WhatsApp alert. A replay engine sends none."""
-        _schedule_whatsapp(message)
+        if critical:
+            _schedule_critical_whatsapp(message)
+        else:
+            _schedule_whatsapp(message)
 
     def _view_frame(self, view: str, frame: pd.DataFrame, cfg: BotConfig) -> tuple[pd.DataFrame, bool]:
         """The chart stock's enriched candles, and whether they were recomputed.
@@ -2100,7 +2103,7 @@ class StrategyEngine:
         except SlCancelFailed as exc:
             self.last_error = f"Stop refused ({why}) and the exit failed: {exc}. Close {symbol} by hand."
             self._signals[symbol] = self.last_error
-            _schedule_critical_whatsapp(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}")
+            self._alert(f"PalTra ALERT\n{symbol} has no stop. {self.last_error}", critical=True)
             return
         self.position = None
         self.last_error = f"Stop refused ({why}). {symbol} was closed at once."
@@ -2802,7 +2805,7 @@ class StrategyEngine:
             self._announce_down("DAY_COMPLETED", self.halt_reason)
 
     def _announce_down(self, status: str, reason: str) -> None:
-        _schedule_critical_whatsapp(bot_down_alert(status, reason, self._now()))
+        self._alert(bot_down_alert(status, reason, self._now()), critical=True)
 
     async def announce_shutdown(self) -> None:
         """Tell Telegram before the process exits. A kill signal must not stay silent."""

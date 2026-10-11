@@ -30,6 +30,10 @@ async function desk<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function providerLabel(name: string): string {
+  return name === "telegram" ? "Telegram" : name === "twilio" ? "Twilio WhatsApp" : "CallMeBot";
+}
+
 const inputCls =
   "mt-0.5 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-sm text-[#f8fafc] outline-none";
 
@@ -88,7 +92,9 @@ function ChannelForm({
     setBusy(true);
     setNote(null);
     try {
-      const result = await desk<{ provider: string }>("/api/scan/test-alert", { method: "POST" });
+      const result = await desk<{ provider: string }>(`/api/scan/test-alert?channel_type=${channelType}`, {
+        method: "POST",
+      });
       const where = result.provider === "telegram" ? "Telegram" : "WhatsApp";
       setNote(`Test sent through ${result.provider}. Check ${where}.`);
     } catch (err: unknown) {
@@ -97,6 +103,25 @@ function ChannelForm({
       setBusy(false);
     }
   };
+
+  const assign = async (name: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const saved = await desk<Channel[]>(`/api/scan/channels/${name}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ channel_type: channelType }),
+      });
+      onSaved(saved);
+      setNote(`${providerLabel(name)} now gets ${channelType === "critical" ? "critical alerts only" : "trade alerts"}.`);
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "Could not switch the channel");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reusable = channels.filter((r) => r.configured && r.provider !== active?.provider);
 
   const canSave =
     provider === "telegram"
@@ -114,6 +139,21 @@ function ChannelForm({
         </span>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-slate-400">{description}</p>
+      {reusable.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {reusable.map((r) => (
+            <button
+              key={r.provider}
+              type="button"
+              disabled={busy}
+              onClick={() => assign(r.provider)}
+              className="inline-flex h-9 items-center rounded-md border border-sky-400/30 px-3 text-xs font-semibold text-sky-200 hover:bg-sky-400/10 disabled:opacity-50"
+            >
+              Use saved {providerLabel(r.provider)} here
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-3 flex overflow-hidden rounded-md border border-white/10 text-xs">
         {(
           [
