@@ -123,3 +123,26 @@ async def test_answer_returns_proposals_and_saves_nothing(monkeypatch):
     assert "Apply" in res["reply"]
     assert posts == ["https://api.openai.com/v1/responses"]
     assert {t["name"] for t in sent["body"]["tools"]} == {"propose_trade_list_change", "propose_stop_change"}
+
+
+def test_reply_names_every_proposed_change():
+    from app.services.chat_actions import summary
+
+    text = summary(
+        [
+            {"kind": "stop", "bot": 1, "symbol": "BAJFINANCE", "changes": {"tsl_sl_points": 4.8, "tsl_target_points": 6.0}, "reason": ""},
+            {"kind": "trade_list", "bot": 2, "arm": ["SBIN"], "unarm": [], "reason": ""},
+        ]
+    )
+    assert "these 2 changes" in text
+    assert "BAJFINANCE: tsl_sl_points 4.8, tsl_target_points 6.0" in text
+    assert "Bot 2: arm SBIN" in text
+    assert "reload the page" in text
+
+
+def test_a_fixed_target_cannot_be_overtaken_by_the_trail():
+    from tsl import tsl_entry_levels, tsl_stop
+
+    stop, target = tsl_entry_levels("LONG", 100.0, 11.0, 18.0)
+    assert (stop, target) == (89.0, 118.0)
+    assert tsl_stop("LONG", 100.0, 11.0, 18.0, best=117.9) == 89.0

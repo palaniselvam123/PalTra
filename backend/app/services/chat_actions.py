@@ -101,7 +101,10 @@ TOOLS = [
             "the fields that change. The user sees old -> new values and must tap Apply. ATR: stop at "
             "atr_multiplier x ATR. TSL: trailing stop; tsl_mode POINTS uses tsl_sl_points / tsl_trail_points / "
             "tsl_target_points in rupees, PERCENT uses tsl_sl_pct / tsl_trail_pct / tsl_target_pct (% of entry); "
-            "target 0 = none. SMA_GAP: gap_sl_mult / gap_tp_mult / gap_min_pct, PAPER only."
+            "target 0 = none. A fixed stop plus target (no trailing) is TSL with the trail step equal to the "
+            "target distance (tsl_trail_points = tsl_target_points, or the % fields), so the target closes the "
+            "trade before the stop can move. SMA_GAP: gap_sl_mult / gap_tp_mult / gap_min_pct, PAPER only. "
+            "For several stocks, call this once per stock."
         ),
         "parameters": {
             "type": "object",
@@ -153,6 +156,24 @@ def parse_proposal(name: str, arguments: str) -> tuple[dict | None, str | None]:
         first = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
         return None, f"A proposed change was not valid ({first})."
     return None, f"Unknown action '{name}'."
+
+
+def summary(proposals: list[dict]) -> str:
+    """Plain lines naming each proposed change, for the reply text."""
+    lines = []
+    for p in proposals:
+        if p["kind"] == "trade_list":
+            parts = [f"arm {', '.join(p['arm'])}" if p["arm"] else "", f"unarm {', '.join(p['unarm'])}" if p["unarm"] else ""]
+            lines.append(f"- Bot {p['bot']}: " + "; ".join(x for x in parts if x))
+        else:
+            where = p["symbol"] or "all stocks"
+            fields = ", ".join(f"{k} {v}" for k, v in p["changes"].items())
+            lines.append(f"- Bot {p['bot']}, {where}: {fields}")
+    count = "this change" if len(proposals) == 1 else f"these {len(proposals)} changes"
+    return (
+        f"I prepared {count}:\n" + "\n".join(lines) + "\n\nTap Apply on each card below; nothing is saved before "
+        "that. If no card shows, reload the page."
+    )
 
 
 def proposals_from(data: dict) -> tuple[list[dict], list[str]]:
