@@ -209,3 +209,43 @@ class TestConfiguration:
             src = path.read_text(encoding="utf-8")
             for needle in needles:
                 assert needle not in src, f"{path.name} may contain a real credential"
+
+
+class TestChannelRouting:
+    """Trade alerts and critical alerts go to their own channels."""
+
+    def _notifier(self, monkeypatch, enabled: dict[str, str]):
+        notifier = AlertNotifier()
+        delivered: list[tuple[str, str]] = []
+
+        async def active_channel(channel_type: str = "trade"):
+            provider = enabled.get(channel_type)
+            return type("Row", (), {"provider": provider})() if provider else None
+
+        async def deliver(channel, message):
+            delivered.append((channel.provider, message))
+            return DeliveryResult(True, channel.provider, classification=ACCEPTED)
+
+        monkeypatch.setattr(notifier, "active_channel", active_channel)
+        monkeypatch.setattr(notifier, "_deliver", deliver)
+        return notifier, delivered
+
+    def test_trade_alerts_never_reach_the_critical_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram", "critical": "twilio"})
+        asyncio.run(notifier.send("fill"))
+        assert delivered == [("telegram", "fill")]
+
+    def test_critical_alerts_go_to_the_critical_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram", "critical": "twilio"})
+        asyncio.run(notifier.send_critical("bot down"))
+        assert delivered == [("twilio", "bot down")]
+
+    def test_critical_falls_back_to_trade_when_no_critical_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram"})
+        asyncio.run(notifier.send_critical("bot down"))
+        assert delivered == [("telegram", "bot down")]
+
+    def test_trade_alert_is_skipped_when_only_a_critical_channel_exists(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"critical": "twilio"})
+        result = asyncio.run(notifier.send("fill"))
+        assert delivered == [] and not result.ok
