@@ -1063,7 +1063,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -1075,6 +1075,8 @@ export const smaApi = {
           force,
           quiet_min: opts.quiet_min ?? 60,
           alert_on_quiet: opts.alert_on_quiet ?? false,
+          price_min: opts.price_min ?? 0,
+          price_max: opts.price_max ?? 0,
         }),
       },
       20000,

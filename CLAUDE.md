@@ -345,7 +345,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   for `quiet_min` minutes (default 60), its row shows a `🔔 Quiet Nm` chip and the page shows
   a dismissible popup (8 names, then "and N more"); one Telegram per scan through the quiet-runner
   channel (`alert_notifier.send_quiet`, else the trade one) (`quiet_runners_text` names the 15 longest-quiet and counts the rest), each stock at most
-  once per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
+  once per IST day (`chop_scan._ALERTED_TODAY`). A **price range** (`price_min` / `price_max` ₹ on
+  `POST /api/chop-scan/start`, 0 = no bound; `chop_scan.in_price_range`) limits the alert to stocks
+  priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
   defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
   Trade list are downloaded (quick enough to run quietly).
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also

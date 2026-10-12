@@ -1468,6 +1468,9 @@ class ChopScanStart(BaseModel):
     minutes: Literal[1, 2, 3, 5, 10, 15] = 5
     quiet_min: int = Field(default=chop_scan.QUIET_MIN_DEFAULT, ge=1, le=375)
     alert_on_quiet: bool = False
+    # Quiet-runner alerts only for stocks priced inside this range (₹; 0 = no bound).
+    price_min: float = Field(default=0.0, ge=0)
+    price_max: float = Field(default=0.0, ge=0)
     force: bool = False
 
 
@@ -1512,6 +1515,8 @@ async def chop_scan_start(body: ChopScanStart):
             alert_on_quiet=body.alert_on_quiet,
             alert_cb=_chop_alert if body.alert_on_quiet else None,
             force=body.force,
+            price_min=body.price_min,
+            price_max=body.price_max,
             job=_scan_job(
                 scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, extra=(body.quiet_min,)
             ),
