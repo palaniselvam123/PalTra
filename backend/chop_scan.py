@@ -279,6 +279,15 @@ class ChopScanner:
         self._key: tuple | None = None
         self._started_at = 0.0
 
+    def stop(self, reason: str) -> None:
+        """Cancel a running pass (the Scalp page's Pause scans). The last finished rows stay."""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        if self.status.running:
+            self.status.running = False
+            self.status.error = reason
+            self._key = None
+
     def snapshot(self) -> dict:
         s = self.status
         return {

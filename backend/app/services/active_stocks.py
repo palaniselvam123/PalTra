@@ -152,6 +152,8 @@ class ActiveScanner:
         self._last_start: dt.datetime | None = None
         self._task: asyncio.Task | None = None
         self.manual_task: asyncio.Task | None = None
+        # Scalp page "Pause scans": no new pass, and a running pass stops asking Groww.
+        self.paused = False
 
     def universe_symbols(self) -> list[str]:
         from app.services.instruments import instrument_master
@@ -207,6 +209,8 @@ class ActiveScanner:
             async def one(symbol: str) -> None:
                 nonlocal failed
                 async with sem:
+                    if self.paused:
+                        return
                     try:
                         data = await client.get_quote_payload(symbol)
                     except Exception as exc:  # noqa: BLE001
@@ -244,7 +248,7 @@ class ActiveScanner:
             while True:
                 try:
                     client = get_client()
-                    if client is not None and is_market_open():
+                    if client is not None and is_market_open() and not self.paused:
                         await self.scan(client)
                 except asyncio.CancelledError:
                     raise

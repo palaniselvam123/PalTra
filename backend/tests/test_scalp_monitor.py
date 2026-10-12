@@ -160,3 +160,34 @@ def test_the_monitor_endpoint_ranks_the_streaming_stocks(monkeypatch):
     assert body["alerts"]["enabled"] is False
     only = TestClient(app).get("/api/scalp/monitor", params={"only_ready": True}).json()
     assert [r["symbol"] for r in only["rows"]] == ["GOOD"]
+
+
+def test_pause_stops_the_monitor_the_most_active_scan_and_alerts(monkeypatch):
+    """Scalp page "Pause all scans" (desk side): nothing is scored or fetched until resumed."""
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_scalp
+    from app.main import app
+    from app.services.active_stocks import active_scanner
+    from app.services.market_data import DataSource
+
+    called = []
+    monkeypatch.setattr(routes_scalp.monitor, "rows", lambda *a, **k: called.append("rows") or [])
+    monkeypatch.setattr(routes_scalp.monitor, "backfill_soon", lambda: called.append("backfill"))
+    monkeypatch.setattr(routes_scalp.market_data, "source", DataSource.LIVE)
+    monkeypatch.setattr(routes_scalp, "is_market_open", lambda: True)
+    client = TestClient(app)
+    try:
+        assert client.get("/api/scalp/pause").json() == {"paused": False}
+        assert client.post("/api/scalp/pause", json={"paused": True}).json() == {"paused": True}
+        body = client.get("/api/scalp/monitor").json()
+        assert body["paused"] is True and body["rows"] == [] and called == []
+        assert client.post("/api/scalp/active/scan").status_code == 409
+        assert client.get("/api/scalp/active").json()["paused"] is True
+        import asyncio
+
+        assert asyncio.run(routes_scalp._Monitor().alert_once()) == []
+    finally:
+        assert client.post("/api/scalp/pause", json={"paused": False}).json() == {"paused": False}
+    assert active_scanner.paused is False
+    assert client.get("/api/scalp/monitor").json()["paused"] is False and called == ["backfill", "rows"]

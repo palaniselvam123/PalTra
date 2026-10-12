@@ -122,7 +122,7 @@ class _Monitor:
         self.last_alert_run = ist_now().isoformat()
         # Simulated prices are invented, and a closed market is frozen: neither
         # is worth a phone buzz.
-        if market_data.source is not DataSource.LIVE or not is_market_open():
+        if market_data.source is not DataSource.LIVE or not is_market_open() or scans_paused():
             return []
         sent = []
         for row in self.due_alerts(self.rows()):
@@ -181,6 +181,21 @@ async def scalp_monitor(
     only_ready: bool = Query(False),
     top: int = Query(50, ge=1, le=500),
 ):
+    if scans_paused():
+        # Paused from the Scalp page: no scoring and no Groww history calls.
+        health = market_data.health()
+        return {
+            "as_of": ist_now().isoformat(),
+            "source": market_data.source.value,
+            "market_open": health.market_open,
+            "universe": 0,
+            "ready": 0,
+            "settings": {"min_atr_pct": min_atr_pct, "max_spread_pct": max_spread_pct, "min_value_cr": min_value_cr},
+            "rows": [],
+            "notes": [],
+            "alerts": monitor.alert_status(),
+            "paused": True,
+        }
     monitor.backfill_soon()
     rows = monitor.rows(min_atr_pct, max_spread_pct, min_value_cr)
     shown = [r for r in rows if r.ready] if only_ready else rows
@@ -199,6 +214,7 @@ async def scalp_monitor(
         "rows": [r.as_dict() for r in shown[:top]],
         "notes": sorted(set(monitor.notes.values()))[:4],
         "alerts": monitor.alert_status(),
+        "paused": False,
     }
 
 
@@ -244,6 +260,7 @@ async def most_active(
         raise HTTPException(400, f"sort must be one of {', '.join(SORTS)}")
     out = active_scanner.snapshot(sort=sort, top=top, bias=(bias or "").upper() or None, min_value_cr=min_value_cr)
     out["connected"] = _groww_session() is not None
+    out["paused"] = scans_paused()
     out["market_open"] = is_market_open()
     return out
 
@@ -260,6 +277,8 @@ async def fno_universe():
 @router.post("/active/scan")
 async def most_active_scan():
     """Start a scan now (at most once a minute). Returns at once; the page polls."""
+    if scans_paused():
+        raise HTTPException(409, "Scans are paused. Resume them at the top of the Scalp page.")
     client = _groww_session()
     if client is None:
         raise HTTPException(428, "Connect Groww in Settings (Connect Live Data) to scan NSE.")
@@ -268,3 +287,33 @@ async def most_active_scan():
     # Kept on the scanner so the task is not garbage-collected mid-scan.
     active_scanner.manual_task = asyncio.create_task(active_scanner.scan(client))
     return {"started": True}
+
+
+# ---- pause every Scalp scan ------------------------------------------------------------------
+
+
+def scans_paused() -> bool:
+    return active_scanner.paused
+
+
+class PauseBody(BaseModel):
+    paused: bool
+
+
+@router.get("/pause")
+async def scan_pause_status():
+    return {"paused": scans_paused()}
+
+
+@router.post("/pause")
+async def scan_pause(body: PauseBody):
+    """Pause (or resume) the desk's Scalp page work: the monitor's scoring and Groww history
+    fill, its alerts, and the most-active scan (background and manual). Memory only: a restart
+    resumes. The SMA terminal's Cross / Trend quality scans have their own switch
+    (`PUT /api/scans/pause` on the terminal); the page sets both. Read-only, no order path."""
+    active_scanner.paused = bool(body.paused)
+    if body.paused:
+        for task in (active_scanner.manual_task, monitor._backfill_task):  # noqa: SLF001
+            if task is not None and not task.done():
+                task.cancel()
+    return {"paused": scans_paused()}

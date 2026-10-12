@@ -1403,6 +1403,37 @@ class CrossScanStart(BaseModel):
     force: bool = False
 
 
+# Scalp page "Pause scans" (memory only: a restart resumes). Refuses new Cross / Trend quality
+# scans and stops a running one; the desk has its own switch for its Scalp work.
+_scans_paused = False
+_PAUSED_TEXT = "Scans are paused. Resume them at the top of the Scalp page."
+
+
+class ScanPause(BaseModel):
+    paused: bool
+
+
+@app.get("/api/scans/pause")
+async def scans_pause_status():
+    return {"paused": _scans_paused}
+
+
+@app.put("/api/scans/pause")
+async def scans_pause(body: ScanPause):
+    """Pause or resume the terminal's Scalp scans. Read-only: candles only, no order path."""
+    global _scans_paused
+    _scans_paused = bool(body.paused)
+    if _scans_paused:
+        cross_scanner.stop("Stopped: scans are paused.")
+        chop_scanner.stop("Stopped: scans are paused.")
+    return {"paused": _scans_paused}
+
+
+def _refuse_when_paused() -> None:
+    if _scans_paused:
+        raise HTTPException(409, _PAUSED_TEXT)
+
+
 @app.post("/api/cross-scan/start")
 async def cross_scan_start(body: CrossScanStart):
     """Start a cross scan (read-only: candles only, no order). Returns at once; poll GET /api/cross-scan.
@@ -1410,6 +1441,7 @@ async def cross_scan_start(body: CrossScanStart):
     Uses the main desk's SMA periods. The same candle (and the same stocks) is
     not scanned twice, and a rescan waits a minute.
     """
+    _refuse_when_paused()
     cfg = engine.load_config()
     try:
         return cross_scanner.start(
@@ -1427,7 +1459,7 @@ async def cross_scan_start(body: CrossScanStart):
 
 @app.get("/api/cross-scan")
 async def cross_scan_status():
-    return cross_scanner.snapshot()
+    return {**cross_scanner.snapshot(), "paused": _scans_paused}
 
 
 class ChopScanStart(BaseModel):
@@ -1456,6 +1488,7 @@ async def chop_scan_start(body: ChopScanStart):
     first time a stock reads as a quiet runner during NSE hours gets a Telegram
     alert; a stock is alerted at most once per day.
     """
+    _refuse_when_paused()
     cfg = engine.load_config()
     try:
         return chop_scanner.start(
@@ -1478,7 +1511,7 @@ async def chop_scan_start(body: ChopScanStart):
 
 @app.get("/api/chop-scan")
 async def chop_scan_status():
-    return chop_scanner.snapshot()
+    return {**chop_scanner.snapshot(), "paused": _scans_paused}
 
 
 @app.get("/api/stall")

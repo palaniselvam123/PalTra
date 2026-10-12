@@ -1071,6 +1071,10 @@ export const smaApi = {
       false
     ),
   chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
+  /** Pause / resume the terminal's Scalp scans (Cross scan, Trend quality). */
+  scansPause: (paused: boolean) =>
+    request<{ paused: boolean }>("/api/scans/pause", { method: "PUT", body: JSON.stringify({ paused }) }, undefined, false),
+  scansPauseStatus: () => request<{ paused: boolean }>("/api/scans/pause", undefined, undefined, false),
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */

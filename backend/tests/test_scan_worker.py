@@ -129,3 +129,48 @@ def test_scan_worker_off_keeps_scans_in_process(monkeypatch):
     assert not scan_worker.enabled()
     monkeypatch.setenv("SCAN_WORKER", "on")
     assert scan_worker.enabled()
+
+
+def test_pause_refuses_new_scans_and_stops_a_running_one(tmp_path, monkeypatch):
+    """Scalp page "Pause all scans" (terminal side). Read-only: no Groww call, no order."""
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/pause.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    with TestClient(main.app) as client:
+        assert client.get("/api/scans/pause").json() == {"paused": False}
+        assert client.put("/api/scans/pause", json={"paused": True}).json() == {"paused": True}
+        for path in ("/api/cross-scan/start", "/api/chop-scan/start"):
+            refused = client.post(path, json={"symbols": ["TCS"], "minutes": 5})
+            assert refused.status_code == 409 and "paused" in refused.json()["detail"]
+        assert client.get("/api/cross-scan").json()["paused"] is True
+        assert client.get("/api/chop-scan").json()["paused"] is True
+        assert client.put("/api/scans/pause", json={"paused": False}).json() == {"paused": False}
+    database.reset_engine()
+
+
+def test_stop_cancels_a_running_pass_and_keeps_the_last_rows():
+    import cross_scan
+
+    async def slow(symbol, start, end):
+        await asyncio.sleep(30)
+
+    async def go():
+        scanner = cross_scan.CrossScanner()
+        scanner.status.rows = [{"symbol": "OLD"}]
+        scanner.start(["TCS"], None, job=slow, now=dt.datetime(2026, 10, 12, 10, 0, tzinfo=IST))
+        await asyncio.sleep(0.05)
+        assert scanner.snapshot()["running"] is True
+        scanner.stop("Stopped: scans are paused.")
+        snap = scanner.snapshot()
+        assert snap["running"] is False and snap["error"] == "Stopped: scans are paused." and snap["rows"] == [{"symbol": "OLD"}]
+        with pytest.raises(asyncio.CancelledError):
+            await scanner._task
+        assert scanner.snapshot()["rows"] == [{"symbol": "OLD"}]  # a cancelled pass writes nothing
+
+    asyncio.run(go())

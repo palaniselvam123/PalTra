@@ -385,6 +385,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   token goes to the worker over the process pipe (never logged); a rejected session switches to
   the saved token like `fetch_frame`; a crashed worker restarts on the next stock.
   `SCAN_WORKER=off` reads in-process as before. Read-only, no order path.
+  **Pause all scans** (top of the Scalp page; memory only, a restart resumes): the page sets
+  both switches. Terminal `PUT /api/scans/pause` refuses Cross / Trend quality starts (409)
+  and stops a running pass (`scanner.stop`, the last rows stay); desk `POST /api/scalp/pause`
+  (`active_scanner.paused`) stops the monitor's scoring and Groww history fill, Scalp alerts
+  and the most-active scan (background and manual). The page stops its 10 s monitor poll,
+  the Scan buttons and the 30-minute auto-rescan while paused.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
