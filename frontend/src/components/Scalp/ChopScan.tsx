@@ -80,6 +80,8 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   const [minSpeed, setMinSpeed] = useState(0);
   // "No cross today on": keep stocks whose SMAs have not crossed once today on every ticked candle size.
   const [noCrossOn, setNoCrossOn] = useState<CrossScanMinutes[]>([]);
+  // How many crosses today the ticked sizes must have: 0 (none) or exactly 1 (one turn since the morning).
+  const [crossCount, setCrossCount] = useState<0 | 1>(0);
   // "I have shown this stock as quiet already" — stops the popup repeating each tick while it's open.
   const seenRef = useRef<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
         if (typeof saved.auto === "boolean") setAuto(saved.auto);
         if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
+        if (saved.crossCount === 0 || saved.crossCount === 1) setCrossCount(saved.crossCount);
         if (Array.isArray(saved.noCrossOn))
           setNoCrossOn(saved.noCrossOn.filter((m: unknown) => CANDLE_CHOICES.includes(m as CrossScanMinutes)));
         if (typeof saved.score === "string") setScore(saved.score as ScoreFilter);
@@ -105,11 +108,11 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn }));
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn, crossCount }));
     } catch {
       /* private mode */
     }
-  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn]);
+  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn, crossCount]);
 
   const start = useCallback(
     async (force = false) => {
@@ -202,10 +205,10 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
         if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
         if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
-        if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== 0)) return false;
+        if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== crossCount)) return false;
         return true;
       }),
-    [data?.rows, scannedThisCandle, query, score, minSpeed, noCrossOn]
+    [data?.rows, scannedThisCandle, query, score, minSpeed, noCrossOn, crossCount]
   );
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
@@ -256,7 +259,7 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         className="mb-3"
         lead={`Information only. Each stock's ${label} crosses on today's closed candles are counted, with the longest run since the last one and the average time and move between them.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. <b>No cross today on</b> keeps only the stocks whose SMAs have not crossed once today on every candle size you tick (1m, 5m, 15m…): a one-way move on all of them. All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -320,9 +323,18 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         </div>
       </FilterRow>
       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="mr-1 text-slate-400" title="Keep only stocks whose SMA fast / slow have not crossed once today on every ticked candle size">
-          No cross today on:
-        </span>
+        <span className="text-slate-400">Crosses today:</span>
+        <select
+          value={crossCount}
+          onChange={(e) => setCrossCount(Number(e.target.value) === 1 ? 1 : 0)}
+          aria-label="How many SMA crosses today"
+          className="min-h-8 rounded-md border border-slate-700 bg-transparent px-2 text-xs text-slate-200"
+          title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run."
+        >
+          <option value={0}>None (0)</option>
+          <option value={1}>Exactly 1</option>
+        </select>
+        <span className="mr-1 text-slate-400">on:</span>
         {CANDLE_CHOICES.map((m) => {
           const on = noCrossOn.includes(m);
           return (
@@ -347,9 +359,9 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         )}
       </div>
       {toast && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <span>🔔 Quiet runner — {toast}</span>
-          <button type="button" onClick={() => setToast(null)} className="rounded px-2 py-0.5 text-amber-100 hover:bg-amber-500/20">
+          <button type="button" onClick={() => setToast(null)} className="rounded px-2 py-0.5 text-amber-300 hover:bg-amber-500/20">
             Dismiss
           </button>
         </div>
@@ -520,25 +532,44 @@ function TrendChip({ row: r }: { row: ChopScanRow }) {
   );
 }
 
-/** Today's crosses on 1 / 5 / 15-minute candles (and the other sizes on hover); a 0 is green with the side. */
+const istTime = (ts: number | null | undefined) =>
+  ts == null ? "" : new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+
+/** Today's crosses on 1 / 5 / 15-minute candles (the other sizes on hover): 0 is green with the side;
+ * one cross shows when it happened and which way. */
 function CrossSizes({ row: r }: { row: ChopScanRow }) {
   const by = r.crosses_by_minutes ?? {};
   const side = r.side_by_minutes ?? {};
-  const all = CANDLE_CHOICES.map((m) => `${m}m: ${by[String(m)] ?? "—"}${side[String(m)] ? ` (${side[String(m)] === "BULLISH" ? "↑" : "↓"})` : ""}`);
+  const lastTs = r.last_cross_ts_by_minutes ?? {};
+  const lastSide = r.last_cross_side_by_minutes ?? {};
+  const arrow = (s: string | null | undefined) => (s === "BULLISH" ? "↑" : s === "BEARISH" ? "↓" : "");
+  const all = CANDLE_CHOICES.map((m) => {
+    const k = String(m);
+    const last = lastTs[k] != null ? ` last ${istTime(lastTs[k])} ${arrow(lastSide[k])}` : "";
+    return `${m}m: ${by[k] ?? "—"}${last}`;
+  });
   return (
     <span className="inline-flex gap-1 text-xs tabular-nums" title={`Today's SMA crosses — ${all.join(" · ")}`}>
       {([1, 5, 15] as const).map((m) => {
-        const n = by[String(m)];
+        const k = String(m);
+        const n = by[k];
         return (
           <span
             key={m}
             className={clsx(
               "rounded px-1.5 py-0.5 ring-1 ring-inset",
-              n === 0 ? "bg-profit/10 text-profit ring-profit/30" : n == null ? "text-slate-600 ring-slate-800" : "text-slate-400 ring-slate-700"
+              n === 0
+                ? "bg-profit/10 text-profit ring-profit/30"
+                : n === 1
+                  ? "bg-accentSky/10 text-accentSky ring-accentSky/30"
+                  : n == null
+                    ? "text-slate-600 ring-slate-800"
+                    : "text-slate-400 ring-slate-700"
             )}
           >
             {m}m {n ?? "—"}
-            {n === 0 && side[String(m)] ? (side[String(m)] === "BULLISH" ? " ↑" : " ↓") : ""}
+            {n === 0 && side[k] ? ` ${arrow(side[k])}` : ""}
+            {n === 1 && lastTs[k] != null ? ` @${istTime(lastTs[k])} ${arrow(lastSide[k])}` : ""}
           </span>
         );
       })}

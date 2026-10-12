@@ -227,3 +227,29 @@ def test_a_size_with_too_few_candles_reads_none():
     row = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(60)]), 9, 21, 1, _at(10, 20), symbol="NEW")
     assert row is not None
     assert row.crosses_by_minutes[15] is None and row.side_by_minutes[15] is None
+
+
+def test_a_single_cross_today_carries_its_time_and_direction_on_each_size():
+    """Fell all of yesterday, turned up at 10:30 today and kept rising: one bullish cross per size."""
+    import datetime as _dt
+
+    from candles import CANDLE_MINUTES
+
+    yesterday = [200 - i * 0.05 for i in range(375)]
+    start = yesterday[-1]
+    today = [start - i * 0.05 for i in range(75)] + [start - 3.7 + i * 0.12 for i in range(125)]  # 09:15-10:30 down, then up
+    frame = pd.concat([_minutes(yesterday, dt.date(2026, 10, 7)), _minutes(today)], ignore_index=True)
+    row = chop_scan.analyze(frame, 9, 21, 5, _at(12, 35), symbol="TURN")
+    assert row is not None
+    for m in (1, 5, 15):
+        assert row.crosses_by_minutes[m] == 1, (m, row.crosses_by_minutes)
+        assert row.last_cross_side_by_minutes[m] == "BULLISH"
+        when = _dt.datetime.fromtimestamp(row.last_cross_ts_by_minutes[m], IST).time()
+        assert _dt.time(10, 30) <= when <= _dt.time(12, 15), (m, when)  # longer candles cross later
+    assert set(row.last_cross_ts_by_minutes) == set(CANDLE_MINUTES)
+    assert row.minutes_since_last_cross is not None  # the 5-minute candle is the card's own
+
+
+def test_no_cross_means_no_cross_time():
+    row = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(200)]), 9, 21, 5, _at(12, 40), symbol="UP")
+    assert row is not None and row.last_cross_ts_by_minutes[5] is None and row.last_cross_side_by_minutes[5] is None

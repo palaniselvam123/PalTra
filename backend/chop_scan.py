@@ -144,6 +144,9 @@ class ChopRow:
     crosses_by_minutes: dict = field(default_factory=dict)
     # The side the fast SMA is on for each size ("BULLISH" above the slow SMA, "BEARISH" below).
     side_by_minutes: dict = field(default_factory=dict)
+    # Start of the last cross candle today per size (epoch seconds) and its direction; None without one.
+    last_cross_ts_by_minutes: dict = field(default_factory=dict)
+    last_cross_side_by_minutes: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         out = asdict(self)
@@ -223,15 +226,17 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
-    by_size = {m: (len(hits), _side(enriched)) if m == minutes else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today)
+    by_size = {m: _cross_read(hits, enriched) if m == minutes else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today)
                for m in CANDLE_MINUTES}
     return replace(
         base,
         **activity(frame_1m),
         **trend_strength.read(enriched, _vwap_today(frame_1m, now)),
         day_move_pct=_day_move(frame_1m),
-        crosses_by_minutes={m: c for m, (c, _s) in by_size.items()},
-        side_by_minutes={m: s for m, (_c, s) in by_size.items()},
+        crosses_by_minutes={m: r[0] for m, r in by_size.items()},
+        side_by_minutes={m: r[1] for m, r in by_size.items()},
+        last_cross_ts_by_minutes={m: r[2] for m, r in by_size.items()},
+        last_cross_side_by_minutes={m: r[3] for m, r in by_size.items()},
     )
 
 
@@ -241,12 +246,17 @@ def _side(enriched: pd.DataFrame) -> str | None:
 
 
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int):
-    """(today's closed-candle crosses, current side) on `minutes`-long candles; (None, None) when too short."""
+    """(crosses today, side, last cross ts, last cross side) on `minutes`-long candles; Nones when too short."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
-        return None, None
+        return None, None, None, None
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
-    return len(_crosses(enriched, today)), _side(enriched)
+    return _cross_read(_crosses(enriched, today), enriched)
+
+
+def _cross_read(hits: list[dict], enriched: pd.DataFrame):
+    last = hits[-1] if hits else None
+    return len(hits), _side(enriched), (last["ts"] if last else None), (last["side"] if last else None)
 
 
 def _today_1m(frame_1m: pd.DataFrame) -> pd.DataFrame:

@@ -239,6 +239,9 @@ export type ChopScanRow = {
   crosses_by_minutes?: Record<string, number | null>;
   /** Side of the fast SMA per candle size. */
   side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
+  /** Start of today's last cross candle per size (epoch seconds), and that cross's direction. */
+  last_cross_ts_by_minutes?: Record<string, number | null>;
+  last_cross_side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
 };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
 export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run";
