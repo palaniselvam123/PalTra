@@ -99,6 +99,10 @@ class TestMasking:
     def test_sanitize_strips_a_bare_number_even_without_a_parameter_name(self):
         assert "919876543210" not in sanitize("delivery failed for 919876543210")
 
+    def test_sanitize_ignores_a_secret_that_is_only_a_plus(self):
+        body = '{"ok":false,"description":"Bad Request: chat not found"}'
+        assert sanitize(body, "+") == body
+
     def test_sanitize_handles_none(self):
         assert sanitize(None) == ""
 

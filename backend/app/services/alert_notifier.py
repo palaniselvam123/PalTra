@@ -101,7 +101,9 @@ def sanitize(text: str | None, *secrets: str) -> str:
         if sec:
             bare = sec.lstrip("+")
             for form in (sec, bare, "%2B" + bare):
-                out = out.replace(form, "<REDACTED>")
+                # An empty form (a secret that is only "+") would redact between every character.
+                if form and form != "%2B":
+                    out = out.replace(form, "<REDACTED>")
     out = re.sub(r"(?i)(apikey|api_key|token|auth|password)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
     out = re.sub(r"(?i)(phone|number|to)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
     out = re.sub(r"\+?\d{10,15}", "<REDACTED>", out)
