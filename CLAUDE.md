@@ -343,8 +343,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (symbols, minutes, force) and `GET /api/chop-scan` on the SMA terminal.
   **Quiet runner alert**: when a stock had crosses earlier today and has stayed quiet
   for `quiet_min` minutes (default 60), its row shows a `🔔 Quiet Nm` chip and the page shows
-  a dismissible popup; a Telegram ping is sent through the main engine's alert path, at most
-  once per stock per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
+  a dismissible popup (8 names, then "and N more"); one Telegram per scan through the main engine's
+  alert path (`quiet_runners_text` names the 15 longest-quiet and counts the rest), each stock at most
+  once per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
   defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
   Trade list are downloaded (quick enough to run quietly).
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also

@@ -166,7 +166,12 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
     setToast(
       fresh.length === 1
         ? `${fresh[0].symbol} is quiet (possible strong ${fresh[0].last_cross_direction === "BULLISH" ? "bullish" : fresh[0].last_cross_direction === "BEARISH" ? "bearish" : "trend"}). Review.`
-        : `${fresh.length} stocks are quiet: ${fresh.map((r) => r.symbol).join(", ")}. Review.`
+        : `${fresh.length} stocks are quiet: ${fresh
+            .slice(0, 8)
+            .map((r) => r.symbol)
+            .join(", ")}${fresh.length > 8 ? ` and ${fresh.length - 8} more` : ""}. Review.${
+            fresh.length > 30 ? " That is most of the list: raise \"Alert when quiet for\" to 30-60 min." : ""
+          }`
     );
   }, [data?.rows]);
 

@@ -253,3 +253,31 @@ def test_a_single_cross_today_carries_its_time_and_direction_on_each_size():
 def test_no_cross_means_no_cross_time():
     row = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(200)]), 9, 21, 5, _at(12, 40), symbol="UP")
     assert row is not None and row.last_cross_ts_by_minutes[5] is None and row.last_cross_side_by_minutes[5] is None
+
+
+def test_many_quiet_runners_send_one_summary_alert_once_a_day(monkeypatch):
+    """A low "quiet for" setting can flag hundreds of stocks: one Telegram per scan, not one per stock."""
+    import asyncio
+
+    monkeypatch.setattr(chop_scan, "_ALERTED_TODAY", {})
+    monkeypatch.setattr(chop_scan, "market_is_open", lambda now: True)
+    names = [f"S{i}" for i in range(40)]
+
+    async def job(symbol, start, end):
+        return chop_scan.ChopRow(
+            symbol=symbol, minutes=5, crosses_today=1, minutes_since_last_cross=90.0 + int(symbol[1:]),
+            avg_minutes_between=None, avg_move_pct=None, last_cross_direction="BULLISH", score=chop_scan.TRENDING,
+            quiet_runner=True, ltp=100.0, candle_ts=0,
+        )
+
+    sent: list[str] = []
+
+    async def go(scanner, when):
+        scanner.start(names, None, job=job, quiet_min=60, alert_on_quiet=True, alert_cb=sent.append, force=True, now=when)
+        await scanner._task
+
+    asyncio.run(go(chop_scan.ChopScanner(), _at(12, 0)))
+    assert len(sent) == 1
+    assert sent[0].startswith("QUIET RUNNERS · 40 stocks") and "S39 ↑" in sent[0] and "and 25 more" in sent[0]
+    asyncio.run(go(chop_scan.ChopScanner(), _at(12, 30)))
+    assert len(sent) == 1  # every one of them was already alerted today

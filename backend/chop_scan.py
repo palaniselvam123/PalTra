@@ -100,6 +100,23 @@ def quiet_runner_text(symbol: str, minutes: float, side: str | None, ltp: float 
         f"May be a strong {bias}. Open Trend quality to review."
     )
 
+SUMMARY_NAMES = 15  # stocks named in a summary alert before "and N more"
+
+
+def quiet_runners_text(rows: list) -> str:
+    """One alert for several quiet runners: the longest-quiet first, then a count of the rest."""
+    ranked = sorted(rows, key=lambda r: -(r.minutes_since_last_cross or 0.0))
+    names = [
+        f"{r.symbol}{' ↑' if r.last_cross_direction == 'BULLISH' else ' ↓' if r.last_cross_direction == 'BEARISH' else ''}"
+        for r in ranked[:SUMMARY_NAMES]
+    ]
+    more = len(ranked) - len(names)
+    tail = f" and {more} more" if more > 0 else ""
+    return (
+        f"QUIET RUNNERS · {len(ranked)} stocks have had no SMA cross for a while after crossing earlier today: "
+        f"{', '.join(names)}{tail}. Open Trend quality to review."
+    )
+
 # Thresholds. Picked on the plain-language reading of the owner's example: one
 # cross-only morning that then runs for 60+ minutes is TRENDING; a stock that
 # crosses four or more times in a day, or whose crosses come on average less
@@ -455,15 +472,21 @@ class ChopScanner:
         self.status.market_open = market_is_open(now)
         # One alert per quiet runner per day. Nothing is traded here.
         if alert_on_quiet and alert_cb is not None and market_is_open(now):
-            for row in rows:
-                if not row.quiet_runner or _already_alerted(row.symbol, now):
-                    continue
+            fresh = [row for row in rows if row.quiet_runner and not _already_alerted(row.symbol, now)]
+            if fresh:
+                # One message per scan: a low "quiet for" setting can flag hundreds of stocks.
+                text = (
+                    quiet_runner_text(fresh[0].symbol, fresh[0].minutes_since_last_cross or 0.0, fresh[0].last_cross_direction, fresh[0].ltp)
+                    if len(fresh) == 1
+                    else quiet_runners_text(fresh)
+                )
                 try:
-                    alert_cb(quiet_runner_text(row.symbol, row.minutes_since_last_cross or 0.0, row.last_cross_direction, row.ltp))
+                    alert_cb(text)
                 except Exception:  # noqa: BLE001
-                    log.exception("could not send a quiet-runner alert for %s", row.symbol)
-                    continue
-                _mark_alerted(row.symbol, now)
+                    log.exception("could not send the quiet-runner alert")
+                else:
+                    for row in fresh:
+                        _mark_alerted(row.symbol, now)
         if ok == 0 and errors:
             self.status.error = max(errors, key=errors.get)
             self._key = None
