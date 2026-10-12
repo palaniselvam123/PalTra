@@ -156,6 +156,10 @@ async def run(broker, fn, symbol: str, start: dt.datetime, end: dt.datetime, *ar
         broker.adopt_saved_session()
     if not broker.token:
         raise HistoryError("Past candles come from Groww. Log in to Groww on the desk Settings page first.")
+    import groww_pressure
+
+    # Bots first: while a bot's Groww call was refused for the rate limit lately, wait.
+    await groww_pressure.wait_for_bots()
     loop = asyncio.get_running_loop()
     for attempt in (0, 1):
         try:
@@ -166,6 +170,8 @@ async def run(broker, fn, symbol: str, start: dt.datetime, end: dt.datetime, *ar
                 continue
             raise HistoryError(f"Groww did not send candles: {exc}"[:240]) from None
         except ScanFailed as exc:
+            if groww_pressure.is_rate_limited(exc):
+                groww_pressure.note_scan_rate_limit()
             raise HistoryError(str(exc)) from None
         except BrokenProcessPool:
             log.warning("scanner process stopped; it restarts on the next stock")

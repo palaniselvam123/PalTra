@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 import chop_scan
+import groww_pressure
 import scan_worker
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
@@ -1533,7 +1534,7 @@ async def chop_scan_status():
 @app.get("/api/stall")
 async def stall_status():
     """Has the event loop stalled since boot, and for how long (see stall_tracer.py). Read-only."""
-    return stall_tracer.snapshot()
+    return {**stall_tracer.snapshot(), "groww": groww_pressure.snapshot()}
 
 
 @app.get("/api/ticks")

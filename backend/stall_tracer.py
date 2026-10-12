@@ -86,6 +86,7 @@ class StallTracer:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._stalled_since: float | None = None
+        self._stall_where: str | None = None  # the loop thread's newest frames at the first dump
         self._redumps = 0
         self._last_dump_at = 0.0
         self._last_lag_log = 0.0
@@ -167,7 +168,8 @@ class StallTracer:
         elif self._stalled_since is not None:
             lasted = self._last - self._stalled_since  # from the last beat before it to the first one after
             self.longest_stall = max(self.longest_stall, lasted)
-            self.stalls.append({"at": time.time() - lasted, "seconds": round(lasted, 1)})
+            self.stalls.append({"at": time.time() - lasted, "seconds": round(lasted, 1), "where": self._stall_where})
+            self._stall_where = None
             del self.stalls[:-HISTORY]
             self._stalled_since = None
             log.warning("STALL over: the event loop was blocked for %.1fs and is answering again", lasted)
@@ -176,6 +178,9 @@ class StallTracer:
         frames = sys._current_frames()
         loop_frame = frames.get(self._loop_thread) if self._loop_thread is not None else None
         stack = format_stack(loop_frame) if loop_frame is not None else "(the loop thread's stack is not available)"
+        if first:
+            # Kept with the stall in /api/stall: the newest frames say what blocked the loop.
+            self._stall_where = format_stack(loop_frame, limit=8) if loop_frame is not None else None
         try:
             load = "%.2f %.2f %.2f" % os.getloadavg()
         except (OSError, AttributeError):

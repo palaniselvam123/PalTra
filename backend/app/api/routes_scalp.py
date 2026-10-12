@@ -11,6 +11,7 @@ import datetime as dt
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+import groww_pressure
 from app import state
 from app.core.market_clock import ist_now, is_market_open
 from app.services.active_stocks import SORTS, active_scanner
@@ -95,6 +96,7 @@ class _Monitor:
         async def _run() -> None:
             for symbol in due:
                 self.backfill_tried[symbol] = ist_now()
+                await groww_pressure.wait_for_bots()  # bots first on Groww's rate limit
                 note = await ensure_backfilled(symbol, "1m")
                 if note:
                     self.notes[symbol] = note
