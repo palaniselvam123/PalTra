@@ -22,6 +22,7 @@ import datetime as dt
 import logging
 from dataclasses import asdict, dataclass
 
+import groww_pressure
 from app.core.market_clock import IST, ist_now, is_market_open
 
 log = logging.getLogger("active_stocks")
@@ -178,6 +179,7 @@ class ActiveScanner:
 
         async def one(symbol: str) -> None:
             async with sem:
+                await groww_pressure.wait_for_bots()
                 try:
                     vols = await client.get_daily_volumes(symbol, AVG_DAYS, end=before)
                 except Exception:  # noqa: BLE001 — no average just means no "vs usual" for that stock
@@ -211,6 +213,7 @@ class ActiveScanner:
                 async with sem:
                     if self.paused:
                         return
+                    await groww_pressure.wait_for_bots()  # bots first on Groww's rate limit
                     try:
                         data = await client.get_quote_payload(symbol)
                     except Exception as exc:  # noqa: BLE001

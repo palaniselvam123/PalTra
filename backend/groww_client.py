@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from config import get_settings
+from groww_pressure import run_bot_call
 from tick_sizes import round_price
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -585,7 +586,7 @@ class GrowwClient:
         if not names:
             return {}
         try:
-            raw = await asyncio.wait_for(asyncio.to_thread(self._load_ltps, names), timeout=_QUOTE_TIMEOUT_SEC)
+            raw = await asyncio.wait_for(run_bot_call(self._load_ltps, names), timeout=_QUOTE_TIMEOUT_SEC)
         except Exception:  # noqa: BLE001
             return {}
         got: dict[str, float] = {}
@@ -622,7 +623,7 @@ class GrowwClient:
     async def _refresh_live(self, symbol: str) -> tuple[float, pd.DataFrame]:
         # The Groww SDK blocks with no HTTP timeout. Keep that off the event
         # loop or the whole site stops answering while a quote is in flight.
-        return await asyncio.to_thread(self._load_quote, symbol)
+        return await run_bot_call(self._load_quote, symbol)
 
     def _load_quote(self, symbol: str) -> tuple[float, pd.DataFrame]:
         sdk = self._require_sdk()
@@ -730,7 +731,7 @@ class GrowwClient:
         else:
             limit = round_price(symbol, trigger * (1 + buffer))
         sdk = self._require_sdk()
-        await asyncio.to_thread(
+        await run_bot_call(
             sdk.modify_order,
             order_type="SL",
             segment="CASH",
@@ -755,7 +756,7 @@ class GrowwClient:
             order.status = "CANCELLED"
             return
         sdk = self._require_sdk()
-        await asyncio.to_thread(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
+        await run_bot_call(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
 
     async def get_order_status(self, order_id: str) -> str:
         status, _price = await self.read_order(order_id)
@@ -777,7 +778,7 @@ class GrowwClient:
             sdk = self._require_sdk()
             if not hasattr(sdk, "get_order_detail"):
                 return ""
-            raw = await asyncio.to_thread(sdk.get_order_detail, segment="CASH", groww_order_id=order_id)
+            raw = await run_bot_call(sdk.get_order_detail, segment="CASH", groww_order_id=order_id)
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
             return ""
@@ -819,7 +820,7 @@ class GrowwClient:
             return "", None
 
         try:
-            status, price = await asyncio.to_thread(_read)
+            status, price = await run_bot_call(_read)
             return status.upper(), price
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
@@ -835,7 +836,7 @@ class GrowwClient:
                 raise RuntimeError("Groww positions API is unavailable")
             return fn(segment="CASH")
 
-        raw = await asyncio.wait_for(asyncio.to_thread(_pos), timeout=4)
+        raw = await asyncio.wait_for(run_bot_call(_pos), timeout=4)
         data = raw.get("payload", raw) if isinstance(raw, dict) else raw
         if isinstance(data, dict):
             data = data.get("positions") or []
@@ -911,7 +912,7 @@ class GrowwClient:
                 kwargs["trigger_price"] = float(trigger)
             return sdk.place_order(**kwargs)
 
-        raw = await asyncio.to_thread(_place)
+        raw = await run_bot_call(_place)
         ack = _order_ack_from_response(raw)
         self._orders[ack.order_id] = _SimOrder(
             ack.order_id, side, qty, order_type, ack.status, ack.fill_price, trigger

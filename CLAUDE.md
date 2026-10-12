@@ -400,6 +400,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`active_scanner.paused`) stops the monitor's scoring and Groww history fill, Scalp alerts
   and the most-active scan (background and manual). The page stops its 10 s monitor poll,
   the Scan buttons and the 30-minute auto-rescan while paused.
+- `backend/groww_pressure.py` – bots first on Groww (one account, one rate limit). Every
+  blocking Groww SDK call in `groww_client.GrowwClient` (bots 1-4: quotes, candles, orders,
+  stops) runs on `BOT_POOL`, a thread pool only the bots use (`run_bot_call`,
+  `BOT_GROWW_THREADS`, default 12), so scan downloads on asyncio's default pool never queue
+  ahead of a bot's call. A bot call refused for the rate limit (`note_bot_rate_limit`) makes
+  the scans wait (`wait_for_bots`, until no refusal for `HOLD_SEC` 30 s, at most 120 s a step):
+  `scan_worker.run` (Cross scan, Trend quality), the desk's most-active scan and the Scalp
+  monitor's history fill. `/api/stall` reports it under `groww` and keeps the blocking frames
+  of each stall (`recent[].where`). Bookkeeping only: no order is placed, changed or held back.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).

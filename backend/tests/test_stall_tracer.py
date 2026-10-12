@@ -40,6 +40,7 @@ def test_a_blocked_loop_is_logged_with_the_line_that_blocked_it(caplog):
     snap = tracer.snapshot()
     assert snap["stalls_since_start"] == 1 and snap["longest_stall_s"] >= 0.9
     assert snap["recent"] and snap["stalled_now"] is False
+    assert "_block_the_loop_for_the_test" in (snap["recent"][-1]["where"] or "")  # kept for /api/stall
 
 
 def test_a_healthy_loop_logs_nothing(caplog):
@@ -110,4 +111,5 @@ def test_the_stall_endpoint_reports_the_tracer(tmp_path, monkeypatch):
     with TestClient(main.app) as client:
         body = client.get("/api/stall").json()
     assert {"on", "stalls_since_start", "longest_stall_s", "last_beat_age_s", "rss_mb", "recent"} <= set(body)
+    assert {"bot_threads", "bot_rate_limits", "scans_yielding_now", "scan_waits"} <= set(body["groww"])
     database.reset_engine()
