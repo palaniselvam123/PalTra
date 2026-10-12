@@ -89,6 +89,15 @@ def _mark_alerted(symbol: str, now: dt.datetime) -> None:
     _ALERTED_TODAY.setdefault(today, set()).add(symbol)
 
 
+def in_price_range(ltp: float | None, price_min: float = 0.0, price_max: float = 0.0) -> bool:
+    """True when the last price is inside [price_min, price_max]; 0 means no bound. Unknown price passes only with no bounds."""
+    if not price_min and not price_max:
+        return True
+    if ltp is None:
+        return False
+    return (not price_min or ltp >= price_min) and (not price_max or ltp <= price_max)
+
+
 def quiet_runner_text(symbol: str, minutes: float, side: str | None, ltp: float | None) -> str:
     bias = "Bullish ↑" if side == "BULLISH" else "Bearish ↓" if side == "BEARISH" else "trend forming"
     price = f" at {ltp:.2f}" if ltp is not None else ""
@@ -374,6 +383,8 @@ class ChopScanner:
         force: bool = False,
         now: dt.datetime | None = None,
         job: Job | None = None,
+        price_min: float = 0.0,
+        price_max: float = 0.0,
     ) -> dict:
         if minutes not in CANDLE_MINUTES:
             raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
@@ -401,6 +412,7 @@ class ChopScanner:
             self._run(
                 names, fetch, key, minutes, sma_fast, sma_slow, now,
                 alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
+                price_min=price_min, price_max=price_max,
             )
         )
         return self.snapshot()
@@ -418,6 +430,8 @@ class ChopScanner:
         alert_on_quiet: bool = False,
         alert_cb: Callable[[str], None] | None = None,
         job: Job | None = None,
+        price_min: float = 0.0,
+        price_max: float = 0.0,
     ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
@@ -472,7 +486,11 @@ class ChopScanner:
         self.status.market_open = market_is_open(now)
         # One alert per quiet runner per day. Nothing is traded here.
         if alert_on_quiet and alert_cb is not None and market_is_open(now):
-            fresh = [row for row in rows if row.quiet_runner and not _already_alerted(row.symbol, now)]
+            # Only stocks inside the chosen price range are alerted (0 = no bound).
+            fresh = [
+                row for row in rows
+                if row.quiet_runner and in_price_range(row.ltp, price_min, price_max) and not _already_alerted(row.symbol, now)
+            ]
             if fresh:
                 # One message per scan: a low "quiet for" setting can flag hundreds of stocks.
                 text = (

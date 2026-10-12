@@ -45,6 +45,9 @@ CALLMEBOT = "callmebot"
 TWILIO = "twilio"
 TELEGRAM = "telegram"
 TWILIO_VOICE = "twilio_voice"
+# A second Telegram bot that only gets the Scalp page's quiet-runner alerts, so
+# they are not lost among trade alerts. Its own row: providers are one row each.
+TELEGRAM_QUIET = "telegram_quiet"
 
 # Phone calls ring only in market hours, at most once per cooldown: four bots
 # stopping together is one call, and nobody is woken by an evening deploy.
@@ -98,7 +101,9 @@ def sanitize(text: str | None, *secrets: str) -> str:
         if sec:
             bare = sec.lstrip("+")
             for form in (sec, bare, "%2B" + bare):
-                out = out.replace(form, "<REDACTED>")
+                # An empty form (a secret that is only "+") would redact between every character.
+                if form and form != "%2B":
+                    out = out.replace(form, "<REDACTED>")
     out = re.sub(r"(?i)(apikey|api_key|token|auth|password)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
     out = re.sub(r"(?i)(phone|number|to)=[^&\s\"'<]+", r"\1=<REDACTED>", out)
     out = re.sub(r"\+?\d{10,15}", "<REDACTED>", out)
@@ -305,6 +310,18 @@ class AlertNotifier:
             return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
         return await self._deliver(channel, message)
 
+    async def send_quiet(self, message: str) -> DeliveryResult:
+        """Send a quiet-runner alert to the 'quiet' channel (its own Telegram bot).
+
+        Falls back to the 'trade' channel when none is set, as before it existed.
+        """
+        channel = await self.active_channel("quiet")
+        if channel is None:
+            channel = await self.active_channel("trade")
+        if channel is None:
+            return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
+        return await self._deliver(channel, message)
+
     async def place_call(self, message: str, *, test: bool = False, any_time: bool = False) -> DeliveryResult:
         """Ring the owner's phone through Twilio Voice and read the message out."""
         channel = await self.active_channel("call")
@@ -333,7 +350,7 @@ class AlertNotifier:
             return await self._send_callmebot(target, secret, message)
         if channel.provider == TWILIO:
             return await self._send_twilio(target, secret, extra, message)
-        if channel.provider == TELEGRAM:
+        if channel.provider in (TELEGRAM, TELEGRAM_QUIET):
             return await self._send_telegram(target, secret, message)
         if channel.provider == TWILIO_VOICE:
             return await self._call_twilio(target, secret, extra, message)

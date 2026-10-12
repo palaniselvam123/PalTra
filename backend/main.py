@@ -10,6 +10,7 @@ stop, P&L, bot status). REST lives under `/api`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import datetime as dt
 import json
 import csv
@@ -1467,15 +1468,28 @@ class ChopScanStart(BaseModel):
     minutes: Literal[1, 2, 3, 5, 10, 15] = 5
     quiet_min: int = Field(default=chop_scan.QUIET_MIN_DEFAULT, ge=1, le=375)
     alert_on_quiet: bool = False
+    # Quiet-runner alerts only for stocks priced inside this range (₹; 0 = no bound).
+    price_min: float = Field(default=0.0, ge=0)
+    price_max: float = Field(default=0.0, ge=0)
     force: bool = False
 
 
 def _chop_alert(message: str) -> None:
-    """Hand a chop-scan Telegram off to the same path the bots use. Logging only on failure."""
+    """Send a quiet-runner Telegram to its own channel (else the trade one). Never raises."""
     try:
-        engine._alert(message)  # noqa: SLF001 - the shared helper is private but owned here
-    except Exception:  # noqa: BLE001
-        pass
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send_quiet(message)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("sma.alerts").exception("quiet-runner alert failed")
+
+    loop.create_task(_send())
 
 
 @app.post("/api/chop-scan/start")
@@ -1501,6 +1515,8 @@ async def chop_scan_start(body: ChopScanStart):
             alert_on_quiet=body.alert_on_quiet,
             alert_cb=_chop_alert if body.alert_on_quiet else None,
             force=body.force,
+            price_min=body.price_min,
+            price_max=body.price_max,
             job=_scan_job(
                 scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, extra=(body.quiet_min,)
             ),

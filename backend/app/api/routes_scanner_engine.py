@@ -17,6 +17,7 @@ from app.services.alert_notifier import (
     CALLMEBOT,
     TELEGRAM,
     TWILIO,
+    TELEGRAM_QUIET,
     TWILIO_VOICE,
     TelegramSetupError,
     alert_notifier,
@@ -63,6 +64,7 @@ class ChannelRequest(BaseModel):
     provider: str
     # "trade" = fills / closes / warnings; "critical" = bot-down / app-hung only;
     # "call" = a Twilio phone call for bot-down / app-down (provider twilio_voice only).
+    # "quiet" = the Scalp page's quiet-runner alerts (provider telegram_quiet only).
     channel_type: str = "trade"
     enabled: bool = True
     # CallMeBot: target = phone, secret = apikey.
@@ -208,14 +210,18 @@ async def channels():
 @router.post("/channels")
 async def save_channel(body: ChannelRequest):
     provider = body.provider.lower()
-    if provider not in (CALLMEBOT, TWILIO, TELEGRAM, TWILIO_VOICE):
-        raise HTTPException(400, f"provider must be '{CALLMEBOT}', '{TWILIO}', '{TELEGRAM}' or '{TWILIO_VOICE}'")
-    channel_type = body.channel_type if body.channel_type in ("trade", "critical", "call") else "trade"
+    if provider not in (CALLMEBOT, TWILIO, TELEGRAM, TWILIO_VOICE, TELEGRAM_QUIET):
+        raise HTTPException(
+            400, f"provider must be '{CALLMEBOT}', '{TWILIO}', '{TELEGRAM}', '{TWILIO_VOICE}' or '{TELEGRAM_QUIET}'"
+        )
+    channel_type = body.channel_type if body.channel_type in ("trade", "critical", "call", "quiet") else "trade"
     if (provider == TWILIO_VOICE) != (channel_type == "call"):
         raise HTTPException(400, "Phone calls use provider twilio_voice with channel_type call")
+    if (provider == TELEGRAM_QUIET) != (channel_type == "quiet"):
+        raise HTTPException(400, "Quiet-runner alerts use provider telegram_quiet with channel_type quiet")
     target = body.target.strip()
     secret = body.secret.strip()
-    if provider == TELEGRAM:
+    if provider in (TELEGRAM, TELEGRAM_QUIET):
         if not secret:
             raise HTTPException(400, "Paste the bot token from BotFather")
         if not target:
@@ -276,8 +282,8 @@ async def assign_channel(provider: str, body: AssignRequest):
     channel_type = body.channel_type
     if channel_type not in ("trade", "critical"):
         raise HTTPException(400, "channel_type must be 'trade' or 'critical'")
-    if provider.lower() == TWILIO_VOICE:
-        raise HTTPException(400, "The phone-call channel stays in its own slot")
+    if provider.lower() in (TWILIO_VOICE, TELEGRAM_QUIET):
+        raise HTTPException(400, "The phone-call and quiet-runner channels stay in their own slots")
     async with async_session() as session:
         row = (
             await session.execute(select(AlertChannel).where(AlertChannel.provider == provider.lower()))
@@ -326,7 +332,13 @@ async def test_alert(channel_type: str = "trade"):
         if not result.ok:
             raise HTTPException(400, result.error or result.skipped_reason or "Call failed")
         return {"ok": True, "provider": result.provider}
-    if channel_type == "critical":
+    if channel_type == "quiet":
+        channel = await alert_notifier.active_channel("quiet")
+        if channel is None:
+            raise HTTPException(400, "No quiet-runner alert channel is enabled")
+        message = "PalTra test\nQuiet-runner alerts are connected. Only the Scalp page's quiet runners come here."
+        result = await alert_notifier._deliver(channel, message)
+    elif channel_type == "critical":
         channel = await alert_notifier.active_channel("critical")
         if channel is None:
             raise HTTPException(400, "No critical alert channel is enabled")

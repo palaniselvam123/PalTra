@@ -343,9 +343,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (symbols, minutes, force) and `GET /api/chop-scan` on the SMA terminal.
   **Quiet runner alert**: when a stock had crosses earlier today and has stayed quiet
   for `quiet_min` minutes (default 60), its row shows a `🔔 Quiet Nm` chip and the page shows
-  a dismissible popup (8 names, then "and N more"); one Telegram per scan through the main engine's
-  alert path (`quiet_runners_text` names the 15 longest-quiet and counts the rest), each stock at most
-  once per IST day (`chop_scan._ALERTED_TODAY`). The Scalp page's Trend quality card
+  a dismissible popup (8 names, then "and N more"); one Telegram per scan through the quiet-runner
+  channel (`alert_notifier.send_quiet`, else the trade one) (`quiet_runners_text` names the 15 longest-quiet and counts the rest), each stock at most
+  once per IST day (`chop_scan._ALERTED_TODAY`). A **price range** (`price_min` / `price_max` ₹ on
+  `POST /api/chop-scan/start`, 0 = no bound; `chop_scan.in_price_range`) limits the alert to stocks
+  priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
   defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
   Trade list are downloaded (quick enough to run quietly).
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also
@@ -450,8 +452,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   start/stop or panic.
 - Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards):
   `trade` (fills, closes, warnings; `alert_notifier.send`), `critical` (bot down, app
-  shutting down, no stop; `send_critical`, falls back to trade) and `call` (provider
-  `twilio_voice`: a Twilio phone call that reads the alert out). The engine asks for a call
+  shutting down, no stop; `send_critical`, falls back to trade) `call` (provider
+  `twilio_voice`: a Twilio phone call that reads the alert out) and `quiet` (provider
+  `telegram_quiet`: a second Telegram bot that only gets the Scalp page's quiet-runner alerts,
+  `send_quiet`, falls back to trade; `main._chop_alert`). The engine asks for a call
   (`_alert(critical=True, call=True)`) on HALTED / STOPPED and a position with no stop;
   never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings only 09:00-15:45 IST
   Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test call button ignores

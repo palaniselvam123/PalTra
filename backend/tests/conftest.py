@@ -41,4 +41,5 @@ def _no_alert_delivery(monkeypatch):
         return await record(message)
 
     monkeypatch.setattr(alert_notifier, "send_critical", record_critical)
+    monkeypatch.setattr(alert_notifier, "send_quiet", record)
     return sent

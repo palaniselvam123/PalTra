@@ -281,3 +281,43 @@ def test_many_quiet_runners_send_one_summary_alert_once_a_day(monkeypatch):
     assert sent[0].startswith("QUIET RUNNERS · 40 stocks") and "S39 ↑" in sent[0] and "and 25 more" in sent[0]
     asyncio.run(go(chop_scan.ChopScanner(), _at(12, 30)))
     assert len(sent) == 1  # every one of them was already alerted today
+
+
+def test_in_price_range_bounds_and_zero_means_open():
+    assert chop_scan.in_price_range(None)
+    assert chop_scan.in_price_range(150.0, 100, 200)
+    assert not chop_scan.in_price_range(99.0, 100, 200)
+    assert not chop_scan.in_price_range(201.0, 100, 200)
+    assert chop_scan.in_price_range(5000.0, 100, 0)
+    assert chop_scan.in_price_range(50.0, 0, 200)
+    assert not chop_scan.in_price_range(None, 100, 0)
+
+
+def test_quiet_alert_keeps_only_stocks_in_the_price_range(monkeypatch):
+    """Only quiet runners priced inside the range reach Telegram; the others stay unalerted for today."""
+    import asyncio
+
+    monkeypatch.setattr(chop_scan, "_ALERTED_TODAY", {})
+    monkeypatch.setattr(chop_scan, "market_is_open", lambda now: True)
+    prices = {"CHEAP": 40.0, "MID": 250.0, "DEAR": 3000.0}
+
+    async def job(symbol, start, end):
+        return chop_scan.ChopRow(
+            symbol=symbol, minutes=5, crosses_today=1, minutes_since_last_cross=90.0,
+            avg_minutes_between=None, avg_move_pct=None, last_cross_direction="BULLISH", score=chop_scan.TRENDING,
+            quiet_runner=True, ltp=prices[symbol], candle_ts=0,
+        )
+
+    sent: list[str] = []
+
+    async def go():
+        scanner = chop_scan.ChopScanner()
+        scanner.start(
+            list(prices), None, job=job, quiet_min=60, alert_on_quiet=True, alert_cb=sent.append,
+            force=True, now=_at(12, 0), price_min=100, price_max=1000,
+        )
+        await scanner._task
+
+    asyncio.run(go())
+    assert len(sent) == 1 and "MID" in sent[0] and "CHEAP" not in sent[0] and "DEAR" not in sent[0]
+    assert not chop_scan._already_alerted("CHEAP", _at(12, 0))

@@ -99,6 +99,10 @@ class TestMasking:
     def test_sanitize_strips_a_bare_number_even_without_a_parameter_name(self):
         assert "919876543210" not in sanitize("delivery failed for 919876543210")
 
+    def test_sanitize_ignores_a_secret_that_is_only_a_plus(self):
+        body = '{"ok":false,"description":"Bad Request: chat not found"}'
+        assert sanitize(body, "+") == body
+
     def test_sanitize_handles_none(self):
         assert sanitize(None) == ""
 
@@ -249,6 +253,63 @@ class TestChannelRouting:
         notifier, delivered = self._notifier(monkeypatch, {"critical": "twilio"})
         result = asyncio.run(notifier.send("fill"))
         assert delivered == [] and not result.ok
+
+
+class TestQuietRunnerChannel:
+    """The Scalp page's quiet runners go to their own Telegram bot when one is set."""
+
+    def _notifier(self, monkeypatch, enabled: dict[str, str]):
+        return TestChannelRouting._notifier(None, monkeypatch, enabled)
+
+    def test_quiet_alerts_go_to_the_quiet_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram", "quiet": "telegram_quiet"})
+        asyncio.run(AlertNotifier.send_quiet(notifier, "quiet runners"))
+        assert delivered == [("telegram_quiet", "quiet runners")]
+
+    def test_quiet_falls_back_to_trade_when_no_quiet_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram"})
+        asyncio.run(AlertNotifier.send_quiet(notifier, "quiet runners"))
+        assert delivered == [("telegram", "quiet runners")]
+
+    def test_trade_alerts_never_reach_the_quiet_channel(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram", "quiet": "telegram_quiet"})
+        asyncio.run(AlertNotifier.send(notifier, "fill"))
+        asyncio.run(AlertNotifier.send_critical(notifier, "bot down"))
+        assert delivered == [("telegram", "fill"), ("telegram", "bot down")]
+
+    def test_the_quiet_bot_is_sent_through_telegram(self, monkeypatch):
+        notifier = AlertNotifier()
+        seen: list[tuple[str, str, str]] = []
+
+        async def telegram(chat_id, token, message):
+            seen.append((chat_id, token, message))
+            return DeliveryResult(True, "telegram", classification=ACCEPTED)
+
+        monkeypatch.setattr(notifier, "_send_telegram", telegram)
+        monkeypatch.setattr(
+            "app.services.alert_notifier.get_vault",
+            lambda: type("Vault", (), {"decrypt": staticmethod(lambda v: v)})(),
+        )
+        row = type(
+            "Row", (),
+            {"provider": "telegram_quiet", "target_encrypted": "42", "secret_encrypted": "1:TEST", "extra_encrypted": ""},
+        )()
+        result = asyncio.run(notifier._deliver(row, "hi"))
+        assert result.ok and seen == [("42", "1:TEST", "hi")]
+
+    @pytest.mark.parametrize(
+        "provider,channel_type",
+        [("telegram_quiet", "trade"), ("telegram_quiet", "critical"), ("telegram", "quiet")],
+    )
+    def test_the_quiet_slot_only_takes_the_quiet_bot(self, provider, channel_type):
+        from fastapi import HTTPException
+
+        from app.api.routes_scanner_engine import ChannelRequest, save_channel
+
+        body = ChannelRequest(provider=provider, channel_type=channel_type, secret="1:TEST", target="42")
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(save_channel(body))
+        assert err.value.status_code == 400
 
 
 class TestTwilioReplies:
