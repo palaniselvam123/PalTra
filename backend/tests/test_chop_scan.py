@@ -197,3 +197,33 @@ def test_scanner_fires_the_alert_once_per_quiet_stock_per_day(monkeypatch):
     assert len(sent) == 1 and "QUIET" in sent[0]
     # A fresh day: the alert fires again.
     assert not chop_scan._already_alerted(sample_row.symbol, now + dt2.timedelta(days=1))
+
+
+def test_crosses_are_counted_on_every_candle_size_for_the_no_cross_filter():
+    """A steady rise all day crosses on no candle size; a wobbling one crosses on the short ones."""
+    import math
+
+    from candles import CANDLE_MINUTES
+
+    yesterday = [100 + i * 0.05 for i in range(375)]
+    steady = _minutes(yesterday, dt.date(2026, 10, 7)).pipe(
+        lambda y: pd.concat([y, _minutes([yesterday[-1] + i * 0.05 for i in range(200)])], ignore_index=True)
+    )
+    row = chop_scan.analyze(steady, 9, 21, 5, _at(12, 40), symbol="UP")
+    assert row is not None
+    assert set(row.crosses_by_minutes) == set(CANDLE_MINUTES)
+    assert all(row.crosses_by_minutes[m] == 0 for m in CANDLE_MINUTES)
+    assert all(row.side_by_minutes[m] == "BULLISH" for m in CANDLE_MINUTES)
+    assert row.as_dict()["crosses_by_minutes"][5] == row.crosses_today == 0
+
+    wobble = [100 + 0.05 * i + 0.6 * math.sin(i / 3) for i in range(200)]  # fast wiggles, slow drift up
+    row = chop_scan.analyze(_minutes(wobble), 9, 21, 5, _at(12, 40), symbol="WOB")
+    assert row is not None
+    assert row.crosses_by_minutes[1] > 0
+    assert row.crosses_by_minutes[1] >= row.crosses_by_minutes[5]
+
+
+def test_a_size_with_too_few_candles_reads_none():
+    row = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(60)]), 9, 21, 1, _at(10, 20), symbol="NEW")
+    assert row is not None
+    assert row.crosses_by_minutes[15] is None and row.side_by_minutes[15] is None

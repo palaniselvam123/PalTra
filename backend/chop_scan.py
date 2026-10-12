@@ -139,6 +139,11 @@ class ChopRow:
     sma_gap_pct: float | None = None
     vwap: float | None = None
     day_move_pct: float | None = None  # last close vs today's first open
+    # Today's closed-candle SMA crosses on every candle size (1, 2, 3, 5, 10, 15 min), from the
+    # same 1-minute download: the "No cross today on" filter. None = not enough candles yet.
+    crosses_by_minutes: dict = field(default_factory=dict)
+    # The side the fast SMA is on for each size ("BULLISH" above the slow SMA, "BEARISH" below).
+    side_by_minutes: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         out = asdict(self)
@@ -218,7 +223,30 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
-    return replace(base, **activity(frame_1m), **trend_strength.read(enriched, _vwap_today(frame_1m, now)), day_move_pct=_day_move(frame_1m))
+    by_size = {m: (len(hits), _side(enriched)) if m == minutes else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today)
+               for m in CANDLE_MINUTES}
+    return replace(
+        base,
+        **activity(frame_1m),
+        **trend_strength.read(enriched, _vwap_today(frame_1m, now)),
+        day_move_pct=_day_move(frame_1m),
+        crosses_by_minutes={m: c for m, (c, _s) in by_size.items()},
+        side_by_minutes={m: s for m, (_c, s) in by_size.items()},
+    )
+
+
+def _side(enriched: pd.DataFrame) -> str | None:
+    gap = sma_gap_pct(enriched.iloc[-1].get("sma_9"), enriched.iloc[-1].get("sma_21")) if len(enriched) else None
+    return None if gap is None or gap == 0 else ("BULLISH" if gap > 0 else "BEARISH")
+
+
+def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int):
+    """(today's closed-candle crosses, current side) on `minutes`-long candles; (None, None) when too short."""
+    bars = closed_bars(frame_1m, minutes, now)
+    if len(bars) < max(int(sma_slow), 2) + 1:
+        return None, None
+    enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
+    return len(_crosses(enriched, today)), _side(enriched)
 
 
 def _today_1m(frame_1m: pd.DataFrame) -> pd.DataFrame:

@@ -356,6 +356,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
+  **No cross today on** (multi-select 1/2/3/5/10/15 min): each row carries `crosses_by_minutes`
+  and `side_by_minutes`, today's closed-candle SMA crosses and the fast SMA's side on every candle
+  size, read from the same 1-minute download (`chop_scan._crosses_on`; None while a size has too
+  few candles); the card keeps only stocks with 0 crosses on every ticked size.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
