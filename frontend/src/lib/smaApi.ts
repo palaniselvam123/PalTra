@@ -313,7 +313,10 @@ export type ReviewItem = {
       with: number;
       against: number;
       flat: number;
-      checks: Record<string, "with" | "against" | "flat">;
+      /** One check candle. */
+      checks?: Record<string, "with" | "against" | "flat">;
+      /** Several check candles (combined verdict): each size's own read. */
+      by_candle?: { minutes: number; label: string; checks?: Record<string, "with" | "against" | "flat"> }[];
     } | null;
   };
   message: string;
