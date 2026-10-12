@@ -17,6 +17,8 @@ type Props = {
   armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
+  /** Scans are paused from the top of the Scalp page. */
+  paused?: boolean;
 };
 
 type Side = "ALL" | "BULLISH" | "BEARISH";
@@ -38,7 +40,7 @@ function shares(v: number | null | undefined): string {
  * worked out from Groww's candles exactly as the bot does it. Display only: it
  * places no order, and Arm only puts a stock on a bot's Trade list.
  */
-export function CrossScan({ armed, arming, onArm }: Props) {
+export function CrossScan({ armed, arming, onArm, paused = false }: Props) {
   const [data, setData] = useState<CrossScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
@@ -150,7 +152,8 @@ export function CrossScan({ armed, arming, onArm }: Props) {
         <button
           type="button"
           onClick={() => void start(true)}
-          disabled={busy || data?.running}
+          disabled={busy || data?.running || paused}
+          title={paused ? "Scans are paused at the top of the page" : undefined}
           className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now

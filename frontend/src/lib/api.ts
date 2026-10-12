@@ -577,6 +577,8 @@ export type ActiveStocksResponse = {
 };
 
 export type ScalpMonitorResponse = {
+  /** Scans are paused from the Scalp page: no rows are scored. */
+  paused?: boolean;
   as_of: string;
   source: string;
   market_open: boolean;
@@ -897,6 +899,10 @@ export const api = {
   scalpActive: (params: { sort?: ActiveSort; top?: number; bias?: "LONG" | "SHORT"; min_value_cr?: number } = {}) =>
     request<ActiveStocksResponse>(`/api/scalp/active${queryString(stringifyParams(params))}`),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
+  /** Pause / resume the desk's Scalp work (monitor scoring + history fill, alerts, most-active scan). */
+  scalpPause: (paused: boolean) =>
+    request<{ paused: boolean }>("/api/scalp/pause", { method: "POST", body: JSON.stringify({ paused }) }),
+  scalpPauseStatus: () => request<{ paused: boolean }>("/api/scalp/pause"),
   /** The F&O stock names (for scans on the SMA terminal). `error` says why the list is empty. */
   scalpUniverse: () => request<{ symbols: string[]; error: string | null }>("/api/scalp/universe"),
   scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),

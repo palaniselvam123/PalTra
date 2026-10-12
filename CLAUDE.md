@@ -375,6 +375,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`cross_scan.activity`, no `enrich()`, so no volume warnings): shares traded today
   (Groww's running total), shares in the last 10 minutes, and the signed price speed
   in % per minute over those 10 minutes. No order path: Arm only opens the arm prompt.
+- `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
+  Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
+  (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the
+  bots' event loop never crunches scan candles. The scanners take a `job` callable for this
+  (`main._scan_job`); progress, caching and alerts stay in the main process. The worker paces
+  Groww (one candle request per `MIN_GAP_SEC`) and retries a "rate limit" answer after 2, 4 and
+  8 s; Groww's limit is per account, so this also spares the bots' own requests. The desk's
+  token goes to the worker over the process pipe (never logged); a rejected session switches to
+  the saved token like `fetch_frame`; a crashed worker restarts on the next stock.
+  `SCAN_WORKER=off` reads in-process as before. Read-only, no order path.
+  **Pause all scans** (top of the Scalp page; memory only, a restart resumes): the page sets
+  both switches. Terminal `PUT /api/scans/pause` refuses Cross / Trend quality starts (409)
+  and stops a running pass (`scanner.stop`, the last rows stay); desk `POST /api/scalp/pause`
+  (`active_scanner.paused`) stops the monitor's scoring and Groww history fill, Scalp alerts
+  and the most-active scan (background and manual). The page stops its 10 s monitor poll,
+  the Scan buttons and the 30-minute auto-rescan while paused.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).

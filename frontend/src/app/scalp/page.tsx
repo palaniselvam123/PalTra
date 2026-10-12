@@ -4,7 +4,7 @@ import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
@@ -72,6 +72,29 @@ export default function ScalpPage() {
   const [preview, setPreview] = useState<{ symbol: string; message: string }[] | null>(null);
   const [alertBusy, setAlertBusy] = useState(false);
 
+  // "Pause scans": stops every Scalp scan on both servers (desk + SMA terminal) until resumed.
+  const [paused, setPaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
+  const [pauseNote, setPauseNote] = useState<string | null>(null);
+  useEffect(() => {
+    Promise.allSettled([api.scalpPauseStatus(), smaApi.scansPauseStatus()]).then((res) => {
+      setPaused(res.some((r) => r.status === "fulfilled" && r.value.paused));
+    });
+  }, []);
+  const togglePause = async () => {
+    const next = !paused;
+    setPauseBusy(true);
+    setPauseNote(null);
+    const res = await Promise.allSettled([api.scalpPause(next), smaApi.scansPause(next)]);
+    const failed = res.filter((r) => r.status === "rejected").length;
+    setPaused(next || res.some((r) => r.status === "fulfilled" && r.value.paused));
+    if (failed)
+      setPauseNote(
+        failed === 2 ? "Neither server answered; press again to retry." : "One of the two servers did not answer; press again to retry."
+      );
+    setPauseBusy(false);
+  };
+
   const refresh = useCallback(() => {
     setLoading(true);
     api
@@ -87,12 +110,13 @@ export default function ScalpPage() {
 
   useEffect(() => {
     refresh();
+    if (paused) return;
     const id = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       refresh();
     }, REFRESH_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, paused]);
 
   useEffect(() => {
     if (!data) return;
@@ -241,6 +265,34 @@ export default function ScalpPage() {
           </Explain>
         </header>
 
+        <section
+          className={clsx(
+            "flex flex-wrap items-center gap-3 rounded-xl border p-4 text-sm",
+            paused ? "border-amber-500/40 bg-amber-500/10" : "border-slate-800 bg-card"
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => void togglePause()}
+            disabled={pauseBusy}
+            className={clsx(
+              "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold ring-1 ring-inset disabled:opacity-50",
+              paused
+                ? "bg-amber-500/20 text-amber-300 ring-amber-500/50 hover:bg-amber-500/30"
+                : "text-slate-200 ring-slate-700 hover:bg-white/5"
+            )}
+          >
+            {pauseBusy ? <Loader2 size={14} className="animate-spin" /> : paused ? <Play size={14} /> : <Pause size={14} />}
+            {paused ? "Resume scans" : "Pause all scans"}
+          </button>
+          <span className={paused ? "text-amber-300" : "text-slate-400"}>
+            {paused
+              ? "Scans are paused: no Cross scan, Trend quality, most-active scan, monitor scoring or Scalp alerts, so the bots get the server and Groww to themselves. A restart or deploy resumes them."
+              : "Scans compete with the bots for the server and Groww. Pause them while the bots need every second."}
+          </span>
+          {pauseNote && <span className="text-xs text-loss">{pauseNote}</span>}
+        </section>
+
         <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-800 bg-card p-4 text-sm">
           <span
             className={clsx(
@@ -250,7 +302,9 @@ export default function ScalpPage() {
           >
             {data ? (simulated ? "SIMULATED prices" : "LIVE NSE") : "…"}
           </span>
-          {data && (
+          {data?.paused ? (
+            <span className="text-amber-300">Monitor paused — press Resume scans above to score stocks again.</span>
+          ) : data && (
             <span className="text-slate-400">
               <span className="font-semibold text-profit">{data.ready}</span> of {data.universe} streaming stocks
               scalp-ready · {data.market_open ? "market open" : "market closed"} · updated{" "}
@@ -269,8 +323,8 @@ export default function ScalpPage() {
 
         {dialogs}
 
-        <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} />
-        <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} />
+        <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} paused={paused} />
+        <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} paused={paused} />
 
         <MostActive
           watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
@@ -278,6 +332,7 @@ export default function ScalpPage() {
           arming={arming}
           onArm={(s) => arm(s, "Scalp monitor")}
           onWatched={refresh}
+          paused={paused}
         />
 
         {simulated && (

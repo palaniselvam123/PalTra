@@ -109,6 +109,8 @@ CHOP_MIN_CROSSES = 4
 CHOP_SHORT_GAP_MIN = 15
 
 Fetch = Callable[[str, dt.datetime, dt.datetime], Awaitable[pd.DataFrame]]
+# One stock's whole read (download + analysis), e.g. in the scanner process (scan_worker.py).
+Job = Callable[[str, dt.datetime, dt.datetime], Awaitable["ChopRow | None"]]
 
 
 @dataclass
@@ -277,6 +279,15 @@ class ChopScanner:
         self._key: tuple | None = None
         self._started_at = 0.0
 
+    def stop(self, reason: str) -> None:
+        """Cancel a running pass (the Scalp page's Pause scans). The last finished rows stay."""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        if self.status.running:
+            self.status.running = False
+            self.status.error = reason
+            self._key = None
+
     def snapshot(self) -> dict:
         s = self.status
         return {
@@ -307,6 +318,7 @@ class ChopScanner:
         alert_cb: Callable[[str], None] | None = None,
         force: bool = False,
         now: dt.datetime | None = None,
+        job: Job | None = None,
     ) -> dict:
         if minutes not in CANDLE_MINUTES:
             raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
@@ -331,7 +343,10 @@ class ChopScanner:
         self.status.minutes, self.status.sma_fast, self.status.sma_slow = minutes, sma_fast, sma_slow
         self.status.quiet_min = max(1, int(quiet_min or QUIET_MIN_DEFAULT))
         self._task = asyncio.get_running_loop().create_task(
-            self._run(names, fetch, key, minutes, sma_fast, sma_slow, now, alert_on_quiet=alert_on_quiet, alert_cb=alert_cb)
+            self._run(
+                names, fetch, key, minutes, sma_fast, sma_slow, now,
+                alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
+            )
         )
         return self.snapshot()
 
@@ -347,6 +362,7 @@ class ChopScanner:
         *,
         alert_on_quiet: bool = False,
         alert_cb: Callable[[str], None] | None = None,
+        job: Job | None = None,
     ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
@@ -365,8 +381,11 @@ class ChopScanner:
                 if abort.is_set():
                     return
                 try:
-                    frame = await fetch(symbol, start, end)
-                    row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min)
+                    if job is not None:
+                        row = await job(symbol, start, end)
+                    else:
+                        frame = await fetch(symbol, start, end)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min)
                     ok += 1
                     if row is not None:
                         rows.append(row)

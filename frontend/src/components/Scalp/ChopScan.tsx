@@ -20,6 +20,8 @@ type Props = {
   armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
+  /** Scans are paused from the top of the Scalp page. */
+  paused?: boolean;
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
@@ -61,7 +63,7 @@ function shares(v: number | null | undefined): string {
  * Choppy. Information only: it places no order, and Arm only puts a stock on a
  * bot's Trade list.
  */
-export function ChopScan({ armed, arming, onArm }: Props) {
+export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   const [data, setData] = useState<ChopScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
@@ -139,12 +141,12 @@ export function ChopScan({ armed, arming, onArm }: Props) {
 
   // Auto re-scan every 30 minutes while the user has it on and the market is open.
   useEffect(() => {
-    if (!auto) return;
+    if (!auto || paused) return;
     const id = setInterval(() => {
       if (data?.market_open !== false) void start(true);
     }, AUTO_SCAN_MS);
     return () => clearInterval(id);
-  }, [auto, start, data?.market_open]);
+  }, [auto, paused, start, data?.market_open]);
 
   // When a result comes back, pop a toast for quiet runners we haven't highlighted yet.
   useEffect(() => {
@@ -238,7 +240,8 @@ export function ChopScan({ armed, arming, onArm }: Props) {
         <button
           type="button"
           onClick={() => void start(true)}
-          disabled={busy || data?.running}
+          disabled={busy || data?.running || paused}
+          title={paused ? "Scans are paused at the top of the page" : undefined}
           className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now

@@ -26,13 +26,15 @@ type Props = {
   onArm: (symbol: string) => void;
   /** Called after a stock is added to the desk feed, so the monitor reloads. */
   onWatched: () => void;
+  /** Scans are paused from the top of the Scalp page. */
+  paused?: boolean;
 };
 
 const pct = (v: number | null, digits = 2) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`);
 
 /** The F&O stocks ranked by where traders are: money traded, volume against
  * usual, and buy vs sell quantity waiting. From Groww quotes; no orders. */
-export function MostActive({ watching, armed, arming, onArm, onWatched }: Props) {
+export function MostActive({ watching, armed, arming, onArm, onWatched, paused = false }: Props) {
   const [data, setData] = useState<ActiveStocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<ActiveSort>("value");
@@ -133,7 +135,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched }: Props)
         <button
           type="button"
           onClick={scanNow}
-          disabled={scanning || data?.running || data?.connected === false}
+          disabled={scanning || data?.running || data?.connected === false || paused}
+          title={paused ? "Scans are paused at the top of the page" : undefined}
           className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
         >
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
