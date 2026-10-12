@@ -10,6 +10,7 @@ stop, P&L, bot status). REST lives under `/api`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import datetime as dt
 import json
 import csv
@@ -1471,11 +1472,21 @@ class ChopScanStart(BaseModel):
 
 
 def _chop_alert(message: str) -> None:
-    """Hand a chop-scan Telegram off to the same path the bots use. Logging only on failure."""
+    """Send a quiet-runner Telegram to its own channel (else the trade one). Never raises."""
     try:
-        engine._alert(message)  # noqa: SLF001 - the shared helper is private but owned here
-    except Exception:  # noqa: BLE001
-        pass
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send_quiet(message)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("sma.alerts").exception("quiet-runner alert failed")
+
+    loop.create_task(_send())
 
 
 @app.post("/api/chop-scan/start")

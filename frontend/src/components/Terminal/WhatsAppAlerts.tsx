@@ -32,6 +32,7 @@ async function desk<T>(path: string, init?: RequestInit): Promise<T> {
 
 function providerLabel(name: string): string {
   if (name === "twilio_voice") return "Twilio phone call";
+  if (name === "telegram_quiet") return "Quiet-runner Telegram";
   return name === "telegram" ? "Telegram" : name === "twilio" ? "Twilio WhatsApp" : "CallMeBot";
 }
 
@@ -123,7 +124,8 @@ function ChannelForm({
   };
 
   const reusable = channels.filter(
-    (r) => r.configured && r.provider !== active?.provider && r.provider !== "twilio_voice"
+    (r) =>
+      r.configured && r.provider !== active?.provider && r.provider !== "twilio_voice" && r.provider !== "telegram_quiet"
   );
 
   const canSave =
@@ -384,6 +386,101 @@ function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Ch
   );
 }
 
+/** Its own Telegram bot for the Scalp page's quiet-runner alerts, so they are not lost among trade alerts. */
+function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Channel[]) => void }) {
+  const [secret, setSecret] = useState("");
+  const [chat, setChat] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const active = channels.find((r) => r.channel_type === "quiet" && r.enabled && r.configured);
+
+  const run = async (path: string, init: RequestInit, done: (res: unknown) => string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      setNote(done(await desk<unknown>(path, init)));
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Quiet-runner alerts (Scalp page)</div>
+        <span className={active ? "text-xs font-semibold text-[#10B981]" : "text-xs text-slate-400"}>
+          {active ? "telegram live" : "not connected · sent with trade alerts"}
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        The Trend quality scan&apos;s 🔔 quiet runners go to this Telegram bot on their own, so they are not lost among
+        trade alerts. Until it is set, they go to the trade alert channel as before.
+      </p>
+      <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
+        <li>In Telegram, open @BotFather, send /newbot and copy the token.</li>
+        <li>Open the new bot and send it any message (e.g. /start).</li>
+        <li>Paste the token below and tap Save. The chat is picked up from that message.</li>
+      </ol>
+      <label className="mt-3 block">
+        <span className="text-xs uppercase tracking-wider text-slate-400">Bot token</span>
+        <input
+          type="password"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          placeholder="123456789:AA..."
+          className={inputCls}
+        />
+      </label>
+      <label className="mt-2 block">
+        <span className="text-xs uppercase tracking-wider text-slate-400">Chat id, if you already have it</span>
+        <input value={chat} onChange={(e) => setChat(e.target.value)} placeholder="Leave blank to detect it" className={inputCls} />
+      </label>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !secret.trim()}
+          onClick={() =>
+            run(
+              "/api/scan/channels",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  provider: "telegram_quiet",
+                  channel_type: "quiet",
+                  enabled: true,
+                  target: chat.trim(),
+                  secret: secret.trim(),
+                }),
+              },
+              (res) => {
+                onSaved(res as Channel[]);
+                setSecret("");
+                return "Quiet-runner alerts now go to this bot.";
+              }
+            )
+          }
+          className="inline-flex h-11 items-center rounded-md bg-[#10B981] px-4 text-sm font-semibold text-[#04140d] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+        >
+          Save & enable
+        </button>
+        <button
+          type="button"
+          disabled={busy || !active}
+          onClick={() =>
+            run("/api/scan/test-alert?channel_type=quiet", { method: "POST" }, () => "Test sent. Check the quiet-runner bot.")
+          }
+          className="inline-flex h-11 items-center rounded-md border border-white/15 px-4 text-sm text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+        >
+          Send test
+        </button>
+      </div>
+      {note && <p className="mt-2 text-xs text-slate-400">{note}</p>}
+    </section>
+  );
+}
+
 export function WhatsAppAlerts() {
   const [channels, setChannels] = useState<Channel[]>([]);
 
@@ -409,6 +506,7 @@ export function WhatsAppAlerts() {
         channels={channels}
         onSaved={setChannels}
       />
+      <QuietForm channels={channels} onSaved={setChannels} />
       <CallForm channels={channels} onSaved={setChannels} />
     </div>
   );
