@@ -22,6 +22,7 @@ a bot is switched to LIVE, and again just before every LIVE entry.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import groww_client
 from database import session_factory
@@ -113,6 +114,8 @@ class BotEngine(StrategyEngine):
                 raise
             except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
+            # Deep health reads this (deep_health.py); without it bots 2-4 always read "not ticked".
+            self.last_tick_at = time.monotonic()
             cfg = self._cfg_cache
             idle = not self.positions and not (trade_names(cfg) if cfg is not None else [])
             if not market_is_open(self._now()) and self.status != "RUNNING":
