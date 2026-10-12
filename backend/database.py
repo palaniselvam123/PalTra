@@ -110,6 +110,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "flip_orders": "BOOLEAN DEFAULT 0",
             "cross_exit": "BOOLEAN DEFAULT 1",
             "late_entry_min": "INTEGER DEFAULT 0",
+            "join_trend": "BOOLEAN DEFAULT 0",
+            "join_after_min": "INTEGER DEFAULT 15",
             "gap_entry_delay_min": "INTEGER DEFAULT 0",
             "gap_entry_window_min": "INTEGER DEFAULT 0",
             "entry_cutoff_time": "TEXT DEFAULT '15:00'",

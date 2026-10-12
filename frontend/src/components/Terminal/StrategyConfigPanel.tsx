@@ -58,6 +58,8 @@ const LABELS: Record<string, string> = {
   use_candle_dir: "candle direction",
   cross_exit: "cross exit",
   late_entry_min: "late entry",
+  join_trend: "join morning trend",
+  join_after_min: "join after",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -215,6 +217,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
     cross_exit: crossExitOn(form),
     late_entry_min: Math.min(375, Math.max(0, Math.round(Number(form.late_entry_min ?? 0)))),
+    join_trend: Boolean(form.join_trend),
+    join_after_min: Math.min(360, Math.max(0, Math.round(Number(form.join_after_min ?? 15)))),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -763,6 +767,29 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             value={String(form.late_entry_min ?? 0)}
             onChange={(v) => set("late_entry_min", v)}
             own={isOwn("late_entry_min")}
+          />
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.join_trend)}
+              onChange={(e) => set("join_trend", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("join_trend") && <OwnTag />}
+            Join the morning trend
+            <InfoTip label="About joining the morning trend">
+              For a stock that opens already trending (its SMA cross printed yesterday or before 09:20), so the bot has no
+              fresh cross to trade. Once a day, from the minutes below after 09:15, while the bot is flat, it treats the side
+              the SMAs are on as a cross: the first closed candle on which every ticked filter (VWAP, RSI…), ADX and, in gap
+              mode, the gap level agree opens the trade. Only the trend already running at that time is joined; a later cross
+              is traded as a normal cross. A stopped-out join is not re-entered that day.
+            </InfoTip>
+          </label>
+          <Field
+            label="Join from (min after 09:15)"
+            value={String(form.join_after_min ?? 15)}
+            onChange={(v) => set("join_after_min", v)}
+            own={isOwn("join_after_min")}
           />
         </div>
         <div className="min-w-0">

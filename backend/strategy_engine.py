@@ -56,6 +56,7 @@ from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_ga
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
+import join_trend
 import late_entry
 import review
 import paper_wallet
@@ -183,7 +184,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -722,6 +723,10 @@ class StrategyEngine:
         self._gap_pending: dict[str, Pending] = {}
         # Late entry (late_entry.py): a filter-refused cross waiting for its filters.
         self._late_pending: dict[str, Pending] = {}
+        # Join the morning trend (join_trend.py): the SMA run each stock was entered on
+        # today (never joined), and the stocks already joined or given up on today.
+        self._side_entered: dict[str, tuple[str, int]] = {}
+        self._joined_today: set[str] = set()
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
         # Latest order refusal per stock (Groww's own words), kept for the
@@ -964,6 +969,8 @@ class StrategyEngine:
             self._reject_sent.clear()
             self._gap_pending.clear()
             self._late_pending.clear()
+            self._side_entered.clear()
+            self._joined_today.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1182,6 +1189,7 @@ class StrategyEngine:
         """
         for table in (
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
+            self._side_entered,
             self._tapes, self._review_bar, self._review_episode,
         ):
             for symbol in [key for key in table if key not in watch]:
@@ -1243,16 +1251,22 @@ class StrategyEngine:
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
         # is the one that may trade. Being flat does not enter early.
-        if self._cross_is_stale(symbol, frame):
+        stale = self._cross_is_stale(symbol, frame)
+        if stale and not join_trend.enabled(cfg):
             text = f"{symbol} no order — that cross already printed, waiting for a new cross. {_filter_note(cfg)}"
             self._signals[symbol] = text
             self.last_signal = text
             return text
-        signal, signal_frame = _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
+        # With join_trend on, an old cross is not traded as a cross; the running side may be joined below.
+        signal, signal_frame = (None, None) if stale else _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
         if uses_gap_mode(cfg):
             return await self._gap_minute(symbol, signal, signal_frame, frame, cfg, now)
         if (signal is None or signal_frame is None) and symbol in self._late_pending:
             return await self._late_minute(symbol, frame, cfg, now)
+        if signal is None or signal_frame is None:
+            run = self._joinable(symbol, frame, cfg, now)
+            if run is not None:
+                return await self._join_minute(symbol, run, frame, cfg, now)
         if signal is None or signal_frame is None:
             relation = _sma_side_text(frame)
             if symbol in self.positions:
@@ -1278,6 +1292,41 @@ class StrategyEngine:
             self._signals[symbol] = result
             self.last_signal = result
         return result
+
+    def _joinable(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> tuple[str, int] | None:
+        """Today's morning trend to join (join_trend.py), or None."""
+        if not join_trend.enabled(cfg) or symbol in self.positions or symbol in self._joined_today:
+            return None
+        start = join_trend.join_from(cfg, now)
+        if now < start:
+            return None
+        run = join_trend.side_start(frame)
+        # Only the run already going at the join time; a later cross is a normal cross.
+        if run is None or run[1] >= int(start.timestamp()) or self._side_entered.get(symbol) == run:
+            return None
+        return run
+
+    async def _join_minute(self, symbol: str, run: tuple[str, int], frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Join a running trend: ask the usual entry path for the side the SMAs are already on."""
+        direction = run[0]
+        sig = "BULLISH" if direction == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        if result.startswith("blocked — order PENDING"):
+            return result
+        if result.startswith("opened"):
+            self._joined_today.add(symbol)
+            text = f"{result} — joined the morning {direction} trend"
+        elif late_entry.refused_by_filter(sig, result):
+            text = f"{symbol} waiting to join the morning {direction} trend — {result.split(' — ', 1)[-1]}"
+        elif "no new entries after" in result or "trade cap" in result:
+            # No later candle of today will do better.
+            self._joined_today.add(symbol)
+            text = f"{symbol} no order — gave up joining the {direction} trend today: {result}"
+        else:
+            text = f"{symbol} no order — {result}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
 
     async def _late_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
         """Late entry, once per closed candle: try a filter-refused cross again (late_entry.py)."""
@@ -1366,6 +1415,12 @@ class StrategyEngine:
             if symbol not in self.positions:
                 cross_ts = _closed_bar_ts(signal_frame) or _closed_bar_ts(frame) or 0
                 self._gap_pending[symbol] = Pending(want, int(cross_ts))
+        if signal is None and symbol not in self._gap_pending:
+            run = self._joinable(symbol, frame, cfg, now)
+            if run is not None:
+                # Join the morning trend: its side arms the gap entry, once a day.
+                self._joined_today.add(symbol)
+                self._gap_pending[symbol] = Pending(run[0], _closed_bar_ts(frame) or run[1])
         pending = self._gap_pending.get(symbol)
         if pending is None or symbol in self.positions:
             self._gap_pending.pop(symbol, None)
@@ -1580,6 +1635,11 @@ class StrategyEngine:
                     cfg=cfg,
                     now=now,
                 )
+                if result.startswith(("opened", "reversed")) and self._focus in self.positions:
+                    # Remember the SMA run this entry belongs to (join_trend.py: never joined twice).
+                    run = join_trend.side_start(frame)
+                    if run is not None:
+                        self._side_entered[self._focus] = (self.positions[self._focus].signal_direction, run[1])
                 self.last_signal = result
                 self._signals[self._focus] = result
                 self._log_decision(signal, frame, cfg, now, result)
