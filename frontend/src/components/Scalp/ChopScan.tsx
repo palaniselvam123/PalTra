@@ -78,6 +78,8 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   const [auto, setAuto] = useState(true);
   // Fast movers only: |speed| over the last 10 minutes at least this many % per minute (0 = off).
   const [minSpeed, setMinSpeed] = useState(0);
+  // "No cross today on": keep stocks whose SMAs have not crossed once today on every ticked candle size.
+  const [noCrossOn, setNoCrossOn] = useState<CrossScanMinutes[]>([]);
   // "I have shown this stock as quiet already" — stops the popup repeating each tick while it's open.
   const seenRef = useRef<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
@@ -93,6 +95,8 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
         if (typeof saved.auto === "boolean") setAuto(saved.auto);
         if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
+        if (Array.isArray(saved.noCrossOn))
+          setNoCrossOn(saved.noCrossOn.filter((m: unknown) => CANDLE_CHOICES.includes(m as CrossScanMinutes)));
         if (typeof saved.score === "string") setScore(saved.score as ScoreFilter);
       }
     } catch {
@@ -101,11 +105,11 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score }));
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn }));
     } catch {
       /* private mode */
     }
-  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score]);
+  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn]);
 
   const start = useCallback(
     async (force = false) => {
@@ -198,9 +202,10 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
         if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
         if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
+        if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== 0)) return false;
         return true;
       }),
-    [data?.rows, scannedThisCandle, query, score, minSpeed]
+    [data?.rows, scannedThisCandle, query, score, minSpeed, noCrossOn]
   );
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
@@ -251,7 +256,7 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         className="mb-3"
         lead={`Information only. Each stock's ${label} crosses on today's closed candles are counted, with the longest run since the last one and the average time and move between them.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. <b>No cross today on</b> keeps only the stocks whose SMAs have not crossed once today on every candle size you tick (1m, 5m, 15m…): a one-way move on all of them. All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -314,6 +319,33 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
           <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
         </div>
       </FilterRow>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="mr-1 text-slate-400" title="Keep only stocks whose SMA fast / slow have not crossed once today on every ticked candle size">
+          No cross today on:
+        </span>
+        {CANDLE_CHOICES.map((m) => {
+          const on = noCrossOn.includes(m);
+          return (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setNoCrossOn((cur) => (on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b)))}
+              className={clsx(
+                "min-h-8 rounded-md px-2.5 font-semibold ring-1 ring-inset",
+                on ? "bg-accentSky/15 text-accentSky ring-accentSky/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
+              )}
+            >
+              {m}m
+            </button>
+          );
+        })}
+        {noCrossOn.length > 0 && (
+          <button type="button" onClick={() => setNoCrossOn([])} className="ml-1 text-slate-500 underline-offset-2 hover:underline">
+            clear
+          </button>
+        )}
+      </div>
       {toast && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           <span>🔔 Quiet runner — {toast}</span>
@@ -346,6 +378,9 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
                 <SortTh label="Score" k="score" sort={sort} onSort={onSort} text />
                 <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" />
                 <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" />
+                <th className="px-2 pb-2 text-left font-medium" title="Today's SMA crosses on each candle size (— = not enough candles yet)">
+                  Crosses by size
+                </th>
                 <SortTh label="Crosses today" k="crosses" sort={sort} onSort={onSort} num />
                 <SortTh label="Last cross (min)" k="since" sort={sort} onSort={onSort} num title="Minutes since the start of the last cross candle" />
                 <SortTh label="Avg gap (min)" k="avgGap" sort={sort} onSort={onSort} num title="Average time between today's crosses" />
@@ -408,6 +443,9 @@ function Row({ row: r, armedOn, arming, onArm }: { row: ChopScanRow; armedOn: st
             {r.day_move_pct.toFixed(2)}%
           </span>
         )}
+      </td>
+      <td className="py-1.5">
+        <CrossSizes row={r} />
       </td>
       <td className="py-1.5 text-right tabular-nums">{r.crosses_today}</td>
       <td className="py-1.5 text-right tabular-nums">{r.minutes_since_last_cross == null ? "—" : Math.max(0, Math.round(r.minutes_since_last_cross))}</td>
@@ -478,6 +516,32 @@ function TrendChip({ row: r }: { row: ChopScanRow }) {
       title={title}
     >
       {bull ? "Strong ↑" : "Strong ↓"} {passed}/7
+    </span>
+  );
+}
+
+/** Today's crosses on 1 / 5 / 15-minute candles (and the other sizes on hover); a 0 is green with the side. */
+function CrossSizes({ row: r }: { row: ChopScanRow }) {
+  const by = r.crosses_by_minutes ?? {};
+  const side = r.side_by_minutes ?? {};
+  const all = CANDLE_CHOICES.map((m) => `${m}m: ${by[String(m)] ?? "—"}${side[String(m)] ? ` (${side[String(m)] === "BULLISH" ? "↑" : "↓"})` : ""}`);
+  return (
+    <span className="inline-flex gap-1 text-xs tabular-nums" title={`Today's SMA crosses — ${all.join(" · ")}`}>
+      {([1, 5, 15] as const).map((m) => {
+        const n = by[String(m)];
+        return (
+          <span
+            key={m}
+            className={clsx(
+              "rounded px-1.5 py-0.5 ring-1 ring-inset",
+              n === 0 ? "bg-profit/10 text-profit ring-profit/30" : n == null ? "text-slate-600 ring-slate-800" : "text-slate-400 ring-slate-700"
+            )}
+          >
+            {m}m {n ?? "—"}
+            {n === 0 && side[String(m)] ? (side[String(m)] === "BULLISH" ? " ↑" : " ↓") : ""}
+          </span>
+        );
+      })}
     </span>
   );
 }

@@ -235,6 +235,10 @@ export type ChopScanRow = {
   vwap?: number | null;
   /** Last close vs today's first open, %. */
   day_move_pct?: number | null;
+  /** Today's closed-candle SMA crosses per candle size in minutes (null = not enough candles yet). */
+  crosses_by_minutes?: Record<string, number | null>;
+  /** Side of the fast SMA per candle size. */
+  side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
 };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
 export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run";
