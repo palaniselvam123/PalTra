@@ -16,6 +16,20 @@ function clock(ts: number | undefined, plusMinutes = 0): string {
 
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
+type Verdict = NonNullable<NonNullable<ReviewItem["one_min"]>["verdict"]>;
+
+const joinChecks = (checks: Verdict["checks"]) =>
+  Object.entries(checks ?? {})
+    .map(([name, v]) => `${name} ${v}`)
+    .join(" · ");
+
+// One check candle sends `checks`; several send a combined verdict with each size under `by_candle`.
+function checkLine(v: Verdict): string {
+  if (v.checks) return joinChecks(v.checks);
+  const parts = (v.by_candle ?? []).map((c) => `${c.minutes}m ${c.label}: ${joinChecks(c.checks)}`);
+  return parts.length ? parts.join(" | ") : "—";
+}
+
 // Not green / red: those stay for profit and loss.
 const VERDICT_STYLE = {
   WITH: "bg-sky-500/15 text-sky-200 ring-sky-400/40",
@@ -173,9 +187,7 @@ export function ReviewCards({ state, onChanged }: { state: SmaState | null; onCh
                     {one.verdict ? (
                       <p className="text-slate-400">
                         Checks:{" "}
-                        {Object.entries(one.verdict.checks)
-                          .map(([name, v]) => `${name} ${v}`)
-                          .join(" · ")}
+                        {checkLine(one.verdict)}
                       </p>
                     ) : null}
                     <p className="text-slate-400">
