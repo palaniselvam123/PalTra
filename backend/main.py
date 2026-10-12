@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 import chop_scan
+import scan_worker
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
@@ -46,7 +47,7 @@ from replay import (
     settings_snapshot,
 )
 import gap_mode
-from groww_client import market_is_open, preferred_quote_token
+from groww_client import IST, market_is_open, preferred_quote_token
 from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
@@ -148,6 +149,7 @@ async def announce_shutdown_all() -> None:
 
 def stop_engine() -> None:
     stall_tracer.stop()
+    scan_worker.shutdown()
     engine.stop()
     research_engine.stop()
     for eng in bot_engines.values():
@@ -1383,6 +1385,18 @@ async def replay_bot_kill(bot: int = 1):
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
 
 
+def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = ()):
+    """Each stock's read in the scanner process (scan_worker.py), or None to read in-process."""
+    if not scan_worker.enabled():
+        return None
+    now = dt.datetime.now(IST)
+
+    async def job(symbol, start, end):
+        return await scan_worker.run(engine.broker, fn, symbol, start, end, sma_fast, sma_slow, minutes, now, *extra)
+
+    return job
+
+
 class CrossScanStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
     minutes: Literal[1, 2, 3, 5, 10, 15] = 5
@@ -1405,6 +1419,7 @@ async def cross_scan_start(body: CrossScanStart):
             sma_fast=int(cfg.sma_fast),
             sma_slow=int(cfg.sma_slow),
             force=body.force,
+            job=_scan_job(scan_worker.cross_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1453,6 +1468,9 @@ async def chop_scan_start(body: ChopScanStart):
             alert_on_quiet=body.alert_on_quiet,
             alert_cb=_chop_alert if body.alert_on_quiet else None,
             force=body.force,
+            job=_scan_job(
+                scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, extra=(body.quiet_min,)
+            ),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

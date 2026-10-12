@@ -57,6 +57,8 @@ BULLISH = "BULLISH"  # fast SMA is (or will be) above slow
 BEARISH = "BEARISH"
 
 Fetch = Callable[[str, dt.datetime, dt.datetime], Awaitable[pd.DataFrame]]
+# One stock's whole read (download + analysis), e.g. in the scanner process (scan_worker.py).
+Job = Callable[[str, dt.datetime, dt.datetime], Awaitable["ScanRow | None"]]
 
 
 @dataclass
@@ -263,8 +265,12 @@ class CrossScanner:
         sma_slow: int = 21,
         force: bool = False,
         now: dt.datetime | None = None,
+        job: Job | None = None,
     ) -> dict:
-        """Begin a pass unless one is running or the result is already for this candle."""
+        """Begin a pass unless one is running or the result is already for this candle.
+
+        With `job`, each stock is read by it (download and analysis) instead of `fetch` + `scan_one`.
+        """
         if minutes not in CANDLE_MINUTES:
             raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
         names = clean_symbols(symbols)
@@ -286,10 +292,13 @@ class CrossScanner:
         self.status.failed = 0
         self.status.error = None
         self.status.minutes, self.status.sma_fast, self.status.sma_slow = minutes, sma_fast, sma_slow
-        self._task = asyncio.get_running_loop().create_task(self._run(names, fetch, key, minutes, sma_fast, sma_slow, now))
+        self._task = asyncio.get_running_loop().create_task(self._run(names, fetch, key, minutes, sma_fast, sma_slow, now, job))
         return self.snapshot()
 
-    async def _run(self, names: list[str], fetch: Fetch, key: tuple, minutes: int, sma_fast: int, sma_slow: int, now: dt.datetime) -> None:
+    async def _run(
+        self, names: list[str], fetch: Fetch, key: tuple, minutes: int, sma_fast: int, sma_slow: int, now: dt.datetime,
+        job: Job | None = None,
+    ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
         rows: list[ScanRow] = []
@@ -307,8 +316,10 @@ class CrossScanner:
                 if abort.is_set():
                     return
                 try:
-                    frame = await fetch(symbol, start, end)
-                    row = scan_one(symbol, frame, sma_fast, sma_slow, minutes, now)
+                    if job is not None:
+                        row = await job(symbol, start, end)
+                    else:
+                        row = scan_one(symbol, await fetch(symbol, start, end), sma_fast, sma_slow, minutes, now)
                     ok += 1
                     if row is not None:
                         rows.append(row)
