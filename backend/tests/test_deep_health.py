@@ -127,3 +127,30 @@ def test_desk_route_is_public_and_follows_the_terminal(monkeypatch):
     with TestClient(desk) as http:
         up = http.get("/api/health/deep")
     assert up.status_code == 200 and up.json()["ok"] is True
+
+
+def test_bots_2_to_4_stamp_each_pass_too():
+    """BotEngine has its own run loop; it must stamp last_tick_at like bot 1 or deep health always fails."""
+    import main as sma
+
+    eng = sma.bot_engines[2]
+
+    async def go():
+        async def fake_tick(now):
+            eng._stop = True
+
+        async def no_sleep(_s):
+            return None
+
+        eng.tick, eng._sleep = fake_tick, no_sleep
+        eng._stop = False
+        eng.last_tick_at = None
+        await eng.run()
+
+    try:
+        asyncio.run(go())
+        assert eng.last_tick_at is not None
+    finally:
+        del eng.tick
+        eng._sleep = asyncio.sleep
+        eng._stop = False

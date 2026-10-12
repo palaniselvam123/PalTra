@@ -8,6 +8,8 @@ name: Health watch
 # check the setup.
 #
 # GitHub starts scheduled runs best-effort, so a run can be a few minutes late.
+# If the Actions tab shows no scheduled runs, an edit to this file on main
+# registers the schedule again (it had never fired between 9 and 12 Oct).
 
 on:
   schedule:
