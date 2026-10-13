@@ -107,6 +107,8 @@ def test_scanner_runs_once_at_a_time_and_sorts_rows_by_score():
             await asyncio.sleep(0.01)
         snap = s.snapshot()
         assert not snap["running"] and snap["done"] == 2
+        # The wall-clock time the pass ended, for the card's "Last scan HH:MM".
+        assert snap["finished_at"] and snap["finished_at"].endswith("+05:30")
         kinds = [row["score"] for row in snap["rows"]]
         # TRENDING comes before CHOPPY in the sort.
         assert kinds and kinds.index(chop_scan.TRENDING) < kinds.index(chop_scan.CHOPPY)

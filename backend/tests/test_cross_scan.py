@@ -174,6 +174,7 @@ async def test_after_the_close_the_result_stays_until_forced():
     await _run(scanner, ["A"], fetch, _at(18, 30))
     assert len(fetch.calls) == 1
     assert scanner.snapshot()["market_open"] is False
+    assert scanner.snapshot()["finished_at"].endswith("+05:30")
 
 
 @pytest.mark.asyncio

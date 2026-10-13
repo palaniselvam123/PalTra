@@ -330,6 +330,7 @@ class Status:
     sma_slow: int = 21
     quiet_min: int = QUIET_MIN_DEFAULT
     as_of: str | None = None
+    finished_at: str | None = None  # wall-clock time (IST) the last pass ended
     market_open: bool = False
     rows: list[dict] = field(default_factory=list)
 
@@ -361,6 +362,7 @@ class ChopScanner:
             "failed": s.failed,
             "error": s.error,
             "minutes": s.minutes,
+            "finished_at": s.finished_at,
             "sma_fast": s.sma_fast,
             "sma_slow": s.sma_slow,
             "quiet_min": s.quiet_min,
@@ -511,4 +513,5 @@ class ChopScanner:
         else:
             self.status.error = None if not errors else f"{self.status.failed} stock(s) could not be read ({max(errors, key=errors.get)})"
             self._key = key
+        self.status.finished_at = dt.datetime.now(IST).isoformat(timespec="seconds")
         self.status.running = False

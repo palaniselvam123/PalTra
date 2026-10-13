@@ -226,6 +226,7 @@ class Status:
     sma_fast: int = 9
     sma_slow: int = 21
     as_of: str | None = None  # when the last finished pass started (IST)
+    finished_at: str | None = None  # wall-clock time (IST) the last pass ended
     market_open: bool = False
     rows: list[dict] = field(default_factory=list)
 
@@ -257,6 +258,7 @@ class CrossScanner:
             "failed": s.failed,
             "error": s.error,
             "minutes": s.minutes,
+            "finished_at": s.finished_at,
             "sma_fast": s.sma_fast,
             "sma_slow": s.sma_slow,
             "as_of": s.as_of,
@@ -357,4 +359,5 @@ class CrossScanner:
         else:
             self.status.error = None if not errors else f"{self.status.failed} stock(s) could not be read ({max(errors, key=errors.get)})"
             self._key = key
+        self.status.finished_at = dt.datetime.now(IST).isoformat(timespec="seconds")
         self.status.running = False

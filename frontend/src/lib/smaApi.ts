@@ -201,6 +201,8 @@ export type CrossScan = {
   sma_fast: number;
   sma_slow: number;
   as_of: string | null;
+  /** When the last pass ended (IST); older servers leave it out. */
+  finished_at?: string | null;
   market_open: boolean;
   rows: CrossScanRow[];
 };
@@ -257,6 +259,8 @@ export type ChopScan = {
   sma_slow: number;
   quiet_min: number;
   as_of: string | null;
+  /** When the last pass ended (IST); older servers leave it out. */
+  finished_at?: string | null;
   market_open: boolean;
   rows: ChopScanRow[];
 };

@@ -3,6 +3,7 @@
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { lastScanText } from "@/lib/lastScan";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
@@ -138,9 +139,6 @@ export function CrossScan({ armed, arming, onArm, paused = false }: Props) {
         return r.volume_window;
     }
   });
-  const asOf = data?.as_of
-    ? new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST"
-    : null;
   const label = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA";
 
   return (
@@ -176,9 +174,7 @@ export function CrossScan({ armed, arming, onArm, paused = false }: Props) {
           data
             ? data.running
               ? `Scanning ${data.done} of ${data.total}…`
-              : asOf && scannedThisCandle
-                ? `Closed candles to ${asOf}${data.market_open ? "" : " · market closed"}`
-                : "No scan yet"
+              : lastScanText(data, minutes) ?? "No scan yet"
             : null
         }
       >
