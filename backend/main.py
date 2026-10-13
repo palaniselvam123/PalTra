@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
+import chop_auto
 import chop_scan
 import groww_pressure
 import scan_worker
@@ -80,6 +81,8 @@ from strategy_engine import (
 engine = StrategyEngine()
 cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
+# Trend quality re-scan run by the server every N minutes (chop_auto.py).
+chop_autos = chop_auto.ChopAuto()
 #: One replay player per SMA bot (1-4), so all four bots can replay at once
 #: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
 replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
@@ -129,6 +132,8 @@ def boot_engine() -> asyncio.Task | None:
     engine.broker.set_mode(cfg.trading_mode)
     engine.broker.adopt_saved_session(force=True)
     _task = asyncio.create_task(engine.run())
+    chop_autos.reload()
+    chop_autos.start_loop(_chop_auto_start)
     ensure_research_config()
     research_engine.restore_open_books()
     research_engine.restore_trades_today()
@@ -152,6 +157,7 @@ async def announce_shutdown_all() -> None:
 
 def stop_engine() -> None:
     stall_tracer.stop()
+    chop_autos.stop()
     scan_worker.shutdown()
     engine.stop()
     research_engine.stop()
@@ -1501,6 +1507,33 @@ def _chop_alert(message: str) -> None:
     loop.create_task(_send())
 
 
+def _start_chop(
+    symbols: list[str],
+    *,
+    minutes: int,
+    quiet_min: int,
+    alert_on_quiet: bool,
+    price_min: float,
+    price_max: float,
+    force: bool,
+):
+    cfg = engine.load_config()
+    return chop_scanner.start(
+        symbols,
+        lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+        minutes=minutes,
+        sma_fast=int(cfg.sma_fast),
+        sma_slow=int(cfg.sma_slow),
+        quiet_min=quiet_min,
+        alert_on_quiet=alert_on_quiet,
+        alert_cb=_chop_alert if alert_on_quiet else None,
+        force=force,
+        price_min=price_min,
+        price_max=price_max,
+        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min,)),
+    )
+
+
 @app.post("/api/chop-scan/start")
 async def chop_scan_start(body: ChopScanStart):
     """Start a chop/trend scan (read-only: candles only, no order). Returns at once; poll GET /api/chop-scan.
@@ -1512,31 +1545,88 @@ async def chop_scan_start(body: ChopScanStart):
     alert; a stock is alerted at most once per day.
     """
     _refuse_when_paused()
-    cfg = engine.load_config()
     try:
-        return chop_scanner.start(
+        out = _start_chop(
             body.symbols,
-            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
             minutes=body.minutes,
-            sma_fast=int(cfg.sma_fast),
-            sma_slow=int(cfg.sma_slow),
             quiet_min=body.quiet_min,
             alert_on_quiet=body.alert_on_quiet,
-            alert_cb=_chop_alert if body.alert_on_quiet else None,
-            force=body.force,
             price_min=body.price_min,
             price_max=body.price_max,
-            job=_scan_job(
-                scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, extra=(body.quiet_min,)
-            ),
+            force=body.force,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    # A manual scan counts as a run: the next automatic one waits a full interval.
+    chop_autos.note_run()
+    return out
+
+
+async def _auto_symbols(armed_only: bool) -> list[str]:
+    """The stocks an automatic Trend quality scan reads: every bot's Trade list, or the F&O list."""
+    if armed_only:
+        if server_role.is_scanner():
+            from app.api.routes_link import desk_armed
+
+            body = await desk_armed()
+            if body.get("error"):
+                raise RuntimeError(body["error"])
+        else:
+            body = armed_lists()
+        names = {str(s).upper() for b in body.get("bots", []) for s in (b.get("armed") or [])}
+        names |= {str(s).upper() for s in (body.get("research") or [])}
+        if not names:
+            raise RuntimeError("No stocks are armed on any bot, so there is nothing to scan.")
+        return sorted(names)
+    from app.services.active_stocks import active_scanner
+
+    names = active_scanner.universe_symbols()
+    if not names:
+        raise RuntimeError(active_scanner.error or "The F&O stock list is empty, so there is nothing to scan.")
+    return list(names)[:CROSS_SCAN_MAX]
+
+
+async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
+    """One automatic Trend quality pass with the card's saved choices (read-only)."""
+    if _scans_paused:
+        raise RuntimeError("Scans are paused at the top of the Scalp page.")
+    if chop_scanner.status.running:
+        return
+    symbols = await _auto_symbols(s.armed_only)
+    _start_chop(
+        symbols,
+        minutes=s.minutes,
+        quiet_min=s.quiet_min,
+        alert_on_quiet=s.alert_on_quiet,
+        price_min=s.price_min,
+        price_max=s.price_max,
+        force=True,
+    )
+
+
+class ChopAutoUpdate(BaseModel):
+    on: bool | None = None
+    every_min: Literal[5, 10, 15, 20, 30, 45, 60] | None = None
+    minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    armed_only: bool | None = None
+    quiet_min: int | None = Field(default=None, ge=1, le=375)
+    alert_on_quiet: bool | None = None
+    price_min: float | None = Field(default=None, ge=0)
+    price_max: float | None = Field(default=None, ge=0)
+
+
+@app.put("/api/chop-scan/auto")
+async def chop_scan_auto(body: ChopAutoUpdate):
+    """Turn the server's Trend quality re-scan on/off, set how often, and the choices it scans with."""
+    if body.on and not server_role.scans_enabled():
+        raise HTTPException(409, server_role.SCANS_OFF_TEXT)
+    chop_autos.update(**body.model_dump())
+    return chop_autos.snapshot()
 
 
 @app.get("/api/chop-scan")
 async def chop_scan_status():
-    return {**chop_scanner.snapshot(), "paused": _scans_paused}
+    return {**chop_scanner.snapshot(), "paused": _scans_paused, "auto": chop_autos.snapshot()}
 
 
 @app.get("/api/stall")

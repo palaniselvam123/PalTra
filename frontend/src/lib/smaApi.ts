@@ -263,7 +263,30 @@ export type ChopScan = {
   finished_at?: string | null;
   market_open: boolean;
   rows: ChopScanRow[];
+  /** The server's own re-scan (older servers leave it out). */
+  auto?: ChopAuto;
 };
+
+/** Trend quality re-scan run by the server every `every_min` minutes while NSE is open (no browser needed). */
+export type ChopAuto = {
+  on: boolean;
+  every_min: number;
+  minutes: CrossScanMinutes;
+  armed_only: boolean;
+  quiet_min: number;
+  alert_on_quiet: boolean;
+  price_min: number;
+  price_max: number;
+  every_choices: number[];
+  last_run_at: string | null;
+  next_at: string | null;
+  error: string | null;
+  scans_enabled: boolean;
+};
+
+export type ChopAutoUpdate = Partial<
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max">
+>;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
 export type ReviewStatus = "PENDING" | "USER_REVIEW_EXIT" | "USER_REVIEW_WAIT" | "NO_RESPONSE" | "ALREADY_CLOSED";
@@ -1087,6 +1110,9 @@ export const smaApi = {
       false
     ),
   chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
+  /** Turn the server's Trend quality re-scan on/off, how often, and the choices it scans with. */
+  chopScanAuto: (body: ChopAutoUpdate) =>
+    request<ChopAuto>("/api/chop-scan/auto", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   /** Pause / resume the terminal's Scalp scans (Cross scan, Trend quality). */
   scansPause: (paused: boolean) =>
     request<{ paused: boolean }>("/api/scans/pause", { method: "PUT", body: JSON.stringify({ paused }) }, undefined, false),

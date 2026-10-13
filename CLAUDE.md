@@ -348,8 +348,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once per IST day (`chop_scan._ALERTED_TODAY`). A **price range** (`price_min` / `price_max` ₹ on
   `POST /api/chop-scan/start`, 0 = no bound; `chop_scan.in_price_range`) limits the alert to stocks
   priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
-  defaults to armed-stocks-only and auto-rescans every 30 minutes, so only the stocks on the
-  Trade list are downloaded (quick enough to run quietly).
+  defaults to armed-stocks-only, so only the stocks on the Trade list are downloaded (quick enough to
+  run quietly). **Auto re-scan** (`backend/chop_auto.py`, `ChopAuto`): the server itself starts the
+  scan every `every_min` minutes (5/10/15/20/30/45/60, default 30) while NSE is open, no browser
+  needed, with the card's last choices (candle, Armed only read fresh each time: the desk's link on
+  the scanner, `armed_lists()` on the desk; quiet minutes, price range, Telegram). Settings in
+  `chop_auto.json` next to the terminal's SQLite file (the Fly volume); `PUT /api/chop-scan/auto`,
+  and `GET /api/chop-scan` carries `auto` (next_at, last error). On by default only on the scanner
+  server; never runs on a desk with `SCANS=off` or while scans are paused. A manual Scan now counts as
+  a run.
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also
   gets `trend` = `STRONG_BULLISH` / `STRONG_BEARISH` / null, `trend_score` (0-100) and
   `trend_checks`, judged on the closed candles for the side of fast vs slow SMA: `stack` (close
