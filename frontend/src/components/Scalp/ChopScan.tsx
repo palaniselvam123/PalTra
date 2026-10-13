@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import { smaApi, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
+import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
@@ -14,7 +14,9 @@ const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
 // Auto re-scan period in milliseconds (30 min). GitHub-cron-style, best-effort; the browser
 // has to be awake. On mobile a backgrounded tab may skip ticks.
-const AUTO_SCAN_MS = 30 * 60 * 1000;
+// While the server's re-scan is on, the card fetches the newest result this often.
+const AUTO_POLL_MS = 60_000;
+const EVERY_CHOICES = [5, 10, 15, 20, 30, 45, 60];
 const QUIET_STORE = "sma.chop.quiet"; // localStorage key for the alert settings
 
 type Props = {
@@ -75,11 +77,14 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const universe = useRef<string[] | null>(null);
-  // Alert settings. Default: armed stocks only, 60 min of quiet, Telegram ping on, auto re-scan on.
+  // Alert settings. Default: armed stocks only, 60 min of quiet, Telegram ping on.
   const [armedOnly, setArmedOnly] = useState(true);
   const [quietMin, setQuietMin] = useState(60);
   const [alertOnQuiet, setAlertOnQuiet] = useState(true);
-  const [auto, setAuto] = useState(true);
+  // The server's own re-scan (chop_auto.py): on/off and every N minutes live on the server, not in this browser.
+  const [auto, setAuto] = useState<ChopAuto | null>(null);
+  // True once the server's last result (and its auto settings) has loaded, so the card does not overwrite them.
+  const [synced, setSynced] = useState(false);
   // Fast movers only: |speed| over the last 10 minutes at least this many % per minute (0 = off).
   const [minSpeed, setMinSpeed] = useState(0);
   // "No cross today on": keep stocks whose SMAs have not crossed once today on every ticked candle size.
@@ -102,7 +107,6 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         if (typeof saved.armedOnly === "boolean") setArmedOnly(saved.armedOnly);
         if (typeof saved.quietMin === "number") setQuietMin(saved.quietMin);
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
-        if (typeof saved.auto === "boolean") setAuto(saved.auto);
         if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
         if (saved.crossCount === 0 || saved.crossCount === 1) setCrossCount(saved.crossCount);
         if (typeof saved.priceMin === "number") setPriceMin(saved.priceMin);
@@ -117,12 +121,12 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
       );
     } catch {
       /* private mode */
     }
-  }, [armedOnly, quietMin, alertOnQuiet, auto, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
+  }, [armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
 
   const start = useCallback(
     async (force = false) => {
@@ -158,14 +162,50 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
     [minutes, armed, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
-  // Auto re-scan every 30 minutes while the user has it on and the market is open.
+  // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
   useEffect(() => {
-    if (!auto || paused) return;
+    if (!synced) return;
+    const id = setTimeout(() => {
+      smaApi
+        .chopScanAuto({
+          minutes,
+          armed_only: armedOnly,
+          quiet_min: quietMin,
+          alert_on_quiet: alertOnQuiet,
+          price_min: priceMin,
+          price_max: priceMax,
+        })
+        .then(setAuto)
+        .catch(() => {
+          /* an older server without the re-scan: the card still scans on Scan now */
+        });
+    }, 800);
+    return () => clearTimeout(id);
+  }, [synced, minutes, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]);
+
+  const changeAuto = (change: ChopAutoUpdate) => {
+    setError(null);
+    smaApi
+      .chopScanAuto(change)
+      .then(setAuto)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not change the auto re-scan"));
+  };
+
+  // While the server's re-scan is on, pick up each new result (and its quiet runners) once a minute.
+  useEffect(() => {
+    if (!auto?.on || paused) return;
     const id = setInterval(() => {
-      if (data?.market_open !== false) void start(true);
-    }, AUTO_SCAN_MS);
+      if (typeof document !== "undefined" && document.hidden) return;
+      smaApi
+        .chopScan()
+        .then((d) => {
+          setData(d);
+          if (d.auto) setAuto(d.auto);
+        })
+        .catch(() => {});
+    }, AUTO_POLL_MS);
     return () => clearInterval(id);
-  }, [auto, paused, start, data?.market_open]);
+  }, [auto?.on, paused]);
 
   // When a result comes back, pop a toast for quiet runners we haven't highlighted yet.
   useEffect(() => {
@@ -192,10 +232,18 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
     let live = true;
     smaApi
       .chopScan()
-      .then((d) => live && setData(d))
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        if (d.auto) {
+          setAuto(d.auto);
+          setMinutes(d.auto.minutes);
+        }
+      })
       .catch(() => {
         /* the terminal is not answering: the page shows "No scan yet" and Scan now still works */
-      });
+      })
+      .finally(() => live && setSynced(true));
     return () => {
       live = false;
     };
@@ -351,10 +399,23 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         />
         <div className="flex min-h-9 flex-wrap items-end gap-2 self-end">
           <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
-          <Toggle label="Rescan 30 min" checked={auto} onChange={setAuto} title="Rescan every 30 minutes while the market is open" />
+          <Toggle
+            label="Auto re-scan"
+            checked={auto?.on ?? false}
+            onChange={(on) => changeAuto({ on })}
+            title="The server scans by itself every N minutes while the market is open, even with this page closed"
+          />
           <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
         </div>
+        <SelectFilter
+          label="Re-scan every"
+          value={auto?.every_min ?? 30}
+          onChange={(v) => changeAuto({ every_min: Number(v) })}
+          options={(auto?.every_choices ?? EVERY_CHOICES).map((m) => ({ value: m, label: `${m} min` }))}
+          className="w-32"
+        />
       </FilterRow>
+      {auto ? <AutoLine auto={auto} paused={paused} /> : null}
       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
         <span className="text-slate-400">Crosses today:</span>
         <select
@@ -412,7 +473,7 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
               ? "The scan could not read any stock, so there is nothing to show yet."
               : data?.as_of && scannedThisCandle
                 ? "No stock matches these filters. Change Show or clear the stock filter, or press Scan now after the next candle closes."
-                : `Nothing is scanned until you press Scan now. A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
+                : `${auto?.on ? `The server scans by itself every ${auto.every_min} min while the market is open, or press Scan now.` : "Nothing is scanned until you press Scan now."} A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -607,5 +668,37 @@ function CrossSizes({ row: r }: { row: ChopScanRow }) {
         );
       })}
     </span>
+  );
+}
+
+/** "14:45 IST", or "09:15 IST on 14 Oct" when it is not today. */
+function whenText(iso: string) {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+  const day = (d: Date) => d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+  return day(at) === day(new Date())
+    ? `${time} IST`
+    : `${time} IST on ${at.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}`;
+}
+
+/** One line on the server's own re-scan: on/off, how often, when next, or why it did not run. */
+function AutoLine({ auto, paused }: { auto: ChopAuto; paused: boolean }) {
+  if (!auto.on)
+    return <p className="mb-3 text-xs text-slate-500">Auto re-scan is off. Scans run only when you press Scan now.</p>;
+  const next = auto.next_at ? new Date(auto.next_at) : null;
+  const soon = next != null && next.getTime() <= Date.now();
+  return (
+    <p className="mb-3 text-xs text-slate-400">
+      <span className="font-semibold text-profit">Auto re-scan on</span> · every {auto.every_min} min on the server, even with this
+      page closed{auto.armed_only ? " · armed stocks" : " · every F&O stock"}
+      {paused
+        ? " · paused at the top of the page"
+        : next
+          ? soon
+            ? " · next scan within a minute"
+            : ` · next ${whenText(auto.next_at as string)}`
+          : ""}
+      {auto.error ? <span className="text-loss"> · last try: {auto.error}</span> : null}
+    </p>
   );
 }

@@ -18,3 +18,6 @@ backend/research_data/
 
 # Static export built for the Docker image (CI builds it for each deploy)
 frontend/out/
+
+# Trend quality auto re-scan settings (chop_auto.py)
+backend/chop_auto.json
