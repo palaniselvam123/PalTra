@@ -18,6 +18,7 @@ import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
+import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 
@@ -250,6 +251,7 @@ export default function ScalpPage() {
   useEffect(() => {
     order.current = rows.map((r) => r.symbol);
   }, [rows]);
+  const paged = usePaged(rows, "scalp.monitor.pageSize");
 
   const pick = (symbol: string, on: boolean) =>
     setPicked((prev) => {
@@ -585,6 +587,9 @@ export default function ScalpPage() {
               </p>
             )}
 
+            <div ref={paged.anchor}>
+              <Pager p={paged} className="mb-2" />
+            </div>
             <ColumnHint moved={cols.moved} onReset={cols.reset} />
             <div
               className="h-[min(75vh,820px)] min-h-[320px] overflow-auto rounded-lg [overflow-anchor:none]"
@@ -641,7 +646,7 @@ export default function ScalpPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
+                    {paged.shown.map((r) => (
                       <Row
                         key={r.symbol}
                         order={cols.order}
@@ -658,6 +663,7 @@ export default function ScalpPage() {
               </div>
             )}
             </div>
+            <Pager p={paged} className="mt-2" />
             <p className="mt-2 text-[11px] text-slate-500" aria-live="polite">
               {rows.length} stock{rows.length === 1 ? "" : "s"} shown
               {holdOrder ? " · order held while you point at the list; it re-sorts when you move away" : ""}

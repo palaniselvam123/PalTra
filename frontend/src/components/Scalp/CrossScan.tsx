@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 
@@ -152,6 +153,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
     onStatus?.({ when: data?.finished_at ?? data?.as_of ?? null, running: !!data?.running });
   }, [onStatus, data?.finished_at, data?.as_of, data?.running]);
 
+  const paged = usePaged(rows, "scalp.cross.pageSize");
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -239,7 +241,8 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
                 : `Nothing is scanned until you press Scan now. A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={paged.anchor}>
+          <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
@@ -284,11 +287,12 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {paged.shown.map((r) => (
                 <Row key={r.symbol} order={cols.order} row={r} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
+          <Pager p={paged} className="mt-2" />
         </div>
       )}
     </section>

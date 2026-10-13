@@ -16,6 +16,7 @@ import {
 import { saveFile } from "@/lib/chartTable";
 import { pdfText } from "@/lib/backtestPdf";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { Pager, usePaged } from "@/components/ui/pagination";
 
 const POLL_MS = 3_000;
 
@@ -275,6 +276,7 @@ export function ScanHistory() {
   );
   const cols = run ? columns(run.kind, !!run.check) : [];
   const { sorted, sort, onSort } = useSort<Merged, string>(shown, (r, k) => cols.find((c) => c.id === k)?.get(r) ?? null);
+  const paged = usePaged(sorted, "scalp.history.pageSize");
 
   const fileBase = run ? `${run.kind === "cross" ? "cross-scan" : "trend-quality"}-${run.day}-${clock(run.as_of).replace(":", "")}` : "scan";
 
@@ -464,7 +466,8 @@ export function ScanHistory() {
             </select>
             <span>{sorted.length} shown</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" ref={paged.anchor}>
+            <Pager p={paged} className="mb-2" />
             <table className="w-full text-sm">
               <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
                 <tr>
@@ -474,7 +477,7 @@ export function ScanHistory() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r) => (
+                {paged.shown.map((r) => (
                   <tr key={r.symbol} className="border-t border-slate-800/60">
                     {cols.map((c) => {
                       const v = c.get(r);
@@ -496,6 +499,7 @@ export function ScanHistory() {
                 ))}
               </tbody>
             </table>
+            <Pager p={paged} className="mt-2" />
           </div>
         </div>
       )}
