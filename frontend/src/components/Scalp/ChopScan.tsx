@@ -9,6 +9,8 @@ import { api } from "@/lib/api";
 import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
+import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
@@ -25,10 +27,14 @@ type Props = {
   onArm: (symbol: string) => void;
   /** Scans are paused from the top of the Scalp page. */
   paused?: boolean;
+  /** Tells the page's tab bar when this scan last ran. */
+  onStatus?: OnScanStatus;
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
 type SortKey = "symbol" | "score" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type Col = SortKey | "sizes" | "arm";
+const COLUMNS: readonly Col[] = ["symbol", "score", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -69,7 +75,8 @@ function shares(v: number | null | undefined): string {
  * Choppy. Information only: it places no order, and Arm only puts a stock on a
  * bot's Trade list.
  */
-export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
+export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Props) {
+  const cols = useColumnOrder<Col>("scalp.cols.trend", COLUMNS);
   const [data, setData] = useState<ChopScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
@@ -302,6 +309,10 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   });
   const label = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA";
 
+  useEffect(() => {
+    onStatus?.({ when: data?.finished_at ?? data?.as_of ?? null, running: !!data?.running });
+  }, [onStatus, data?.finished_at, data?.as_of, data?.running]);
+
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -477,28 +488,67 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
         </p>
       ) : (
         <div className="overflow-x-auto">
+          <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
-                <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
-                <SortTh label="Score" k="score" sort={sort} onSort={onSort} text />
-                <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" />
-                <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" />
-                <th className="px-2 pb-2 text-left font-medium" title="Today's SMA crosses on each candle size (— = not enough candles yet)">
-                  Crosses by size
-                </th>
-                <SortTh label="Crosses today" k="crosses" sort={sort} onSort={onSort} num />
-                <SortTh label="Last cross (min)" k="since" sort={sort} onSort={onSort} num title="Minutes since the start of the last cross candle" />
-                <SortTh label="Avg gap (min)" k="avgGap" sort={sort} onSort={onSort} num title="Average time between today's crosses" />
-                <SortTh label="Avg move %" k="avgMove" sort={sort} onSort={onSort} num title="Average absolute close-to-close move between consecutive crosses" />
-                <SortTh label="Speed" k="speed" sort={sort} onSort={onSort} num title="Signed % per minute over the last 10 minutes (same reader as the Movers page)" />
-                <SortTh label="Volume" k="volume" sort={sort} onSort={onSort} num title="Shares traded today so far" />
-                <th className="px-1 pb-2 text-right font-medium">Arm</th>
+                {inOrder(cols.order, {
+                  symbol: <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
+                  score: <SortTh label="Score" k="score" sort={sort} onSort={onSort} text drag={cols.dragProps("score")} />,
+                  trend: (
+                    <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" drag={cols.dragProps("trend")} />
+                  ),
+                  dayMove: <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" drag={cols.dragProps("dayMove")} />,
+                  sizes: (
+                    <th
+                      {...cols.dragProps("sizes")}
+                      className={clsx("px-2 pb-2 text-left font-medium", cols.dragProps("sizes").className)}
+                      title="Today's SMA crosses on each candle size (— = not enough candles yet)"
+                    >
+                      Crosses by size
+                    </th>
+                  ),
+                  crosses: <SortTh label="Crosses today" k="crosses" sort={sort} onSort={onSort} num drag={cols.dragProps("crosses")} />,
+                  since: (
+                    <SortTh label="Last cross (min)" k="since" sort={sort} onSort={onSort} num title="Minutes since the start of the last cross candle" drag={cols.dragProps("since")} />
+                  ),
+                  avgGap: (
+                    <SortTh label="Avg gap (min)" k="avgGap" sort={sort} onSort={onSort} num title="Average time between today's crosses" drag={cols.dragProps("avgGap")} />
+                  ),
+                  avgMove: (
+                    <SortTh
+                      label="Avg move %"
+                      k="avgMove"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="Average absolute close-to-close move between consecutive crosses"
+                      drag={cols.dragProps("avgMove")}
+                    />
+                  ),
+                  speed: (
+                    <SortTh
+                      label="Speed"
+                      k="speed"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="Signed % per minute over the last 10 minutes (same reader as the Movers page)"
+                      drag={cols.dragProps("speed")}
+                    />
+                  ),
+                  volume: <SortTh label="Volume" k="volume" sort={sort} onSort={onSort} num title="Shares traded today so far" drag={cols.dragProps("volume")} />,
+                  arm: (
+                    <th {...cols.dragProps("arm")} className={clsx("px-1 pb-2 text-right font-medium", cols.dragProps("arm").className)}>
+                      Arm
+                    </th>
+                  ),
+                })}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <Row key={r.symbol} row={r} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -508,88 +558,126 @@ export function ChopScan({ armed, arming, onArm, paused = false }: Props) {
   );
 }
 
-function Row({ row: r, armedOn, arming, onArm }: { row: ChopScanRow; armedOn: string[]; arming: boolean; onArm: () => void }) {
+function Row({
+  order,
+  row: r,
+  armedOn,
+  arming,
+  onArm,
+}: {
+  order: readonly Col[];
+  row: ChopScanRow;
+  armedOn: string[];
+  arming: boolean;
+  onArm: () => void;
+}) {
   return (
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
-      <td className="py-1.5 font-semibold text-slate-100">{r.symbol}</td>
-      <td className="py-1.5">
-        <span
-          className={clsx("rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset", SCORE_CLASS[r.score])}
-          title={
-            r.score === "TRENDING"
-              ? "Trending — few crosses, long run since the last one"
-              : r.score === "CHOPPY"
-                ? "Choppy — many crosses, short gaps between them"
-                : "Mixed — neither trending nor obviously choppy"
-          }
-        >
-          {SCORE_LABEL[r.score]}
-          {r.last_cross_direction === "BULLISH" ? " ↑" : r.last_cross_direction === "BEARISH" ? " ↓" : ""}
-        </span>
-        {r.quiet_runner && (
-          <span
-            className="ml-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-500/40"
-            title={`Quiet runner — had a cross earlier today and has been silent since. Possible strong ${
-              r.last_cross_direction === "BULLISH" ? "bullish" : r.last_cross_direction === "BEARISH" ? "bearish" : "trend"
-            }.`}
-          >
-            🔔 Quiet {r.minutes_since_last_cross == null ? "" : `${Math.max(0, Math.round(r.minutes_since_last_cross))}m`}
-          </span>
-        )}
-      </td>
-      <td className="py-1.5">
-        <TrendChip row={r} />
-      </td>
-      <td className="py-1.5 text-right tabular-nums">
-        {r.day_move_pct == null ? (
-          "—"
-        ) : (
-          <span className={r.day_move_pct >= 0 ? "text-profit" : "text-loss"}>
-            {r.day_move_pct >= 0 ? "+" : ""}
-            {r.day_move_pct.toFixed(2)}%
-          </span>
-        )}
-      </td>
-      <td className="py-1.5">
-        <CrossSizes row={r} />
-      </td>
-      <td className="py-1.5 text-right tabular-nums">{r.crosses_today}</td>
-      <td className="py-1.5 text-right tabular-nums">{r.minutes_since_last_cross == null ? "—" : Math.max(0, Math.round(r.minutes_since_last_cross))}</td>
-      <td className="py-1.5 text-right tabular-nums text-slate-400">{num(r.avg_minutes_between, 1)}</td>
-      <td className="py-1.5 text-right tabular-nums text-slate-400">{r.avg_move_pct == null ? "—" : `${r.avg_move_pct.toFixed(2)}%`}</td>
-      <td className="py-1.5 text-right tabular-nums">
-        {r.speed_pct_per_min == null ? (
-          <span className="text-slate-600" title="Not enough candles to say">—</span>
-        ) : (
-          <span
-            className={r.speed_pct_per_min >= 0 ? "text-profit" : "text-loss"}
-            title={`${r.move_pct != null ? `${r.move_pct >= 0 ? "+" : ""}${r.move_pct.toFixed(2)}% ` : ""}over the last ${r.window_min ?? 10} minutes`}
-          >
-            {r.speed_pct_per_min >= 0 ? "+" : ""}
-            {r.speed_pct_per_min.toFixed(3)}
-          </span>
-        )}
-      </td>
-      <td className="py-1.5 text-right tabular-nums text-slate-300">{shares(r.volume)}</td>
-      <td className="py-1.5 text-right">
-        <span className="inline-flex items-center justify-end gap-1.5">
-          {armedOn.length ? (
-            <span className="text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
-              {armedOn.join(" · ")}
+      {inOrder(order, {
+        symbol: (
+          <td className="py-1.5 font-semibold text-slate-100">{r.symbol}</td>
+        ),
+        score: (
+          <td className="py-1.5">
+            <span
+              className={clsx("rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset", SCORE_CLASS[r.score])}
+              title={
+                r.score === "TRENDING"
+                  ? "Trending — few crosses, long run since the last one"
+                  : r.score === "CHOPPY"
+                    ? "Choppy — many crosses, short gaps between them"
+                    : "Mixed — neither trending nor obviously choppy"
+              }
+            >
+              {SCORE_LABEL[r.score]}
+              {r.last_cross_direction === "BULLISH" ? " ↑" : r.last_cross_direction === "BEARISH" ? " ↓" : ""}
             </span>
-          ) : null}
-          <button
-            type="button"
-            disabled={arming}
-            onClick={onArm}
-            aria-label={`Arm ${r.symbol} on a bot`}
-            title="Arm on a bot (asks which)"
-            className="min-h-9 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
-          >
-            {arming ? "…" : "Arm"}
-          </button>
-        </span>
-      </td>
+            {r.quiet_runner && (
+              <span
+                className="ml-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-500/40"
+                title={`Quiet runner — had a cross earlier today and has been silent since. Possible strong ${
+                  r.last_cross_direction === "BULLISH" ? "bullish" : r.last_cross_direction === "BEARISH" ? "bearish" : "trend"
+                }.`}
+              >
+                🔔 Quiet {r.minutes_since_last_cross == null ? "" : `${Math.max(0, Math.round(r.minutes_since_last_cross))}m`}
+              </span>
+            )}
+          </td>
+        ),
+        trend: (
+          <td className="py-1.5">
+            <TrendChip row={r} />
+          </td>
+        ),
+        dayMove: (
+          <td className="py-1.5 text-right tabular-nums">
+            {r.day_move_pct == null ? (
+              "—"
+            ) : (
+              <span className={r.day_move_pct >= 0 ? "text-profit" : "text-loss"}>
+                {r.day_move_pct >= 0 ? "+" : ""}
+                {r.day_move_pct.toFixed(2)}%
+              </span>
+            )}
+          </td>
+        ),
+        sizes: (
+          <td className="py-1.5">
+            <CrossSizes row={r} />
+          </td>
+        ),
+        crosses: (
+          <td className="py-1.5 text-right tabular-nums">{r.crosses_today}</td>
+        ),
+        since: (
+          <td className="py-1.5 text-right tabular-nums">{r.minutes_since_last_cross == null ? "—" : Math.max(0, Math.round(r.minutes_since_last_cross))}</td>
+        ),
+        avgGap: (
+          <td className="py-1.5 text-right tabular-nums text-slate-400">{num(r.avg_minutes_between, 1)}</td>
+        ),
+        avgMove: (
+          <td className="py-1.5 text-right tabular-nums text-slate-400">{r.avg_move_pct == null ? "—" : `${r.avg_move_pct.toFixed(2)}%`}</td>
+        ),
+        speed: (
+          <td className="py-1.5 text-right tabular-nums">
+            {r.speed_pct_per_min == null ? (
+              <span className="text-slate-600" title="Not enough candles to say">—</span>
+            ) : (
+              <span
+                className={r.speed_pct_per_min >= 0 ? "text-profit" : "text-loss"}
+                title={`${r.move_pct != null ? `${r.move_pct >= 0 ? "+" : ""}${r.move_pct.toFixed(2)}% ` : ""}over the last ${r.window_min ?? 10} minutes`}
+              >
+                {r.speed_pct_per_min >= 0 ? "+" : ""}
+                {r.speed_pct_per_min.toFixed(3)}
+              </span>
+            )}
+          </td>
+        ),
+        volume: (
+          <td className="py-1.5 text-right tabular-nums text-slate-300">{shares(r.volume)}</td>
+        ),
+        arm: (
+          <td className="py-1.5 text-right">
+            <span className="inline-flex items-center justify-end gap-1.5">
+              {armedOn.length ? (
+                <span className="text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
+                  {armedOn.join(" · ")}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                disabled={arming}
+                onClick={onArm}
+                aria-label={`Arm ${r.symbol} on a bot`}
+                title="Arm on a bot (asks which)"
+                className="min-h-9 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
+              >
+                {arming ? "…" : "Arm"}
+              </button>
+            </span>
+          </td>
+        ),
+      })}
     </tr>
   );
 }
