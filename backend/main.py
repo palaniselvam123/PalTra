@@ -18,7 +18,7 @@ import io
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -28,6 +28,8 @@ from candle_history import HistoryError, fetch_frame, load_history
 import chop_auto
 import chop_scan
 import groww_pressure
+import scan_accuracy
+import scan_history
 import scan_worker
 import server_role
 import join_trend
@@ -83,6 +85,27 @@ cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
+scan_checker = scan_accuracy.AccuracyChecker()
+
+
+def _keep_scan(kind: str):
+    """Save each finished pass to the scan history (off the event loop). Never raises."""
+
+    def keep(snapshot: dict, meta: dict) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(asyncio.to_thread(scan_history.save, kind, snapshot, meta))
+        _history_tasks.add(task)
+        task.add_done_callback(_history_tasks.discard)
+
+    return keep
+
+
+_history_tasks: set = set()
+cross_scanner.on_done = _keep_scan("cross")
+chop_scanner.on_done = _keep_scan("chop")
 #: One replay player per SMA bot (1-4), so all four bots can replay at once
 #: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
 replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
@@ -158,6 +181,7 @@ async def announce_shutdown_all() -> None:
 def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
+    scan_checker.stop("Stopped: the app is shutting down.")
     scan_worker.shutdown()
     engine.stop()
     research_engine.stop()
@@ -1440,6 +1464,7 @@ async def scans_pause(body: ScanPause):
     if _scans_paused:
         cross_scanner.stop("Stopped: scans are paused.")
         chop_scanner.stop("Stopped: scans are paused.")
+        scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
 
@@ -1468,6 +1493,7 @@ async def cross_scan_start(body: CrossScanStart):
             sma_slow=int(cfg.sma_slow),
             force=body.force,
             job=_scan_job(scan_worker.cross_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes),
+            meta={"stocks": len(body.symbols), "source": "manual"},
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1516,6 +1542,7 @@ def _start_chop(
     price_min: float,
     price_max: float,
     force: bool,
+    source: str = "manual",
 ):
     cfg = engine.load_config()
     return chop_scanner.start(
@@ -1531,6 +1558,13 @@ def _start_chop(
         price_min=price_min,
         price_max=price_max,
         job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min,)),
+        meta={
+            "stocks": len(symbols),
+            "source": source,
+            "alert_on_quiet": alert_on_quiet,
+            "price_min": price_min,
+            "price_max": price_max,
+        },
     )
 
 
@@ -1601,6 +1635,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         price_min=s.price_min,
         price_max=s.price_max,
         force=True,
+        source="auto",
     )
 
 
@@ -1627,6 +1662,64 @@ async def chop_scan_auto(body: ChopAutoUpdate):
 @app.get("/api/chop-scan")
 async def chop_scan_status():
     return {**chop_scanner.snapshot(), "paused": _scans_paused, "auto": chop_autos.snapshot()}
+
+
+# ---- scan history: every finished pass, kept (scan_history.py), and how it turned out (scan_accuracy.py)
+
+
+@app.get("/api/scan-history")
+async def scan_history_list(
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    kind: Literal["cross", "chop"] | None = None,
+):
+    """The days with saved scans, and one day's runs (the latest day when none is given). Read-only."""
+    days = await asyncio.to_thread(scan_history.days)
+    pick = day or (days[0]["day"] if days else None)
+    runs = await asyncio.to_thread(scan_history.runs, pick, kind) if pick else []
+    return {"days": days, "day": pick, "runs": runs, "keep_days": scan_history.keep_days(), "checking": scan_checker.snapshot()}
+
+
+@app.get("/api/scan-history/{run_id}")
+async def scan_history_run(run_id: int):
+    """One saved scan with every row as the page got it, and its accuracy check when one was made."""
+    run = await asyncio.to_thread(scan_history.get, run_id)
+    if run is None:
+        raise HTTPException(404, "No such saved scan.")
+    run["can_check"] = scan_accuracy.day_closed(run["as_of"])
+    run["checking"] = scan_checker.snapshot()
+    return run
+
+
+def _check_job():
+    if not scan_worker.enabled():
+        return None
+
+    async def job(symbol, start, end, *args):
+        return await scan_worker.run(engine.broker, scan_worker.check_job, symbol, start, end, *args)
+
+    return job
+
+
+@app.post("/api/scan-history/{run_id}/check")
+async def scan_history_check(run_id: int):
+    """Download that day's candles again and measure what each stock did after the scan. Read-only."""
+    _refuse_when_paused()
+    if not server_role.is_scanner() and market_is_open():
+        raise HTTPException(409, "During market hours the check runs only on the scanner server, so it never shares the bots' Groww limit.")
+    run = await asyncio.to_thread(scan_history.get, run_id)
+    if run is None:
+        raise HTTPException(404, "No such saved scan.")
+    try:
+        return scan_checker.start(
+            run,
+            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            save=scan_history.save_check,
+            job=_check_job(),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/stall")

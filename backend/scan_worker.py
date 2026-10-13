@@ -125,6 +125,12 @@ def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_
     return analyze(_frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min)
 
 
+def check_job(token, symbol, start, end, kind, row, as_of, minutes, sma_fast, sma_slow):
+    from scan_accuracy import evaluate
+
+    return evaluate(kind, row, _frame(token, symbol, start, end), as_of, minutes, sma_fast, sma_slow)
+
+
 # ---- main-process side ---------------------------------------------------------------------
 
 _pool: ProcessPoolExecutor | None = None

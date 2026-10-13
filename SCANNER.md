@@ -37,6 +37,14 @@ paltra-scanner.fly.dev  (PALTRA_ROLE=scanner)         paltra.fly.dev  (the desk)
 a link to the scanner on its Scalp page. It stays **on** until you set it, so
 turn it off only once the scanner is working.
 
+## Scan history
+
+Every finished Cross scan and Trend quality pass is saved on the scanner's volume
+(`scan_history.db`, 90 days) and shown on the Scalp page's **History** tab: pick a
+day and a time to see that scan's table, download it as CSV or PDF, and after
+15:30 press **Check accuracy** to see what each stock did after the scan (the
+scanner downloads that day's candles again with its own Groww key).
+
 ## Setup (one time, outside market hours)
 
 1. **Create the app and its volume**, from a checkout of `main`:
