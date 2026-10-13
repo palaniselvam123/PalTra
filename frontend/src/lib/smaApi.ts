@@ -220,6 +220,9 @@ export type ChopScanRow = {
   score: ChopScore;
   /** Had crosses earlier today and has been quiet for ≥ quiet_min minutes — possible strong trend forming. */
   quiet_runner: boolean;
+  /** When a scan first read this stock as quiet today, and when its Telegram went (IST; older servers leave them out). */
+  first_quiet_at?: string | null;
+  alerted_at?: string | null;
   ltp: number | null;
   candle_ts: number;
   volume?: number | null;

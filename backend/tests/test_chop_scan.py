@@ -323,3 +323,38 @@ def test_quiet_alert_keeps_only_stocks_in_the_price_range(monkeypatch):
     asyncio.run(go())
     assert len(sent) == 1 and "MID" in sent[0] and "CHEAP" not in sent[0] and "DEAR" not in sent[0]
     assert not chop_scan._already_alerted("CHEAP", _at(12, 0))
+
+
+def test_rows_keep_when_each_stock_was_first_quiet_and_alerted_today(monkeypatch):
+    """The table's "First alert": the first scan that read a stock as quiet, and when its Telegram went."""
+    import asyncio
+
+    monkeypatch.setattr(chop_scan, "_ALERTED_TODAY", {})
+    monkeypatch.setattr(chop_scan, "_FIRST_QUIET", {})
+    monkeypatch.setattr(chop_scan, "market_is_open", lambda now: True)
+    quiet = {"EARLY"}
+
+    async def job(symbol, start, end):
+        return chop_scan.ChopRow(
+            symbol=symbol, minutes=5, crosses_today=1, minutes_since_last_cross=90.0, avg_minutes_between=None,
+            avg_move_pct=None, last_cross_direction="BULLISH", score=chop_scan.TRENDING,
+            quiet_runner=symbol in quiet, ltp=100.0, candle_ts=0,
+        )
+
+    sent: list[str] = []
+
+    async def go(when):
+        scanner = chop_scan.ChopScanner()
+        scanner.start(["EARLY", "LATE"], None, job=job, quiet_min=60, alert_on_quiet=True, alert_cb=sent.append, force=True, now=when)
+        await scanner._task
+        return {r["symbol"]: r for r in scanner.snapshot()["rows"]}
+
+    first = asyncio.run(go(_at(11, 0)))
+    assert first["EARLY"]["first_quiet_at"].startswith(f"{DAY.isoformat()}T11:00")
+    assert first["EARLY"]["alerted_at"].startswith(f"{DAY.isoformat()}T11:00")
+    assert first["LATE"]["first_quiet_at"] is None and first["LATE"]["alerted_at"] is None
+    quiet.add("LATE")
+    second = asyncio.run(go(_at(11, 30)))
+    assert second["EARLY"]["first_quiet_at"].startswith(f"{DAY.isoformat()}T11:00")  # kept, not moved to 11:30
+    assert second["LATE"]["first_quiet_at"].startswith(f"{DAY.isoformat()}T11:30")
+    assert second["LATE"]["alerted_at"].startswith(f"{DAY.isoformat()}T11:30")

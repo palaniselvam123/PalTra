@@ -70,13 +70,28 @@ CHOPPY = "CHOPPY"
 # strong trend forming) and sends one Telegram per stock per day. Information
 # only: nothing in the strategy reads it; the person decides.
 QUIET_MIN_DEFAULT = 60
-# Keyed by IST date so a brand-new day sends the alert again.
-_ALERTED_TODAY: dict[dt.date, set[str]] = {}
+# Keyed by IST date so a brand-new day sends the alert again: stock -> when its Telegram went (IST).
+_ALERTED_TODAY: dict[dt.date, dict[str, str]] = {}
+# Stock -> when a scan first read it as a quiet runner today (IST), for the table's "First alert".
+_FIRST_QUIET: dict[dt.date, dict[str, str]] = {}
+
+
+def _today_only(book: dict[dt.date, dict[str, str]], now: dt.datetime) -> dict[str, str]:
+    today = now.astimezone(IST).date()
+    for day in list(book):
+        if day != today:
+            book.pop(day, None)
+    return book.setdefault(today, {})
+
+
+def _note_first_quiet(symbol: str, now: dt.datetime) -> str:
+    """The first time today this stock read as quiet (kept for the rest of the day)."""
+    return _today_only(_FIRST_QUIET, now).setdefault(symbol, now.astimezone(IST).isoformat(timespec="seconds"))
 
 
 def _already_alerted(symbol: str, now: dt.datetime) -> bool:
     today = now.astimezone(IST).date()
-    _ALERTED_TODAY.setdefault(today, set())
+    _ALERTED_TODAY.setdefault(today, {})
     # Keep only today's set, so the dict stays bounded across days.
     for day in list(_ALERTED_TODAY):
         if day != today:
@@ -86,7 +101,7 @@ def _already_alerted(symbol: str, now: dt.datetime) -> bool:
 
 def _mark_alerted(symbol: str, now: dt.datetime) -> None:
     today = now.astimezone(IST).date()
-    _ALERTED_TODAY.setdefault(today, set()).add(symbol)
+    _ALERTED_TODAY.setdefault(today, {}).setdefault(symbol, now.astimezone(IST).isoformat(timespec="seconds"))
 
 
 def in_price_range(ltp: float | None, price_min: float = 0.0, price_max: float = 0.0) -> bool:
@@ -173,6 +188,9 @@ class ChopRow:
     # Start of the last cross candle today per size (epoch seconds) and its direction; None without one.
     last_cross_ts_by_minutes: dict = field(default_factory=dict)
     last_cross_side_by_minutes: dict = field(default_factory=dict)
+    # When a scan first read this stock as a quiet runner today, and when its Telegram went (IST).
+    first_quiet_at: str | None = None
+    alerted_at: str | None = None
 
     def as_dict(self) -> dict:
         out = asdict(self)
@@ -483,7 +501,6 @@ class ChopScanner:
                 -(r.minutes_since_last_cross or 0.0) if r.score == TRENDING else -r.crosses_today if r.score == CHOPPY else 0,
             )
         )
-        self.status.rows = [r.as_dict() for r in rows]
         self.status.as_of = now.isoformat(timespec="seconds")
         self.status.market_open = market_is_open(now)
         # One alert per quiet runner per day. Nothing is traded here.
@@ -507,6 +524,15 @@ class ChopScanner:
                 else:
                     for row in fresh:
                         _mark_alerted(row.symbol, now)
+        # First time today each stock read as quiet (market hours only), and when its Telegram went.
+        first_quiet = _today_only(_FIRST_QUIET, now)
+        alerted = _today_only(_ALERTED_TODAY, now)
+        for row in rows:
+            if row.quiet_runner and market_is_open(now):
+                _note_first_quiet(row.symbol, now)
+            row.first_quiet_at = first_quiet.get(row.symbol)
+            row.alerted_at = alerted.get(row.symbol)
+        self.status.rows = [r.as_dict() for r in rows]
         if ok == 0 and errors:
             self.status.error = max(errors, key=errors.get)
             self._key = None
