@@ -8,18 +8,47 @@ import { Search, X } from "lucide-react";
 /** How long a typed or slid number waits before it is applied (so a refetching filter is not hit on every tick). */
 const COMMIT_MS = 350;
 
+/** The label above every filter field: one height, so the boxes below all start on the same line. */
+const LABEL = "mb-1 block h-4 whitespace-nowrap text-[11px] font-medium leading-4 text-slate-400";
+
 /**
- * The toolbar that holds the filter cards above a table. Lays its children out
- * as a grid of equal-width cells on narrow screens and a wrapping flex row on
- * wide ones, so the labels and inputs line up. Pass a `status` for the "No scan
- * yet" / "Scanning…" label; it sits on its own row below the filters so it
- * never fights for space.
+ * The panel that holds the filter fields above a table. Fields are aligned on
+ * their tops (label, then a 36px box), so a field with a slider under it never
+ * pushes its neighbours' boxes down. Pass `FilterGroup`s to split the panel into
+ * titled rows, or plain fields for a single row. A `status` ("Last scan …",
+ * "Scanning…") sits under the panel.
  */
 export function FilterRow({ children, status }: { children: ReactNode; status?: ReactNode }) {
   return (
     <div className="mb-3">
-      <div className="flex flex-wrap items-end gap-2.5">{children}</div>
+      <div className="rounded-lg border border-border bg-surface2/60 p-3">
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-2.5">{children}</div>
+      </div>
       {status ? <div className="mt-1.5 text-[11px] text-slate-500">{status}</div> : null}
+    </div>
+  );
+}
+
+/** One titled row of a FilterRow panel (e.g. "View", "Alerts"); rows are split by a thin line. */
+export function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div
+      role="group"
+      aria-label={title}
+      className="flex w-full min-w-0 flex-col gap-2 border-t border-border pt-2.5 first:border-t-0 first:pt-0 md:flex-row md:items-start md:gap-3"
+    >
+      <span className="block w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:pt-[26px]">{title}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-start gap-x-3 gap-y-2.5">{children}</div>
+    </div>
+  );
+}
+
+/** A field that is not a single input (toggles, chips): the same label line, then a 36px row. */
+export function FilterField({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <div className={LABEL}>{label}</div>
+      <div className="flex min-h-9 flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }
@@ -123,7 +152,7 @@ export function NumberFilter({
   const shown = Number.isFinite(n) && draft.trim() !== "" ? Math.min(max, Math.max(min, n)) : value;
   return (
     <div className={className}>
-      <label htmlFor={id} className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">
+      <label htmlFor={id} className={LABEL}>
         {label}
       </label>
       <div className="flex min-h-9 items-stretch rounded-md border border-slate-700 bg-base focus-within:border-slate-500">
@@ -181,7 +210,7 @@ export function SelectFilter<T extends string | number>({
   const id = useId();
   return (
     <div className={className}>
-      <label htmlFor={id} className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">
+      <label htmlFor={id} className={LABEL}>
         {label}
       </label>
       <select
@@ -221,7 +250,7 @@ export function TextFilter({
   const id = useId();
   return (
     <div className={className}>
-      <label htmlFor={id} className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">
+      <label htmlFor={id} className={LABEL}>
         {label}
       </label>
       <div className="relative">
