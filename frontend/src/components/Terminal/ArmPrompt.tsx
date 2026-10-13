@@ -41,6 +41,7 @@ export function ArmPrompt({
   live = false,
   onArm,
   onClose,
+  io,
 }: {
   symbol: string;
   deskName?: string;
@@ -49,6 +50,11 @@ export function ArmPrompt({
   live?: boolean;
   onArm: (save: () => Promise<void>) => Promise<void>;
   onClose: () => void;
+  /** Where the stock's settings are read and saved; default this server's terminal (the scanner uses the desk link). */
+  io?: {
+    load: (target: ArmTarget, symbol: string) => Promise<StockConfig>;
+    save: (target: ArmTarget, symbol: string, body: Partial<SmaConfig>) => Promise<unknown>;
+  };
 }) {
   const [cfg, setCfg] = useState<StockConfig | null>(null);
   const [f, setF] = useState<Fields | null>(null);
@@ -61,7 +67,7 @@ export function ArmPrompt({
 
   useEffect(() => {
     let alive = true;
-    (target === undefined ? smaApi.stockConfig(symbol) : smaApi.stockConfigOn(target, symbol))
+    (target === undefined ? smaApi.stockConfig(symbol) : io ? io.load(target, symbol) : smaApi.stockConfigOn(target, symbol))
       .then((c) => {
         if (!alive) return;
         setCfg(c);
@@ -71,6 +77,8 @@ export function ArmPrompt({
     return () => {
       alive = false;
     };
+    // `io` is fixed for the life of the prompt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, target]);
 
   useEffect(() => {
@@ -125,6 +133,7 @@ export function ArmPrompt({
       await onArm(async () => {
         if (!Object.keys(body).length) return;
         if (target === undefined) await smaApi.saveStockConfig(symbol, body);
+        else if (io) await io.save(target, symbol, body);
         else await smaApi.saveStockConfigOn(target, symbol, body);
       });
       onClose();

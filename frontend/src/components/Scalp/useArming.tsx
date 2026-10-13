@@ -15,9 +15,9 @@ import { ArmPrompt } from "@/components/Terminal/ArmPrompt";
  *
  * Render `dialogs` once on the page. `priceOf` gives the prompt a price to show.
  *
- * On the scanner server (which never trades) the armed chips come from the desk's
- * read-only link, and Arm opens the desk's Scalp page in a new tab with `?arm=`,
- * where this same prompt runs against the real bots.
+ * On the scanner server (which never trades) the bots are the desk's: the armed chips,
+ * the prompt's settings and the arm itself go through the desk link, PAPER and LIVE.
+ * A LIVE bot is confirmed here first and the link refuses it without that confirmation.
  */
 export function useArming(priceOf?: (symbol: string) => number | null | undefined) {
   // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them.
@@ -60,13 +60,6 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
 
   // "Arm" asks which bot first; a LIVE bot is confirmed again before it is armed.
   const arm = (symbol: string, source?: string | null) => {
-    if (onScanner && role) {
-      const query = new URLSearchParams({ arm: symbol });
-      if (source) query.set("from", source);
-      window.open(`${role.desk_url}/scalp/?${query.toString()}`, "_blank", "noopener");
-      setArmNote(`Opened the main desk to arm ${symbol}. This scanner server never trades.`);
-      return;
-    }
     setArmNote(null);
     loadDesks();
     setArmFor({ symbol, source: source ?? null });
@@ -87,7 +80,11 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     setArmNote(null);
     try {
       await save();
-      await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
+      if (onScanner) {
+        await api.deskArm({ target: desk.target, symbol, source: source ?? null, confirm_live: desk.mode === "LIVE" });
+      } else {
+        await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
+      }
       setArmNote(
         `${symbol} is armed on ${desk.name}${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
       );
@@ -116,6 +113,15 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           price={priceOf?.(armAsk.symbol) ?? null}
           onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source)}
           onClose={() => setArmAsk(null)}
+          io={
+            onScanner
+              ? {
+                  load: (t, s) => api.deskStock(t, s),
+                  // Runs only after armNow's LIVE question was answered yes.
+                  save: (t, s, body) => api.deskSaveStock(t, s, body, armAsk.desk.mode === "LIVE"),
+                }
+              : undefined
+          }
         />
       ) : null}
     </>
