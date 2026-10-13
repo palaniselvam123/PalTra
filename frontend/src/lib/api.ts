@@ -335,6 +335,18 @@ export type ScanOptions = {
 
 export type ScanChannel = { provider: string; enabled: boolean; configured: boolean };
 
+/** GET /api/role: "scanner" never sends orders; Arm opens the desk at desk_url. */
+export type ServerRole = {
+  role: "desk" | "scanner";
+  /** False on a desk with SCANS=off: its Scalp scans run on the scanner server. */
+  scans_enabled: boolean;
+  desk_url: string;
+  scanner_url: string | null;
+  link: boolean;
+};
+
+export type DeskArmedBot = { bot: number; name: string; mode: "PAPER" | "LIVE"; armed: string[] };
+
 export type ScanStatus = {
   running: boolean;
   timeframe: string;
@@ -905,6 +917,11 @@ export const api = {
   scalpPauseStatus: () => request<{ paused: boolean }>("/api/scalp/pause"),
   /** The F&O stock names (for scans on the SMA terminal). `error` says why the list is empty. */
   scalpUniverse: () => request<{ symbols: string[]; error: string | null }>("/api/scalp/universe"),
+  /** Which server this is: the trading desk, or the scan-only scanner server. */
+  serverRole: () => request<ServerRole>("/api/role"),
+  /** Scanner server only: the desk's Trade lists (read-only link). */
+  deskArmed: () =>
+    request<{ bots: DeskArmedBot[]; research: string[] | null; error: string | null }>("/api/link/desk-armed"),
   scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),

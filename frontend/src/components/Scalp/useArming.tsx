@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { smaApi, type BotSummary } from "@/lib/smaApi";
+import { api } from "@/lib/api";
+import { useServerRole } from "@/hooks/useServerRole";
 import { ArmPicker, armDesks, type ArmDesk } from "@/components/Scalp/ArmPicker";
 import { ArmPrompt } from "@/components/Terminal/ArmPrompt";
 
@@ -12,6 +14,10 @@ import { ArmPrompt } from "@/components/Terminal/ArmPrompt";
  * stock on that bot's Trade list; it orders on the bot's next SMA cross, not now.
  *
  * Render `dialogs` once on the page. `priceOf` gives the prompt a price to show.
+ *
+ * On the scanner server (which never trades) the armed chips come from the desk's
+ * read-only link, and Arm opens the desk's Scalp page in a new tab with `?arm=`,
+ * where this same prompt runs against the real bots.
  */
 export function useArming(priceOf?: (symbol: string) => number | null | undefined) {
   // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them.
@@ -23,13 +29,26 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   const [arming, setArming] = useState<string | null>(null);
   const [armNote, setArmNote] = useState<string | null>(null);
 
+  const role = useServerRole();
+  const onScanner = role?.role === "scanner";
+
   const loadDesks = useCallback(() => {
+    if (onScanner) {
+      api
+        .deskArmed()
+        .then((d) => {
+          setBots(d.bots.map((b) => ({ ...b, status: "", held: [], trades_today: 0, net_today: 0 })));
+          setResearchArmed(d.research);
+        })
+        .catch(() => {});
+      return;
+    }
     smaApi.bots().then(setBots).catch(() => {});
     smaApi
       .researchConfig()
       .then((c) => setResearchArmed(c.trade_symbols ?? []))
       .catch(() => setResearchArmed(null));
-  }, []);
+  }, [onScanner]);
 
   const desks = useMemo(() => armDesks(bots, researchArmed), [bots, researchArmed]);
   /** Stock → the desks it is armed on ("Bot 1", "Research", …). */
@@ -41,6 +60,13 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
 
   // "Arm" asks which bot first; a LIVE bot is confirmed again before it is armed.
   const arm = (symbol: string, source?: string | null) => {
+    if (onScanner && role) {
+      const query = new URLSearchParams({ arm: symbol });
+      if (source) query.set("from", source);
+      window.open(`${role.desk_url}/scalp/?${query.toString()}`, "_blank", "noopener");
+      setArmNote(`Opened the main desk to arm ${symbol}. This scanner server never trades.`);
+      return;
+    }
     setArmNote(null);
     loadDesks();
     setArmFor({ symbol, source: source ?? null });

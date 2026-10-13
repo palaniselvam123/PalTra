@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+import server_role
 from config import get_settings
 from groww_pressure import run_bot_call
 from tick_sizes import round_price
@@ -725,6 +726,7 @@ class GrowwClient:
             return
         if not order_id:
             raise RuntimeError("No exchange stop id to modify")
+        server_role.refuse_orders("stop modify")
         buffer = get_settings().market_protection_pct / 100.0
         if side == "SELL":
             limit = round_price(symbol, trigger * (1 - buffer))
@@ -755,6 +757,7 @@ class GrowwClient:
                 return
             order.status = "CANCELLED"
             return
+        server_role.refuse_orders("order cancel")
         sdk = self._require_sdk()
         await run_bot_call(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
 
@@ -894,6 +897,7 @@ class GrowwClient:
         price: float,
         trigger: float | None,
     ) -> OrderAck:
+        server_role.refuse_orders("Groww order")
         sdk = self._require_sdk()
 
         def _place():

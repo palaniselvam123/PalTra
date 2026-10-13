@@ -24,6 +24,7 @@ from app.api import (
     routes_reports,
     routes_scanner,
     routes_movers,
+    routes_link,
     routes_scalp,
     routes_research,
     routes_scanner_engine,
@@ -271,17 +272,25 @@ async def lifespan(app: FastAPI):
     from app.services.active_stocks import active_scanner
     from app.services.groww_funds import groww_client as _groww_session
 
-    active_scanner.start_background(_groww_session)
+    import server_role
+
+    if server_role.scans_enabled():
+        active_scanner.start_background(_groww_session)
+    else:
+        # SCANS=off: the Scalp scans run on the scanner server; this desk keeps them paused.
+        active_scanner.paused = True
     await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
     yield
     if scanner_worker.running:
         await scanner_worker.stop()
-    try:
-        from sma_terminal_main import announce_shutdown_all
+    # The scanner server has no bots to report: a scanner deploy must not ring the owner.
+    if not server_role.is_scanner():
+        try:
+            from sma_terminal_main import announce_shutdown_all
 
-        await announce_shutdown_all()
-    except Exception:  # noqa: BLE001
-        pass
+            await announce_shutdown_all()
+        except Exception:  # noqa: BLE001
+            pass
     try:
         from app.sma_host import stop_terminal
 
@@ -322,6 +331,7 @@ app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
+app.include_router(routes_link.router)
 app.include_router(routes_mcp.router)
 # Optional routers that are not in this repository. Skipping a missing module
 # keeps a run working.

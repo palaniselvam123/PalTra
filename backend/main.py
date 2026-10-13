@@ -28,6 +28,7 @@ from candle_history import HistoryError, fetch_frame, load_history
 import chop_scan
 import groww_pressure
 import scan_worker
+import server_role
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
@@ -905,6 +906,8 @@ async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
     if mode not in ("PAPER", "LIVE"):
         raise HTTPException(400, "mode must be PAPER or LIVE")
     if mode == "LIVE":
+        if server_role.is_scanner():
+            raise HTTPException(403, server_role.SCANNER_NO_ORDERS)
         if not body.confirm_live:
             raise HTTPException(
                 400,
@@ -1407,7 +1410,8 @@ class CrossScanStart(BaseModel):
 
 # Scalp page "Pause scans" (memory only: a restart resumes). Refuses new Cross / Trend quality
 # scans and stops a running one; the desk has its own switch for its Scalp work.
-_scans_paused = False
+# SCANS=off: this desk's scans moved to the scanner server, so they stay paused for good.
+_scans_paused = not server_role.scans_enabled()
 _PAUSED_TEXT = "Scans are paused. Resume them at the top of the Scalp page."
 
 
@@ -1417,13 +1421,15 @@ class ScanPause(BaseModel):
 
 @app.get("/api/scans/pause")
 async def scans_pause_status():
-    return {"paused": _scans_paused}
+    return {"paused": _scans_paused, "scans_off": not server_role.scans_enabled()}
 
 
 @app.put("/api/scans/pause")
 async def scans_pause(body: ScanPause):
     """Pause or resume the terminal's Scalp scans. Read-only: candles only, no order path."""
     global _scans_paused
+    if not body.paused and not server_role.scans_enabled():
+        raise HTTPException(409, server_role.SCANS_OFF_TEXT)
     _scans_paused = bool(body.paused)
     if _scans_paused:
         cross_scanner.stop("Stopped: scans are paused.")
@@ -1432,6 +1438,8 @@ async def scans_pause(body: ScanPause):
 
 
 def _refuse_when_paused() -> None:
+    if not server_role.scans_enabled():
+        raise HTTPException(409, server_role.SCANS_OFF_TEXT)
     if _scans_paused:
         raise HTTPException(409, _PAUSED_TEXT)
 
@@ -1702,6 +1710,24 @@ def _bot_summary(eng: StrategyEngine) -> dict:
         "trades_today": eng.trades_today,
         "net_today": float(kpis["net"]),
         "gross_today": float(kpis["actual_gross"]),
+    }
+
+
+def armed_lists() -> dict:
+    """Each bot's Trade list and the research desk's, for the scanner server's link (read-only)."""
+
+    def one(eng: StrategyEngine) -> dict:
+        cfg = eng.load_config()
+        return {
+            "bot": eng.bot_id,
+            "name": getattr(cfg, "bot_name", None) or f"Bot {eng.bot_id}",
+            "mode": (cfg.trading_mode or "PAPER").upper(),
+            "armed": trade_names(cfg),
+        }
+
+    return {
+        "bots": [one(engine), *(one(eng) for eng in bot_engines.values())],
+        "research": trade_names(research_engine.load_config()),
     }
 
 
