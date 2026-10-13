@@ -178,7 +178,7 @@ def test_pause_stops_the_monitor_the_most_active_scan_and_alerts(monkeypatch):
     monkeypatch.setattr(routes_scalp, "is_market_open", lambda: True)
     client = TestClient(app)
     try:
-        assert client.get("/api/scalp/pause").json() == {"paused": False}
+        assert client.get("/api/scalp/pause").json() == {"paused": False, "scans_off": False}
         assert client.post("/api/scalp/pause", json={"paused": True}).json() == {"paused": True}
         body = client.get("/api/scalp/monitor").json()
         assert body["paused"] is True and body["rows"] == [] and called == []

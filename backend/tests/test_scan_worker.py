@@ -143,7 +143,7 @@ def test_pause_refuses_new_scans_and_stops_a_running_one(tmp_path, monkeypatch):
     import main
 
     with TestClient(main.app) as client:
-        assert client.get("/api/scans/pause").json() == {"paused": False}
+        assert client.get("/api/scans/pause").json() == {"paused": False, "scans_off": False}
         assert client.put("/api/scans/pause", json={"paused": True}).json() == {"paused": True}
         for path in ("/api/cross-scan/start", "/api/chop-scan/start"):
             refused = client.post(path, json={"symbols": ["TCS"], "minutes": 5})
