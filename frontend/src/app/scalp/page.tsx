@@ -13,6 +13,7 @@ import { useArming } from "@/components/Scalp/useArming";
 import { useServerRole } from "@/hooks/useServerRole";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
+import { ScanHistory } from "@/components/Scalp/ScanHistory";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
@@ -63,6 +64,7 @@ const TABS = [
   { id: "trend", label: "Trend quality" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
+  { id: "history", label: "History" },
   { id: "alerts", label: "Alerts" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -334,6 +336,7 @@ export default function ScalpPage() {
     trend: trendStatus,
     active: activeStatus,
     backtest: null,
+    history: null,
     alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
   };
 
@@ -687,6 +690,7 @@ export default function ScalpPage() {
         <div hidden={tab !== "backtest"}>
           <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
         </div>
+        <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory />}</div>
         <div hidden={tab !== "alerts"}>
           <section className="rounded-xl border border-slate-800 bg-card p-4">
             <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
@@ -968,7 +972,7 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
               </span>
             ) : st?.when ? (
               <span className="text-[11px] font-normal tabular-nums text-slate-500">{shortTime(st.when)}</span>
-            ) : t.id !== "backtest" ? (
+            ) : t.id !== "backtest" && t.id !== "history" ? (
               <span className="text-[11px] font-normal text-slate-600">no scan yet</span>
             ) : null}
           </button>

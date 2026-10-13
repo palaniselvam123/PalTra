@@ -361,6 +361,9 @@ class ChopScanner:
         self._task: asyncio.Task | None = None
         self._key: tuple | None = None
         self._started_at = 0.0
+        # Called with (snapshot, meta) when a pass finishes with something read (scan_history).
+        self.on_done: Callable[[dict, dict], None] | None = None
+        self._meta: dict = {}
 
     def stop(self, reason: str) -> None:
         """Cancel a running pass (the Scalp page's Pause scans). The last finished rows stay."""
@@ -403,6 +406,7 @@ class ChopScanner:
         force: bool = False,
         now: dt.datetime | None = None,
         job: Job | None = None,
+        meta: dict | None = None,
         price_min: float = 0.0,
         price_max: float = 0.0,
     ) -> dict:
@@ -421,6 +425,7 @@ class ChopScanner:
         if time.monotonic() - self._started_at < MIN_RESCAN_SEC and self._key is not None:
             return self.snapshot()
         self._started_at = time.monotonic()
+        self._meta = dict(meta or {})
         self.status.running = True
         self.status.done = 0
         self.status.total = len(names)
@@ -541,3 +546,8 @@ class ChopScanner:
             self._key = key
         self.status.finished_at = dt.datetime.now(IST).isoformat(timespec="seconds")
         self.status.running = False
+        if self.on_done is not None and ok > 0:
+            try:
+                self.on_done(self.snapshot(), self._meta)
+            except Exception:  # noqa: BLE001
+                log.exception("could not hand the finished scan to history")

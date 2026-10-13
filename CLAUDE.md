@@ -393,6 +393,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`cross_scan.activity`, no `enrich()`, so no volume warnings): shares traded today
   (Groww's running total), shares in the last 10 minutes, and the signed price speed
   in % per minute over those 10 minutes. No order path: Arm only opens the arm prompt.
+- `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
+  finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
+  by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
+  price range, stocks, `source` manual/auto) and every row as gzip JSON in its own SQLite file
+  next to the SMA DB (`scan_history.db`, `SCAN_HISTORY_FILE`), `SCAN_HISTORY_DAYS` (default 90)
+  days. `GET /api/scan-history[?day=&kind=]`, `GET /api/scan-history/{id}`. The page shows any
+  past run's table and downloads it as CSV or PDF. **Accuracy check** (`backend/scan_accuracy.py`,
+  `POST /api/scan-history/{id}/check`, once the scan's day has closed): each stock's 1-minute
+  candles for that day are downloaded again (`scan_worker.check_job`) and `evaluate` reads, with
+  the scan's call (Cross scan: its side; Trend quality: the fast SMA's side on the scan's candle),
+  the move 15 / 30 / 60 minutes later and at the close, the best and worst move, and the next SMA
+  cross (crossed as predicted and within double the estimate; how long the trend held).
+  `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
+  cross / just crossed); saved with the run. On the desk it is refused in market hours (the
+  bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the

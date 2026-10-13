@@ -270,6 +270,109 @@ export type ChopScan = {
   auto?: ChopAuto;
 };
 
+/** One saved Cross scan / Trend quality pass (scan history), without its rows. */
+export type ScanKind = "cross" | "chop";
+export type ScanRun = {
+  id: number;
+  kind: ScanKind;
+  label: string;
+  day: string;
+  as_of: string;
+  finished_at: string | null;
+  minutes: CrossScanMinutes | null;
+  total: number | null;
+  failed: number | null;
+  row_count: number;
+  error: string | null;
+  meta: {
+    sma_fast?: number;
+    sma_slow?: number;
+    quiet_min?: number;
+    stocks?: number;
+    source?: "manual" | "auto";
+    alert_on_quiet?: boolean;
+    price_min?: number;
+    price_max?: number;
+  };
+  /** When its accuracy check was made (UTC), null when never. */
+  checked_at: string | null;
+};
+export type ScanCheckStatus = {
+  running: boolean;
+  run_id: number | null;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+};
+export type ScanHistory = {
+  days: { day: string; runs: number }[];
+  day: string | null;
+  runs: ScanRun[];
+  keep_days: number;
+  checking: ScanCheckStatus;
+};
+/** What one stock did after a saved scan, % with the scan's call (a fall is + for a bearish call). */
+export type ScanCheckRow = {
+  symbol: string;
+  side: "BULLISH" | "BEARISH" | null;
+  entry: number;
+  after_15_pct: number | null;
+  after_30_pct: number | null;
+  after_60_pct: number | null;
+  close_price: number | null;
+  close_pct: number | null;
+  best_pct: number | null;
+  worst_pct: number | null;
+  next_cross_after_min: number | null;
+  next_cross_side: "BULLISH" | "BEARISH" | null;
+  /** Minutes the trend held after the scan (to the next cross, else to the close). */
+  held_min: number | null;
+  state?: "APPROACHING" | "CROSSED";
+  predicted_min?: number | null;
+  crossed?: boolean;
+  on_time?: boolean;
+  quiet_runner?: boolean;
+  trend?: ChopTrend | null;
+  score?: ChopScore;
+};
+export type ScanCheckGroup = {
+  key: string;
+  label: string;
+  count: number;
+  with_call: number;
+  right_after_15_pct: number | null;
+  right_after_30_pct: number | null;
+  right_after_60_pct: number | null;
+  right_close_pct: number | null;
+  avg_after_15_pct: number | null;
+  avg_after_30_pct: number | null;
+  avg_after_60_pct: number | null;
+  avg_close_pct: number | null;
+  avg_best_pct: number | null;
+  avg_worst_pct: number | null;
+  avg_held_min: number | null;
+  crossed_pct?: number | null;
+  on_time_pct?: number | null;
+};
+export type ScanCheck = {
+  run_id: number;
+  kind: ScanKind;
+  as_of: string;
+  minutes: number;
+  checked: number;
+  failed: number;
+  error: string | null;
+  summary: ScanCheckGroup[];
+  rows: ScanCheckRow[];
+};
+export type ScanRunDetail = ScanRun & {
+  rows: (CrossScanRow | ChopScanRow)[];
+  check: ScanCheck | null;
+  can_check: boolean;
+  checking: ScanCheckStatus;
+};
+
 /** Trend quality re-scan run by the server every `every_min` minutes while NSE is open (no browser needed). */
 export type ChopAuto = {
   on: boolean;
@@ -1113,6 +1216,18 @@ export const smaApi = {
       false
     ),
   chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
+  /** Saved scans: the days, and one day's runs (latest day when none is given). */
+  scanHistory: (day?: string, kind?: ScanKind) => {
+    const q = new URLSearchParams();
+    if (day) q.set("day", day);
+    if (kind) q.set("kind", kind);
+    const qs = q.toString();
+    return request<ScanHistory>(`/api/scan-history${qs ? `?${qs}` : ""}`, undefined, undefined, false);
+  },
+  scanHistoryRun: (id: number) => request<ScanRunDetail>(`/api/scan-history/${id}`, undefined, 20000, false),
+  /** Check how a saved scan turned out (after its day closed). Returns at once; poll scanHistoryRun. */
+  scanHistoryCheck: (id: number) =>
+    request<ScanCheckStatus>(`/api/scan-history/${id}/check`, { method: "POST" }, undefined, false),
   /** Turn the server's Trend quality re-scan on/off, how often, and the choices it scans with. */
   chopScanAuto: (body: ChopAutoUpdate) =>
     request<ChopAuto>("/api/chop-scan/auto", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
