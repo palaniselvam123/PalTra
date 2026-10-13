@@ -1090,16 +1090,18 @@ def _parse_candles(raw, limit: int | None = _MAX_CANDLES) -> pd.DataFrame:
         else:
             continue
         ts = _to_epoch(ts_raw)
-        if ts is None:
+        close = _price(c)
+        if ts is None or close is None:
+            # Groww sometimes sends a minute with no prices (None): skip that minute, keep the rest.
             continue
         out.append(
             {
                 "ts": ts,
-                "open": float(o),
-                "high": float(h),
-                "low": float(l),
-                "close": float(c),
-                "volume": int(v or 0),
+                "open": _price(o) or close,
+                "high": _price(h) or close,
+                "low": _price(l) or close,
+                "close": close,
+                "volume": _volume(v),
             }
         )
     if not out:
@@ -1108,6 +1110,23 @@ def _parse_candles(raw, limit: int | None = _MAX_CANDLES) -> pd.DataFrame:
     if limit is not None and len(frame) > limit:
         frame = frame.iloc[-limit:].reset_index(drop=True)
     return frame
+
+
+def _price(value) -> float | None:
+    """A candle price, or None when Groww sent none (None, blank, NaN, 0 or not a number)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
+def _volume(value) -> int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return int(number) if math.isfinite(number) and number > 0 else 0
 
 
 def _to_epoch(value) -> int | None:
