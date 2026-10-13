@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react
 import { api, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 
@@ -137,6 +138,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     onStatus?.({ when: data?.as_of ?? null, running: !!data?.running });
   }, [onStatus, data?.as_of, data?.running]);
 
+  const paged = usePaged(rows, "scalp.active.pageSize");
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -205,7 +207,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
               : "Scans run while the market is open (09:15–15:30). Click Scan now to read the last prices."}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={paged.anchor}>
+          <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
@@ -262,11 +265,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {paged.shown.map((r, i) => (
                 <ActiveRowView
                   key={r.symbol}
                   order={cols.order}
-                  rank={i + 1}
+                  rank={paged.start + i + 1}
                   row={r}
                   watching={watching.has(r.symbol)}
                   adding={adding === r.symbol}
@@ -278,6 +281,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
               ))}
             </tbody>
           </table>
+          <Pager p={paged} className="mt-2" />
         </div>
       )}
     </section>
