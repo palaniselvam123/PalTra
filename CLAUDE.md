@@ -468,10 +468,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_alert(critical=True, call=True)`) on HALTED / STOPPED and a position with no stop;
   never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings only 09:00-15:45 IST
   Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test call button ignores
-  both. The app stopping (any deploy or restart) always alerts and rings, at any hour:
+  both. The app stopping (any deploy or restart) alerts and rings:
   `app.main` lifespan → `main.announce_shutdown_all` → `strategy_engine.announce_process_stop`
-  (one message listing every bot, `send_critical(call_any_time=True)`; the cooldown still
-  applies). `fly.toml` `kill_timeout = '15s'` leaves time for it. Replay and research engines send nothing.
+  → `alert_notifier.announce_shutdown` (one message listing every bot; the cooldown still
+  applies). In market hours it always messages and rings; outside them each follows its switch
+  (`AlertPrefs` row 1: `after_hours_stop_call`, `after_hours_stop_message`, both on by default;
+  `GET/PUT /api/scan/alert-prefs`, the phone-call card in Settings). `fly.toml` `kill_timeout = '15s'` leaves time for it. Replay and research engines send nothing.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`

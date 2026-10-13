@@ -289,6 +289,22 @@ class AlertChannel(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
 
+class AlertPrefs(Base):
+    """Owner's alert switches (one row, id 1). No secrets here.
+
+    When the app stops (a deploy or restart) outside market hours
+    (09:00-15:45 IST, Mon-Fri): ring the phone-call channel, and send the
+    stop message to Telegram / WhatsApp. In market hours both always happen.
+    """
+
+    __tablename__ = "alert_prefs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    after_hours_stop_call: Mapped[bool] = mapped_column(Boolean, default=True)
+    after_hours_stop_message: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
 _engine = create_async_engine(get_settings().database_url, echo=False)
 async_session = async_sessionmaker(_engine, expire_on_commit=False)
 

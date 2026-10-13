@@ -279,6 +279,52 @@ function ChannelForm({
   );
 }
 
+type StopPrefs = { after_hours_stop_call: boolean; after_hours_stop_message: boolean };
+
+/** When the app stops (a deploy or restart) outside market hours: ring, and/or send the message. */
+function AfterHoursStop() {
+  const [prefs, setPrefs] = useState<StopPrefs | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    desk<StopPrefs>("/api/scan/alert-prefs")
+      .then(setPrefs)
+      .catch(() => setPrefs(null));
+  }, []);
+  const save = async (patch: Partial<StopPrefs>) => {
+    setNote(null);
+    try {
+      setPrefs(await desk<StopPrefs>("/api/scan/alert-prefs", { method: "PUT", body: JSON.stringify(patch) }));
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "Could not save");
+    }
+  };
+  const row = (key: keyof StopPrefs, label: string) => (
+    <label className="flex items-center gap-2 text-sm text-slate-200">
+      <input
+        type="checkbox"
+        className="h-4 w-4 accent-emerald-500"
+        checked={prefs?.[key] ?? true}
+        disabled={prefs == null}
+        onChange={(e) => void save({ [key]: e.target.checked })}
+      />
+      {label}
+    </label>
+  );
+  return (
+    <div className="mt-4 border-t border-white/10 pt-3">
+      <div className="text-xs uppercase tracking-wider text-slate-400">App stopped after market hours (deploys, restarts)</div>
+      <p className="mt-1 text-xs leading-relaxed text-slate-400">
+        Outside 09:00–15:45 IST Mon–Fri, choose how you hear that the app stopped. In market hours you always get both.
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {row("after_hours_stop_call", "Phone call")}
+        {row("after_hours_stop_message", "Telegram / WhatsApp message (critical channel, else trade)")}
+      </div>
+      {note && <p className="mt-1 text-xs text-rose-300">{note}</p>}
+    </div>
+  );
+}
+
 function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Channel[]) => void }) {
   const [phone, setPhone] = useState("");
   const [secret, setSecret] = useState("");
@@ -311,7 +357,7 @@ function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Ch
       <p className="mt-2 text-xs leading-relaxed text-slate-400">
         Twilio rings your phone and reads the alert when a bot halts or stops on its loss limit, the app shuts down, or a
         live position has no stop. Not for the normal end of the day or a Panic you pressed. Market hours only (09:00–15:45
-        IST, Mon–Fri), at most one call every 5 minutes.
+        IST, Mon–Fri), at most one call every 5 minutes; an app stop after hours follows the switches below.
       </p>
       <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
         <li>
@@ -382,6 +428,7 @@ function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Ch
         </button>
       </div>
       {note && <p className="mt-2 text-xs text-slate-400">{note}</p>}
+      <AfterHoursStop />
     </section>
   );
 }
