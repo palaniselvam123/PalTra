@@ -16,6 +16,8 @@ import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
+import type { ScanStatus } from "@/components/Scalp/scanStatus";
+import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 
 /** 1 to 30 trading days, one at a time. */
@@ -38,11 +40,70 @@ type SortKey =
   | "move_5m_pct"
   | "vwap_dist_pct";
 
+type MonitorCol = SortKey | "terminal";
+const MONITOR_COLUMNS: readonly MonitorCol[] = [
+  "symbol",
+  "score",
+  "ltp",
+  "change_pct",
+  "atr_pct",
+  "spread_pct",
+  "volume_ratio",
+  "value_cr",
+  "move_1m_pct",
+  "move_5m_pct",
+  "vwap_dist_pct",
+  "ready",
+  "terminal",
+];
+
+const TABS = [
+  { id: "monitor", label: "Monitor" },
+  { id: "cross", label: "Cross scan" },
+  { id: "trend", label: "Trend quality" },
+  { id: "active", label: "Most active" },
+  { id: "backtest", label: "Backtest" },
+  { id: "alerts", label: "Alerts" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+const TAB_STORE = "scalp.tab";
+const isTab = (v: string | null | undefined): v is TabId => TABS.some((t) => t.id === v);
+
 export default function ScalpPage() {
   const { connected, summary, summaryLoad, killSwitchActive, killSwitch, resetKillSwitch, feed, setFeed, bot } =
     useTradingState();
 
   const [data, setData] = useState<ScalpMonitorResponse | null>(null);
+
+  // Sub-tabs: one scanner at a time. Every tab stays mounted, so scans, polls and pop-ups keep running.
+  const [tab, setTab] = useState<TabId>("monitor");
+  useEffect(() => {
+    const fromHash = window.location.hash.replace("#", "");
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(TAB_STORE);
+    } catch {
+      /* private mode */
+    }
+    const first = isTab(fromHash) ? fromHash : isTab(saved) ? saved : null;
+    if (first) setTab(first);
+  }, []);
+  const chooseTab = useCallback((next: TabId) => {
+    setTab(next);
+    try {
+      localStorage.setItem(TAB_STORE, next);
+    } catch {
+      /* private mode */
+    }
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${next}`);
+  }, []);
+  const [crossStatus, setCrossStatus] = useState<ScanStatus | null>(null);
+  const [trendStatus, setTrendStatus] = useState<ScanStatus | null>(null);
+  const [activeStatus, setActiveStatus] = useState<ScanStatus | null>(null);
+  const onCrossStatus = useCallback((st: ScanStatus) => setCrossStatus(st), []);
+  const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
+  const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
+  const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [minAtr, setMinAtr] = useState(0.08);
@@ -244,7 +305,16 @@ export default function ScalpPage() {
   };
 
   const header = (key: SortKey, label: string, right = true, title?: string) => (
-    <th className={clsx("whitespace-nowrap pb-2 font-medium", right ? "text-right" : "text-left", !right && key !== "symbol" && "pl-3")} title={title}>
+    <th
+      {...cols.dragProps(key)}
+      className={clsx(
+        "whitespace-nowrap pb-2 font-medium",
+        right ? "text-right" : "text-left",
+        !right && key !== "symbol" && "pl-3",
+        cols.dragProps(key).className
+      )}
+      title={title}
+    >
       <button
         type="button"
         onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "symbol" && key !== "spread_pct" }))}
@@ -258,6 +328,14 @@ export default function ScalpPage() {
 
   const simulated = data && data.source !== "live";
   const alerts = data?.alerts;
+  const tabTimes: Record<TabId, ScanStatus | null> = {
+    monitor: data ? { when: data.as_of, running: false } : null,
+    cross: crossStatus,
+    trend: trendStatus,
+    active: activeStatus,
+    backtest: null,
+    alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
+  };
 
   return (
     <div className="min-h-screen bg-base text-slate-100">
@@ -272,10 +350,10 @@ export default function ScalpPage() {
         botRunning={bot?.enabled ?? false}
       />
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+      <main className="w-full space-y-4 px-4 py-6 lg:px-6">
         <header className="space-y-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Gauge size={20} className="text-bot" /> Scalp monitor
+            <Gauge size={20} className="text-bot" /> Scalp scanners
           </h1>
           <Explain lead="Which streaming stocks are worth scalping right now. Watch only — nothing here places an order.">
             A stock scores well with enough movement per minute (ATR), a tight bid/ask spread, enough money traded
@@ -341,353 +419,371 @@ export default function ScalpPage() {
         </section>
         )}
 
-        <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-800 bg-card p-4 text-sm">
-          <span
-            className={clsx(
-              "rounded px-2 py-0.5 text-xs font-semibold",
-              simulated ? "bg-amber-500/15 text-amber-300" : "bg-profit/15 text-profit"
-            )}
-          >
-            {data ? (simulated ? "SIMULATED prices" : "LIVE NSE") : "…"}
-          </span>
-          {data?.paused ? (
-            <span className="text-amber-300">
-              {scansMoved
-                ? "Monitor off here — it runs on the scanner server."
-                : "Monitor paused — press Resume scans above to score stocks again."}
-            </span>
-          ) : data && (
-            <span className="text-slate-400">
-              <span className="font-semibold text-profit">{data.ready}</span> of {data.universe} streaming stocks
-              scalp-ready · {data.market_open ? "market open" : "market closed"} · updated{" "}
-              {new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5"
-          >
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
-          </button>
-        </section>
-
         {dialogs}
 
-        <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} paused={paused} />
-        <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} paused={paused} />
+        <ScalpTabs tab={tab} onTab={chooseTab} times={tabTimes} />
 
-        <MostActive
-          watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
-          armed={armed}
-          arming={arming}
-          onArm={(s) => arm(s, "Scalp monitor")}
-          onWatched={refresh}
-          paused={paused}
-        />
-
-        {simulated && (
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-            The desk is on the simulated feed, so these prices are invented and alerts are off. Switch the data source
-            to LIVE NSE (top bar) for real readings.
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="rounded-lg border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">
-            {error}
-          </p>
-        )}
-        {(data?.notes ?? []).map((note) => (
-          <p key={note} className="text-xs text-slate-500">
-            {note}
-          </p>
-        ))}
-
-        <section className="rounded-xl border border-slate-800 bg-card p-4">
-          <FilterRow>
-            <NumberFilter label="Min ATR %/min" value={minAtr} onChange={setMinAtr} min={0} max={0.5} step={0.01} suffix="%" />
-            <NumberFilter label="Max spread" value={maxSpread} onChange={setMaxSpread} min={0.01} max={2} step={0.01} suffix="%" />
-            <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={200} step={1} prefix="₹" suffix="cr" />
-            <NumberFilter label="Min score" value={minScore} onChange={setMinScore} min={0} max={100} step={1} />
-            <TextFilter value={query} onChange={setQuery} />
-            <div className="w-44">
-              <div className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">LTP range ₹</div>
-              <div className="flex min-h-9 items-stretch rounded-md border border-slate-700 bg-base">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  placeholder="min"
-                  aria-label="Lowest LTP"
-                  value={ltpMin}
-                  onChange={(e) => setLtpMin(e.target.value)}
-                  className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
-                />
-                <span aria-hidden className="flex items-center text-slate-600">–</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  placeholder="max"
-                  aria-label="Highest LTP"
-                  value={ltpMax}
-                  onChange={(e) => setLtpMax(e.target.value)}
-                  className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
-                />
-                {ltpMin || ltpMax ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLtpMin("");
-                      setLtpMax("");
-                    }}
-                    className="px-2 text-slate-400 hover:text-slate-200"
-                    aria-label="Clear the LTP range"
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <SelectFilter
-              label="Bias"
-              value={bias}
-              onChange={(v) => setBias(v as "ALL" | "LONG" | "SHORT")}
-              options={[
-                { value: "ALL", label: "All" },
-                { value: "LONG", label: "Long" },
-                { value: "SHORT", label: "Short" },
-              ]}
-              className="w-28"
-            />
-            <div className="flex min-h-9 items-end self-end">
-              <Toggle label="Scalp-ready only" checked={readyOnly} onChange={setReadyOnly} />
-            </div>
-          </FilterRow>
-
-          {armNote && <p className="mb-2 text-xs text-accentSky">{armNote}</p>}
-
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-accentViolet/30 bg-accentViolet/[0.06] px-3 py-2 text-xs text-slate-300">
-            <FlaskConical size={14} className="text-accentViolet" />
-            <span>
-              {picked.size
-                ? `${picked.size} ticked`
-                : "Tick stocks below to test how the bot would have traded them"}
+        <div hidden={tab !== "monitor"} className="space-y-4">
+          <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-800 bg-card p-4 text-sm">
+            <span
+              className={clsx(
+                "rounded px-2 py-0.5 text-xs font-semibold",
+                simulated ? "bg-amber-500/15 text-amber-300" : "bg-profit/15 text-profit"
+              )}
+            >
+              {data ? (simulated ? "SIMULATED prices" : "LIVE NSE") : "…"}
             </span>
-            {picked.size > 0 && (
-              <button type="button" onClick={() => setPicked(new Set())} className="text-slate-400 hover:text-slate-200">
-                Clear
-              </button>
+            {data?.paused ? (
+              <span className="text-amber-300">
+                {scansMoved
+                  ? "Monitor off here — it runs on the scanner server."
+                  : "Monitor paused — press Resume scans above to score stocks again."}
+              </span>
+            ) : data && (
+              <span className="text-slate-400">
+                <span className="font-semibold text-profit">{data.ready}</span> of {data.universe} streaming stocks
+                scalp-ready · {data.market_open ? "market open" : "market closed"} · Last scan{" "}
+                {new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })} IST
+              </span>
             )}
-            <label className="ml-auto flex items-center gap-1.5 text-slate-400">
-              over the last
-              <select
-                value={btDays}
-                onChange={(e) => setBtDays(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-              >
-                {BACKTEST_DAYS.map((d) => (
-                  <option key={d} value={d}>
-                    {d} trading day{d === 1 ? "" : "s"}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               type="button"
-              disabled={btBusy || picked.size === 0}
-              onClick={backtest}
-              title="Replays the ticked stocks on Groww's past 1-minute candles with your SMA settings. Practice money only; nothing is armed and no order is sent."
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentViolet/15 px-3 font-semibold text-accentViolet ring-1 ring-inset ring-accentViolet/40 hover:bg-accentViolet/25 disabled:opacity-40"
+              onClick={refresh}
+              disabled={loading}
+              className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5"
             >
-              {btBusy ? <Loader2 size={13} className="animate-spin" /> : <FlaskConical size={13} />} Backtest selected
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
             </button>
-          </div>
-          {btNote && (
-            <p className={clsx("mb-3 text-xs", btNote.ok ? "text-accentViolet" : "text-amber-300")}>
-              {btNote.text}{" "}
-              {btNote.ok && (
-                <Link href="/terminal" className="font-semibold text-accentSky underline-offset-2 hover:underline">
-                  Open the SMA terminal →
-                </Link>
-              )}
+          </section>
+          {simulated && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              The desk is on the simulated feed, so these prices are invented and alerts are off. Switch the data source
+              to LIVE NSE (top bar) for real readings.
             </p>
           )}
-
-          <div
-            className="h-[min(70vh,680px)] min-h-[320px] overflow-auto rounded-lg [overflow-anchor:none]"
-            onPointerEnter={() => setHoldOrder(true)}
-            onPointerLeave={() => setHoldOrder(false)}
-            onFocus={() => setHoldOrder(true)}
-            onBlur={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoldOrder(false);
-            }}
-          >
-          {!data ? (
-            <Empty>Loading…</Empty>
-          ) : rows.length === 0 ? (
-            <Empty>
-              {data.universe === 0
-                ? "No stocks are streaming. Add stocks to the watchlist on the Dashboard, or track the full universe on Movers."
-                : "No stock passes these filters. Lower Min ATR or Min traded, or raise Max spread."}
-            </Empty>
-          ) : (
-            <div>
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-card text-xs uppercase text-slate-500 shadow-[0_1px_0_rgba(148,163,184,0.15)]">
-                  <tr>
-                    <th className="w-7 pb-2">
-                      <input
-                        type="checkbox"
-                        aria-label="Tick every stock shown"
-                        className="accent-violet-400"
-                        checked={rows.length > 0 && rows.every((r) => picked.has(r.symbol))}
-                        onChange={(e) =>
-                          setPicked(e.target.checked ? new Set(rows.slice(0, MAX_BACKTEST_STOCKS).map((r) => r.symbol)) : new Set())
-                        }
-                      />
-                    </th>
-                    {header("symbol", "Stock", false)}
-                    {header("score", "Score", true, "0–100: movement 35, volume spike 25, 5-minute move 20, money traded 20; cut by a wide spread")}
-                    {header("ltp", "LTP", true, "Last traded price")}
-                    {header("change_pct", "Day")}
-                    {header("atr_pct", "ATR/min", true, "Wilder ATR(14) on closed 1-minute candles, as % of price")}
-                    {header("spread_pct", "Spread", true, "Ask minus bid, as % of price")}
-                    {header("volume_ratio", "Vol ×", true, "Last closed minute against the 20 before it")}
-                    {header("value_cr", "₹ cr", true, "Money traded today")}
-                    {header("move_1m_pct", "1m")}
-                    {header("move_5m_pct", "5m")}
-                    {header("vwap_dist_pct", "vs VWAP")}
-                    {header("ready", "Status", false, "Ready stocks first (then by score)")}
-                    <th className="pb-2 text-right font-medium">Terminal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <Row
-                      key={r.symbol}
-                      row={r}
-                      armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
-                      arming={arming === r.symbol}
-                      onArm={() => arm(r.symbol, "Scalp monitor")}
-                      picked={picked.has(r.symbol)}
-                      onPick={(on) => pick(r.symbol, on)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {error && (
+            <p role="alert" className="rounded-lg border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">
+              {error}
+            </p>
           )}
-          </div>
-          <p className="mt-2 text-[11px] text-slate-500" aria-live="polite">
-            {rows.length} stock{rows.length === 1 ? "" : "s"} shown
-            {holdOrder ? " · order held while you point at the list; it re-sorts when you move away" : ""}
-          </p>
-          <p className="mt-3 text-[11px] leading-snug text-slate-500">
-            The list is every stock the desk is streaming. Readings use closed 1-minute candles; LTP, spread and the
-            1-minute move use the live quote. Bias is LONG when price is above VWAP and up over 5 minutes, SHORT when
-            below and down. “Arm” adds the stock to the SMA terminal&apos;s Trade list — the bot still waits for its
-            SMA cross and filters.
-          </p>
-        </section>
-
-        <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
-
-        <section className="rounded-xl border border-slate-800 bg-card p-4">
-          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-            <BellRing size={15} className="text-bot" /> Telegram scalp alerts
-          </h2>
-          <p className="mb-3 max-w-3xl text-xs text-slate-500">
-            Once a minute during market hours on LIVE prices, sends a Telegram when a stock is scalp-ready and scores
-            at least the minimum. Each stock alerts at most once per cooldown. Watch only — no order is placed. Uses
-            the alert channel set up on Settings. Turns off again if the server restarts.
-          </p>
-          <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
-            <label className="flex flex-col gap-1">
-              Min score
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={alertScore}
-                onChange={(e) => setAlertScore(Number(e.target.value))}
-                className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+          {(data?.notes ?? []).map((note) => (
+            <p key={note} className="text-xs text-slate-500">
+              {note}
+            </p>
+          ))}
+          <section className="rounded-xl border border-slate-800 bg-card p-4">
+            <FilterRow>
+              <NumberFilter label="Min ATR %/min" value={minAtr} onChange={setMinAtr} min={0} max={0.5} step={0.01} suffix="%" />
+              <NumberFilter label="Max spread" value={maxSpread} onChange={setMaxSpread} min={0.01} max={2} step={0.01} suffix="%" />
+              <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={200} step={1} prefix="₹" suffix="cr" />
+              <NumberFilter label="Min score" value={minScore} onChange={setMinScore} min={0} max={100} step={1} />
+              <TextFilter value={query} onChange={setQuery} />
+              <div className="w-44">
+                <div className="mb-1 block whitespace-nowrap text-[11px] font-medium text-slate-400">LTP range ₹</div>
+                <div className="flex min-h-9 items-stretch rounded-md border border-slate-700 bg-base">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    placeholder="min"
+                    aria-label="Lowest LTP"
+                    value={ltpMin}
+                    onChange={(e) => setLtpMin(e.target.value)}
+                    className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
+                  />
+                  <span aria-hidden className="flex items-center text-slate-600">–</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    placeholder="max"
+                    aria-label="Highest LTP"
+                    value={ltpMax}
+                    onChange={(e) => setLtpMax(e.target.value)}
+                    className="w-1/2 bg-transparent px-2 py-1 text-sm tabular-nums text-slate-100 outline-none"
+                  />
+                  {ltpMin || ltpMax ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLtpMin("");
+                        setLtpMax("");
+                      }}
+                      className="px-2 text-slate-400 hover:text-slate-200"
+                      aria-label="Clear the LTP range"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <SelectFilter
+                label="Bias"
+                value={bias}
+                onChange={(v) => setBias(v as "ALL" | "LONG" | "SHORT")}
+                options={[
+                  { value: "ALL", label: "All" },
+                  { value: "LONG", label: "Long" },
+                  { value: "SHORT", label: "Short" },
+                ]}
+                className="w-28"
               />
-            </label>
-            <label className="flex flex-col gap-1">
-              Cooldown (min)
-              <input
-                type="number"
-                min={1}
-                max={600}
-                value={alertCooldown}
-                onChange={(e) => setAlertCooldown(Number(e.target.value))}
-                className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={alertBusy}
-              onClick={() => saveAlerts(!alerts?.enabled)}
-              className={clsx(
-                "min-h-9 rounded-md px-3 text-xs font-semibold",
-                alerts?.enabled ? "bg-loss/20 text-loss hover:bg-loss/30" : "bg-profit/20 text-profit hover:bg-profit/30"
+              <div className="flex min-h-9 items-end self-end">
+                <Toggle label="Scalp-ready only" checked={readyOnly} onChange={setReadyOnly} />
+              </div>
+            </FilterRow>
+
+            {armNote && <p className="mb-2 text-xs text-accentSky">{armNote}</p>}
+
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-accentViolet/30 bg-accentViolet/[0.06] px-3 py-2 text-xs text-slate-300">
+              <FlaskConical size={14} className="text-accentViolet" />
+              <span>
+                {picked.size
+                  ? `${picked.size} ticked`
+                  : "Tick stocks below to test how the bot would have traded them"}
+              </span>
+              {picked.size > 0 && (
+                <button type="button" onClick={() => setPicked(new Set())} className="text-slate-400 hover:text-slate-200">
+                  Clear
+                </button>
               )}
+              <label className="ml-auto flex items-center gap-1.5 text-slate-400">
+                over the last
+                <select
+                  value={btDays}
+                  onChange={(e) => setBtDays(Number(e.target.value))}
+                  className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                >
+                  {BACKTEST_DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {d} trading day{d === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={btBusy || picked.size === 0}
+                onClick={backtest}
+                title="Replays the ticked stocks on Groww's past 1-minute candles with your SMA settings. Practice money only; nothing is armed and no order is sent."
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentViolet/15 px-3 font-semibold text-accentViolet ring-1 ring-inset ring-accentViolet/40 hover:bg-accentViolet/25 disabled:opacity-40"
+              >
+                {btBusy ? <Loader2 size={13} className="animate-spin" /> : <FlaskConical size={13} />} Backtest selected
+              </button>
+            </div>
+            {btNote && (
+              <p className={clsx("mb-3 text-xs", btNote.ok ? "text-accentViolet" : "text-amber-300")}>
+                {btNote.text}{" "}
+                {btNote.ok && (
+                  <Link href="/terminal" className="font-semibold text-accentSky underline-offset-2 hover:underline">
+                    Open the SMA terminal →
+                  </Link>
+                )}
+              </p>
+            )}
+
+            <ColumnHint moved={cols.moved} onReset={cols.reset} />
+            <div
+              className="h-[min(75vh,820px)] min-h-[320px] overflow-auto rounded-lg [overflow-anchor:none]"
+              onPointerEnter={() => setHoldOrder(true)}
+              onPointerLeave={() => setHoldOrder(false)}
+              onFocus={() => setHoldOrder(true)}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoldOrder(false);
+              }}
             >
-              {alerts?.enabled ? "Turn alerts off" : "Turn alerts on"}
-            </button>
-            {alerts?.enabled && (
+            {!data ? (
+              <Empty>Loading…</Empty>
+            ) : rows.length === 0 ? (
+              <Empty>
+                {data.universe === 0
+                  ? "No stocks are streaming. Add stocks to the watchlist on the Dashboard, or track the full universe on Movers."
+                  : "No stock passes these filters. Lower Min ATR or Min traded, or raise Max spread."}
+              </Empty>
+            ) : (
+              <div>
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-card text-xs uppercase text-slate-500 shadow-[0_1px_0_rgba(148,163,184,0.15)]">
+                    <tr>
+                      <th className="w-7 pb-2">
+                        <input
+                          type="checkbox"
+                          aria-label="Tick every stock shown"
+                          className="accent-violet-400"
+                          checked={rows.length > 0 && rows.every((r) => picked.has(r.symbol))}
+                          onChange={(e) =>
+                            setPicked(e.target.checked ? new Set(rows.slice(0, MAX_BACKTEST_STOCKS).map((r) => r.symbol)) : new Set())
+                          }
+                        />
+                      </th>
+                      {inOrder(cols.order, {
+                        symbol: header("symbol", "Stock", false),
+                        score: header("score", "Score", true, "0–100: movement 35, volume spike 25, 5-minute move 20, money traded 20; cut by a wide spread"),
+                        ltp: header("ltp", "LTP", true, "Last traded price"),
+                        change_pct: header("change_pct", "Day"),
+                        atr_pct: header("atr_pct", "ATR/min", true, "Wilder ATR(14) on closed 1-minute candles, as % of price"),
+                        spread_pct: header("spread_pct", "Spread", true, "Ask minus bid, as % of price"),
+                        volume_ratio: header("volume_ratio", "Vol ×", true, "Last closed minute against the 20 before it"),
+                        value_cr: header("value_cr", "₹ cr", true, "Money traded today"),
+                        move_1m_pct: header("move_1m_pct", "1m"),
+                        move_5m_pct: header("move_5m_pct", "5m"),
+                        vwap_dist_pct: header("vwap_dist_pct", "vs VWAP"),
+                        ready: header("ready", "Status", false, "Ready stocks first (then by score)"),
+                        terminal: (
+                          <th {...cols.dragProps("terminal")} className={clsx("pb-2 text-right font-medium", cols.dragProps("terminal").className)}>
+                            Terminal
+                          </th>
+                        ),
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <Row
+                        key={r.symbol}
+                        order={cols.order}
+                        row={r}
+                        armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
+                        arming={arming === r.symbol}
+                        onArm={() => arm(r.symbol, "Scalp monitor")}
+                        picked={picked.has(r.symbol)}
+                        onPick={(on) => pick(r.symbol, on)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500" aria-live="polite">
+              {rows.length} stock{rows.length === 1 ? "" : "s"} shown
+              {holdOrder ? " · order held while you point at the list; it re-sorts when you move away" : ""}
+            </p>
+            <p className="mt-3 text-[11px] leading-snug text-slate-500">
+              The list is every stock the desk is streaming. Readings use closed 1-minute candles; LTP, spread and the
+              1-minute move use the live quote. Bias is LONG when price is above VWAP and up over 5 minutes, SHORT when
+              below and down. “Arm” adds the stock to the SMA terminal&apos;s Trade list — the bot still waits for its
+              SMA cross and filters.
+            </p>
+          </section>
+        </div>
+        <div hidden={tab !== "cross"}>
+          <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} paused={paused} onStatus={onCrossStatus} />
+        </div>
+        <div hidden={tab !== "trend"}>
+          <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
+        </div>
+        <div hidden={tab !== "active"}>
+          <MostActive
+            watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
+            armed={armed}
+            arming={arming}
+            onArm={(s) => arm(s, "Scalp monitor")}
+            onWatched={refresh}
+            paused={paused}
+            onStatus={onActiveStatus}
+          />
+        </div>
+        <div hidden={tab !== "backtest"}>
+          <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
+        </div>
+        <div hidden={tab !== "alerts"}>
+          <section className="rounded-xl border border-slate-800 bg-card p-4">
+            <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+              <BellRing size={15} className="text-bot" /> Telegram scalp alerts
+            </h2>
+            <p className="mb-3 max-w-3xl text-xs text-slate-500">
+              Once a minute during market hours on LIVE prices, sends a Telegram when a stock is scalp-ready and scores
+              at least the minimum. Each stock alerts at most once per cooldown. Watch only — no order is placed. Uses
+              the alert channel set up on Settings. Turns off again if the server restarts.
+            </p>
+            <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
+              <label className="flex flex-col gap-1">
+                Min score
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={alertScore}
+                  onChange={(e) => setAlertScore(Number(e.target.value))}
+                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Cooldown (min)
+                <input
+                  type="number"
+                  min={1}
+                  max={600}
+                  value={alertCooldown}
+                  onChange={(e) => setAlertCooldown(Number(e.target.value))}
+                  className="w-20 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+                />
+              </label>
               <button
                 type="button"
                 disabled={alertBusy}
-                onClick={() => saveAlerts(true)}
+                onClick={() => saveAlerts(!alerts?.enabled)}
+                className={clsx(
+                  "min-h-9 rounded-md px-3 text-xs font-semibold",
+                  alerts?.enabled ? "bg-loss/20 text-loss hover:bg-loss/30" : "bg-profit/20 text-profit hover:bg-profit/30"
+                )}
+              >
+                {alerts?.enabled ? "Turn alerts off" : "Turn alerts on"}
+              </button>
+              {alerts?.enabled && (
+                <button
+                  type="button"
+                  disabled={alertBusy}
+                  onClick={() => saveAlerts(true)}
+                  className="min-h-9 rounded-md px-3 text-xs text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-white/5"
+                >
+                  Save settings
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={alertBusy}
+                onClick={showPreview}
                 className="min-h-9 rounded-md px-3 text-xs text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-white/5"
               >
-                Save settings
+                Preview (no send)
               </button>
-            )}
-            <button
-              type="button"
-              disabled={alertBusy}
-              onClick={showPreview}
-              className="min-h-9 rounded-md px-3 text-xs text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-white/5"
-            >
-              Preview (no send)
-            </button>
-          </div>
-          {alerts && (
-            <p className="mt-2 text-xs text-slate-500">
-              {alerts.enabled ? (
-                <span className="font-semibold text-profit">On</span>
-              ) : (
-                <span className="font-semibold text-slate-400">Off</span>
-              )}
-              {alerts.last_run && ` · last check ${new Date(alerts.last_run).toLocaleTimeString("en-IN")}`}
-              {alerts.sent_today.length > 0 && ` · sent today: ${alerts.sent_today.join(", ")}`}
-              {alerts.last_error && <span className="text-amber-300"> · {alerts.last_error}</span>}
-            </p>
-          )}
-          {preview && (
-            <div className="mt-3 space-y-2">
-              {preview.length === 0 ? (
-                <p className="text-xs text-slate-500">Nothing would be sent right now.</p>
-              ) : (
-                preview.map((p) => (
-                  <pre key={p.symbol} className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-base/60 p-3 font-sans text-xs text-slate-300">
-                    {p.message}
-                  </pre>
-                ))
-              )}
             </div>
-          )}
-        </section>
+            {alerts && (
+              <p className="mt-2 text-xs text-slate-500">
+                {alerts.enabled ? (
+                  <span className="font-semibold text-profit">On</span>
+                ) : (
+                  <span className="font-semibold text-slate-400">Off</span>
+                )}
+                {alerts.last_run && ` · last check ${new Date(alerts.last_run).toLocaleTimeString("en-IN")}`}
+                {alerts.sent_today.length > 0 && ` · sent today: ${alerts.sent_today.join(", ")}`}
+                {alerts.last_error && <span className="text-amber-300"> · {alerts.last_error}</span>}
+              </p>
+            )}
+            {preview && (
+              <div className="mt-3 space-y-2">
+                {preview.length === 0 ? (
+                  <p className="text-xs text-slate-500">Nothing would be sent right now.</p>
+                ) : (
+                  preview.map((p) => (
+                    <pre key={p.symbol} className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-base/60 p-3 font-sans text-xs text-slate-300">
+                      {p.message}
+                    </pre>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
+        </div>
       </main>
     </div>
   );
 }
 
 function Row({
+  order,
   row: r,
   armedOn,
   arming,
@@ -695,6 +791,7 @@ function Row({
   picked,
   onPick,
 }: {
+  order: readonly MonitorCol[];
   row: ScalpRow;
   /** The desks this stock is armed on. */
   armedOn: string[];
@@ -705,76 +802,106 @@ function Row({
 }) {
   return (
     <tr className={clsx("border-t border-slate-800/70", r.ready && "bg-profit/[0.04]", picked && "bg-accentViolet/[0.08]")}>
-      <td className="py-1.5">
-        <input
-          type="checkbox"
-          aria-label={`Tick ${r.symbol} for a backtest`}
-          className="accent-violet-400"
-          checked={picked}
-          onChange={(e) => onPick(e.target.checked)}
-        />
-      </td>
-      <td className="py-1.5 font-semibold text-amber-300">{r.symbol}</td>
-      <td className="py-1.5 text-right">
-        <ScoreBar value={r.score} />
-      </td>
-      <td className="py-1.5 text-right tabular-nums">{r.ltp == null ? "—" : r.ltp.toFixed(2)}</td>
-      <td className="py-1.5 text-right">
-        <Pct value={r.change_pct} />
-      </td>
-      <td className="py-1.5 text-right tabular-nums">{r.atr_pct == null ? "—" : `${r.atr_pct.toFixed(3)}%`}</td>
-      <td className="py-1.5 text-right tabular-nums">{r.spread_pct == null ? "—" : `${r.spread_pct.toFixed(3)}%`}</td>
-      <td
-        className={clsx(
-          "py-1.5 text-right tabular-nums",
-          r.volume_ratio != null && r.volume_ratio >= 2 ? "font-semibold text-accentSky" : ""
-        )}
-      >
-        {r.volume_ratio == null ? "—" : `${r.volume_ratio.toFixed(1)}×`}
-      </td>
-      <td className="py-1.5 text-right tabular-nums">{r.value_cr == null ? "—" : r.value_cr.toFixed(1)}</td>
-      <td className="py-1.5 text-right">
-        <Pct value={r.move_1m_pct} />
-      </td>
-      <td className="py-1.5 text-right">
-        <Pct value={r.move_5m_pct} />
-      </td>
-      <td className="py-1.5 text-right">
-        <Pct value={r.vwap_dist_pct} />
-      </td>
-      <td className="max-w-[16rem] py-1.5 pl-3 text-xs">
-        {r.ready ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="rounded bg-profit/15 px-1.5 py-0.5 font-semibold text-profit">READY</span>
-            {r.bias !== "NONE" && (
-              <span className={r.bias === "LONG" ? "text-profit" : "text-loss"}>{r.bias}</span>
+      {inOrder(["pick" as const, ...order], {
+        pick: (
+          <td className="py-1.5">
+            <input
+              type="checkbox"
+              aria-label={`Tick ${r.symbol} for a backtest`}
+              className="accent-violet-400"
+              checked={picked}
+              onChange={(e) => onPick(e.target.checked)}
+            />
+          </td>
+        ),
+        symbol: (
+          <td className="py-1.5 font-semibold text-amber-300">{r.symbol}</td>
+        ),
+        score: (
+          <td className="py-1.5 text-right">
+            <ScoreBar value={r.score} />
+          </td>
+        ),
+        ltp: (
+          <td className="py-1.5 text-right tabular-nums">{r.ltp == null ? "—" : r.ltp.toFixed(2)}</td>
+        ),
+        change_pct: (
+          <td className="py-1.5 text-right">
+            <Pct value={r.change_pct} />
+          </td>
+        ),
+        atr_pct: (
+          <td className="py-1.5 text-right tabular-nums">{r.atr_pct == null ? "—" : `${r.atr_pct.toFixed(3)}%`}</td>
+        ),
+        spread_pct: (
+          <td className="py-1.5 text-right tabular-nums">{r.spread_pct == null ? "—" : `${r.spread_pct.toFixed(3)}%`}</td>
+        ),
+        volume_ratio: (
+          <td
+            className={clsx(
+              "py-1.5 text-right tabular-nums",
+              r.volume_ratio != null && r.volume_ratio >= 2 ? "font-semibold text-accentSky" : ""
             )}
-          </span>
-        ) : (
-          <span className="block truncate text-slate-500" title={r.reasons.join("; ")}>
-            {r.reasons[0]}
-            {r.reasons.length > 1 ? ` +${r.reasons.length - 1}` : ""}
-          </span>
-        )}
-      </td>
-      <td className="py-1.5 text-right">
-        <span className="inline-flex items-center justify-end gap-1.5">
-          {armedOn.length ? (
-            <span className="text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
-              {armedOn.join(" · ")}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            disabled={arming}
-            onClick={onArm}
-            title="Arm on a bot (asks which)"
-            className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
           >
-            {arming ? "…" : "Arm"}
-          </button>
-        </span>
-      </td>
+            {r.volume_ratio == null ? "—" : `${r.volume_ratio.toFixed(1)}×`}
+          </td>
+        ),
+        value_cr: (
+          <td className="py-1.5 text-right tabular-nums">{r.value_cr == null ? "—" : r.value_cr.toFixed(1)}</td>
+        ),
+        move_1m_pct: (
+          <td className="py-1.5 text-right">
+            <Pct value={r.move_1m_pct} />
+          </td>
+        ),
+        move_5m_pct: (
+          <td className="py-1.5 text-right">
+            <Pct value={r.move_5m_pct} />
+          </td>
+        ),
+        vwap_dist_pct: (
+          <td className="py-1.5 text-right">
+            <Pct value={r.vwap_dist_pct} />
+          </td>
+        ),
+        ready: (
+          <td className="max-w-[16rem] py-1.5 pl-3 text-xs">
+            {r.ready ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="rounded bg-profit/15 px-1.5 py-0.5 font-semibold text-profit">READY</span>
+                {r.bias !== "NONE" && (
+                  <span className={r.bias === "LONG" ? "text-profit" : "text-loss"}>{r.bias}</span>
+                )}
+              </span>
+            ) : (
+              <span className="block truncate text-slate-500" title={r.reasons.join("; ")}>
+                {r.reasons[0]}
+                {r.reasons.length > 1 ? ` +${r.reasons.length - 1}` : ""}
+              </span>
+            )}
+          </td>
+        ),
+        terminal: (
+          <td className="py-1.5 text-right">
+            <span className="inline-flex items-center justify-end gap-1.5">
+              {armedOn.length ? (
+                <span className="text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
+                  {armedOn.join(" · ")}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                disabled={arming}
+                onClick={onArm}
+                title="Arm on a bot (asks which)"
+                className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/40 hover:bg-accentSky/10 disabled:opacity-50"
+              >
+                {arming ? "…" : "Arm"}
+              </button>
+            </span>
+          </td>
+        ),
+      })}
     </tr>
   );
 }
@@ -807,6 +934,46 @@ function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full min-h-[160px] items-center justify-center rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-sm text-slate-500">
       {children}
+    </div>
+  );
+}
+
+const shortTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+
+/** The Scalp page's scanners as tabs; each shows when it last scanned (or that it is scanning now). */
+function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => void; times: Record<TabId, ScanStatus | null> }) {
+  return (
+    <div role="tablist" aria-label="Scalp scanners" className="flex flex-wrap gap-1 border-b border-slate-800">
+      {TABS.map((t) => {
+        const on = tab === t.id;
+        const st = times[t.id];
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => onTab(t.id)}
+            title={st?.when ? `Last scan ${new Date(st.when).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : undefined}
+            className={clsx(
+              "-mb-px inline-flex min-h-10 items-center gap-2 rounded-t-md border-b-2 px-3 text-sm font-semibold",
+              on ? "border-accentSky text-slate-100" : "border-transparent text-slate-400 hover:text-slate-200"
+            )}
+          >
+            {t.label}
+            {st?.running ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-normal text-accentSky">
+                <Loader2 size={11} className="animate-spin" aria-hidden /> scanning
+              </span>
+            ) : st?.when ? (
+              <span className="text-[11px] font-normal tabular-nums text-slate-500">{shortTime(st.when)}</span>
+            ) : t.id !== "backtest" ? (
+              <span className="text-[11px] font-normal text-slate-600">no scan yet</span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

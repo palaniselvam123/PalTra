@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import type { DragThProps } from "@/components/ui/columnOrder";
 
 export type SortDir = "asc" | "desc";
 export type SortState<K extends string> = { key: K; dir: SortDir } | null;
@@ -51,6 +52,7 @@ export function SortTh<K extends string>({
   text = false,
   title,
   className,
+  drag,
 }: {
   label: React.ReactNode;
   k: K;
@@ -60,6 +62,8 @@ export function SortTh<K extends string>({
   text?: boolean;
   title?: string;
   className?: string;
+  /** Drag handles from useColumnOrder, so the column can be moved. */
+  drag?: DragThProps;
 }) {
   const on = sort?.key === k;
   const Icon = !on ? ArrowUpDown : sort!.dir === "asc" ? ArrowUp : ArrowDown;
@@ -67,7 +71,8 @@ export function SortTh<K extends string>({
     <th
       scope="col"
       aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
-      className={clsx("px-1 py-1", num && "text-right", className)}
+      {...drag}
+      className={clsx("px-1 py-1", num && "text-right", className, drag?.className)}
     >
       <button
         type="button"

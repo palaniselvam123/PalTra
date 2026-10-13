@@ -7,6 +7,8 @@ import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react
 import { api, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
+import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -16,6 +18,8 @@ const SORT_LABEL: Record<ActiveSort, string> = {
   pressure: "Buyer/seller imbalance",
 };
 type ColKey = "symbol" | "ltp" | "change" | "value" | "rvol" | "buy" | "vwap" | "bias";
+type Col = "rank" | ColKey | "actions";
+const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "value", "rvol", "buy", "vwap", "bias", "actions"];
 
 type Props = {
   /** Stocks already on the desk feed (shown in the monitor below). */
@@ -28,13 +32,16 @@ type Props = {
   onWatched: () => void;
   /** Scans are paused from the top of the Scalp page. */
   paused?: boolean;
+  /** Tells the page's tab bar when this scan last ran. */
+  onStatus?: OnScanStatus;
 };
 
 const pct = (v: number | null, digits = 2) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`);
 
 /** The F&O stocks ranked by where traders are: money traded, volume against
  * usual, and buy vs sell quantity waiting. From Groww quotes; no orders. */
-export function MostActive({ watching, armed, arming, onArm, onWatched, paused = false }: Props) {
+export function MostActive({ watching, armed, arming, onArm, onWatched, paused = false, onStatus }: Props) {
+  const cols = useColumnOrder<Col>("scalp.cols.active", COLUMNS);
   const [data, setData] = useState<ActiveStocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<ActiveSort>("value");
@@ -126,6 +133,10 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     ? new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST"
     : null;
 
+  useEffect(() => {
+    onStatus?.({ when: data?.as_of ?? null, running: !!data?.running });
+  }, [onStatus, data?.as_of, data?.running]);
+
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -195,25 +206,66 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         </p>
       ) : (
         <div className="overflow-x-auto">
+          <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
-                <th className="px-1 pb-2 text-left font-medium">#</th>
-                <SortTh label="Stock" k="symbol" sort={colSort} onSort={onSort} text />
-                <SortTh label="LTP" k="ltp" sort={colSort} onSort={onSort} num />
-                <SortTh label="Day" k="change" sort={colSort} onSort={onSort} num />
-                <SortTh label="₹ cr" k="value" sort={colSort} onSort={onSort} num title="Volume × average price today" />
-                <SortTh label="Vol vs usual" k="rvol" sort={colSort} onSort={onSort} num title="Volume so far against the 20-day average scaled to the time of day" />
-                <SortTh label="Buyers vs sellers" k="buy" sort={colSort} onSort={onSort} title="Total buy vs sell quantity waiting in the order book" />
-                <SortTh label="vs avg" k="vwap" sort={colSort} onSort={onSort} num title="Price against Groww's average traded price today (VWAP)" />
-                <SortTh label="Bias" k="bias" sort={colSort} onSort={onSort} text />
-                <th className="px-1 pb-2 text-right font-medium">Actions</th>
+                {inOrder(cols.order, {
+                  rank: (
+                    <th {...cols.dragProps("rank")} className={clsx("px-1 pb-2 text-left font-medium", cols.dragProps("rank").className)}>
+                      #
+                    </th>
+                  ),
+                  symbol: <SortTh label="Stock" k="symbol" sort={colSort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
+                  ltp: <SortTh label="LTP" k="ltp" sort={colSort} onSort={onSort} num drag={cols.dragProps("ltp")} />,
+                  change: <SortTh label="Day" k="change" sort={colSort} onSort={onSort} num drag={cols.dragProps("change")} />,
+                  value: <SortTh label="₹ cr" k="value" sort={colSort} onSort={onSort} num title="Volume × average price today" drag={cols.dragProps("value")} />,
+                  rvol: (
+                    <SortTh
+                      label="Vol vs usual"
+                      k="rvol"
+                      sort={colSort}
+                      onSort={onSort}
+                      num
+                      title="Volume so far against the 20-day average scaled to the time of day"
+                      drag={cols.dragProps("rvol")}
+                    />
+                  ),
+                  buy: (
+                    <SortTh
+                      label="Buyers vs sellers"
+                      k="buy"
+                      sort={colSort}
+                      onSort={onSort}
+                      title="Total buy vs sell quantity waiting in the order book"
+                      drag={cols.dragProps("buy")}
+                    />
+                  ),
+                  vwap: (
+                    <SortTh
+                      label="vs avg"
+                      k="vwap"
+                      sort={colSort}
+                      onSort={onSort}
+                      num
+                      title="Price against Groww's average traded price today (VWAP)"
+                      drag={cols.dragProps("vwap")}
+                    />
+                  ),
+                  bias: <SortTh label="Bias" k="bias" sort={colSort} onSort={onSort} text drag={cols.dragProps("bias")} />,
+                  actions: (
+                    <th {...cols.dragProps("actions")} className={clsx("px-1 pb-2 text-right font-medium", cols.dragProps("actions").className)}>
+                      Actions
+                    </th>
+                  ),
+                })}
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => (
                 <ActiveRowView
                   key={r.symbol}
+                  order={cols.order}
                   rank={i + 1}
                   row={r}
                   watching={watching.has(r.symbol)}
@@ -233,6 +285,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
 }
 
 function ActiveRowView({
+  order,
   rank,
   row,
   watching,
@@ -242,6 +295,7 @@ function ActiveRowView({
   arming,
   onArm,
 }: {
+  order: readonly Col[];
   rank: number;
   row: ActiveStock;
   watching: boolean;
@@ -254,78 +308,100 @@ function ActiveRowView({
   const share = row.buy_share;
   return (
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
-      <td className="py-1.5 pr-2 text-xs text-slate-500">{rank}</td>
-      <td className="py-1.5 pr-2 font-semibold text-slate-100">{row.symbol}</td>
-      <td className="py-1.5 pr-2 text-right font-mono">{row.ltp.toFixed(2)}</td>
-      <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.change_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
-        {pct(row.change_pct)}
-      </td>
-      <td className="py-1.5 pr-2 text-right font-mono">{row.value_cr.toFixed(0)}</td>
-      <td
-        className={clsx(
-          "py-1.5 pr-2 text-right font-mono",
-          row.rvol != null && row.rvol >= 2 ? "font-semibold text-amber-300" : "text-slate-300"
-        )}
-      >
-        {row.rvol == null ? "—" : `${row.rvol.toFixed(1)}×`}
-      </td>
-      <td className="py-1.5 pr-2">
-        {share == null ? (
-          <span className="text-xs text-slate-500">—</span>
-        ) : (
-          <div className="flex items-center gap-1.5" title={`Buy ${row.buy_qty?.toLocaleString("en-IN")} · Sell ${row.sell_qty?.toLocaleString("en-IN")}`}>
-            <div className="flex h-1.5 w-16 overflow-hidden rounded bg-loss/60">
-              <div className="h-full bg-profit" style={{ width: `${Math.round(share * 100)}%` }} />
+      {inOrder(order, {
+        rank: (
+          <td className="py-1.5 pr-2 text-xs text-slate-500">{rank}</td>
+        ),
+        symbol: (
+          <td className="py-1.5 pr-2 font-semibold text-slate-100">{row.symbol}</td>
+        ),
+        ltp: (
+          <td className="py-1.5 pr-2 text-right font-mono">{row.ltp.toFixed(2)}</td>
+        ),
+        change: (
+          <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.change_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
+            {pct(row.change_pct)}
+          </td>
+        ),
+        value: (
+          <td className="py-1.5 pr-2 text-right font-mono">{row.value_cr.toFixed(0)}</td>
+        ),
+        rvol: (
+          <td
+            className={clsx(
+              "py-1.5 pr-2 text-right font-mono",
+              row.rvol != null && row.rvol >= 2 ? "font-semibold text-amber-300" : "text-slate-300"
+            )}
+          >
+            {row.rvol == null ? "—" : `${row.rvol.toFixed(1)}×`}
+          </td>
+        ),
+        buy: (
+          <td className="py-1.5 pr-2">
+            {share == null ? (
+              <span className="text-xs text-slate-500">—</span>
+            ) : (
+              <div className="flex items-center gap-1.5" title={`Buy ${row.buy_qty?.toLocaleString("en-IN")} · Sell ${row.sell_qty?.toLocaleString("en-IN")}`}>
+                <div className="flex h-1.5 w-16 overflow-hidden rounded bg-loss/60">
+                  <div className="h-full bg-profit" style={{ width: `${Math.round(share * 100)}%` }} />
+                </div>
+                <span className="font-mono text-xs text-slate-300">{Math.round(share * 100)}%</span>
+              </div>
+            )}
+          </td>
+        ),
+        vwap: (
+          <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.vwap_dist_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
+            {pct(row.vwap_dist_pct)}
+          </td>
+        ),
+        bias: (
+          <td className="py-1.5 pr-2">
+            {row.bias === "LONG" ? (
+              <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-profit">
+                <ArrowUp size={12} /> Long
+              </span>
+            ) : row.bias === "SHORT" ? (
+              <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-loss">
+                <ArrowDown size={12} /> Short
+              </span>
+            ) : (
+              <span className="text-xs text-slate-500">—</span>
+            )}
+          </td>
+        ),
+        actions: (
+          <td className="py-1.5 text-right">
+            <div className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={onWatch}
+                disabled={watching || adding}
+                title={watching ? "Already streaming on the desk" : "Stream on the desk so the monitor below scores it"}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
+              >
+                {adding ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                {watching ? "Watching" : "Watch"}
+              </button>
+              {armedOn.length ? (
+                <span className="self-center text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
+                  {armedOn.join(" · ")}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={onArm}
+                disabled={arming}
+                title="Arm on a bot (asks which)"
+                className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-accentViolet ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10 disabled:opacity-50"
+              >
+                {arming ? <Loader2 size={12} className="animate-spin" /> : null}
+                Arm
+              </button>
             </div>
-            <span className="font-mono text-xs text-slate-300">{Math.round(share * 100)}%</span>
-          </div>
-        )}
-      </td>
-      <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.vwap_dist_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
-        {pct(row.vwap_dist_pct)}
-      </td>
-      <td className="py-1.5 pr-2">
-        {row.bias === "LONG" ? (
-          <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-profit">
-            <ArrowUp size={12} /> Long
-          </span>
-        ) : row.bias === "SHORT" ? (
-          <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-loss">
-            <ArrowDown size={12} /> Short
-          </span>
-        ) : (
-          <span className="text-xs text-slate-500">—</span>
-        )}
-      </td>
-      <td className="py-1.5 text-right">
-        <div className="flex justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={onWatch}
-            disabled={watching || adding}
-            title={watching ? "Already streaming on the desk" : "Stream on the desk so the monitor below scores it"}
-            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
-          >
-            {adding ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
-            {watching ? "Watching" : "Watch"}
-          </button>
-          {armedOn.length ? (
-            <span className="self-center text-[11px] font-semibold text-profit" title={`Armed on ${armedOn.join(", ")}`}>
-              {armedOn.join(" · ")}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={onArm}
-            disabled={arming}
-            title="Arm on a bot (asks which)"
-            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-accentViolet ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10 disabled:opacity-50"
-          >
-            {arming ? <Loader2 size={12} className="animate-spin" /> : null}
-            Arm
-          </button>
-        </div>
-      </td>
+          </td>
+        ),
+      })}
     </tr>
   );
 }
