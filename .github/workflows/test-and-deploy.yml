@@ -132,3 +132,26 @@ jobs:
       - run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  # The scanner server (fly.scanner.toml, SCANNER.md). Off until the repo variable
+  # DEPLOY_SCANNER is "true" and the secret FLY_SCANNER_API_TOKEN
+  # (`fly tokens create deploy -a paltra-scanner`) is set. Same market-hours gate.
+  deploy-scanner:
+    name: Deploy scanner to Fly.io
+    needs: [backend-tests, frontend-build, market-hours-gate]
+    if: needs.market-hours-gate.outputs.allowed == 'true' && vars.DEPLOY_SCANNER == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: fly-deploy-scanner
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-out
+          path: frontend/out
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only -c fly.scanner.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_SCANNER_API_TOKEN }}

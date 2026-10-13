@@ -409,6 +409,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `scan_worker.run` (Cross scan, Trend quality), the desk's most-active scan and the Scalp
   monitor's history fill. `/api/stall` reports it under `groww` and keeps the blocking frames
   of each stall (`recent[].where`). Bookkeeping only: no order is placed, changed or held back.
+- `backend/server_role.py` – scanner server (`PALTRA_ROLE=scanner`, second Fly app
+  `paltra-scanner`, `fly.scanner.toml`, setup in `SCANNER.md`): the same image runs the Scalp
+  page's scans and alerts on its own machine and its own Groww API key. It **never orders**:
+  `refuse_orders` in both Groww clients (`_live_order`, `modify_sl`, `cancel_order`; desk
+  `place_order`, `cancel_order`, `square_off_all`), and 403 on the SMA `/api/mode` /
+  `/api/bots/{n}/mode` LIVE switch and the manual desk's Groww execution. Its Arm opens the desk's
+  `/scalp/?arm=SYMBOL&from=…` in a new tab (`useArming`); the armed chips and "Armed only" come
+  from the desk over a read-only link (`app/api/routes_link.py`: desk `GET /api/link/armed`, token
+  `SCANNER_LINK_TOKEN`, exempt from the Google lock; scanner `GET /api/link/desk-armed`). No
+  shutdown call from the scanner. `GET /api/role` tells the page which server it is on.
+  `SCANS=off` on the desk (default on) keeps its Scalp scans paused for good: the most-active
+  background scan does not start, and resuming scans answers 409. CI deploys the scanner only when
+  the repo variable `DEPLOY_SCANNER` is `true` (secret `FLY_SCANNER_API_TOKEN`).
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
@@ -547,6 +560,9 @@ Real orders reach Groww in only two places:
    `backend/app/brokers/groww_client.py`, `GrowwClient.place_order`
    (also `square_off_all`, `cancel_order`). Only used when
    `state.manual_live` is true.
+
+On the scanner server (`PALTRA_ROLE=scanner`) both paths refuse before the SDK
+(`server_role.refuse_orders`).
 
 The ORB bot never sends real orders. Every bot and strategy-account entry goes
 through `place_paper_entry` in `backend/app/services/execution.py`, which fills

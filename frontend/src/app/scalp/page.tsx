@@ -10,6 +10,7 @@ import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
 import { replayActive, smaApi } from "@/lib/smaApi";
 import { useArming } from "@/components/Scalp/useArming";
+import { useServerRole } from "@/hooks/useServerRole";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { MostActive } from "@/components/Scalp/MostActive";
@@ -60,6 +61,23 @@ export default function ScalpPage() {
   const { armed, arming, armNote, arm, loadDesks, dialogs } = useArming(
     (symbol) => (data?.rows ?? []).find((r) => r.symbol === symbol)?.ltp ?? null
   );
+
+  // Scanner server (scans only, never trades) or a desk whose scans moved there (SCANS=off).
+  const role = useServerRole();
+  const onScanner = role?.role === "scanner";
+  const scansMoved = role?.role === "desk" && !role.scans_enabled;
+
+  // The scanner's Arm opens this page on the desk with ?arm=SYMBOL&from=…: open the arm prompt once.
+  const armHandled = useRef(false);
+  useEffect(() => {
+    if (!role || onScanner || armHandled.current) return;
+    armHandled.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const symbol = (params.get("arm") ?? "").trim().toUpperCase();
+    if (!/^[A-Z0-9&_-]{1,30}$/.test(symbol)) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    arm(symbol, params.get("from") || "Scanner server");
+  }, [role, onScanner, arm]);
 
   // "Backtest these": replay the ticked stocks over past days with the bot.
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -265,6 +283,35 @@ export default function ScalpPage() {
           </Explain>
         </header>
 
+        {onScanner ? (
+          <section className="rounded-xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm text-violet-300">
+            <span className="font-semibold">Scanner server.</span> Scans and alerts run here on their own machine and
+            Groww key; this server never sends an order. Arm opens the{" "}
+            <a href={`${role.desk_url}/scalp/`} target="_blank" rel="noopener noreferrer" className="underline">
+              main desk
+            </a>{" "}
+            in a new tab.
+          </section>
+        ) : null}
+
+        {scansMoved ? (
+          <section className="rounded-xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm text-violet-300">
+            <span className="font-semibold">Scans are off on this server</span> so the bots keep it and Groww to
+            themselves.{" "}
+            {role.scanner_url ? (
+              <>
+                Run them on the{" "}
+                <a href={`${role.scanner_url}/scalp/`} target="_blank" rel="noopener noreferrer" className="underline">
+                  scanner server
+                </a>
+                .
+              </>
+            ) : (
+              "Run them on the scanner server."
+            )}{" "}
+            Arm still works here.
+          </section>
+        ) : (
         <section
           className={clsx(
             "flex flex-wrap items-center gap-3 rounded-xl border p-4 text-sm",
@@ -292,6 +339,7 @@ export default function ScalpPage() {
           </span>
           {pauseNote && <span className="text-xs text-loss">{pauseNote}</span>}
         </section>
+        )}
 
         <section className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-800 bg-card p-4 text-sm">
           <span
@@ -303,7 +351,11 @@ export default function ScalpPage() {
             {data ? (simulated ? "SIMULATED prices" : "LIVE NSE") : "…"}
           </span>
           {data?.paused ? (
-            <span className="text-amber-300">Monitor paused — press Resume scans above to score stocks again.</span>
+            <span className="text-amber-300">
+              {scansMoved
+                ? "Monitor off here — it runs on the scanner server."
+                : "Monitor paused — press Resume scans above to score stocks again."}
+            </span>
           ) : data && (
             <span className="text-slate-400">
               <span className="font-semibold text-profit">{data.ready}</span> of {data.universe} streaming stocks

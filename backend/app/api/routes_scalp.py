@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import groww_pressure
+import server_role
 from app import state
 from app.core.market_clock import ist_now, is_market_open
 from app.services.active_stocks import SORTS, active_scanner
@@ -295,7 +296,8 @@ async def most_active_scan():
 
 
 def scans_paused() -> bool:
-    return active_scanner.paused
+    # SCANS=off (the scans moved to the scanner server) keeps them paused for good.
+    return active_scanner.paused or not server_role.scans_enabled()
 
 
 class PauseBody(BaseModel):
@@ -304,7 +306,7 @@ class PauseBody(BaseModel):
 
 @router.get("/pause")
 async def scan_pause_status():
-    return {"paused": scans_paused()}
+    return {"paused": scans_paused(), "scans_off": not server_role.scans_enabled()}
 
 
 @router.post("/pause")
@@ -313,6 +315,8 @@ async def scan_pause(body: PauseBody):
     fill, its alerts, and the most-active scan (background and manual). Memory only: a restart
     resumes. The SMA terminal's Cross / Trend quality scans have their own switch
     (`PUT /api/scans/pause` on the terminal); the page sets both. Read-only, no order path."""
+    if not body.paused and not server_role.scans_enabled():
+        raise HTTPException(409, server_role.SCANS_OFF_TEXT)
     active_scanner.paused = bool(body.paused)
     if body.paused:
         for task in (active_scanner.manual_task, monitor._backfill_task):  # noqa: SLF001
