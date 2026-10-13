@@ -364,11 +364,11 @@ export default function ScalpPage() {
         {onScanner ? (
           <section className="rounded-xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm text-violet-300">
             <span className="font-semibold">Scanner server.</span> Scans and alerts run here on their own machine and
-            Groww key; this server never sends an order. Arm opens the{" "}
+            Groww key; this server never sends an order. Arm puts the stock on a bot of the{" "}
             <a href={`${role.desk_url}/scalp/`} target="_blank" rel="noopener noreferrer" className="underline">
               main desk
             </a>{" "}
-            in a new tab.
+            (a LIVE bot asks first); the bot orders there on its next SMA cross.
           </section>
         ) : null}
 

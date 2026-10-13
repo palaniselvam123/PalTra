@@ -22,12 +22,14 @@ paltra-scanner.fly.dev  (PALTRA_ROLE=scanner)         paltra.fly.dev  (the desk)
   call refuses (`server_role.refuse_orders`), and the SMA terminal's LIVE
   switch and the manual desk's Groww execution answer 403. Its bots can only
   run in PAPER.
-- **Arm opens the desk.** On the scanner, Arm opens the desk's Scalp page in a
-  new tab with `?arm=SYMBOL`. The usual prompt runs there against the real bots,
-  with the LIVE confirmation and the desk's Google sign-in.
-- **Armed stocks come from the desk** over a read-only link: the scanner calls
-  `GET {DESK_URL}/api/link/armed` with `SCANNER_LINK_TOKEN`. That answer only
-  holds each bot's name, mode and Trade list. Nothing else crosses the link.
+- **Arm arms the desk's bots, from the scanner.** The usual prompt (which bot,
+  quantity, stop, trail, target) runs on the scanner and saves to the desk's bots
+  over the link. PAPER and LIVE both work; a LIVE bot asks the same LIVE
+  question as the desk first, and the desk refuses a LIVE change without it.
+  Only quantity and the trailing-stop numbers can change; no order, no mode.
+- **Armed stocks come from the desk** over the same link: the scanner calls
+  `GET {DESK_URL}/api/link/armed` with `SCANNER_LINK_TOKEN` (each bot's name,
+  mode and Trade list). Keep the token secret: it can arm stocks on your bots.
 - **No shutdown call.** A scanner deploy does not ring you: only the desk
   announces bots going down.
 

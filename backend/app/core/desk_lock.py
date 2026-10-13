@@ -207,6 +207,12 @@ def session_ok(conn) -> bool:
     return token_ok(conn.cookies.get(COOKIE))
 
 
+def _link_token_path(path: str) -> bool:
+    from app.api.routes_link import token_path
+
+    return token_path(path)
+
+
 def _api_public(path: str) -> bool:
     return path in ("/api/health", "/api/health/deep", "/api/session/google")
 
@@ -226,7 +232,7 @@ async def desk_lock_middleware(request: Request, call_next):
     path = request.url.path
     # /mcp checks its own MCP_TOKEN, and the scanner link its SCANNER_LINK_TOKEN; outside
     # servers cannot hold a Google session cookie.
-    if _api_public(path) or path == "/mcp" or path.startswith("/mcp/") or path == "/api/link/armed":
+    if _api_public(path) or path == "/mcp" or path.startswith("/mcp/") or _link_token_path(path):
         return await call_next(request)
     signed_in = session_ok(request)
     if path.startswith("/api/") or path.startswith("/ws") or path.startswith("/sma"):

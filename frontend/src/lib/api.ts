@@ -1,4 +1,5 @@
 import { onSignedOut } from "./session";
+import type { StockConfig } from "./smaApi";
 
 export type BotConfig = {
   session_mode: "demo" | "market";
@@ -919,6 +920,21 @@ export const api = {
   scalpUniverse: () => request<{ symbols: string[]; error: string | null }>("/api/scalp/universe"),
   /** Which server this is: the trading desk, or the scan-only scanner server. */
   serverRole: () => request<ServerRole>("/api/role"),
+  /** Scanner server only: one stock's settings on a desk bot (bot 1-4 or "research"), through the link. */
+  deskStock: (target: number | "research", symbol: string) =>
+    request<StockConfig>(`/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}`),
+  /** Scanner server only: save quantity / trailing stop for a stock on a desk bot. LIVE needs confirmLive. */
+  deskSaveStock: (target: number | "research", symbol: string, body: Record<string, unknown>, confirmLive: boolean) =>
+    request<unknown>(`/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}${confirmLive ? "?confirm_live=true" : ""}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  /** Scanner server only: arm a stock on a desk bot. LIVE needs confirmLive (asked in the page first). */
+  deskArm: (body: { target: number | "research"; symbol: string; source?: string | null; confirm_live: boolean }) =>
+    request<unknown>("/api/link/desk-arm", {
+      method: "POST",
+      body: JSON.stringify({ ...body, target: String(body.target), source: body.source ?? null }),
+    }),
   /** Scanner server only: the desk's Trade lists (read-only link). */
   deskArmed: () =>
     request<{ bots: DeskArmedBot[]; research: string[] | null; error: string | null }>("/api/link/desk-armed"),

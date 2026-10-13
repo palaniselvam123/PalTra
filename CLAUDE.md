@@ -423,10 +423,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   page's scans and alerts on its own machine and its own Groww API key. It **never orders**:
   `refuse_orders` in both Groww clients (`_live_order`, `modify_sl`, `cancel_order`; desk
   `place_order`, `cancel_order`, `square_off_all`), and 403 on the SMA `/api/mode` /
-  `/api/bots/{n}/mode` LIVE switch and the manual desk's Groww execution. Its Arm opens the desk's
-  `/scalp/?arm=SYMBOL&from=…` in a new tab (`useArming`); the armed chips and "Armed only" come
-  from the desk over a read-only link (`app/api/routes_link.py`: desk `GET /api/link/armed`, token
-  `SCANNER_LINK_TOKEN`, exempt from the Google lock; scanner `GET /api/link/desk-armed`). No
+  `/api/bots/{n}/mode` LIVE switch and the manual desk's Groww execution. Its Arm arms the desk's
+  bots over the link (`app/api/routes_link.py`, token `SCANNER_LINK_TOKEN`, exempt from the Google
+  lock via `token_path`): `useArming` shows the desk's bots, `ArmPrompt` reads / saves the stock's qty
+  and trailing stop through scanner `/api/link/desk-stock/{bot}/{symbol}` → desk
+  `/api/link/stock/…`, then scanner `/api/link/desk-arm` → desk `POST /api/link/arm` calls the
+  terminal's own trade-symbols route in-process. PAPER and LIVE: a change on a LIVE bot needs
+  `confirm_live` (the page asks the same LIVE question as the desk first; without it 403), and the
+  terminal's checks (one LIVE bot per stock) still apply. Only qty / TSL numbers can change, never the
+  mode; no order is placed. Armed chips and "Armed only" come from desk `GET /api/link/armed` (scanner
+  `GET /api/link/desk-armed`). No
   shutdown call from the scanner. `GET /api/role` tells the page which server it is on.
   `SCANS=off` on the desk (default on) keeps its Scalp scans paused for good: the most-active
   background scan does not start, and resuming scans answers 409. CI deploys the scanner only when
