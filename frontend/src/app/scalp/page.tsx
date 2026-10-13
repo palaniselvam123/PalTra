@@ -19,7 +19,7 @@ import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
-import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
+import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -531,9 +531,9 @@ export default function ScalpPage() {
                 ]}
                 className="w-28"
               />
-              <div className="flex min-h-9 items-end self-end">
+              <FilterField label="Options">
                 <Toggle label="Scalp-ready only" checked={readyOnly} onChange={setReadyOnly} />
-              </div>
+              </FilterField>
             </FilterRow>
 
             {armNote && <p className="mb-2 text-xs text-accentSky">{armNote}</p>}
@@ -948,7 +948,7 @@ const shortTime = (iso: string) =>
 /** The Scalp page's scanners as tabs; each shows when it last scanned (or that it is scanning now). */
 function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => void; times: Record<TabId, ScanStatus | null> }) {
   return (
-    <div role="tablist" aria-label="Scalp scanners" className="flex flex-wrap gap-1 border-b border-slate-800">
+    <div role="tablist" aria-label="Scalp scanners" className="flex flex-wrap gap-1.5 rounded-xl border border-border bg-surface p-1.5 shadow-card">
       {TABS.map((t) => {
         const on = tab === t.id;
         const st = times[t.id];
@@ -961,8 +961,10 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
             onClick={() => onTab(t.id)}
             title={st?.when ? `Last scan ${new Date(st.when).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : undefined}
             className={clsx(
-              "-mb-px inline-flex min-h-10 items-center gap-2 rounded-t-md border-b-2 px-3 text-sm font-semibold",
-              on ? "border-accentSky text-slate-100" : "border-transparent text-slate-400 hover:text-slate-200"
+              "inline-flex min-h-10 items-center gap-2 rounded-lg border px-3.5 text-sm font-semibold transition-colors",
+              on
+                ? "border-accentSky/60 bg-accentSky/15 text-accentSky shadow-sm"
+                : "border-border bg-surface2 text-slate-400 hover:border-accentSky/40 hover:text-slate-200"
             )}
           >
             {t.label}

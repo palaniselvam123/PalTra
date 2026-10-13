@@ -7,7 +7,7 @@ import { lastScanText } from "@/lib/lastScan";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
-import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
+import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
@@ -218,10 +218,10 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
           step={0.01}
           suffix="%/min"
         />
-        <div className="flex min-h-9 flex-wrap items-end gap-2 self-end">
+        <FilterField label="Options">
           <Toggle label="Fast movers only" checked={fastOnly} onChange={setFastOnly} />
           <Toggle label="Just-crossed" checked={showCrossed} onChange={setShowCrossed} title="Also show stocks that just crossed" />
-        </div>
+        </FilterField>
       </FilterRow>
 
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}

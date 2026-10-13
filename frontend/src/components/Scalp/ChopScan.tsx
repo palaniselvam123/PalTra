@@ -7,7 +7,7 @@ import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
-import { FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
+import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
@@ -351,124 +351,133 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             : null
         }
       >
-        <SelectFilter
-          label="Candle"
-          value={minutes}
-          onChange={(v) => setMinutes(v as CrossScanMinutes)}
-          options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
-          className="w-28"
-        />
-        <SelectFilter
-          label="Show"
-          value={score}
-          onChange={(v) => setScore(v as ScoreFilter)}
-          options={[
-            { value: "ALL", label: "All" },
-            { value: "STRONG", label: "Strong trend (both)" },
-            { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
-            { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
-            { value: "TRENDING", label: "Trending only" },
-            { value: "MIXED", label: "Mixed only" },
-            { value: "CHOPPY", label: "Choppy only" },
-          ]}
-          className="w-44"
-        />
-        <NumberFilter
-          label="Fast movers: |speed| ≥"
-          value={minSpeed}
-          onChange={(v) => setMinSpeed(Math.min(1, Math.max(0, Math.round(v * 1000) / 1000)))}
-          min={0}
-          max={0.3}
-          step={0.01}
-          suffix="%/min"
-          className="w-44"
-        />
-        <TextFilter value={query} onChange={setQuery} />
-        <NumberFilter
-          label="Price from (0 = any)"
-          value={priceMin}
-          onChange={(v) => setPriceMin(Math.min(100000, Math.max(0, Math.round(v))))}
-          min={0}
-          max={5000}
-          step={50}
-          prefix="₹"
-          className="w-36"
-        />
-        <NumberFilter
-          label="Price to (0 = any)"
-          value={priceMax}
-          onChange={(v) => setPriceMax(Math.min(100000, Math.max(0, Math.round(v))))}
-          min={0}
-          max={5000}
-          step={50}
-          prefix="₹"
-          className="w-36"
-        />
-        <NumberFilter
-          label="Alert when quiet for ≥"
-          value={quietMin}
-          onChange={(v) => setQuietMin(Math.min(375, Math.max(1, Math.round(v))))}
-          min={5}
-          max={240}
-          step={5}
-          suffix="min"
-          className="w-40"
-        />
-        <div className="flex min-h-9 flex-wrap items-end gap-2 self-end">
-          <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
-          <Toggle
-            label="Auto re-scan"
-            checked={auto?.on ?? false}
-            onChange={(on) => changeAuto({ on })}
-            title="The server scans by itself every N minutes while the market is open, even with this page closed"
+        <FilterGroup title="View">
+          <SelectFilter
+            label="Candle"
+            value={minutes}
+            onChange={(v) => setMinutes(v as CrossScanMinutes)}
+            options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+            className="w-28"
           />
-          <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
-        </div>
-        <SelectFilter
-          label="Re-scan every"
-          value={auto?.every_min ?? 30}
-          onChange={(v) => changeAuto({ every_min: Number(v) })}
-          options={(auto?.every_choices ?? EVERY_CHOICES).map((m) => ({ value: m, label: `${m} min` }))}
-          className="w-32"
-        />
+          <SelectFilter
+            label="Show"
+            value={score}
+            onChange={(v) => setScore(v as ScoreFilter)}
+            options={[
+              { value: "ALL", label: "All" },
+              { value: "STRONG", label: "Strong trend (both)" },
+              { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
+              { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
+              { value: "TRENDING", label: "Trending only" },
+              { value: "MIXED", label: "Mixed only" },
+              { value: "CHOPPY", label: "Choppy only" },
+            ]}
+            className="w-44"
+          />
+          <TextFilter value={query} onChange={setQuery} />
+          <NumberFilter
+            label="Fast movers: |speed| ≥"
+            value={minSpeed}
+            onChange={(v) => setMinSpeed(Math.min(1, Math.max(0, Math.round(v * 1000) / 1000)))}
+            min={0}
+            max={0.3}
+            step={0.01}
+            suffix="%/min"
+            className="w-44"
+          />
+          <FilterField label="Crosses today">
+            <select
+              value={crossCount}
+              onChange={(e) => setCrossCount(Number(e.target.value) === 1 ? 1 : 0)}
+              aria-label="How many SMA crosses today"
+              className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
+              title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run."
+            >
+              <option value={0}>None (0)</option>
+              <option value={1}>Exactly 1</option>
+            </select>
+            <span className="text-xs text-slate-400">on</span>
+            {CANDLE_CHOICES.map((m) => {
+              const on = noCrossOn.includes(m);
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setNoCrossOn((cur) => (on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b)))}
+                  className={clsx(
+                    "min-h-9 min-w-10 rounded-md px-2.5 text-xs font-semibold ring-1 ring-inset",
+                    on ? "bg-accentSky/15 text-accentSky ring-accentSky/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
+                  )}
+                >
+                  {m}m
+                </button>
+              );
+            })}
+            {noCrossOn.length > 0 && (
+              <button type="button" onClick={() => setNoCrossOn([])} className="text-xs text-slate-500 underline-offset-2 hover:underline">
+                clear
+              </button>
+            )}
+          </FilterField>
+        </FilterGroup>
+        <FilterGroup title="Price & alert">
+          <NumberFilter
+            label="Price from (0 = any)"
+            value={priceMin}
+            onChange={(v) => setPriceMin(Math.min(100000, Math.max(0, Math.round(v))))}
+            min={0}
+            max={5000}
+            step={50}
+            prefix="₹"
+            className="w-36"
+          />
+          <NumberFilter
+            label="Price to (0 = any)"
+            value={priceMax}
+            onChange={(v) => setPriceMax(Math.min(100000, Math.max(0, Math.round(v))))}
+            min={0}
+            max={5000}
+            step={50}
+            prefix="₹"
+            className="w-36"
+          />
+          <NumberFilter
+            label="Alert when quiet for ≥"
+            value={quietMin}
+            onChange={(v) => setQuietMin(Math.min(375, Math.max(1, Math.round(v))))}
+            min={5}
+            max={240}
+            step={5}
+            suffix="min"
+            className="w-40"
+          />
+          <FilterField label="Quiet runner alert">
+            <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
+          </FilterField>
+        </FilterGroup>
+        <FilterGroup title="Scanning">
+          <FilterField label="Stocks">
+            <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
+          </FilterField>
+          <FilterField label="Server">
+            <Toggle
+              label="Auto re-scan"
+              checked={auto?.on ?? false}
+              onChange={(on) => changeAuto({ on })}
+              title="The server scans by itself every N minutes while the market is open, even with this page closed"
+            />
+          </FilterField>
+          <SelectFilter
+            label="Re-scan every"
+            value={auto?.every_min ?? 30}
+            onChange={(v) => changeAuto({ every_min: Number(v) })}
+            options={(auto?.every_choices ?? EVERY_CHOICES).map((m) => ({ value: m, label: `${m} min` }))}
+            className="w-32"
+          />
+        </FilterGroup>
       </FilterRow>
       {auto ? <AutoLine auto={auto} paused={paused} /> : null}
-      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="text-slate-400">Crosses today:</span>
-        <select
-          value={crossCount}
-          onChange={(e) => setCrossCount(Number(e.target.value) === 1 ? 1 : 0)}
-          aria-label="How many SMA crosses today"
-          className="min-h-8 rounded-md border border-slate-700 bg-transparent px-2 text-xs text-slate-200"
-          title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run."
-        >
-          <option value={0}>None (0)</option>
-          <option value={1}>Exactly 1</option>
-        </select>
-        <span className="mr-1 text-slate-400">on:</span>
-        {CANDLE_CHOICES.map((m) => {
-          const on = noCrossOn.includes(m);
-          return (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={on}
-              onClick={() => setNoCrossOn((cur) => (on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b)))}
-              className={clsx(
-                "min-h-8 rounded-md px-2.5 font-semibold ring-1 ring-inset",
-                on ? "bg-accentSky/15 text-accentSky ring-accentSky/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
-              )}
-            >
-              {m}m
-            </button>
-          );
-        })}
-        {noCrossOn.length > 0 && (
-          <button type="button" onClick={() => setNoCrossOn([])} className="ml-1 text-slate-500 underline-offset-2 hover:underline">
-            clear
-          </button>
-        )}
-      </div>
       {toast && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <span>🔔 Quiet runner — {toast}</span>
