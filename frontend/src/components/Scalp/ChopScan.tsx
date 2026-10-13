@@ -32,9 +32,9 @@ type Props = {
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
-type SortKey = "symbol" | "score" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type SortKey = "symbol" | "ltp" | "score" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "score", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -287,6 +287,8 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
     switch (k) {
       case "symbol":
         return r.symbol;
+      case "ltp":
+        return r.ltp;
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
@@ -494,6 +496,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
               <tr>
                 {inOrder(cols.order, {
                   symbol: <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
+                  ltp: <SortTh label="LTP" k="ltp" sort={sort} onSort={onSort} num title="Last traded price at the scan" drag={cols.dragProps("ltp")} />,
                   score: <SortTh label="Score" k="score" sort={sort} onSort={onSort} text drag={cols.dragProps("score")} />,
                   trend: (
                     <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" drag={cols.dragProps("trend")} />
@@ -577,6 +580,7 @@ function Row({
         symbol: (
           <td className="py-1.5 font-semibold text-slate-100">{r.symbol}</td>
         ),
+        ltp: <td className="py-1.5 text-right tabular-nums">{num(r.ltp)}</td>,
         score: (
           <td className="py-1.5">
             <span
