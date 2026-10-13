@@ -32,9 +32,9 @@ type Props = {
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
-type SortKey = "symbol" | "ltp" | "score" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type SortKey = "symbol" | "ltp" | "score" | "first" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -60,6 +60,8 @@ const isStrong = (r: ChopScanRow) => r.trend === "STRONG_BULLISH" || r.trend ===
 const inPriceRange = (ltp: number | null | undefined, min: number, max: number) =>
   (!min && !max) || (ltp != null && (!min || ltp >= min) && (!max || ltp <= max));
 
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
 function shares(v: number | null | undefined): string {
@@ -289,6 +291,8 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
         return r.symbol;
       case "ltp":
         return r.ltp;
+      case "first":
+        return r.first_quiet_at ?? null;
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
@@ -498,6 +502,17 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
                   symbol: <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
                   ltp: <SortTh label="LTP" k="ltp" sort={sort} onSort={onSort} num title="Last traded price at the scan" drag={cols.dragProps("ltp")} />,
                   score: <SortTh label="Score" k="score" sort={sort} onSort={onSort} text drag={cols.dragProps("score")} />,
+                  first: (
+                    <SortTh
+                      label="First alert"
+                      k="first"
+                      sort={sort}
+                      onSort={onSort}
+                      text
+                      title="When a scan first read the stock as a quiet runner today (📨 = its Telegram went)"
+                      drag={cols.dragProps("first")}
+                    />
+                  ),
                   trend: (
                     <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" drag={cols.dragProps("trend")} />
                   ),
@@ -605,6 +620,21 @@ function Row({
               >
                 🔔 Quiet {r.minutes_since_last_cross == null ? "" : `${Math.max(0, Math.round(r.minutes_since_last_cross))}m`}
               </span>
+            )}
+          </td>
+        ),
+        first: (
+          <td className="py-1.5 tabular-nums text-xs">
+            {r.first_quiet_at ? (
+              <span
+                className="text-amber-300"
+                title={`First read as quiet at ${clock(r.first_quiet_at)} IST${r.alerted_at ? ` · Telegram sent ${clock(r.alerted_at)} IST` : " · no Telegram sent"}`}
+              >
+                {clock(r.first_quiet_at)}
+                {r.alerted_at ? " 📨" : ""}
+              </span>
+            ) : (
+              <span className="text-slate-600">—</span>
             )}
           </td>
         ),
