@@ -114,3 +114,40 @@ def test_api_returns_a_desks_day(sma_api):
     assert body["summary"]["last"] == 120.5
     assert sma_api.get("/api/open-pnl?desk=2&day=2026-10-13").json()["points"] == []
     assert sma_api.get("/api/open-pnl?desk=9").status_code == 422
+
+
+# ---- replays ------------------------------------------------------------------------------------
+
+
+def test_a_replay_keeps_one_point_per_replayed_minute_per_run():
+    eng = FakeEngine({"TCS": ("LONG", 10, 4000.0, 4050.0, 500.0)})
+    rec = open_pnl_log.ReplayRecorder(run_id=7, bot=2)
+    past = dt.date(2026, 10, 9)
+    for sec in range(0, 180, 10):  # three replayed minutes on a 10-second grid
+        eng._pnl["TCS"] = 100.0 + sec
+        rec.note(eng, dt.datetime.combine(past, dt.time(10, 0), tzinfo=IST) + dt.timedelta(seconds=sec))
+    rec.flush()  # no running loop: saved at once
+    pts = open_pnl_log.replay_points(7, "2026-10-09")
+    # The first tick of each minute.
+    assert [(p["t"][11:16], p["gross"], p["mode"]) for p in pts] == [("10:00", 100.0, "REPLAY"), ("10:01", 160.0, "REPLAY"), ("10:02", 220.0, "REPLAY")]
+    assert open_pnl_log.replay_days(7) == [{"day": "2026-10-09", "points": 3, "held_points": 3}]
+    runs = open_pnl_log.replay_runs(2)
+    assert [(r["run_id"], r["first"], r["days"], r["points"]) for r in runs] == [(7, "2026-10-09", 1, 3)]
+    assert open_pnl_log.replay_runs(1) == []
+    # A run without an id (nothing to file it under) records nothing.
+    loose = open_pnl_log.ReplayRecorder(run_id=None, bot=1)
+    loose.note(eng, dt.datetime.combine(past, dt.time(11, 0), tzinfo=IST))
+    loose.flush()
+    open_pnl_log.delete_replay(7)
+    assert open_pnl_log.replay_runs(2) == []
+
+
+def test_api_lists_a_bots_replay_runs_and_returns_a_days_points(sma_api):
+    sample = {"gross": -42.0, "net": -60.0, "held": 1, "stocks": [{"symbol": "SBIN"}]}
+    open_pnl_log.save_replay(11, 3, [(_at(10, 5, dt.date(2026, 10, 8)), sample), (_at(10, 5, dt.date(2026, 10, 9)), sample)])
+    runs = sma_api.get("/api/open-pnl/replays?bot=3").json()["runs"]
+    assert [(r["run_id"], r["days"]) for r in runs] == [(11, 2)]
+    body = sma_api.get("/api/open-pnl/replay/11").json()
+    assert body["day"] == "2026-10-09" and body["points"][0]["gross"] == -42.0
+    assert sma_api.get("/api/open-pnl/replay/11?day=2026-10-08").json()["summary"]["low"] == -42.0
+    assert sma_api.get("/api/open-pnl/replays?bot=9").status_code == 422

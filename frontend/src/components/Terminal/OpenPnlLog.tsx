@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
-import { smaApi, type OpenPnlLog as LogData, type OpenPnlPoint } from "@/lib/smaApi";
+import { smaApi, type OpenPnlLog as LiveLog, type OpenPnlPoint, type OpenPnlReplayLog, type OpenPnlReplayRun } from "@/lib/smaApi";
+
+type LogData = Pick<LiveLog, "day" | "days" | "points" | "summary" | "keep_days">;
 import { saveFile } from "@/lib/chartTable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 
@@ -112,7 +114,23 @@ function Chart({ points }: { points: OpenPnlPoint[] }) {
 }
 
 /** The desk's "Open" P&L, one point a minute, for any recorded day. */
-export function OpenPnlLog({ desk, deskName, onClose }: { desk: string; deskName?: string; onClose: () => void }) {
+export function OpenPnlLog({
+  desk,
+  deskName,
+  onClose,
+  startOnReplay = false,
+}: {
+  desk: string;
+  deskName?: string;
+  onClose: () => void;
+  /** Open on the Replays view (the desk is showing a replay). */
+  startOnReplay?: boolean;
+}) {
+  // Bots 1-4 replay; the research desk does not.
+  const bot = /^[1-4]$/.test(desk) ? Number(desk) : null;
+  const [source, setSource] = useState<"live" | "replay">(startOnReplay && bot ? "replay" : "live");
+  const [runs, setRuns] = useState<OpenPnlReplayRun[]>([]);
+  const [runId, setRunId] = useState<number | undefined>(undefined);
   const [day, setDay] = useState<string | undefined>(undefined);
   const [data, setData] = useState<LogData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,14 +139,31 @@ export function OpenPnlLog({ desk, deskName, onClose }: { desk: string; deskName
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await smaApi.openPnl(desk, day));
+      if (source === "replay" && bot) {
+        const list = (await smaApi.openPnlReplays(bot)).runs;
+        setRuns(list);
+        const pick = runId ?? list[0]?.run_id;
+        setData(pick ? ((await smaApi.openPnlReplay(pick, day)) as OpenPnlReplayLog) : { day: null, days: [], points: [], summary: null, keep_days: 90 });
+      } else {
+        setData(await smaApi.openPnl(desk, day));
+      }
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [desk, day]);
+  }, [desk, day, source, bot, runId]);
+
+  const choose = (next: "live" | "replay") => {
+    setSource(next);
+    setDay(undefined);
+    setRunId(undefined);
+    setData(null);
+  };
+  const runLabel = (r: OpenPnlReplayRun) =>
+    `Run #${r.run_id} · ${dayText(r.first)}${r.last !== r.first ? ` – ${dayText(r.last)}` : ""} (${r.days} day${r.days === 1 ? "" : "s"})`;
+  const shownRun = runId ?? runs[0]?.run_id;
 
   useEffect(() => {
     void load();
@@ -147,7 +182,7 @@ export function OpenPnlLog({ desk, deskName, onClose }: { desk: string; deskName
   const csv = () => {
     const head = "Time,Open P&L before charges,Open P&L after charges,Stocks held,Stocks";
     const rows = points.map((p) => [clock(p.t), p.gross, p.net, p.held, `"${stocksText(p).replace(/₹/g, "Rs ").replace(/−/g, "-")}"`].join(","));
-    saveFile(`open-pnl-${desk}-${data?.day ?? "day"}.csv`, [head, ...rows].join("\n"), "text/csv;charset=utf-8");
+    saveFile(`open-pnl-${source === "replay" ? `replay${shownRun ?? ""}` : desk}-${data?.day ?? "day"}.csv`, [head, ...rows].join("\n"), "text/csv;charset=utf-8");
   };
 
   return createPortal(
@@ -165,11 +200,49 @@ export function OpenPnlLog({ desk, deskName, onClose }: { desk: string; deskName
           </button>
         </div>
         <p className="mb-3 text-xs text-slate-400">
-          The &quot;Open&quot; figure of the Stocks bar (open trades, before charges), saved once a minute while the market is open and kept
-          {` ${data?.keep_days ?? 90} days`}. Point at the chart to see the stocks held at that minute.
+          The &quot;Open&quot; figure of the Stocks bar (open trades, before charges),{" "}
+          {source === "replay"
+            ? "saved for every replayed minute of each replay run"
+            : "saved once a minute while the market is open"}{" "}
+          and kept {data?.keep_days ?? 90} days. Point at the chart to see the stocks held at that minute.
         </p>
 
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          {bot ? (
+            <div className="flex overflow-hidden rounded-md border border-border" role="group" aria-label="What to show">
+              {(["live", "replay"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={source === k}
+                  onClick={() => source !== k && choose(k)}
+                  className={clsx("h-8 px-2.5", source === k ? "bg-accentSky/15 font-semibold text-accentSky" : "text-slate-300 hover:bg-white/5")}
+                >
+                  {k === "live" ? "Market days" : "Replays"}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {source === "replay" && (
+            <label className="flex items-center gap-1.5">
+              Run
+              <select
+                value={shownRun ?? ""}
+                onChange={(e) => {
+                  setRunId(Number(e.target.value) || undefined);
+                  setDay(undefined);
+                }}
+                className="h-8 max-w-[18rem] rounded-md border border-border bg-surface px-1.5 text-xs text-slate-200"
+              >
+                {runs.length === 0 && <option value="">No replay recorded yet</option>}
+                {runs.map((r) => (
+                  <option key={r.run_id} value={r.run_id}>
+                    {runLabel(r)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="flex items-center gap-1.5">
             Day
             <select
@@ -199,7 +272,9 @@ export function OpenPnlLog({ desk, deskName, onClose }: { desk: string; deskName
 
         {!points.length ? (
           <p className="py-8 text-center text-xs text-slate-400">
-            Nothing recorded {data?.day ? "on this day" : "yet"}. A point is saved every minute from 09:15 to 15:30 on market days.
+            {source === "replay"
+              ? "No replay recorded yet. Play a past day with Replay and its open P&L is saved minute by minute."
+              : `Nothing recorded ${data?.day ? "on this day" : "yet"}. A point is saved every minute from 09:15 to 15:30 on market days.`}
           </p>
         ) : (
           <>

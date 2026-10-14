@@ -283,6 +283,9 @@ export type OpenPnlLog = {
   keep_days: number;
 };
 
+export type OpenPnlReplayRun = { run_id: number; first: string; last: string; days: number; points: number; saved_at: string };
+export type OpenPnlReplayLog = Omit<OpenPnlLog, "desk" | "every_sec"> & { run_id: number };
+
 /** One saved Cross scan / Trend quality pass (scan history), without its rows. */
 export type ScanKind = "cross" | "chop";
 export type ScanRun = {
@@ -1233,6 +1236,11 @@ export const smaApi = {
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>
     request<OpenPnlLog>(`/api/open-pnl?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`, undefined, undefined, false),
+  /** A bot's replay runs that have an open P&L log, newest first. */
+  openPnlReplays: (bot: number) => request<{ bot: number; runs: OpenPnlReplayRun[] }>(`/api/open-pnl/replays?bot=${bot}`, undefined, undefined, false),
+  /** One replay run's open P&L through one of its days (its last day when none is given). */
+  openPnlReplay: (runId: number, day?: string) =>
+    request<OpenPnlReplayLog>(`/api/open-pnl/replay/${runId}${day ? `?day=${day}` : ""}`, undefined, undefined, false),
   scanHistory: (day?: string, kind?: ScanKind) => {
     const q = new URLSearchParams();
     if (day) q.set("day", day);

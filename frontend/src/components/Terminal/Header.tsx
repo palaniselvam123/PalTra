@@ -763,6 +763,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 desk={desk === "research" ? "research" : String(deskBot ?? 1)}
                 deskName={state?.bot_name || (desk === "research" ? "Research" : undefined)}
                 onClose={() => setPnlLog(false)}
+                startOnReplay={state?.mode === "REPLAY"}
               />
             )}
             {folded && armedList.length > 0 && (

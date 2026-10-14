@@ -390,6 +390,18 @@ async def test_a_multi_day_run_plays_each_day_and_records_the_run(db, monkeypatc
     assert len({t.date for t in trades}) >= 2  # trades on more than one replayed day
     assert all(t.exit_time is not None for t in trades)  # each day squared off
 
+    # The run's Open P&L log: one point per replayed minute, on each day (open_pnl_log.py).
+    import open_pnl_log
+
+    for _ in range(50):
+        if len(open_pnl_log.replay_days(info["run_id"])) == 3:
+            break
+        await asyncio.sleep(0.05)
+    logged = open_pnl_log.replay_days(info["run_id"])
+    assert [d["day"] for d in logged] == [mon.isoformat(), tue.isoformat(), wed.isoformat()]
+    assert all(d["points"] >= 60 for d in logged)  # 09:15 to 10:30, a point a minute
+    assert any(d["held_points"] > 0 for d in logged)
+
     detail = get_run(info["run_id"])
     assert detail["settings"] == {"qty": 10, "stop_type": "ATR"}
     assert [d["date"] for d in detail["days"]] == sorted(d["date"] for d in detail["days"])

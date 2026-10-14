@@ -1701,6 +1701,28 @@ async def open_pnl(
     }
 
 
+@app.get("/api/open-pnl/replays")
+async def open_pnl_replays(bot: int = Query(1, ge=1, le=4)):
+    """A bot's replay runs that have an open P&L log (newest first). Read-only."""
+    return {"bot": bot, "runs": await asyncio.to_thread(open_pnl_log.replay_runs, bot)}
+
+
+@app.get("/api/open-pnl/replay/{run_id}")
+async def open_pnl_replay(run_id: int, day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """One replay run's open P&L through one of its days, one point per replayed minute. Read-only."""
+    days = await asyncio.to_thread(open_pnl_log.replay_days, run_id)
+    pick = day or (days[-1]["day"] if days else None)
+    series = await asyncio.to_thread(open_pnl_log.replay_points, run_id, pick) if pick else []
+    return {
+        "run_id": run_id,
+        "day": pick,
+        "days": days,
+        "points": series,
+        "summary": open_pnl_log.summary(series),
+        "keep_days": open_pnl_log.keep_days(),
+    }
+
+
 # ---- scan history: every finished pass, kept (scan_history.py), and how it turned out (scan_accuracy.py)
 
 
