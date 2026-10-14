@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
-import { AlertTriangle, CandlestickChart, ChevronDown, Loader2, Moon, Search, Sun } from "lucide-react";
+import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, Loader2, Moon, Search, Sun } from "lucide-react";
+import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
@@ -166,6 +167,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [folded, setFolded] = useState(false);
+  const [pnlLog, setPnlLog] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
@@ -700,14 +702,14 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         </div>
         <div ref={searchRef} className={clsx("relative min-w-0", !inTab(tab, "watchlist") && "hidden")}>
           <div className="rounded-xl border border-white/10 bg-[#151921]">
-            <h2 className={clsx(!folded && "border-b border-white/10")}>
+            <h2 className={clsx("flex items-center", !folded && "border-b border-white/10")}>
               <button
                 type="button"
                 aria-expanded={!folded}
                 aria-controls="stock-list-body"
                 onClick={toggleFold}
                 title={folded ? "Show the stock list" : "Shrink the stock list to one line"}
-                className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 text-left hover:bg-white/[0.03]"
+                className="flex min-h-11 w-full min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-1.5 text-left hover:bg-white/[0.03]"
               >
                 <ChevronDown
                   size={16}
@@ -746,7 +748,23 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   ) : null}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => setPnlLog(true)}
+                title="Open P&L through the day: the Open figure saved every minute"
+                aria-label="Open P&L through the day"
+                className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
+              >
+                <LineChart size={14} aria-hidden /> <span className="hidden md:inline">P&amp;L log</span>
+              </button>
             </h2>
+            {pnlLog && (
+              <OpenPnlLog
+                desk={desk === "research" ? "research" : String(deskBot ?? 1)}
+                deskName={state?.bot_name || (desk === "research" ? "Research" : undefined)}
+                onClose={() => setPnlLog(false)}
+              />
+            )}
             {folded && armedList.length > 0 && (
               <p className="-mt-1 truncate px-3 pb-2 pl-9 text-xs text-slate-400" title={armedList.join(", ")}>
                 {armedList.map((s, i) => {

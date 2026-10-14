@@ -408,6 +408,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.
+- `backend/open_pnl_log.py` – open P&L log (read-only): once a minute while NSE is open
+  (`OpenPnlRecorder`, started in `boot_engine`), each desk's "Open" figure from the terminal's
+  Stocks bar (bot 1, bots 2-4, research; `sample` uses `engine._open_pnl`, the screen's own
+  arithmetic) is saved with its mode and every held stock (side, qty, entry, last price, open P&L)
+  in its own SQLite file next to the SMA DB (`open_pnl.db`, `OPEN_PNL_FILE`, `OPEN_PNL_DAYS`
+  default 90). `GET /api/open-pnl?desk=1|2|3|4|research&day=` gives a day's points plus its high /
+  low / latest. UI: the Stocks bar's "P&L log" button (`OpenPnlLog`: chart with hover, table, CSV).
+  No order path; nothing in the strategy reads it.
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the

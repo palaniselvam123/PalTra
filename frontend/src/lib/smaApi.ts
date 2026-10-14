@@ -270,6 +270,19 @@ export type ChopScan = {
   auto?: ChopAuto;
 };
 
+/** One minute of a desk's open P&L (the Stocks bar's "Open" figure), from the open P&L log. */
+export type OpenPnlStock = { symbol: string; side: string; qty: number; entry: number | null; ltp: number | null; gross: number; net: number };
+export type OpenPnlPoint = { t: string; mode: string; gross: number; net: number; held: number; stocks: OpenPnlStock[] };
+export type OpenPnlLog = {
+  desk: string;
+  day: string | null;
+  days: { day: string; points: number; held_points: number }[];
+  points: OpenPnlPoint[];
+  summary: { high: number; high_at: string; low: number; low_at: string; last: number; last_at: string } | null;
+  every_sec: number;
+  keep_days: number;
+};
+
 /** One saved Cross scan / Trend quality pass (scan history), without its rows. */
 export type ScanKind = "cross" | "chop";
 export type ScanRun = {
@@ -1217,6 +1230,9 @@ export const smaApi = {
     ),
   chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
+  /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
+  openPnl: (desk: string, day?: string) =>
+    request<OpenPnlLog>(`/api/open-pnl?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`, undefined, undefined, false),
   scanHistory: (day?: string, kind?: ScanKind) => {
     const q = new URLSearchParams();
     if (day) q.set("day", day);
