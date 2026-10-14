@@ -5,7 +5,10 @@ import clsx from "clsx";
 import { Download, FileText, History, Loader2, RefreshCw, Target } from "lucide-react";
 import {
   smaApi,
+  type ChopScan as ChopScanData,
   type ChopScanRow,
+  type CrossScan as CrossScanData,
+  type CrossScanMinutes,
   type CrossScanRow,
   type ScanCheckGroup,
   type ScanCheckRow,
@@ -17,6 +20,8 @@ import { saveFile } from "@/lib/chartTable";
 import { pdfText } from "@/lib/backtestPdf";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
+import { ChopScan } from "@/components/Scalp/ChopScan";
+import { CrossScan } from "@/components/Scalp/CrossScan";
 
 const POLL_MS = 3_000;
 
@@ -194,7 +199,17 @@ async function pdf(run: ScanRunDetail, cols: Col[], rows: Merged[]): Promise<voi
   doc.save(`${run.kind === "cross" ? "cross-scan" : "trend-quality"}-${run.day}-${clock(run.as_of).replace(":", "")}.pdf`);
 }
 
-export function ScanHistory() {
+export function ScanHistory({
+  armed,
+  arming,
+  onArm,
+}: {
+  armed: Map<string, string[]>;
+  arming: string | null;
+  onArm: (symbol: string) => void;
+}) {
+  // "page": the saved scan exactly as its tab showed it; "accuracy": the check table.
+  const [view, setView] = useState<"page" | "accuracy">("page");
   const [hist, setHist] = useState<ScanHistoryData | null>(null);
   const [day, setDay] = useState<string>("");
   const [kind, setKind] = useState<ScanKind | "">("");
@@ -267,6 +282,30 @@ export function ScanHistory() {
     const byStock = new Map((run.check?.rows ?? []).map((c) => [c.symbol, c]));
     return (run.rows as Saved[]).map((r) => ({ ...r, check: byStock.get(r.symbol) }));
   }, [run]);
+  // The run as its live tab got it, for the "as it looked" view.
+  const savedTitle = run ? `${clock(run.as_of)} IST · ${dayText(run.day)}` : undefined;
+  const savedBase = useMemo(() => {
+    if (!run) return null;
+    const m = run.meta;
+    return {
+      running: false,
+      done: run.total ?? run.row_count,
+      total: run.total ?? run.row_count,
+      failed: run.failed ?? 0,
+      error: run.error,
+      minutes: (run.minutes ?? 5) as CrossScanMinutes,
+      sma_fast: m.sma_fast ?? 9,
+      sma_slow: m.sma_slow ?? 21,
+      as_of: run.as_of,
+      finished_at: run.finished_at,
+      market_open: true,
+    };
+  }, [run]);
+  const savedChop: ChopScanData | null =
+    run && savedBase && run.kind === "chop" ? { ...savedBase, quiet_min: run.meta.quiet_min ?? 60, rows: run.rows as ChopScanRow[] } : null;
+  const savedCross: CrossScanData | null =
+    run && savedBase && run.kind === "cross" ? { ...savedBase, rows: run.rows as CrossScanRow[] } : null;
+
   const shown = useMemo(
     () =>
       merged.filter((r) =>
@@ -424,6 +463,27 @@ export function ScanHistory() {
             <p className="mb-2 text-xs text-amber-300">{run.checking.error}</p>
           )}
 
+          <div className="mb-3 flex overflow-hidden rounded-md border border-border text-xs" role="group" aria-label="How to show this scan">
+            {(["page", "accuracy"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={view === k}
+                onClick={() => setView(k)}
+                className={clsx("h-8 px-3", view === k ? "bg-accentSky/15 font-semibold text-accentSky" : "text-slate-300 hover:bg-white/5")}
+              >
+                {k === "page" ? `${run.label} as it looked` : run.check ? "Accuracy (what happened next)" : "Accuracy table"}
+              </button>
+            ))}
+          </div>
+          {view === "page" ? (
+            run.kind === "chop" ? (
+              <ChopScan armed={armed} arming={arming} onArm={onArm} saved={savedChop ?? undefined} savedTitle={savedTitle} />
+            ) : (
+              <CrossScan armed={armed} arming={arming} onArm={onArm} saved={savedCross ?? undefined} savedTitle={savedTitle} />
+            )
+          ) : (
+          <>
           {run.check && (
             <div className="mb-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               {run.check.summary.map((g) => (
@@ -501,6 +561,8 @@ export function ScanHistory() {
             </table>
             <Pager p={paged} className="mt-2" />
           </div>
+          </>
+          )}
         </div>
       )}
     </section>

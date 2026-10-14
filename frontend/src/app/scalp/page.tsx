@@ -696,7 +696,7 @@ export default function ScalpPage() {
         <div hidden={tab !== "backtest"}>
           <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
         </div>
-        <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory />}</div>
+        <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>
           <section className="rounded-xl border border-slate-800 bg-card p-4">
             <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
