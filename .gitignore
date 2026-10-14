@@ -22,3 +22,4 @@ frontend/out/
 # Trend quality auto re-scan settings (chop_auto.py)
 backend/chop_auto.json
 backend/scan_history.db
+backend/open_pnl.db

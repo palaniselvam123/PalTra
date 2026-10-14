@@ -28,6 +28,7 @@ from candle_history import HistoryError, fetch_frame, load_history
 import chop_auto
 import chop_scan
 import groww_pressure
+import open_pnl_log
 import scan_accuracy
 import scan_history
 import scan_worker
@@ -86,6 +87,7 @@ chop_scanner = ChopScanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 scan_checker = scan_accuracy.AccuracyChecker()
+open_pnl_recorder = open_pnl_log.OpenPnlRecorder()
 
 
 def _keep_scan(kind: str):
@@ -157,6 +159,7 @@ def boot_engine() -> asyncio.Task | None:
     _task = asyncio.create_task(engine.run())
     chop_autos.reload()
     chop_autos.start_loop(_chop_auto_start)
+    open_pnl_recorder.start(_open_pnl_desks)
     ensure_research_config()
     research_engine.restore_open_books()
     research_engine.restore_trades_today()
@@ -181,6 +184,7 @@ async def announce_shutdown_all() -> None:
 def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
+    open_pnl_recorder.stop()
     scan_checker.stop("Stopped: the app is shutting down.")
     scan_worker.shutdown()
     engine.stop()
@@ -1662,6 +1666,39 @@ async def chop_scan_auto(body: ChopAutoUpdate):
 @app.get("/api/chop-scan")
 async def chop_scan_status():
     return {**chop_scanner.snapshot(), "paused": _scans_paused, "auto": chop_autos.snapshot()}
+
+
+# ---- open P&L log: each desk's "Open" figure, minute by minute (open_pnl_log.py)
+
+OPEN_PNL_DESKS = ("1", "2", "3", "4", "research")
+
+
+def _open_pnl_desks() -> list[tuple[str, object]]:
+    """Every live desk the log samples: the main desk (bot 1), bots 2-4 and the research desk."""
+    out: list[tuple[str, object]] = [("1", engine)]
+    out += [(str(n), eng) for n, eng in sorted(bot_engines.items())]
+    out.append(("research", research_engine))
+    return out
+
+
+@app.get("/api/open-pnl")
+async def open_pnl(
+    desk: Literal["1", "2", "3", "4", "research"] = "1",
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+):
+    """One desk's open P&L through a day, one point a minute (the latest day when none is given). Read-only."""
+    days = await asyncio.to_thread(open_pnl_log.days, desk)
+    pick = day or (days[0]["day"] if days else None)
+    series = await asyncio.to_thread(open_pnl_log.points, pick, desk) if pick else []
+    return {
+        "desk": desk,
+        "day": pick,
+        "days": days,
+        "points": series,
+        "summary": open_pnl_log.summary(series),
+        "every_sec": open_pnl_log.EVERY_SEC,
+        "keep_days": open_pnl_log.keep_days(),
+    }
 
 
 # ---- scan history: every finished pass, kept (scan_history.py), and how it turned out (scan_accuracy.py)
