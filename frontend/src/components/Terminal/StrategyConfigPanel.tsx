@@ -60,6 +60,10 @@ const LABELS: Record<string, string> = {
   late_entry_min: "late entry",
   join_trend: "join morning trend",
   join_after_min: "join after",
+  counter_exit_count: "counter-candle exit",
+  counter_rule: "counter-candle rule",
+  counter_need_fast: "counter-candle fast SMA",
+  counter_entry: "early reversal entry",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -219,6 +223,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     late_entry_min: Math.min(375, Math.max(0, Math.round(Number(form.late_entry_min ?? 0)))),
     join_trend: Boolean(form.join_trend),
     join_after_min: Math.min(360, Math.max(0, Math.round(Number(form.join_after_min ?? 15)))),
+    counter_exit_count: Math.min(10, Math.max(0, Math.round(Number(form.counter_exit_count ?? 0)))),
+    counter_rule: (["CLOSES", "COLOUR", "BOTH"] as const).includes(form.counter_rule as "CLOSES")
+      ? (form.counter_rule as "CLOSES" | "COLOUR" | "BOTH")
+      : "COLOUR",
+    counter_need_fast: form.counter_need_fast !== false,
+    counter_entry: Boolean(form.counter_entry),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -895,6 +905,59 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           </div>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Counter candles (exit and early entry)
+            <InfoTip label="About counter candles">
+              A run of closed candles against the trade often turns it before the SMAs cross: green candles in a sell, red in a
+              buy. Exit: an open trade closes once its last N closed candles (counted after the entry) all went against it,
+              and, with the fast-SMA box ticked, the last close is past the fast SMA on that side. Early entry: while flat, the
+              same run against the side the SMAs are on (fast below slow, then N green candles closing above the fast SMA)
+              opens the trade that way before the cross, once per SMA run. Every filter, the cut-off, the caps and the stop
+              still apply. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Exit after N candles against (0 = off)"
+              value={String(form.counter_exit_count ?? 0)}
+              onChange={(v) => set("counter_exit_count", v)}
+              own={isOwn("counter_exit_count")}
+            />
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Counted by{isOwn("counter_rule") && <OwnTag />}
+              </span>
+              <select
+                value={form.counter_rule ?? "COLOUR"}
+                onChange={(e) => set("counter_rule", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="COLOUR">Colour (green / red)</option>
+                <option value="CLOSES">Closes rising / falling</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.counter_need_fast !== false}
+              onChange={(e) => set("counter_need_fast", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("counter_need_fast") && <OwnTag />}
+            Last close must be past the fast SMA
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.counter_entry)}
+              onChange={(e) => set("counter_entry", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("counter_entry") && <OwnTag />}
+            Early reversal entry (before the cross; N = exit count, or 3)
+          </label>
         </div>
       </FieldGroup>
       <FieldGroup title="Exits & stops" hint="Stop type, ₹ stop / trail / target, ATR stop, cross exit, Bollinger exit" wide={wide}>
