@@ -76,6 +76,19 @@ def _connect() -> sqlite3.Connection:
             PRIMARY KEY (desk, minute)
         );
         CREATE INDEX IF NOT EXISTS open_pnl_day ON open_pnl (day, desk);
+        CREATE TABLE IF NOT EXISTS replay_pnl (
+            run_id INTEGER NOT NULL,
+            bot INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            minute TEXT NOT NULL,
+            gross REAL,
+            net REAL,
+            held INTEGER,
+            stocks TEXT,
+            saved_at TEXT NOT NULL,
+            PRIMARY KEY (run_id, minute)
+        );
+        CREATE INDEX IF NOT EXISTS replay_pnl_bot ON replay_pnl (bot, run_id);
         """
     )
     return con
@@ -177,6 +190,117 @@ def summary(series: list[dict]) -> dict | None:
         "last": series[-1]["gross"],
         "last_at": series[-1]["t"],
     }
+
+
+# ---- replays: the same figure, one point per replayed minute, kept per run ------------------
+
+
+def save_replay(run_id: int, bot: int, rows: Iterable[tuple[dt.datetime, dict]]) -> int:
+    """Store a replay's points ((replay minute, sample) each). Never raises: the log must not hurt the replay."""
+    now = dt.datetime.now(dt.timezone.utc)
+    data = []
+    for minute, s in rows:
+        stamp = minute.astimezone(IST).replace(second=0, microsecond=0)
+        data.append(
+            (
+                int(run_id), int(bot), stamp.date().isoformat(), stamp.isoformat(timespec="minutes"),
+                s["gross"], s["net"], s["held"], json.dumps(s["stocks"], separators=(",", ":")),
+                now.isoformat(timespec="seconds"),
+            )
+        )
+    if not data:
+        return 0
+    try:
+        with _lock, _connect() as con:
+            con.executemany("INSERT OR REPLACE INTO replay_pnl VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", data)
+            cutoff = (now - dt.timedelta(days=keep_days())).isoformat(timespec="seconds")
+            con.execute("DELETE FROM replay_pnl WHERE saved_at < ?", (cutoff,))
+        return len(data)
+    except Exception:  # noqa: BLE001
+        log.exception("could not save the replay's open P&L log")
+        return 0
+
+
+def delete_replay(run_id: int) -> None:
+    try:
+        with _lock, _connect() as con:
+            con.execute("DELETE FROM replay_pnl WHERE run_id = ?", (int(run_id),))
+    except Exception:  # noqa: BLE001
+        log.exception("could not delete a replay's open P&L log")
+
+
+def replay_runs(bot: int, limit: int = 100) -> list[dict]:
+    """A bot's replay runs with recorded points, newest first: their days and point counts."""
+    with _lock, _connect() as con:
+        out = con.execute(
+            "SELECT run_id, MIN(day) AS first, MAX(day) AS last, COUNT(DISTINCT day) AS days, COUNT(*) AS points,"
+            " MAX(saved_at) AS saved_at FROM replay_pnl WHERE bot = ? GROUP BY run_id ORDER BY run_id DESC LIMIT ?",
+            (int(bot), limit),
+        ).fetchall()
+    return [dict(r) for r in out]
+
+
+def replay_days(run_id: int) -> list[dict]:
+    with _lock, _connect() as con:
+        out = con.execute(
+            "SELECT day, COUNT(*) AS points, SUM(held > 0) AS held FROM replay_pnl WHERE run_id = ? GROUP BY day ORDER BY day",
+            (int(run_id),),
+        ).fetchall()
+    return [{"day": r["day"], "points": r["points"], "held_points": r["held"] or 0} for r in out]
+
+
+def replay_points(run_id: int, day: str) -> list[dict]:
+    with _lock, _connect() as con:
+        out = con.execute(
+            "SELECT minute, gross, net, held, stocks FROM replay_pnl WHERE run_id = ? AND day = ? ORDER BY minute",
+            (int(run_id), day),
+        ).fetchall()
+    return [
+        {"t": r["minute"], "mode": "REPLAY", "gross": r["gross"], "net": r["net"], "held": r["held"], "stocks": json.loads(r["stocks"] or "[]")}
+        for r in out
+    ]
+
+
+class ReplayRecorder:
+    """Collects one point per replayed minute and saves them in batches, off the event loop."""
+
+    BATCH = 30
+
+    def __init__(self, run_id: int | None, bot: int) -> None:
+        self.run_id = run_id
+        self.bot = int(bot)
+        self._last: str | None = None
+        self._buffer: list[tuple[dt.datetime, dict]] = []
+        self._tasks: set = set()
+
+    def note(self, engine, clock: dt.datetime) -> None:
+        """Called after each replay tick: keeps the first tick of each new replay minute."""
+        if self.run_id is None:
+            return
+        key = clock.strftime("%Y-%m-%d %H:%M")
+        if key == self._last:
+            return
+        self._last = key
+        try:
+            self._buffer.append((clock, sample(engine)))
+        except Exception:  # noqa: BLE001
+            log.exception("could not read the replay's open P&L")
+            return
+        if len(self._buffer) >= self.BATCH:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._buffer or self.run_id is None:
+            return
+        rows, self._buffer = self._buffer, []
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            save_replay(self.run_id, self.bot, rows)
+            return
+        task = loop.create_task(asyncio.to_thread(save_replay, self.run_id, self.bot, rows))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
 
 class OpenPnlRecorder:

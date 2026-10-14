@@ -33,6 +33,7 @@ from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, ReviewLog, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
+import open_pnl_log
 from scalp_picks import PickRule, picks_for_day
 
 SPEEDS = (1, 10, 60, 300)
@@ -574,7 +575,8 @@ def delete_run(run_id: int) -> bool:
         db.query(ReviewLog).filter(ReviewLog.run_id == run_id).delete()
         db.delete(run)
         db.commit()
-        return True
+    open_pnl_log.delete_replay(run_id)
+    return True
 
 
 @dataclass
@@ -814,6 +816,8 @@ class ReplaySession:
             engine.hold_for_next_cross(symbols)
             engine.status = "PAUSED" if bot_paused else "RUNNING"
             self.engine = engine
+            # The Open P&L log of this run, one point per replayed minute (read-only).
+            self._pnl_log = open_pnl_log.ReplayRecorder(self.run_id, self.bot)
             if self.status not in ("PLAYING", "PAUSED"):
                 self.status = "PLAYING"
             await self._play()
@@ -901,6 +905,7 @@ class ReplaySession:
                     await eng.tick(eng.feed.clock)
                 except Exception as exc:  # noqa: BLE001
                     eng.last_error = str(exc)
+                self._note_pnl(eng)
                 if eng.feed.clock >= end:
                     await self._finish_day()
                     return
@@ -914,7 +919,18 @@ class ReplaySession:
             sample = played / spent if spent > 0 else 0.0
             self.effective_speed = sample if self.effective_speed == 0 else 0.7 * self.effective_speed + 0.3 * sample
 
+    def _note_pnl(self, eng) -> None:
+        log_ = getattr(self, "_pnl_log", None)
+        if log_ is not None:
+            log_.note(eng, eng.feed.clock)
+
+    def _flush_pnl(self) -> None:
+        log_ = getattr(self, "_pnl_log", None)
+        if log_ is not None:
+            log_.flush()
+
     async def _finish_day(self) -> None:
+        self._flush_pnl()
         eng = self.engine
         if eng is not None and eng.positions:
             await eng._square_off("EOD_SQUARE_OFF")
@@ -944,6 +960,7 @@ class ReplaySession:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
         self._task = None
+        self._flush_pnl()
         eng = self.engine
         if eng is not None and eng.positions:
             try:

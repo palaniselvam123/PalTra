@@ -414,7 +414,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   arithmetic) is saved with its mode and every held stock (side, qty, entry, last price, open P&L)
   in its own SQLite file next to the SMA DB (`open_pnl.db`, `OPEN_PNL_FILE`, `OPEN_PNL_DAYS`
   default 90). `GET /api/open-pnl?desk=1|2|3|4|research&day=` gives a day's points plus its high /
-  low / latest. UI: the Stocks bar's "P&L log" button (`OpenPnlLog`: chart with hover, table, CSV).
+  low / latest. **Replays too**: each `ReplaySession` day gets an `open_pnl_log.ReplayRecorder`
+  (run id, bot) that keeps the first tick of each replayed minute after `eng.tick` (`_note_pnl`) and
+  saves in batches off the loop (`flush` every 30 points, at the day's end and on Stop) into
+  `replay_pnl` (keyed by run and replayed minute; `delete_run` drops it). `GET /api/open-pnl/replays?bot=`
+  lists a bot's runs, `GET /api/open-pnl/replay/{run_id}?day=` gives one replayed day.
+  UI: the Stocks bar's "P&L log" button (`OpenPnlLog`: Market days / Replays switch, run and day
+  pickers, chart with hover, table, CSV; opens on Replays while the desk shows a replay).
   No order path; nothing in the strategy reads it.
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
