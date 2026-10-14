@@ -9,6 +9,9 @@ import { smaApi, type OpenPnlLog as LiveLog, type OpenPnlPoint, type OpenPnlRepl
 type LogData = Pick<LiveLog, "day" | "days" | "points" | "summary" | "keep_days">;
 import { saveFile } from "@/lib/chartTable";
 import { Pager, usePaged } from "@/components/ui/pagination";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
+
+type SortKey = "time" | "gross" | "net" | "held";
 
 const W = 760;
 const H = 220;
@@ -176,7 +179,11 @@ export function OpenPnlLog({
 
   const points = data?.points ?? [];
   const newestFirst = useMemo(() => [...points].reverse(), [points]);
-  const paged = usePaged(newestFirst, "terminal.openPnl.pageSize");
+  // Newest first until a column is clicked; the third click on a column comes back here.
+  const { sorted, sort, onSort } = useSort<OpenPnlPoint, SortKey>(newestFirst, (p, k) =>
+    k === "time" ? p.t : k === "gross" ? p.gross : k === "net" ? p.net : p.held
+  );
+  const paged = usePaged(sorted, "terminal.openPnl.pageSize");
   const s = data?.summary;
 
   const csv = () => {
@@ -302,10 +309,10 @@ export function OpenPnlLog({
             <table className="w-full text-xs">
               <thead className="text-left text-slate-400">
                 <tr className="[&_th]:px-2 [&_th]:py-1.5 [&_th]:font-medium">
-                  <th>Time</th>
-                  <th className="text-right">Open (before charges)</th>
-                  <th className="text-right">After charges</th>
-                  <th>Stocks held</th>
+                  <SortTh label="Time" k="time" text sort={sort} onSort={onSort} title="Sort by time (earliest first, then latest first)" />
+                  <SortTh label="Open (before charges)" k="gross" num sort={sort} onSort={onSort} title="Sort by open P&L before charges (highest first)" />
+                  <SortTh label="After charges" k="net" num sort={sort} onSort={onSort} title="Sort by open P&L after charges (highest first)" />
+                  <SortTh label="Stocks held" k="held" sort={sort} onSort={onSort} title="Sort by how many stocks were held (most first)" />
                 </tr>
               </thead>
               <tbody>
