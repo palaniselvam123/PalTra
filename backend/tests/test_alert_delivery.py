@@ -401,3 +401,60 @@ def test_an_app_stop_rings_outside_market_hours_but_keeps_the_cooldown(monkeypat
     assert asyncio.run(notifier.place_call("app stopping", any_time=True)).ok
     assert not asyncio.run(notifier.place_call("app stopping again", any_time=True)).ok
     assert rang == ["app stopping"]
+
+
+class TestAppStopAnnouncement:
+    """The app stopping: always in market hours; after hours each part follows its switch."""
+
+    def _notifier(self, monkeypatch, prefs):
+        import datetime as dt
+
+        notifier = AlertNotifier()
+        calls: list[tuple[str, bool]] = []
+        messages: list[tuple[str, bool]] = []
+
+        async def stop_prefs():
+            return prefs
+
+        async def place_call(message, *, test=False, any_time=False):
+            calls.append((message, any_time))
+            return DeliveryResult(True, "twilio_voice", classification=ACCEPTED)
+
+        async def send_critical(message, call=False, call_any_time=False):
+            messages.append((message, call))
+            if call:
+                await place_call(message, any_time=call_any_time)
+            return DeliveryResult(True, "telegram", classification=ACCEPTED)
+
+        monkeypatch.setattr(notifier, "stop_prefs", stop_prefs)
+        monkeypatch.setattr(notifier, "place_call", place_call)
+        monkeypatch.setattr(notifier, "send_critical", send_critical)
+        return notifier, calls, messages, dt
+
+    def test_in_market_hours_it_always_messages_and_rings(self, monkeypatch):
+        notifier, calls, messages, dt = self._notifier(
+            monkeypatch, {"after_hours_stop_call": False, "after_hours_stop_message": False}
+        )
+        asyncio.run(notifier.announce_shutdown("stop", now=dt.datetime(2026, 10, 13, 11, 0)))
+        assert messages == [("stop", True)] and len(calls) == 1
+
+    def test_after_hours_both_switches_on_rings_at_any_hour_and_messages(self, monkeypatch):
+        notifier, calls, messages, dt = self._notifier(
+            monkeypatch, {"after_hours_stop_call": True, "after_hours_stop_message": True}
+        )
+        asyncio.run(notifier.announce_shutdown("stop", now=dt.datetime(2026, 10, 13, 20, 0)))
+        assert calls == [("stop", True)] and messages == [("stop", False)]
+
+    def test_after_hours_call_off_sends_only_the_message(self, monkeypatch):
+        notifier, calls, messages, dt = self._notifier(
+            monkeypatch, {"after_hours_stop_call": False, "after_hours_stop_message": True}
+        )
+        asyncio.run(notifier.announce_shutdown("stop", now=dt.datetime(2026, 10, 13, 20, 0)))
+        assert calls == [] and messages == [("stop", False)]
+
+    def test_after_hours_both_off_sends_nothing(self, monkeypatch):
+        notifier, calls, messages, dt = self._notifier(
+            monkeypatch, {"after_hours_stop_call": False, "after_hours_stop_message": False}
+        )
+        asyncio.run(notifier.announce_shutdown("stop", now=dt.datetime(2026, 10, 17, 10, 0)))  # a Saturday
+        assert calls == [] and messages == []

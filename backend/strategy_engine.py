@@ -3938,7 +3938,8 @@ async def announce_process_stop(engines: list) -> None:
     try:
         from app.services.alert_notifier import alert_notifier
 
-        await asyncio.wait_for(alert_notifier.send_critical(message, call=True, call_any_time=True), timeout=8)
+        # In market hours it always messages and rings; after hours each follows its switch.
+        await asyncio.wait_for(alert_notifier.announce_shutdown(message), timeout=8)
     except Exception:  # noqa: BLE001
         return
 

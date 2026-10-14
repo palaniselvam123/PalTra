@@ -320,6 +320,22 @@ async def delete_channel(provider: str):
     return await alert_notifier.configured_providers()
 
 
+class StopPrefsBody(BaseModel):
+    after_hours_stop_call: bool | None = None
+    after_hours_stop_message: bool | None = None
+
+
+@router.get("/alert-prefs")
+async def alert_prefs():
+    """After-hours app-stop switches (call / message). No secrets."""
+    return await alert_notifier.stop_prefs()
+
+
+@router.put("/alert-prefs")
+async def save_alert_prefs(body: StopPrefsBody):
+    return await alert_notifier.save_stop_prefs(call=body.after_hours_stop_call, message=body.after_hours_stop_message)
+
+
 @router.post("/test-alert")
 async def test_alert(channel_type: str = "trade"):
     """Sends a real message through the enabled channel, so credentials are

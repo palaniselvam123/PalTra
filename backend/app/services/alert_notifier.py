@@ -39,7 +39,7 @@ from sqlalchemy import select
 
 from app.core.encryption import get_vault
 from app.core.market_clock import ist_now
-from app.models.database import AlertChannel, async_session
+from app.models.database import AlertChannel, AlertPrefs, async_session
 
 CALLMEBOT = "callmebot"
 TWILIO = "twilio"
@@ -321,6 +321,54 @@ class AlertNotifier:
         if channel is None:
             return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
         return await self._deliver(channel, message)
+
+    async def stop_prefs(self) -> dict:
+        """The after-hours app-stop switches. Both on when never saved (ring and message, as before)."""
+        async with async_session() as session:
+            row = await session.get(AlertPrefs, 1)
+        if row is None:
+            return {"after_hours_stop_call": True, "after_hours_stop_message": True}
+        return {
+            "after_hours_stop_call": bool(row.after_hours_stop_call),
+            "after_hours_stop_message": bool(row.after_hours_stop_message),
+        }
+
+    async def save_stop_prefs(self, *, call: bool | None = None, message: bool | None = None) -> dict:
+        async with async_session() as session:
+            row = await session.get(AlertPrefs, 1)
+            if row is None:
+                row = AlertPrefs(id=1, after_hours_stop_call=True, after_hours_stop_message=True)
+                session.add(row)
+            if call is not None:
+                row.after_hours_stop_call = bool(call)
+            if message is not None:
+                row.after_hours_stop_message = bool(message)
+            row.updated_at = dt.datetime.utcnow()
+            await session.commit()
+        return await self.stop_prefs()
+
+    async def announce_shutdown(self, message: str, now: dt.datetime | None = None) -> None:
+        """The app is stopping. In market hours: message and call, always.
+
+        Outside market hours (a deploy after 15:45, a night restart) each is sent
+        only when its switch is on (`stop_prefs`). The call cooldown still applies.
+        """
+        now = now or ist_now()
+        in_hours = now.weekday() < 5 and CALL_HOURS[0] <= now.time() <= CALL_HOURS[1]
+        if in_hours:
+            await self.send_critical(message, call=True)
+            return
+        try:
+            prefs = await self.stop_prefs()
+        except Exception:  # noqa: BLE001 - unreadable prefs: behave as before (both on)
+            prefs = {"after_hours_stop_call": True, "after_hours_stop_message": True}
+        if prefs["after_hours_stop_call"]:
+            try:
+                await self.place_call(message, any_time=True)
+            except Exception:  # noqa: BLE001
+                log.exception("alert.call failed")
+        if prefs["after_hours_stop_message"]:
+            await self.send_critical(message)
 
     async def place_call(self, message: str, *, test: bool = False, any_time: bool = False) -> DeliveryResult:
         """Ring the owner's phone through Twilio Voice and read the message out."""
