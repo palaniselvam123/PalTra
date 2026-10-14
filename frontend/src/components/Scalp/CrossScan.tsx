@@ -25,6 +25,10 @@ type Props = {
   paused?: boolean;
   /** Tells the page's tab bar when this scan last ran. */
   onStatus?: OnScanStatus;
+  /** A saved scan from the History tab: shown read-only exactly as the page showed it. */
+  saved?: CrossScanData;
+  /** "10:04 IST · Wed, 14 Oct" for a saved scan's title. */
+  savedTitle?: string;
 };
 
 type Side = "ALL" | "BULLISH" | "BEARISH";
@@ -48,7 +52,7 @@ function shares(v: number | null | undefined): string {
  * worked out from Groww's candles exactly as the bot does it. Display only: it
  * places no order, and Arm only puts a stock on a bot's Trade list.
  */
-export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Props) {
+export function CrossScan({ armed, arming, onArm, paused = false, onStatus, saved, savedTitle }: Props) {
   const cols = useColumnOrder<Col>("scalp.cols.cross", COLUMNS);
   const [data, setData] = useState<CrossScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +89,15 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
 
   // Nothing is scanned until "Scan now" is pressed. Opening the page only looks at the last result the
   // server already holds (one pass is hundreds of downloads, so it never starts by itself).
+  // A saved scan: its own rows and candle, nothing fetched.
   useEffect(() => {
+    if (!saved) return;
+    setData(saved);
+    setMinutes(saved.minutes);
+  }, [saved]);
+
+  useEffect(() => {
+    if (saved) return;
     let live = true;
     smaApi
       .crossScan()
@@ -96,7 +108,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
     return () => {
       live = false;
     };
-  }, []);
+  }, [saved]);
 
   // While a pass runs, watch its progress.
   useEffect(() => {
@@ -150,16 +162,21 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
   const label = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA";
 
   useEffect(() => {
+    if (saved) return;
     onStatus?.({ when: data?.finished_at ?? data?.as_of ?? null, running: !!data?.running });
-  }, [onStatus, data?.finished_at, data?.as_of, data?.running]);
+  }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.cross.pageSize");
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Crosshair size={15} className="text-accentSky" /> Cross scan — F&amp;O stocks about to cross on the {minutes}-minute candle
+          <Crosshair size={15} className="text-accentSky" />{" "}
+          {saved
+            ? `Cross scan — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute candle`
+            : `Cross scan — F&O stocks about to cross on the ${minutes}-minute candle`}
         </h2>
+        {!saved && (
         <button
           type="button"
           onClick={() => void start(true)}
@@ -169,6 +186,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        )}
       </div>
       <Explain
         className="mb-3"
@@ -184,20 +202,24 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus }: Pr
 
       <FilterRow
         status={
-          data
-            ? data.running
-              ? `Scanning ${data.done} of ${data.total}…`
-              : lastScanText(data, minutes) ?? "No scan yet"
-            : null
+          saved
+            ? `Saved scan · ${savedTitle ?? ""} · ${saved.rows.length} stocks listed of ${saved.total} scanned`
+            : data
+              ? data.running
+                ? `Scanning ${data.done} of ${data.total}…`
+                : lastScanText(data, minutes) ?? "No scan yet"
+              : null
         }
       >
-        <SelectFilter
-          label="Candle"
-          value={minutes}
-          onChange={(v) => setMinutes(v as CrossScanMinutes)}
-          options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
-          className="w-28"
-        />
+        {!saved && (
+          <SelectFilter
+            label="Candle"
+            value={minutes}
+            onChange={(v) => setMinutes(v as CrossScanMinutes)}
+            options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+            className="w-28"
+          />
+        )}
         <SelectFilter
           label="Direction"
           value={side}

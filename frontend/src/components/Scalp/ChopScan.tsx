@@ -30,6 +30,10 @@ type Props = {
   paused?: boolean;
   /** Tells the page's tab bar when this scan last ran. */
   onStatus?: OnScanStatus;
+  /** A saved scan from the History tab: shown read-only exactly as the page showed it (no scanning, no alerts). */
+  saved?: ChopScanData;
+  /** "10:04 IST · Wed, 14 Oct" for a saved scan's title. */
+  savedTitle?: string;
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
@@ -78,7 +82,7 @@ function shares(v: number | null | undefined): string {
  * Choppy. Information only: it places no order, and Arm only puts a stock on a
  * bot's Trade list.
  */
-export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Props) {
+export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved, savedTitle }: Props) {
   const cols = useColumnOrder<Col>("scalp.cols.trend", COLUMNS);
   const [data, setData] = useState<ChopScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,13 +134,14 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
     }
   }, []);
   useEffect(() => {
+    if (saved) return; // a saved scan's view never changes the live card's settings
     try {
       localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
       );
     } catch {
       /* private mode */
     }
-  }, [armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
+  }, [saved, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
 
   const start = useCallback(
     async (force = false) => {
@@ -174,7 +179,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
   useEffect(() => {
-    if (!synced) return;
+    if (!synced || saved) return;
     const id = setTimeout(() => {
       smaApi
         .chopScanAuto({
@@ -191,7 +196,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, minutes, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -203,7 +208,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
 
   // While the server's re-scan is on, pick up each new result (and its quiet runners) once a minute.
   useEffect(() => {
-    if (!auto?.on || paused) return;
+    if (saved || !auto?.on || paused) return;
     const id = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       smaApi
@@ -215,11 +220,11 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
         .catch(() => {});
     }, AUTO_POLL_MS);
     return () => clearInterval(id);
-  }, [auto?.on, paused]);
+  }, [saved, auto?.on, paused]);
 
   // When a result comes back, pop a toast for quiet runners we haven't highlighted yet.
   useEffect(() => {
-    if (!data?.rows) return;
+    if (saved || !data?.rows) return;
     const quiet = data.rows.filter((r) => r.quiet_runner && inPriceRange(r.ltp, priceMin, priceMax));
     if (quiet.length === 0) return;
     const fresh = quiet.filter((r) => !seenRef.current.has(r.symbol));
@@ -235,10 +240,18 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             fresh.length > 30 ? " That is most of the list: raise \"Alert when quiet for\" to 30-60 min." : ""
           }`
     );
-  }, [data?.rows, priceMin, priceMax]);
+  }, [saved, data?.rows, priceMin, priceMax]);
 
   // The server holds one result. Opening the page shows it — a scan starts only on Scan now.
+  // A saved scan: its own rows and candle, nothing fetched.
   useEffect(() => {
+    if (!saved) return;
+    setData(saved);
+    setMinutes(saved.minutes);
+  }, [saved]);
+
+  useEffect(() => {
+    if (saved) return;
     let live = true;
     smaApi
       .chopScan()
@@ -257,7 +270,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
     return () => {
       live = false;
     };
-  }, []);
+  }, [saved]);
 
   // While a pass runs, watch its progress.
   useEffect(() => {
@@ -317,16 +330,21 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
   const label = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA";
 
   useEffect(() => {
+    if (saved) return;
     onStatus?.({ when: data?.finished_at ?? data?.as_of ?? null, running: !!data?.running });
-  }, [onStatus, data?.finished_at, data?.as_of, data?.running]);
+  }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.trend.pageSize");
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Activity size={15} className="text-accentSky" /> Trend quality — how choppy each stock has looked today on the {minutes}-minute candle
+          <Activity size={15} className="text-accentSky" />{" "}
+          {saved
+            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute candle`
+            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute candle`}
         </h2>
+        {!saved && (
         <button
           type="button"
           onClick={() => void start(true)}
@@ -336,6 +354,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        )}
       </div>
       <Explain
         className="mb-3"
@@ -346,21 +365,25 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
 
       <FilterRow
         status={
-          data
-            ? data.running
-              ? `Scanning ${data.done} of ${data.total}…`
-              : lastScanText(data, minutes) ?? "No scan yet"
-            : null
+          saved
+            ? `Saved scan · ${savedTitle ?? ""} · ${saved.rows.length} stocks listed of ${saved.total} scanned`
+            : data
+              ? data.running
+                ? `Scanning ${data.done} of ${data.total}…`
+                : lastScanText(data, minutes) ?? "No scan yet"
+              : null
         }
       >
         <FilterGroup title="View">
-          <SelectFilter
-            label="Candle"
-            value={minutes}
-            onChange={(v) => setMinutes(v as CrossScanMinutes)}
-            options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
-            className="w-28"
-          />
+          {!saved && (
+            <SelectFilter
+              label="Candle"
+              value={minutes}
+              onChange={(v) => setMinutes(v as CrossScanMinutes)}
+              options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+              className="w-28"
+            />
+          )}
           <SelectFilter
             label="Show"
             value={score}
@@ -423,7 +446,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             )}
           </FilterField>
         </FilterGroup>
-        <FilterGroup title="Price & alert">
+        <FilterGroup title={saved ? "Price" : "Price & alert"}>
           <NumberFilter
             label="Price from (0 = any)"
             value={priceMin}
@@ -444,6 +467,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             prefix="₹"
             className="w-36"
           />
+          {!saved && (
           <NumberFilter
             label="Alert when quiet for ≥"
             value={quietMin}
@@ -454,10 +478,14 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             suffix="min"
             className="w-40"
           />
+          )}
+          {!saved && (
           <FilterField label="Quiet runner alert">
             <Toggle label="Telegram" checked={alertOnQuiet} onChange={setAlertOnQuiet} title="Ping the owner on Telegram for a new quiet runner" />
           </FilterField>
+          )}
         </FilterGroup>
+        {!saved && (
         <FilterGroup title="Scanning">
           <FilterField label="Stocks">
             <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
@@ -478,8 +506,9 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus }: Pro
             className="w-32"
           />
         </FilterGroup>
+        )}
       </FilterRow>
-      {auto ? <AutoLine auto={auto} paused={paused} /> : null}
+      {auto && !saved ? <AutoLine auto={auto} paused={paused} /> : null}
       {toast && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <span>🔔 Quiet runner — {toast}</span>
