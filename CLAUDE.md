@@ -293,6 +293,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Never twice a day (`_joined_today`) or on a run the bot already entered (`_side_entered`,
   set in `apply_signal`); a later cross is a normal cross. A cross printed before the stock was
   armed is still not traded as a cross. Settings → Entry filters.
+- `backend/counter_candles.py` – counter candles (off by default, per bot and per stock, PAPER and LIVE):
+  a run of closed candles against the trade turns it before the SMAs cross. **Exit**
+  (`counter_exit_count` N, 0 = off, max 10): `StrategyEngine._watch_counter_candles` closes an open
+  trade (`COUNTER_CANDLES`, via `_exit_now`, which cancels a LIVE stop first) once its last N
+  candles closed after the entry all went against it (`counter_rule` `COLOUR` default | `CLOSES` |
+  `BOTH`, read by `indicators._direction_reason`) and, with `counter_need_fast` (default on), the
+  last close is past the fast SMA on that side; once per closed candle (`pos.cc_bar`); a LIVE
+  position restored without its stop id is left to that stop. **Early reversal entry**
+  (`counter_entry`): while flat, `_counter_minute` takes the same run against the side the SMAs are
+  on (fast below slow then N green closing above the fast SMA buys; N = the exit count, else 3)
+  through `apply_signal` (alert off; every check, cut-off, cap, stop, flip and one-LIVE-bot-per-stock
+  apply), once per SMA run (`_counter_done`, keyed on `join_trend.side_start`). Gap mode and candle
+  patterns ignore it. Settings → Entry filters (more). The stock research baseline keeps both off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

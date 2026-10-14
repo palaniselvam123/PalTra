@@ -44,6 +44,8 @@ BASELINE_OFF = {
     "entry_mode": "SMA",
     "candle_minutes": 1,
     "review_on": False,
+    "counter_exit_count": 0,
+    "counter_entry": False,
     "stock_settings": "{}",
 }
 

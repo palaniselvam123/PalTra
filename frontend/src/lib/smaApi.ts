@@ -120,6 +120,13 @@ export type SmaConfig = {
   /** Join the morning trend once a day, join_after_min minutes after 09:15. */
   join_trend?: boolean;
   join_after_min?: number;
+  /** Counter candles: close after N closed candles against the trade (0 = off). */
+  counter_exit_count?: number;
+  /** Enter early when N candles run against the side the SMAs are on (once per SMA run). */
+  counter_entry?: boolean;
+  counter_rule?: "CLOSES" | "COLOUR" | "BOTH";
+  /** The last counter candle must close past the fast SMA (on unless false). */
+  counter_need_fast?: boolean;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */

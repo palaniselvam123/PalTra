@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | COUNTER_CANDLES | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -302,6 +302,12 @@ class BotConfig(Base):
     # enter the side a stock is already trending on when its cross was missed.
     join_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     join_after_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)
+    # Counter candles (counter_candles.py): exit after N closed candles against the trade
+    # (0 = off), and an early reversal entry on such a run before the SMAs cross.
+    counter_exit_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    counter_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    counter_rule: Mapped[str | None] = mapped_column(String, nullable=True, default="COLOUR")
+    counter_need_fast: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
     # candle and close at its end.

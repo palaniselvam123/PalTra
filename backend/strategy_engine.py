@@ -56,6 +56,7 @@ from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_ga
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
+import counter_candles
 import join_trend
 import late_entry
 import review
@@ -135,6 +136,8 @@ class OpenPosition:
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
     bb_armed: bool = False
+    # Counter-candle exit (counter_candles.py): the last closed candle read.
+    cc_bar: int | None = None
     # SMA gap mode exit: last closed candle read, its gap, and armed / peak.
     gap_bar: int | None = None
     gap_prev: float | None = None
@@ -185,6 +188,7 @@ SNAPSHOT_FIELDS = (
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
+    "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -727,6 +731,8 @@ class StrategyEngine:
         # today (never joined), and the stocks already joined or given up on today.
         self._side_entered: dict[str, tuple[str, int]] = {}
         self._joined_today: set[str] = set()
+        # Early reversal entry (counter_candles.py): the SMA run each stock was entered against.
+        self._counter_done: dict[str, tuple[str, int]] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
         # Latest order refusal per stock (Groww's own words), kept for the
@@ -1119,6 +1125,7 @@ class StrategyEngine:
             await self._trail_tsl(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
+            await self._watch_counter_candles(symbol_cfg)
             await self._watch_gap_fade(symbol_cfg)
 
         self._focus = view
@@ -1189,7 +1196,7 @@ class StrategyEngine:
         """
         for table in (
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
-            self._side_entered,
+            self._side_entered, self._counter_done,
             self._tapes, self._review_bar, self._review_episode,
         ):
             for symbol in [key for key in table if key not in watch]:
@@ -1267,6 +1274,10 @@ class StrategyEngine:
             run = self._joinable(symbol, frame, cfg, now)
             if run is not None:
                 return await self._join_minute(symbol, run, frame, cfg, now)
+        if (signal is None or signal_frame is None) and counter_candles.entry_on(cfg) and symbol not in self.positions:
+            text = await self._counter_minute(symbol, frame, cfg, now)
+            if text is not None:
+                return text
         if signal is None or signal_frame is None:
             relation = _sma_side_text(frame)
             if symbol in self.positions:
@@ -1324,6 +1335,38 @@ class StrategyEngine:
             text = f"{symbol} no order — gave up joining the {direction} trend today: {result}"
         else:
             text = f"{symbol} no order — {result}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
+
+    async def _counter_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
+        """Early reversal entry (counter_candles.py): N candles against the SMAs' side, before the cross.
+
+        None when there is no such run, so the usual "waiting" note is shown.
+        """
+        closed = frame.iloc[:-1]
+        side_now = counter_candles.sma_side(closed)
+        run = join_trend.side_start(frame)
+        if side_now is None or run is None:
+            return None
+        want = counter_candles.against(side_now)
+        key = (want, int(run[1]))
+        if self._counter_done.get(symbol) == key:
+            return None
+        hit, note = counter_candles.run_towards(
+            closed, want, counter_candles.entry_count(cfg), counter_candles.rule(cfg), counter_candles.need_fast(cfg)
+        )
+        if not hit:
+            return None
+        sig = "BULLISH" if want == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        if result.startswith("blocked — order PENDING"):
+            return result
+        if result.startswith("opened"):
+            self._counter_done[symbol] = key
+            text = f"{result} — early reversal: {note}"
+        else:
+            text = f"{symbol} no order — early {want} reversal ({note}): {result}"
         self._signals[symbol] = text
         self.last_signal = text
         return text
@@ -2476,6 +2519,39 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} Bollinger exit — {note}"
         await self._exit_now(cfg, self.ltp, reason)
 
+    async def _watch_counter_candles(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit after N candles against the trade (counter_candles.py)."""
+        pos = self.position
+        count = counter_candles.exit_count(cfg)
+        if pos is None or self.status != "RUNNING" or count <= 0 or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.cc_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        if closed_ts + 60 <= opened.timestamp():
+            return
+        pos.cc_bar = closed_ts
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+        closed = enriched.iloc[:-1]
+        # Only candles that closed after the entry count against it.
+        after = closed[closed["ts"].astype("int64") + 60 > int(opened.timestamp())]
+        if len(after) < count:
+            return
+        towards = counter_candles.against(pos.signal_direction)
+        hit, note = counter_candles.run_towards(
+            closed, towards, count, counter_candles.rule(cfg), counter_candles.need_fast(cfg)
+        )
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
+        await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")
+
     async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str) -> None:
         """Close the focused position for a stop, target or Bollinger exit."""
         async with self.lock:
@@ -2504,6 +2580,7 @@ class StrategyEngine:
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
                     "GAP_FADE": "SMA gap faded — flat",
                     "CANDLE_END": "candle closed — flat",
+                    "COUNTER_CANDLES": "candles turned against the trade — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -3843,6 +3920,7 @@ _ALERT_REASON = {
     "TARGET_HIT": "target hit",
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",
+    "COUNTER_CANDLES": "candles turned against the trade",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "REPLAY_STOPPED": "replay stopped",
@@ -4256,7 +4334,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END")
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES")
 
 
 def _filter_note(cfg: BotConfig) -> str:

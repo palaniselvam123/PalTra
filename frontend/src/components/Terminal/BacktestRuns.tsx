@@ -57,6 +57,8 @@ export function strategyLabel(s: Settings): string {
     if (s.cross_exit === false) parts.push("no cross exit");
     if (Number(s.late_entry_min ?? 0) > 0) parts.push(`late entry ${s.late_entry_min}m`);
     if (s.join_trend) parts.push(`join morning trend from 09:15+${s.join_after_min ?? 15}m`);
+    if (Number(s.counter_exit_count ?? 0) > 0) parts.push(`exit on ${s.counter_exit_count} counter candles`);
+    if (s.counter_entry) parts.push("early reversal entry");
   }
   if (s.flip_orders) parts.push("FLIPPED (buy signals sell)");
   if (s.use_stop === false) parts.push("no stop");
@@ -156,6 +158,8 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ],
   ["SMA cross exit", (s) => (s.cross_exit === false ? "Off (a cross does not close the trade)" : "On")],
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
+  ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"})` : "Off")],
+  ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],
   ["VWAP filter", (s) => (s.use_vwap ? "On" : "Off")],
