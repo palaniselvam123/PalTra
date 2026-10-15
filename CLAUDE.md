@@ -360,7 +360,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   channel (`alert_notifier.send_quiet`, else the trade one) (`quiet_runners_text` names the 15 longest-quiet and counts the rest), each stock at most
   once per IST day (`chop_scan._ALERTED_TODAY`, which keeps when each Telegram went). Each row carries
   `first_quiet_at` (the first market-hours scan today that read it as quiet, `_FIRST_QUIET`) and
-  `alerted_at`, shown as the card's "First alert" column (HH:MM, 📨 when the Telegram went). A **price range** (`price_min` / `price_max` ₹ on
+  `alerted_at` (shown in the card's "First seen" tooltip, 📨 when the Telegram went). The card's **First seen** column
+  (`components/Scalp/useFirstSeen.ts`, browser only) is the earliest of today's saved Trend quality scans (same
+  candle size, up to the scan on screen) in which the stock passed the card's current filters (all but the stock
+  search), so it changes with Show / crosses / price / speed; a stock no saved scan had dates to the scan on screen. A **price range** (`price_min` / `price_max` ₹ on
   `POST /api/chop-scan/start`, 0 = no bound; `chop_scan.in_price_range`) limits the alert to stocks
   priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
   defaults to armed-stocks-only, so only the stocks on the Trade list are downloaded (quick enough to

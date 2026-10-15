@@ -10,6 +10,7 @@ import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanDa
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
+import { useFirstSeen } from "@/components/Scalp/useFirstSeen";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
@@ -286,24 +287,27 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
   }, [data?.running]);
 
   const scannedThisCandle = data?.minutes === minutes;
-  const filtered = useMemo(
-    () =>
-      (scannedThisCandle ? (data?.rows ?? []) : []).filter((r) => {
-        if (!matchesText(query, r.symbol)) return false;
-        if (score === "STRONG" && !isStrong(r)) return false;
-        if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
-        if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
-        if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
-        if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
-        if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
-        if (score === "PHASE_CHOP" && r.phase !== "CHOP") return false;
-        if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
-        if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
-        if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== crossCount)) return false;
-        return true;
-      }),
-    [data?.rows, scannedThisCandle, query, score, minSpeed, noCrossOn, crossCount, priceMin, priceMax]
+  // Every filter but the stock search: what decides whether a stock is "in the list".
+  const passes = useCallback(
+    (r: ChopScanRow) => {
+      if (score === "STRONG" && !isStrong(r)) return false;
+      if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
+      if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
+      if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
+      if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
+      if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
+      if (score === "PHASE_CHOP" && r.phase !== "CHOP") return false;
+      if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
+      if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
+      if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== crossCount)) return false;
+      return true;
+    },
+    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax]
   );
+  const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
+  const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
+  // When each stock first showed up in this list (these filters) in today's saved scans.
+  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes);
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
       case "symbol":
@@ -311,7 +315,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
       case "ltp":
         return r.ltp;
       case "first":
-        return r.first_quiet_at ?? null;
+        return firstSeen.get(r.symbol) ?? null;
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
@@ -557,12 +561,12 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
                   score: <SortTh label="Score" k="score" sort={sort} onSort={onSort} text drag={cols.dragProps("score")} />,
                   first: (
                     <SortTh
-                      label="First alert"
+                      label="First seen"
                       k="first"
                       sort={sort}
                       onSort={onSort}
                       text
-                      title="When a scan first read the stock as a quiet runner today (📨 = its Telegram went)"
+                      title="When the stock first appeared in this list today, with the filters set above (from today's saved scans on this candle size)"
                       drag={cols.dragProps("first")}
                     />
                   ),
@@ -630,7 +634,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -644,12 +648,14 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
 function Row({
   order,
   row: r,
+  firstAt,
   armedOn,
   arming,
   onArm,
 }: {
   order: readonly Col[];
   row: ChopScanRow;
+  firstAt: string | null;
   armedOn: string[];
   arming: boolean;
   onArm: () => void;
@@ -690,12 +696,18 @@ function Row({
         ),
         first: (
           <td className="py-1.5 tabular-nums text-xs">
-            {r.first_quiet_at ? (
+            {firstAt ? (
               <span
-                className="text-amber-300"
-                title={`First read as quiet at ${clock(r.first_quiet_at)} IST${r.alerted_at ? ` · Telegram sent ${clock(r.alerted_at)} IST` : " · no Telegram sent"}`}
+                className="text-slate-200"
+                title={[
+                  `First in this list today at ${clock(firstAt)} IST`,
+                  r.first_quiet_at ? `Quiet runner since ${clock(r.first_quiet_at)} IST` : "",
+                  r.alerted_at ? `Telegram sent ${clock(r.alerted_at)} IST` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               >
-                {clock(r.first_quiet_at)}
+                {clock(firstAt)}
                 {r.alerted_at ? " 📨" : ""}
               </span>
             ) : (
