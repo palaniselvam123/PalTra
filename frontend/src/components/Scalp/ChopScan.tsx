@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
+import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
@@ -37,10 +37,10 @@ type Props = {
   savedTitle?: string;
 };
 
-type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH";
-type SortKey = "symbol" | "ltp" | "score" | "first" | "trend" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
+type SortKey = "symbol" | "ltp" | "score" | "first" | "trend" | "phase" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "trend", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "trend", "phase", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -293,6 +293,10 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
         if (score === "STRONG" && !isStrong(r)) return false;
         if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
         if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
+        if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
+        if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
+        if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
+        if (score === "PHASE_CHOP" && r.phase !== "CHOP") return false;
         if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
         if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
         if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== crossCount)) return false;
@@ -312,6 +316,9 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
         return (isStrong(r) ? 1000 : 0) + (r.trend_score ?? 0);
+      case "phase":
+        // Strong phases first, longest-running first; then choppy.
+        return r.phase == null ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
       case "dayMove":
         return r.day_move_pct ?? null;
       case "crosses":
@@ -394,6 +401,10 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
               { value: "STRONG", label: "Strong trend (both)" },
               { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
               { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
+              { value: "PHASE_STRONG", label: "Phase now: strong (both)" },
+              { value: "PHASE_BULL", label: "Phase now: strong up ↑" },
+              { value: "PHASE_BEAR", label: "Phase now: strong down ↓" },
+              { value: "PHASE_CHOP", label: "Phase now: choppy" },
               { value: "TRENDING", label: "Trending only" },
               { value: "MIXED", label: "Mixed only" },
               { value: "CHOPPY", label: "Choppy only" },
@@ -558,6 +569,17 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
                   trend: (
                     <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" drag={cols.dragProps("trend")} />
                   ),
+                  phase: (
+                    <SortTh
+                      label="Phase"
+                      k="phase"
+                      sort={sort}
+                      onSort={onSort}
+                      text
+                      title="Today split into choppy / strong up / strong down stretches; the chip is the stretch the stock is in now"
+                      drag={cols.dragProps("phase")}
+                    />
+                  ),
                   dayMove: <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" drag={cols.dragProps("dayMove")} />,
                   sizes: (
                     <th
@@ -686,6 +708,11 @@ function Row({
             <TrendChip row={r} />
           </td>
         ),
+        phase: (
+          <td className="py-1.5">
+            <PhaseCell row={r} />
+          </td>
+        ),
         dayMove: (
           <td className="py-1.5 text-right tabular-nums">
             {r.day_move_pct == null ? (
@@ -796,6 +823,46 @@ const istTime = (ts: number | null | undefined) =>
 
 /** Today's crosses on 1 / 5 / 15-minute candles (the other sizes on hover): 0 is green with the side;
  * one cross shows when it happened and which way. */
+const PHASE_LOOK: Record<ChopPhaseSide, { label: string; chip: string; bar: string }> = {
+  BULL: { label: "Strong up ↑", chip: "bg-profit/10 text-profit ring-profit/30", bar: "bg-profit" },
+  BEAR: { label: "Strong down ↓", chip: "bg-loss/10 text-loss ring-loss/30", bar: "bg-loss" },
+  CHOP: { label: "Choppy", chip: "bg-slate-500/10 text-slate-400 ring-slate-600/40", bar: "bg-slate-600/60" },
+};
+const SESSION_MIN = 375; // 09:15 to 15:30 IST
+
+/** The phase now as a chip, and today's phases as a strip from 09:15 to 15:30. */
+function PhaseCell({ row: r }: { row: ChopScanRow }) {
+  const all = r.phases ?? [];
+  if (!r.phase || !all.length) return <span className="text-slate-600">—</span>;
+  const look = PHASE_LOOK[r.phase];
+  const step = (r.minutes || 5) * 60;
+  const dayStart = (() => {
+    const first = all[0].start_ts;
+    const ist = first + 19_800;
+    return ist - (ist % 86_400) + 33_300 - 19_800; // 09:15 IST that day
+  })();
+  const pct = (ts: number) => Math.max(0, Math.min(100, ((ts - dayStart) / 60 / SESSION_MIN) * 100));
+  const move = (m: number | null) => (m == null ? "" : ` ${m >= 0 ? "+" : ""}${m.toFixed(2)}%`);
+  const tip = all.map((p) => `${PHASE_LOOK[p.side].label} ${istTime(p.start_ts)}–${istTime(p.end_ts + step)}${move(p.move_pct)}`).join("\n");
+  return (
+    <div className="min-w-[10rem]" title={`Today's phases (${r.minutes}-min candles):\n${tip}`}>
+      <span className={clsx("whitespace-nowrap rounded px-1.5 py-0.5 text-xs ring-1 ring-inset", look.chip)}>
+        {look.label} since {istTime(r.phase_since_ts)}
+        {r.phase !== "CHOP" && <span className="tabular-nums">{move(r.phase_move_pct ?? null)}</span>}
+      </span>
+      <div className="relative mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-800/60" aria-hidden>
+        {all.map((p) => (
+          <span
+            key={p.start_ts}
+            className={clsx("absolute inset-y-0", PHASE_LOOK[p.side].bar)}
+            style={{ left: `${pct(p.start_ts)}%`, width: `${Math.max(0.8, pct(p.end_ts + step) - pct(p.start_ts))}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CrossSizes({ row: r }: { row: ChopScanRow }) {
   const by = r.crosses_by_minutes ?? {};
   const side = r.side_by_minutes ?? {};

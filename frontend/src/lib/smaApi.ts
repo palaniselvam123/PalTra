@@ -254,7 +254,16 @@ export type ChopScanRow = {
   /** Start of today's last cross candle per size (epoch seconds), and that cross's direction. */
   last_cross_ts_by_minutes?: Record<string, number | null>;
   last_cross_side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
+  /** Today's trend phases on the scan's candle (older servers leave them out): the phase now and every phase, oldest first. */
+  phase?: ChopPhaseSide | null;
+  phase_since_ts?: number | null;
+  phase_move_pct?: number | null;
+  phase_candles?: number;
+  phases?: ChopPhase[];
+  strong_phases?: number;
 };
+export type ChopPhaseSide = "BULL" | "BEAR" | "CHOP";
+export type ChopPhase = { side: ChopPhaseSide; start_ts: number; end_ts: number; candles: number; move_pct: number | null };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
 export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run";
 
