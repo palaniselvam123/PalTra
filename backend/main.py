@@ -78,6 +78,7 @@ from strategy_engine import (
     StrategyEngine,
     attach_market_prices,
     apply_trade_sources,
+    is_nse_symbol,
     trade_names,
     trade_sources,
 )
@@ -417,7 +418,7 @@ def _chart_symbol(symbol: str | None) -> str | None:
     name = (symbol or "").strip().upper()
     if not name:
         return None
-    if not name.isalnum():
+    if not is_nse_symbol(name):
         raise HTTPException(400, f"{symbol!r} is not an NSE trading symbol.")
     return name
 
@@ -518,7 +519,7 @@ def _open_symbols(eng: StrategyEngine | None = None) -> set[str]:
 async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
     """Arm or disarm a stock without changing the chart on screen."""
     symbol = (body.symbol or "").upper().strip()
-    if not symbol or not symbol.isalnum():
+    if not is_nse_symbol(symbol):
         raise HTTPException(400, "Symbol must be an NSE trading symbol")
     with session_factory()() as db:
         row = db.get(BotConfig, eng.config_id)
@@ -575,7 +576,7 @@ async def copy_trade_symbols(body: TradeSymbolCopy):
         raise HTTPException(400, "Pick a bot between 1 and 4")
     if body.from_bot == body.to_bot:
         raise HTTPException(400, "Pick a different destination bot")
-    wanted = [s.strip().upper() for s in body.symbols if s and s.strip().isalnum()]
+    wanted = [s.strip().upper() for s in body.symbols if is_nse_symbol((s or "").strip().upper())]
     wanted = [s for s in dict.fromkeys(wanted) if s]
     if not wanted:
         raise HTTPException(400, "No stocks to copy")
@@ -662,7 +663,7 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             data["sma_medium"] = None
         if "symbol" in data:
             data["symbol"] = data["symbol"].upper().strip()
-            if not data["symbol"].isalnum():
+            if not is_nse_symbol(data["symbol"]):
                 raise HTTPException(400, "Symbol must be an NSE trading symbol")
         if "square_off_time" in data:
             _validate_hhmm(data["square_off_time"])
@@ -895,7 +896,7 @@ async def research_reset_stock_config(symbol: str):
 
 def _stock_name(symbol: str) -> str:
     name = (symbol or "").upper().strip()
-    if not name or not name.isalnum():
+    if not is_nse_symbol(name):
         raise HTTPException(400, "Symbol must be an NSE trading symbol")
     return name
 
@@ -1196,7 +1197,7 @@ async def replay_scalp_picks(body: ScalpPickStart):
     universe: list[str] = []
     for raw in body.universe:
         name = (raw or "").strip().upper()
-        if not name.isalnum():
+        if not is_nse_symbol(name):
             raise HTTPException(400, f"{raw!r} is not an NSE trading symbol.")
         if name not in universe:
             universe.append(name)
@@ -1249,7 +1250,7 @@ async def replay_start(body: ReplayStart):
         symbols = []
         for raw in body.symbols:
             name = (raw or "").strip().upper()
-            if not name.isalnum():
+            if not is_nse_symbol(name):
                 raise HTTPException(400, f"{raw!r} is not an NSE trading symbol.")
             if name not in symbols:
                 symbols.append(name)

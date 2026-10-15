@@ -22,6 +22,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -310,12 +311,22 @@ def _strategy_of(row: TradeLog, parsed: dict[str, dict | None] | None = None) ->
     return value
 
 
+# NSE trading symbols are letters and digits plus "&", "-" and "_" (M&M,
+# GVT&D, BAJAJ-AUTO). A plain isalnum() check refused every name with "&".
+_NSE_SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9&_-]{0,19}")
+
+
+def is_nse_symbol(name: str | None) -> bool:
+    """True for an upper-case NSE trading symbol such as TCS, M&M or BAJAJ-AUTO."""
+    return bool(name) and _NSE_SYMBOL.fullmatch(name) is not None
+
+
 def trade_names(cfg: BotConfig) -> list[str]:
     """Stocks the bot may order. The chart symbol is not implied."""
     raw = getattr(cfg, "trade_symbols", None) or ""
     names: list[str] = []
     for part in str(raw).upper().replace(" ", "").split(","):
-        if part and part.isalnum() and part not in names:
+        if is_nse_symbol(part) and part not in names:
             names.append(part)
     return names[:MAX_TRADE_SYMBOLS]
 
@@ -333,7 +344,7 @@ def trade_sources(cfg: BotConfig) -> dict[str, str]:
     for key, value in data.items():
         name = str(key).upper().strip()
         text = str(value).strip()[:40]
-        if name.isalnum() and text:
+        if is_nse_symbol(name) and text:
             out[name] = text
     return out
 
@@ -1822,7 +1833,7 @@ class StrategyEngine:
         if self.status == "DAY_COMPLETED":
             raise ForceRefused(self.halt_reason or "Session already squared off")
         name = (symbol or "").upper().strip()
-        if not name or not name.isalnum():
+        if not is_nse_symbol(name):
             raise ForceRefused("Choose a stock on the chart first")
         if name in self.positions:
             direction = self.positions[name].direction

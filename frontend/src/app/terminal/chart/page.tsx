@@ -53,7 +53,7 @@ export default function StockChartPage() {
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    const name = (q.get("symbol") ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const name = (q.get("symbol") ?? "").toUpperCase().replace(/[^A-Z0-9&_-]/g, "");
     const run = q.get("run");
     const p = {
       symbol: name,

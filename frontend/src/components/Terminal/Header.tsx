@@ -178,7 +178,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       const raw = localStorage.getItem(SAVED_KEY);
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
       if (Array.isArray(parsed)) {
-        setSaved(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)).slice(0, 24));
+        setSaved(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9][A-Z0-9&_-]*$/.test(s)).slice(0, 24));
       }
     } catch {
       /* a private browser can refuse storage */
@@ -186,7 +186,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     try {
       const raw = localStorage.getItem(HIDDEN_KEY);
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-      if (Array.isArray(parsed)) setHidden(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9]+$/.test(s)));
+      if (Array.isArray(parsed)) setHidden(parsed.filter((s) => typeof s === "string" && /^[A-Z0-9][A-Z0-9&_-]*$/.test(s)));
     } catch {
       /* ignore */
     }
