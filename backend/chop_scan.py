@@ -57,7 +57,10 @@ from cross_scan import (
 )
 from groww_client import IST, market_is_open
 from indicators import _session_vwap, enrich, sma_gap_pct
+import trend_phases
 import trend_strength
+
+SESSION_OPEN_SEC = 9 * 3600 + 15 * 60  # 09:15 IST, seconds after IST midnight
 
 log = logging.getLogger("sma.chopscan")
 
@@ -191,6 +194,14 @@ class ChopRow:
     # When a scan first read this stock as a quiet runner today, and when its Telegram went (IST).
     first_quiet_at: str | None = None
     alerted_at: str | None = None
+    # Trend phases today (`trend_phases`): the phase now (BULL / BEAR / CHOP), since when, its move,
+    # and every phase today oldest first ({side, start_ts, end_ts, candles, move_pct}).
+    phase: str | None = None
+    phase_since_ts: int | None = None
+    phase_move_pct: float | None = None
+    phase_candles: int = 0
+    phases: list = field(default_factory=list)
+    strong_phases: int = 0
 
     def as_dict(self) -> dict:
         out = asdict(self)
@@ -276,6 +287,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         base,
         **activity(frame_1m),
         **trend_strength.read(enriched, _vwap_today(frame_1m, now)),
+        **trend_phases.summary(trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)),
         day_move_pct=_day_move(frame_1m),
         crosses_by_minutes={m: r[0] for m, r in by_size.items()},
         side_by_minutes={m: r[1] for m, r in by_size.items()},

@@ -381,6 +381,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
+  **Trend phases** (`backend/trend_phases.py`, read by `chop_scan.analyze`): today's closed candles split
+  into `CHOP` / `BULL` / `BEAR` stretches (tuned on the owner's Bajaj Finserv 15 Oct example: 09:45-12:10
+  choppy, 12:10-13:35 strong up, 13:35-14:40 strong down). Each candle is judged on its last `WINDOW` (6)
+  candles: efficiency ratio |net| / sum |close moves| ≥ `MIN_EFFICIENCY` (0.5) and |net| ≥ `MIN_ATR_MOVE`
+  (1) ATR; runs of ≥ `MIN_RUN` (5) such candles (gaps of `BRIDGE` 1 closed) become a phase, backdated to
+  the window's turn; shorter bursts stay choppy. Rows carry `phase`, `phase_since_ts`, `phase_move_pct`,
+  `phase_candles`, `phases` (all of today's) and `strong_phases`; the card's Phase column shows the phase
+  now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
   **Crosses today: None (0) / Exactly 1 on** (multi-select 1/2/3/5/10/15 min): each row carries
   `crosses_by_minutes`, `side_by_minutes`, `last_cross_ts_by_minutes` and
   `last_cross_side_by_minutes`: today's closed-candle SMA crosses, the fast SMA's side, and the
