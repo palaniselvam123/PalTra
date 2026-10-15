@@ -138,10 +138,15 @@ jobs:
   # (`fly tokens create deploy -a paltra-scanner`) is set. Same market-hours gate.
   deploy-scanner:
     name: Deploy scanner to Fly.io
-    needs: [backend-tests, frontend-build, market-hours-gate]
-    if: needs.market-hours-gate.outputs.allowed == 'true' && vars.DEPLOY_SCANNER == 'true'
+    # After the desk's deploy, not beside it: both apps build on the org's one
+    # remote Fly builder, and the scanner's deploy kept hanging after "pushing
+    # layers" when the two ran at once. It still runs when the
+    # desk's deploy failed (!cancelled), so one app never blocks the other.
+    needs: [backend-tests, frontend-build, market-hours-gate, deploy]
+    if: ${{ !cancelled() && needs.market-hours-gate.outputs.allowed == 'true' && vars.DEPLOY_SCANNER == 'true' }}
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 25
     concurrency:
       group: fly-deploy-scanner
       cancel-in-progress: false
@@ -152,6 +157,18 @@ jobs:
           name: frontend-out
           path: frontend/out
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only -c fly.scanner.toml
+      # A healthy deploy takes about a minute. If one stalls, stop it after 8 minutes
+      # and try once more instead of hanging until someone cancels the run.
+      - name: flyctl deploy (scanner, retried once if it stalls)
+        run: |
+          for attempt in 1 2; do
+            if timeout 480 flyctl deploy --remote-only -c fly.scanner.toml; then
+              exit 0
+            fi
+            echo "::warning title=Scanner deploy attempt $attempt failed or stalled::retrying in 30 s"
+            sleep 30
+          done
+          echo "::error title=Scanner deploy failed::two attempts did not finish; the scanner keeps running its previous version"
+          exit 1
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_SCANNER_API_TOKEN }}

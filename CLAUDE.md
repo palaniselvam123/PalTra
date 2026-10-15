@@ -499,7 +499,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   shutdown call from the scanner. `GET /api/role` tells the page which server it is on.
   `SCANS=off` on the desk (default on) keeps its Scalp scans paused for good: the most-active
   background scan does not start, and resuming scans answers 409. CI deploys the scanner only when
-  the repo variable `DEPLOY_SCANNER` is `true` (secret `FLY_SCANNER_API_TOKEN`).
+  the repo variable `DEPLOY_SCANNER` is `true` (secret `FLY_SCANNER_API_TOKEN`), after the desk's deploy job
+  (the two shared the org's remote builder and the scanner's deploy hung after pushing layers), even if that
+  one failed; each `flyctl deploy` attempt is stopped after 8 minutes and retried once (job limit 25 min).
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
