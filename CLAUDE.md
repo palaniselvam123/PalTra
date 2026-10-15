@@ -417,6 +417,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`cross_scan.activity`, no `enrich()`, so no volume warnings): shares traded today
   (Groww's running total), shares in the last 10 minutes, and the signed price speed
   in % per minute over those 10 minutes. No order path: Arm only opens the arm prompt.
+  **Arm ticked** (`components/Scalp/BulkArm.tsx`, `TickArm.tsx`, `useArming().armSeveral`): the Monitor,
+  Cross scan and Trend quality tables have tick boxes; Arm ticked picks one bot (or Research) and one set of
+  qty / stop loss / trail / target (filled from that bot's settings), saves them as each stock's own trailing
+  stop and arms each one through the same routes as the single Arm (desk link on the scanner). A LIVE bot asks
+  once more first, and a stock another LIVE bot trades is skipped. On a PAPER bot (desk only) "Backtest these"
+  then replays the armed stocks on that bot (`/api/replay/start` with `symbols` and `bot`). No order is placed.
   Every Scalp table's stock name (Monitor, Cross scan, Trend quality, Most active, History) is a
   `GrowwLink` (`components/ui/growwLink.tsx`) to desk `GET /api/instruments/groww/{symbol}`, which
   302s to the stock's groww.in page: the slug comes from Groww's public website search

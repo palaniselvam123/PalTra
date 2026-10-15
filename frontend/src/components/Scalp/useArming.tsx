@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useServerRole } from "@/hooks/useServerRole";
 import { ArmPicker, armDesks, type ArmDesk } from "@/components/Scalp/ArmPicker";
 import { ArmPrompt } from "@/components/Terminal/ArmPrompt";
+import { BulkArm } from "@/components/Scalp/BulkArm";
 
 /**
  * Arm a stock on an SMA bot from any page (Scalp, Movers): which bot first,
@@ -26,6 +27,8 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   const [armFor, setArmFor] = useState<{ symbol: string; source?: string | null } | null>(null);
   // After the bot is picked: quantity, stop, trail and target for that bot (ArmPrompt).
   const [armAsk, setArmAsk] = useState<{ symbol: string; desk: ArmDesk; source?: string | null } | null>(null);
+  // Several ticked stocks armed on one bot with the same quantity / stop / target (BulkArm).
+  const [armMany, setArmMany] = useState<{ symbols: string[]; source?: string | null } | null>(null);
   const [arming, setArming] = useState<string | null>(null);
   const [armNote, setArmNote] = useState<string | null>(null);
 
@@ -64,6 +67,13 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     loadDesks();
     setArmFor({ symbol, source: source ?? null });
   };
+  /** Arm every ticked stock on one bot, with one set of numbers (and backtest them there). */
+  const armSeveral = (symbols: string[], source?: string | null) => {
+    if (!symbols.length) return;
+    setArmNote(null);
+    loadDesks();
+    setArmMany({ symbols, source: source ?? null });
+  };
   const armOn = (symbol: string, desk: ArmDesk, source?: string | null) => {
     setArmFor(null);
     setArmAsk({ symbol, desk, source: source ?? null });
@@ -96,6 +106,16 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
 
   const dialogs = (
     <>
+      {armMany ? (
+        <BulkArm
+          symbols={armMany.symbols}
+          desks={desks}
+          onScanner={onScanner}
+          source={armMany.source}
+          onDone={loadDesks}
+          onClose={() => setArmMany(null)}
+        />
+      ) : null}
       {armFor ? (
         <ArmPicker
           symbol={armFor.symbol}
@@ -127,5 +147,5 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     </>
   );
 
-  return { armed, arming, armNote, arm, loadDesks, dialogs };
+  return { armed, arming, armNote, arm, armSeveral, loadDesks, dialogs };
 }

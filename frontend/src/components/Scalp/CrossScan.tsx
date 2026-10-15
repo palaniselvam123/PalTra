@@ -13,6 +13,7 @@ import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
@@ -22,6 +23,8 @@ type Props = {
   armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
+  /** Arm several ticked stocks on one bot at once (the live card only; a saved scan has no ticks). */
+  onArmMany?: (symbols: string[]) => void;
   /** Scans are paused from the top of the Scalp page. */
   paused?: boolean;
   /** Tells the page's tab bar when this scan last ran. */
@@ -53,7 +56,7 @@ function shares(v: number | null | undefined): string {
  * worked out from Groww's candles exactly as the bot does it. Display only: it
  * places no order, and Arm only puts a stock on a bot's Trade list.
  */
-export function CrossScan({ armed, arming, onArm, paused = false, onStatus, saved, savedTitle }: Props) {
+export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onStatus, saved, savedTitle }: Props) {
   const cols = useColumnOrder<Col>("scalp.cols.cross", COLUMNS);
   const [data, setData] = useState<CrossScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +171,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus, save
   }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.cross.pageSize");
+  const ticks = useTicks();
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -265,11 +269,13 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus, save
         </p>
       ) : (
         <div className="overflow-x-auto" ref={paged.anchor}>
+          {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
           <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
+                {onArmMany ? <TickHead ticks={ticks} symbols={rows.map((r) => r.symbol)} /> : null}
                 {inOrder(cols.order, {
                   symbol: <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
                   side: <SortTh label="Cross" k="side" sort={sort} onSort={onSort} text drag={cols.dragProps("side")} />,
@@ -311,7 +317,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus, save
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -325,6 +331,7 @@ export function CrossScan({ armed, arming, onArm, paused = false, onStatus, save
 function Row({
   order,
   row: r,
+  tick,
   fastAt,
   armedOn,
   arming,
@@ -332,6 +339,7 @@ function Row({
 }: {
   order: readonly Col[];
   row: CrossScanRow;
+  tick: React.ReactNode;
   fastAt: number;
   armedOn: string[];
   arming: boolean;
@@ -341,6 +349,7 @@ function Row({
   const bullish = r.side === "BULLISH";
   return (
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
+      {tick}
       {inOrder(order, {
         symbol: (
           <td className="py-1.5 font-semibold text-slate-100"><GrowwLink symbol={r.symbol} /></td>
