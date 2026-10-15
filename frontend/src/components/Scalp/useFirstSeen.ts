@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   smaApi,
-  type ChopScanRow,
   type CrossScanMinutes,
   type ScanRunDetail,
 } from "@/lib/smaApi";
@@ -15,16 +14,17 @@ const istDay = (iso: string) =>
   new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
 /**
- * When each stock first appeared in the Trend quality list with the card's current
+ * When each stock first appeared in a scan card's list (Trend quality or Cross scan) with its current
  * filters: the earliest of today's saved scans (same candle size, up to the scan on
  * screen) in which the stock passes `passes`. A stock in the list now that no saved
  * scan had is dated to the scan on screen. Read-only: it only reads the scan history.
  */
-export function useFirstSeen(
+export function useFirstSeen<R extends { symbol: string }>(
   asOf: string | null | undefined,
   minutes: CrossScanMinutes | undefined,
-  rows: ChopScanRow[],
-  passes: (r: ChopScanRow) => boolean,
+  rows: R[],
+  passes: (r: R) => boolean,
+  kind: "chop" | "cross" = "chop",
 ): Map<string, string> {
   const [runs, setRuns] = useState<ScanRunDetail[]>([]);
 
@@ -37,7 +37,7 @@ export function useFirstSeen(
     const until = Date.parse(asOf);
     (async () => {
       try {
-        const list = await smaApi.scanHistory(istDay(asOf), "chop");
+        const list = await smaApi.scanHistory(istDay(asOf), kind);
         const wanted = list.runs.filter(
           (r) => r.minutes === minutes && Date.parse(r.as_of) <= until,
         );
@@ -59,7 +59,7 @@ export function useFirstSeen(
     return () => {
       live = false;
     };
-  }, [asOf, minutes]);
+  }, [asOf, minutes, kind]);
 
   return useMemo(() => {
     const first = new Map<string, string>();
@@ -67,7 +67,7 @@ export function useFirstSeen(
       (a, b) => Date.parse(a.as_of) - Date.parse(b.as_of),
     );
     for (const run of ordered) {
-      for (const row of run.rows as ChopScanRow[]) {
+      for (const row of run.rows as unknown as R[]) {
         if (!first.has(row.symbol) && passes(row))
           first.set(row.symbol, run.as_of);
       }

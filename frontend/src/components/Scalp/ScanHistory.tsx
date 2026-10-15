@@ -204,10 +204,13 @@ export function ScanHistory({
   armed,
   arming,
   onArm,
+  onArmMany,
 }: {
   armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
+  /** Arm several ticked stocks of a saved scan on one bot at once. */
+  onArmMany?: (symbols: string[]) => void;
 }) {
   // "page": the saved scan exactly as its tab showed it; "accuracy": the check table.
   const [view, setView] = useState<"page" | "accuracy">("page");
@@ -479,9 +482,9 @@ export function ScanHistory({
           </div>
           {view === "page" ? (
             run.kind === "chop" ? (
-              <ChopScan armed={armed} arming={arming} onArm={onArm} saved={savedChop ?? undefined} savedTitle={savedTitle} />
+              <ChopScan armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} saved={savedChop ?? undefined} savedTitle={savedTitle} />
             ) : (
-              <CrossScan armed={armed} arming={arming} onArm={onArm} saved={savedCross ?? undefined} savedTitle={savedTitle} />
+              <CrossScan armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} saved={savedCross ?? undefined} savedTitle={savedTitle} />
             )
           ) : (
           <>

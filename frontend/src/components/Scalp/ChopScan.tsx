@@ -14,6 +14,7 @@ import { useFirstSeen } from "@/components/Scalp/useFirstSeen";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
@@ -28,6 +29,8 @@ type Props = {
   armed: Map<string, string[]>;
   arming: string | null;
   onArm: (symbol: string) => void;
+  /** Arm several ticked stocks on one bot at once (the live card only; a saved scan has no ticks). */
+  onArmMany?: (symbols: string[]) => void;
   /** Scans are paused from the top of the Scalp page. */
   paused?: boolean;
   /** Tells the page's tab bar when this scan last ran. */
@@ -84,7 +87,7 @@ function shares(v: number | null | undefined): string {
  * Choppy. Information only: it places no order, and Arm only puts a stock on a
  * bot's Trade list.
  */
-export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved, savedTitle }: Props) {
+export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onStatus, saved, savedTitle }: Props) {
   const cols = useColumnOrder<Col>("scalp.cols.trend", COLUMNS);
   const [data, setData] = useState<ChopScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -347,6 +350,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
   }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.trend.pageSize");
+  const ticks = useTicks();
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -550,11 +554,13 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
         </p>
       ) : (
         <div className="overflow-x-auto" ref={paged.anchor}>
+          {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
           <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
+                {onArmMany ? <TickHead ticks={ticks} symbols={rows.map((r) => r.symbol)} /> : null}
                 {inOrder(cols.order, {
                   symbol: <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
                   ltp: <SortTh label="LTP" k="ltp" sort={sort} onSort={onSort} num title="Last traded price at the scan" drag={cols.dragProps("ltp")} />,
@@ -634,7 +640,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -648,6 +654,7 @@ export function ChopScan({ armed, arming, onArm, paused = false, onStatus, saved
 function Row({
   order,
   row: r,
+  tick,
   firstAt,
   armedOn,
   arming,
@@ -655,6 +662,7 @@ function Row({
 }: {
   order: readonly Col[];
   row: ChopScanRow;
+  tick: React.ReactNode;
   firstAt: string | null;
   armedOn: string[];
   arming: boolean;
@@ -662,6 +670,7 @@ function Row({
 }) {
   return (
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
+      {tick}
       {inOrder(order, {
         symbol: (
           <td className="py-1.5 font-semibold text-slate-100"><GrowwLink symbol={r.symbol} /></td>

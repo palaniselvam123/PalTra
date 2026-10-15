@@ -4,7 +4,7 @@ import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, BellRing, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, Crosshair, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
@@ -123,7 +123,7 @@ export default function ScalpPage() {
   const [ltpMax, setLtpMax] = useState("");
 
   // Arm a stock on any SMA bot from here: which bot, then quantity / stop / trail / target (useArming).
-  const { armed, arming, armNote, arm, loadDesks, dialogs } = useArming(
+  const { armed, arming, armNote, arm, armSeveral, loadDesks, dialogs } = useArming(
     (symbol) => (data?.rows ?? []).find((r) => r.symbol === symbol)?.ltp ?? null
   );
 
@@ -546,7 +546,7 @@ export default function ScalpPage() {
               <span>
                 {picked.size
                   ? `${picked.size} ticked`
-                  : "Tick stocks below to test how the bot would have traded them"}
+                  : "Tick stocks below to arm them together, or to test how the bot would have traded them"}
               </span>
               {picked.size > 0 && (
                 <button type="button" onClick={() => setPicked(new Set())} className="text-slate-400 hover:text-slate-200">
@@ -567,6 +567,15 @@ export default function ScalpPage() {
                   ))}
                 </select>
               </label>
+              <button
+                type="button"
+                disabled={picked.size === 0}
+                onClick={() => armSeveral(Array.from(picked), "Scalp monitor")}
+                title="Arm every ticked stock on one bot with the same quantity, stop loss, trail and target; then backtest them there if you like."
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-profit/15 px-3 font-semibold text-profit ring-1 ring-inset ring-profit/40 hover:bg-profit/25 disabled:opacity-40"
+              >
+                <Crosshair size={13} /> Arm ticked
+              </button>
               <button
                 type="button"
                 disabled={btBusy || picked.size === 0}
@@ -678,10 +687,10 @@ export default function ScalpPage() {
           </section>
         </div>
         <div hidden={tab !== "cross"}>
-          <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} paused={paused} onStatus={onCrossStatus} />
+          <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} onArmMany={(list) => armSeveral(list, "Cross scan")} paused={paused} onStatus={onCrossStatus} />
         </div>
         <div hidden={tab !== "trend"}>
-          <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
+          <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} onArmMany={(list) => armSeveral(list, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
         </div>
         <div hidden={tab !== "active"}>
           <MostActive
@@ -697,7 +706,7 @@ export default function ScalpPage() {
         <div hidden={tab !== "backtest"}>
           <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
         </div>
-        <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} />}</div>
+        <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>
           <section className="rounded-xl border border-slate-800 bg-card p-4">
             <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
