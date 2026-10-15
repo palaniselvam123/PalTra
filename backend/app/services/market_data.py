@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import time
 from dataclasses import dataclass
 from enum import Enum
 
+import groww_pressure
 from app.core.market_clock import ist_now, is_market_open, session_state
 from app.services.tick_feed import SimulatedTickFeed, Tick
 from app.strategies.scanner import NIFTY50_UNIVERSE
@@ -53,45 +55,81 @@ class FeedHealth:
 class LiveGrowwFeed:
     """Polls Groww for real quotes and yields them as ticks.
 
-    Depth (bid/ask) costs one call per symbol, so it is fetched on a slower
-    cadence than LTP; between refreshes the last known spread is reused. The
-    spread guard therefore acts on depth that is at most `depth_every` polls
-    old — acceptable for a paper engine, and flagged in the README.
+    Depth (bid/ask) costs one call per symbol, so it is spread over the polls:
+    `depth_per_poll` symbols each poll, round the universe in turn, instead of
+    every symbol in one burst. Between refreshes the last known spread is
+    reused, so the spread guard acts on depth about a minute old — acceptable
+    for a paper engine, and flagged in the README.
+
+    Groww's rate limit is per account and shared with everything else on this
+    server (the bots, scans). The burst of one quote per symbol every ~20 s
+    was enough to breach it on its own, and then every price failed. Now a
+    "rate limit" answer stops this feed's calls for `RATE_PAUSE_SEC` (depth
+    for `DEPTH_PAUSE_SEC`) and makes the scans wait too (groww_pressure).
     """
 
-    def __init__(self, client, symbols: list[str], poll_interval_sec: float = 2.0, depth_every: int = 10):
+    RATE_PAUSE_SEC = 20.0
+    DEPTH_PAUSE_SEC = 120.0
+
+    def __init__(self, client, symbols: list[str], poll_interval_sec: float = 2.0, depth_per_poll: int = 1):
         self.client = client
         self.symbols = symbols
         self.poll_interval_sec = poll_interval_sec
-        self.depth_every = depth_every
+        self.depth_per_poll = depth_per_poll
         self._spreads: dict[str, tuple[float, float]] = {}   # symbol -> (bid_offset, ask_offset)
         self._volumes: dict[str, int] = {}
-        self._poll_count = 0
+        self._depth_next = 0          # index of the next symbol whose depth is due
+        self._paused_until = 0.0      # time.monotonic(): no Groww call before this
+        self._depth_paused_until = 0.0
+        self.rate_limits = 0
         self.last_error: str | None = None
 
+    def _note_rate_limit(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        self.rate_limits += 1
+        self._paused_until = now + self.RATE_PAUSE_SEC
+        self._depth_paused_until = now + self.DEPTH_PAUSE_SEC
+        self.last_error = (
+            "Groww rate limit: too many requests on this Groww account. "
+            f"Prices pause for {int(self.RATE_PAUSE_SEC)} s and then resume."
+        )
+        groww_pressure.note_feed_rate_limit()
+
     async def _refresh_depth(self) -> None:
-        for symbol in self.symbols:
+        """Bid/ask for the next few symbols in turn; stops at a rate limit."""
+        if not self.symbols or time.monotonic() < self._depth_paused_until:
+            return
+        for _ in range(min(self.depth_per_poll, len(self.symbols))):
+            symbol = self.symbols[self._depth_next % len(self.symbols)]
+            self._depth_next = (self._depth_next + 1) % len(self.symbols)
             try:
                 quote = await self.client.get_full_quote(symbol)
             except Exception as exc:  # noqa: BLE001
+                if groww_pressure.is_rate_limited(exc):
+                    self._note_rate_limit()
+                    return
                 self.last_error = str(exc)
                 continue
             if quote.ltp > 0:
                 self._spreads[symbol] = (quote.ltp - quote.bid, quote.ask - quote.ltp)
             if quote.volume:
                 self._volumes[symbol] = quote.volume
-            await asyncio.sleep(0.05)  # be gentle with rate limits
 
     async def stream(self):
         while True:
             open_now = is_market_open()
+            wait = self._paused_until - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+                continue
             try:
-                # Bid/ask for every name is dozens of Groww calls. After the
-                # close the spread does not matter, and that loop was filling
-                # the only CPU so positions and the terminal stopped answering.
-                if broker_poll_due(open_now) and self._poll_count % self.depth_every == 0:
+                # Bid/ask is one Groww call per name. After the close the
+                # spread does not matter, and that loop was filling the only
+                # CPU so positions and the terminal stopped answering.
+                if broker_poll_due(open_now):
                     await self._refresh_depth()
-                self._poll_count += 1
+                if time.monotonic() < self._paused_until:
+                    continue
 
                 ltps = await asyncio.wait_for(self.client.get_ltp_batch(self.symbols), timeout=8)
                 self.last_error = None
@@ -109,7 +147,10 @@ class LiveGrowwFeed:
                     )
             except Exception as exc:  # noqa: BLE001
                 # Never let a transient broker error kill the feed task.
-                self.last_error = str(exc)
+                if groww_pressure.is_rate_limited(exc):
+                    self._note_rate_limit()
+                    continue
+                self.last_error = str(exc) or f"Groww did not answer in time ({type(exc).__name__})"
                 await asyncio.sleep(5 if open_now else 60)
                 continue
 

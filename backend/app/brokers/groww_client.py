@@ -240,7 +240,8 @@ class GrowwClient(BrokerClient):
             except Exception as exc:  # noqa: BLE001
                 errors.append(str(exc))
         if not out and errors:
-            raise BrokerOrderError(f"Groww LTP fetch failed: {errors[0]}")
+            # Each chunk's error already says "Groww LTP fetch failed: …".
+            raise BrokerOrderError(errors[0])
         return out
 
     async def _ltp_chunk(self, symbols: list[str]) -> dict[str, float]:
