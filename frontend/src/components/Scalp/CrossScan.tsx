@@ -13,6 +13,7 @@ import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { useFirstSeen } from "@/components/Scalp/useFirstSeen";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
@@ -36,9 +37,12 @@ type Props = {
 };
 
 type Side = "ALL" | "BULLISH" | "BEARISH";
-type SortKey = "symbol" | "side" | "mins" | "ltp" | "gap" | "slope" | "speed" | "volume" | "volWin";
+type SortKey = "symbol" | "side" | "mins" | "first" | "ltp" | "gap" | "slope" | "speed" | "volume" | "volWin";
 type Col = SortKey | "sma" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "side", "mins", "ltp", "gap", "slope", "speed", "volume", "volWin", "sma", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "side", "mins", "first", "ltp", "gap", "slope", "speed", "volume", "volWin", "sma", "arm"];
+
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
@@ -130,17 +134,20 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
 
   // The server holds one result, for the candle size it last scanned.
   const scannedThisCandle = data?.minutes === minutes;
-  const filtered = useMemo(
-    () =>
-      (scannedThisCandle ? (data?.rows ?? []) : []).filter((r) => {
-        if (!matchesText(query, r.symbol)) return false;
-        if (side !== "ALL" && r.side !== side) return false;
-        if (fastOnly && (speedOf(r) ?? 0) < minSpeed) return false;
-        if (r.state === "CROSSED") return showCrossed;
-        return (r.minutes_to_cross ?? Infinity) <= within;
-      }),
-    [data?.rows, scannedThisCandle, query, side, fastOnly, minSpeed, speedOf, showCrossed, within]
+  // Every filter but the stock search: what decides whether a stock is "in the list".
+  const passes = useCallback(
+    (r: CrossScanRow) => {
+      if (side !== "ALL" && r.side !== side) return false;
+      if (fastOnly && (speedOf(r) ?? 0) < minSpeed) return false;
+      if (r.state === "CROSSED") return showCrossed;
+      return (r.minutes_to_cross ?? Infinity) <= within;
+    },
+    [side, fastOnly, minSpeed, speedOf, showCrossed, within]
   );
+  const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
+  const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
+  // When each stock first showed up in this list (these filters) in today's saved Cross scans.
+  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "cross");
   const { sorted: rows, sort, onSort } = useSort<CrossScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
       case "symbol":
@@ -149,6 +156,8 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
         return r.side;
       case "mins":
         return r.state === "CROSSED" ? -1 : r.minutes_to_cross;
+      case "first":
+        return firstSeen.get(r.symbol) ?? null;
       case "ltp":
         return r.ltp;
       case "gap":
@@ -282,6 +291,17 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
                   mins: (
                     <SortTh label="In" k="mins" sort={sort} onSort={onSort} num title="Estimated time to the cross at the pace of the last few candles" drag={cols.dragProps("mins")} />
                   ),
+                  first: (
+                    <SortTh
+                      label="First seen"
+                      k="first"
+                      sort={sort}
+                      onSort={onSort}
+                      text
+                      title="When the stock first appeared in this list today, with the filters set above (from today's saved Cross scans on this candle size)"
+                      drag={cols.dragProps("first")}
+                    />
+                  ),
                   ltp: <SortTh label="LTP" k="ltp" sort={sort} onSort={onSort} num drag={cols.dragProps("ltp")} />,
                   gap: (
                     <SortTh label="Gap %" k="gap" sort={sort} onSort={onSort} num title="(fast SMA − slow SMA) / slow SMA, on the last closed candle" drag={cols.dragProps("gap")} />
@@ -317,7 +337,7 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} fastAt={minSpeed} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -332,6 +352,7 @@ function Row({
   order,
   row: r,
   tick,
+  firstAt,
   fastAt,
   armedOn,
   arming,
@@ -340,6 +361,7 @@ function Row({
   order: readonly Col[];
   row: CrossScanRow;
   tick: React.ReactNode;
+  firstAt: string | null;
   fastAt: number;
   armedOn: string[];
   arming: boolean;
@@ -373,6 +395,17 @@ function Row({
               <span className="text-amber-300">{r.crossed_candles_ago === 0 ? "just crossed" : "crossed 1 candle ago"}</span>
             ) : (
               <span title={`${num(r.candles_to_cross, 1)} candles`}>~{Math.max(1, Math.round(r.minutes_to_cross ?? 0))} min</span>
+            )}
+          </td>
+        ),
+        first: (
+          <td className="py-1.5 tabular-nums text-xs">
+            {firstAt ? (
+              <span className="text-slate-200" title={`First in this list today at ${clock(firstAt)} IST`}>
+                {clock(firstAt)}
+              </span>
+            ) : (
+              <span className="text-slate-600">—</span>
             )}
           </td>
         ),
