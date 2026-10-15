@@ -1932,3 +1932,16 @@ def test_restart_remembers_how_many_live_trades_were_taken(api):
         )
         db.commit()
     assert engine.restore_trades_today() == 15
+
+
+def test_a_symbol_with_an_ampersand_or_dash_can_be_armed(api):
+    """GVT&D, M&M and BAJAJ-AUTO are real NSE symbols; isalnum() refused them."""
+    from strategy_engine import is_nse_symbol
+
+    for name in ("GVT&D", "M&M", "BAJAJ-AUTO"):
+        res = api.post("/api/trade-symbols", json={"symbol": name, "armed": True})
+        assert res.status_code == 200, res.text
+        assert name in res.json()["trade_symbols"]
+    assert api.get("/api/config/stock/M%26M").status_code == 200
+    assert api.post("/api/trade-symbols", json={"symbol": "TCS;DROP", "armed": True}).status_code == 400
+    assert not is_nse_symbol("&M") and not is_nse_symbol("A B") and not is_nse_symbol("")
