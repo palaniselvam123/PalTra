@@ -12,6 +12,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
+import { GrowwLink } from "@/components/ui/growwLink";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
@@ -342,7 +343,7 @@ function Row({
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
       {inOrder(order, {
         symbol: (
-          <td className="py-1.5 font-semibold text-slate-100">{r.symbol}</td>
+          <td className="py-1.5 font-semibold text-slate-100"><GrowwLink symbol={r.symbol} /></td>
         ),
         side: (
           <td className="py-1.5">

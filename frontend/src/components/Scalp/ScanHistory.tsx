@@ -22,6 +22,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
+import { GrowwLink } from "@/components/ui/growwLink";
 
 const POLL_MS = 3_000;
 
@@ -551,7 +552,7 @@ export function ScanHistory({
                             c.tone && typeof v === "number" && (v > 0 ? "text-profit" : v < 0 ? "text-loss" : "")
                           )}
                         >
-                          {cellText(c, r)}
+                          {c.id === "symbol" ? <GrowwLink symbol={r.symbol} /> : cellText(c, r)}
                         </td>
                       );
                     })}

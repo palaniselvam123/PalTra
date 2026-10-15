@@ -406,6 +406,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`cross_scan.activity`, no `enrich()`, so no volume warnings): shares traded today
   (Groww's running total), shares in the last 10 minutes, and the signed price speed
   in % per minute over those 10 minutes. No order path: Arm only opens the arm prompt.
+  Every Scalp table's stock name (Monitor, Cross scan, Trend quality, Most active, History) is a
+  `GrowwLink` (`components/ui/growwLink.tsx`) to desk `GET /api/instruments/groww/{symbol}`, which
+  302s to the stock's groww.in page: the slug comes from Groww's public website search
+  (`app/services/groww_links.py`, exact NSE match, cached per symbol; else Groww's search page).
+  Opens in a new tab with the browser's own Groww login. Read-only, no trading API, no order.
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,

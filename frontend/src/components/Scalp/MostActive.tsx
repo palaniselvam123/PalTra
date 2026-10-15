@@ -10,6 +10,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
+import { GrowwLink } from "@/components/ui/growwLink";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -317,7 +318,7 @@ function ActiveRowView({
           <td className="py-1.5 pr-2 text-xs text-slate-500">{rank}</td>
         ),
         symbol: (
-          <td className="py-1.5 pr-2 font-semibold text-slate-100">{row.symbol}</td>
+          <td className="py-1.5 pr-2 font-semibold text-slate-100"><GrowwLink symbol={row.symbol} /></td>
         ),
         ltp: (
           <td className="py-1.5 pr-2 text-right font-mono">{row.ltp.toFixed(2)}</td>

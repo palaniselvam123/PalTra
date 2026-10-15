@@ -21,6 +21,7 @@ import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
+import { GrowwLink } from "@/components/ui/growwLink";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -825,7 +826,7 @@ function Row({
           </td>
         ),
         symbol: (
-          <td className="py-1.5 font-semibold text-amber-300">{r.symbol}</td>
+          <td className="py-1.5 font-semibold text-amber-300"><GrowwLink symbol={r.symbol} /></td>
         ),
         score: (
           <td className="py-1.5 text-right">
