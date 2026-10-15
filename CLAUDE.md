@@ -460,6 +460,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `scan_worker.run` (Cross scan, Trend quality), the desk's most-active scan and the Scalp
   monitor's history fill. `/api/stall` reports it under `groww` and keeps the blocking frames
   of each stall (`recent[].where`). Bookkeeping only: no order is placed, changed or held back.
+  The desk's live price feed (`app/services/market_data.LiveGrowwFeed`, Dashboard "Live", also on
+  the scanner) asks bid/ask for `depth_per_poll` (1) symbol per poll in turn, never the whole
+  universe in one burst; a "rate limit" answer pauses its calls `RATE_PAUSE_SEC` (20 s), depth
+  `DEPTH_PAUSE_SEC` (120 s), shows "Groww rate limit: …", and counts as `feed_rate_limits`
+  (`note_feed_rate_limit`), which makes the scans wait like a bot's refusal.
 - `backend/server_role.py` – scanner server (`PALTRA_ROLE=scanner`, second Fly app
   `paltra-scanner`, `fly.scanner.toml`, setup in `SCANNER.md`): the same image runs the Scalp
   page's scans and alerts on its own machine and its own Groww API key. It **never orders**:

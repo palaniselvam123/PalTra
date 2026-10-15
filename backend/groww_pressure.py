@@ -39,6 +39,7 @@ _state = {
     "scan_wait_sec": 0.0,
     "bot_calls_running": 0,
     "bot_calls_peak": 0,
+    "feed_rate_limits": 0,
 }
 
 
@@ -49,6 +50,12 @@ def is_rate_limited(exc: BaseException | str) -> bool:
 
 def note_bot_rate_limit() -> None:
     _state["bot_rate_limits"] += 1
+    _state["last_bot_rate_limit"] = time.monotonic()
+
+
+def note_feed_rate_limit() -> None:
+    """The desk's live price feed (Dashboard "Live") was refused: scans yield as for a bot."""
+    _state["feed_rate_limits"] += 1
     _state["last_bot_rate_limit"] = time.monotonic()
 
 
@@ -99,6 +106,7 @@ def snapshot() -> dict:
         "bot_calls_running": _state["bot_calls_running"],
         "bot_calls_peak": _state["bot_calls_peak"],
         "bot_rate_limits": _state["bot_rate_limits"],
+        "feed_rate_limits": _state["feed_rate_limits"],
         "last_bot_rate_limit_s_ago": round(time.monotonic() - last, 1) if last else None,
         "scans_yielding_now": bots_under_pressure(),
         "scan_rate_limits": _state["scan_rate_limits"],
