@@ -306,6 +306,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   through `apply_signal` (alert off; every check, cut-off, cap, stop, flip and one-LIVE-bot-per-stock
   apply), once per SMA run (`_counter_done`, keyed on `join_trend.side_start`). Gap mode and candle
   patterns ignore it. Settings → Entry filters (more). The stock research baseline keeps both off.
+- `backend/ema_filter.py` – EMA cross check (off by default, per bot and per stock, PAPER and LIVE): a
+  second pair of lines next to the SMA ones, like Groww's "EMA Cross 9 200" (`ema_fast` / `ema_slow`,
+  defaults 9 / 200, 1-500, typed in Settings → Entry filters (more)). The bot still trades the SMA
+  cross. **Entry** (`use_ema`): wired through `_entry_block` like the other filters (check name `ema`,
+  chart ✕ "EMA"): a buy only while EMA fast > EMA slow on the last closed candle, a sell only while
+  below; refused while the slow EMA has fewer than `ema_slow` closed candles. **Exit** (`ema_exit`):
+  `StrategyEngine._watch_ema_exit` closes an open trade (`EMA_CROSS`, via `_exit_now`, which cancels a
+  LIVE stop first) on a candle that closed after the entry on which the EMAs crossed against it;
+  once per closed candle (`pos.ema_bar`); a LIVE position restored without its stop id is left to
+  that stop. EMAs are `ewm(adjust=False)` on the bot's own candles. The stock research baseline keeps
+  both off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

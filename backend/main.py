@@ -34,6 +34,7 @@ import scan_history
 import scan_worker
 import server_role
 import counter_candles
+import ema_filter
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
@@ -294,6 +295,10 @@ class ConfigUpdate(BaseModel):
     counter_entry: bool | None = None
     counter_rule: Literal["COLOUR", "CLOSES", "BOTH"] | None = None
     counter_need_fast: bool | None = None
+    use_ema: bool | None = None
+    ema_exit: bool | None = None
+    ema_fast: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
+    ema_slow: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
@@ -763,6 +768,10 @@ def _gap_dict(row) -> dict:
         "counter_entry": counter_candles.entry_on(row),
         "counter_rule": counter_candles.rule(row),
         "counter_need_fast": counter_candles.need_fast(row),
+        "use_ema": ema_filter.entry_on(row),
+        "ema_exit": ema_filter.exit_on(row),
+        "ema_fast": ema_filter.lengths(row)[0],
+        "ema_slow": ema_filter.lengths(row)[1],
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),

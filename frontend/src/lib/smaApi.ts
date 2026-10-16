@@ -127,6 +127,11 @@ export type SmaConfig = {
   counter_rule?: "CLOSES" | "COLOUR" | "BOTH";
   /** The last counter candle must close past the fast SMA (on unless false). */
   counter_need_fast?: boolean;
+  /** EMA cross check: entry only on the fast/slow EMA side; exit on an EMA cross against the trade. */
+  use_ema?: boolean;
+  ema_exit?: boolean;
+  ema_fast?: number;
+  ema_slow?: number;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */
