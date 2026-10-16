@@ -48,6 +48,8 @@ BASELINE_OFF = {
     "counter_entry": False,
     "use_ema": False,
     "ema_exit": False,
+    "use_supertrend": False,
+    "st_exit": False,
     "stock_settings": "{}",
 }
 

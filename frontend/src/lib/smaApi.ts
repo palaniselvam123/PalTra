@@ -132,6 +132,11 @@ export type SmaConfig = {
   ema_exit?: boolean;
   ema_fast?: number;
   ema_slow?: number;
+  /** Supertrend: entry only on its side; exit when it flips against the trade. */
+  use_supertrend?: boolean;
+  st_exit?: boolean;
+  st_period?: number;
+  st_mult?: number;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */
@@ -644,6 +649,9 @@ export type Candle = {
   /** EMA cross lines (fast, slow), when the EMA check or exit is on. */
   emaFast?: number | null;
   emaSlow?: number | null;
+  /** Supertrend line while it is up (green) / down (red), when its check or exit is on. */
+  stUp?: number | null;
+  stDown?: number | null;
   /** Shares traded in this candle (null when Groww's running total cannot give it). */
   volume?: number | null;
 };
@@ -671,6 +679,10 @@ export type ChartFilters = {
   ema_lines?: boolean;
   ema_fast?: number;
   ema_slow?: number;
+  /** Draw the Supertrend line (its check or exit on) and its settings. */
+  st_line?: boolean;
+  st_period?: number;
+  st_mult?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */
