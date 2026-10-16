@@ -149,7 +149,7 @@ function withIndicators(rows: Candle[], formingLast: boolean): Candle[] {
   // The forming candle's lines would repaint, so they stop on the last closed one.
   if (formingLast && out.length) {
     const last = out[out.length - 1];
-    out[out.length - 1] = { ...last, sma9: null, sma21: null, atr14: null, vwap: null, rsi14: null };
+    out[out.length - 1] = { ...last, sma9: null, sma21: null, atr14: null, vwap: null, rsi14: null, emaFast: null, emaSlow: null };
   }
   return out;
 }
@@ -326,6 +326,8 @@ class TradeBoxes implements ISeriesPrimitive<Time> {
 }
 
 const VWAP_COLOR = "#22D3EE";
+const EMA_FAST_COLOR = "#F59E0B";
+const EMA_SLOW_COLOR = "#10B981";
 const RSI_COLOR = "#F472B6";
 
 
@@ -692,6 +694,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
   const bbRefs = useRef<ISeriesApi<"Line">[]>([]);
+  // EMA cross lines (ema_filter.py): fast, slow. Drawn only while the EMA check or exit is on.
+  const emaRefs = useRef<ISeriesApi<"Line">[]>([]);
   const rsiBands = useRef<IPriceLine[]>([]);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
@@ -1153,6 +1157,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     instance.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     vwapRef.current = vwap;
     rsiRef.current = rsi;
+    emaRefs.current = [EMA_FAST_COLOR, EMA_SLOW_COLOR].map((color) =>
+      instance.addLineSeries({
+        color,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dotted,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        visible: false,
+      })
+    );
     // Bollinger: upper and lower dashed, middle faint. Drawn only when the filter is on.
     bbRefs.current = [
       { color: BB_COLOR, style: LineStyle.Dashed, width: 1 },
@@ -1276,6 +1290,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         showVwap ? rows.filter((c) => c.vwap != null).map((c) => ({ time: c.time as never, value: c.vwap as number })) : []
       );
     }
+    // EMA lines come from the server on the bot's own candle; a merged-up size has none.
+    const showEma = Boolean(filters?.ema_lines);
+    emaRefs.current.forEach((series, i) => {
+      const key = i === 0 ? "emaFast" : "emaSlow";
+      const length = i === 0 ? filters?.ema_fast : filters?.ema_slow;
+      series.applyOptions({ visible: showEma, title: showEma && length ? `EMA ${length}` : "" });
+      series.setData(
+        showEma ? rows.filter((c) => c[key] != null).map((c) => ({ time: c.time as never, value: c[key] as number })) : []
+      );
+    });
     const showBb = Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF";
     const bands = showBb ? bollingerRows(rows, filters?.bb_period ?? 20, filters?.bb_std ?? 2, !past) : null;
     bbRefs.current.forEach((series, i) => {

@@ -641,6 +641,9 @@ export type Candle = {
   vwap?: number | null;
   /** RSI 14 on 1-minute closes (what the RSI filter reads). */
   rsi14?: number | null;
+  /** EMA cross lines (fast, slow), when the EMA check or exit is on. */
+  emaFast?: number | null;
+  emaSlow?: number | null;
   /** Shares traded in this candle (null when Groww's running total cannot give it). */
   volume?: number | null;
 };
@@ -664,6 +667,10 @@ export type ChartFilters = {
   bb_exit?: BbExit;
   /** The ATR stop is the one in use, so the ATR line matters. */
   atr_stop: boolean;
+  /** Draw the EMA cross lines (EMA check or EMA exit on) and their lengths. */
+  ema_lines?: boolean;
+  ema_fast?: number;
+  ema_slow?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */

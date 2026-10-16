@@ -102,3 +102,20 @@ def test_api_saves_the_ema_settings(tmp_path, monkeypatch):
         own = client.put("/api/config/stock/SBIN", json={"ema_exit": False})
         assert own.status_code == 200 and own.json()["ema_exit"] is False
     database.reset_engine()
+
+
+def test_chart_rows_carry_the_ema_lines_only_when_asked():
+    from strategy_engine import candle_rows, chart_filters
+
+    frame = _closes([100 + i * 0.5 for i in range(40)]).assign(volume=1000)
+    plain = candle_rows(frame)
+    assert "emaFast" not in plain[-1]
+    rows = candle_rows(frame, (3, 10))
+    assert rows[1]["emaFast"] is None and rows[2]["emaFast"] is not None  # 3 candles before EMA 3 shows
+    assert rows[8]["emaSlow"] is None and rows[9]["emaSlow"] is not None
+    fast, slow = ema_filter.emas(frame, 3, 10)
+    assert abs(rows[-2]["emaFast"] - float(fast.iloc[-2])) < 1e-9 and abs(rows[-2]["emaSlow"] - float(slow.iloc[-2])) < 1e-9
+
+    off = chart_filters(Cfg(use_ema=False, ema_exit=False))
+    assert off["ema_lines"] is False and (off["ema_fast"], off["ema_slow"]) == (9, 200)
+    assert chart_filters(Cfg(use_ema=False, ema_exit=True, ema_fast=5, ema_slow=50))["ema_lines"] is True

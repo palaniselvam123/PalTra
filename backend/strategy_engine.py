@@ -651,6 +651,10 @@ def chart_filters(cfg) -> dict:
         "bb_std": float(getattr(cfg, "bb_std", 2.0) or 2.0),
         "bb_exit": (getattr(cfg, "bb_exit", None) or "OFF").upper(),
         "atr_stop": getattr(cfg, "use_stop", True) is not False and (getattr(cfg, "stop_type", "ATR") or "ATR") == "ATR",
+        # EMA lines (ema_filter.py): drawn while the EMA entry check or the EMA exit is on.
+        "ema_lines": ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg),
+        "ema_fast": ema_filter.lengths(cfg)[0],
+        "ema_slow": ema_filter.lengths(cfg)[1],
     }
 
 
@@ -661,6 +665,7 @@ _FILTER_KEYS = (
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
+    "use_ema", "ema_exit", "ema_fast", "ema_slow",
 )
 
 
@@ -682,10 +687,18 @@ def _forming_row(bar) -> dict:
     }
 
 
-def candle_rows(frame: pd.DataFrame) -> list[dict]:
-    """Chart candles with SMA, ATR, session VWAP and RSI 14 per candle."""
+def candle_rows(frame: pd.DataFrame, ema: tuple[int, int] | None = None) -> list[dict]:
+    """Chart candles with SMA, ATR, session VWAP and RSI 14 per candle.
+
+    `ema` (fast, slow lengths) adds the EMA cross lines (ema_filter.py), from the
+    same closes the bot's EMA check reads. A value is left out until that EMA has
+    as many candles as its length, as the bot does not trust it before then.
+    """
     if frame is None or frame.empty:
         return []
+    ema_fast = ema_slow = None
+    if ema:
+        ema_fast, ema_slow = ema_filter.emas(frame, ema[0], ema[1])
     vwap = session_vwap_series(frame)
     rsi = rsi_wilder(frame["close"], 14)
     # Shares traded in each minute (Groww's own volume is a running session
@@ -711,6 +724,9 @@ def candle_rows(frame: pd.DataFrame) -> list[dict]:
                 "volume": _finite(minute_vol.iloc[i]),
             }
         )
+        if ema:
+            rows[-1]["emaFast"] = _finite(ema_fast.iloc[i]) if i + 1 >= ema[0] else None
+            rows[-1]["emaSlow"] = _finite(ema_slow.iloc[i]) if i + 1 >= ema[1] else None
     return rows
 
 
@@ -3681,7 +3697,8 @@ class StrategyEngine:
         cached = caches.get(symbol)
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
-        rows = candle_rows(frame)[:-1]
+        ema = ema_filter.lengths(cfg) if cfg is not None and (ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg)) else None
+        rows = candle_rows(frame, ema)[:-1]
         # Refused crosses belong to the bot's own candle; another chart size shows none.
         blocks = filter_blocks(frame, cfg) if with_blocks else []
         if symbol not in caches and len(caches) >= 12:
