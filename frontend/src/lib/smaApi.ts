@@ -137,6 +137,13 @@ export type SmaConfig = {
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;
+  /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
+  use_or_volume?: boolean;
+  use_or_vwap?: boolean;
+  use_or_spread?: boolean;
+  use_or_break?: boolean;
+  or_volume_ratio?: number;
+  or_spread_pct?: number;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */
@@ -683,6 +690,13 @@ export type ChartFilters = {
   st_line?: boolean;
   st_period?: number;
   st_mult?: number;
+  /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
+  use_or_volume?: boolean;
+  use_or_vwap?: boolean;
+  use_or_spread?: boolean;
+  use_or_break?: boolean;
+  or_volume_ratio?: number;
+  or_spread_pct?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */

@@ -60,6 +60,7 @@ from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
 import ema_filter
 import supertrend
+import opening_range
 import join_trend
 import late_entry
 import review
@@ -198,6 +199,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult",
+    "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -406,6 +408,10 @@ def _entry_block(
         st = supertrend.entry_reason(frame, direction, cfg)
         if st:
             reason = f"{reason}; {st}" if reason else st
+    if any(on(name) for name in opening_range.CHECKS):
+        opening = opening_range.entry_reason(frame, direction, cfg, only=only)
+        if opening:
+            reason = f"{reason}; {opening}" if reason else opening
     return reason
 
 
@@ -500,6 +506,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("EMA")
         elif low.startswith("supertrend"):
             parts.append("ST")
+        elif low.startswith("opening"):
+            parts.append("Open range")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -562,6 +570,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
     ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"),
+    ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
 
 
@@ -610,6 +619,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return ema_filter.passed_text(frame, direction, cfg)
         if name == "supertrend":
             return supertrend.passed_text(frame, direction, cfg)
+        if name in opening_range.CHECKS:
+            return opening_range.passed_text(frame, direction, cfg, name)
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -683,6 +694,7 @@ _FILTER_KEYS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult",
+    "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
 
 
@@ -4485,6 +4497,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("EMA")
     if bool(getattr(cfg, "use_supertrend", False)):
         checked.append("Supertrend")
+    if opening_range.any_on(cfg):
+        checked.append("opening range")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:

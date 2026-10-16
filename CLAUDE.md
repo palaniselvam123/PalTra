@@ -328,6 +328,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
+  **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
+  the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the
+  window's per-minute volume at least that × the usual per-minute volume for the same window on earlier sessions
+  in the frame (missing volume refuses); `or_vwap`: every window candle closed on the trade's side of
+  `session_vwap_series`; `or_spread` (`or_spread_pct`, default 0.10): the SMA gap in % on the trade's side is at
+  least that and wider than on the candle before; `or_break`: the first candle closed at or after 09:30 closes
+  beyond the window high (buy) or low (sell). Nothing is checked before the window is complete (a candle at or
+  after 09:30 has closed), so no entry in the window itself is taken with a check on. Wired through `_entry_block`
+  (check names `or_volume` … `or_break`; chart ✕ "Opening …"). No exits. The stock research baseline keeps all off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle
