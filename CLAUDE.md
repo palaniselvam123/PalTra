@@ -317,6 +317,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once per closed candle (`pos.ema_bar`); a LIVE position restored without its stop id is left to
   that stop. EMAs are `ewm(adjust=False)` on the bot's own candles. The stock research baseline keeps
   both off.
+- `backend/supertrend.py` – Supertrend (off by default, per bot and per stock, PAPER and LIVE): the same
+  line as Groww's / TradingView's Supertrend (`st_period` ATR length, default 10, 1-100; `st_mult` factor,
+  default 3, 0.5-10; Wilder ATR seeded with the SMA of the first `st_period` true ranges, bands on
+  (high + low) / 2 that only tighten while the trend holds, a flip on a close beyond the other band), on the
+  bot's own closed candles. **Entry** (`use_supertrend`): through `_entry_block` (check name `supertrend`,
+  chart ✕ "ST"): a buy only while it is up, a sell only while down. **Exit** (`st_exit`):
+  `StrategyEngine._watch_supertrend_exit` closes the trade (`SUPERTREND`, via `_exit_now`, which cancels a
+  LIVE stop first) on a candle closed after the entry on which it flipped against the trade; once per closed
+  candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. The chart draws
+  it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
+  lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

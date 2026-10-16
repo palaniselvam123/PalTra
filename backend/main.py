@@ -35,6 +35,7 @@ import scan_worker
 import server_role
 import counter_candles
 import ema_filter
+import supertrend
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
@@ -299,6 +300,10 @@ class ConfigUpdate(BaseModel):
     ema_exit: bool | None = None
     ema_fast: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
     ema_slow: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
+    use_supertrend: bool | None = None
+    st_exit: bool | None = None
+    st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
+    st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
@@ -772,6 +777,10 @@ def _gap_dict(row) -> dict:
         "ema_exit": ema_filter.exit_on(row),
         "ema_fast": ema_filter.lengths(row)[0],
         "ema_slow": ema_filter.lengths(row)[1],
+        "use_supertrend": supertrend.entry_on(row),
+        "st_exit": supertrend.exit_on(row),
+        "st_period": supertrend.settings(row)[0],
+        "st_mult": supertrend.settings(row)[1],
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),

@@ -59,6 +59,7 @@ from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
 import ema_filter
+import supertrend
 import join_trend
 import late_entry
 import review
@@ -142,6 +143,8 @@ class OpenPosition:
     cc_bar: int | None = None
     # EMA cross exit (ema_filter.py): the last closed candle read.
     ema_bar: int | None = None
+    # Supertrend exit (supertrend.py): the last closed candle read.
+    st_bar: int | None = None
     # SMA gap mode exit: last closed candle read, its gap, and armed / peak.
     gap_bar: int | None = None
     gap_prev: float | None = None
@@ -194,6 +197,7 @@ SNAPSHOT_FIELDS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
+    "use_supertrend", "st_exit", "st_period", "st_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -398,6 +402,10 @@ def _entry_block(
         ema = ema_filter.entry_reason(frame, direction, cfg)
         if ema:
             reason = f"{reason}; {ema}" if reason else ema
+    if on("supertrend"):
+        st = supertrend.entry_reason(frame, direction, cfg)
+        if st:
+            reason = f"{reason}; {st}" if reason else st
     return reason
 
 
@@ -490,6 +498,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("Candles")
         elif low.startswith("ema"):
             parts.append("EMA")
+        elif low.startswith("supertrend"):
+            parts.append("ST")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -551,7 +561,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"),
 )
 
 
@@ -598,6 +608,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return f"Candle direction: last {n} {what} ({closes})"
         if name == "ema":
             return ema_filter.passed_text(frame, direction, cfg)
+        if name == "supertrend":
+            return supertrend.passed_text(frame, direction, cfg)
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -655,6 +667,10 @@ def chart_filters(cfg) -> dict:
         "ema_lines": ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg),
         "ema_fast": ema_filter.lengths(cfg)[0],
         "ema_slow": ema_filter.lengths(cfg)[1],
+        # Supertrend line (supertrend.py): drawn while its entry check or exit is on.
+        "st_line": supertrend.entry_on(cfg) or supertrend.exit_on(cfg),
+        "st_period": supertrend.settings(cfg)[0],
+        "st_mult": supertrend.settings(cfg)[1],
     }
 
 
@@ -666,6 +682,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
+    "use_supertrend", "st_exit", "st_period", "st_mult",
 )
 
 
@@ -687,7 +704,9 @@ def _forming_row(bar) -> dict:
     }
 
 
-def candle_rows(frame: pd.DataFrame, ema: tuple[int, int] | None = None) -> list[dict]:
+def candle_rows(
+    frame: pd.DataFrame, ema: tuple[int, int] | None = None, st: tuple[int, float] | None = None
+) -> list[dict]:
     """Chart candles with SMA, ATR, session VWAP and RSI 14 per candle.
 
     `ema` (fast, slow lengths) adds the EMA cross lines (ema_filter.py), from the
@@ -699,6 +718,7 @@ def candle_rows(frame: pd.DataFrame, ema: tuple[int, int] | None = None) -> list
     ema_fast = ema_slow = None
     if ema:
         ema_fast, ema_slow = ema_filter.emas(frame, ema[0], ema[1])
+    st_line, st_trend = supertrend.compute(frame, st[0], st[1]) if st else ([], [])
     vwap = session_vwap_series(frame)
     rsi = rsi_wilder(frame["close"], 14)
     # Shares traded in each minute (Groww's own volume is a running session
@@ -727,6 +747,11 @@ def candle_rows(frame: pd.DataFrame, ema: tuple[int, int] | None = None) -> list
         if ema:
             rows[-1]["emaFast"] = _finite(ema_fast.iloc[i]) if i + 1 >= ema[0] else None
             rows[-1]["emaSlow"] = _finite(ema_slow.iloc[i]) if i + 1 >= ema[1] else None
+        if st:
+            # Two keys so the chart draws the up (green) and down (red) runs apart.
+            up = st_trend[i] == 1
+            rows[-1]["stUp"] = _finite(st_line[i]) if up else None
+            rows[-1]["stDown"] = _finite(st_line[i]) if st_trend[i] == -1 else None
     return rows
 
 
@@ -1171,6 +1196,7 @@ class StrategyEngine:
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
+            await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_gap_fade(symbol_cfg)
 
         self._focus = view
@@ -2622,6 +2648,31 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} EMA cross exit — {note}"
         await self._exit_now(cfg, self.ltp, "EMA_CROSS")
 
+    async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not supertrend.exit_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.st_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            # That candle had closed before the entry: a flip on it is not "after the entry".
+            return
+        pos.st_bar = closed_ts
+        hit, note = supertrend.flipped_against(frame.iloc[:-1], pos.signal_direction, cfg)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} Supertrend exit — {note}"
+        await self._exit_now(cfg, self.ltp, "SUPERTREND")
+
     async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str) -> None:
         """Close the focused position for a stop, target or Bollinger exit."""
         async with self.lock:
@@ -2652,6 +2703,7 @@ class StrategyEngine:
                     "CANDLE_END": "candle closed — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
+                    "SUPERTREND": "Supertrend turned against the trade — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -3698,7 +3750,8 @@ class StrategyEngine:
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
         ema = ema_filter.lengths(cfg) if cfg is not None and (ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg)) else None
-        rows = candle_rows(frame, ema)[:-1]
+        st = supertrend.settings(cfg) if cfg is not None and (supertrend.entry_on(cfg) or supertrend.exit_on(cfg)) else None
+        rows = candle_rows(frame, ema, st)[:-1]
         # Refused crosses belong to the bot's own candle; another chart size shows none.
         blocks = filter_blocks(frame, cfg) if with_blocks else []
         if symbol not in caches and len(caches) >= 12:
@@ -3994,6 +4047,7 @@ _ALERT_REASON = {
     "BB_MIDDLE": "Bollinger middle band",
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
+    "SUPERTREND": "Supertrend turned against the trade",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "REPLAY_STOPPED": "replay stopped",
@@ -4407,7 +4461,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS")
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND")
 
 
 def _filter_note(cfg: BotConfig) -> str:
@@ -4429,6 +4483,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("candle direction")
     if bool(getattr(cfg, "use_ema", False)):
         checked.append("EMA")
+    if bool(getattr(cfg, "use_supertrend", False)):
+        checked.append("Supertrend")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:

@@ -68,6 +68,10 @@ const LABELS: Record<string, string> = {
   ema_exit: "EMA exit",
   ema_fast: "fast EMA",
   ema_slow: "slow EMA",
+  use_supertrend: "Supertrend entry",
+  st_exit: "Supertrend exit",
+  st_period: "Supertrend ATR length",
+  st_mult: "Supertrend factor",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -237,6 +241,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ema_exit: Boolean(form.ema_exit),
     ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
     ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
+    use_supertrend: Boolean(form.use_supertrend),
+    st_exit: Boolean(form.st_exit),
+    st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
+    st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -1010,6 +1018,52 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("ema_exit") && <OwnTag />}
             Exit: close the trade when the EMAs cross against it
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Supertrend (entry and exit)
+            <InfoTip label="About the Supertrend">
+              One line that follows the price, the same as Groww&apos;s &quot;Supertrend&quot; (ATR length 10, factor 3). It sits
+              under the price while the trend is up (green) and above it while the trend is down (red), at a distance of
+              factor × ATR, so it gives a fast-moving stock more room. It flips when a candle closes on the other side.
+              Entry: a buy only while it is green, a sell only while it is red; otherwise the cross is skipped (✕ &quot;ST&quot;
+              on the chart). Exit: an open trade closes when the Supertrend flips against it after the entry. A bigger
+              factor (4) means fewer, later exits; a smaller one (2) means earlier exits and more shake-outs. Off by default;
+              try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="ATR length (candles)"
+              value={String(form.st_period ?? 10)}
+              onChange={(v) => set("st_period", v)}
+              own={isOwn("st_period")}
+            />
+            <Field
+              label="Factor (× ATR)"
+              value={String(form.st_mult ?? 3)}
+              onChange={(v) => set("st_mult", v)}
+              own={isOwn("st_mult")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_supertrend)}
+              onChange={(e) => set("use_supertrend", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_supertrend") && <OwnTag />}
+            Entry: buy only when green, sell only when red
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.st_exit)}
+              onChange={(e) => set("st_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("st_exit") && <OwnTag />}
+            Exit: close the trade when the Supertrend flips against it
           </label>
         </div>
       </FieldGroup>

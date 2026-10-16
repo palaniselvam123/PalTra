@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | COUNTER_CANDLES | EMA_CROSS | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | COUNTER_CANDLES | EMA_CROSS | SUPERTREND | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -313,6 +313,11 @@ class BotConfig(Base):
     ema_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     ema_fast: Mapped[int | None] = mapped_column(Integer, nullable=True, default=9)
     ema_slow: Mapped[int | None] = mapped_column(Integer, nullable=True, default=200)
+    # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.
+    use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
+    st_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
     # candle and close at its end.
