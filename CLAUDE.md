@@ -532,7 +532,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still
-  refreshes every 55 s) and records real Groww prices (`price_ticks`, one row
+  refreshes every 55 s; a stock whose history download failed or came back short is asked again
+  once a minute, `_history_tried`, so it is never left on a tape of its own prices) and records real Groww prices (`price_ticks`, one row
   per stock per second, kept 10 days). `/api/ticks` serves them to the data
   table, whose rows expand into their seconds. Groww's history has no seconds,
   so replays and earlier days have none; `SMA_RECORD_TICKS=all` also records

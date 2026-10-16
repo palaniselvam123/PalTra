@@ -174,3 +174,62 @@ def test_switch_turns_the_per_second_fetch_off_and_on(tmp_path, monkeypatch):
     finally:
         tick_store.set_enabled(True)
         database.reset_engine()
+
+
+class FlakyHistorySdk:
+    """Quotes always work; the minute-history download fails until `history_ok` is set."""
+
+    def __init__(self):
+        self.history_calls = 0
+        self.history_ok = False
+
+    def get_ltp(self, exchange_trading_symbols, segment, timeout):  # noqa: ARG002
+        return {"payload": {key: 1166.0 for key in exchange_trading_symbols}}
+
+    def get_ohlc(self, exchange_trading_symbols, segment, timeout):  # noqa: ARG002
+        raise RuntimeError("no ohlc in this stub")
+
+    def get_historical_candle_data(self, **kwargs):  # noqa: ARG002
+        self.history_calls += 1
+        if not self.history_ok:
+            raise RuntimeError("rate limit exceeded")
+        start = int(time.time()) // 60 * 60 - 300 * 60
+        return {"candles": [[start + i * 60, 1170.0, 1171.0, 1169.0, 1170.0 + i * 0.01, 1000 * (i + 1)] for i in range(300)]}
+
+
+def test_a_failed_history_download_is_tried_again_while_the_second_feed_runs(monkeypatch):
+    """PNBHOUSING, 16 Oct: the first history download failed, the 1-second batch kept the
+    quote fresh, and history was never asked for again: no SMAs, so no cross and no exit."""
+    import groww_client
+    from groww_client import GrowwClient
+
+    monkeypatch.setattr(groww_client, "desk_session_token", lambda: "")
+    monkeypatch.setattr(groww_client, "_env_access_token", lambda: "")
+    monkeypatch.setattr(groww_client, "market_is_open", lambda now=None: True)
+    client = GrowwClient(mode="PAPER", token="test-token")
+    sdk = FlakyHistorySdk()
+    client._require_sdk = lambda: sdk
+
+    _ltp, frame, _src = asyncio.run(client.refresh("PNBHOUSING"))
+    assert sdk.history_calls == 1 and len(frame) == 1  # only today's own price to start with
+
+    # The batch keeps the quote fresh every second; within the minute history is not asked again.
+    asyncio.run(client.refresh_ltps(["PNBHOUSING"]))
+    asyncio.run(client.refresh("PNBHOUSING"))
+    assert sdk.history_calls == 1
+
+    # A minute later it is asked again, even though the price is fresh. A second failure
+    # keeps the candles built so far instead of starting again from one bar.
+    built = pd.concat([frame.assign(ts=frame["ts"] - 120), frame.assign(ts=frame["ts"] - 60), frame], ignore_index=True)
+    client._quotes["PNBHOUSING"] = (1166.0, built, time.monotonic())
+    client._history_tried["PNBHOUSING"] -= 60
+    _ltp, frame, _src = asyncio.run(client.refresh("PNBHOUSING"))
+    assert sdk.history_calls == 2 and len(frame) >= 3
+
+    # And once Groww answers, the bot gets the full history (enough for SMA 9/21).
+    sdk.history_ok = True
+    client._history_tried["PNBHOUSING"] -= 60
+    client._batch_at["PNBHOUSING"] = time.monotonic()
+    _ltp, frame, _src = asyncio.run(client.refresh("PNBHOUSING"))
+    assert sdk.history_calls == 3 and len(frame) >= 300
+    assert "PNBHOUSING" in client._candle_frames
