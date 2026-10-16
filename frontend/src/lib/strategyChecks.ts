@@ -39,7 +39,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     cfg.use_stop === false &&
     !cfg.use_gap_mode &&
     String(cfg.bb_exit ?? "OFF").toUpperCase() === "OFF" &&
-    !(Number(cfg.counter_exit_count ?? 0) > 0)
+    !(Number(cfg.counter_exit_count ?? 0) > 0) &&
+    !cfg.ema_exit
   );
 }
 

@@ -64,6 +64,10 @@ const LABELS: Record<string, string> = {
   counter_rule: "counter-candle rule",
   counter_need_fast: "counter-candle fast SMA",
   counter_entry: "early reversal entry",
+  use_ema: "EMA entry",
+  ema_exit: "EMA exit",
+  ema_fast: "fast EMA",
+  ema_slow: "slow EMA",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -229,6 +233,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       : "COLOUR",
     counter_need_fast: form.counter_need_fast !== false,
     counter_entry: Boolean(form.counter_entry),
+    use_ema: Boolean(form.use_ema),
+    ema_exit: Boolean(form.ema_exit),
+    ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
+    ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -957,6 +965,51 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("counter_entry") && <OwnTag />}
             Early reversal entry (before the cross; N = exit count, or 3)
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            EMA cross (entry and exit)
+            <InfoTip label="About the EMA cross">
+              A second pair of lines, like Groww&apos;s &quot;EMA Cross 9 200&quot;: a fast EMA and a slow EMA, with the lengths
+              you type below. The bot still trades the SMA cross; the EMAs are an extra check on its own candles. Entry: a buy
+              only while the fast EMA is above the slow one, a sell only while it is below; otherwise the cross is skipped (✕
+              &quot;EMA&quot; on the chart). Exit: an open trade closes when the two EMAs cross against it after the entry (fast
+              drops below slow in a buy, rises above it in a sell). The slow EMA needs that many closed candles first (200
+              five-minute candles is about 3 days of history). Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Fast EMA (candles)"
+              value={String(form.ema_fast ?? 9)}
+              onChange={(v) => set("ema_fast", v)}
+              own={isOwn("ema_fast")}
+            />
+            <Field
+              label="Slow EMA (candles)"
+              value={String(form.ema_slow ?? 200)}
+              onChange={(v) => set("ema_slow", v)}
+              own={isOwn("ema_slow")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_ema)}
+              onChange={(e) => set("use_ema", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_ema") && <OwnTag />}
+            Entry: buy only above, sell only below (fast vs slow EMA)
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.ema_exit)}
+              onChange={(e) => set("ema_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("ema_exit") && <OwnTag />}
+            Exit: close the trade when the EMAs cross against it
           </label>
         </div>
       </FieldGroup>

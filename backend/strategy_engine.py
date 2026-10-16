@@ -58,6 +58,7 @@ from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
+import ema_filter
 import join_trend
 import late_entry
 import review
@@ -139,6 +140,8 @@ class OpenPosition:
     bb_armed: bool = False
     # Counter-candle exit (counter_candles.py): the last closed candle read.
     cc_bar: int | None = None
+    # EMA cross exit (ema_filter.py): the last closed candle read.
+    ema_bar: int | None = None
     # SMA gap mode exit: last closed candle read, its gap, and armed / peak.
     gap_bar: int | None = None
     gap_prev: float | None = None
@@ -190,6 +193,7 @@ SNAPSHOT_FIELDS = (
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast",
+    "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -389,6 +393,15 @@ def _entry_block(
     def on(name: str) -> bool:
         return bool(getattr(cfg, f"use_{name}", False)) and (only is None or only == name)
 
+    reason = _base_entry_reason(frame, direction, cfg, on, only, price)
+    if on("ema"):
+        ema = ema_filter.entry_reason(frame, direction, cfg)
+        if ema:
+            reason = f"{reason}; {ema}" if reason else ema
+    return reason
+
+
+def _base_entry_reason(frame, direction, cfg, on, only, price):
     return entry_filter_reason(
         frame,
         direction,
@@ -475,6 +488,8 @@ def _short_block_label(reason: str) -> str:
             parts.append(f"Gap {words[2]}" if len(words) > 2 and words[2][:1] in "+-" else "Gap")
         elif low.startswith("candle direction"):
             parts.append("Candles")
+        elif low.startswith("ema"):
+            parts.append("EMA")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -536,7 +551,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"),
 )
 
 
@@ -581,6 +596,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
                     "BOTH": f"closes {word}, {'green' if direction == 'LONG' else 'red'}"}[rule]
             closes = " → ".join(f"{float(c):.2f}" for c in closed["close"].iloc[-(n + 1):])
             return f"Candle direction: last {n} {what} ({closes})"
+        if name == "ema":
+            return ema_filter.passed_text(frame, direction, cfg)
         if name == "density":
             span = float(bar["high"]) - float(bar["low"])
             body = abs(float(bar["close"]) - float(bar["open"]))
@@ -1137,6 +1154,7 @@ class StrategyEngine:
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
+            await self._watch_ema_exit(symbol_cfg)
             await self._watch_gap_fade(symbol_cfg)
 
         self._focus = view
@@ -2563,6 +2581,31 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
         await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")
 
+    async def _watch_ema_exit(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit when the EMAs cross against the trade (ema_filter.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not ema_filter.exit_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.ema_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            # That candle had closed before the entry: a cross on it is not "after the entry".
+            return
+        pos.ema_bar = closed_ts
+        hit, note = ema_filter.crossed_against(frame.iloc[:-1], pos.signal_direction, cfg)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} EMA cross exit — {note}"
+        await self._exit_now(cfg, self.ltp, "EMA_CROSS")
+
     async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str) -> None:
         """Close the focused position for a stop, target or Bollinger exit."""
         async with self.lock:
@@ -2592,6 +2635,7 @@ class StrategyEngine:
                     "GAP_FADE": "SMA gap faded — flat",
                     "CANDLE_END": "candle closed — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
+                    "EMA_CROSS": "EMAs crossed against the trade — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -3932,6 +3976,7 @@ _ALERT_REASON = {
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",
     "COUNTER_CANDLES": "candles turned against the trade",
+    "EMA_CROSS": "EMA cross against the trade",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "REPLAY_STOPPED": "replay stopped",
@@ -4345,7 +4390,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES")
+_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS")
 
 
 def _filter_note(cfg: BotConfig) -> str:
@@ -4365,6 +4410,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("SMA gap")
     if bool(getattr(cfg, "use_candle_dir", False)):
         checked.append("candle direction")
+    if bool(getattr(cfg, "use_ema", False)):
+        checked.append("EMA")
     if bool(getattr(cfg, "use_adx_filter", False)):
         checked.append("ADX")
     if not checked:

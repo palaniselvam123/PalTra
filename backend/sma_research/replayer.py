@@ -46,6 +46,8 @@ BASELINE_OFF = {
     "review_on": False,
     "counter_exit_count": 0,
     "counter_entry": False,
+    "use_ema": False,
+    "ema_exit": False,
     "stock_settings": "{}",
 }
 

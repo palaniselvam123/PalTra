@@ -377,6 +377,9 @@ class GrowwClient:
         self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
         self._candle_frames: dict[str, pd.DataFrame] = {}
         self._candle_at: dict[str, float] = {}
+        # When each stock's minute history was last asked for. A stock whose
+        # download failed is asked again once a minute (see refresh()).
+        self._history_tried: dict[str, float] = {}
         # When refresh_ltps last updated each stock's price, and last tried.
         self._batch_at: dict[str, float] = {}
         self._batch_tried = 0.0
@@ -533,7 +536,14 @@ class GrowwClient:
         # A price from the batched call counts as fresh, but the minute
         # history is still re-downloaded on its own schedule.
         fresh_at = max(cached[2], self._batch_at.get(symbol, 0.0)) if cached is not None else 0.0
-        candles_due = symbol in self._candle_frames and now_m - self._candle_at.get(symbol, 0.0) >= _CANDLE_REFRESH_SEC
+        if symbol in self._candle_frames:
+            candles_due = now_m - self._candle_at.get(symbol, 0.0) >= _CANDLE_REFRESH_SEC
+        else:
+            # No history yet (the download failed or came back short). The
+            # once-a-second price batch keeps the quote fresh, so without this
+            # the history was never asked for again that day: the stock traded
+            # on a tape built from its own prices, too short for the SMAs.
+            candles_due = cached is not None and now_m - self._history_tried.get(symbol, 0.0) >= _CANDLE_REFRESH_SEC
         if cached is not None and now_m - fresh_at < ttl and not candles_due:
             self.last_error = ""
             return self._serve_quote(symbol, live=market_is_open())
@@ -633,6 +643,8 @@ class GrowwClient:
             exchange_trading_symbols=key, segment="CASH", timeout=_SDK_TIMEOUT_SEC
         )
         ltp = _parse_ltp(raw_ltp, symbol)
+        # The candles built from this stock's own prices so far (kept if the history download fails).
+        built = self._quotes.get(symbol)
         # Publish the last trade before the slower candle download. A caller
         # that stops waiting still has a real price instead of the practice tape.
         self._quotes[symbol] = (float(ltp), _one_bar(ltp), time.monotonic())
@@ -646,6 +658,7 @@ class GrowwClient:
             self._candle_frames[symbol] = frame
             self._quotes[symbol] = (float(ltp), frame, time.monotonic())
             return float(ltp), frame
+        self._history_tried[symbol] = time.monotonic()
         end = dt.datetime.now(IST).replace(tzinfo=None)
         start = end - dt.timedelta(days=5)
         frame = pd.DataFrame()
@@ -663,7 +676,9 @@ class GrowwClient:
         except Exception:
             frame = pd.DataFrame()
         if frame.empty:
-            frame = _one_bar(ltp, _session_ohlc(sdk, symbol))
+            # Keep the candles built from this stock's own prices so far rather
+            # than starting again from one bar.
+            frame = built[1] if built is not None and len(built[1]) > 1 else _one_bar(ltp, _session_ohlc(sdk, symbol))
         frame = _apply_ltp(frame, ltp)
         if len(frame) >= _CANDLE_MIN_BARS:
             self._candle_frames[symbol] = frame
