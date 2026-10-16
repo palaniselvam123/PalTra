@@ -416,6 +416,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
+  **Morning mode** (`trend_mode` = `MORNING`, before 10:00 IST; `trend_strength.read(..., now=, tape=)`):
+  only today's candles since 09:15 are read. Seven checks: `stack`, `vwap`, `slope`, `fan` (≥ 0.10%),
+  `hold` (all closes on the trend side up to 09:30 = 3 of 3, then ≥ 75%), `run` (a fresh cross today
+  is allowed, yesterday never counts), `volume` (since 09:15 ≥ 1.5× the same minutes on earlier sessions
+  in the 1-minute tape, up to 10 sessions, needs 2). Five or more of seven = `Strong` (`trend_days`,
+  `rvol` and per-check `trend_notes` are sent). From 10:00 (`MIDDAY`) the 12-candle rules above apply
+  unchanged. Information only: nothing in the strategy reads it.
   **Trend phases** (`backend/trend_phases.py`, read by `chop_scan.analyze`): today's closed candles split
   into `CHOP` / `BULL` / `BEAR` stretches (tuned on the owner's Bajaj Finserv 15 Oct example: 09:45-12:10
   choppy, 12:10-13:35 strong up, 13:35-14:40 strong down). Each candle is judged on its last `WINDOW` (6)
