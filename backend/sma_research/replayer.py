@@ -49,6 +49,10 @@ BASELINE_OFF = {
     "use_ema": False,
     "ema_exit": False,
     "use_supertrend": False,
+    "use_or_volume": False,
+    "use_or_vwap": False,
+    "use_or_spread": False,
+    "use_or_break": False,
     "st_exit": False,
     "stock_settings": "{}",
 }

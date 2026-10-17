@@ -36,6 +36,7 @@ import server_role
 import counter_candles
 import ema_filter
 import supertrend
+import opening_range
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
@@ -304,6 +305,12 @@ class ConfigUpdate(BaseModel):
     st_exit: bool | None = None
     st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
     st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
+    use_or_volume: bool | None = None
+    use_or_vwap: bool | None = None
+    use_or_spread: bool | None = None
+    use_or_break: bool | None = None
+    or_volume_ratio: float | None = Field(default=None, ge=0, le=20)
+    or_spread_pct: float | None = Field(default=None, ge=0, le=5)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
@@ -781,6 +788,12 @@ def _gap_dict(row) -> dict:
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
         "st_mult": supertrend.settings(row)[1],
+        "use_or_volume": bool(getattr(row, "use_or_volume", False)),
+        "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
+        "use_or_spread": bool(getattr(row, "use_or_spread", False)),
+        "use_or_break": bool(getattr(row, "use_or_break", False)),
+        "or_volume_ratio": opening_range.ratio(row),
+        "or_spread_pct": opening_range.spread_pct(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),

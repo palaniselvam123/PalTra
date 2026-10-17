@@ -182,6 +182,12 @@ class ChopRow:
     trend_checks: dict = field(default_factory=dict)
     sma_gap_pct: float | None = None
     vwap: float | None = None
+    # Morning mode (before 10:00 IST): which rules were used, a note per check, today's relative volume
+    # and how many earlier sessions it was compared with (trend_strength.py).
+    trend_mode: str = "MIDDAY"
+    trend_notes: dict = field(default_factory=dict)
+    rvol: float | None = None
+    trend_days: int = 0
     day_move_pct: float | None = None  # last close vs today's first open
     # Today's closed-candle SMA crosses on every candle size (1, 2, 3, 5, 10, 15 min), from the
     # same 1-minute download: the "No cross today on" filter. None = not enough candles yet.
@@ -286,7 +292,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     return replace(
         base,
         **activity(frame_1m),
-        **trend_strength.read(enriched, _vwap_today(frame_1m, now)),
+        **trend_strength.read(enriched, _vwap_today(frame_1m, now), now=now, tape=frame_1m),
         **trend_phases.summary(trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)),
         day_move_pct=_day_move(frame_1m),
         crosses_by_minutes={m: r[0] for m, r in by_size.items()},

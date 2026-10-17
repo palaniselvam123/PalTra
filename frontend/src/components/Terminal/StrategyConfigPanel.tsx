@@ -72,6 +72,12 @@ const LABELS: Record<string, string> = {
   st_exit: "Supertrend exit",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
+  use_or_volume: "opening volume check",
+  use_or_vwap: "opening VWAP check",
+  use_or_spread: "opening SMA spread check",
+  use_or_break: "opening break check",
+  or_volume_ratio: "opening volume ratio",
+  or_spread_pct: "opening SMA spread %",
   flip_orders: "flip",
   review_on: "1-min review",
   review_gap_pct: "review band",
@@ -245,6 +251,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     st_exit: Boolean(form.st_exit),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
+    use_or_volume: Boolean(form.use_or_volume),
+    use_or_vwap: Boolean(form.use_or_vwap),
+    use_or_spread: Boolean(form.use_or_spread),
+    use_or_break: Boolean(form.use_or_break),
+    or_volume_ratio: Math.min(20, Math.max(0, Number(form.or_volume_ratio ?? 2) || 0)),
+    or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
     entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
     pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
@@ -1065,6 +1077,47 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("st_exit") && <OwnTag />}
             Exit: close the trade when the Supertrend flips against it
           </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Opening range (09:15–09:30, entries only)
+            <InfoTip label="About the opening range">
+              Four checks on the first 15 minutes of the day. Each is its own tick box; a trade is taken only if every ticked
+              check agrees. Volume: the 09:15–09:30 volume is at least the number below times the usual per-minute volume.
+              VWAP: every opening candle closed on the trade&apos;s side of VWAP. SMA spread: the 9 and 21 lines are pulling
+              apart by at least the % below and widening. Break: the first candle at or after 09:30 closes beyond the opening
+              high (buy) or low (sell). Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Volume ≥ × usual (opening)"
+              value={String(form.or_volume_ratio ?? 2)}
+              onChange={(v) => set("or_volume_ratio", v)}
+              own={isOwn("or_volume_ratio")}
+            />
+            <Field
+              label="SMA spread ≥ % (opening)"
+              value={String(form.or_spread_pct ?? 0.1)}
+              onChange={(v) => set("or_spread_pct", v)}
+              own={isOwn("or_spread_pct")}
+            />
+          </div>
+          {([
+            ["use_or_volume", "Volume check"],
+            ["use_or_vwap", "VWAP check (all opening candles on one side)"],
+            ["use_or_spread", "SMA spread check (lines pulling apart)"],
+            ["use_or_break", "Break check (first 09:15–09:30 high or low broken at 09:30)"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form[key])}
+                onChange={(e) => set(key, e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn(key) && <OwnTag />}
+              {label}
+            </label>
+          ))}
         </div>
       </FieldGroup>
       <FieldGroup title="Exits & stops" hint="Stop type, ₹ stop / trail / target, ATR stop, cross exit, Bollinger exit" wide={wide}>

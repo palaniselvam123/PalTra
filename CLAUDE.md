@@ -328,6 +328,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
+  **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
+  the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the
+  window's per-minute volume at least that × the usual per-minute volume for the same window on earlier sessions
+  in the frame (missing volume refuses); `or_vwap`: every window candle closed on the trade's side of
+  `session_vwap_series`; `or_spread` (`or_spread_pct`, default 0.10): the SMA gap in % on the trade's side is at
+  least that and wider than on the candle before; `or_break`: the first candle closed at or after 09:30 closes
+  beyond the window high (buy) or low (sell). Nothing is checked before the window is complete (a candle at or
+  after 09:30 has closed), so no entry in the window itself is taken with a check on. Wired through `_entry_block`
+  (check names `or_volume` … `or_break`; chart ✕ "Opening …"). No exits. The stock research baseline keeps all off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle
@@ -406,6 +416,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
+  **Morning mode** (`trend_mode` = `MORNING`, before 10:00 IST; `trend_strength.read(..., now=, tape=)`):
+  only today's candles since 09:15 are read. Seven checks: `stack`, `vwap`, `slope`, `fan` (≥ 0.10%),
+  `hold` (all closes on the trend side up to 09:30 = 3 of 3, then ≥ 75%), `run` (a fresh cross today
+  is allowed, yesterday never counts), `volume` (since 09:15 ≥ 1.5× the same minutes on earlier sessions
+  in the 1-minute tape, up to 10 sessions, needs 2). Five or more of seven = `Strong` (`trend_days`,
+  `rvol` and per-check `trend_notes` are sent). From 10:00 (`MIDDAY`) the 12-candle rules above apply
+  unchanged. Information only: nothing in the strategy reads it.
   **Trend phases** (`backend/trend_phases.py`, read by `chop_scan.analyze`): today's closed candles split
   into `CHOP` / `BULL` / `BEAR` stretches (tuned on the owner's Bajaj Finserv 15 Oct example: 09:45-12:10
   choppy, 12:10-13:35 strong up, 13:35-14:40 strong down). Each candle is judged on its last `WINDOW` (6)

@@ -53,8 +53,10 @@ const SCORE_CLASS: Record<ChopScore, string> = {
   CHOPPY: "bg-accentViolet/10 text-accentViolet ring-accentViolet/40",
 };
 
-// What each strong-trend check means, in the order the server judges them.
-const CHECK_TEXT: Record<ChopTrendCheck, string> = {
+// What each strong-trend check means. Before 10:00 (morning mode) the server judges today's
+// candles only, with the seven checks below; from 10:00 (midday) the 12-candle rules apply.
+// The server's own per-check note (`trend_notes`) wins when it is sent.
+const MIDDAY_TEXT: Partial<Record<ChopTrendCheck, string>> = {
   stack: "Price beyond the fast SMA, fast beyond the slow SMA",
   vwap: "Price and the slow SMA on the trend side of VWAP",
   slope: "Fast and slow SMA both sloping with the trend",
@@ -63,7 +65,18 @@ const CHECK_TEXT: Record<ChopTrendCheck, string> = {
   structure: "Lower highs and lows (bearish) / higher highs and lows (bullish)",
   run: "No SMA cross in the last 12 candles",
 };
-const CHECK_ORDER = Object.keys(CHECK_TEXT) as ChopTrendCheck[];
+const MORNING_TEXT: Partial<Record<ChopTrendCheck, string>> = {
+  stack: "Price beyond the fast SMA, fast beyond the slow SMA (today)",
+  vwap: "Price and the fast SMA on the trend side of today's VWAP",
+  slope: "Fast SMA moving with the trend since the open",
+  fan: "SMAs at least 0.10% apart on the trend side",
+  hold: "Closes on the trend side of the fast SMA today (all of them to 09:30, then 75%)",
+  run: "A fresh cross today is allowed; otherwise the lines are on the trend side since the open",
+  volume: "Volume since 09:15 at least 1.5× the same minutes on earlier sessions",
+};
+const MIDDAY_ORDER = Object.keys(MIDDAY_TEXT) as ChopTrendCheck[];
+const MORNING_ORDER = Object.keys(MORNING_TEXT) as ChopTrendCheck[];
+const orderFor = (r: ChopScanRow) => (r.trend_mode === "MORNING" ? MORNING_ORDER : MIDDAY_ORDER);
 
 const isStrong = (r: ChopScanRow) => r.trend === "STRONG_BULLISH" || r.trend === "STRONG_BEARISH";
 // Inside [min, max] ₹; 0 = no bound. A stock with no price passes only when no bound is set (as chop_scan.in_price_range).
@@ -809,10 +822,13 @@ function Row({
 
 function TrendChip({ row: r }: { row: ChopScanRow }) {
   const checks = r.trend_checks ?? {};
-  const passed = CHECK_ORDER.filter((k) => checks[k]).length;
+  const order = orderFor(r);
+  const texts = r.trend_mode === "MORNING" ? MORNING_TEXT : MIDDAY_TEXT;
+  const passed = order.filter((k) => checks[k]).length;
   const title = [
+    r.trend_mode === "MORNING" ? "Morning read (before 10:00, today's candles)" : "Midday read (10:00 on)",
     r.trend ? `Strong ${r.trend === "STRONG_BULLISH" ? "bullish" : "bearish"} trend` : `Not a strong trend (${r.trend_side?.toLowerCase() ?? "no"} side)`,
-    ...CHECK_ORDER.map((k) => `${checks[k] ? "✓" : "✗"} ${CHECK_TEXT[k]}`),
+    ...order.map((k) => `${checks[k] ? "✓" : "✗"} ${r.trend_notes?.[k] ?? texts[k] ?? k}`),
     r.vwap != null ? `VWAP ${r.vwap.toFixed(2)}` : "VWAP not available",
     r.sma_gap_pct != null ? `SMA gap ${r.sma_gap_pct >= 0 ? "+" : ""}${r.sma_gap_pct.toFixed(2)}%` : "",
   ]
@@ -822,7 +838,7 @@ function TrendChip({ row: r }: { row: ChopScanRow }) {
   if (!r.trend)
     return (
       <span className="text-xs tabular-nums text-slate-500" title={title}>
-        {r.trend_side === "BULLISH" ? "↑" : "↓"} {passed}/7
+        {r.trend_side === "BULLISH" ? "↑" : "↓"} {passed}/{order.length}
       </span>
     );
   const bull = r.trend === "STRONG_BULLISH";

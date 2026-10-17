@@ -137,6 +137,13 @@ export type SmaConfig = {
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;
+  /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
+  use_or_volume?: boolean;
+  use_or_vwap?: boolean;
+  use_or_spread?: boolean;
+  use_or_break?: boolean;
+  or_volume_ratio?: number;
+  or_spread_pct?: number;
   /** 1-minute human review (off by default): ask EXIT or WAIT when an open trade's SMA gap narrows into this band. */
   review_on?: boolean;
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */
@@ -253,6 +260,13 @@ export type ChopScanRow = {
   /** Share of the seven trend checks that passed, 0-100. */
   trend_score?: number;
   trend_checks?: Partial<Record<ChopTrendCheck, boolean>>;
+  /** MORNING before 10:00 IST (today's candles), MIDDAY from 10:00. */
+  trend_mode?: "MORNING" | "MIDDAY";
+  /** The server's one-line reading of each check (names the morning / midday rule used). */
+  trend_notes?: Partial<Record<ChopTrendCheck, string>>;
+  /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
+  rvol?: number | null;
+  trend_days?: number;
   sma_gap_pct?: number | null;
   vwap?: number | null;
   /** Last close vs today's first open, %. */
@@ -275,7 +289,7 @@ export type ChopScanRow = {
 export type ChopPhaseSide = "BULL" | "BEAR" | "CHOP";
 export type ChopPhase = { side: ChopPhaseSide; start_ts: number; end_ts: number; candles: number; move_pct: number | null };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
-export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run";
+export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run" | "volume";
 
 export type ChopScan = {
   running: boolean;
@@ -683,6 +697,13 @@ export type ChartFilters = {
   st_line?: boolean;
   st_period?: number;
   st_mult?: number;
+  /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
+  use_or_volume?: boolean;
+  use_or_vwap?: boolean;
+  use_or_spread?: boolean;
+  use_or_break?: boolean;
+  or_volume_ratio?: number;
+  or_spread_pct?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */

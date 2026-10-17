@@ -63,6 +63,8 @@ export function strategyLabel(s: Settings): string {
     if (s.ema_exit) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} exit`);
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
+    const orChecks = [s.use_or_volume && "volume", s.use_or_vwap && "VWAP", s.use_or_spread && "SMA spread", s.use_or_break && "break"].filter(Boolean);
+    if (orChecks.length) parts.push(`opening range: ${orChecks.join(", ")}`);
   }
   if (s.flip_orders) parts.push("FLIPPED (buy signals sell)");
   if (s.use_stop === false) parts.push("no stop");

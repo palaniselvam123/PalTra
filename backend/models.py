@@ -318,6 +318,13 @@ class BotConfig(Base):
     st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     st_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
+    # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
+    use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    use_or_spread: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    use_or_break: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    or_volume_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
+    or_spread_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.10)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
     # candle and close at its end.
