@@ -231,6 +231,52 @@ export type CrossScan = {
   rows: CrossScanRow[];
 };
 
+/** The 09:30 morning checklist (morning_scan.py): five opening checks per stock — information only. */
+export type MorningCheck = "orb" | "rvol" | "vwap" | "gap" | "candles";
+export type MorningScanRow = {
+  symbol: string;
+  /** The 09:15-09:30 window has closed. */
+  ready: boolean;
+  side: "LONG" | "SHORT" | null;
+  /** Checks passed on `side`, 0-5. */
+  score: number;
+  runner: boolean;
+  checks: Partial<Record<MorningCheck, boolean>>;
+  notes: Partial<Record<MorningCheck, string>>;
+  long_score: number;
+  short_score: number;
+  or_high: number | null;
+  or_low: number | null;
+  price: number | null;
+  price_ts: number | null;
+  rvol: number | null;
+  rvol_sessions: number;
+  open_volume: number | null;
+  gap_pct: number | null;
+  gap_ts: number | null;
+  vwap: number | null;
+  greens: number;
+  reds: number;
+  ltp: number | null;
+  day_move_pct: number | null;
+};
+export type MorningScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  minutes: number;
+  sma_fast: number;
+  sma_slow: number;
+  as_of: string | null;
+  finished_at?: string | null;
+  market_open: boolean;
+  rules?: { rvol_min: number; gap_min_pct: number; runner_min: number; sessions: number };
+  rows: MorningScanRow[];
+  paused?: boolean;
+};
+
 /** How choppy or trending a stock has looked today — information only, never traded on. */
 export type ChopScore = "TRENDING" | "MIXED" | "CHOPPY";
 export type ChopScanRow = {
@@ -1293,6 +1339,10 @@ export const smaApi = {
       false
     ),
   chopScan: () => request<ChopScan>("/api/chop-scan", undefined, undefined, false),
+  /** Start the 09:30 morning checklist (read-only; candles only). Returns at once; poll `morningScan`. */
+  morningScanStart: (symbols: string[], force = false) =>
+    request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
+  morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>

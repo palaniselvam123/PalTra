@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from candle_history import HistoryError, fetch_frame, load_history
 import chop_auto
 import chop_scan
+import morning_scan
 import groww_pressure
 import open_pnl_log
 import scan_accuracy
@@ -89,6 +90,8 @@ from strategy_engine import (
 engine = StrategyEngine()
 cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
+# The Scalp page's 09:30 Morning tab: five opening checks per stock (morning_scan.py).
+morning_scanner = morning_scan.MorningScanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 scan_checker = scan_accuracy.AccuracyChecker()
@@ -1509,6 +1512,7 @@ async def scans_pause(body: ScanPause):
     if _scans_paused:
         cross_scanner.stop("Stopped: scans are paused.")
         chop_scanner.stop("Stopped: scans are paused.")
+        morning_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -1707,6 +1711,38 @@ async def chop_scan_auto(body: ChopAutoUpdate):
 @app.get("/api/chop-scan")
 async def chop_scan_status():
     return {**chop_scanner.snapshot(), "paused": _scans_paused, "auto": chop_autos.snapshot()}
+
+
+class MorningScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    force: bool = False
+
+
+@app.post("/api/morning-scan/start")
+async def morning_scan_start(body: MorningScanStart):
+    """Start the 09:30 morning checklist (read-only: candles only, no order). Poll GET /api/morning-scan.
+
+    Five checks on the three 09:15-09:30 five-minute candles per stock (morning_scan.py), with the
+    main desk's SMA periods. No bot setting is read or changed.
+    """
+    _refuse_when_paused()
+    cfg = engine.load_config()
+    try:
+        return morning_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            sma_fast=int(cfg.sma_fast),
+            sma_slow=int(cfg.sma_slow),
+            force=body.force,
+            job=_scan_job(scan_worker.morning_job, int(cfg.sma_fast), int(cfg.sma_slow), morning_scan.CANDLE_MIN),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/morning-scan")
+async def morning_scan_status():
+    return {**morning_scanner.snapshot(), "paused": _scans_paused}
 
 
 # ---- open P&L log: each desk's "Open" figure, minute by minute (open_pnl_log.py)

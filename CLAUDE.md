@@ -437,6 +437,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   start and direction of the last cross on every candle size, read from the same 1-minute download
   (`chop_scan._crosses_on`; None while a size has too few candles). The card keeps only stocks with
   exactly the chosen count on every ticked size and shows a single cross as `@HH:MM ↑/↓`.
+- `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
+  `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
+  quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute
+  close at/after 09:30 beyond the 09:15–09:30 high / low), `rvol` (Groww's running volume at the 09:29 candle
+  ≥ `RVOL_MIN` 1.8× the same on up to `LOOKBACK_SESSIONS` 10 earlier sessions, needs `MIN_SESSIONS` 2), `vwap`
+  (each candle closes beyond today's VWAP; the 09:20 / 09:25 candles also open beyond it and no 1-minute wick in
+  them touches the VWAP line of that minute; the 09:15 candle on its close only), `gap` (SMA fast/slow gap on the
+  last closed 5-minute candle ≥ +`GAP_MIN_PCT` 0.10% / ≤ −0.10%), `candles` (2 of 3 in the trend colour, the 09:25
+  close beyond the 09:15 close and the fast SMA). The side with more passes is shown; `RUNNER_MIN` 4 of 5 = runner.
+  Before 09:30 a row is `ready = False`. The first scan of the day downloads `LONG_DAYS` (15) of 1-minute candles per
+  stock and keeps the earlier sessions' opening volume for the day (`_BASELINE`, in the scanner process), later
+  scans `SHORT_DAYS` (4). `MorningScanner` mirrors `ChopScanner` (manual Scan now, one pass at a time, scanner
+  process via `scan_worker.morning_job`, stopped by Pause scans). `POST /api/morning-scan/start` (symbols, force),
+  `GET /api/morning-scan`. Arm / Arm ticked use the same routes as the other tabs. No order path; nothing in the
+  strategy reads it.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
