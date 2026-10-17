@@ -125,6 +125,13 @@ def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_
     return analyze(_frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min)
 
 
+def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
+    from morning_scan import analyze, download_start
+
+    # The worker keeps each stock's opening-volume baseline for the day, so it picks the start itself.
+    return analyze(_frame(token, symbol, download_start(symbol, now), end), sma_fast, sma_slow, now, symbol=symbol)
+
+
 def check_job(token, symbol, start, end, kind, row, as_of, minutes, sma_fast, sma_slow):
     from scan_accuracy import evaluate
 

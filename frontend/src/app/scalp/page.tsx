@@ -17,6 +17,7 @@ import { ScanHistory } from "@/components/Scalp/ScanHistory";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
+import { MorningScan } from "@/components/Scalp/MorningScan";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -63,6 +64,7 @@ const MONITOR_COLUMNS: readonly MonitorCol[] = [
 const TABS = [
   { id: "monitor", label: "Monitor" },
   { id: "cross", label: "Cross scan" },
+  { id: "morning", label: "09:30 Morning" },
   { id: "trend", label: "Trend quality" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
@@ -103,9 +105,11 @@ export default function ScalpPage() {
   }, []);
   const [crossStatus, setCrossStatus] = useState<ScanStatus | null>(null);
   const [trendStatus, setTrendStatus] = useState<ScanStatus | null>(null);
+  const [morningStatus, setMorningStatus] = useState<ScanStatus | null>(null);
   const [activeStatus, setActiveStatus] = useState<ScanStatus | null>(null);
   const onCrossStatus = useCallback((st: ScanStatus) => setCrossStatus(st), []);
   const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
+  const onMorningStatus = useCallback((st: ScanStatus) => setMorningStatus(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -336,6 +340,7 @@ export default function ScalpPage() {
   const tabTimes: Record<TabId, ScanStatus | null> = {
     monitor: data ? { when: data.as_of, running: false } : null,
     cross: crossStatus,
+    morning: morningStatus,
     trend: trendStatus,
     active: activeStatus,
     backtest: null,
@@ -688,6 +693,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "cross"}>
           <CrossScan armed={armed} arming={arming} onArm={(s) => arm(s, "Cross scan")} onArmMany={(list) => armSeveral(list, "Cross scan")} paused={paused} onStatus={onCrossStatus} />
+        </div>
+        <div hidden={tab !== "morning"}>
+          <MorningScan armed={armed} arming={arming} onArm={(s) => arm(s, "09:30 Morning")} onArmMany={(list) => armSeveral(list, "09:30 Morning")} paused={paused} onStatus={onMorningStatus} />
         </div>
         <div hidden={tab !== "trend"}>
           <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} onArmMany={(list) => armSeveral(list, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
