@@ -28,7 +28,8 @@ A trade still in recovery at the entry cut-off (15:00 by default) closes at mark
 **Handoff** (`handoff`): the stock leaves the source bot's Trade list and is armed on
 Bot 2 with its own settings: flipped orders, SMA gap mode in at ±0.119 %, out at
 ±0.003 %, the fade confirmed by a close past the slow SMA, VWAP check, RSI buy 40-70 and
-sell 30-60. Bot 2 waits for its next cross; it never orders at once. A PAPER source never
+sell 30-60, and the breakout handoff back to Bot 3 (breakout.py). Bot 2 waits for its
+next cross; it never orders at once. A PAPER source never
 arms a LIVE Bot 2, and the one-LIVE-bot-per-stock rule still applies.
 """
 from __future__ import annotations
@@ -67,6 +68,8 @@ HANDOFF_SETTINGS = {
     "rsi_long_max": 70.0,
     "rsi_short_min": 30.0,
     "rsi_short_max": 60.0,
+    # A breakout hands it back to the trend bot (breakout.py).
+    "breakout_handoff": True,
 }
 
 
@@ -156,10 +159,12 @@ def judge(
     return "hold", f"loss {loss:.2f}, {candles_held} of {max_candles(cfg)} candles"
 
 
-def handoff(from_bot: int, symbol: str, source_live: bool) -> str:
-    """Move `symbol` from `from_bot` to Bot 2 with the chop settings. Returns what happened.
+def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT) -> str:
+    """Move `symbol` from `from_bot` to `to_bot`. Returns what happened.
 
-    Bot 2 is armed to wait for its next cross (no order now). Never raises.
+    To Bot 2 (`HANDOFF_BOT`) the stock gets the chop settings; to another bot (the
+    breakout handoff back to Bot 3, breakout.py) it trades on that bot's own settings.
+    The target is armed to wait for its next cross (no order now). Never raises.
     """
     from database import session_factory
     from models import BotConfig
@@ -167,21 +172,21 @@ def handoff(from_bot: int, symbol: str, source_live: bool) -> str:
     from strategy_engine import MAX_TRADE_SYMBOLS, apply_trade_sources, stock_settings, trade_names
 
     name = (symbol or "").upper()
-    to_bot = HANDOFF_BOT
+    to_bot = int(to_bot)
     if int(from_bot) == to_bot:
-        return "already on Bot 2: no handoff"
+        return f"already on Bot {to_bot}: no handoff"
     try:
         with session_factory()() as db:
             target = db.get(BotConfig, bots.config_id_for(to_bot))
             source = db.get(BotConfig, bots.config_id_for(int(from_bot)))
             if target is None or source is None:
-                return "no handoff: Bot 2 is not set up"
+                return f"no handoff: Bot {to_bot} is not set up"
             target_live = (target.trading_mode or "PAPER").upper() == "LIVE"
             if target_live and not source_live:
-                return "no handoff: Bot 2 is LIVE and this trade was practice money"
+                return f"no handoff: Bot {to_bot} is LIVE and this trade was practice money"
             names = trade_names(target)
             if name not in names and len(names) >= MAX_TRADE_SYMBOLS:
-                return f"no handoff: Bot 2's Trade list is full ({MAX_TRADE_SYMBOLS})"
+                return f"no handoff: Bot {to_bot}'s Trade list is full ({MAX_TRADE_SYMBOLS})"
             # Off the source bot first, so the one-LIVE-bot-per-stock rule sees it gone.
             left = [n for n in trade_names(source) if n != name]
             source.trade_symbols = ",".join(left)
@@ -191,9 +196,10 @@ def handoff(from_bot: int, symbol: str, source_live: bool) -> str:
                 why = bots.live_conflict(to_bot, [name])
                 if why:
                     return f"no handoff: {why}"
-            everything = stock_settings(target)
-            everything[name] = {**everything.get(name, {}), **HANDOFF_SETTINGS}
-            target.stock_settings = json.dumps(everything)
+            if to_bot == HANDOFF_BOT:
+                everything = stock_settings(target)
+                everything[name] = {**everything.get(name, {}), **HANDOFF_SETTINGS}
+                target.stock_settings = json.dumps(everything)
             if name not in names:
                 names.append(name)
             target.trade_symbols = ",".join(names)
@@ -206,4 +212,6 @@ def handoff(from_bot: int, symbol: str, source_live: bool) -> str:
     if engine is not None:
         # The cross already on the tape is not traded: Bot 2 waits for its next one.
         engine.hold_for_next_cross([name])
-    return f"moved to Bot 2 (flipped, gap mode) — waits for its next cross"
+    if to_bot == HANDOFF_BOT:
+        return "moved to Bot 2 (flipped, gap mode) — waits for its next cross"
+    return f"moved to Bot {to_bot} — waits for its next cross"

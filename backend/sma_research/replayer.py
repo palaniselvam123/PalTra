@@ -52,6 +52,7 @@ BASELINE_OFF = {
     "tall_pullback": False,
     "slow_sma_exit": False,
     "recovery_hold": False,
+    "breakout_handoff": False,
     "use_or_volume": False,
     "use_or_vwap": False,
     "use_or_spread": False,

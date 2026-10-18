@@ -39,6 +39,7 @@ import ema_filter
 import supertrend
 import tall_pullback as tall_pb
 import recovery as recovery_mod
+import breakout as breakout_mod
 import opening_range
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
@@ -320,6 +321,10 @@ class ConfigUpdate(BaseModel):
     recovery_atr_mult: float | None = Field(default=None, ge=0.5, le=20)
     recovery_max_candles: int | None = Field(default=None, ge=1, le=recovery_mod.MAX_CANDLES)
     recovery_handoff: bool | None = None
+    breakout_handoff: bool | None = None
+    breakout_atr_mult: float | None = Field(default=None, ge=0.5, le=10)
+    breakout_gap_pct: float | None = Field(default=None, ge=0, le=5)
+    breakout_volume_mult: float | None = Field(default=None, ge=1, le=10)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -813,6 +818,10 @@ def _gap_dict(row) -> dict:
         "recovery_atr_mult": recovery_mod.atr_mult(row),
         "recovery_max_candles": recovery_mod.max_candles(row),
         "recovery_handoff": recovery_mod.handoff_on(row),
+        "breakout_handoff": breakout_mod.on(row),
+        "breakout_atr_mult": breakout_mod.atr_mult(row),
+        "breakout_gap_pct": breakout_mod.gap_pct(row),
+        "breakout_volume_mult": breakout_mod.volume_mult(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

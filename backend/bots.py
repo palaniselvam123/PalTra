@@ -146,6 +146,10 @@ def register(engine: StrategyEngine) -> None:
     import recovery
 
     engine.handoff = recovery.handoff  # type: ignore[attr-defined]
+    # A breakout handoff to this bot queues an entry on the breakout's side (breakout.py).
+    import breakout
+
+    engine.breakout_arrival = breakout.arrive  # type: ignore[attr-defined]
 
 
 def engines() -> dict[int, StrategyEngine]:

@@ -370,6 +370,25 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   ±0.003 out with the slow-SMA fade confirmation, VWAP, RSI 40-70 / 30-60); Bot 2 waits for its next cross
   (`hold_for_next_cross`). A PAPER source never arms a LIVE Bot 2, and the one-LIVE-bot-per-stock rule applies (a
   refused handoff leaves the stock off both bots). The stock research baseline keeps them off.
+- `backend/breakout.py` – trend breakout handoff, the reverse of the recovery handoff (`breakout_handoff`, off by
+  default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2, and ticked for every stock
+  `recovery.HANDOFF_SETTINGS` moves there). On each newly closed candle of an armed stock (the bot's own candle; not the
+  candle on the tape when the stock was armed), `StrategyEngine._watch_breakout` (before `on_minute`, in the armed loop)
+  runs `breakout.read`: height ≥ `breakout_atr_mult` (1.8) × ATR and either |SMA fast − slow| / slow ≥ `breakout_gap_pct`
+  (0.20) % or the candle's volume ≥ `breakout_volume_mult` (1.5) × the previous 20 candles' average (missing volume never
+  counts). Then an open trade on the stock is cut (`BREAKOUT_STOP`, via `_exit_now`, which cancels a LIVE stop first; a
+  LIVE position restored without its stop id is left to that stop) and, in LIVE only once Groww shows no shares,
+  `engine.handoff(..., to_bot=breakout.TREND_BOT)` → `recovery.handoff(to_bot=3)` takes it off this bot's Trade list and
+  arms it on Bot 3 with Bot 3's own settings. Never on Bot 3 itself. A PAPER source never arms a LIVE Bot 3, and the
+  one-LIVE-bot-per-stock rule applies. **Bot 3 enters on the breakout's side at once**, no new cross needed: Bot 2
+  sends `breakout.Arrival` (green candle buys, red sells; limit `tall_pullback.level` of the breakout candle: SMA fast
+  or half-way, whichever is nearer the close) through `engine.breakout_arrival` (`breakout.arrive`, set by
+  `bots.register` on live bots only) to Bot 3's `queue_breakout_entry`; on Bot 3's next pass `_enter_on_arrival` runs
+  `apply_signal(..., alert=False, pullback_at=…)`, so every Bot 3 check (filters, ADX, cut-off, cap, one LIVE bot per
+  stock) applies and the entry waits as a tall-candle `PullbackOrder` for Bot 3's `tall_expiry_candles` (2) candles,
+  never a market order at the breakout's top (a flipped stock orders at once). An arrival older than
+  `ARRIVAL_TTL_SEC` (15 min) is dropped. Replays move the stock (`ReplayEngine._hand_off`) but play one bot, so Bot 3's
+  entry happens only on the live bots. The stock research baseline keeps it off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

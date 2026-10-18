@@ -149,6 +149,11 @@ export type SmaConfig = {
   recovery_atr_mult?: number;
   recovery_max_candles?: number;
   recovery_handoff?: boolean;
+  /** Trend breakout: cut the trade and hand the stock back to Bot 3 (breakout.py). */
+  breakout_handoff?: boolean;
+  breakout_atr_mult?: number;
+  breakout_gap_pct?: number;
+  breakout_volume_mult?: number;
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;
