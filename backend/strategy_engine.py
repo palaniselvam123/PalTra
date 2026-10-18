@@ -63,6 +63,7 @@ import supertrend
 import opening_range
 import join_trend
 import late_entry
+import tall_pullback
 import review
 import paper_wallet
 import tick_sizes
@@ -106,6 +107,19 @@ def flips_orders(cfg) -> bool:
 def cross_exits(cfg) -> bool:
     """SMA cross exit (cross_exit, on unless set off): an opposite cross closes the trade."""
     return getattr(cfg, "cross_exit", None) is not False
+
+
+@dataclass
+class PullbackOrder:
+    """A tall signal candle's entry waiting for the price to pull back (tall_pullback.py)."""
+
+    direction: str  # the signal's side: LONG | SHORT
+    limit: float
+    cross_price: float  # the signal candle's close
+    atr: float
+    signal_ts: int  # start of the signal candle
+    span_sec: int  # candle length
+    candles: int  # closed candles to wait after the signal candle
 
 
 @dataclass
@@ -200,6 +214,7 @@ SNAPSHOT_FIELDS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
+    "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -808,6 +823,8 @@ class StrategyEngine:
         self._gap_pending: dict[str, Pending] = {}
         # Late entry (late_entry.py): a filter-refused cross waiting for its filters.
         self._late_pending: dict[str, Pending] = {}
+        # Tall-candle pullback (tall_pullback.py): an entry waiting for the price to come back.
+        self._pullback: dict[str, PullbackOrder] = {}
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
         # today (never joined), and the stocks already joined or given up on today.
         self._side_entered: dict[str, tuple[str, int]] = {}
@@ -1056,6 +1073,7 @@ class StrategyEngine:
             self._reject_sent.clear()
             self._gap_pending.clear()
             self._late_pending.clear()
+            self._pullback.clear()
             self._side_entered.clear()
             self._joined_today.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
@@ -1211,6 +1229,8 @@ class StrategyEngine:
             await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_gap_fade(symbol_cfg)
 
+        await self._watch_pullbacks(cfg, now)
+
         self._focus = view
         if view in self._ltps:
             self.ltp = self._ltps[view]
@@ -1279,7 +1299,7 @@ class StrategyEngine:
         """
         for table in (
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
-            self._side_entered, self._counter_done,
+            self._pullback, self._side_entered, self._counter_done,
             self._tapes, self._review_bar, self._review_episode,
         ):
             for symbol in [key for key in table if key not in watch]:
@@ -1738,6 +1758,23 @@ class StrategyEngine:
             self._log_decision(signal, frame, cfg, now, text)
             return text
         cross_price = round_price(cfg.symbol, float(curr["close"]))
+        want = "LONG" if signal == "BULLISH" else "SHORT"
+        # A new signal replaces any entry still waiting for its pullback.
+        self._pullback.pop(self._focus, None)
+        pullback = None
+        if tall_pullback.on(cfg) and not flips_orders(cfg):
+            plan = tall_pullback.plan(curr, want, atr, cfg)
+            if plan is not None:
+                span = int(frame.iloc[-1]["ts"]) - int(curr["ts"]) if len(frame) >= 2 else 0
+                pullback = PullbackOrder(
+                    direction=want,
+                    limit=round_price(cfg.symbol, plan.limit),
+                    cross_price=cross_price,
+                    atr=atr,
+                    signal_ts=int(curr["ts"]),
+                    span_sec=span if span > 0 else 60,
+                    candles=tall_pullback.expiry(cfg),
+                )
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
         entry_block = _entry_block(frame, "LONG" if signal == "BULLISH" else "SHORT", cfg)
@@ -1760,12 +1797,16 @@ class StrategyEngine:
                     entry_block=entry_block,
                     cfg=cfg,
                     now=now,
+                    pullback=pullback,
                 )
-                if result.startswith(("opened", "reversed")) and self._focus in self.positions:
+                entered = result.startswith(("opened", "reversed")) and self._focus in self.positions
+                if entered or self._focus in self._pullback:
                     # Remember the SMA run this entry belongs to (join_trend.py: never joined twice).
+                    # A pullback entry waiting for its level counts, so a join does not order it at once.
                     run = join_trend.side_start(frame)
+                    side = self.positions[self._focus].signal_direction if entered else want
                     if run is not None:
-                        self._side_entered[self._focus] = (self.positions[self._focus].signal_direction, run[1])
+                        self._side_entered[self._focus] = (side, run[1])
                 self.last_signal = result
                 self._signals[self._focus] = result
                 self._log_decision(signal, frame, cfg, now, result)
@@ -1816,6 +1857,7 @@ class StrategyEngine:
         cfg: BotConfig,
         now: dt.datetime,
         entry_block: str | None = None,
+        pullback: PullbackOrder | None = None,
     ) -> str:
         want = "LONG" if signal == "BULLISH" else "SHORT"
         pos = self.position
@@ -1847,6 +1889,8 @@ class StrategyEngine:
             if self.trades_today >= int(cfg.max_trades_per_day):
                 self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
+            if pullback is not None:
+                return "reversed — " + self._arm_pullback(pullback, cfg)
             await self._open(want, cross_price, atr, cfg, now)
             return f"reversed to {want}"
 
@@ -1860,8 +1904,62 @@ class StrategyEngine:
         if self.trades_today >= int(cfg.max_trades_per_day):
             self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
+        if pullback is not None:
+            return self._arm_pullback(pullback, cfg)
         await self._open(want, cross_price, atr, cfg, now)
         return f"opened {want}"
+
+    def _arm_pullback(self, order: PullbackOrder, cfg: BotConfig) -> str:
+        """Wait for the price to come back to the limit level instead of ordering at the tall candle's close."""
+        symbol = (cfg.symbol or "").upper()
+        self._pullback[symbol] = order
+        side = "BUY" if order.direction == "LONG" else "SELL"
+        return (
+            f"pullback {side} at {order.limit:.2f} — tall candle; "
+            f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
+        )
+
+    async def _watch_pullbacks(self, cfg: BotConfig, now: dt.datetime) -> None:
+        """Every pass: send a waiting pullback entry once the price reaches its level (tall_pullback.py)."""
+        for symbol, order in list(self._pullback.items()):
+            symbol_cfg = _cfg_for(cfg, symbol)
+            side = "BUY" if order.direction == "LONG" else "SELL"
+            frame = self._frames.get(symbol)
+            why = None
+            if symbol in self.positions:
+                why = "already in a trade"
+            elif not self._still_armed(symbol):
+                why = "taken off the Trade list"
+            elif now.time() >= _entry_cutoff(symbol_cfg):
+                why = f"no new entries after {_entry_cutoff(symbol_cfg).strftime('%H:%M')} IST"
+            elif tall_pullback.expired(order.signal_ts, _closed_bar_ts(frame), order.span_sec, order.candles):
+                why = f"the price did not come back to {order.limit:.2f} within {order.candles} candle(s)"
+            elif self.trades_today >= int(symbol_cfg.max_trades_per_day):
+                why = "trade cap reached"
+            if why:
+                self._pullback.pop(symbol, None)
+                self._signals[symbol] = f"pullback {side} {symbol} cancelled — {why}"
+                continue
+            price = self._ltps.get(symbol)
+            if not tall_pullback.touched(order.direction, price, order.limit):
+                continue
+            async with self.lock:
+                if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                    continue
+                self._pullback.pop(symbol, None)
+                self._focus = symbol
+                self.ltp = float(price)
+                self.inflight = "TRANSIT"
+                try:
+                    await self._open(order.direction, order.cross_price, order.atr, symbol_cfg, now)
+                    result = f"opened {order.direction} — price came back to the pullback level {order.limit:.2f}"
+                except SlCancelFailed as exc:
+                    self._note_broker_block(exc)
+                    result = f"pullback {side} not filled — {exc}"
+                finally:
+                    self.inflight = None
+            self._signals[symbol] = result
+            self.last_signal = result
 
     def hold_for_next_cross(self, symbols: list[str]) -> None:
         """Remember the closed bar already on the tape. Do not trade that cross."""
@@ -2767,6 +2865,7 @@ class StrategyEngine:
                 self._focus, self.ltp = saved_focus, saved_ltp
 
     async def kill(self, reason: str) -> None:
+        self._pullback.clear()
         self.halt_reason = reason
         self.status = "HALTED"
         await self._square_off("KILL_SWITCH")
