@@ -82,6 +82,10 @@ const LABELS: Record<string, string> = {
   recovery_atr_mult: "recovery ATR floor ×",
   recovery_max_candles: "recovery candles",
   recovery_handoff: "hand off to Bot 2",
+  breakout_handoff: "breakout hand-off to Bot 3",
+  breakout_atr_mult: "breakout candle × ATR",
+  breakout_gap_pct: "breakout SMA gap %",
+  breakout_volume_mult: "breakout volume ×",
   use_or_volume: "opening volume check",
   use_or_vwap: "opening VWAP check",
   use_or_spread: "opening SMA spread check",
@@ -271,6 +275,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     recovery_atr_mult: Math.min(20, Math.max(0.5, Number(form.recovery_atr_mult ?? 2.5) || 2.5)),
     recovery_max_candles: Math.min(75, Math.max(1, Math.round(Number(form.recovery_max_candles ?? 6) || 6))),
     recovery_handoff: form.recovery_handoff !== false,
+    breakout_handoff: Boolean(form.breakout_handoff),
+    breakout_atr_mult: Math.min(10, Math.max(0.5, Number(form.breakout_atr_mult ?? 1.8) || 1.8)),
+    breakout_gap_pct: Math.min(5, Math.max(0, Number(form.breakout_gap_pct ?? 0.2) || 0)),
+    breakout_volume_mult: Math.min(10, Math.max(1, Number(form.breakout_volume_mult ?? 1.5) || 1.5)),
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -1138,7 +1146,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               reverses as usual; a trade at a loss is held instead. Each candle close after that, it closes as a recovery when
               the loss is back within the target % of the entry or the price comes back to the slow SMA, and then (if ticked)
               the stock moves to Bot 2: flipped, SMA gap mode in at ±0.119 % and out at ±0.003 % with the fade confirmed by a
-              close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60; Bot 2 waits for its next cross. It closes as an
+              close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60, and the trend breakout back to Bot 3; Bot 2 waits
+              for its next cross. It closes as an
               emergency when the loss grows to the floor × the loss at the cross, or the ATR floor × ATR, or after the
               candles below; that stock is then not traded again on this bot today. A held trade still open at the entry
               cut-off (15:00) closes there. The stop still guards the trade throughout. A practice bot never hands a stock to
@@ -1202,6 +1211,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("recovery_handoff") && <OwnTag />}
             After a recovery, move the stock to Bot 2 (flipped, gap mode)
           </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Trend breakout (back to Bot 3)
+            <InfoTip label="About the trend breakout">
+              For the chop bot (Bot 2); every stock a recovery moves to Bot 2 gets it ticked. On each closed candle, a
+              breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
+              volume at least the × below of the last 20 candles&apos; average. Then an open trade on that stock is cut at
+              once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3 with Bot 3&apos;s
+              own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
+              new cross: every Bot 3 check still applies, and the order waits at the breakout candle&apos;s 9 SMA or half-way
+              level for 2 candles instead of buying its top. In LIVE the move waits until Groww shows no shares. A practice
+              bot never hands a stock to a LIVE Bot 3. A replay moves the stock too, but plays one bot, so Bot 3&apos;s entry
+              happens only on the live bots. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.breakout_handoff)}
+              onChange={(e) => set("breakout_handoff", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("breakout_handoff") && <OwnTag />}
+            On a breakout, cut the trade and move the stock to Bot 3
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field
+              label="Candle (× ATR)"
+              value={String(form.breakout_atr_mult ?? 1.8)}
+              onChange={(v) => set("breakout_atr_mult", v)}
+              own={isOwn("breakout_atr_mult")}
+            />
+            <Field
+              label="SMA gap (%)"
+              value={String(form.breakout_gap_pct ?? 0.2)}
+              onChange={(v) => set("breakout_gap_pct", v)}
+              own={isOwn("breakout_gap_pct")}
+            />
+            <Field
+              label="Volume (× avg)"
+              value={String(form.breakout_volume_mult ?? 1.5)}
+              onChange={(v) => set("breakout_volume_mult", v)}
+              own={isOwn("breakout_volume_mult")}
+            />
+          </div>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
             <InfoTip label="About the opening range">

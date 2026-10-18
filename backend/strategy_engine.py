@@ -65,6 +65,7 @@ import join_trend
 import late_entry
 import tall_pullback
 import recovery
+import breakout
 import review
 import paper_wallet
 import tick_sizes
@@ -225,6 +226,7 @@ SNAPSHOT_FIELDS = (
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
+    "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -804,6 +806,8 @@ class StrategyEngine:
     # Recovery handoff (recovery.handoff), set by bots.register for the live bots only:
     # replays and the research desk never move a stock between bots.
     handoff = None
+    # Set by bots.register: queue Bot 3's entry after a breakout handoff (breakout.py).
+    breakout_arrival = None
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
@@ -838,6 +842,8 @@ class StrategyEngine:
         self._late_pending: dict[str, Pending] = {}
         # Tall-candle pullback (tall_pullback.py): an entry waiting for the price to come back.
         self._pullback: dict[str, PullbackOrder] = {}
+        # Stocks handed here by a breakout, waiting for this bot's entry on its side (breakout.py).
+        self._arrivals: dict[str, breakout.Arrival] = {}
         # Stocks not traded again today after an emergency recovery exit (recovery.py).
         self._recovery_blocked: set[str] = set()
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
@@ -1274,8 +1280,15 @@ class StrategyEngine:
                 self._signals[symbol] = f"{symbol} waiting for the closed candle"
                 self.last_signal = self._signals[symbol]
                 continue
+            arrival = self._arrivals.pop(symbol, None)
+            if arrival is not None and self._still_armed(symbol):
+                await self._enter_on_arrival(symbol, arrival, frame, _cfg_for(cfg, symbol), now)
+                if self.status != "RUNNING":
+                    break
             if self._judged_bar.get(symbol) == closed_ts:
                 continue
+            # The candle on the tape when the stock was armed is not read for a breakout.
+            seen_before = symbol in self._judged_bar
             if not self._still_armed(symbol):
                 # Taken off the Trade list while this pass fetched quotes.
                 continue
@@ -1283,6 +1296,11 @@ class StrategyEngine:
             enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
+            if seen_before and await self._watch_breakout(symbol, symbol_cfg, enriched):
+                self._judged_bar[symbol] = closed_ts
+                if self.status != "RUNNING":
+                    break
+                continue
             result = await self.on_minute(now, symbol_cfg, enriched)
             if (result or "").startswith("blocked — order PENDING"):
                 continue
@@ -1767,9 +1785,19 @@ class StrategyEngine:
             logger.exception("signal report failed")
 
     async def apply_signal(
-        self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, alert: bool = True
+        self,
+        signal: str,
+        frame: pd.DataFrame,
+        cfg: BotConfig,
+        now: dt.datetime,
+        alert: bool = True,
+        pullback_at: PullbackOrder | None = None,
     ) -> str:
-        """Stop-and-reverse on a closed-candle cross. Returns a short status."""
+        """Stop-and-reverse on a closed-candle cross. Returns a short status.
+
+        `pullback_at` makes the entry wait at that level whatever the candle's height
+        (a breakout arrival, breakout.py); a flipped stock still orders at once.
+        """
         self._focus = (cfg.symbol or "").upper()
         curr = frame.iloc[-2]
         atr = _finite(curr.get("atr_14"))
@@ -1785,7 +1813,9 @@ class StrategyEngine:
         # A new signal replaces any entry still waiting for its pullback.
         self._pullback.pop(self._focus, None)
         pullback = None
-        if tall_pullback.on(cfg) and not flips_orders(cfg):
+        if pullback_at is not None and not flips_orders(cfg):
+            pullback = pullback_at
+        elif tall_pullback.on(cfg) and not flips_orders(cfg):
             plan = tall_pullback.plan(curr, want, atr, cfg)
             if plan is not None:
                 span = int(frame.iloc[-1]["ts"]) - int(curr["ts"]) if len(frame) >= 2 else 0
@@ -2065,6 +2095,88 @@ class StrategyEngine:
             text += f"; {moved}"
             self._alert(text)
         self._signals[symbol] = text
+
+    async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
+        """A breakout candle on the chop bot: cut the trade, hand the stock to Bot 3 (breakout.py).
+
+        True when the stock was handled here (cut and/or handed off), so the cross is not judged.
+        """
+        if not breakout.on(cfg) or self.handoff is None or self.bot_id == breakout.TREND_BOT:
+            return False
+        hit, note = breakout.read(enriched, cfg)
+        if not hit:
+            return False
+        pos = self.positions.get(symbol)
+        live = False
+        if pos is not None:
+            live = (pos.mode or "PAPER").upper() == "LIVE"
+            if live and pos.stop_active and not pos.sl_order_id:
+                # Restored after a restart without its stop id: left to that stop and the square-off.
+                return False
+            await self._exit_now(cfg, self.ltp, breakout.BREAKOUT_EXIT)  # the focus is this stock
+            if self.positions.get(symbol) is not None:
+                self._signals[symbol] = f"{symbol} breakout ({note}) — the exit did not go through"
+                return True
+        else:
+            live = (getattr(cfg, "trading_mode", None) or "PAPER").upper() == "LIVE"
+        flat = True
+        if live:
+            flat = await self._groww_net(symbol) == 0
+        moved = (
+            self.handoff(self.bot_id, symbol, live, to_bot=breakout.TREND_BOT)
+            if flat
+            else "no handoff: Groww still shows shares"
+        )
+        if moved.startswith("moved") and self.breakout_arrival is not None:
+            bar = enriched.iloc[-2]
+            want, limit = breakout.side(bar), None
+            if want is not None:
+                limit = tall_pullback.level(bar, want)
+            if want is not None and limit is not None:
+                arrival = breakout.Arrival(direction=want, limit=float(limit), made_at=self._now().timestamp())
+                moved += "; " + self.breakout_arrival(breakout.TREND_BOT, symbol, arrival)
+        text = f"{symbol} trend breakout — {note}" + ("; trade cut" if pos is not None else "") + f"; {moved}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        self._alert(text)
+        return True
+
+    def queue_breakout_entry(self, symbol: str, arrival: breakout.Arrival) -> None:
+        """A breakout moved this stock here: enter on its side on the next pass (breakout.py)."""
+        self._arrivals[(symbol or "").upper()] = arrival
+
+    async def _enter_on_arrival(
+        self, symbol: str, arrival: breakout.Arrival, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime
+    ) -> str:
+        """Bot 3's entry on a breakout's side: every check applies; it waits at the pullback level."""
+        side = "BUY" if arrival.direction == "LONG" else "SELL"
+        if now.timestamp() - arrival.made_at > breakout.ARRIVAL_TTL_SEC:
+            text = f"breakout {side} {symbol} dropped — it waited too long for this bot"
+        else:
+            enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+            closed = enriched.iloc[-2]
+            closed_ts = _closed_bar_ts(enriched)
+            atr = _finite(closed.get("atr_14"))
+            if closed_ts is None or atr is None or atr <= 0:
+                text = f"breakout {side} {symbol} dropped — ATR not ready"
+            else:
+                order = PullbackOrder(
+                    direction=arrival.direction,
+                    limit=round_price(symbol, arrival.limit),
+                    cross_price=round_price(symbol, float(closed["close"])),
+                    atr=atr,
+                    signal_ts=int(closed_ts),
+                    span_sec=candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60,
+                    candles=tall_pullback.expiry(cfg),
+                )
+                self._focus = symbol
+                self.ltp = self._ltps.get(symbol, self.ltp)
+                signal = "BULLISH" if arrival.direction == "LONG" else "BEARISH"
+                result = await self.apply_signal(signal, enriched, cfg, now, alert=False, pullback_at=order)
+                text = f"breakout arrival — {result}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
 
     async def _watch_pullbacks(self, cfg: BotConfig, now: dt.datetime) -> None:
         """Every pass: send a waiting pullback entry once the price reaches its level (tall_pullback.py)."""
@@ -2967,6 +3079,7 @@ class StrategyEngine:
                     "RECOVERY_TARGET_HIT": "recovery target hit — flat",
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
                     "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
+                    "BREAKOUT_STOP": "trend breakout — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -4728,6 +4841,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
+    "BREAKOUT_STOP",
 )
 
 

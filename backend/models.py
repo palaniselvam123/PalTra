@@ -333,6 +333,11 @@ class BotConfig(Base):
     recovery_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.5)
     recovery_max_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     recovery_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Trend breakout handoff back to Bot 3 (breakout.py).
+    breakout_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)
+    breakout_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.20)
+    breakout_volume_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

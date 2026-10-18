@@ -246,14 +246,14 @@ class ReplayEngine(StrategyEngine):
     def _now(self) -> dt.datetime:
         return self.feed.clock
 
-    def _hand_off(self, from_bot: int, symbol: str, source_live: bool) -> str:  # noqa: ARG002
-        """Recovery hand-off in a replay (recovery.py): the stock really moves to Bot 2.
+    def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT) -> str:  # noqa: ARG002
+        """Hand-off in a replay: the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).
 
         The owner checks the hand-off after hours on replays. Practice money only, so a
-        LIVE Bot 2 is never armed. The stock is then dropped from the rest of this replay,
+        LIVE target bot is never armed. The stock is then dropped from the rest of this replay,
         as the bot it left would stop trading it.
         """
-        text = recovery.handoff(from_bot, symbol, source_live=False)
+        text = recovery.handoff(from_bot, symbol, source_live=False, to_bot=to_bot)
         if text.startswith("moved"):
             name = (symbol or "").upper()
             self.replay_symbols = [s for s in self.replay_symbols if s != name]

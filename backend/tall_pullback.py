@@ -80,15 +80,19 @@ def plan(bar, direction: str, atr: float | None, cfg) -> Plan | None:
     height = high - low
     if height < mult(cfg) * atr:
         return None
-    half = low + 0.5 * height if direction == "LONG" else high - 0.5 * height
+    return Plan(limit=level(bar, direction), height=height, atr=atr)
+
+
+def level(bar, direction: str) -> float | None:
+    """The pullback limit of a candle: max(SMA fast, half-way) for a buy, min(...) for a sell."""
+    high, low = _f(bar.get("high")), _f(bar.get("low"))
+    if high is None or low is None or high < low:
+        return None
+    half = low + 0.5 * (high - low) if direction == "LONG" else high - 0.5 * (high - low)
     fast = _f(bar.get("sma_9"))
     if fast is None:
-        limit = half
-    elif direction == "LONG":
-        limit = max(fast, half)
-    else:
-        limit = min(fast, half)
-    return Plan(limit=limit, height=height, atr=atr)
+        return half
+    return max(fast, half) if direction == "LONG" else min(fast, half)
 
 
 def touched(direction: str, price: float | None, limit: float) -> bool:
