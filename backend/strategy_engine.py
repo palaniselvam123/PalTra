@@ -64,6 +64,7 @@ import opening_range
 import join_trend
 import late_entry
 import tall_pullback
+import recovery
 import review
 import paper_wallet
 import tick_sizes
@@ -171,6 +172,13 @@ class OpenPosition:
     # Flip strategy: the order went the other way from the signal (a buy
     # signal sold, a sell signal bought). Signal exits follow the signal.
     flipped: bool = False
+    # Recovery hold (recovery.py): the loss per share at the adverse cross, the closed candle
+    # it came on (None = not in recovery), and the last candle the recovery rules read.
+    recovery_loss: float | None = None
+    recovery_bar: int | None = None
+    rec_bar: int | None = None
+    # Slow SMA exit (recovery.py): the last closed candle read.
+    slow_bar: int | None = None
 
     @property
     def signal_direction(self) -> str:
@@ -215,6 +223,8 @@ SNAPSHOT_FIELDS = (
     "use_supertrend", "st_exit", "st_period", "st_mult",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
+    "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
+    "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -791,6 +801,9 @@ class StrategyEngine:
     #: bots.live_conflict once the bots are registered: refuses a LIVE entry on
     #: a stock another LIVE bot owns. None (no check) for a lone engine in tests.
     live_guard = None
+    # Recovery handoff (recovery.handoff), set by bots.register for the live bots only:
+    # replays and the research desk never move a stock between bots.
+    handoff = None
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
@@ -825,6 +838,8 @@ class StrategyEngine:
         self._late_pending: dict[str, Pending] = {}
         # Tall-candle pullback (tall_pullback.py): an entry waiting for the price to come back.
         self._pullback: dict[str, PullbackOrder] = {}
+        # Stocks not traded again today after an emergency recovery exit (recovery.py).
+        self._recovery_blocked: set[str] = set()
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
         # today (never joined), and the stocks already joined or given up on today.
         self._side_entered: dict[str, tuple[str, int]] = {}
@@ -984,6 +999,8 @@ class StrategyEngine:
                     row.stop_active is not False,
                     bool(getattr(row, "flipped", False)),
                     _strategy_of(row) or {},
+                    getattr(row, "recovery_loss", None),
+                    getattr(row, "recovery_bar", None),
                 )
                 for row in rows
             ]
@@ -991,7 +1008,7 @@ class StrategyEngine:
             cfg = self.load_config()
         except Exception:  # noqa: BLE001
             cfg = None
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry, rec_loss, rec_bar in pending:
             if not symbol or symbol in self.positions:
                 continue
             # The stop the trade was opened with: this stock's own settings,
@@ -1039,6 +1056,9 @@ class StrategyEngine:
                 high=entry,
                 low=entry,
                 flipped=flipped,
+                recovery_loss=float(rec_loss) if rec_loss is not None else None,
+                recovery_bar=int(rec_bar) if rec_bar is not None else None,
+                rec_bar=int(rec_bar) if rec_bar is not None else None,
             )
 
     def _bot_rows(self):
@@ -1074,6 +1094,7 @@ class StrategyEngine:
             self._gap_pending.clear()
             self._late_pending.clear()
             self._pullback.clear()
+            self._recovery_blocked.clear()
             self._side_entered.clear()
             self._joined_today.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
@@ -1227,6 +1248,8 @@ class StrategyEngine:
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
+            await self._watch_slow_sma(symbol_cfg)
+            await self._watch_recovery(symbol_cfg, now)
             await self._watch_gap_fade(symbol_cfg)
 
         await self._watch_pullbacks(cfg, now)
@@ -1875,10 +1898,21 @@ class StrategyEngine:
                 "Bollinger exit or square-off closes it"
             )
 
+        exit_reason = "MA_CROSS"
+        if pos is not None and pos.signal_direction != want and recovery.on(cfg):
+            # Recovery hold (recovery.py): close a winner at once, hold a loser for its recovery.
+            if pos.recovery_loss is not None:
+                return f"holding {pos.direction} — recovery hold since the earlier cross"
+            price = self._market_price(cfg.symbol, cross_price)
+            loss = recovery.loss_per_share(pos.direction, pos.entry_price, price)
+            if loss >= 0:
+                return self._enter_recovery(pos, cfg, max(loss, 0.0))
+            exit_reason = recovery.PROFIT_EXIT
+
         if pos is not None and pos.signal_direction != want:
             # Opposite cross: cancel SL, verify, flatten, then maybe reverse.
             await self._cancel_sl_verified(pos)
-            await self._close_position(pos, self._market_price(cfg.symbol, cross_price), "MA_CROSS", now, cfg)
+            await self._close_position(pos, self._market_price(cfg.symbol, cross_price), exit_reason, now, cfg)
             self.position = None
             if past_cutoff:
                 return f"closed on {signal} — {cutoff_text}"
@@ -1889,6 +1923,8 @@ class StrategyEngine:
             if self.trades_today >= int(cfg.max_trades_per_day):
                 self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
+            if (cfg.symbol or "").upper() in self._recovery_blocked:
+                return "closed on cross — no new trade in this stock today (emergency recovery exit)"
             if pullback is not None:
                 return "reversed — " + self._arm_pullback(pullback, cfg)
             await self._open(want, cross_price, atr, cfg, now)
@@ -1904,6 +1940,8 @@ class StrategyEngine:
         if self.trades_today >= int(cfg.max_trades_per_day):
             self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
+        if (cfg.symbol or "").upper() in self._recovery_blocked:
+            return "entry blocked — no new trade in this stock today (emergency recovery exit)"
         if pullback is not None:
             return self._arm_pullback(pullback, cfg)
         await self._open(want, cross_price, atr, cfg, now)
@@ -1918,6 +1956,115 @@ class StrategyEngine:
             f"pullback {side} at {order.limit:.2f} — tall candle; "
             f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
         )
+
+    def _enter_recovery(self, pos: OpenPosition, cfg: BotConfig, loss: float) -> str:
+        """The adverse cross came while the trade was losing: hold it for its recovery (recovery.py)."""
+        symbol = (cfg.symbol or "").upper()
+        pos.recovery_loss = round(loss, 4)
+        pos.recovery_bar = _closed_bar_ts(self._frames.get(symbol))
+        pos.rec_bar = pos.recovery_bar
+        # Saved so a restart keeps the hold and its emergency floor.
+        with session_factory()() as db:
+            row = db.get(TradeLog, pos.trade_id)
+            if row is not None and row.exit_time is None:
+                row.recovery_loss = pos.recovery_loss
+                row.recovery_bar = pos.recovery_bar
+                db.commit()
+        return (
+            f"holding {pos.direction} — recovery hold: loss {loss:.2f} a share at the cross; waits up to "
+            f"{recovery.max_candles(cfg)} candles for the price to come back"
+        )
+
+    async def _watch_slow_sma(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit on a close beyond the slow SMA against the trade (recovery.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not recovery.slow_exit_on(cfg) or self.ltp <= 0:
+            return
+        if pos.recovery_loss is not None:
+            return  # the recovery rules judge a held trade
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.slow_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            return
+        pos.slow_bar = closed_ts
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+        bar = enriched.iloc[-2]
+        close, slow = _finite(bar.get("close")), _finite(bar.get("sma_21"))
+        if not recovery.slow_breach(pos.signal_direction, close, slow):
+            return
+        word = "below" if pos.signal_direction == "LONG" else "above"
+        self._signals[symbol] = f"{symbol} slow SMA exit — close {close:.2f} {word} the slow SMA {slow:.2f}"
+        await self._exit_now(cfg, self.ltp, recovery.SLOW_SMA_EXIT)
+
+    async def _watch_recovery(self, cfg: BotConfig, now: dt.datetime) -> None:
+        """A trade in recovery hold: recovery target, emergency exit or the cut-off (recovery.py)."""
+        pos = self.position
+        if pos is None or pos.recovery_loss is None or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop and the square-off.
+            return
+        if now.time() >= _entry_cutoff(cfg):
+            self._signals[symbol] = f"{symbol} recovery hold closed at the {_entry_cutoff(cfg).strftime('%H:%M')} cut-off"
+            await self._exit_now(cfg, self.ltp, recovery.CUTOFF_EXIT)
+            return
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.rec_bar == closed_ts:
+            return
+        if pos.recovery_bar is not None and closed_ts <= pos.recovery_bar:
+            return  # the cross candle itself
+        pos.rec_bar = closed_ts
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+        bar = enriched.iloc[-2]
+        span = candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60
+        held = int((closed_ts - pos.recovery_bar) // span) if pos.recovery_bar is not None else 1
+        verdict, note = recovery.judge(
+            pos.direction,
+            pos.entry_price,
+            {
+                "close": _finite(bar.get("close")),
+                "high": _finite(bar.get("high")),
+                "low": _finite(bar.get("low")),
+                "sma_21": _finite(bar.get("sma_21")),
+                "atr_14": _finite(bar.get("atr_14")),
+            },
+            float(pos.recovery_loss),
+            held,
+            cfg,
+        )
+        if verdict == "hold":
+            self._signals[symbol] = f"{symbol} recovery hold — {note}"
+            return
+        live = (pos.mode or "PAPER").upper() == "LIVE"
+        if verdict == "abort":
+            self._recovery_blocked.add(symbol)
+            await self._exit_now(cfg, self.ltp, recovery.ABORT_EXIT)
+            self._signals[symbol] = f"{symbol} emergency recovery exit — {note}; not traded again today"
+            self._alert(f"{symbol} emergency recovery exit — {note}. Not traded again on this bot today.")
+            return
+        await self._exit_now(cfg, self.ltp, recovery.TARGET_EXIT)
+        if self.position is not None:
+            return  # the exit did not go through
+        text = f"{symbol} recovery target hit — {note}"
+        if recovery.handoff_on(cfg) and self.handoff is not None:
+            flat = True
+            if live:
+                net = await self._groww_net(symbol)
+                flat = net == 0
+            moved = self.handoff(self.bot_id, symbol, live) if flat else "no handoff: Groww still shows shares"
+            text += f"; {moved}"
+            self._alert(text)
+        self._signals[symbol] = text
 
     async def _watch_pullbacks(self, cfg: BotConfig, now: dt.datetime) -> None:
         """Every pass: send a waiting pullback entry once the price reaches its level (tall_pullback.py)."""
@@ -2706,6 +2853,8 @@ class StrategyEngine:
         count = counter_candles.exit_count(cfg)
         if pos is None or self.status != "RUNNING" or count <= 0 or self.ltp <= 0:
             return
+        if recovery.slow_exit_on(cfg):
+            return  # the slow SMA exit replaces it: minor candles against the trade are ignored
         symbol = (cfg.symbol or self._focus or "").upper()
         frame = self._frames.get(symbol)
         closed_ts = _closed_bar_ts(frame)
@@ -2814,6 +2963,10 @@ class StrategyEngine:
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
+                    "SLOW_SMA_BREACH": "closed beyond the slow SMA — flat",
+                    "RECOVERY_TARGET_HIT": "recovery target hit — flat",
+                    "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
+                    "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -4572,7 +4725,10 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
-_TAKEN_EXITS = ("TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND")
+_TAKEN_EXITS = (
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
+    "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
+)
 
 
 def _filter_note(cfg: BotConfig) -> str:
