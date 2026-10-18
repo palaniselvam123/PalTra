@@ -362,8 +362,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `recovery_max_candles` (6) candles → `EMERGENCY_RECOVERY_ABORT` and the stock is blocked on that bot for the day
   (`_recovery_blocked`); still held at the entry cut-off → `SQUARE_OFF_CUTOFF`. A LIVE position restored without its
   stop id is left to that stop. **Handoff** (`recovery_handoff`, on by default once recovery hold is on): after a
-  recovery target, on the live bots only (`bots.register` sets `engine.handoff`; replays and research never move a
-  stock), and in LIVE only once Groww shows no shares, `recovery.handoff` takes the stock off the source bot's Trade
+  recovery target, on the live bots (`bots.register` sets `engine.handoff`) and in replays (`ReplaySession` sets
+  `ReplayEngine._hand_off`, so the owner can check it after hours: practice money, so it never arms a LIVE Bot 2; the
+  stock leaves the rest of the run, `ReplaySession.handed_off`; research never moves a stock), and in LIVE only once
+  Groww shows no shares, `recovery.handoff` takes the stock off the source bot's Trade
   list and arms it on Bot 2 (`HANDOFF_BOT`) with its own settings (`HANDOFF_SETTINGS`: flipped, gap mode ±0.119 in /
   ±0.003 out with the slow-SMA fade confirmation, VWAP, RSI 40-70 / 30-60); Bot 2 waits for its next cross
   (`hold_for_next_cross`). A PAPER source never arms a LIVE Bot 2, and the one-LIVE-bot-per-stock rule applies (a

@@ -1142,7 +1142,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               emergency when the loss grows to the floor × the loss at the cross, or the ATR floor × ATR, or after the
               candles below; that stock is then not traded again on this bot today. A held trade still open at the entry
               cut-off (15:00) closes there. The stop still guards the trade throughout. A practice bot never hands a stock to
-              a LIVE Bot 2. Off by default; try it on Replay first.
+              a LIVE Bot 2. A replay (backtest) moves the stock too, so you can check it after market hours; the stock
+              then leaves the rest of that replay. Off by default; try it on Replay first.
             </InfoTip>
           </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">

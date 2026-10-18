@@ -34,6 +34,7 @@ from models import BotConfig, ReplayRun, ReviewLog, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
 import open_pnl_log
+import recovery
 from scalp_picks import PickRule, picks_for_day
 
 SPEEDS = (1, 10, 60, 300)
@@ -234,6 +235,8 @@ class ReplayEngine(StrategyEngine):
         self.bot_id = int(bot)
         self.config_id = 1 if self.bot_id == 1 else self.bot_id + 1
         self.replay_symbols = [s.upper() for s in symbols][:MAX_TRADE_SYMBOLS]
+        # Set by ReplaySession: a "Recovered" exit moves the stock to Bot 2 (recovery.py).
+        self.on_handoff = None
         super().__init__(broker=ReplayBroker(feed))
         self._session_date = feed.clock.date().isoformat()
         with session_factory()() as db:
@@ -242,6 +245,21 @@ class ReplayEngine(StrategyEngine):
 
     def _now(self) -> dt.datetime:
         return self.feed.clock
+
+    def _hand_off(self, from_bot: int, symbol: str, source_live: bool) -> str:  # noqa: ARG002
+        """Recovery hand-off in a replay (recovery.py): the stock really moves to Bot 2.
+
+        The owner checks the hand-off after hours on replays. Practice money only, so a
+        LIVE Bot 2 is never armed. The stock is then dropped from the rest of this replay,
+        as the bot it left would stop trading it.
+        """
+        text = recovery.handoff(from_bot, symbol, source_live=False)
+        if text.startswith("moved"):
+            name = (symbol or "").upper()
+            self.replay_symbols = [s for s in self.replay_symbols if s != name]
+            if self.on_handoff is not None:
+                self.on_handoff(name)
+        return text
 
     def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:  # noqa: ARG002
         return None
@@ -603,6 +621,8 @@ class ReplaySession:
     rule: PickRule | None = None
     picks: dict[str, list[dict]] = field(default_factory=dict)
     universe: list[str] = field(default_factory=list)
+    #: Stocks a "Recovered" exit moved to Bot 2 during this run (recovery.py); not traded after it.
+    handed_off: list[str] = field(default_factory=list)
     _settings: dict = field(default_factory=dict)
     engine: ReplayEngine | None = None
     _task: asyncio.Task | None = None
@@ -636,6 +656,7 @@ class ReplaySession:
             "loaded": self.loaded,
             "total": len(self.universe or self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
             "error": self.error,
+            "handed_off": self.handed_off,
             "pick_rule": self.rule.as_dict() if self.rule is not None else None,
             "picks": self.picks,
         }
@@ -656,6 +677,7 @@ class ReplaySession:
         await self.stop("REPLAY_STOPPED")
         self.bot, self.bot_name = int(bot), bot_name or f"Bot {int(bot)}"
         self.rule, self.picks, self.universe = rule, {}, []
+        self.handed_off = []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = day, end_day or day, start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
@@ -693,6 +715,7 @@ class ReplaySession:
         _drop_unfinished_days(int(run_id), [d.isoformat() for d in all_days[done:]])
         self.bot, self.bot_name = bot, bot_name
         self.rule, self.picks, self.universe = None, {}, []
+        self.handed_off = []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = all_days[done], all_days[-1], start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
@@ -803,11 +826,18 @@ class ReplaySession:
                 if not symbols:
                     self._mark_run(days_done=index + 1)
                     continue
+            # A stock handed off to Bot 2 earlier in the run is no longer this bot's (recovery.py).
+            symbols = [s for s in symbols if s not in self.handed_off]
+            if not symbols:
+                self._mark_run(days_done=index + 1)
+                continue
             self.symbols = symbols
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
             engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved)
+            engine.handoff = engine._hand_off
+            engine.on_handoff = lambda name: self.handed_off.append(name)
             # A 1-minute review pauses the replay so it can be answered as it
             # would have been live. Play again without answering = no answer.
             engine.on_review = lambda _item: self.control("pause")
