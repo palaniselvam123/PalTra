@@ -1491,8 +1491,9 @@ export const smaApi = {
       },
       20000
     ),
-  replayRuns: (): Promise<ReplayRun[]> =>
-    request<ReplayRun[]>("/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
+  /** The newest `limit` runs (server default 50, at most 500). */
+  replayRuns: (limit?: number): Promise<ReplayRun[]> =>
+    request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),

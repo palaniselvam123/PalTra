@@ -130,6 +130,9 @@ export function gapModeText(s: Settings): string {
 }
 
 const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
+// The runs list asks for the newest RUNS_PAGE runs, then RUNS_PAGE more per "Show older runs" (server cap 500).
+const RUNS_PAGE = 50;
+const RUNS_MAX = 500;
 
 /** The Bollinger exit in a few words, or "" when it was off. */
 export function bbExitText(s: Settings): string {
@@ -239,9 +242,11 @@ export function BacktestRuns() {
 
   // The newest run opens by itself once, so its day-wise P&L shows without a click.
   const autoOpened = useRef(false);
+  // How many of the newest runs to list; "Show older runs" raises it (the server keeps every run).
+  const [limit, setLimit] = useState(RUNS_PAGE);
   const load = useCallback(() => {
     smaApi
-      .replayRuns()
+      .replayRuns(limit)
       .then((rows) => {
         setRuns(rows);
         setError(null);
@@ -251,7 +256,7 @@ export function BacktestRuns() {
         }
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Runs did not load"));
-  }, []);
+  }, [limit]);
 
   useEffect(() => {
     load();
@@ -486,6 +491,15 @@ export function BacktestRuns() {
               })}
             </tbody>
           </table>
+          {runs.length >= limit && limit < RUNS_MAX ? (
+            <button
+              type="button"
+              className="mt-3 rounded-md border border-white/10 px-3 py-1.5 text-xs text-sky-300 hover:bg-white/5"
+              onClick={() => setLimit((n) => Math.min(RUNS_MAX, n + RUNS_PAGE))}
+            >
+              Show older runs
+            </button>
+          ) : null}
         </div>
       )}
       {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width. */}
