@@ -137,6 +137,10 @@ export type SmaConfig = {
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;
+  /** Tall-candle pullback: after a tall signal candle, wait for the price to come back before entering. */
+  tall_pullback?: boolean;
+  tall_atr_mult?: number;
+  tall_expiry_candles?: number;
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;

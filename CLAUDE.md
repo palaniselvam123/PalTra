@@ -338,6 +338,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   beyond the window high (buy) or low (sell). Nothing is checked before the window is complete (a candle at or
   after 09:30 has closed), so no entry in the window itself is taken with a check on. Wired through `_entry_block`
   (check names `or_volume` … `or_break`; chart ✕ "Opening …"). No exits. The stock research baseline keeps all off.
+- `backend/tall_pullback.py` – tall-candle pullback entry (`tall_pullback`, off by default, per bot and per stock,
+  PAPER and LIVE): when the closed signal candle's height (high − low) is ≥ `tall_atr_mult` (default 1.5) × its ATR,
+  `apply_signal` does not order at once. `_apply_locked` arms a `PullbackOrder` instead (`_arm_pullback`, flat and
+  reverse paths; the reverse closes the old trade first) at `max(SMA fast, low + ½ range)` for a buy or
+  `min(SMA fast, high − ½ range)` for a sell. `StrategyEngine._watch_pullbacks` (every tick) sends the normal entry
+  through `_open` on the first price at or beyond that level (every check, stop, cap, cut-off and one LIVE bot per stock
+  apply; nothing rests on Groww's book, so nothing needs cancelling), and drops it once `tall_expiry_candles` (default 2)
+  more candles have closed, the cut-off passes, a trade opens, the stock is unarmed or a new signal replaces it. A
+  waiting pullback counts as entering the SMA run (`_side_entered`), so join-trend does not order it at once. A flipped
+  stock orders at once. The stock research baseline keeps it off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

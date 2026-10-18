@@ -72,6 +72,9 @@ const LABELS: Record<string, string> = {
   st_exit: "Supertrend exit",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
+  tall_pullback: "tall-candle pullback",
+  tall_atr_mult: "tall candle × ATR",
+  tall_expiry_candles: "pullback wait (candles)",
   use_or_volume: "opening volume check",
   use_or_vwap: "opening VWAP check",
   use_or_spread: "opening SMA spread check",
@@ -251,6 +254,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     st_exit: Boolean(form.st_exit),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
+    tall_pullback: Boolean(form.tall_pullback),
+    tall_atr_mult: Math.min(10, Math.max(0.5, Number(form.tall_atr_mult ?? 1.5) || 1.5)),
+    tall_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.tall_expiry_candles ?? 2) || 2))),
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -806,6 +812,38 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             onChange={(v) => set("late_entry_min", v)}
             own={isOwn("late_entry_min")}
           />
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.tall_pullback)}
+              onChange={(e) => set("tall_pullback", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("tall_pullback") && <OwnTag />}
+            Tall candle: wait for a pullback before entering
+            <InfoTip label="About the tall-candle pullback">
+              When the signal candle is tall (high − low at least the multiple below × ATR), the bot does not buy at its top or
+              sell at its bottom. It waits for the price to come back: a buy at the higher of the fast SMA and the candle&apos;s
+              half-way point, a sell at the lower of the fast SMA and the half-way point. The first price at that level sends the
+              normal entry (every check, the stop, the trade cap and the cut-off still apply). If the price has not come back
+              after the candles below have closed, no order is sent. Nothing waits on Groww&apos;s book in the meantime. A smaller
+              signal candle orders at once, as before. A flipped stock always orders at once. Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Tall when height ≥ (× ATR)"
+              value={String(form.tall_atr_mult ?? 1.5)}
+              onChange={(v) => set("tall_atr_mult", v)}
+              own={isOwn("tall_atr_mult")}
+            />
+            <Field
+              label="Wait at most (candles)"
+              value={String(form.tall_expiry_candles ?? 2)}
+              onChange={(v) => set("tall_expiry_candles", v)}
+              own={isOwn("tall_expiry_candles")}
+            />
+          </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"

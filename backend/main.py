@@ -37,6 +37,7 @@ import server_role
 import counter_candles
 import ema_filter
 import supertrend
+import tall_pullback as tall_pb
 import opening_range
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
@@ -308,6 +309,9 @@ class ConfigUpdate(BaseModel):
     st_exit: bool | None = None
     st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
     st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
+    tall_pullback: bool | None = None
+    tall_atr_mult: float | None = Field(default=None, ge=tall_pb.MIN_MULT, le=tall_pb.MAX_MULT)
+    tall_expiry_candles: int | None = Field(default=None, ge=1, le=tall_pb.MAX_EXPIRY)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -791,6 +795,9 @@ def _gap_dict(row) -> dict:
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
         "st_mult": supertrend.settings(row)[1],
+        "tall_pullback": tall_pb.on(row),
+        "tall_atr_mult": tall_pb.mult(row),
+        "tall_expiry_candles": tall_pb.expiry(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

@@ -318,6 +318,10 @@ class BotConfig(Base):
     st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     st_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
+    # Tall-candle pullback entry (tall_pullback.py): wait for a pullback after a tall signal candle.
+    tall_pullback: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tall_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    tall_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

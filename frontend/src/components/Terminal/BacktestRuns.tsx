@@ -63,6 +63,7 @@ export function strategyLabel(s: Settings): string {
     if (s.ema_exit) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} exit`);
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
+    if (s.tall_pullback) parts.push(`tall-candle pullback (${s.tall_atr_mult ?? 1.5}× ATR, ${s.tall_expiry_candles ?? 2} candles)`);
     const orChecks = [s.use_or_volume && "volume", s.use_or_vwap && "VWAP", s.use_or_spread && "SMA spread", s.use_or_break && "break"].filter(Boolean);
     if (orChecks.length) parts.push(`opening range: ${orChecks.join(", ")}`);
   }
@@ -170,6 +171,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
+  ["Tall-candle pullback", (s) => (s.tall_pullback ? `On (${s.tall_atr_mult ?? 1.5}× ATR, wait ${s.tall_expiry_candles ?? 2} candles)` : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],
   ["VWAP filter", (s) => (s.use_vwap ? "On" : "Off")],
