@@ -1,6 +1,6 @@
 """Slow SMA exit, recovery hold and the Bot 2 handoff (recovery.py).
 
-PAPER only: the replay engine fills locally (no Groww order path) and never hands off.
+PAPER only: the replay engine fills locally (no Groww order path); a replay hands off for real.
 """
 from __future__ import annotations
 
@@ -215,3 +215,45 @@ def test_api_saves_the_recovery_settings(tmp_path, monkeypatch):
         own = client.put("/api/bots/3/config/stock/SBIN", json={"recovery_hold": True})
         assert own.status_code == 200 and own.json()["recovery_hold"] is True
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_a_replay_hands_a_recovered_stock_to_bot_2(db):  # noqa: F811
+    """After hours a replay (backtest) does the real hand-off, so the owner can check it."""
+    import bots
+    from models import BotConfig
+    from replay import IST, SESSION_END, SESSION_OPEN, ReplayFeed, _to_next_grid
+    from sma_research.replayer import ResearchEngine
+    from strategy_engine import stock_settings, trade_names
+
+    _seed_bots(db)
+    with db.session_factory()() as s:
+        s.get(BotConfig, bots.config_id_for(1)).trade_symbols = "SIMR,TCS"
+        s.commit()
+    feed = ReplayFeed({"SIMR": _frame(_recovers)}, dt.datetime.combine(DAY, SESSION_OPEN, tzinfo=IST))
+    engine = ResearchEngine(feed, "SIMR", _settings(db, **HOLD, recovery_max_candles=12))
+    moved: list[str] = []
+    engine.handoff = engine._hand_off
+    engine.on_handoff = moved.append
+    engine.load_config()
+    await engine.tick(feed.clock)
+    engine.hold_for_next_cross(["SIMR"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, SESSION_END, tzinfo=IST)
+    while feed.clock < end and not moved:
+        feed.clock = min(end, feed.clock + dt.timedelta(seconds=_to_next_grid(feed.clock)))
+        await engine.tick(feed.clock)
+    assert moved == ["SIMR"] and "SIMR" not in engine.replay_symbols
+    with db.session_factory()() as s:
+        assert trade_names(s.get(BotConfig, bots.config_id_for(1))) == ["TCS"]
+        two = s.get(BotConfig, bots.config_id_for(2))
+        assert trade_names(two) == ["SIMR"] and stock_settings(two)["SIMR"]["flip_orders"] is True
+
+
+def test_a_replay_never_arms_a_live_bot_2(db):  # noqa: F811
+    from replay import ReplayEngine
+
+    _seed_bots(db, bot2_mode="LIVE")
+    fake = type("E", (), {"replay_symbols": ["SBIN"], "on_handoff": None})()
+    assert ReplayEngine._hand_off(fake, 1, "SBIN", True).startswith("no handoff")  # replays are practice money
+    assert fake.replay_symbols == ["SBIN"]
