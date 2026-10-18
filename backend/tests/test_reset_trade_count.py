@@ -86,6 +86,10 @@ def test_api_resets_each_desk_on_its_own(tmp_path, monkeypatch):
     from main import app, engine, research_engine
 
     with TestClient(app) as client:
+        # The engines were built when `main` was first imported; a suite that runs past midnight IST
+        # would roll the day (and zero the count) on the loop's next tick, so start both on today.
+        for eng in (engine, research_engine):
+            eng._roll_session(eng._now())
         engine.trades_today, research_engine.trades_today = 7, 4
         body = client.post("/api/bot/reset-trades").json()
         assert body["was"] == 7 and body["trades_today"] == 0
