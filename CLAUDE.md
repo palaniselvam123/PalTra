@@ -348,6 +348,26 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   more candles have closed, the cut-off passes, a trade opens, the stock is unarmed or a new signal replaces it. A
   waiting pullback counts as entering the SMA run (`_side_entered`), so join-trend does not order it at once. A flipped
   stock orders at once. The stock research baseline keeps it off.
+- `backend/recovery.py` – structural exit, recovery hold and the trend-to-chop handoff (all off by default,
+  per bot and per stock, PAPER and LIVE; meant for the trend bot, Bot 3). **Slow SMA exit** (`slow_sma_exit`):
+  `StrategyEngine._watch_slow_sma` closes a trade on the first candle closed after the entry beyond the slow SMA
+  against its signal side (`SLOW_SMA_BREACH`, via `_exit_now`); while on, the counter-candle exit is skipped, and a
+  trade in recovery is left to the recovery rules. **Recovery hold** (`recovery_hold`, only where the SMA cross exit
+  is on, `_apply_locked`; gap mode's `_close_on_cross` and candle patterns are not covered): on an opposite cross a
+  trade in profit closes as `PROFITABLE_TREND_EXHAUSTION` and reverses as usual; one at a loss (or flat) is held
+  (`_enter_recovery`: `OpenPosition.recovery_loss` per share and `recovery_bar`, saved on `TradeLog.recovery_loss` /
+  `recovery_bar` and restored after a restart). `_watch_recovery`, once per closed candle, runs `recovery.judge`:
+  loss within `recovery_tolerance_pct` (0.15) % of entry or the candle touched the slow SMA → `RECOVERY_TARGET_HIT`;
+  loss ≥ `recovery_emergency_mult` (1.5) × the loss at the cross, ≥ `recovery_atr_mult` (2.5) × ATR, or
+  `recovery_max_candles` (6) candles → `EMERGENCY_RECOVERY_ABORT` and the stock is blocked on that bot for the day
+  (`_recovery_blocked`); still held at the entry cut-off → `SQUARE_OFF_CUTOFF`. A LIVE position restored without its
+  stop id is left to that stop. **Handoff** (`recovery_handoff`, on by default once recovery hold is on): after a
+  recovery target, on the live bots only (`bots.register` sets `engine.handoff`; replays and research never move a
+  stock), and in LIVE only once Groww shows no shares, `recovery.handoff` takes the stock off the source bot's Trade
+  list and arms it on Bot 2 (`HANDOFF_BOT`) with its own settings (`HANDOFF_SETTINGS`: flipped, gap mode ±0.119 in /
+  ±0.003 out with the slow-SMA fade confirmation, VWAP, RSI 40-70 / 30-60); Bot 2 waits for its next cross
+  (`hold_for_next_cross`). A PAPER source never arms a LIVE Bot 2, and the one-LIVE-bot-per-stock rule applies (a
+  refused handoff leaves the stock off both bots). The stock research baseline keeps them off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

@@ -38,6 +38,7 @@ import counter_candles
 import ema_filter
 import supertrend
 import tall_pullback as tall_pb
+import recovery as recovery_mod
 import opening_range
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
@@ -312,6 +313,13 @@ class ConfigUpdate(BaseModel):
     tall_pullback: bool | None = None
     tall_atr_mult: float | None = Field(default=None, ge=tall_pb.MIN_MULT, le=tall_pb.MAX_MULT)
     tall_expiry_candles: int | None = Field(default=None, ge=1, le=tall_pb.MAX_EXPIRY)
+    slow_sma_exit: bool | None = None
+    recovery_hold: bool | None = None
+    recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
+    recovery_emergency_mult: float | None = Field(default=None, ge=1, le=10)
+    recovery_atr_mult: float | None = Field(default=None, ge=0.5, le=20)
+    recovery_max_candles: int | None = Field(default=None, ge=1, le=recovery_mod.MAX_CANDLES)
+    recovery_handoff: bool | None = None
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -798,6 +806,13 @@ def _gap_dict(row) -> dict:
         "tall_pullback": tall_pb.on(row),
         "tall_atr_mult": tall_pb.mult(row),
         "tall_expiry_candles": tall_pb.expiry(row),
+        "slow_sma_exit": recovery_mod.slow_exit_on(row),
+        "recovery_hold": recovery_mod.on(row),
+        "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),
+        "recovery_emergency_mult": recovery_mod.emergency_mult(row),
+        "recovery_atr_mult": recovery_mod.atr_mult(row),
+        "recovery_max_candles": recovery_mod.max_candles(row),
+        "recovery_handoff": recovery_mod.handoff_on(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

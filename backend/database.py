@@ -127,6 +127,13 @@ def _ensure_bot_config_columns(engine) -> None:
             "tall_pullback": "BOOLEAN DEFAULT 0",
             "tall_atr_mult": "FLOAT DEFAULT 1.5",
             "tall_expiry_candles": "INTEGER DEFAULT 2",
+            "slow_sma_exit": "BOOLEAN DEFAULT 0",
+            "recovery_hold": "BOOLEAN DEFAULT 0",
+            "recovery_tolerance_pct": "FLOAT DEFAULT 0.15",
+            "recovery_emergency_mult": "FLOAT DEFAULT 1.5",
+            "recovery_atr_mult": "FLOAT DEFAULT 2.5",
+            "recovery_max_candles": "INTEGER DEFAULT 6",
+            "recovery_handoff": "BOOLEAN DEFAULT 1",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",
             "use_or_spread": "BOOLEAN DEFAULT 0",
@@ -182,6 +189,10 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_active BOOLEAN DEFAULT 1")
         if "flipped" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN flipped BOOLEAN DEFAULT 0")
+        if "recovery_loss" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN recovery_loss FLOAT")
+        if "recovery_bar" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN recovery_bar INTEGER")
         if "bot" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN bot INTEGER DEFAULT 1")
         if "run_id" not in names:

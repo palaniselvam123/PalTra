@@ -37,6 +37,9 @@ class TradeLog(Base):
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Flip strategy: the order went against the signal (a buy signal sold).
     flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Recovery hold (recovery.py): loss per share at the adverse cross and that candle's start.
+    recovery_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recovery_bar: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Which SMA bot placed it: 1 is the main desk (NULL on older rows), 2-4 the
     # extra bots (bots.py). Each bot has its own book, P&L and caps.
     bot: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
@@ -322,6 +325,14 @@ class BotConfig(Base):
     tall_pullback: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     tall_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     tall_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
+    slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    recovery_tolerance_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)
+    recovery_emergency_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    recovery_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.5)
+    recovery_max_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
+    recovery_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

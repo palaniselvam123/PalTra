@@ -141,6 +141,14 @@ export type SmaConfig = {
   tall_pullback?: boolean;
   tall_atr_mult?: number;
   tall_expiry_candles?: number;
+  /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
+  slow_sma_exit?: boolean;
+  recovery_hold?: boolean;
+  recovery_tolerance_pct?: number;
+  recovery_emergency_mult?: number;
+  recovery_atr_mult?: number;
+  recovery_max_candles?: number;
+  recovery_handoff?: boolean;
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;

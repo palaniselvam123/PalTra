@@ -142,6 +142,10 @@ def register(engine: StrategyEngine) -> None:
     """Called at boot for bot 1 and each extra bot, so the rule can see them all."""
     _ENGINES[int(engine.bot_id)] = engine
     engine.live_guard = live_conflict  # type: ignore[attr-defined]
+    # Only the live bots move a recovered stock to Bot 2 (recovery.py); replays never do.
+    import recovery
+
+    engine.handoff = recovery.handoff  # type: ignore[attr-defined]
 
 
 def engines() -> dict[int, StrategyEngine]:

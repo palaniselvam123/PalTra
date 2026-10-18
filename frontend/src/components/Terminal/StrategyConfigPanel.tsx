@@ -75,6 +75,13 @@ const LABELS: Record<string, string> = {
   tall_pullback: "tall-candle pullback",
   tall_atr_mult: "tall candle × ATR",
   tall_expiry_candles: "pullback wait (candles)",
+  slow_sma_exit: "slow SMA exit",
+  recovery_hold: "recovery hold",
+  recovery_tolerance_pct: "recovery target %",
+  recovery_emergency_mult: "recovery loss floor ×",
+  recovery_atr_mult: "recovery ATR floor ×",
+  recovery_max_candles: "recovery candles",
+  recovery_handoff: "hand off to Bot 2",
   use_or_volume: "opening volume check",
   use_or_vwap: "opening VWAP check",
   use_or_spread: "opening SMA spread check",
@@ -257,6 +264,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tall_pullback: Boolean(form.tall_pullback),
     tall_atr_mult: Math.min(10, Math.max(0.5, Number(form.tall_atr_mult ?? 1.5) || 1.5)),
     tall_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.tall_expiry_candles ?? 2) || 2))),
+    slow_sma_exit: Boolean(form.slow_sma_exit),
+    recovery_hold: Boolean(form.recovery_hold),
+    recovery_tolerance_pct: Math.min(5, Math.max(0, Number(form.recovery_tolerance_pct ?? 0.15) || 0)),
+    recovery_emergency_mult: Math.min(10, Math.max(1, Number(form.recovery_emergency_mult ?? 1.5) || 1.5)),
+    recovery_atr_mult: Math.min(20, Math.max(0.5, Number(form.recovery_atr_mult ?? 2.5) || 2.5)),
+    recovery_max_candles: Math.min(75, Math.max(1, Math.round(Number(form.recovery_max_candles ?? 6) || 6))),
+    recovery_handoff: form.recovery_handoff !== false,
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -1114,6 +1128,78 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("st_exit") && <OwnTag />}
             Exit: close the trade when the Supertrend flips against it
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Trend defence and recovery (for the trend bot)
+            <InfoTip label="About trend defence and recovery">
+              Slow SMA exit: a trade closes only when a candle closes beyond the slow SMA against it (below for a buy, above
+              for a sell); small candles against it are ignored, and the counter-candle exit is not used while this is on.
+              Recovery hold (needs the SMA cross exit on): on an opposite cross, a trade in profit closes at once and the bot
+              reverses as usual; a trade at a loss is held instead. Each candle close after that, it closes as a recovery when
+              the loss is back within the target % of the entry or the price comes back to the slow SMA, and then (if ticked)
+              the stock moves to Bot 2: flipped, SMA gap mode in at ±0.119 % and out at ±0.003 % with the fade confirmed by a
+              close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60; Bot 2 waits for its next cross. It closes as an
+              emergency when the loss grows to the floor × the loss at the cross, or the ATR floor × ATR, or after the
+              candles below; that stock is then not traded again on this bot today. A held trade still open at the entry
+              cut-off (15:00) closes there. The stop still guards the trade throughout. A practice bot never hands a stock to
+              a LIVE Bot 2. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.slow_sma_exit)}
+              onChange={(e) => set("slow_sma_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("slow_sma_exit") && <OwnTag />}
+            Exit only on a close beyond the slow SMA (replaces the counter-candle exit)
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.recovery_hold)}
+              onChange={(e) => set("recovery_hold", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("recovery_hold") && <OwnTag />}
+            Recovery hold: on an opposite cross, close a winner, hold a loser for its recovery
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Recovery target (% of entry)"
+              value={String(form.recovery_tolerance_pct ?? 0.15)}
+              onChange={(v) => set("recovery_tolerance_pct", v)}
+              own={isOwn("recovery_tolerance_pct")}
+            />
+            <Field
+              label="Give up after (candles)"
+              value={String(form.recovery_max_candles ?? 6)}
+              onChange={(v) => set("recovery_max_candles", v)}
+              own={isOwn("recovery_max_candles")}
+            />
+            <Field
+              label="Loss floor (× loss at the cross)"
+              value={String(form.recovery_emergency_mult ?? 1.5)}
+              onChange={(v) => set("recovery_emergency_mult", v)}
+              own={isOwn("recovery_emergency_mult")}
+            />
+            <Field
+              label="ATR floor (× ATR)"
+              value={String(form.recovery_atr_mult ?? 2.5)}
+              onChange={(v) => set("recovery_atr_mult", v)}
+              own={isOwn("recovery_atr_mult")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.recovery_handoff !== false}
+              onChange={(e) => set("recovery_handoff", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("recovery_handoff") && <OwnTag />}
+            After a recovery, move the stock to Bot 2 (flipped, gap mode)
           </label>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
