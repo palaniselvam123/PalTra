@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
+import all_bots_guard
 import chop_auto
 import chop_scan
 import morning_scan
@@ -148,6 +149,7 @@ _booted = False
 _task: asyncio.Task | None = None
 _research_task: asyncio.Task | None = None
 _bot_tasks: list[asyncio.Task] = []
+_guard_task: asyncio.Task | None = None
 
 
 def boot_engine() -> asyncio.Task | None:
@@ -182,7 +184,17 @@ def boot_engine() -> asyncio.Task | None:
         eng.restore_open_books()
         eng.restore_trades_today()
         _bot_tasks.append(asyncio.create_task(eng.run()))
+    # All-bots day target / stop loss (all_bots_guard.py): off until set on Settings.
+    global _guard_task
+    _guard_task = asyncio.create_task(
+        all_bots_guard.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()))
+    )
     return _task
+
+
+def _all_bots() -> list[StrategyEngine]:
+    """Bots 1-4, the ones the all-bots target / stop loss adds up and stops (not research)."""
+    return [engine, *bot_engines.values()]
 
 
 async def announce_shutdown_all() -> None:
@@ -202,7 +214,7 @@ def stop_engine() -> None:
     research_engine.stop()
     for eng in bot_engines.values():
         eng.stop()
-    for task in (_task, _research_task, *_bot_tasks):
+    for task in (_task, _research_task, _guard_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -1054,6 +1066,12 @@ async def _start_bot(eng: StrategyEngine):
     eng._roll_session(_ist_now())
     eng.release_manual_panic()
     eng.release_trade_cap()
+    if all_bots_guard.is_guard_halt(eng) and eng in _all_bots():
+        # Halted by the all-bots target / stop loss: only once the limits no longer hit.
+        closed = await asyncio.to_thread(all_bots_guard.closed_total, _all_bots())
+        target, stop = all_bots_guard.limits(engine.load_config())
+        if all_bots_guard.verdict(closed + all_bots_guard.open_total(_all_bots()), target, stop) is None:
+            eng.status, eng.halt_reason = "STOPPED", ""
     if eng.status == "HALTED":
         raise HTTPException(423, eng.halt_reason or "Halted for the day")
     if eng.status == "DAY_COMPLETED":
@@ -2148,6 +2166,47 @@ async def wallet_margin(body: WalletMargin):
 async def list_bots():
     """Every SMA bot: name, mode, status, armed and held stocks, today's net."""
     return [_bot_summary(engine), *(_bot_summary(eng) for eng in bot_engines.values())]
+
+
+class AllBotsGuard(BaseModel):
+    target: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
+    stop: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
+
+
+async def _guard_view() -> dict:
+    bots = _all_bots()
+    target, stop = all_bots_guard.limits(engine.load_config())
+    closed = await asyncio.to_thread(all_bots_guard.closed_total, bots)
+    amount = round(closed + all_bots_guard.open_total(bots), 2)
+    halted = [eng.bot_id for eng in bots if all_bots_guard.is_guard_halt(eng)]
+    return {
+        "target": target,
+        "stop": stop,
+        "total": amount,
+        "hit": all_bots_guard.verdict(amount, target, stop),
+        "halted_bots": halted,
+        "reason": next((eng.halt_reason for eng in bots if all_bots_guard.is_guard_halt(eng)), ""),
+    }
+
+
+@app.get("/api/bots/guard")
+async def all_bots_guard_get():
+    """The all-bots day target / stop loss and today's combined P&L (before charges)."""
+    return await _guard_view()
+
+
+@app.put("/api/bots/guard")
+async def all_bots_guard_put(body: AllBotsGuard):
+    """Save the all-bots day target / stop loss (₹, 0 = off) on bot 1's settings row."""
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        row.all_bots_target = float(body.target)
+        row.all_bots_stop = float(body.stop)
+        db.commit()
+    engine.load_config()
+    return await _guard_view()
 
 
 @app.post("/api/bots/kill-all")

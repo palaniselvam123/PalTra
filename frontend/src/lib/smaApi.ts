@@ -836,6 +836,16 @@ export const CANDLE_MINUTES: CandleMinutes[] = [1, 2, 3, 5, 10, 15];
 
 export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 
+/** The all-bots day target / stop loss (all_bots_guard.py). */
+export interface AllBotsGuard {
+  target: number;
+  stop: number;
+  total: number;
+  hit: "target" | "stop" | null;
+  halted_bots: number[];
+  reason: string;
+}
+
 export type BotSummary = {
   bot: number;
   name: string;
@@ -1390,6 +1400,10 @@ export const smaApi = {
   /** Every SMA bot: name, PAPER/LIVE, status, armed and held stocks, today's net. */
   bots: () => request<BotSummary[]>("/api/bots"),
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
+  /** All-bots day target / stop loss (₹, 0 = off) and today's combined P&L before charges. */
+  allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
+  saveAllBotsGuard: (target: number, stop: number) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {
