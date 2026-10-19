@@ -482,12 +482,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the window's turn; shorter bursts stay choppy. Rows carry `phase`, `phase_since_ts`, `phase_move_pct`,
   `phase_candles`, `phases` (all of today's) and `strong_phases`; the card's Phase column shows the phase
   now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
-  **Crosses today: None (0) / Exactly 1 on** (multi-select 1/2/3/5/10/15 min): each row carries
+  **Crosses today on** (`CROSS_RULES` in `ChopScan.tsx`: None, Exactly 1 / 1 ↑ / 1 ↓ / 2 / 3, At most 1-3,
+  2 / 3 / 5 or more; multi-select 1/2/3/5/10/15 min): each row carries
   `crosses_by_minutes`, `side_by_minutes`, `last_cross_ts_by_minutes` and
   `last_cross_side_by_minutes`: today's closed-candle SMA crosses, the fast SMA's side, and the
   start and direction of the last cross on every candle size, read from the same 1-minute download
-  (`chop_scan._crosses_on`; None while a size has too few candles). The card keeps only stocks with
-  exactly the chosen count on every ticked size and shows a single cross as `@HH:MM ↑/↓`.
+  (`chop_scan._crosses_on`; None while a size has too few candles). The card keeps only stocks whose count
+  matches the chosen rule on every ticked size (a size with no count never matches; ↑ / ↓ also read
+  `last_cross_side_by_minutes`) and shows a single cross as `@HH:MM ↑/↓`.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute

@@ -17,6 +17,37 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
+
+// "Crosses today" choices: today's closed-candle SMA crosses on each ticked candle size.
+const CROSS_RULES = [
+  ["0", "None (0)"],
+  ["1", "Exactly 1"],
+  ["1up", "Exactly 1 ↑ (crossed up)"],
+  ["1down", "Exactly 1 ↓ (crossed down)"],
+  ["2", "Exactly 2"],
+  ["3", "Exactly 3"],
+  ["le1", "At most 1"],
+  ["le2", "At most 2"],
+  ["le3", "At most 3"],
+  ["ge2", "2 or more"],
+  ["ge3", "3 or more"],
+  ["ge5", "5 or more (choppy)"],
+] as const;
+type CrossRule = (typeof CROSS_RULES)[number][0];
+
+function isCrossRule(value: string): value is CrossRule {
+  return CROSS_RULES.some(([v]) => v === value);
+}
+
+// A size with too few candles has no count (null): it never matches.
+function crossRuleMatches(rule: CrossRule, count: number | null | undefined, lastSide: "BULLISH" | "BEARISH" | null | undefined): boolean {
+  if (count == null) return false;
+  if (rule === "1up") return count === 1 && lastSide === "BULLISH";
+  if (rule === "1down") return count === 1 && lastSide === "BEARISH";
+  if (rule.startsWith("le")) return count <= Number(rule.slice(2));
+  if (rule.startsWith("ge")) return count >= Number(rule.slice(2));
+  return count === Number(rule);
+}
 const POLL_MS = 3_000;
 // Auto re-scan period in milliseconds (30 min). GitHub-cron-style, best-effort; the browser
 // has to be awake. On mobile a backgrounded tab may skip ticks.
@@ -121,8 +152,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [minSpeed, setMinSpeed] = useState(0);
   // "No cross today on": keep stocks whose SMAs have not crossed once today on every ticked candle size.
   const [noCrossOn, setNoCrossOn] = useState<CrossScanMinutes[]>([]);
-  // How many crosses today the ticked sizes must have: 0 (none) or exactly 1 (one turn since the morning).
-  const [crossCount, setCrossCount] = useState<0 | 1>(0);
+  // How many crosses today the ticked sizes must have (CROSS_RULES: none, exactly N, at most N, N or more, one up / down).
+  const [crossCount, setCrossCount] = useState<CrossRule>("0");
   // Price range in ₹ (0 = no bound): filters the table, the quiet pop-up and the Telegram alert.
   const [priceMin, setPriceMin] = useState(0);
   const [priceMax, setPriceMax] = useState(0);
@@ -140,7 +171,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         if (typeof saved.quietMin === "number") setQuietMin(saved.quietMin);
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
         if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
-        if (saved.crossCount === 0 || saved.crossCount === 1) setCrossCount(saved.crossCount);
+        if (isCrossRule(String(saved.crossCount))) setCrossCount(String(saved.crossCount) as CrossRule);
         if (typeof saved.priceMin === "number") setPriceMin(saved.priceMin);
         if (typeof saved.priceMax === "number") setPriceMax(saved.priceMax);
         if (Array.isArray(saved.noCrossOn))
@@ -315,7 +346,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       if (score === "PHASE_CHOP" && r.phase !== "CHOP") return false;
       if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
       if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
-      if (noCrossOn.some((m) => r.crosses_by_minutes?.[String(m)] !== crossCount)) return false;
+      if (noCrossOn.some((m) => !crossRuleMatches(crossCount, r.crosses_by_minutes?.[String(m)], r.last_cross_side_by_minutes?.[String(m)])))
+        return false;
       return true;
     },
     [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax]
@@ -446,13 +478,16 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           <FilterField label="Crosses today">
             <select
               value={crossCount}
-              onChange={(e) => setCrossCount(Number(e.target.value) === 1 ? 1 : 0)}
+              onChange={(e) => setCrossCount(isCrossRule(e.target.value) ? e.target.value : "0")}
               aria-label="How many SMA crosses today"
               className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
-              title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run."
+              title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run (↑ up / ↓ down: that cross's direction). At most / or more: a range. Every ticked candle size must match."
             >
-              <option value={0}>None (0)</option>
-              <option value={1}>Exactly 1</option>
+              {CROSS_RULES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
             <span className="text-xs text-slate-400">on</span>
             {CANDLE_CHOICES.map((m) => {
