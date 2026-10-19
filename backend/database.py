@@ -134,6 +134,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "recovery_atr_mult": "FLOAT DEFAULT 2.5",
             "recovery_max_candles": "INTEGER DEFAULT 6",
             "recovery_handoff": "BOOLEAN DEFAULT 1",
+            "all_bots_target": "FLOAT DEFAULT 0",
+            "all_bots_stop": "FLOAT DEFAULT 0",
             "breakout_handoff": "BOOLEAN DEFAULT 0",
             "breakout_atr_mult": "FLOAT DEFAULT 1.8",
             "breakout_gap_pct": "FLOAT DEFAULT 0.2",

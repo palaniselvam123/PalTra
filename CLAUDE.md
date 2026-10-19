@@ -655,6 +655,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   day_gross`, `open_gross_total`, `kpis.gross_wins`, `/api/bots` `gross_today`,
   chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
   daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
+- `backend/all_bots_guard.py` – all-bots day target / stop loss (off by default: `all_bots_target` /
+  `all_bots_stop` ₹ on `BotConfig` row 1, 0 = off; `GET/PUT /api/bots/guard`, Settings → "All bots: day target and
+  stop loss", `components/Settings/AllBotsGuard.tsx`). While NSE is open the watcher (`run`, started in `boot_engine`,
+  every `POLL_SEC` 5 s) adds today's P&L of bots 1-4 (`main._all_bots`; not research or replays), each in its own
+  current book: closed gross (`_kpis`, read in a thread) plus open gross (`_open_pnl`, on the loop), before charges like
+  the screens. At ≥ target or ≤ −stop every bot gets `StrategyEngine.kill` (the same panic as "Panic all bots": LIVE
+  stop cancelled, positions squared off, HALTED, alert/call) with a reason starting `HALT_PREFIX`. `_start_bot` refuses
+  such a bot for the rest of the day unless the saved limits no longer hit; the next session's roll clears it.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

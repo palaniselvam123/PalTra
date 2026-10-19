@@ -5,12 +5,14 @@ import { ApiKeyForm } from "@/components/Settings/ApiKeyForm";
 import { AiKeyForm } from "@/components/Settings/AiKeyForm";
 import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
+import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
 import { SectionNav } from "@/components/Settings/SectionNav";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
 import { useTradingState } from "@/hooks/useTradingState";
 
 const SECTIONS: [string, string][] = [
+  ["all-bots-guard", "All-bots target"],
   ["sma-strategy", "SMA strategy"],
   ["trade-alerts", "Trade alerts"],
   ["broker-keys", "Broker keys"],
@@ -37,6 +39,7 @@ export default function SettingsPage() {
       />
       <main className="mx-auto max-w-[1440px] space-y-4 px-4 py-6 lg:px-6">
         <SectionNav sections={SECTIONS} />
+        <AllBotsGuard />
         <SmaStrategySettings />
         {/* The smaller forms sit two to a row on a wide screen instead of stretching across it. */}
         <div className="grid items-start gap-4 xl:grid-cols-2">
