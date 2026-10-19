@@ -686,6 +686,72 @@ async def copy_trade_symbols(body: TradeSymbolCopy):
     return {"added": added, "skipped": skipped, "config": payload}
 
 
+class SettingsCopy(BaseModel):
+    """Copy one bot's strategy settings onto another bot (or the research desk)."""
+
+    from_desk: Literal["1", "2", "3", "4", "research"]
+    to_desk: Literal["1", "2", "3", "4", "research"]
+    # Also replace the destination's own per-stock settings with the source's.
+    stock_settings: bool = False
+    # The destination trades real money: the page asked first.
+    confirm_live: bool = False
+
+
+# Never copied: the row's identity, its Trade list, its PAPER/LIVE switch, the
+# chart focus, bookkeeping, and the desk-wide switches kept on bot 1's row.
+COPY_SKIP = frozenset({
+    "id", "symbol", "trade_symbols", "trade_sources", "trading_mode", "bot_name", "stock_settings",
+    "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
+    "all_bots_target", "all_bots_stop", "all_bots_squareoff",
+})
+
+
+def _desk_engine(desk: str) -> StrategyEngine:
+    if desk == "research":
+        return _research()
+    bot = int(desk)
+    if bot in EXTRA_BOTS:
+        ensure_bot_config(bot)
+    return _bot_engine_for(bot)
+
+
+@app.post("/api/bots/copy-settings")
+async def copy_settings(body: SettingsCopy):
+    """Replace one desk's strategy settings with another's. The Trade list, mode and name stay."""
+    if body.from_desk == body.to_desk:
+        raise HTTPException(400, "Pick a different bot to copy to")
+    src_eng, dst_eng = _desk_engine(body.from_desk), _desk_engine(body.to_desk)
+    with session_factory()() as db:
+        src = db.get(BotConfig, src_eng.config_id)
+        row = db.get(BotConfig, dst_eng.config_id)
+        if src is None or row is None:
+            raise HTTPException(500, "BotConfig missing")
+        if (row.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(409, "That bot is LIVE: confirm before changing its settings")
+        copied = [col.name for col in BotConfig.__table__.columns if col.name not in COPY_SKIP]
+        own = stock_settings(src) if body.stock_settings else stock_settings(row)
+        held = {symbol: pos.qty for symbol, pos in dst_eng.positions.items() if pos is not None}
+        if any(qty != int(src.qty) for symbol, qty in held.items() if "qty" not in own.get(symbol, {})):
+            raise HTTPException(409, "Close the open position before changing quantity")
+        changed = [name for name in copied if getattr(row, name) != getattr(src, name)]
+        for name in copied:
+            setattr(row, name, getattr(src, name))
+        if body.stock_settings:
+            row.stock_settings = src.stock_settings or "{}"
+        _check_settings(row)
+        for symbol in own:
+            _check_settings(_cfg_for(row, symbol), symbol)
+        db.commit()
+        db.refresh(row)
+        payload = _config_dict(row)
+        cap = int(row.max_trades_per_day)
+        db.expunge(row)
+    _reload(dst_eng, payload)
+    if "max_trades_per_day" in changed:
+        dst_eng.release_trade_cap(cap)
+    return {"changed": changed, "config": payload}
+
+
 async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
     # The chart symbol can change while another stock stays open. Quantity is
     # shared, so an open book still blocks a size change. Raising the trade

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
+import { CopySettings } from "@/components/Settings/CopySettings";
 import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } from "@/lib/smaApi";
 
 /**
@@ -145,6 +146,11 @@ export function SmaStrategySettings() {
         <p className="mb-2 flex min-h-[3.75rem] items-end text-xs text-slate-400">
           The research desk always trades practice money next to the live bots; it has no name of its own.
         </p>
+      ) : null}
+      {config ? (
+        <div className="mb-2">
+          <CopySettings key={desk} to={desk} bots={bots} onCopied={load} />
+        </div>
       ) : null}
       {config ? (
         <div aria-busy={configDesk !== desk} className={clsx("transition-opacity", configDesk !== desk && "pointer-events-none opacity-50")}>
