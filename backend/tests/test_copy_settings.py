@@ -34,9 +34,12 @@ def test_copy_replaces_the_strategy_but_keeps_list_mode_and_name(tmp_path, monke
         client.put("/api/bots/3/config/stock/SBIN", json={"qty": 3})
         client.put("/api/bots/guard", json={"target": 500, "stop": 0})  # on bot 1's row
         client.post("/api/bots/2/trade-symbols", json={"symbol": "TCS", "armed": True})
+        with database.session_factory()() as s:
+            s.get(BotConfig, 3).all_bots_target = 0.0  # a new bot's row starts as a copy of row 1's
+            s.commit()
         res = client.post("/api/bots/copy-settings", json={"from_desk": "1", "to_desk": "2"})
         assert res.status_code == 200
-        assert not _guard_target_of_bot_2(database)
+        assert _guard_target_of_bot_2(database) == 0.0 and "all_bots_target" not in res.json()["changed"]
         res = client.post("/api/bots/copy-settings", json={"from_desk": "3", "to_desk": "2"})
         assert res.status_code == 200, res.text
         out = res.json()
@@ -48,7 +51,6 @@ def test_copy_replaces_the_strategy_but_keeps_list_mode_and_name(tmp_path, monke
         with database.session_factory()() as s:
             two = s.get(BotConfig, 3)
             assert json.loads(two.stock_settings or "{}") == {}  # per-stock settings only when asked
-            assert not two.all_bots_target  # never copied
         res = client.post("/api/bots/copy-settings", json={"from_desk": "3", "to_desk": "research", "stock_settings": True})
         assert res.status_code == 200, res.text
         assert client.get("/api/research/config/stock/SBIN").json()["qty"] == 3
