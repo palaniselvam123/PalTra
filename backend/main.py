@@ -708,6 +708,7 @@ COPY_SKIP = frozenset({
 
 def _desk_engine(desk: str) -> StrategyEngine:
     if desk == "research":
+        ensure_research_config()
         return _research()
     bot = int(desk)
     if bot in EXTRA_BOTS:
