@@ -336,6 +336,7 @@ class BotConfig(Base):
     # All-bots day target / stop loss in ₹ (all_bots_guard.py), read from row 1 only; 0 = off.
     all_bots_target: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_stop: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_squareoff: Mapped[str | None] = mapped_column(String(5), nullable=True, default="")
     # Trend breakout handoff back to Bot 3 (breakout.py).
     breakout_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)

@@ -1,4 +1,4 @@
-"""All-bots day target and stop loss (all_bots_guard.py).
+"""All-bots day target, stop loss and square-off time (all_bots_guard.py).
 
 Off by default. Two numbers on bot 1's settings row (`BotConfig` id 1):
 `all_bots_target` and `all_bots_stop`, in ₹, 0 = off. While NSE is open the
@@ -11,14 +11,21 @@ When the total reaches the target, or falls to minus the stop, every bot gets
 the same panic as "Panic all bots" (`StrategyEngine.kill`: open trades squared
 off, the LIVE stop cancelled first, the bot HALTED) with a reason starting
 `HALT_PREFIX`. Start then refuses for the rest of the day, unless the limits are
-changed so the total no longer hits them (`may_restart`). Bookkeeping and the
-existing kill path only: nothing here places an order of its own.
+changed so the total no longer hits them (`may_restart`).
+
+A third setting, `all_bots_squareoff` ("HH:MM" IST, empty = off, between 09:15 and
+15:30), does the same at that time of day: from then on every bot is squared off
+and stays stopped for the rest of the day, whatever the P&L (each bot's own
+`square_off_time` still applies too). Bookkeeping and the existing kill path only:
+nothing here places an order of its own.
 """
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import math
+import re
 
 log = logging.getLogger("sma.all_bots_guard")
 
@@ -42,8 +49,27 @@ def limits(cfg) -> tuple[float, float]:
     return _amount(getattr(cfg, "all_bots_target", 0)), _amount(getattr(cfg, "all_bots_stop", 0))
 
 
-def verdict(total: float, target: float, stop: float) -> str | None:
-    """'target' / 'stop' when the day's total has reached a limit, else None."""
+EARLIEST, LATEST = dt.time(9, 15), dt.time(15, 30)
+_HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+def parse_time(value) -> dt.time | None:
+    """'HH:MM' inside the session (09:15-15:30) as a time, else None (off)."""
+    match = _HHMM.match(str(value or "").strip())
+    if not match:
+        return None
+    at = dt.time(int(match.group(1)), int(match.group(2)))
+    return at if EARLIEST <= at <= LATEST else None
+
+
+def squareoff_at(cfg) -> dt.time | None:
+    return parse_time(getattr(cfg, "all_bots_squareoff", None))
+
+
+def verdict(total: float, target: float, stop: float, now: dt.datetime | None = None, at: dt.time | None = None) -> str | None:
+    """'time' / 'target' / 'stop' when a limit has been reached today, else None."""
+    if at is not None and now is not None and now.time() >= at:
+        return "time"
     if target > 0 and total >= target:
         return "target"
     if stop > 0 and total <= -stop:
@@ -80,17 +106,21 @@ def is_guard_halt(engine) -> bool:
     return engine.status == "HALTED" and (engine.halt_reason or "").startswith(HALT_PREFIX)
 
 
-def may_restart(engines, cfg) -> bool:
-    """A bot halted by this guard may start again today only if the limits no longer hit."""
+def may_restart(engines, cfg, now: dt.datetime | None = None) -> bool:
+    """A bot halted by this guard may start again today only if no limit hits any more."""
     target, stop = limits(cfg)
-    return verdict(total(engines), target, stop) is None
+    return verdict(total(engines), target, stop, now, squareoff_at(cfg)) is None
 
 
-async def trip(engines, kind: str, amount: float, target: float, stop: float) -> str:
+async def trip(engines, kind: str, amount: float, target: float, stop: float, at: dt.time | None = None) -> str:
     """Panic every bot. Returns the reason given to each."""
-    limit = target if kind == "target" else -stop
-    word = "target" if kind == "target" else "stop loss"
-    reason = f"{HALT_PREFIX} {word} hit: P&L ₹{amount:,.2f} (limit ₹{limit:,.2f}) — every bot squared off"
+    if kind == "time":
+        when = at.strftime("%H:%M") if at else "?"
+        reason = f"{HALT_PREFIX} square-off time {when} reached: P&L ₹{amount:,.2f} — every bot squared off"
+    else:
+        limit = target if kind == "target" else -stop
+        word = "target" if kind == "target" else "stop loss"
+        reason = f"{HALT_PREFIX} {word} hit: P&L ₹{amount:,.2f} (limit ₹{limit:,.2f}) — every bot squared off"
     for eng in engines:
         if is_guard_halt(eng) and not eng.positions:
             continue
@@ -101,20 +131,21 @@ async def trip(engines, kind: str, amount: float, target: float, stop: float) ->
     return reason
 
 
-async def run(engines_fn, config_fn, is_open_fn, poll: float = POLL_SEC) -> None:
-    """Watch the day's total while the market is open; trip once a limit is reached."""
+async def run(engines_fn, config_fn, is_open_fn, poll: float = POLL_SEC, now_fn=None) -> None:
+    """Watch the day's total and the clock while the market is open; trip once a limit is reached."""
     while True:
         try:
             if is_open_fn():
                 cfg = config_fn()
                 target, stop = limits(cfg)
-                if target > 0 or stop > 0:
+                at = squareoff_at(cfg)
+                if target > 0 or stop > 0 or at is not None:
                     engines = list(engines_fn())
                     closed = await asyncio.to_thread(closed_total, engines)
                     amount = round(closed + open_total(engines), 2)
-                    kind = verdict(amount, target, stop)
+                    kind = verdict(amount, target, stop, now_fn() if now_fn else None, at)
                     if kind and any(not is_guard_halt(eng) or eng.positions for eng in engines):
-                        reason = await trip(engines, kind, amount, target, stop)
+                        reason = await trip(engines, kind, amount, target, stop, at)
                         log.warning("all-bots guard tripped: %s", reason)
         except asyncio.CancelledError:
             raise
