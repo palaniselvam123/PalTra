@@ -187,7 +187,7 @@ def boot_engine() -> asyncio.Task | None:
     # All-bots day target / stop loss (all_bots_guard.py): off until set on Settings.
     global _guard_task
     _guard_task = asyncio.create_task(
-        all_bots_guard.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()))
+        all_bots_guard.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), now_fn=engine._now)
     )
     return _task
 
@@ -1069,8 +1069,10 @@ async def _start_bot(eng: StrategyEngine):
     if all_bots_guard.is_guard_halt(eng) and eng in _all_bots():
         # Halted by the all-bots target / stop loss: only once the limits no longer hit.
         closed = await asyncio.to_thread(all_bots_guard.closed_total, _all_bots())
-        target, stop = all_bots_guard.limits(engine.load_config())
-        if all_bots_guard.verdict(closed + all_bots_guard.open_total(_all_bots()), target, stop) is None:
+        cfg = engine.load_config()
+        target, stop = all_bots_guard.limits(cfg)
+        amount = closed + all_bots_guard.open_total(_all_bots())
+        if all_bots_guard.verdict(amount, target, stop, engine._now(), all_bots_guard.squareoff_at(cfg)) is None:
             eng.status, eng.halt_reason = "STOPPED", ""
     if eng.status == "HALTED":
         raise HTTPException(423, eng.halt_reason or "Halted for the day")
@@ -2171,19 +2173,24 @@ async def list_bots():
 class AllBotsGuard(BaseModel):
     target: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
     stop: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
+    # "HH:MM" IST between 09:15 and 15:30; empty = off. Left out = unchanged.
+    squareoff: str | None = None
 
 
 async def _guard_view() -> dict:
     bots = _all_bots()
-    target, stop = all_bots_guard.limits(engine.load_config())
+    cfg = engine.load_config()
+    target, stop = all_bots_guard.limits(cfg)
+    at = all_bots_guard.squareoff_at(cfg)
     closed = await asyncio.to_thread(all_bots_guard.closed_total, bots)
     amount = round(closed + all_bots_guard.open_total(bots), 2)
     halted = [eng.bot_id for eng in bots if all_bots_guard.is_guard_halt(eng)]
     return {
         "target": target,
         "stop": stop,
+        "squareoff": at.strftime("%H:%M") if at else "",
         "total": amount,
-        "hit": all_bots_guard.verdict(amount, target, stop),
+        "hit": all_bots_guard.verdict(amount, target, stop, engine._now(), at),
         "halted_bots": halted,
         "reason": next((eng.halt_reason for eng in bots if all_bots_guard.is_guard_halt(eng)), ""),
     }
@@ -2204,6 +2211,11 @@ async def all_bots_guard_put(body: AllBotsGuard):
             raise HTTPException(500, "BotConfig missing")
         row.all_bots_target = float(body.target)
         row.all_bots_stop = float(body.stop)
+        if body.squareoff is not None:
+            text = body.squareoff.strip()
+            if text and all_bots_guard.parse_time(text) is None:
+                raise HTTPException(422, "Square-off time must be HH:MM between 09:15 and 15:30, or empty for off.")
+            row.all_bots_squareoff = text
         db.commit()
     engine.load_config()
     return await _guard_view()

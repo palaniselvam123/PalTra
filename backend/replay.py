@@ -34,6 +34,7 @@ from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, ReviewLog, TradeLog
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
 from tick_sizes import round_price
+import all_bots_guard
 import open_pnl_log
 import recovery
 from scalp_picks import PickRule, picks_for_day
@@ -217,6 +218,10 @@ class ReplayEngine(StrategyEngine):
     """The SMA bot on a replayed day: its own clock, books and broker."""
 
     records_ticks = False  # its prices are walked from minute candles
+    # The all-bots day target / stop loss / square-off time (all_bots_guard.py), judged on this
+    # replayed day's own P&L and clock, so a backtest shows what the rule would have done.
+    day_guard = True
+    _guard_minute: dt.datetime | None = None
     uses_wallet = True  # a replay takes margin from the bots' practice wallet (owner's choice)
 
     def __init__(
@@ -246,6 +251,32 @@ class ReplayEngine(StrategyEngine):
 
     def _now(self) -> dt.datetime:
         return self.feed.clock
+
+    async def tick(self, now: dt.datetime) -> None:
+        await super().tick(now)
+        if self.day_guard and self.status != "HALTED":
+            await self._check_day_guard(now)
+
+    async def _check_day_guard(self, now: dt.datetime) -> None:
+        """Once per replayed minute: this day's P&L (closed + open, before charges) against the
+        all-bots target / stop loss, and the replay clock against the all-bots square-off time.
+        A hit squares off and stops this replayed day, as the live guard does to every bot."""
+        minute = now.replace(second=0, microsecond=0)
+        if minute == self._guard_minute:
+            return
+        self._guard_minute = minute
+        with session_factory()() as db:
+            row = db.get(BotConfig, 1)
+            if row is None:
+                return
+            target, stop = all_bots_guard.limits(row)
+            at = all_bots_guard.squareoff_at(row)
+        if not (target or stop or at):
+            return
+        amount = all_bots_guard.total([self])
+        kind = all_bots_guard.verdict(amount, target, stop, now, at)
+        if kind:
+            await all_bots_guard.trip([self], kind, amount, target, stop, at)
 
     def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT) -> str:  # noqa: ARG002
         """Hand-off in a replay: the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).

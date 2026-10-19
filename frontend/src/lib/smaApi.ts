@@ -840,6 +840,8 @@ export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 export interface AllBotsGuard {
   target: number;
   stop: number;
+  /** "HH:MM" IST square-off time for every bot, "" = off. */
+  squareoff: string;
   total: number;
   hit: "target" | "stop" | null;
   halted_bots: number[];
@@ -1402,8 +1404,8 @@ export const smaApi = {
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
   /** All-bots day target / stop loss (₹, 0 = off) and today's combined P&L before charges. */
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
-  saveAllBotsGuard: (target: number, stop: number) =>
-    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop }) }),
+  saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {

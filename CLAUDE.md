@@ -663,6 +663,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the screens. At ≥ target or ≤ −stop every bot gets `StrategyEngine.kill` (the same panic as "Panic all bots": LIVE
   stop cancelled, positions squared off, HALTED, alert/call) with a reason starting `HALT_PREFIX`. `_start_bot` refuses
   such a bot for the rest of the day unless the saved limits no longer hit; the next session's roll clears it.
+  A third setting, `all_bots_squareoff` ("HH:MM" IST, 09:15-15:30, empty = off; `parse_time`, `squareoff_at`), trips
+  the same panic once that time of day is reached (`verdict(..., now, at)` → `"time"`), whatever the P&L; each bot's
+  own `square_off_time` still applies. **Backtests too**: each `ReplayEngine` day (`day_guard`, off for the
+  `sma_research` baseline) checks once per replayed minute (`_check_day_guard`) its own day's P&L (closed + open, before
+  charges) against the target / stop and the replay clock against the square-off time, and on a hit `trip`s itself
+  (squared off as `KILL_SWITCH`, HALTED for the rest of that replayed day; the next day starts fresh). A replay plays
+  one bot, so it is judged on that bot's P&L alone.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.
