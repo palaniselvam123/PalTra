@@ -1391,7 +1391,7 @@ async def replay_resume(body: ReplayResume, bot: int = 1):
 @app.get("/api/replay/runs")
 async def replay_runs(limit: int = 50):
     """Every replay run with its totals and the settings it used."""
-    return list_runs(max(1, min(limit, 500)))
+    return await asyncio.to_thread(list_runs, max(1, min(limit, 500)))
 
 
 @app.get("/api/replay/runs/{run_id}")

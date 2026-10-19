@@ -257,3 +257,30 @@ def test_a_replay_never_arms_a_live_bot_2(db):  # noqa: F811
     fake = type("E", (), {"replay_symbols": ["SBIN"], "on_handoff": None})()
     assert ReplayEngine._hand_off(fake, 1, "SBIN", True).startswith("no handoff")  # replays are practice money
     assert fake.replay_symbols == ["SBIN"]
+
+
+def test_list_runs_reuses_unchanged_summaries_and_sees_changes(db):  # noqa: F811
+    """The Backtests tab polls the run list; unchanged runs are not re-read (replay._RUN_CACHE)."""
+    import replay
+    from models import ReplayRun, TradeLog
+
+    with db.session_factory()() as s:
+        run = ReplayRun(start_date="2026-09-22", end_date="2026-09-22", start_time="09:15", symbols="SBIN",
+                        settings="{}", status="FINISHED", days_total=1, days_done=1, created_at=dt.datetime(2026, 9, 22, 16))
+        s.add(run)
+        s.commit()
+        run_id = run.id
+        s.add(TradeLog(date="2026-09-22", symbol="SBIN", direction="LONG", qty=1, entry_time=dt.datetime(2026, 9, 22, 10),
+                       entry_price=100.0, exit_time=dt.datetime(2026, 9, 22, 11), exit_price=102.0, gross_pnl=2.0, net_pnl=1.5,
+                       ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger_price=98.0, mode="REPLAY", bot=1, run_id=run_id))
+        s.commit()
+    first = replay.list_runs(10)[0]
+    assert first["id"] == run_id and first["totals"]["trades"] == 1
+    assert replay.list_runs(10)[0] is first  # nothing changed: the same summary, not re-read
+    with db.session_factory()() as s:
+        s.add(TradeLog(date="2026-09-22", symbol="SBIN", direction="SHORT", qty=1, entry_time=dt.datetime(2026, 9, 22, 12),
+                       entry_price=102.0, exit_time=dt.datetime(2026, 9, 22, 13), exit_price=101.0, gross_pnl=1.0, net_pnl=0.5,
+                       ma_cross_price=102.0, atr_at_entry=1.0, sl_trigger_price=104.0, mode="REPLAY", bot=1, run_id=run_id))
+        s.commit()
+    assert replay.list_runs(10)[0]["totals"]["trades"] == 2  # a new trade is seen
+    assert replay.delete_run(run_id) and run_id not in replay._RUN_CACHE

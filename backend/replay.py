@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import case, func
 
 from candle_history import HistoryError, fetch_frame
 from database import session_factory
@@ -520,15 +521,48 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     return out
 
 
+# Run summaries for the Backtests list, kept until the run or its trades change
+# (status, days done, trade count, open trades, newest trade id). The tab polls
+# every few seconds; re-reading every trade of every listed run each time
+# blocked the shared event loop for seconds once there were many runs.
+_RUN_CACHE: dict[int, tuple[tuple, dict]] = {}
+_RUN_CACHE_MAX = 600
+
+
 def list_runs(limit: int = 50) -> list[dict]:
+    """The newest runs with their totals. Blocking: call it off the event loop."""
     with session_factory()() as db:
         runs = db.query(ReplayRun).order_by(ReplayRun.id.desc()).limit(limit).all()
         ids = [r.id for r in runs]
-        trades = db.query(TradeLog).filter(TradeLog.run_id.in_(ids)).all() if ids else []
+        stamps: dict[int, tuple] = {}
+        if ids:
+            rows = (
+                db.query(
+                    TradeLog.run_id,
+                    func.count(TradeLog.id),
+                    func.sum(case((TradeLog.exit_price.is_(None), 1), else_=0)),
+                    func.max(TradeLog.id),
+                )
+                .filter(TradeLog.run_id.in_(ids))
+                .group_by(TradeLog.run_id)
+                .all()
+            )
+            stamps = {int(r[0]): (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in rows}
+        keys = {r.id: (r.status, r.days_done, r.days_total, stamps.get(r.id, (0, 0, 0))) for r in runs}
+        stale = [r.id for r in runs if _RUN_CACHE.get(r.id, (None,))[0] != keys[r.id]]
         by_run: dict[int, list[TradeLog]] = {}
-        for t in trades:
-            by_run.setdefault(int(t.run_id), []).append(t)
-        return [_run_dict(r, by_run.get(r.id, []), with_days=False) for r in runs]
+        if stale:
+            for t in db.query(TradeLog).filter(TradeLog.run_id.in_(stale)).all():
+                by_run.setdefault(int(t.run_id), []).append(t)
+        out = []
+        for r in runs:
+            if r.id in stale:
+                _RUN_CACHE[r.id] = (keys[r.id], _run_dict(r, by_run.get(r.id, []), with_days=False))
+            out.append(_RUN_CACHE[r.id][1])
+    if len(_RUN_CACHE) > _RUN_CACHE_MAX:
+        for run_id in sorted(_RUN_CACHE)[: len(_RUN_CACHE) - _RUN_CACHE_MAX]:
+            _RUN_CACHE.pop(run_id, None)
+    return out
 
 
 def run_trades(run_id: int, symbol: str | None = None) -> list[dict] | None:
@@ -593,6 +627,7 @@ def delete_run(run_id: int) -> bool:
         db.query(ReviewLog).filter(ReviewLog.run_id == run_id).delete()
         db.delete(run)
         db.commit()
+    _RUN_CACHE.pop(run_id, None)
     open_pnl_log.delete_replay(run_id)
     return True
 
