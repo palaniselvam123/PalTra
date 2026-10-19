@@ -304,7 +304,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     .slice(0, 24)
     .sort((a, b) => Number(armed.has(b)) - Number(armed.has(a)) || a.localeCompare(b));
 
-  const applySymbol = async (next: string) => {
+  /** Put a stock on the chart. From the search box (`askArm`), a stock not yet armed then asks to arm it. */
+  const applySymbol = async (next: string, askArm = false) => {
     const cleaned = next.trim().toUpperCase();
     if (!cleaned) return;
     setBusy(true);
@@ -317,6 +318,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       setHits([]);
       setOpen(false);
       onChanged();
+      if (askArm && !armed.has(cleaned)) toggleTrade(cleaned);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not change symbol");
     } finally {
@@ -788,7 +790,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               onSubmit={(e) => {
                 e.preventDefault();
                 const typed = query.trim().toUpperCase();
-                if (typed) applySymbol(typed);
+                if (typed) applySymbol(typed, true);
               }}
             >
               <Search size={14} className="shrink-0 text-slate-400" />
@@ -814,7 +816,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                     key={hit.symbol}
                     type="button"
                     disabled={busy}
-                    onClick={() => applySymbol(hit.symbol)}
+                    onClick={() => applySymbol(hit.symbol, true)}
                     className="flex w-full flex-col px-3 py-2 text-left hover:bg-white/[0.04]"
                   >
                     <span className="text-sm font-semibold text-[#FBBF24]">{hit.symbol}</span>
