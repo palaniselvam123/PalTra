@@ -20,6 +20,8 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import gzip
+
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -235,7 +237,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="SMA ATR Intraday Terminal", lifespan=lifespan)
 # A full trade book is a few MB of repetitive JSON; gzip cuts it ~10x.
-app.add_middleware(GZipMiddleware, minimum_size=2048)
+app.add_middleware(GZipMiddleware, minimum_size=16384)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -2033,7 +2035,10 @@ async def trades():
     for eng in bot_engines.values():
         ltps.update(eng._ltps)
     ltps.update(engine._ltps)
-    return attach_market_prices(engine.trades(), ltps)
+    # engine.trades() reads 200 trades off SQLite. Run it off the event loop
+    # so the bots' tick keeps up on a cold cache.
+    rows = await asyncio.to_thread(engine.trades)
+    return attach_market_prices(rows, ltps)
 
 
 @app.get("/api/trades/book")
@@ -2049,14 +2054,22 @@ async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT, bot: int | N
     ltps = dict(src._ltps)
     only = bot if book in ("PAPER", "LIVE") else None
 
-    def build() -> str:
+    def build() -> tuple[bytes, dict[str, str]]:
         data = src.book(book, limit, only)
         rows, strategies = pack_strategies(attach_market_prices(src.with_open_extremes(data["rows"]), ltps))
-        return json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies})
+        payload = json.dumps({"mode": book, "total": data["total"], "rows": rows, "strategies": strategies}).encode()
+        # Compress in this same thread when it is worth it, so the gzip middleware
+        # does not do it on the event loop; the middleware skips a response that
+        # already carries Content-Encoding.
+        if len(payload) >= 16384:
+            payload = gzip.compress(payload, compresslevel=5)
+            return payload, {"Content-Encoding": "gzip"}
+        return payload, {}
 
     # Thousands of rows take a moment; build them off the event loop so the
     # bot keeps ticking, and skip FastAPI's per-value encoder (plain values only).
-    return Response(await asyncio.to_thread(build), media_type="application/json")
+    body, headers = await asyncio.to_thread(build)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 @app.get("/api/trades/counts")

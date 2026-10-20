@@ -84,7 +84,10 @@ class MarketRecorder:
         while self.running:
             try:
                 if session_state() == "OPEN":
-                    self.last_written = self.record_once()
+                    # A snapshot is one SQLite executemany of thousands of rows: a
+                    # few seconds on the Fly disk. Run it in a thread so the shared
+                    # event loop keeps ticking the bots and serving the pages.
+                    self.last_written = await asyncio.to_thread(self.record_once)
                     self.total_written += self.last_written
                     self.last_run_at = ist_now()
                     self.last_error = None
