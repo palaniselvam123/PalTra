@@ -325,6 +325,12 @@ class BotConfig(Base):
     tall_pullback: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     tall_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     tall_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    # Candle-extreme limit entry (extreme_entry.py): wait at the signal candle's low (buy) / high (sell).
+    extreme_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    extreme_anchor: Mapped[str | None] = mapped_column(String, nullable=True, default="CANDLE_EXTREME")
+    extreme_invalid_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
+    extreme_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    extreme_cancel_on_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

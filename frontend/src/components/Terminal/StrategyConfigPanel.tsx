@@ -75,6 +75,11 @@ const LABELS: Record<string, string> = {
   tall_pullback: "tall-candle pullback",
   tall_atr_mult: "tall candle × ATR",
   tall_expiry_candles: "pullback wait (candles)",
+  extreme_entry: "candle-extreme limit entry",
+  extreme_anchor: "limit at",
+  extreme_invalid_pct: "cancel beyond (%)",
+  extreme_expiry_candles: "limit wait (candles)",
+  extreme_cancel_on_cross: "cancel on an SMA cross against",
   slow_sma_exit: "slow SMA exit",
   recovery_hold: "recovery hold",
   recovery_tolerance_pct: "recovery target %",
@@ -268,6 +273,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tall_pullback: Boolean(form.tall_pullback),
     tall_atr_mult: Math.min(10, Math.max(0.5, Number(form.tall_atr_mult ?? 1.5) || 1.5)),
     tall_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.tall_expiry_candles ?? 2) || 2))),
+    extreme_entry: Boolean(form.extreme_entry),
+    extreme_anchor: form.extreme_anchor === "SMA_9" ? "SMA_9" : "CANDLE_EXTREME",
+    extreme_invalid_pct: Math.min(5, Math.max(0, Number(form.extreme_invalid_pct ?? 0.05) || 0)),
+    extreme_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.extreme_expiry_candles ?? 2) || 2))),
+    extreme_cancel_on_cross: form.extreme_cancel_on_cross !== false,
     slow_sma_exit: Boolean(form.slow_sma_exit),
     recovery_hold: Boolean(form.recovery_hold),
     recovery_tolerance_pct: Math.min(5, Math.max(0, Number(form.recovery_tolerance_pct ?? 0.15) || 0)),
@@ -865,6 +875,63 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               onChange={(v) => set("tall_expiry_candles", v)}
               own={isOwn("tall_expiry_candles")}
             />
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.extreme_entry)}
+              onChange={(e) => set("extreme_entry", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("extreme_entry") && <OwnTag />}
+            Limit entry at the signal candle&apos;s low / high
+            <InfoTip label="About the candle-extreme limit entry">
+              Every signal (an SMA cross, a gap-mode entry, a join, a late or early-reversal entry; not candle patterns) waits
+              at the signal candle&apos;s favourable extreme instead of ordering at once: a buy at its low, a sell at its high
+              (or the fast SMA when it is nearer, with &quot;Fast SMA&quot; below). It is judged on the side the real order goes,
+              so a flipped stock&apos;s buy signal sells at the high. The wait is cancelled when the price breaks beyond the
+              other side of the candle by more than the % below (SETUP_INVALIDATED_OPPOSITE_BREAK), when a closed candle shows
+              the SMAs crossed against the signal (if ticked), or when the candles below close without a fill. The first price at
+              the limit sends the normal entry: every check, the stop, the trade cap and the cut-off still apply. Nothing waits
+              on Groww&apos;s book. Takes over from the tall-candle pullback when both are on. Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Limit at{isOwn("extreme_anchor") && <OwnTag />}
+              </span>
+              <select
+                value={form.extreme_anchor ?? "CANDLE_EXTREME"}
+                onChange={(e) => set("extreme_anchor", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="CANDLE_EXTREME">Candle low / high</option>
+                <option value="SMA_9">Fast SMA (if nearer)</option>
+              </select>
+            </label>
+            <Field
+              label="Cancel beyond the candle by (%)"
+              value={String(form.extreme_invalid_pct ?? 0.05)}
+              onChange={(v) => set("extreme_invalid_pct", v)}
+              own={isOwn("extreme_invalid_pct")}
+            />
+            <Field
+              label="Wait at most (candles)"
+              value={String(form.extreme_expiry_candles ?? 2)}
+              onChange={(v) => set("extreme_expiry_candles", v)}
+              own={isOwn("extreme_expiry_candles")}
+            />
+            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
+              <input
+                type="checkbox"
+                checked={form.extreme_cancel_on_cross !== false}
+                onChange={(e) => set("extreme_cancel_on_cross", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("extreme_cancel_on_cross") && <OwnTag />}
+              Cancel if the SMAs cross against it
+            </label>
           </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input

@@ -67,6 +67,7 @@ export function strategyLabel(s: Settings): string {
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
     if (s.tall_pullback) parts.push(`tall-candle pullback (${s.tall_atr_mult ?? 1.5}× ATR, ${s.tall_expiry_candles ?? 2} candles)`);
+    if (s.extreme_entry) parts.push(`limit at candle ${s.extreme_anchor === "SMA_9" ? "extreme / fast SMA" : "extreme"} (${s.extreme_expiry_candles ?? 2} candles)`);
     const orChecks = [s.use_or_volume && "volume", s.use_or_vwap && "VWAP", s.use_or_spread && "SMA spread", s.use_or_break && "break"].filter(Boolean);
     if (orChecks.length) parts.push(`opening range: ${orChecks.join(", ")}`);
   }
@@ -181,6 +182,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Recovery hold", (s) => (s.recovery_hold ? `On (target ${s.recovery_tolerance_pct ?? 0.15}%, floor ${s.recovery_emergency_mult ?? 1.5}× / ${s.recovery_atr_mult ?? 2.5}× ATR, ${s.recovery_max_candles ?? 6} candles${s.recovery_handoff === false ? "" : ", hand-off to Bot 2"})` : "Off")],
   ["Breakout hand-off", (s) => (s.breakout_handoff ? `On (candle ${s.breakout_atr_mult ?? 1.8}× ATR + gap ${s.breakout_gap_pct ?? 0.2}% or volume ${s.breakout_volume_mult ?? 1.5}×, to Bot 3)` : "Off")],
   ["Tall-candle pullback", (s) => (s.tall_pullback ? `On (${s.tall_atr_mult ?? 1.5}× ATR, wait ${s.tall_expiry_candles ?? 2} candles)` : "Off")],
+  ["Candle-extreme limit", (s) => (s.extreme_entry ? `On (${s.extreme_anchor === "SMA_9" ? "low/high or fast SMA" : "low/high"}, cancel beyond ${s.extreme_invalid_pct ?? 0.05}%, wait ${s.extreme_expiry_candles ?? 2} candles${s.extreme_cancel_on_cross === false ? "" : ", cancel on a cross against"})` : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],
   ["VWAP filter", (s) => (s.use_vwap ? "On" : "Off")],

@@ -64,6 +64,7 @@ import opening_range
 import join_trend
 import late_entry
 import tall_pullback
+import extreme_entry
 import recovery
 import breakout
 import review
@@ -122,6 +123,12 @@ class PullbackOrder:
     signal_ts: int  # start of the signal candle
     span_sec: int  # candle length
     candles: int  # closed candles to wait after the signal candle
+    # Candle-extreme limit entry (extreme_entry.py); a tall-candle pullback leaves these unset.
+    side: str | None = None  # the real order's side when it differs (a flipped stock)
+    invalid_at: float | None = None  # dropped once the price breaks beyond this
+    sma_side: int = 0  # SMA fast vs slow on the signal candle (+1 above, -1 below)
+    cancel_on_cross: bool = False  # dropped once the SMAs turn against the signal
+    note: str = "tall candle"
 
 
 @dataclass
@@ -224,6 +231,7 @@ SNAPSHOT_FIELDS = (
     "use_supertrend", "st_exit", "st_period", "st_mult",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
+    "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -1815,6 +1823,26 @@ class StrategyEngine:
         pullback = None
         if pullback_at is not None and not flips_orders(cfg):
             pullback = pullback_at
+        elif extreme_entry.applies(cfg):
+            # Candle-extreme limit (extreme_entry.py), judged on the side the real order goes.
+            real = _opposite(want) if flips_orders(cfg) else want
+            found = extreme_entry.levels(curr, real, cfg)
+            if found is not None:
+                span = int(frame.iloc[-1]["ts"]) - int(curr["ts"]) if len(frame) >= 2 else 0
+                pullback = PullbackOrder(
+                    direction=want,
+                    limit=round_price(cfg.symbol, found[0]),
+                    cross_price=cross_price,
+                    atr=atr,
+                    signal_ts=int(curr["ts"]),
+                    span_sec=span if span > 0 else 60,
+                    candles=extreme_entry.expiry(cfg),
+                    side=real,
+                    invalid_at=found[1],
+                    sma_side=extreme_entry.sma_side(curr),
+                    cancel_on_cross=extreme_entry.cancel_on_cross(cfg),
+                    note="candle extreme",
+                )
         elif tall_pullback.on(cfg) and not flips_orders(cfg):
             plan = tall_pullback.plan(curr, want, atr, cfg)
             if plan is not None:
@@ -1981,7 +2009,13 @@ class StrategyEngine:
         """Wait for the price to come back to the limit level instead of ordering at the tall candle's close."""
         symbol = (cfg.symbol or "").upper()
         self._pullback[symbol] = order
-        side = "BUY" if order.direction == "LONG" else "SELL"
+        side = "BUY" if (order.side or order.direction) == "LONG" else "SELL"
+        if order.invalid_at is not None:
+            beyond = "under" if side == "BUY" else "over"
+            return (
+                f"limit {side} at {order.limit:.2f} — {order.note}; waiting up to {order.candles} "
+                f"candle{'s' if order.candles != 1 else ''}, cancelled {beyond} {order.invalid_at:.2f}"
+            )
         return (
             f"pullback {side} at {order.limit:.2f} — tall candle; "
             f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
@@ -2182,8 +2216,11 @@ class StrategyEngine:
         """Every pass: send a waiting pullback entry once the price reaches its level (tall_pullback.py)."""
         for symbol, order in list(self._pullback.items()):
             symbol_cfg = _cfg_for(cfg, symbol)
-            side = "BUY" if order.direction == "LONG" else "SELL"
+            real = order.side or order.direction
+            side = "BUY" if real == "LONG" else "SELL"
             frame = self._frames.get(symbol)
+            price = self._ltps.get(symbol)
+            closed_ts = _closed_bar_ts(frame)
             why = None
             if symbol in self.positions:
                 why = "already in a trade"
@@ -2191,16 +2228,30 @@ class StrategyEngine:
                 why = "taken off the Trade list"
             elif now.time() >= _entry_cutoff(symbol_cfg):
                 why = f"no new entries after {_entry_cutoff(symbol_cfg).strftime('%H:%M')} IST"
-            elif tall_pullback.expired(order.signal_ts, _closed_bar_ts(frame), order.span_sec, order.candles):
+            elif order.invalid_at is not None and extreme_entry.broken(real, price, order.invalid_at):
+                beyond = "under the signal candle's low" if real == "LONG" else "over the signal candle's high"
+                why = f"{extreme_entry.OPPOSITE_BREAK}: {float(price):.2f} broke {beyond} ({order.invalid_at:.2f})"
+            elif (
+                order.cancel_on_cross
+                and closed_ts is not None
+                and closed_ts > order.signal_ts
+                and extreme_entry.crossed_against(
+                    order.direction,
+                    order.sma_side,
+                    extreme_entry.side_on_closed(frame, int(symbol_cfg.sma_fast), int(symbol_cfg.sma_slow)),
+                )
+            ):
+                why = f"{extreme_entry.SMA_CROSS}: the SMAs crossed against the {order.direction.lower()} signal"
+            elif tall_pullback.expired(order.signal_ts, closed_ts, order.span_sec, order.candles):
                 why = f"the price did not come back to {order.limit:.2f} within {order.candles} candle(s)"
             elif self.trades_today >= int(symbol_cfg.max_trades_per_day):
                 why = "trade cap reached"
             if why:
                 self._pullback.pop(symbol, None)
-                self._signals[symbol] = f"pullback {side} {symbol} cancelled — {why}"
+                label = "limit" if order.invalid_at is not None else "pullback"
+                self._signals[symbol] = f"{label} {side} {symbol} cancelled — {why}"
                 continue
-            price = self._ltps.get(symbol)
-            if not tall_pullback.touched(order.direction, price, order.limit):
+            if not tall_pullback.touched(real, price, order.limit):
                 continue
             async with self.lock:
                 if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
@@ -2211,7 +2262,8 @@ class StrategyEngine:
                 self.inflight = "TRANSIT"
                 try:
                     await self._open(order.direction, order.cross_price, order.atr, symbol_cfg, now)
-                    result = f"opened {order.direction} — price came back to the pullback level {order.limit:.2f}"
+                    level = "the candle-extreme limit" if order.invalid_at is not None else "the pullback level"
+                    result = f"opened {real} — price came back to {level} {order.limit:.2f}"
                 except SlCancelFailed as exc:
                     self._note_broker_block(exc)
                     result = f"pullback {side} not filled — {exc}"
