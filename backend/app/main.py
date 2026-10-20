@@ -228,6 +228,12 @@ async def lifespan(app: FastAPI):
     from app.services.market_recorder import market_recorder
     await market_recorder.start()
 
+    # Warm the instrument master in the background so the first search doesn't
+    # hit the 7 s CSV download + parse on the event loop.
+    import asyncio as _asyncio
+    from app.services.instruments import instrument_master
+    _asyncio.create_task(_asyncio.to_thread(instrument_master.ensure_loaded))
+
     sma_task = None
     try:
         from app.sma_host import boot_terminal, rewrite_terminal_bundle
