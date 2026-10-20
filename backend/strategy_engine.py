@@ -4279,6 +4279,7 @@ class StrategyEngine:
                     frame, cfg, f"{shown_symbol}@{alt}" if alt else shown_symbol, with_blocks=not alt
                 )
                 candles = [*closed_rows, _forming_row(frame.iloc[-1])][-limit:]
+                candles = _from_formed_sma(candles)
             else:
                 candles = [_forming_row(frame.iloc[-1])]
         first_shown = candles[0]["time"] if candles else None
@@ -4978,6 +4979,16 @@ def _signal_on_unjudged_bars(frame: pd.DataFrame, judged_ts: int | None) -> tupl
         return None, None
     signal, _ts, signal_frame = choices[-1]
     return signal, signal_frame
+
+
+def _from_formed_sma(candles: list[dict]) -> list[dict]:
+    """Drop the leading candles that have no slow SMA yet (the frame's warm-up),
+    so the chart does not start with a stretch of candles and no SMA 21 line.
+    Kept whole when no candle has it (too little history to draw it at all)."""
+    for i, row in enumerate(candles):
+        if row.get("sma21") is not None:
+            return candles[i:] if i else candles
+    return candles
 
 
 def _closed_bar_ts(frame: pd.DataFrame | None) -> int | None:

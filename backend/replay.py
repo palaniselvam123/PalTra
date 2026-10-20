@@ -23,6 +23,7 @@ import datetime as dt
 import json
 import time
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -32,7 +33,7 @@ from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, ReviewLog, TradeLog
-from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_snapshot, trade_names
+from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_for, settings_snapshot, trade_names
 from tick_sizes import round_price
 import all_bots_guard
 import open_pnl_log
@@ -54,6 +55,20 @@ WARMUP_DAYS = 4
 # previous one, enough for SMA 21, ATR 14, RSI, the volume average and the
 # previous close. More only slows every tick.
 FRAME_BARS = 500
+# Longer candles need more 1-minute bars: the slow SMA plus about a session of
+# candles that already have it, so the chart is not blank at its left edge.
+FRAME_EXTRA_CANDLES = 40
+
+
+def frame_bars(cfg) -> int:
+    """1-minute bars handed to the engine per quote for a stock with these settings."""
+    from candles import candle_minutes
+
+    try:
+        slow = max(1, int(getattr(cfg, "sma_slow", None) or 21))
+    except (TypeError, ValueError):
+        slow = 21
+    return max(FRAME_BARS, candle_minutes(cfg) * (slow + FRAME_EXTRA_CANDLES))
 # Share of each real second the replays together may spend ticking, so the
 # live engine and the API stay responsive (one Python process, one event loop).
 # Several bots replaying at once split it. Past this a replay plays slower.
@@ -97,8 +112,10 @@ def _to_next_grid(clock: dt.datetime) -> float:
 class ReplayFeed:
     """Candles for each replayed stock, cut at the replay clock."""
 
-    def __init__(self, frames: dict[str, pd.DataFrame], clock: dt.datetime):
+    def __init__(self, frames: dict[str, pd.DataFrame], clock: dt.datetime, bars: dict[str, int] | None = None):
         self.clock = clock
+        # 1-minute bars per quote, per stock (frame_bars); FRAME_BARS when not given.
+        self._bars = {k.upper(): int(v) for k, v in (bars or {}).items()}
         self._arrays: dict[str, dict[str, np.ndarray]] = {}
         for symbol, frame in frames.items():
             frame = frame.sort_values("ts").drop_duplicates("ts")
@@ -120,7 +137,7 @@ class ReplayFeed:
         f = (now - minute).total_seconds() / 60.0
         ts = data["ts"]
         closed_end = int(np.searchsorted(ts, minute_ts, side="left"))
-        start = max(0, closed_end - FRAME_BARS)
+        start = max(0, closed_end - self._bars.get((symbol or "").upper(), FRAME_BARS))
         cols = {col: data[col][start:closed_end] for col in COLUMNS}
         has_bar = closed_end < len(ts) and ts[closed_end] == minute_ts
         # Groww's volume is the session's running total, so the forming bar's
@@ -870,7 +887,9 @@ class ReplaySession:
         if self.skipped:
             notes.append(f"No candles for {', '.join(self.skipped)}.")
         self.error = " ".join(notes)
-        feed = ReplayFeed(frames, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST))
+        snap = SimpleNamespace(**settings)
+        bars = {name: frame_bars(settings_for(snap, name)) for name in frames}
+        feed = ReplayFeed(frames, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST), bars)
         bot_paused = False
         saved = settings if resume is not None else None
         for index, day in enumerate(days):
