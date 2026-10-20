@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,7 +19,11 @@ async def search(
     equity_only: bool = Query(True),
 ):
     try:
-        results = instrument_master.search(q, limit=limit, equity_only=equity_only)
+        # The first call downloads a 20MB CSV and parses 140k rows; later calls still
+        # scan every equity. Run both off the event loop so the bots keep ticking.
+        results = await asyncio.to_thread(
+            instrument_master.search, q, limit=limit, equity_only=equity_only
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not load the instrument list: {exc}") from exc
     return [
@@ -34,7 +39,7 @@ async def search(
 
 @router.get("/stats")
 async def stats():
-    return instrument_master.stats()
+    return await asyncio.to_thread(instrument_master.stats)
 
 
 _NSE_SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9&_-]{0,19}")
