@@ -670,6 +670,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   charges) against the target / stop and the replay clock against the square-off time, and on a hit `trip`s itself
   (squared off as `KILL_SWITCH`, HALTED for the rest of that replayed day; the next day starts fresh). A replay plays
   one bot, so it is judged on that bot's P&L alone.
+- Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
+  "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
+  column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,
+  trade-count bookkeeping and the all-bots guard on row 1) with the source's, checked like Save; per-stock settings
+  replace the destination's only when ticked. A LIVE destination needs `confirm_live` (409 without); an open trade
+  blocks a qty change as on Save. Settings → SMA strategy, "Copy settings from" (`components/Settings/CopySettings.tsx`).
+  No order is placed.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

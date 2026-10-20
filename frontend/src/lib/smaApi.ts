@@ -1109,6 +1109,11 @@ function asDesk(value: string | null | undefined): Desk | null {
 }
 
 /** The SMA bot number of a desk: 1 for the main desk, 2-4 for the extra bots, null for research. */
+/** The copy-settings route's name for a desk: "1"-"4" or "research". */
+function deskKey(d: Desk): string {
+  return d === "research" ? "research" : d === "live" ? "1" : d.slice(3);
+}
+
 export function deskBot(d: Desk = desk): number | null {
   if (d === "live") return 1;
   if (d === "research") return null;
@@ -1290,6 +1295,22 @@ export const smaApi = {
     request<SmaConfig>(
       target === "research" ? "/api/research/trade-symbols" : target === 1 ? "/api/trade-symbols" : `/api/bots/${target}/trade-symbols`,
       { method: "POST", body: JSON.stringify({ symbol, armed, source: source ?? undefined }) },
+      undefined,
+      false
+    ),
+  /** Replace one desk's strategy settings with another's. Trade list, mode and name stay. */
+  copySettings: (from: Desk, to: Desk, withStocks: boolean, confirmLive = false) =>
+    request<{ changed: string[]; config: SmaConfig }>(
+      "/api/bots/copy-settings",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          from_desk: deskKey(from),
+          to_desk: deskKey(to),
+          stock_settings: withStocks,
+          confirm_live: confirmLive,
+        }),
+      },
       undefined,
       false
     ),
