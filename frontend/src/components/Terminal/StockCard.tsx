@@ -107,8 +107,10 @@ export function StockCard({
             />
           </label>
         </td>
-        <td className="max-w-[5.5rem] py-1 pr-1.5 sm:max-w-none sm:pr-2">
-          <div className="flex min-w-0 items-center gap-1.5">
+        <td className="max-w-[8.5rem] py-1 pr-1.5 sm:max-w-none sm:pr-2">
+          {/* `flex-wrap` on mobile so a long symbol (BHARTIARTL) is not truncated to "B…" when
+              the row also has side / qty / Own / No-stop badges next to it. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span
               className={clsx("truncate text-sm font-semibold tracking-wide text-amber-300", onChart && "underline decoration-sky-400 underline-offset-4")}
               title={note ? `${symbol} · ${note}` : symbol}

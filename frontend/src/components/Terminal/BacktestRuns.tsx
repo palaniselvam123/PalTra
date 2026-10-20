@@ -504,12 +504,27 @@ export function BacktestRuns() {
           ) : null}
         </div>
       )}
-      {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width. */}
+      {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width.
+          Scrolls into view on open so the user doesn't have to swipe past the runs list. */}
       {openId != null ? (
-        <div className="sm:hidden">
-          <RunDetail run={detail?.id === openId ? detail : null} />
-        </div>
+        <MobileRunDetail runId={openId} detail={detail} />
       ) : null}
+    </div>
+  );
+}
+
+function MobileRunDetail({ runId, detail }: { runId: number; detail: ReplayRun | null }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Only on phones (the inline <tr> handles sm+ already); let the DOM paint, then scroll.
+    if (window.matchMedia("(min-width: 640px)").matches) return;
+    const id = window.setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    return () => window.clearTimeout(id);
+  }, [runId]);
+  return (
+    <div ref={ref} className="scroll-mt-16 sm:hidden">
+      <RunDetail run={detail?.id === runId ? detail : null} />
     </div>
   );
 }
