@@ -41,6 +41,7 @@ import counter_candles
 import ema_filter
 import supertrend
 import tall_pullback as tall_pb
+import extreme_entry as extreme_mod
 import recovery as recovery_mod
 import breakout as breakout_mod
 import opening_range
@@ -328,6 +329,11 @@ class ConfigUpdate(BaseModel):
     tall_pullback: bool | None = None
     tall_atr_mult: float | None = Field(default=None, ge=tall_pb.MIN_MULT, le=tall_pb.MAX_MULT)
     tall_expiry_candles: int | None = Field(default=None, ge=1, le=tall_pb.MAX_EXPIRY)
+    extreme_entry: bool | None = None
+    extreme_anchor: Literal["CANDLE_EXTREME", "SMA_9"] | None = None
+    extreme_invalid_pct: float | None = Field(default=None, ge=0, le=extreme_mod.MAX_INVALID_PCT)
+    extreme_expiry_candles: int | None = Field(default=None, ge=1, le=extreme_mod.MAX_EXPIRY)
+    extreme_cancel_on_cross: bool | None = None
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -892,6 +898,11 @@ def _gap_dict(row) -> dict:
         "tall_pullback": tall_pb.on(row),
         "tall_atr_mult": tall_pb.mult(row),
         "tall_expiry_candles": tall_pb.expiry(row),
+        "extreme_entry": extreme_mod.on(row),
+        "extreme_anchor": extreme_mod.anchor(row),
+        "extreme_invalid_pct": extreme_mod.invalid_pct(row),
+        "extreme_expiry_candles": extreme_mod.expiry(row),
+        "extreme_cancel_on_cross": extreme_mod.cancel_on_cross(row),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),

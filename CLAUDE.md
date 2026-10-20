@@ -348,6 +348,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   more candles have closed, the cut-off passes, a trade opens, the stock is unarmed or a new signal replaces it. A
   waiting pullback counts as entering the SMA run (`_side_entered`), so join-trend does not order it at once. A flipped
   stock orders at once. The stock research baseline keeps it off.
+- `backend/extreme_entry.py` – candle-extreme limit entry (`extreme_entry`, off by default, per bot and per stock, PAPER
+  and LIVE): every signal through `apply_signal` (cross, gap-mode entry, join, late / early-reversal entry; not candle
+  patterns) waits as a `PullbackOrder` at the closed signal candle's favourable extreme on the side the real order goes (a
+  flipped stock's buy signal sells): a buy at its low, a sell at its high, or with `extreme_anchor = "SMA_9"` at
+  max(low, SMA fast) / min(high, SMA fast). `StrategyEngine._watch_pullbacks` (every tick) first drops it when the price
+  breaks beyond the other side by more than `extreme_invalid_pct` (0.05) % (`SETUP_INVALIDATED_OPPOSITE_BREAK`), when
+  `extreme_cancel_on_cross` (on) and a closed candle after the signal shows the SMAs crossed against the signal
+  (`SETUP_INVALIDATED_SMA_CROSS`), or after `extreme_expiry_candles` (2) closed candles; else the first price at or beyond
+  the limit sends the normal entry through `_open` (every check, stop, cap, cut-off and one LIVE bot per stock apply;
+  nothing rests on Groww's book). Takes over from the tall-candle pullback; a breakout arrival's own level still wins.
+  Settings → Entry filters. The stock research baseline keeps it off.
 - `backend/recovery.py` – structural exit, recovery hold and the trend-to-chop handoff (all off by default,
   per bot and per stock, PAPER and LIVE; meant for the trend bot, Bot 3). **Slow SMA exit** (`slow_sma_exit`):
   `StrategyEngine._watch_slow_sma` closes a trade on the first candle closed after the entry beyond the slow SMA

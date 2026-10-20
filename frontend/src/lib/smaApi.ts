@@ -141,6 +141,11 @@ export type SmaConfig = {
   tall_pullback?: boolean;
   tall_atr_mult?: number;
   tall_expiry_candles?: number;
+  extreme_entry?: boolean;
+  extreme_anchor?: "CANDLE_EXTREME" | "SMA_9";
+  extreme_invalid_pct?: number;
+  extreme_expiry_candles?: number;
+  extreme_cancel_on_cross?: boolean;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;
