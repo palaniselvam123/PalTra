@@ -51,6 +51,7 @@ BASELINE_OFF = {
     "use_supertrend": False,
     "tall_pullback": False,
     "extreme_entry": False,
+    "slope_exit": False,
     "slow_sma_exit": False,
     "recovery_hold": False,
     "breakout_handoff": False,

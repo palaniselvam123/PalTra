@@ -42,6 +42,7 @@ import ema_filter
 import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
+import slope_exit as slope_mod
 import recovery as recovery_mod
 import breakout as breakout_mod
 import opening_range
@@ -334,6 +335,11 @@ class ConfigUpdate(BaseModel):
     extreme_invalid_pct: float | None = Field(default=None, ge=0, le=extreme_mod.MAX_INVALID_PCT)
     extreme_expiry_candles: int | None = Field(default=None, ge=1, le=extreme_mod.MAX_EXPIRY)
     extreme_cancel_on_cross: bool | None = None
+    slope_exit: bool | None = None
+    slope_lookback: int | None = Field(default=None, ge=1, le=slope_mod.MAX_LOOKBACK)
+    slope_bend_pct: float | None = Field(default=None, ge=0, le=100)
+    slope_turn: bool | None = None
+    slope_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -903,6 +909,11 @@ def _gap_dict(row) -> dict:
         "extreme_invalid_pct": extreme_mod.invalid_pct(row),
         "extreme_expiry_candles": extreme_mod.expiry(row),
         "extreme_cancel_on_cross": extreme_mod.cancel_on_cross(row),
+        "slope_exit": slope_mod.on(row),
+        "slope_lookback": slope_mod.lookback(row),
+        "slope_bend_pct": slope_mod.bend_pct(row),
+        "slope_turn": slope_mod.turn_on(row),
+        "slope_turn_pct": slope_mod.turn_pct(row),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),

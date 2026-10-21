@@ -328,6 +328,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/slope_exit.py` – SMA 9 slope exit (`slope_exit`, off by default, per bot and per stock, PAPER and LIVE):
+  the chart angle depends on zoom, so the fast SMA's slope is read in % per candle over `slope_lookback` (2) closed
+  candles, signed with the trade's signal side. `StrategyEngine._watch_slope_exit`, once per candle closed after the
+  entry (`pos.slope_bar`, steepest slope in `pos.slope_state`, memory only), closes the trade via `_exit_now` (a LIVE
+  stop is cancelled first; a LIVE position restored without its stop id is left to that stop) as `SMA9_BEND` once the
+  slope has dropped `slope_bend_pct` (60, 0 = off) % from its steepest since entry (only after it reached
+  `slope_turn_pct`), or as `SMA9_TURN` (`slope_turn`, on) once it is at least `slope_turn_pct` (0.02) %/candle against
+  the trade. Counts as an exit for `strategyChecks.noExitOn`. Settings → Supertrend / exits. The research baseline keeps it off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the
