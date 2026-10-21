@@ -252,6 +252,7 @@ SNAPSHOT_FIELDS = (
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
+    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -738,7 +739,7 @@ def chart_filters(cfg) -> dict:
         "st_period": supertrend.settings(cfg)[0],
         "st_mult": supertrend.settings(cfg)[1],
         # SMA 9 slope strip (slope_exit.py): always drawn while the slope exit is on.
-        "slope_exit": slope_exit.on(cfg),
+        "slope_exit": slope_exit.watched(cfg),
         "slope_lookback": slope_exit.lookback(cfg),
         "slope_bend_pct": slope_exit.bend_pct(cfg),
         "slope_turn_pct": slope_exit.turn_pct(cfg),
@@ -3168,7 +3169,7 @@ class StrategyEngine:
     async def _watch_slope_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the SMA 9 bends or turns against the trade (slope_exit.py)."""
         pos = self.position
-        if pos is None or self.status != "RUNNING" or not slope_exit.on(cfg) or self.ltp <= 0:
+        if pos is None or self.status != "RUNNING" or not slope_exit.watched(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
         frame = self._frames.get(symbol)
@@ -3187,7 +3188,11 @@ class StrategyEngine:
         value = slope_exit.slope(frame.iloc[:-1], int(cfg.sma_fast), slope_exit.lookback(cfg))
         if value is None:
             return
-        hit = slope_exit.judge(pos.signal_direction, value, pos.slope_state, cfg)
+        hit = slope_exit.judge(pos.signal_direction, value, pos.slope_state, cfg) if slope_exit.on(cfg) else None
+        if slope_exit.vturn_on(cfg):
+            # Read every candle so its history is whole, even when the bend / turn already hit.
+            vturn = slope_exit.judge_vturn(pos.signal_direction, value, pos.slope_state, cfg)
+            hit = hit or vturn
         if hit is None:
             return
         reason, note = hit
@@ -3252,6 +3257,7 @@ class StrategyEngine:
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
                     "SMA9_TURN": "SMA 9 turned against the trade — flat",
+                    "SMA9_VTURN": "SMA 9 V-turn — flat",
                     "SLOW_SMA_BREACH": "closed beyond the slow SMA — flat",
                     "RECOVERY_TARGET_HIT": "recovery target hit — flat",
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
@@ -4607,6 +4613,7 @@ _ALERT_REASON = {
     "SUPERTREND": "Supertrend turned against the trade",
     "SMA9_BEND": "SMA 9 bent",
     "SMA9_TURN": "SMA 9 turned against the trade",
+    "SMA9_VTURN": "SMA 9 V-turn",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "REPLAY_STOPPED": "replay stopped",
@@ -5022,7 +5029,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 # Exits the bot sends itself while an exchange stop may still be working.
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
-    "SMA9_BEND", "SMA9_TURN",
+    "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP",
 )

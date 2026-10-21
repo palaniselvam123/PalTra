@@ -155,6 +155,11 @@ export type SmaConfig = {
   slope_bend_pct?: number;
   slope_turn?: boolean;
   slope_turn_pct?: number;
+  /** SMA 9 V-turn exit: a steep slope with the trade, then a steep one against it within N candles. */
+  vturn_exit?: boolean;
+  vturn_move_pct?: number;
+  vturn_turn_pct?: number;
+  vturn_within?: number;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;

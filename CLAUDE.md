@@ -338,7 +338,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stop is cancelled first; a LIVE position restored without its stop id is left to that stop) as `SMA9_BEND` once the
   slope has dropped `slope_bend_pct` (60, 0 = off) % from its steepest since entry (only after it reached
   `slope_turn_pct`), or as `SMA9_TURN` (`slope_turn`, on) once it is at least `slope_turn_pct` (0.02) %/candle against
-  the trade. Counts as an exit for `strategyChecks.noExitOn`. Settings → Supertrend / exits. The research baseline keeps it off.
+  the trade. **V-turn** (`vturn_exit`, off, its own tick box, independent of `slope_exit`; `slope_exit.judge_vturn`):
+  closes as `SMA9_VTURN` once the slope is at least `vturn_turn_pct` (0.015) %/candle against the trade within
+  `vturn_within` (6, max 10) candles of having been at least `vturn_move_pct` (0.02) %/candle with it (signed slopes since
+  the entry in `pos.slope_state["hist"]`): a sharp V, never a slow U or a drift. Same `slope_lookback`; the chart's slope strip
+  shows while either is on (`slope_exit.watched`). Both count as an exit for `strategyChecks.noExitOn`. Settings →
+  Supertrend / exits. The research baseline keeps both off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the

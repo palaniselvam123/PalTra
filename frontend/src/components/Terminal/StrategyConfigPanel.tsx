@@ -76,6 +76,10 @@ const LABELS: Record<string, string> = {
   slope_bend_pct: "bend exit (% off the steepest)",
   slope_turn: "turn exit",
   slope_turn_pct: "turn at (%/candle)",
+  vturn_exit: "V-turn exit",
+  vturn_move_pct: "V-turn steep run",
+  vturn_turn_pct: "V-turn turn back",
+  vturn_within: "V-turn within",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -281,6 +285,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     slope_bend_pct: Math.min(100, Math.max(0, Number(form.slope_bend_pct ?? 60) || 0)),
     slope_turn: form.slope_turn !== false,
     slope_turn_pct: Math.min(5, Math.max(0, Number(form.slope_turn_pct ?? 0.02) || 0)),
+    vturn_exit: Boolean(form.vturn_exit),
+    vturn_move_pct: Math.min(5, Math.max(0, Number(form.vturn_move_pct ?? 0.02) || 0)),
+    vturn_turn_pct: Math.min(5, Math.max(0, Number(form.vturn_turn_pct ?? 0.015) || 0)),
+    vturn_within: Math.min(10, Math.max(1, Math.round(Number(form.vturn_within ?? 6)) || 6)),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1294,6 +1302,44 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               value={String(form.slope_turn_pct ?? 0.02)}
               onChange={(v) => set("slope_turn_pct", v)}
               own={isOwn("slope_turn_pct")}
+            />
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.vturn_exit)}
+              onChange={(e) => set("vturn_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("vturn_exit") && <OwnTag />}
+            V-turn exit: close on a sharp V in the SMA 9 line
+            <InfoTip label="About the V-turn exit">
+              Closes the trade (SMA9_VTURN) when the SMA 9 slope was steep with the trade (at least the first %/candle) and,
+              within the candles below, turns steeply against it (at least the second %/candle): the point of a V — a fall
+              then a sharp climb in a sell, a rise then a sharp drop in a buy. A slow U-shaped rounding or a sideways drift
+              never qualifies, so it is left to the other exits. Uses &quot;Slope over&quot; above; works on its own or next to
+              Bend / Turn. A V in price shows in SMA 9 as an arch about 9 candles wide, so keep the window at 5-8. Off by
+              default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field
+              label="Steep run (%/candle with)"
+              value={String(form.vturn_move_pct ?? 0.02)}
+              onChange={(v) => set("vturn_move_pct", v)}
+              own={isOwn("vturn_move_pct")}
+            />
+            <Field
+              label="Turn back (%/candle against)"
+              value={String(form.vturn_turn_pct ?? 0.015)}
+              onChange={(v) => set("vturn_turn_pct", v)}
+              own={isOwn("vturn_turn_pct")}
+            />
+            <Field
+              label="Within (candles)"
+              value={String(form.vturn_within ?? 6)}
+              onChange={(v) => set("vturn_within", v)}
+              own={isOwn("vturn_within")}
             />
           </div>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
