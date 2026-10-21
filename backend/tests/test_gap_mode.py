@@ -213,3 +213,36 @@ def test_api_saves_gap_mode_and_an_exit_past_the_entry(tmp_path, monkeypatch):
         assert lock.status_code == 200, lock.text
         assert lock.json()["gap_exit_long"] == 0.1 and lock.json()["gap_exit_short"] == -0.386
     database.reset_engine()
+
+
+def _sharp_drop() -> pd.DataFrame:
+    flat = lambda i, p: 1000.0 + (0.02 if i % 2 else -0.02)  # noqa: E731
+
+    def path(i, p):
+        if i < 60:
+            return flat(i, p)
+        if i < 92:  # 10:15-10:46 a steady rise
+            return p + 0.15
+        return p - 0.8  # 10:47 on: a sharp fall inside the 10:45 candle
+
+    return pd.DataFrame(_day(dt.date(2026, 9, 21), flat) + _day(dt.date(2026, 9, 22), path))
+
+
+@pytest.mark.asyncio
+async def test_minute_fade_check_exits_inside_a_five_minute_candle(db):
+    from sma_research.replayer import replay_symbol
+
+    levels = dict(use_gap_mode=True, gap_entry_long=0.05, gap_exit_long=0.10, gap_entry_short=-50.0,
+                  gap_exit_short=-0.02, candle_minutes=5)
+
+    async def fade(**over):
+        trades = await replay_symbol(_sharp_drop(), "SIMG", [dt.date(2026, 9, 22)], _settings(db, **levels, **over))
+        return next(t for t in trades if t["direction"] == "LONG")
+
+    closed = await fade()
+    minute = await fade(gap_fade_minute=True)
+    assert closed["exit_reason"] == minute["exit_reason"] == "GAP_FADE"
+    assert minute["entry_time"] == closed["entry_time"]  # entries still wait for the 5-minute close
+    assert minute["exit_time"] < closed["exit_time"]  # the fade is seen on a 1-minute close first
+    assert minute["exit_time"].minute % 5 != 0  # inside the 5-minute candle
+    assert minute["exit_price"] > closed["exit_price"]  # out before more of the fall

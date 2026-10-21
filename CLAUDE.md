@@ -234,7 +234,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   of the slow SMA (rides out a pullback), `gap_fade_min_candles` needs the gap
   to narrow N closed candles in a row. `gap_fade_intrabar` judges the fade
   about once a second on the live price as if that second closed the candle
-  (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state).
+  (`StrategyEngine._gap_fade_live`, probing a copy of the closed-candle state). `gap_fade_minute` does the
+  same once per closed 1-minute candle inside a longer bot candle, from Groww's 1-minute history (`_tapes`),
+  so it also works after hours and in replays (`StrategyEngine._gap_fade_minute`; both share `_gap_fade_probe`).
 - `backend/candles.py` – candle interval (`candle_minutes`: 1 default, 2, 3, 5,
   10, 15; per bot and per stock, PAPER and LIVE). `StrategyEngine.tick` groups
   each stock's 1-minute Groww tape into candles of that length from 09:15 IST

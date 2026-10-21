@@ -146,6 +146,7 @@ export function gapModeText(s: Settings): string {
   if (s.gap_fade_confirm_sma) parts.push("exit on close past SMA");
   if (Number(s.gap_fade_min_candles ?? 0) > 0) parts.push(`fade ${s.gap_fade_min_candles} candles`);
   if (s.gap_fade_intrabar) parts.push("fade checked each second");
+  if (s.gap_fade_minute) parts.push("fade checked each minute");
   if (Number(s.gap_entry_delay_min ?? 0) > 0) parts.push(`wait ${s.gap_entry_delay_min}m`);
   if (Number(s.gap_entry_window_min ?? 0) > 0) parts.push(`within ${s.gap_entry_window_min}m`);
   return parts.join(" · ");

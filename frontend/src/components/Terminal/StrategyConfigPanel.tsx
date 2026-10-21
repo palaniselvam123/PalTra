@@ -258,6 +258,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     gap_fade_confirm_sma: Boolean(form.gap_fade_confirm_sma),
     gap_fade_min_candles: Math.max(0, Math.round(Number(form.gap_fade_min_candles ?? 0))),
     gap_fade_intrabar: Boolean(form.gap_fade_intrabar),
+    gap_fade_minute: Boolean(form.gap_fade_minute),
     cross_exit: crossExitOn(form),
     late_entry_min: Math.min(375, Math.max(0, Math.round(Number(form.late_entry_min ?? 0)))),
     join_trend: Boolean(form.join_trend),
@@ -747,6 +748,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 close. Faster on a sharp reversal; a candle that turns back inside the minute can exit too early. Entries still
                 wait for the candle to close. With “1s OFF” in the status bar it checks at the slower quote pace (every few
                 seconds).
+              </InfoTip>
+            </span>
+          </label>
+          <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.gap_fade_minute)}
+              onChange={(e) => set("gap_fade_minute", e.target.checked)}
+              className="mt-1 accent-[#10B981]"
+            />
+            <span>
+              {isOwn("gap_fade_minute") && <OwnTag />}
+              Check the fade every 1-minute candle{" "}
+              <InfoTip label="About checking the fade every minute">
+                For a bot on 2-minute or longer candles: each closed 1-minute candle&apos;s close is read as if it closed the
+                bot&apos;s candle, so a fade can exit inside a 5-minute candle without waiting for it to close. It uses
+                Groww&apos;s 1-minute history, so it also works after hours and in replays / backtests (the every-second check
+                needs live market prices). Entries still wait for the bot&apos;s candle to close. No effect on a 1-minute bot.
               </InfoTip>
             </span>
           </label>

@@ -61,6 +61,12 @@ const GAP_EXITS: Toggle[] = [
     detail: () => "live price, not only closed candles",
     when: (c) => Boolean(c.use_gap_mode),
   },
+  {
+    key: "gap_fade_minute",
+    label: "Fade check every minute",
+    detail: () => "each closed 1-minute candle, replays too",
+    when: (c) => Boolean(c.use_gap_mode),
+  },
 ];
 
 const BB_LABEL: Record<BbExit, string> = { OFF: "Off", BAND: "Band", MIDDLE: "Middle", BOTH: "Both" };
