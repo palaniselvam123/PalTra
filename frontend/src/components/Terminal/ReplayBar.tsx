@@ -203,52 +203,22 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
 
   if (!active) {
     return (
-      <section aria-label="Replay a past day" className="rounded-xl border border-violet-400/25 bg-violet-500/[0.06]">
-        {resumable ? (
-          <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-400/30 bg-amber-400/[0.08] px-3 py-2 text-sm">
-            <RotateCcw size={15} aria-hidden className="text-amber-300" />
-            <span className="text-amber-100">
-              Run #{resumable.id} ({shortDay(resumable.start_date)} → {shortDay(resumable.end_date)}) stopped after day{" "}
-              {resumable.days_done} of {resumable.days_total}
-              {resumable.status === "INTERRUPTED" ? " when the server restarted" : ""}. Carry on from day {resumable.days_done + 1}
-              {resumable.next_day ? ` (${shortDay(resumable.next_day)})` : ""}?
-            </span>
-            <span className="ml-auto flex gap-1.5">
-              <button
-                type="button"
-                disabled={busy || live}
-                onClick={() => void run(() => smaApi.replayResume(resumable.id, speed, resumable.bot))}
-                className="inline-flex min-h-9 items-center gap-1 rounded-md bg-violet-500 px-3 text-xs font-semibold text-white hover:bg-violet-400 disabled:opacity-50"
-                title={live ? "Switch this bot to PAPER to replay" : "Finished days keep their results; the unfinished day plays again from 09:15 with the run's saved settings"}
-              >
-                {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Play size={13} aria-hidden />} Resume
-              </button>
-              <button
-                type="button"
-                onClick={() => hideResume(resumable.id)}
-                className="min-h-9 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
-              >
-                Not now
-              </button>
-            </span>
-            {msg ? <p role="alert" className="basis-full text-xs text-rose-300">{msg}</p> : null}
-          </div>
-        ) : null}
+      <section aria-label="Replay a past day" className="rounded-xl border border-violet-500/60 bg-violet-500/[0.10]">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm"
+          className="flex min-h-11 w-full items-center gap-2 rounded-t-xl bg-violet-700 px-3 text-left text-sm text-white hover:bg-violet-600"
         >
-          <History size={16} aria-hidden className="text-violet-300" />
-          <span className="font-semibold text-violet-100">Replay past days</span>
-          <span className="hidden text-xs text-slate-400 sm:inline">
-            — practise on real Groww candles from one day or a range up to 45 days (about 30 trading days). Practice money only.
+          <History size={16} aria-hidden />
+          <span className="font-semibold">Replay past days</span>
+          <span className="hidden text-xs text-violet-100 sm:inline">
+            — practise on real Groww candles from one day or a range up to 45 days. Practice money only.
           </span>
-          <span className="ml-auto text-xs text-violet-300">{open ? "Hide" : "Set up"}</span>
+          <span className="ml-auto text-xs text-violet-100 underline-offset-2 hover:underline">{open ? "Hide help" : "How it works"}</span>
         </button>
-        {open || info?.status === "ERROR" ? (
-          <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t border-violet-400/15 px-3 py-2">
+        {/* The dates and Start replay are always on screen; the header only folds the help text. */}
+        <form onSubmit={submit} className="flex flex-wrap items-end gap-2 px-3 py-2">
             <label className="flex flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400">
               From
               <input
@@ -309,11 +279,15 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 : armedCount === 0
                   ? "Arm at least one stock in the Stocks panel first. "
                   : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with ${botName ? `${botName}'s` : "your current"} settings. `}
+              {open ? (
+                <>
               The bot trades each day as it would live (crosses, filters, stop, target, 15:00 cut-off, 15:15
               square-off), then moves to the next trading day; weekends and holidays are skipped. A range is up to 45
               days (about 30 trading days). Each run, with the settings it used, is saved in the Backtests tab of the trade blotter.
               Replay trades go to a separate REPLAY book and never touch today’s PAPER or LIVE results. Needs a Groww
               login for the candles; nothing is ever sent to Groww.
+                </>
+              ) : null}
             </p>
             {msg || info?.error ? (
               <p role="alert" className="basis-full text-xs text-rose-300">
@@ -321,6 +295,34 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
               </p>
             ) : null}
           </form>
+        {resumable ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 border-t border-violet-400/20 px-3 py-1.5 text-xs">
+            <RotateCcw size={13} aria-hidden className="text-slate-400" />
+            <span className="text-slate-400">
+              Run #{resumable.id} ({shortDay(resumable.start_date)} → {shortDay(resumable.end_date)}) stopped after day{" "}
+              {resumable.days_done} of {resumable.days_total}
+              {resumable.status === "INTERRUPTED" ? " when the server restarted" : ""}. Carry on from day {resumable.days_done + 1}
+              {resumable.next_day ? ` (${shortDay(resumable.next_day)})` : ""}?
+            </span>
+            <span className="ml-auto flex gap-1.5">
+              <button
+                type="button"
+                disabled={busy || live}
+                onClick={() => void run(() => smaApi.replayResume(resumable.id, speed, resumable.bot))}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-violet-300 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/10 disabled:opacity-50"
+                title={live ? "Switch this bot to PAPER to replay" : "Finished days keep their results; the unfinished day plays again from 09:15 with the run's saved settings"}
+              >
+                {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Play size={13} aria-hidden />} Resume
+              </button>
+              <button
+                type="button"
+                onClick={() => hideResume(resumable.id)}
+                className="min-h-8 rounded-md px-2 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Not now
+              </button>
+            </span>
+          </div>
         ) : null}
       </section>
     );
