@@ -811,10 +811,14 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
                         )}
                         {s.symbol}
                       </button>
+                      {/* A stock with its own settings gets a small chip; the full strategy is in its tooltip, not repeated per row. */}
                       {own && own !== base ? (
-                        <div className="pl-[18px] text-xs font-normal text-violet-300" title="This stock traded with its own settings">
-                          {own}
-                        </div>
+                        <span
+                          className="ml-1.5 rounded-full border border-violet-400/40 px-1.5 py-0.5 text-[10px] font-medium text-violet-300"
+                          title={`Own settings: ${own}`}
+                        >
+                          Own
+                        </span>
                       ) : null}
                     </td>
                     <td className="px-2 py-1.5 text-right text-slate-200">{t.trades}</td>
