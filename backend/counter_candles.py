@@ -8,7 +8,10 @@ judged per bot and per stock, in PAPER and LIVE.
   (`counter_rule` COLOUR), or each close beyond the one before (CLOSES), or
   both (BOTH). With `counter_need_fast` on (default) the last close must also
   be past the fast SMA on that side, so a short bounce inside the trend does
-  not end the trade. Exit reason `COUNTER_CANDLES`.
+  not end the trade. With `counter_min_body` (× ATR, 0 = off) each of those N
+  candles must also have a body |close − open| of at least that × its ATR, so
+  small green candles in a short (or red in a buy) do not count. Exit reason
+  `COUNTER_CANDLES`.
 * **Entry** (`counter_entry`, off by default): a flat stock is entered the
   way such a run points, before the SMAs cross: the run must go against the
   side the SMAs are still on (fast below slow, then N green candles closing
@@ -21,12 +24,15 @@ Nothing here places an order on its own; the engine decides.
 """
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 from indicators import _direction_reason
 
 RULES = ("COLOUR", "CLOSES", "BOTH")
 MAX_COUNT = 10
+MAX_MIN_BODY = 5.0
 
 
 def exit_count(cfg) -> int:
@@ -57,6 +63,14 @@ def need_fast(cfg) -> bool:
     return True if value is None else bool(value)
 
 
+def min_body(cfg) -> float:
+    """Smallest body (× ATR) a counter candle needs for the exit; 0 = any size."""
+    value = _num(getattr(cfg, "counter_min_body", 0) or 0)
+    if value is None or not math.isfinite(value):
+        return 0.0
+    return max(0.0, min(MAX_MIN_BODY, value))
+
+
 def _num(value) -> float | None:
     try:
         out = float(value)
@@ -65,11 +79,14 @@ def _num(value) -> float | None:
     return None if pd.isna(out) else out
 
 
-def run_towards(closed: pd.DataFrame, side: str, count: int, how: str, fast: bool) -> tuple[bool, str]:
+def run_towards(
+    closed: pd.DataFrame, side: str, count: int, how: str, fast: bool, body: float = 0.0
+) -> tuple[bool, str]:
     """Did the last `count` closed candles all move towards `side` (LONG = up)?
 
     `closed` holds closed candles only (no forming one), with `sma_9` when
-    `fast` is asked for. Returns (yes, a short note for the screen).
+    `fast` is asked for and `atr_14` when `body` (× ATR) is above 0. Returns
+    (yes, a short note for the screen).
     """
     if closed is None or count <= 0:
         return False, ""
@@ -78,6 +95,16 @@ def run_towards(closed: pd.DataFrame, side: str, count: int, how: str, fast: boo
         return False, reasons[0]
     colour = "green" if side == "LONG" else "red"
     note = f"{count} {colour} candles in a row" if how == "COLOUR" else f"{count} candles {'up' if side == 'LONG' else 'down'} in a row"
+    if body > 0:
+        for _, bar in closed.tail(count).iterrows():
+            size, atr = _num(bar.get("close")), _num(bar.get("atr_14"))
+            opened = _num(bar.get("open"))
+            if size is None or opened is None or atr is None or atr <= 0:
+                return False, "ATR not ready for the counter-candle body check"
+            size = abs(size - opened)
+            if size < body * atr:
+                return False, f"{note}, but a body of {size:.2f} is under {body:g} × ATR ({body * atr:.2f})"
+        note += f", each body ≥ {body:g} × ATR"
     if fast:
         close, sma = _num(closed["close"].iloc[-1]), _num(closed.iloc[-1].get("sma_9"))
         if close is None or sma is None:

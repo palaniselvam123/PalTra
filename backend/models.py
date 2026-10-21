@@ -314,6 +314,8 @@ class BotConfig(Base):
     counter_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     counter_rule: Mapped[str | None] = mapped_column(String, nullable=True, default="COLOUR")
     counter_need_fast: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Smallest counter-candle body for the exit, × that candle's ATR (0 = any size).
+    counter_min_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # EMA cross check (ema_filter.py): entry only on the EMA fast/slow side, exit on an EMA cross against the trade.
     use_ema: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     ema_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

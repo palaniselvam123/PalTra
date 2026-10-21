@@ -127,6 +127,8 @@ export type SmaConfig = {
   counter_rule?: "CLOSES" | "COLOUR" | "BOTH";
   /** The last counter candle must close past the fast SMA (on unless false). */
   counter_need_fast?: boolean;
+  /** Exit only: each counter candle's body |close − open| must be at least this × its ATR (0 = any size). */
+  counter_min_body?: number;
   /** EMA cross check: entry only on the fast/slow EMA side; exit on an EMA cross against the trade. */
   use_ema?: boolean;
   ema_exit?: boolean;

@@ -116,6 +116,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "counter_entry": "BOOLEAN DEFAULT 0",
             "counter_rule": "VARCHAR DEFAULT 'COLOUR'",
             "counter_need_fast": "BOOLEAN DEFAULT 1",
+            "counter_min_body": "FLOAT DEFAULT 0",
             "use_ema": "BOOLEAN DEFAULT 0",
             "ema_exit": "BOOLEAN DEFAULT 0",
             "ema_fast": "INTEGER DEFAULT 9",

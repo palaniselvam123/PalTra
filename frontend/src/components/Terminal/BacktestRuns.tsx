@@ -192,7 +192,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ],
   ["SMA cross exit", (s) => (s.cross_exit === false ? "Off (a cross does not close the trade)" : "On")],
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
-  ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"})` : "Off")],
+  ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],

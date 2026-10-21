@@ -63,6 +63,7 @@ const LABELS: Record<string, string> = {
   counter_exit_count: "counter-candle exit",
   counter_rule: "counter-candle rule",
   counter_need_fast: "counter-candle fast SMA",
+  counter_min_body: "counter-candle min body",
   counter_entry: "early reversal entry",
   use_ema: "EMA entry",
   ema_exit: "EMA exit",
@@ -266,6 +267,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       ? (form.counter_rule as "CLOSES" | "COLOUR" | "BOTH")
       : "COLOUR",
     counter_need_fast: form.counter_need_fast !== false,
+    counter_min_body: Math.min(5, Math.max(0, Number(form.counter_min_body ?? 0) || 0)),
     counter_entry: Boolean(form.counter_entry),
     use_ema: Boolean(form.use_ema),
     ema_exit: Boolean(form.ema_exit),
@@ -1113,6 +1115,18 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("counter_need_fast") && <OwnTag />}
             Last close must be past the fast SMA
           </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Exit: min body × ATR (0 = any size)"
+              value={String(form.counter_min_body ?? 0)}
+              onChange={(v) => set("counter_min_body", v)}
+              own={isOwn("counter_min_body")}
+            />
+            <p className="pb-2 text-xs text-slate-400">
+              Each counter candle&apos;s body (close − open) must be at least this × its ATR, so small candles against the
+              trade do not count. 0.5 = half an ATR.
+            </p>
+          </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"

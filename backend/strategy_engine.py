@@ -245,7 +245,7 @@ SNAPSHOT_FIELDS = (
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
-    "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast",
+    "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -3088,7 +3088,12 @@ class StrategyEngine:
             return
         towards = counter_candles.against(pos.signal_direction)
         hit, note = counter_candles.run_towards(
-            closed, towards, count, counter_candles.rule(cfg), counter_candles.need_fast(cfg)
+            closed,
+            towards,
+            count,
+            counter_candles.rule(cfg),
+            counter_candles.need_fast(cfg),
+            counter_candles.min_body(cfg),
         )
         if not hit:
             return

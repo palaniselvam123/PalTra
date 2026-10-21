@@ -299,7 +299,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   trade (`COUNTER_CANDLES`, via `_exit_now`, which cancels a LIVE stop first) once its last N
   candles closed after the entry all went against it (`counter_rule` `COLOUR` default | `CLOSES` |
   `BOTH`, read by `indicators._direction_reason`) and, with `counter_need_fast` (default on), the
-  last close is past the fast SMA on that side; once per closed candle (`pos.cc_bar`); a LIVE
+  last close is past the fast SMA on that side, and, with `counter_min_body` (× ATR, 0 = off by default, max 5),
+  each of those N candles has a body |close − open| of at least that × its ATR; once per closed candle (`pos.cc_bar`); a LIVE
   position restored without its stop id is left to that stop. **Early reversal entry**
   (`counter_entry`): while flat, `_counter_minute` takes the same run against the side the SMAs are
   on (fast below slow then N green closing above the fast SMA buys; N = the exit count, else 3)
