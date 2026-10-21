@@ -1,12 +1,31 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, Loader2, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
+import { chartHref } from "./StockTabs";
+
+/** Opens one stock's chart for one day of a finished (or playing) run, in a new tab. */
+function RunChartLink({ run, symbol, date }: { run: ReplayRun; symbol: string; date: string }) {
+  const bot = Number(run.settings.bot ?? 1) || 1;
+  return (
+    <a
+      href={chartHref(symbol, { date, runId: run.id, desk: bot === 1 ? "live" : `bot${bot}` })}
+      target="_blank"
+      rel="noreferrer"
+      title={`Chart of ${symbol} on ${date} with this run's trades`}
+      aria-label={`Chart of ${symbol} on ${date}`}
+      onClick={(e) => e.stopPropagation()}
+      className="ml-1.5 inline-flex h-7 w-7 items-center justify-center rounded-md text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
+    >
+      <LineChart size={13} aria-hidden />
+    </a>
+  );
+}
 
 export type Settings = ReplayRun["settings"];
 
@@ -649,6 +668,10 @@ function RunDetailBody({
                     ) : (
                       dayLabel(d.date)
                     )}
+                    {/* A real run (not a trade-book summary) with one stock: its chart for that day. */}
+                    {!heading && run.id > 0 && run.symbols.length === 1 ? (
+                      <RunChartLink run={run} symbol={run.symbols[0]} date={d.date} />
+                    ) : null}
                   </td>
                   <td className="px-2 py-1.5 text-right text-slate-200">{d.trades}</td>
                   <td className="px-2 py-1.5 text-right text-slate-300">
@@ -664,7 +687,10 @@ function RunDetailBody({
                 {isOpen
                   ? perStock.map(({ symbol, day: sd }) => (
                       <tr key={`${d.date}-${symbol}`} className="bg-white/[0.02] text-slate-300">
-                        <td className="px-2 py-1 pl-8 font-sans font-semibold text-amber-300">{symbol}</td>
+                        <td className="px-2 py-1 pl-8 font-sans font-semibold text-amber-300">
+                          {symbol}
+                          {!heading && run.id > 0 ? <RunChartLink run={run} symbol={symbol} date={d.date} /> : null}
+                        </td>
                         <td className="px-2 py-1 text-right">{sd.trades}</td>
                         <td className="px-2 py-1 text-right">
                           {sd.wins} / {sd.losses}

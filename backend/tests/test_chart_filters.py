@@ -10,7 +10,7 @@ import pytest
 
 from groww_client import IST
 from indicators import _session_vwap, enrich, rsi_wilder, session_vwap_series
-from strategy_engine import _entry_block, candle_rows, chart_filters, filter_blocks
+from strategy_engine import _entry_block, _from_formed_sma, candle_rows, chart_filters, filter_blocks
 
 
 def _frame(days=(dt.date(2026, 9, 28), dt.date(2026, 9, 29)), bars=200) -> pd.DataFrame:
@@ -128,6 +128,8 @@ def _uncached(frame, cfg, limit):
     rows = candle_rows(frame)[-limit:]
     for key in ("sma9", "sma21", "atr14", "vwap", "rsi14", "volume"):
         rows[-1][key] = None
+    # The chart starts where the slow SMA is formed (the frame's warm-up is not drawn).
+    rows = _from_formed_sma(rows)
     first = rows[0]["time"]
     return rows, [b for b in filter_blocks(frame, cfg) if b["time"] >= first]
 
