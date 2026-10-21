@@ -70,6 +70,11 @@ const LABELS: Record<string, string> = {
   ema_slow: "slow EMA",
   use_supertrend: "Supertrend entry",
   st_exit: "Supertrend exit",
+  slope_exit: "SMA 9 slope exit",
+  slope_lookback: "slope over (candles)",
+  slope_bend_pct: "bend exit (% off the steepest)",
+  slope_turn: "turn exit",
+  slope_turn_pct: "turn at (%/candle)",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -268,6 +273,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
     use_supertrend: Boolean(form.use_supertrend),
     st_exit: Boolean(form.st_exit),
+    slope_exit: Boolean(form.slope_exit),
+    slope_lookback: Math.min(10, Math.max(1, Math.round(Number(form.slope_lookback ?? 2) || 2))),
+    slope_bend_pct: Math.min(100, Math.max(0, Number(form.slope_bend_pct ?? 60) || 0)),
+    slope_turn: form.slope_turn !== false,
+    slope_turn_pct: Math.min(5, Math.max(0, Number(form.slope_turn_pct ?? 0.02) || 0)),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1204,6 +1214,55 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("st_exit") && <OwnTag />}
             Exit: close the trade when the Supertrend flips against it
           </label>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.slope_exit)}
+              onChange={(e) => set("slope_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("slope_exit") && <OwnTag />}
+            Exit when the SMA 9 line bends or turns
+            <InfoTip label="About the SMA 9 slope exit">
+              The angle of a line on the chart depends on its zoom, so the bot reads the fast SMA&apos;s slope in % per candle:
+              how much it moved over the last few candles (below), per candle. Read once per closed candle after the entry, on
+              the trade&apos;s signal side. Bend: the trade closes (SMA9_BEND) once the slope has dropped by the % below from its
+              steepest since the entry, e.g. from 0.20 %/candle to 0.08 % with 60 — the line flattening at the top of a run.
+              Turn: it closes (SMA9_TURN) once the slope is at least the %/candle below against the trade (the line pointing the
+              other way). Usually one or two candles earlier than the SMA cross; in a trend with pauses it also exits on a
+              harmless flattening, so try it on Replay first. 0 % bend = bend exit off. Off by default.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Slope over (candles)"
+              value={String(form.slope_lookback ?? 2)}
+              onChange={(v) => set("slope_lookback", v)}
+              own={isOwn("slope_lookback")}
+            />
+            <Field
+              label="Bend: exit at % off the steepest (0 = off)"
+              value={String(form.slope_bend_pct ?? 60)}
+              onChange={(v) => set("slope_bend_pct", v)}
+              own={isOwn("slope_bend_pct")}
+            />
+            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
+              <input
+                type="checkbox"
+                checked={form.slope_turn !== false}
+                onChange={(e) => set("slope_turn", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("slope_turn") && <OwnTag />}
+              Turn exit
+            </label>
+            <Field
+              label="Turn at (%/candle against)"
+              value={String(form.slope_turn_pct ?? 0.02)}
+              onChange={(v) => set("slope_turn_pct", v)}
+              own={isOwn("slope_turn_pct")}
+            />
+          </div>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Trend defence and recovery (for the trend bot)
             <InfoTip label="About trend defence and recovery">

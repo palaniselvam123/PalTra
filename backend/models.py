@@ -331,6 +331,12 @@ class BotConfig(Base):
     extreme_invalid_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
     extreme_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     extreme_cancel_on_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # SMA 9 slope exit (slope_exit.py): close when the fast SMA bends or turns against the trade.
+    slope_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    slope_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    slope_bend_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
+    slope_turn: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    slope_turn_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.02)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

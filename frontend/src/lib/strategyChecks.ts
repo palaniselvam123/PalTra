@@ -41,7 +41,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     String(cfg.bb_exit ?? "OFF").toUpperCase() === "OFF" &&
     !(Number(cfg.counter_exit_count ?? 0) > 0) &&
     !cfg.ema_exit &&
-    !cfg.st_exit
+    !cfg.st_exit &&
+    !cfg.slope_exit
   );
 }
 

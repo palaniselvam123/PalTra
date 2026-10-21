@@ -146,6 +146,11 @@ export type SmaConfig = {
   extreme_invalid_pct?: number;
   extreme_expiry_candles?: number;
   extreme_cancel_on_cross?: boolean;
+  slope_exit?: boolean;
+  slope_lookback?: number;
+  slope_bend_pct?: number;
+  slope_turn?: boolean;
+  slope_turn_pct?: number;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;
