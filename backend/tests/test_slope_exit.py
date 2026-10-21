@@ -112,3 +112,87 @@ def test_the_chart_is_told_the_slope_settings():
     got = chart_filters(_cfg(slope_exit=True, slope_lookback=3, slope_turn_pct=0.05))
     assert got["slope_exit"] is True and got["slope_lookback"] == 3 and got["slope_turn_pct"] == 0.05
     assert chart_filters(_cfg())["slope_exit"] is False
+
+
+def test_vturn_judge():
+    cfg = _cfg()  # move 0.02, turn 0.015, within 6
+    state: dict = {}
+    assert slope_exit.judge_vturn("LONG", 0.05, state, cfg) is None  # the steep run
+    assert slope_exit.judge_vturn("LONG", 0.0, state, cfg) is None
+    reason, note = slope_exit.judge_vturn("LONG", -0.02, state, cfg)
+    assert reason == slope_exit.VTURN_EXIT and "+0.050" in note
+    # A sell mirrors it: a steep fall, then a steep rise.
+    short: dict = {}
+    assert slope_exit.judge_vturn("SHORT", -0.04, short, cfg) is None
+    assert slope_exit.judge_vturn("SHORT", 0.03, short, cfg)[0] == slope_exit.VTURN_EXIT
+    # A gentle run (never 0.02 with the trade) is a U, not a V.
+    gentle: dict = {}
+    for value in (0.012, 0.008, 0.0):
+        assert slope_exit.judge_vturn("LONG", value, gentle, cfg) is None
+    assert slope_exit.judge_vturn("LONG", -0.03, gentle, cfg) is None
+    # The steep run must be within the window: 7 flat candles later it no longer counts.
+    late: dict = {}
+    slope_exit.judge_vturn("LONG", 0.05, late, cfg)
+    for _ in range(6):
+        slope_exit.judge_vturn("LONG", 0.0, late, cfg)
+    assert slope_exit.judge_vturn("LONG", -0.03, late, cfg) is None
+    assert not slope_exit.vturn_on(_cfg()) and slope_exit.vturn_within(_cfg(vturn_within=99)) == slope_exit.MAX_VTURN_WITHIN
+
+
+def _peak_frame(rounding: int) -> pd.DataFrame:
+    """A steep rise to a top, then a steep fall. `rounding` minutes to swing from +0.5 to -0.5 a minute:
+    1 makes a V, 40 a slow U."""
+    flat = lambda i, p: 1000.0 + (0.02 if i % 2 else -0.02)  # noqa: E731
+
+    def path(i, p):
+        if i < 40:
+            return flat(i, p)
+        if i < 60:
+            return p - 0.05
+        if i < 100:
+            return p + 0.5
+        k = i - 100
+        if k < rounding:
+            return p + 0.5 - k / rounding
+        return p - 0.5
+
+    return pd.DataFrame(_day(dt.date(2026, 9, 21), flat) + _day(DAY, path))
+
+
+async def _long_on(database, frame, **over):
+    from sma_research.replayer import replay_symbol
+
+    trades = await replay_symbol(frame, "SIMV", [DAY], _settings(database, **over))
+    return next(t for t in trades if t["direction"] == "LONG" and t["entry_time"] >= dt.datetime(2026, 9, 22, 10, 15))
+
+
+@pytest.mark.asyncio
+async def test_vturn_exits_a_v_top_but_not_a_slow_u(db):  # noqa: F811
+    v_plain = await _long_on(db, _peak_frame(1))
+    v_turn = await _long_on(db, _peak_frame(1), vturn_exit=True)
+    assert v_turn["exit_reason"] == slope_exit.VTURN_EXIT
+    assert v_turn["exit_time"] < v_plain["exit_time"]  # before the SMA cross
+    assert v_turn["entry_time"] == v_plain["entry_time"]
+    u_turn = await _long_on(db, _peak_frame(40), vturn_exit=True)
+    assert u_turn["exit_reason"] != slope_exit.VTURN_EXIT  # a slow rounding is left to the other exits
+
+
+def test_api_saves_the_vturn_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert {"vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within"} <= set(STOCK_FIELDS)
+    with TestClient(app) as client:
+        got = client.get("/api/config").json()
+        assert got["vturn_exit"] is False and got["vturn_within"] == 6 and got["vturn_turn_pct"] == 0.015
+        ok = client.put("/api/config", json={"vturn_exit": True, "vturn_move_pct": 0.03, "vturn_within": 4})
+        assert ok.status_code == 200 and ok.json()["vturn_exit"] is True and ok.json()["vturn_within"] == 4
+        assert client.put("/api/config", json={"vturn_within": 11}).status_code == 422
+    database.reset_engine()

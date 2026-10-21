@@ -19,6 +19,12 @@ signed so that positive is with the trade (rising for a buy, falling for a sell)
   * Turn (`slope_turn`, on): the trade closes as `SMA9_TURN` once the slope is at
     least `slope_turn_pct` (default 0.02 %/candle) against the trade.
 
+  * V-turn (`vturn_exit`, off, on its own tick box): the trade closes as `SMA9_VTURN`
+    once the slope is at least `vturn_turn_pct` (0.015 %/candle) against the trade
+    within `vturn_within` (6) candles of having been at least `vturn_move_pct`
+    (0.02 %/candle) with it: a steep run and a steep turn back, the point of a V. A slow
+    U-shaped rounding or a sideways drift never qualifies. Uses the same `slope_lookback`.
+
 The steepest slope is kept in memory, so after a restart it is measured again from
 the candles closed after that point. Exits go through `_exit_now`, which cancels a
 LIVE stop first; a LIVE position restored without its stop id is left to that stop.
@@ -31,12 +37,17 @@ import pandas as pd
 
 BEND_EXIT = "SMA9_BEND"
 TURN_EXIT = "SMA9_TURN"
+VTURN_EXIT = "SMA9_VTURN"
 
 DEFAULT_LOOKBACK = 2
 MAX_LOOKBACK = 10
 DEFAULT_BEND_PCT = 60.0
 DEFAULT_TURN_PCT = 0.02
 MAX_TURN_PCT = 5.0
+DEFAULT_VTURN_MOVE = 0.02
+DEFAULT_VTURN_TURN = 0.015
+DEFAULT_VTURN_WITHIN = 6
+MAX_VTURN_WITHIN = 10
 
 
 def on(cfg) -> bool:
@@ -74,6 +85,31 @@ def turn_pct(cfg) -> float:
     return _float(cfg, "slope_turn_pct", DEFAULT_TURN_PCT, 0.0, MAX_TURN_PCT)
 
 
+def vturn_on(cfg) -> bool:
+    return bool(getattr(cfg, "vturn_exit", False))
+
+
+def vturn_move_pct(cfg) -> float:
+    return _float(cfg, "vturn_move_pct", DEFAULT_VTURN_MOVE, 0.0, MAX_TURN_PCT)
+
+
+def vturn_turn_pct(cfg) -> float:
+    return _float(cfg, "vturn_turn_pct", DEFAULT_VTURN_TURN, 0.0, MAX_TURN_PCT)
+
+
+def vturn_within(cfg) -> int:
+    try:
+        value = int(getattr(cfg, "vturn_within", None) or DEFAULT_VTURN_WITHIN)
+    except (TypeError, ValueError):
+        return DEFAULT_VTURN_WITHIN
+    return max(1, min(MAX_VTURN_WITHIN, value))
+
+
+def watched(cfg) -> bool:
+    """Is any SMA 9 slope exit on (bend / turn, or the V-turn)?"""
+    return on(cfg) or vturn_on(cfg)
+
+
 def slope(closed: pd.DataFrame, fast: int, back: int) -> float | None:
     """The fast SMA's slope in % per candle on the last closed candle (closed candles only)."""
     if closed is None or getattr(closed, "empty", True) or "close" not in closed.columns:
@@ -104,3 +140,27 @@ def judge(direction: str, value: float, state: dict, cfg) -> tuple[str, str] | N
             f"{(peak if direction == 'LONG' else -peak):+.3f}%/candle"
         )
     return None
+
+
+def judge_vturn(direction: str, value: float, state: dict, cfg) -> tuple[str, str] | None:
+    """(exit reason, note) on a V: a steep slope with the trade, then a steep one against it.
+
+    `state["hist"]` keeps the signed slopes of the candles read before this one (newest last).
+    """
+    signed = value if direction == "LONG" else -value
+    hist = state.setdefault("hist", [])
+    within = vturn_within(cfg)
+    move, turn = vturn_move_pct(cfg), vturn_turn_pct(cfg)
+    recent = hist[-within:]
+    hist.append(signed)
+    del hist[:-MAX_VTURN_WITHIN]
+    if signed >= 0 or -signed < max(turn, 1e-9) or not recent:
+        return None
+    steepest = max(recent)
+    if steepest < max(move, 1e-9):
+        return None
+    with_trade = steepest if direction == "LONG" else -steepest
+    return VTURN_EXIT, (
+        f"SMA 9 V-turn: slope {with_trade:+.3f}%/candle, then {value:+.3f}%/candle "
+        f"within {within} candle(s)"
+    )

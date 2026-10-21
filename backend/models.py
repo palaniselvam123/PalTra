@@ -344,6 +344,11 @@ class BotConfig(Base):
     slope_bend_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
     slope_turn: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     slope_turn_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.02)
+    # SMA 9 V-turn exit (slope_exit.judge_vturn): a steep slope with the trade, then a steep one against it.
+    vturn_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    vturn_move_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.02)
+    vturn_turn_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.015)
+    vturn_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

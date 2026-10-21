@@ -342,6 +342,10 @@ class ConfigUpdate(BaseModel):
     slope_bend_pct: float | None = Field(default=None, ge=0, le=100)
     slope_turn: bool | None = None
     slope_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
+    vturn_exit: bool | None = None
+    vturn_move_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
+    vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
+    vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -918,6 +922,10 @@ def _gap_dict(row) -> dict:
         "slope_bend_pct": slope_mod.bend_pct(row),
         "slope_turn": slope_mod.turn_on(row),
         "slope_turn_pct": slope_mod.turn_pct(row),
+        "vturn_exit": slope_mod.vturn_on(row),
+        "vturn_move_pct": slope_mod.vturn_move_pct(row),
+        "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
+        "vturn_within": slope_mod.vturn_within(row),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),

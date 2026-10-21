@@ -83,6 +83,7 @@ export function strategyLabel(s: Settings): string {
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
     if (s.slope_exit) parts.push(`SMA 9 slope exit (bend ${s.slope_bend_pct ?? 60}%, over ${s.slope_lookback ?? 2})`);
+    if (s.vturn_exit) parts.push("SMA 9 V-turn exit");
     if (s.slow_sma_exit) parts.push("slow SMA exit");
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
@@ -221,6 +222,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Slow SMA exit", (s) => (s.slow_sma_exit ? "On" : "Off")],
+  ["SMA 9 V-turn exit", (s) => (s.vturn_exit ? `On (run ${s.vturn_move_pct ?? 0.02}%, turn ${s.vturn_turn_pct ?? 0.015}%/candle within ${s.vturn_within ?? 6})` : "Off")],
   ["SMA 9 slope exit", (s) => (s.slope_exit ? `On (over ${s.slope_lookback ?? 2} candles, bend ${s.slope_bend_pct ?? 60}%${s.slope_turn === false ? "" : `, turn ${s.slope_turn_pct ?? 0.02}%/candle`})` : "Off")],
   ["Recovery hold", (s) => (s.recovery_hold ? `On (target ${s.recovery_tolerance_pct ?? 0.15}%, floor ${s.recovery_emergency_mult ?? 1.5}× / ${s.recovery_atr_mult ?? 2.5}× ATR, ${s.recovery_max_candles ?? 6} candles${s.recovery_handoff === false ? "" : ", hand-off to Bot 2"})` : "Off")],
   ["Breakout hand-off", (s) => (s.breakout_handoff ? `On (candle ${s.breakout_atr_mult ?? 1.8}× ATR + gap ${s.breakout_gap_pct ?? 0.2}% or volume ${s.breakout_volume_mult ?? 1.5}×, to Bot 3)` : "Off")],
