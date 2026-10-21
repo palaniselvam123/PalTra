@@ -288,6 +288,8 @@ class BotConfig(Base):
     # Judge the fade on the live price about once a second, as if that second
     # closed the candle, instead of only on closed candles.
     gap_fade_intrabar: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Judge the gap fade on each closed 1-minute candle inside a longer bot candle (works in replays too).
+    gap_fade_minute: Mapped[bool] = mapped_column(Boolean, default=False)
     # App-wide (read from row 1): fetch every watched stock's price from Groww
     # once a second and record it (tick_store). Off: quotes every few seconds.
     second_ticks: Mapped[bool] = mapped_column(Boolean, default=True)

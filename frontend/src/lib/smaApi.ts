@@ -113,6 +113,8 @@ export type SmaConfig = {
   gap_fade_min_candles?: number;
   /** Judge the fade on the live price about once a second, not only on closed candles. */
   gap_fade_intrabar?: boolean;
+  /** Judge the fade on each closed 1-minute candle inside a longer bot candle (replays too). */
+  gap_fade_minute?: boolean;
   /** SMA cross exit (on unless false): an opposite cross closes the trade. Off: other exits or square-off. */
   cross_exit?: boolean;
   /** Late entry: minutes a filter-refused cross stays armed (0 = off). */

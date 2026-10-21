@@ -243,7 +243,7 @@ SNAPSHOT_FIELDS = (
     "bb_exit", "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min",
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
-    "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar",
+    "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar", "gap_fade_minute",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
@@ -1728,6 +1728,8 @@ class StrategyEngine:
         if pos.gap_bar == closed_ts:
             if bool(getattr(cfg, "gap_fade_intrabar", False)):
                 await self._gap_fade_live(cfg, pos, symbol, frame)
+            if self.position is pos and bool(getattr(cfg, "gap_fade_minute", False)):
+                await self._gap_fade_minute(cfg, pos, symbol, frame, opened)
             return
         pos.gap_bar = closed_ts
         closes = frame["close"].iloc[:-1].astype(float)
@@ -1765,8 +1767,46 @@ class StrategyEngine:
         if now_s - seen.get(symbol, 0.0) < 1.0:
             return
         seen[symbol] = now_s
+        await self._gap_fade_probe(cfg, pos, symbol, frame, float(self.ltp), "the live price")
+
+    async def _gap_fade_minute(
+        self, cfg: BotConfig, pos: OpenPosition, symbol: str, frame: pd.DataFrame, opened: dt.datetime
+    ) -> None:
+        """gap_fade_minute: judge the fade on each closed 1-minute candle inside a longer bot candle.
+
+        The 1-minute close stands in for the forming candle's close, as the live
+        price does for gap_fade_intrabar, but it comes from the Groww 1-minute
+        history, so it also works after hours and in replays. Once per minute.
+        """
+        tape = self._tapes.get(symbol)
+        if pos.gap_prev is None or tape is None or len(tape) < 2 or frame is None or len(frame) < 2:
+            return
+        minute = tape.iloc[-2]  # the last closed 1-minute candle (the tape's last row is forming)
+        minute_ts = int(minute["ts"])
+        if minute_ts < int(frame.iloc[-1]["ts"]) or minute_ts + 60 <= opened.timestamp():
+            return  # not inside the forming bot candle (a 1-minute bot), or before the entry
+        seen = getattr(self, "_minute_fade_at", None)
+        if seen is None:
+            seen = self._minute_fade_at = {}
+        if seen.get(symbol) == minute_ts:
+            return
+        seen[symbol] = minute_ts
+        price = _finite(minute.get("close"))
+        if price is None or price <= 0:
+            return
+        when = dt.datetime.fromtimestamp(minute_ts + 60, IST).strftime("%H:%M")
+        await self._gap_fade_probe(cfg, pos, symbol, frame, price, f"the {when} 1-minute close")
+
+    async def _gap_fade_probe(
+        self, cfg: BotConfig, pos: OpenPosition, symbol: str, frame: pd.DataFrame, price: float, source: str
+    ) -> None:
+        """Read the gap as if `price` closed the forming candle; exit on a fade.
+
+        The closed-candle state (armed, widest gap, narrowing run) is only probed
+        on a copy, never changed; the next closed candle updates it as usual.
+        """
         need = int(cfg.sma_slow) + 2
-        closes = pd.Series([*frame["close"].iloc[:-1].astype(float).tail(need).tolist(), float(self.ltp)])
+        closes = pd.Series([*frame["close"].iloc[:-1].astype(float).tail(need).tolist(), price])
         fast = closes.rolling(int(cfg.sma_fast)).mean().iloc[-1]
         slow = closes.rolling(int(cfg.sma_slow)).mean().iloc[-1]
         gap = sma_gap_signed(fast, slow)
@@ -1776,11 +1816,11 @@ class StrategyEngine:
         note = judge_exit(cfg, pos.signal_direction, gap, pos.gap_prev, probe)
         if note is None:
             return
-        ok, why = fade_confirmed(cfg, pos.signal_direction, float(self.ltp), _finite(slow), probe)
+        ok, why = fade_confirmed(cfg, pos.signal_direction, price, _finite(slow), probe)
         if not ok:
-            self._signals[symbol] = f"{symbol} holding — live {note}, but {why}"
+            self._signals[symbol] = f"{symbol} holding — {note} on {source}, but {why}"
             return
-        self._signals[symbol] = f"{symbol} gap exit on the live price — {note}"
+        self._signals[symbol] = f"{symbol} gap exit on {source} — {note}"
         await self._exit_now(cfg, self.ltp, "GAP_FADE")
 
     def _log_decision(self, signal: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime, decision: str, note: str = "") -> None:
