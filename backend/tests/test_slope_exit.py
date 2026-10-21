@@ -104,3 +104,11 @@ def test_api_saves_the_slope_settings(tmp_path, monkeypatch):
         own = client.put("/api/bots/3/config/stock/BEL", json={"slope_exit": False})
         assert own.status_code == 200 and own.json()["slope_exit"] is False
     database.reset_engine()
+
+
+def test_the_chart_is_told_the_slope_settings():
+    from strategy_engine import chart_filters
+
+    got = chart_filters(_cfg(slope_exit=True, slope_lookback=3, slope_turn_pct=0.05))
+    assert got["slope_exit"] is True and got["slope_lookback"] == 3 and got["slope_turn_pct"] == 0.05
+    assert chart_filters(_cfg())["slope_exit"] is False

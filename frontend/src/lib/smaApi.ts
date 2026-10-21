@@ -777,6 +777,11 @@ export type ChartFilters = {
   use_or_break?: boolean;
   or_volume_ratio?: number;
   or_spread_pct?: number;
+  /** SMA 9 slope exit (slope_exit.py): the strip is always drawn while it is on. */
+  slope_exit?: boolean;
+  slope_lookback?: number;
+  slope_bend_pct?: number;
+  slope_turn_pct?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */
