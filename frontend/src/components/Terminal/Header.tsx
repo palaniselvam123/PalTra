@@ -681,11 +681,12 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         )}
         {/* A 1-minute review stays in reach until it is answered or ends. */}
         <ReviewCards state={state} onChanged={onChanged} />
+        {/* The section tabs stay pinned with the header, under the square-off / halt line. */}
+        {tabs ? <div className="border-t border-white/10 px-3 py-1.5 sm:px-4">{tabs}</div> : null}
       </header>
 
       <div className="mx-auto flex w-full min-w-0 flex-col gap-2 px-3 pt-3 sm:px-4">
         {notice}
-        {tabs}
         <div className={clsx(!inTab(tab, "live") && "hidden")}>
         <ControlBar
           part="rest"
