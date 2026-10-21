@@ -151,6 +151,22 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const deskBot: 1 | 2 | 3 | 4 | null =
     desk === "live" ? 1 : desk === "bot2" ? 2 : desk === "bot3" ? 3 : desk === "bot4" ? 4 : null;
   const [copyBots, setCopyBots] = useState<BotSummary[]>([]);
+  // Where the sticky header ends (the nav's 44 px + its own height, which changes with
+  // review cards and notices), so a bar further down (the trade blotter's) can pin under it.
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const note = () => root.style.setProperty("--sma-header-bottom", `${44 + el.offsetHeight}px`);
+    note();
+    const watch = new ResizeObserver(note);
+    watch.observe(el);
+    return () => {
+      watch.disconnect();
+      root.style.removeProperty("--sma-header-bottom");
+    };
+  }, []);
   useEffect(() => {
     if (!deskBot) return;
     smaApi.bots().then(setCopyBots).catch(() => {});
@@ -612,6 +628,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         })}
       </nav>
       <header
+        ref={headerRef}
         aria-label="SMA terminal"
         className={clsx(
           "sticky top-11 z-30 bg-[#0B0E14]",
