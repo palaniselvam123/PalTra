@@ -588,7 +588,11 @@ export function TradeHistoryTable({
         simulation ? "border-[#F59E0B]/40" : book === "REPLAY" ? "border-violet-400/40" : "border-[#F43F5E]/40"
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      {/* Pinned under the terminal's sticky header while the blotter scrolls by. */}
+      <div
+        className="sticky z-20 flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#151921] px-4 py-3"
+        style={{ top: "var(--sma-header-bottom, 0px)" }}
+      >
         <div>
           <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
           <h2
