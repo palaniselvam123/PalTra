@@ -58,6 +58,7 @@ async def test_join_sells_the_morning_downtrend_n_minutes_after_the_open(db):  #
     shorts = await _shorts(db, join_trend=True)  # default: 15 minutes after 09:15
     assert len(shorts) == 1
     assert dt.datetime(2026, 9, 22, 9, 30) <= shorts[0]["entry_time"] <= dt.datetime(2026, 9, 22, 9, 32)
+    assert shorts[0]["entry_reason"] == "JOIN_TREND"
     later = await _shorts(db, join_trend=True, join_after_min=60)
     assert len(later) == 1
     assert dt.datetime(2026, 9, 22, 10, 15) <= later[0]["entry_time"] <= dt.datetime(2026, 9, 22, 10, 17)

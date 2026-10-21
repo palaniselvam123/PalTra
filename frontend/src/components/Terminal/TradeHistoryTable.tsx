@@ -8,6 +8,7 @@ import { inr, pnlAtPrice, px, smaApi, type SmaState, type TradeBook, type TradeR
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
+import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -84,6 +85,7 @@ type SortKey =
   | "side"
   | "entry_time"
   | "entry"
+  | "entry_reason"
   | "exit_time"
   | "exit"
   | "high"
@@ -104,6 +106,7 @@ const SORT_CHOICES: { key: SortKey; label: string }[] = [
   { key: "stock", label: "Stock" },
   { key: "side", label: "Side" },
   { key: "reason", label: "Exit reason" },
+  { key: "entry_reason", label: "Entry reason" },
   { key: "strategy", label: "Strategy" },
   { key: "entry", label: "Entry price" },
   { key: "exit", label: "Exit price" },
@@ -158,6 +161,8 @@ function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: 
       return epoch(trade.entry_time);
     case "entry":
       return trade.entry_price;
+    case "entry_reason":
+      return entryReasonShort(trade.entry_reason) ?? "";
     case "exit_time":
       return epoch(trade.exit_time);
     case "exit":
@@ -541,6 +546,7 @@ export function TradeHistoryTable({
       "qty",
       "entry_time",
       "entry_price",
+      "entry_reason",
       "exit_time",
       "exit_price",
       "exit_reason",
@@ -901,6 +907,7 @@ const COLUMNS: Col[] = [
   { key: "side", label: "Side" },
   { key: "entry_time", label: "Entry time" },
   { key: "entry", label: "Entry", num: true },
+  { key: "entry_reason", label: "Entry reason" },
   { key: "exit_time", label: "Exit time" },
   { key: "exit", label: "Exit", num: true },
   { key: "high", label: "Max high", num: true },
@@ -1034,6 +1041,22 @@ function BookSummary({
         </div>
       </div>
     </section>
+  );
+}
+
+function EntryReasonBadge({ trade }: { trade: TradeRow }) {
+  const label = entryReasonShort(trade.entry_reason);
+  if (!label) {
+    return (
+      <span className="text-slate-500" title="Saved for trades opened after this was added.">
+        —
+      </span>
+    );
+  }
+  return (
+    <Badge color="slate" title={`Entry: ${entryReasonLong(trade.entry_reason)}`}>
+      {label}
+    </Badge>
   );
 }
 
@@ -1464,6 +1487,9 @@ function OrderRowView({
       </td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
       <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
+      <td className="px-3 py-2">
+        <EntryReasonBadge trade={t} />
+      </td>
       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
       <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
         {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
@@ -1540,7 +1566,7 @@ function TradeCardView({
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-xs text-slate-400">
-          {tradeId(t)} <ReasonBadge trade={t} />
+          {tradeId(t)} <EntryReasonBadge trade={t} /> <ReasonBadge trade={t} />
         </span>
         {open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}
       </div>

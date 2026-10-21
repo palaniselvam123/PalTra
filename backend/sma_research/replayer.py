@@ -120,6 +120,7 @@ def _trade_rows(min_id: int) -> list[dict]:
                 "entry_price": r.entry_price,
                 "exit_price": r.exit_price,
                 "cross_price": r.ma_cross_price,
+                "entry_reason": r.entry_reason,
                 "exit_reason": r.exit_reason,
                 "gross": float(r.gross_pnl or 0.0),
                 "charges": float(r.brokerage_and_taxes or 0.0),

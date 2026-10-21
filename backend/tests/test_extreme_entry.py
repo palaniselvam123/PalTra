@@ -91,6 +91,8 @@ async def test_the_buy_waits_at_the_cross_candle_low_not_its_top(db):  # noqa: F
     assert plain[0]["entry_price"] > low + 4  # plain mode buys right after the tall candle, near its top
     assert waited[0]["entry_price"] <= low + 0.01  # the limit at the candle's low
     assert waited[0]["entry_time"] > plain[0]["entry_time"]
+    assert plain[0]["entry_reason"] == "SMA_CROSS"
+    assert waited[0]["entry_reason"] == "SMA_CROSS:EXTREME_LIMIT"  # filled from the waiting limit
 
 
 @pytest.mark.asyncio

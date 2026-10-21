@@ -927,6 +927,8 @@ export type TradeRow = {
   /** null when the trade had no stop. */
   sl_trigger_price: number | null;
   stop_active?: boolean;
+  /** Why the trade opened (SMA_CROSS, GAP_MODE, "JOIN_TREND:EXTREME_LIMIT", ...); null on older trades. */
+  entry_reason?: string | null;
   exit_time: string | null;
   exit_price: number | null;
   exit_reason: string | null;

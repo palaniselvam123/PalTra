@@ -206,6 +206,8 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_active BOOLEAN DEFAULT 1")
         if "flipped" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN flipped BOOLEAN DEFAULT 0")
+        if "entry_reason" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN entry_reason VARCHAR")
         if "recovery_loss" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN recovery_loss FLOAT")
         if "recovery_bar" not in names:

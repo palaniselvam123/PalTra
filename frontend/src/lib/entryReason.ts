@@ -1,0 +1,44 @@
+/** Why a trade opened (TradeLog.entry_reason, strategy_engine.ENTRY_REASONS). */
+const ENTRY_SHORT: Record<string, string> = {
+  SMA_CROSS: "SMA cross",
+  GAP_MODE: "Gap mode",
+  JOIN_TREND: "Joined trend",
+  LATE_ENTRY: "Late entry",
+  EARLY_REVERSAL: "Early reversal",
+  CANDLE_PATTERN: "Candle pattern",
+  BREAKOUT_ARRIVAL: "Breakout",
+  FORCE_ORDER: "Force order",
+};
+
+const ENTRY_LONG: Record<string, string> = {
+  SMA_CROSS: "SMA fast crossed the slow SMA on a closed candle",
+  GAP_MODE: "Gap mode: the SMA gap reached the entry level after the cross",
+  JOIN_TREND: "Join the morning trend: the SMAs were already on this side",
+  LATE_ENTRY: "Late entry: a filter refused the cross, then agreed on a later candle",
+  EARLY_REVERSAL: "Counter candles: a run against the SMA side before the cross",
+  CANDLE_PATTERN: "Candle pattern entry",
+  BREAKOUT_ARRIVAL: "Breakout handed over from Bot 2",
+  FORCE_ORDER: "Force order pressed on the terminal",
+};
+
+/** How a waiting limit was filled (the part after ":"). */
+const FILL: Record<string, [string, string]> = {
+  EXTREME_LIMIT: ["limit", "filled at the signal candle's extreme limit"],
+  PULLBACK: ["pullback", "filled when the price came back to the pullback level"],
+};
+
+/** Short label, e.g. "SMA cross · limit"; null for older trades with no reason saved. */
+export function entryReasonShort(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const [base, how] = code.split(":");
+  const label = ENTRY_SHORT[base] ?? base.replace(/_/g, " ").toLowerCase();
+  return how ? `${label} · ${FILL[how]?.[0] ?? how.toLowerCase()}` : label;
+}
+
+/** Full sentence for a tooltip. */
+export function entryReasonLong(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const [base, how] = code.split(":");
+  const text = ENTRY_LONG[base] ?? base.replace(/_/g, " ").toLowerCase();
+  return how ? `${text}; ${FILL[how]?.[1] ?? how.toLowerCase()}` : text;
+}

@@ -2120,6 +2120,7 @@ async def trades_csv(mode: str = ""):
         "fill_lag_points",
         "atr_at_entry",
         "sl_trigger_price",
+        "entry_reason",
         "exit_time",
         "exit_price",
         "exit_reason",

@@ -696,6 +696,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   replace the destination's only when ticked. A LIVE destination needs `confirm_live` (409 without); an open trade
   blocks a qty change as on Save. Settings → SMA strategy, "Copy settings from" (`components/Settings/CopySettings.tsx`).
   No order is placed.
+- Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
+  saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
+  `EARLY_REVERSAL`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`); a fill from a waiting `PullbackOrder` adds
+  `:PULLBACK` or `:EXTREME_LIMIT`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
+  card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

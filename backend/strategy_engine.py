@@ -113,6 +113,20 @@ def cross_exits(cfg) -> bool:
     return getattr(cfg, "cross_exit", None) is not False
 
 
+# Why a trade opened, saved on TradeLog.entry_reason. A fill from a waiting limit adds
+# ":PULLBACK" (tall candle / breakout level) or ":EXTREME_LIMIT" (extreme_entry.py).
+ENTRY_REASONS = (
+    "SMA_CROSS",
+    "GAP_MODE",
+    "JOIN_TREND",
+    "LATE_ENTRY",
+    "EARLY_REVERSAL",
+    "CANDLE_PATTERN",
+    "BREAKOUT_ARRIVAL",
+    "FORCE_ORDER",
+)
+
+
 @dataclass
 class PullbackOrder:
     """A tall signal candle's entry waiting for the price to pull back (tall_pullback.py)."""
@@ -130,6 +144,7 @@ class PullbackOrder:
     sma_side: int = 0  # SMA fast vs slow on the signal candle (+1 above, -1 below)
     cancel_on_cross: bool = False  # dropped once the SMAs turn against the signal
     note: str = "tall candle"
+    why: str = "SMA_CROSS"  # entry reason of the signal that armed it (ENTRY_REASONS)
 
 
 @dataclass
@@ -1484,7 +1499,7 @@ class StrategyEngine:
         """Join a running trend: ask the usual entry path for the side the SMAs are already on."""
         direction = run[0]
         sig = "BULLISH" if direction == "LONG" else "BEARISH"
-        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False, why="JOIN_TREND")
         if result.startswith("blocked — order PENDING"):
             return result
         if result.startswith("opened"):
@@ -1522,7 +1537,7 @@ class StrategyEngine:
         if not hit:
             return None
         sig = "BULLISH" if want == "LONG" else "BEARISH"
-        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False, why="EARLY_REVERSAL")
         if result.startswith("blocked — order PENDING"):
             return result
         if result.startswith("opened"):
@@ -1550,7 +1565,7 @@ class StrategyEngine:
             self.last_signal = text
             return text
         sig = "BULLISH" if pending.direction == "LONG" else "BEARISH"
-        result = await self.apply_signal(sig, frame, cfg, now, alert=False)
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False, why="LATE_ENTRY")
         if result.startswith("blocked — order PENDING"):
             return result
         if late_entry.refused_by_filter(sig, result):
@@ -1589,7 +1604,7 @@ class StrategyEngine:
             return text
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
         # No Telegram for a refused pattern: one can print on every candle.
-        result = await self.apply_signal(signal, frame, cfg, now, alert=False)
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why="CANDLE_PATTERN")
         if result.startswith(("opened", "reversed")):
             result = f"{result} — {call.note}"
             self._signals[symbol] = result
@@ -1643,7 +1658,7 @@ class StrategyEngine:
         action, note = judge_pending(cfg, pending, gap, int(bar["ts"]))
         if action == "enter":
             sig = "BULLISH" if pending.direction == "LONG" else "BEARISH"
-            result = await self.apply_signal(sig, frame, cfg, now, alert=not pending.alerted)
+            result = await self.apply_signal(sig, frame, cfg, now, alert=not pending.alerted, why="GAP_MODE")
             refused = result.startswith(f"{sig} ignored — ") and "no new entries after" not in result
             if refused or result.startswith(("blocked", "skipped")):
                 # A ticked filter or ADX said no on this candle: keep waiting,
@@ -1811,8 +1826,11 @@ class StrategyEngine:
         now: dt.datetime,
         alert: bool = True,
         pullback_at: PullbackOrder | None = None,
+        why: str = "SMA_CROSS",
     ) -> str:
         """Stop-and-reverse on a closed-candle cross. Returns a short status.
+
+        `why` is the entry reason saved on the trade (ENTRY_REASONS).
 
         `pullback_at` makes the entry wait at that level whatever the candle's height
         (a breakout arrival, breakout.py); a flipped stock still orders at once.
@@ -1853,6 +1871,7 @@ class StrategyEngine:
                     sma_side=extreme_entry.sma_side(curr),
                     cancel_on_cross=extreme_entry.cancel_on_cross(cfg),
                     note="candle extreme",
+                    why=why,
                 )
         elif tall_pullback.on(cfg) and not flips_orders(cfg):
             plan = tall_pullback.plan(curr, want, atr, cfg)
@@ -1866,6 +1885,7 @@ class StrategyEngine:
                     signal_ts=int(curr["ts"]),
                     span_sec=span if span > 0 else 60,
                     candles=tall_pullback.expiry(cfg),
+                    why=why,
                 )
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
@@ -1890,6 +1910,7 @@ class StrategyEngine:
                     cfg=cfg,
                     now=now,
                     pullback=pullback,
+                    why=why,
                 )
                 entered = result.startswith(("opened", "reversed")) and self._focus in self.positions
                 if entered or self._focus in self._pullback:
@@ -1950,6 +1971,7 @@ class StrategyEngine:
         now: dt.datetime,
         entry_block: str | None = None,
         pullback: PullbackOrder | None = None,
+        why: str = "SMA_CROSS",
     ) -> str:
         want = "LONG" if signal == "BULLISH" else "SHORT"
         pos = self.position
@@ -1996,7 +2018,7 @@ class StrategyEngine:
                 return "closed on cross — no new trade in this stock today (emergency recovery exit)"
             if pullback is not None:
                 return "reversed — " + self._arm_pullback(pullback, cfg)
-            await self._open(want, cross_price, atr, cfg, now)
+            await self._open(want, cross_price, atr, cfg, now, why=why)
             return f"reversed to {want}"
 
         # FLAT
@@ -2013,7 +2035,7 @@ class StrategyEngine:
             return "entry blocked — no new trade in this stock today (emergency recovery exit)"
         if pullback is not None:
             return self._arm_pullback(pullback, cfg)
-        await self._open(want, cross_price, atr, cfg, now)
+        await self._open(want, cross_price, atr, cfg, now, why=why)
         return f"opened {want}"
 
     def _arm_pullback(self, order: PullbackOrder, cfg: BotConfig) -> str:
@@ -2213,11 +2235,14 @@ class StrategyEngine:
                     signal_ts=int(closed_ts),
                     span_sec=candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60,
                     candles=tall_pullback.expiry(cfg),
+                    why="BREAKOUT_ARRIVAL",
                 )
                 self._focus = symbol
                 self.ltp = self._ltps.get(symbol, self.ltp)
                 signal = "BULLISH" if arrival.direction == "LONG" else "BEARISH"
-                result = await self.apply_signal(signal, enriched, cfg, now, alert=False, pullback_at=order)
+                result = await self.apply_signal(
+                    signal, enriched, cfg, now, alert=False, pullback_at=order, why="BREAKOUT_ARRIVAL"
+                )
                 text = f"breakout arrival — {result}"
         self._signals[symbol] = text
         self.last_signal = text
@@ -2272,7 +2297,10 @@ class StrategyEngine:
                 self.ltp = float(price)
                 self.inflight = "TRANSIT"
                 try:
-                    await self._open(order.direction, order.cross_price, order.atr, symbol_cfg, now)
+                    how = "EXTREME_LIMIT" if order.invalid_at is not None else "PULLBACK"
+                    await self._open(
+                        order.direction, order.cross_price, order.atr, symbol_cfg, now, why=f"{order.why}:{how}"
+                    )
                     level = "the candle-extreme limit" if order.invalid_at is not None else "the pullback level"
                     result = f"opened {real} — price came back to {level} {order.limit:.2f}"
                 except SlCancelFailed as exc:
@@ -2397,6 +2425,7 @@ class StrategyEngine:
                     adx_blocks_entry=False,
                     cfg=_cfg_for(cfg, name),
                     now=now,
+                    why="FORCE_ORDER",
                 )
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
@@ -2595,7 +2624,15 @@ class StrategyEngine:
             self.last_signal = text
             self._signals[symbol] = text
 
-    async def _open(self, direction: str, cross_price: float, atr: float, cfg: BotConfig, now: dt.datetime) -> None:
+    async def _open(
+        self,
+        direction: str,
+        cross_price: float,
+        atr: float,
+        cfg: BotConfig,
+        now: dt.datetime,
+        why: str = "SMA_CROSS",
+    ) -> None:
         """Book a position only once the broker confirms the fill.
 
         A refused, failed, or cancelled entry raises before anything is
@@ -2690,6 +2727,7 @@ class StrategyEngine:
             qty=qty,
             stop_active=stop_active,
             flipped=flipped,
+            entry_reason=why,
         )
         self.trades_today += 1
         self._rejects.pop((cfg.symbol or "").upper(), None)
@@ -3293,6 +3331,7 @@ class StrategyEngine:
         qty: int | None = None,
         stop_active: bool = True,
         flipped: bool = False,
+        entry_reason: str | None = None,
     ) -> int:
         mode = (cfg.trading_mode or "PAPER").upper()
         run_id = getattr(self, "run_id", None)
@@ -3314,6 +3353,7 @@ class StrategyEngine:
                 mode=mode,
                 stop_active=bool(stop_active),
                 flipped=bool(flipped),
+                entry_reason=entry_reason,
                 bot=self.bot_id,
                 run_id=run_id,
                 book_seq=seq,
@@ -5141,6 +5181,7 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "stop_active": row.stop_active is not False,
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
+        "entry_reason": getattr(row, "entry_reason", None),
         "exit_reason": row.exit_reason,
         "gross_pnl": row.gross_pnl,
         "brokerage_and_taxes": row.brokerage_and_taxes,
