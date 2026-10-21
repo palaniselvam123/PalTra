@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
@@ -153,6 +153,27 @@ export function gapModeText(s: Settings): string {
 }
 
 const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
+type RunFilters = { text: string; bot: string; result: string; status: string; from: string; to: string };
+const NO_FILTERS: RunFilters = { text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "" };
+
+/** Does a run pass the Backtests filters? Stock / run # search, bot, result, status and replayed dates. */
+function runMatches(run: ReplayRun, f: RunFilters): boolean {
+  const text = f.text.trim().toUpperCase();
+  if (text) {
+    const hay = [`#${run.id}`, String(run.id), ...run.symbols].join(" ").toUpperCase();
+    if (!text.split(/[\s,]+/).filter(Boolean).every((part) => hay.includes(part))) return false;
+  }
+  if (f.bot !== "ALL" && String(Number(run.settings.bot ?? 1) || 1) !== f.bot) return false;
+  const t = run.totals;
+  if (f.result === "PROFIT" && !(t.trades > 0 && t.net > 0)) return false;
+  if (f.result === "LOSS" && !(t.trades > 0 && t.net < 0)) return false;
+  if (f.result === "NONE" && t.trades > 0) return false;
+  if (f.status !== "ALL" && run.status !== f.status) return false;
+  if (f.from && run.end_date < f.from) return false;
+  if (f.to && run.start_date > f.to) return false;
+  return true;
+}
+
 // The runs list asks for the newest RUNS_PAGE runs, then RUNS_PAGE more per "Show older runs" (server cap 500).
 const RUNS_PAGE = 50;
 const RUNS_MAX = 500;
@@ -244,6 +265,28 @@ export function BacktestRuns() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReplayRun | null>(null);
   const [printing, setPrinting] = useState<number | null>(null);
+  const [filters, setFilters] = useState<RunFilters>(NO_FILTERS);
+  const [starting, setStarting] = useState<number | null>(null);
+
+  /** Replay the same stocks and days again on the run's bot, with that bot's settings as they are now. */
+  const runAgain = (run: ReplayRun) => {
+    const bot = Number(run.settings.bot ?? 1) || 1;
+    const days = run.end_date !== run.start_date ? `${run.start_date} → ${run.end_date}` : run.start_date;
+    const ask =
+      `Run ${days} again on Bot ${bot} with ${run.symbols.join(", ")}?\n\n` +
+      `It uses Bot ${bot}'s settings as they are now (not run #${run.id}'s), so you can compare the two runs. ` +
+      `A replay already playing on Bot ${bot} stops. Practice money only.`;
+    if (!window.confirm(ask)) return;
+    setStarting(run.id);
+    smaApi
+      .replayStart(run.start_date, run.start_time || "09:15", 300, run.end_date, run.symbols, bot)
+      .then(() => {
+        setError(null);
+        load();
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Run again failed"))
+      .finally(() => setStarting(null));
+  };
 
   /** One run as a PDF: its settings, totals, day-wise P&L and every trade. */
   const downloadPdf = useCallback(async (run: ReplayRun) => {
@@ -312,7 +355,9 @@ export function BacktestRuns() {
   }, [openId]);
 
   type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
-  const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(runs ?? [], (r, k) =>
+  const shownRuns = useMemo(() => (runs ?? []).filter((run) => runMatches(run, filters)), [runs, filters]);
+  const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
+  const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(shownRuns, (r, k) =>
     k === "id"
       ? r.id
       : k === "days"
@@ -376,6 +421,11 @@ export function BacktestRuns() {
           No runs yet. Use “Replay past days” above: pick a From and To date and press Start.
         </p>
       ) : (
+        <>
+        <RunFilterBar filters={filters} onChange={setFilters} shown={shownRuns.length} total={runs.length} />
+        {filtering && shownRuns.length === 0 ? (
+          <p className="px-4 py-4 text-sm text-slate-400">No runs match these filters.</p>
+        ) : null}
         <div className="overflow-x-auto px-2 py-3 sm:px-4">
           <table className="w-full min-w-[860px] whitespace-nowrap text-left text-xs">
             <thead className="text-xs uppercase tracking-wider text-slate-400">
@@ -474,6 +524,26 @@ export function BacktestRuns() {
                             <Play size={12} aria-hidden /> Resume
                           </button>
                         ) : null}
+                        {run.status !== "RUNNING" && !scalpPickOf(run.settings) && run.symbols.length > 0 ? (
+                          <button
+                            type="button"
+                            aria-label={`Run ${run.id} again`}
+                            title="Run again: the same stocks and days on the same bot, with the bot's settings as they are now"
+                            disabled={starting === run.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              runAgain(run);
+                            }}
+                            className="mr-1 inline-flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md border border-emerald-500/40 px-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-60"
+                          >
+                            {starting === run.id ? (
+                              <Loader2 size={13} aria-hidden className="animate-spin" />
+                            ) : (
+                              <RotateCcw size={13} aria-hidden />
+                            )}
+                            <span className="hidden lg:inline">Run again</span>
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           aria-label={`Download run ${run.id} as PDF`}
@@ -527,12 +597,94 @@ export function BacktestRuns() {
             </button>
           ) : null}
         </div>
+        </>
       )}
       {/* Phones: the runs table scrolls sideways, so the breakup sits below it at full width.
           Scrolls into view on open so the user doesn't have to swipe past the runs list. */}
       {openId != null ? (
         <MobileRunDetail runId={openId} detail={detail} />
       ) : null}
+    </div>
+  );
+}
+
+function RunFilterBar({
+  filters,
+  onChange,
+  shown,
+  total,
+}: {
+  filters: RunFilters;
+  onChange: (next: RunFilters) => void;
+  shown: number;
+  total: number;
+}) {
+  const set = (key: keyof RunFilters, value: string) => onChange({ ...filters, [key]: value });
+  const box =
+    "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-xs text-slate-100 focus:border-sky-400 focus:outline-none";
+  const changed = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
+  return (
+    <div className="flex flex-wrap items-end gap-2 px-2 pt-3 sm:px-4" role="search" aria-label="Filter backtest runs">
+      <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400 sm:flex-none">
+        Stock or run #
+        <input
+          type="search"
+          value={filters.text}
+          onChange={(e) => set("text", e.target.value)}
+          placeholder="e.g. SBIN or 42"
+          className={clsx(box, "normal-case tracking-normal")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        Bot
+        <select value={filters.bot} onChange={(e) => set("bot", e.target.value)} className={box}>
+          <option value="ALL">All</option>
+          {[1, 2, 3, 4].map((n) => (
+            <option key={n} value={String(n)}>
+              Bot {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        Result
+        <select value={filters.result} onChange={(e) => set("result", e.target.value)} className={box}>
+          <option value="ALL">All</option>
+          <option value="PROFIT">In profit</option>
+          <option value="LOSS">In loss</option>
+          <option value="NONE">No trades</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        Status
+        <select value={filters.status} onChange={(e) => set("status", e.target.value)} className={box}>
+          <option value="ALL">All</option>
+          <option value="FINISHED">Finished</option>
+          <option value="RUNNING">Playing</option>
+          <option value="INTERRUPTED">Cut short</option>
+          <option value="STOPPED">Stopped</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        Days from
+        <input type="date" value={filters.from} onChange={(e) => set("from", e.target.value)} className={box} />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        to
+        <input type="date" value={filters.to} onChange={(e) => set("to", e.target.value)} className={box} />
+      </label>
+      {changed ? (
+        <button
+          type="button"
+          onClick={() => onChange(NO_FILTERS)}
+          className="min-h-9 rounded-md border border-white/10 px-2 text-xs text-sky-300 hover:bg-white/5"
+        >
+          Clear
+        </button>
+      ) : null}
+      <span className="pb-2 text-xs text-slate-400" aria-live="polite">
+        {changed ? `${shown} of ${total} runs` : `${total} runs`}
+      </span>
     </div>
   );
 }
