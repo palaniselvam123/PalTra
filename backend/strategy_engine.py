@@ -722,6 +722,11 @@ def chart_filters(cfg) -> dict:
         "st_line": supertrend.entry_on(cfg) or supertrend.exit_on(cfg),
         "st_period": supertrend.settings(cfg)[0],
         "st_mult": supertrend.settings(cfg)[1],
+        # SMA 9 slope strip (slope_exit.py): always drawn while the slope exit is on.
+        "slope_exit": slope_exit.on(cfg),
+        "slope_lookback": slope_exit.lookback(cfg),
+        "slope_bend_pct": slope_exit.bend_pct(cfg),
+        "slope_turn_pct": slope_exit.turn_pct(cfg),
     }
 
 

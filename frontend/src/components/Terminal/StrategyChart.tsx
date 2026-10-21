@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, Table2, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, Table2, TrendingUp, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -362,6 +362,16 @@ function bollingerRows(
 const PROFILE_KEY = "sma.chart.profile";
 const CHART_HIDDEN_KEY = "sma.chart.hidden";
 const TABLE_KEY = "sma.chart.table";
+const SLOPE_KEY = "sma.chart.slope";
+
+/** SMA 9 slope in % per candle over `back` candles: the number the SMA 9 slope exit reads (slope_exit.py). */
+function slopeAt(rows: ReadonlyArray<{ sma9?: number | null }>, i: number, back: number): number | null {
+  if (i - back < 0) return null;
+  const now = rows[i]?.sma9;
+  const then = rows[i - back]?.sma9;
+  if (now == null || then == null || then === 0) return null;
+  return ((now - then) / then) * 100 / back;
+}
 const NO_MARKERS: ChartPayload["markers"] = [];
 const BOX_SMALL_KEY = "sma.chart.posbox.small";
 const BOX_POS_KEY = "sma.chart.posbox.pos";
@@ -700,6 +710,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const emaRefs = useRef<ISeriesApi<"Line">[]>([]);
   // Supertrend (supertrend.py): up run (green), down run (red). Drawn only while its check or exit is on.
   const stRefs = useRef<ISeriesApi<"Line">[]>([]);
+  const slopeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const slopeLines = useRef<IPriceLine[]>([]);
   const rsiBands = useRef<IPriceLine[]>([]);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
@@ -717,6 +729,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [chartHidden, setChartHidden] = useState(false);
   // The candles as a table under the chart (sort, filter, columns, CSV / PDF).
   const [showTable, setShowTable] = useState(false);
+  // The SMA 9 slope strip under the candles (always on while the slope exit is).
+  const [showSlope, setShowSlope] = useState(false);
   const [boxSmall, setBoxSmall] = useState(false);
   const [boxPos, setBoxPos] = useState<{ x: number; y: number } | null>(null);
   const boxDrag = useRef<{ dx: number; dy: number } | null>(null);
@@ -726,6 +740,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     try {
       if (localStorage.getItem(CHART_HIDDEN_KEY) === "1") setChartHidden(true);
       if (localStorage.getItem(TABLE_KEY) === "1") setShowTable(true);
+      if (localStorage.getItem(SLOPE_KEY) === "1") setShowSlope(true);
       const small = localStorage.getItem(BOX_SMALL_KEY);
       // Phones start with the compact box so it does not cover the candles.
       setBoxSmall(small == null ? window.matchMedia("(max-width: 639px)").matches : small === "1");
@@ -745,6 +760,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const toggleChart = () => {
     setChartHidden((on) => {
       remember(CHART_HIDDEN_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  const toggleSlope = () => {
+    setShowSlope((on) => {
+      remember(SLOPE_KEY, on ? "0" : "1");
       return !on;
     });
   };
@@ -1161,6 +1182,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     instance.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     vwapRef.current = vwap;
     rsiRef.current = rsi;
+    // SMA 9 slope (%/candle): green bars while the line rises, red while it falls.
+    const slopeBars = instance.addHistogramSeries({
+      priceScaleId: "slope",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      visible: false,
+      base: 0,
+    });
+    instance.priceScale("slope").applyOptions({ scaleMargins: { top: 0.84, bottom: 0.0 } });
+    slopeRef.current = slopeBars;
     stRefs.current = [ST_UP_COLOR, ST_DOWN_COLOR].map((color) =>
       instance.addLineSeries({
         color,
@@ -1290,14 +1321,40 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const showAtr = filters ? filters.atr_stop : true;
     const showVwap = Boolean(filters?.use_vwap);
     const showRsi = Boolean(filters?.use_rsi);
+    const showSlopeBars = showSlope || Boolean(filters?.slope_exit);
     atrRef.current.applyOptions({ visible: showAtr });
-    // Both strips at once share the bottom: ATR above, RSI below.
+    // Both strips at once share the bottom: ATR above, RSI below; the slope strip, when on, sits under both.
+    const lift = showSlopeBars ? 0.17 : 0;
     apiRef.current?.priceScale("atr").applyOptions({
-      scaleMargins: showRsi ? { top: 0.72, bottom: 0.15 } : { top: 0.75, bottom: 0.02 },
+      scaleMargins: showRsi ? { top: 0.72 - lift, bottom: 0.15 + lift } : { top: 0.75 - lift, bottom: 0.02 + lift },
     });
     apiRef.current?.priceScale("rsi").applyOptions({
-      scaleMargins: showAtr ? { top: 0.87, bottom: 0.01 } : { top: 0.75, bottom: 0.02 },
+      scaleMargins: showAtr ? { top: 0.87 - lift, bottom: 0.01 + lift } : { top: 0.75 - lift, bottom: 0.02 + lift },
     });
+    if (slopeRef.current) {
+      const series = slopeRef.current;
+      const back = filters?.slope_lookback ?? 2;
+      series.applyOptions({ visible: showSlopeBars });
+      const bars: { time: never; value: number; color: string }[] = [];
+      if (showSlopeBars) {
+        rows.forEach((c, i) => {
+          const v = slopeAt(rows, i, back);
+          if (v != null) bars.push({ time: c.time as never, value: v, color: v >= 0 ? "rgba(52, 211, 153, 0.75)" : "rgba(251, 113, 133, 0.75)" });
+        });
+      }
+      series.setData(bars);
+      for (const line of slopeLines.current) series.removePriceLine(line);
+      slopeLines.current = [];
+      if (showSlopeBars) {
+        const turn = filters?.slope_turn_pct ?? 0.02;
+        const guide = (price: number, color: string) =>
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+        slopeLines.current = [
+          guide(0, "rgba(148, 163, 184, 0.5)"),
+          ...(turn > 0 ? [guide(turn, "rgba(52, 211, 153, 0.45)"), guide(-turn, "rgba(251, 113, 133, 0.45)")] : []),
+        ];
+      }
+    }
     if (vwapRef.current) {
       vwapRef.current.applyOptions({ visible: showVwap });
       vwapRef.current.setData(
@@ -1378,7 +1435,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         /* the held span is no longer in the data (another stock or size) */
       }
     }
-  }, [view, rows, bar, past, trades, allTrades, symbol]);
+  }, [view, rows, bar, past, trades, allTrades, symbol, showSlope]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
@@ -1440,6 +1497,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   };
   const shownVwap = hoverRow ? hoverRow.vwap ?? null : lastOf("vwap");
   const shownRsi = hoverRow ? hoverRow.rsi14 ?? null : lastOf("rsi14");
+  const slopeBack = filters?.slope_lookback ?? 2;
+  const shownSlope = (() => {
+    const at = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
+    // The forming candle has no SMA: read the last closed one.
+    for (let i = at; i >= 0 && i >= at - 1; i -= 1) {
+      const v = slopeAt(rows, i, slopeBack);
+      if (v != null) return v;
+    }
+    return null;
+  })();
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
@@ -1564,6 +1631,19 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <Table2 size={14} aria-hidden />
             Table
           </button>
+          <button
+            type="button"
+            onClick={toggleSlope}
+            aria-pressed={showSlope}
+            title="SMA 9 slope strip under the candles: green bars while the line rises, red while it falls, in % per candle. Always shown while the SMA 9 slope exit is on."
+            className={clsx(
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              showSlope ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <TrendingUp size={14} aria-hidden />
+            Slope
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -1621,6 +1701,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         gap={smaGap}
         vwap={shownVwap}
         rsi={shownRsi}
+        slope={shownSlope}
+        slopeBack={slopeBack}
       />
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
@@ -2022,6 +2104,8 @@ function OhlcLine({
   gap,
   vwap,
   rsi,
+  slope,
+  slopeBack,
 }: {
   ohlc: Ohlc | null;
   hovering: boolean;
@@ -2030,6 +2114,8 @@ function OhlcLine({
   gap: number | null;
   vwap: number | null;
   rsi: number | null;
+  slope: number | null;
+  slopeBack: number;
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -2077,6 +2163,12 @@ function OhlcLine({
       <span className="whitespace-nowrap">
         <span className="text-[#F472B6]">RSI</span>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
+      </span>
+      <span className="whitespace-nowrap" title={`SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle (what the SMA 9 slope exit reads)`}>
+        <span className="text-slate-400">Slope</span>{" "}
+        <span className={clsx(slope == null ? "text-slate-400" : slope >= 0 ? "text-emerald-300" : "text-rose-300")}>
+          {slope == null ? "—" : `${slope >= 0 ? "+" : ""}${slope.toFixed(3)}%/c`}
+        </span>
       </span>
     </div>
   );
