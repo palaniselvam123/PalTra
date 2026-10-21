@@ -176,6 +176,7 @@ async def test_gap_mode_enters_later_than_the_cross_and_exits_on_the_fade(db):
     first_gap = next(t for t in gap if t["direction"] == "LONG")
     assert first_gap["entry_time"] > first_plain["entry_time"]  # waited for the gap to widen
     assert first_gap["exit_reason"] == "GAP_FADE"
+    assert first_gap["entry_reason"] == "GAP_MODE" and first_plain["entry_reason"] == "SMA_CROSS"
     assert first_plain["exit_reason"] != "GAP_FADE"
     assert first_gap["exit_time"] < first_plain["exit_time"]  # left on the fade, before the cross
 

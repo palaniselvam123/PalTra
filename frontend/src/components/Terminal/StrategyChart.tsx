@@ -21,6 +21,7 @@ import { VALUE_AREA_SHARE, volumeProfile, type VolumeProfile } from "@/lib/volum
 import { Skeleton } from "./ui";
 import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
+import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 
 type Props = {
@@ -198,6 +199,8 @@ type TradeTip = {
   exitPrice: number | null;
   exitTime: number | null;
   reason: string | null;
+  /** Why it opened (entry_reason); null on older trades. */
+  entryReason: string | null;
   open: boolean;
   /** Points in the trade's favour (exit, or the latest price while open, against the entry). */
   points: number | null;
@@ -531,6 +534,7 @@ function tradeTip(
     exitPrice: open ? null : exitPrice,
     exitTime: open ? null : exitTime,
     reason: ex?.reason ?? row?.exit_reason ?? null,
+    entryReason: entryReasonShort(row?.entry_reason),
     open,
     points,
     gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? m.gross_pnl ?? byPoints,
@@ -2234,7 +2238,7 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
         </span>
       </div>
       {row("Entry", t.entryPrice == null ? "—" : px(t.entryPrice))}
-      {t.entryTime != null ? row("", when(t.entryTime), "text-slate-400") : null}
+      {t.entryTime != null ? row("", `${when(t.entryTime)}${t.entryReason ? ` · ${t.entryReason}` : ""}`, "text-slate-400") : null}
       {t.open ? row("Exit", "still open", "text-slate-400") : row("Exit", t.exitPrice == null ? "—" : px(t.exitPrice))}
       {!t.open && t.exitTime != null ? row("", `${when(t.exitTime)}${reason ? ` · ${reason}` : ""}`, "text-slate-400") : null}
       {t.qty ? row("Qty", String(t.qty)) : null}

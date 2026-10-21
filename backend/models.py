@@ -37,6 +37,9 @@ class TradeLog(Base):
     stop_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Flip strategy: the order went against the signal (a buy signal sold).
     flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Why the trade opened (strategy_engine.ENTRY_REASONS), e.g. SMA_CROSS, GAP_MODE,
+    # "JOIN_TREND:EXTREME_LIMIT"; NULL on older rows.
+    entry_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     # Recovery hold (recovery.py): loss per share at the adverse cross and that candle's start.
     recovery_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovery_bar: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -311,6 +314,8 @@ class BotConfig(Base):
     counter_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     counter_rule: Mapped[str | None] = mapped_column(String, nullable=True, default="COLOUR")
     counter_need_fast: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Smallest counter-candle body for the exit, × that candle's ATR (0 = any size).
+    counter_min_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # EMA cross check (ema_filter.py): entry only on the EMA fast/slow side, exit on an EMA cross against the trade.
     use_ema: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     ema_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

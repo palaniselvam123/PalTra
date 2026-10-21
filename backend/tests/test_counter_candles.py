@@ -63,6 +63,16 @@ async def test_the_fast_sma_check_and_count_matter(db):  # noqa: F811
 
 
 @pytest.mark.asyncio
+async def test_min_body_ignores_small_counter_candles(db):  # noqa: F811
+    strict = _first(await _trades(db, counter_exit_count=3), "SHORT")
+    tiny = _first(await _trades(db, counter_exit_count=3, counter_min_body=0.01), "SHORT")
+    assert (tiny["exit_time"], tiny["exit_reason"]) == (strict["exit_time"], "COUNTER_CANDLES")
+    # The turn's candles are far smaller than 5 ATR: they never count, so the cross closes it.
+    big = _first(await _trades(db, counter_exit_count=3, counter_min_body=5), "SHORT")
+    assert big["exit_reason"] != "COUNTER_CANDLES" and big["exit_time"] > strict["exit_time"]
+
+
+@pytest.mark.asyncio
 async def test_early_reversal_entry_buys_before_the_cross_once(db):  # noqa: F811
     plain = await _trades(db)
     plain_long = _first(plain, "LONG", since=TURN)
@@ -100,6 +110,17 @@ def test_run_towards_needs_every_candle_and_the_fast_sma():
     assert not counter_candles.run_towards(broken, "LONG", 3, "COLOUR", True)[0]
 
 
+def test_run_towards_body_check():
+    up = _closed([100.0, 101.0, 102.0, 103.0], fast=101.5)  # bodies of 0.5
+    up["atr_14"] = 1.0
+    assert counter_candles.run_towards(up, "LONG", 3, "COLOUR", True, 0.5)[0]
+    ok, note = counter_candles.run_towards(up, "LONG", 3, "COLOUR", True, 0.6)
+    assert not ok and "ATR" in note
+    no_atr = _closed([100.0, 101.0, 102.0, 103.0], fast=101.5)
+    assert not counter_candles.run_towards(no_atr, "LONG", 3, "COLOUR", True, 0.5)[0]
+    assert counter_candles.run_towards(no_atr, "LONG", 3, "COLOUR", True, 0.0)[0]  # 0 = any size
+
+
 def test_settings_helpers():
     class C:
         counter_exit_count = 99
@@ -112,6 +133,9 @@ def test_settings_helpers():
     assert counter_candles.entry_on(C) and counter_candles.entry_count(C) == counter_candles.MAX_COUNT
     C.counter_exit_count = 0
     assert counter_candles.entry_count(C) == 3
+    assert counter_candles.min_body(C) == 0.0
+    C.counter_min_body = 99
+    assert counter_candles.min_body(C) == counter_candles.MAX_MIN_BODY
     assert counter_candles.sma_side(pd.DataFrame([{"sma_9": 99.0, "sma_21": 100.0}])) == "SHORT"
     assert counter_candles.sma_side(pd.DataFrame([{"sma_9": 101.0, "sma_21": 100.0}])) == "LONG"
 
@@ -127,7 +151,7 @@ def test_api_saves_counter_candles(tmp_path, monkeypatch):
     from main import app
     from strategy_engine import STOCK_FIELDS
 
-    assert {"counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast"} <= set(STOCK_FIELDS)
+    assert {"counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body"} <= set(STOCK_FIELDS)
     with TestClient(app) as client:
         first = client.get("/api/config").json()
         assert first["counter_exit_count"] == 0 and first["counter_entry"] is False
@@ -135,6 +159,9 @@ def test_api_saves_counter_candles(tmp_path, monkeypatch):
         ok = client.put("/api/config", json={"counter_exit_count": 3, "counter_entry": True, "counter_rule": "BOTH"})
         assert ok.status_code == 200 and ok.json()["counter_exit_count"] == 3 and ok.json()["counter_rule"] == "BOTH"
         assert client.put("/api/config", json={"counter_exit_count": 11}).status_code == 422
+        body = client.put("/api/config", json={"counter_min_body": 0.5})
+        assert body.status_code == 200 and body.json()["counter_min_body"] == 0.5
+        assert client.put("/api/config", json={"counter_min_body": 6}).status_code == 422
         own = client.put("/api/config/stock/SBIN", json={"counter_entry": False})
         assert own.status_code == 200 and own.json()["counter_entry"] is False
     database.reset_engine()

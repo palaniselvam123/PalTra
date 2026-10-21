@@ -647,6 +647,7 @@ def run_trades(run_id: int, symbol: str | None = None) -> list[dict] | None:
                 "exit_time": r.exit_time,
                 "exit_price": r.exit_price,
                 "exit_reason": r.exit_reason,
+                "entry_reason": getattr(r, "entry_reason", None),
                 "gross_pnl": r.gross_pnl,
                 "charges": r.brokerage_and_taxes,
                 "net_pnl": r.net_pnl,
