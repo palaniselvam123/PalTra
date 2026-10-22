@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Newspaper, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -25,6 +25,7 @@ import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { ChartIndicators } from "./ChartIndicators";
+import { StockNewsPanel } from "./StockNewsPanel";
 
 type Props = {
   chart: ChartPayload | null;
@@ -740,6 +741,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // Which lines show and how they look (Groww-style indicator settings), kept in this browser.
   const [look, setLook, resetLook] = useChartStyle();
   const [showLook, setShowLook] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const [boxSmall, setBoxSmall] = useState(false);
   const [boxPos, setBoxPos] = useState<{ x: number; y: number } | null>(null);
   const boxDrag = useRef<{ dx: number; dy: number } | null>(null);
@@ -1705,6 +1707,21 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <SlidersHorizontal size={14} aria-hidden />
             Indicators
           </button>
+          <button
+            type="button"
+            onClick={() => setShowNews((v) => !v)}
+            aria-pressed={showNews}
+            aria-expanded={showNews}
+            disabled={!shownSymbol}
+            title="News for this stock: NSE company announcements and Google News headlines"
+            className={clsx(
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset disabled:opacity-50",
+              showNews ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <Newspaper size={14} aria-hidden />
+            News
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -1753,6 +1770,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           ) : null}
         </ul>
       </div>
+      {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
       {showLook ? (
         <ChartIndicators
           style={look}

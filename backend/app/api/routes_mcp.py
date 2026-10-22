@@ -248,6 +248,17 @@ async def get_most_active(args: dict) -> Any:
     )
 
 
+async def get_stock_news(args: dict) -> Any:
+    from app.services.stock_news import stock_news
+
+    symbol = str(args.get("symbol") or "").strip().upper()
+    if not symbol or not symbol.replace("&", "").replace("-", "").replace("_", "").isalnum():
+        raise ToolError("symbol (an NSE trading symbol, e.g. SBIN) is required")
+    out = await stock_news(symbol)
+    limit = max(1, min(int(args.get("limit") or 20), 40))
+    return {**out, "items": out["items"][:limit]}
+
+
 async def list_scan_history(args: dict) -> Any:
     params = {}
     if args.get("day"):
@@ -576,6 +587,20 @@ TOOLS: dict[str, dict] = {
                 "min_value_cr": {"type": "number", "minimum": 0},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 250},
             },
+        },
+        "annotations": _READ,
+    },
+    "get_stock_news": {
+        "fn": get_stock_news,
+        "description": (
+            "News for one NSE stock, newest first: NSE corporate announcements (results, board meetings, orders, "
+            "dividends; source NSE, with the filing's link) and Google News headlines of the last 7 days. "
+            "`errors` names a source that could not be read."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}},
+            "required": ["symbol"],
         },
         "annotations": _READ,
     },

@@ -154,7 +154,7 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
         "list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans",
         "list_backtests", "get_backtest", "get_backtest_trades", "compare_backtests", "start_backtest",
         "set_trade_list", "set_stop", "start_scan", "get_scalp_monitor", "get_most_active",
-        "list_scan_history", "get_scan_history", "check_scan_accuracy",
+        "list_scan_history", "get_scan_history", "check_scan_accuracy", "get_stock_news",
     }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
