@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
@@ -131,6 +133,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const [own, setOwn] = useState<Partial<SmaConfig>>({});
   const dirty = useRef(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  // The wide page's Save bar stays at the bottom of the screen unless unfrozen.
+  const [saveBarPinned, setSaveBarPinned] = usePinned("settings-save-bar");
   // Shown on the Save bar; the browser also asks before the page is left with these edits.
   const [unsaved, setUnsaved] = useState(false);
   const markDirty = (on: boolean) => {
@@ -1880,7 +1884,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       <div
         className={clsx(
           "mt-3 flex flex-wrap items-center gap-3",
-          wide && "sticky bottom-0 z-10 -mx-4 border-t border-white/10 bg-[#151921] px-4 py-3 shadow-[0_-8px_16px_-8px_rgba(0,0,0,0.5)] lg:-mx-6 lg:px-6",
+          wide && saveBarPinned && "sticky bottom-0",
+          wide && "z-10 -mx-4 border-t border-white/10 bg-[#151921] px-4 py-3 shadow-[0_-8px_16px_-8px_rgba(0,0,0,0.5)] lg:-mx-6 lg:px-6",
         )}
       >
         <button
@@ -1893,6 +1898,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         >
           {stockScope ? `Save for ${scope}` : "Save"}
         </button>
+        {wide ? <PinToggle pinned={saveBarPinned} onChange={setSaveBarPinned} what="the Save bar (bottom of the screen)" /> : null}
         {unsaved && !busy ? (
           <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
             Unsaved changes

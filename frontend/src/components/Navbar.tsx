@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { WalletChip } from "@/components/Wallet/WalletChip";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -180,9 +182,11 @@ export function Navbar({
   const pnlColor =
     totalPnl == null ? "text-slate-500" : totalPnl > 0 ? "text-profit" : totalPnl < 0 ? "text-loss" : "text-slate-400";
   const sourceLocked = switching || botRunning;
+  // Frozen at the top by default; the pin button lets it scroll away with the page.
+  const [pinned, setPinned] = usePinned("navbar");
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur">
+    <header className={`${pinned ? "sticky" : "relative"} top-0 z-40 border-b border-border bg-surface/95 backdrop-blur`}>
       <div className="mx-auto flex h-14 max-w-[1720px] items-center gap-2 px-3 sm:h-16 sm:gap-6 sm:px-5">
         {/* --- Zone 1: identity + navigation ---------------------------- */}
         <Link href="/" className="flex shrink-0 items-center gap-2">
@@ -296,6 +300,7 @@ export function Navbar({
 
           {/* --- Zone 3: the number, and the one destructive action ------ */}
           <div className="flex items-center gap-1 pl-1">
+            <PinToggle pinned={pinned} onChange={setPinned} what="the menu bar" className="hidden sm:flex" />
             <WalletChip className="mr-1" />
             <div className="text-right leading-tight">
               <div className="text-[9px] uppercase tracking-[0.08em] text-slate-500">P&amp;L</div>

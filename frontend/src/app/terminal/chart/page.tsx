@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
@@ -138,11 +140,15 @@ export default function StockChartPage() {
     return mode === (state?.mode ?? "PAPER").toUpperCase();
   });
   const back = desk === "live" ? "/terminal/" : `/terminal/?desk=${desk}`;
+  const [pinned, setPinned] = usePinned("chart-page-header");
 
   return (
     <div className="terminal-dark min-h-screen w-full min-w-0 bg-[#0B0E14] text-slate-200">
-      <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#0B0E14] px-3 py-2 sm:px-4">
+      <header
+        className={`${pinned ? "sticky" : "relative"} top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#0B0E14] px-3 py-2 sm:px-4`}
+      >
         <div className="flex min-w-0 items-center gap-3">
+          <PinToggle pinned={pinned} onChange={setPinned} what="this header" />
           <a
             href={back}
             className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"

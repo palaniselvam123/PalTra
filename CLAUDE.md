@@ -193,6 +193,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
   chart that follows the replay while it plays and shows the replayed day
   afterwards. "Hold view" on the chart keeps its zoom, scroll and stock.
+  The chart's **Indicators** panel (`components/Terminal/ChartIndicators.tsx`, `lib/chartStyle.ts`, kept in the
+  browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
+  uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
+  strategy does not use is worked out in the browser (`emaValues`). Display only.
+  Every bar that sticks to the top (desk menu bar, terminal header, blotter bar, Settings section links and Save bar,
+  chart page header) has a freeze / unfreeze pin (`components/ui/PinToggle.tsx`, `lib/usePinned.ts`, kept per browser).
   The terminal's Strategy card (`StrategySummary`) switches each part of the
   strategy on or off for all stocks or one stock (gap mode, flip, entry
   filters, stop on/off and type, Bollinger exit, gap-mode exit options); each

@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 
@@ -12,17 +14,20 @@ export function SectionNav({ sections }: { sections: [id: string, label: string]
   const [top, setTop] = useState(0);
   // A clicked link stays lit while the page scrolls to it.
   const clickedUntil = useRef(0);
+  const [pinned, setPinned] = usePinned("settings-sections");
+  // Under the menu bar only while that bar is frozen too.
+  const [navPinned] = usePinned("navbar");
 
   // Sit just under the sticky header, whatever its height (the simulated-prices banner changes it).
   useEffect(() => {
     const header = document.querySelector("header");
     if (!header) return;
-    const measure = () => setTop(header.getBoundingClientRect().height);
+    const measure = () => setTop(navPinned ? header.getBoundingClientRect().height : 0);
     measure();
     const watcher = new ResizeObserver(measure);
     watcher.observe(header);
     return () => watcher.disconnect();
-  }, []);
+  }, [navPinned]);
 
   // The highlighted link follows the section at the top of the screen.
   useEffect(() => {
@@ -58,8 +63,12 @@ export function SectionNav({ sections }: { sections: [id: string, label: string]
     <nav
       aria-label="Settings sections"
       style={{ top }}
-      className="sticky z-10 -mx-4 flex gap-1.5 overflow-x-auto border-b border-border bg-base/90 px-4 py-2 text-xs backdrop-blur lg:-mx-6 lg:px-6"
+      className={clsx(
+        pinned ? "sticky" : "relative",
+        "z-10 -mx-4 flex items-center gap-1.5 overflow-x-auto border-b border-border bg-base/90 px-4 py-2 text-xs backdrop-blur lg:-mx-6 lg:px-6"
+      )}
     >
+      <PinToggle pinned={pinned} onChange={setPinned} what="these section links" />
       {sections.map(([id, label]) => (
         <a
           key={id}

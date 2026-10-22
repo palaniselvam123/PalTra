@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
 import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, Search, Sun } from "lucide-react";
@@ -155,11 +157,13 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   // Where the sticky header ends (the nav's 44 px + its own height, which changes with
   // review cards and notices), so a bar further down (the trade blotter's) can pin under it.
   const headerRef = useRef<HTMLElement>(null);
+  // Frozen (sticky) by default; the pin button unfreezes it so it scrolls away with the page.
+  const [pinned, setPinned] = usePinned("terminal-header");
   useEffect(() => {
     const el = headerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const root = document.documentElement;
-    const note = () => root.style.setProperty("--sma-header-bottom", `${44 + el.offsetHeight}px`);
+    const note = () => root.style.setProperty("--sma-header-bottom", pinned ? `${44 + el.offsetHeight}px` : "0px");
     note();
     const watch = new ResizeObserver(note);
     watch.observe(el);
@@ -167,7 +171,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       watch.disconnect();
       root.style.removeProperty("--sma-header-bottom");
     };
-  }, []);
+  }, [pinned]);
   useEffect(() => {
     if (!deskBot) return;
     smaApi.bots().then(setCopyBots).catch(() => {});
@@ -604,7 +608,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
       ) : null}
       <nav
         aria-label="Desk pages"
-        className="sticky top-0 z-40 flex h-11 items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14]/95 px-2 backdrop-blur sm:gap-2 sm:px-4"
+        className={clsx(
+          pinned ? "sticky top-0" : "relative",
+          "z-40 flex h-11 items-center gap-1 overflow-x-auto border-b border-white/10 bg-[#0B0E14]/95 px-2 backdrop-blur sm:gap-2 sm:px-4"
+        )}
       >
         <a href="/" className="mr-1 flex min-h-10 min-w-10 shrink-0 items-center gap-2 py-2 pr-2" aria-label="ORB Desk home">
           <span className="grad-brand grid h-7 w-7 place-items-center rounded-full text-white">
@@ -633,7 +640,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
         ref={headerRef}
         aria-label="SMA terminal"
         className={clsx(
-          "sticky top-11 z-30 bg-[#0B0E14]",
+          pinned ? "sticky top-11" : "relative",
+          "z-30 bg-[#0B0E14]",
           live ? "border-2 border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]" : "border-b border-white/10"
         )}
       >
@@ -645,6 +653,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </span>
               {onDeskChange ? <DeskSwitch desk={desk} onChange={onDeskChange} /> : null}
               <ThemeToggle />
+              <PinToggle pinned={pinned} onChange={setPinned} what="the terminal header" />
               <WalletChip />
             </span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
