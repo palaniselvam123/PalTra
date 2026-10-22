@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 
 from app.services.groww_links import groww_page
 from app.services.instruments import instrument_master
+from app.services.stock_news import stock_news
 
 router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 
@@ -52,3 +53,12 @@ async def open_on_groww(symbol: str):
     if not _NSE_SYMBOL.fullmatch(name):
         raise HTTPException(400, f"{symbol!r} is not an NSE trading symbol.")
     return RedirectResponse(await groww_page(name), status_code=302)
+
+
+@router.get("/news/{symbol}")
+async def news(symbol: str, force: bool = Query(False)):
+    """NSE announcements and Google News headlines for one stock, newest first (read-only)."""
+    name = symbol.strip().upper()
+    if not _NSE_SYMBOL.fullmatch(name):
+        raise HTTPException(400, f"{symbol!r} is not an NSE trading symbol.")
+    return await stock_news(name, force=force)

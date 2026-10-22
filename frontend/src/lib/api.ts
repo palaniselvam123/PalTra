@@ -670,6 +670,26 @@ function stringifyParams(params: Record<string, string | number | boolean | unde
 }
 
 /** On the deployed site the browser must call this host, not the build machine. */
+/** One stock's news (app/services/stock_news.py): NSE announcements and Google News headlines. */
+export interface StockNewsItem {
+  kind: "news" | "announcement";
+  title: string;
+  detail?: string | null;
+  url: string;
+  source: string;
+  /** ISO time in IST, or null when the source gave none. */
+  at: string | null;
+}
+
+export interface StockNews {
+  symbol: string;
+  name: string | null;
+  items: StockNewsItem[];
+  /** A source that could not be read, with why ("nse", "google_news"). */
+  errors: Record<string, string>;
+  fetched_at?: string;
+}
+
 export function resolveApiBase(): string {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
@@ -997,6 +1017,8 @@ export const api = {
     }),
   removeFromWatchlist: (symbol: string) =>
     request<{ removed: string }>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
+  stockNews: (symbol: string, force = false) =>
+    request<StockNews>(`/api/instruments/news/${encodeURIComponent(symbol.toUpperCase())}${force ? "?force=true" : ""}`),
   getInstrumentStats: () =>
     request<{ mainboard_equity: number; intraday_eligible: number }>("/api/instruments/stats"),
   deskAccount: () => request<DeskAccount>("/api/manual/account"),

@@ -766,6 +766,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   applies). In market hours it always messages and rings; outside them each follows its switch
   (`AlertPrefs` row 1: `after_hours_stop_call`, `after_hours_stop_message`, both on by default;
   `GET/PUT /api/scan/alert-prefs`, the phone-call card in Settings). `fly.toml` `kill_timeout = '15s'` leaves time for it. Replay and research engines send nothing.
+- `backend/app/services/stock_news.py` – news for one stock (read-only; Groww's trading API has no news): NSE's
+  corporate announcements (`nse_announcements`, nseindia.com `api/corporate-announcements`, its home page first for the
+  cookies) and Google News RSS headlines for the company's name from the instrument list (`google_news`, last 7 days),
+  asked together, each source's error kept apart (`errors`), merged newest first, cached `CACHE_SEC` (5 min) per symbol.
+  Desk `GET /api/instruments/news/{symbol}[?force=true]`; the chart's **News** button (`StockNewsPanel`); MCP
+  `get_stock_news`. No key, no order path; nothing in the strategy reads it.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`
