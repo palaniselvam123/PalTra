@@ -43,7 +43,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.ema_exit &&
     !cfg.st_exit &&
     !cfg.slope_exit &&
-    !cfg.vturn_exit
+    !cfg.vturn_exit &&
+    !cfg.slow_sma_exit
   );
 }
 

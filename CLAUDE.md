@@ -199,6 +199,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   switch saves at once (`PUT /api/config` or `/api/config/stock/{symbol}`) and
   asks first before the stop goes off or, in LIVE, the flip changes. The
   numbers behind them are edited on the Settings page (`#sma-strategy`).
+  That page (`StrategyConfigPanel`) opens with **What's switched on** (`activeRules`: every rule that is on, in
+  plain words, grouped, with Turn off; warns at 3+ extra exits or 4+ entry checks), then numbered groups:
+  1 When to enter, 2 Checks before entering, 3 When to exit, 4 SMA gap mode, 5 Stop-loss and target, 6 Size,
+  daily limits and times, 7 Advanced (recovery / hand-offs, 1-minute review). Layout only: `strategyBody()`
+  saves the same fields.
 - `backend/sma_research/` – offline stock-selection research for the SMA bot
   (read-only; `python -m sma_research download|analyze`). `download` runs on
   the Fly machine after hours and only calls Groww's candle-history API;
@@ -284,7 +289,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `_late_minute` drops it when the SMAs crossed back or `late_entry_min` minutes have passed
   since the cross candle, else re-runs `apply_signal` (alert off; every check, cut-off, cap,
   stop, flip and one-LIVE-bot-per-stock still apply) and the first candle the filters agree
-  opens the trade. A new cross replaces it. Gap mode ignores it. Settings → Entry filters.
+  opens the trade. A new cross replaces it. Gap mode ignores it. Settings → 1. When to enter.
 - `backend/join_trend.py` – join the morning trend (`join_trend`, off by default, and
   `join_after_min`, default 15; per bot and per stock, PAPER and LIVE): a stock that opens
   already trending has no fresh cross, so it is never traded. With it on, once per day per
@@ -294,7 +299,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   on each closed candle until every check agrees; in gap mode it arms `_gap_pending` instead.
   Never twice a day (`_joined_today`) or on a run the bot already entered (`_side_entered`,
   set in `apply_signal`); a later cross is a normal cross. A cross printed before the stock was
-  armed is still not traded as a cross. Settings → Entry filters.
+  armed is still not traded as a cross. Settings → 1. When to enter.
 - `backend/counter_candles.py` – counter candles (off by default, per bot and per stock, PAPER and LIVE):
   a run of closed candles against the trade turns it before the SMAs cross. **Exit**
   (`counter_exit_count` N, 0 = off, max 10): `StrategyEngine._watch_counter_candles` closes an open
@@ -308,10 +313,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   on (fast below slow then N green closing above the fast SMA buys; N = the exit count, else 3)
   through `apply_signal` (alert off; every check, cut-off, cap, stop, flip and one-LIVE-bot-per-stock
   apply), once per SMA run (`_counter_done`, keyed on `join_trend.side_start`). Gap mode and candle
-  patterns ignore it. Settings → Entry filters (more). The stock research baseline keeps both off.
+  patterns ignore it. Settings → 1. When to enter (early entry) and 3. When to exit. The stock research baseline keeps both off.
 - `backend/ema_filter.py` – EMA cross check (off by default, per bot and per stock, PAPER and LIVE): a
   second pair of lines next to the SMA ones, like Groww's "EMA Cross 9 200" (`ema_fast` / `ema_slow`,
-  defaults 9 / 200, 1-500, typed in Settings → Entry filters (more)). The bot still trades the SMA
+  defaults 9 / 200, 1-500, typed in Settings → 2. Checks before entering; the exit box is in 3. When to exit). The bot still trades the SMA
   cross. **Entry** (`use_ema`): wired through `_entry_block` like the other filters (check name `ema`,
   chart ✕ "EMA"): a buy only while EMA fast > EMA slow on the last closed candle, a sell only while
   below; refused while the slow EMA has fewer than `ema_slow` closed candles. **Exit** (`ema_exit`):
@@ -374,7 +379,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`SETUP_INVALIDATED_SMA_CROSS`), or after `extreme_expiry_candles` (2) closed candles; else the first price at or beyond
   the limit sends the normal entry through `_open` (every check, stop, cap, cut-off and one LIVE bot per stock apply;
   nothing rests on Groww's book). Takes over from the tall-candle pullback; a breakout arrival's own level still wins.
-  Settings → Entry filters. The stock research baseline keeps it off.
+  Settings → 1. When to enter. The stock research baseline keeps it off.
 - `backend/recovery.py` – structural exit, recovery hold and the trend-to-chop handoff (all off by default,
   per bot and per stock, PAPER and LIVE; meant for the trend bot, Bot 3). **Slow SMA exit** (`slow_sma_exit`):
   `StrategyEngine._watch_slow_sma` closes a trade on the first candle closed after the entry beyond the slow SMA

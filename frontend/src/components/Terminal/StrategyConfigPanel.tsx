@@ -203,6 +203,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     setMsg(null);
   };
 
+  // The "What's switched on" list and the "N on" count on each group.
+  const rules = activeRules(form);
+  const onCount = (group: RuleGroup) => rules.filter((r) => r.group === group).length;
+  const turnOff = (values: Partial<Record<keyof SmaConfig, string | boolean>>) => {
+    for (const [key, value] of Object.entries(values)) set(key as keyof SmaConfig, value as string | boolean);
+    setMsg("Changed — press Save to keep it.");
+  };
+
   const strategyBody = (): Partial<SmaConfig> => ({
     qty: Number(form.qty),
     sma_fast: Number(form.sma_fast),
@@ -429,8 +437,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         wide && "lg:p-6",
       )}
     >
-      {/* Two fixed columns on a wide screen: setup, stop and entry filters on the left; Bollinger, gap and
-          candle-direction rules on the right. Each block stays whole. */}
+      {/* The scope picker, then "What's switched on", then the numbered groups (enter, checks, exits, gap mode, stop,
+          size and times, advanced). Every field saves through strategyBody() exactly as before. */}
       <div className="min-w-0">
           <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
           <label className="mt-3 block text-sm text-slate-300">
@@ -502,7 +510,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </p>
           ) : null}
       </div>
-      <FieldGroup title="Entry signal" hint="Moving averages, candle, how a trade opens, order direction, SMA gap mode" wide={wide}>
+      <ActiveRules form={form} scope={scope} onOff={turnOff} />
+      <FieldGroup id="enter" title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Moving averages</SectionTitle>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
@@ -658,7 +667,705 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
         <div className="min-w-0">
-          <SectionTitle>SMA gap mode</SectionTitle>
+          <SectionTitle>Extra ways in (all off by default)</SectionTitle>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.join_trend)}
+              onChange={(e) => set("join_trend", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("join_trend") && <OwnTag />}
+            Join the morning trend
+            <InfoTip label="About joining the morning trend">
+              For a stock that opens already trending (its SMA cross printed yesterday or before 09:20), so the bot has no
+              fresh cross to trade. Once a day, from the minutes below after 09:15, while the bot is flat, it treats the side
+              the SMAs are on as a cross: the first closed candle on which every ticked filter (VWAP, RSI…), ADX and, in gap
+              mode, the gap level agree opens the trade. Only the trend already running at that time is joined; a later cross
+              is traded as a normal cross. A stopped-out join is not re-entered that day.
+            </InfoTip>
+          </label>
+          <Field
+            label="Join from (min after 09:15)"
+            value={String(form.join_after_min ?? 15)}
+            onChange={(v) => set("join_after_min", v)}
+            own={isOwn("join_after_min")}
+          />
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Late entry
+            <InfoTip label="About late entry">
+              When a filter (VWAP, RSI, ADX or any other ticked one) refuses a cross, keep the cross armed for this many
+              minutes. On each later closed candle the filters are checked again, and the first candle on which they all agree
+              places the order, as long as the fast SMA is still on the cross&apos;s side. It gives up when the SMAs cross back,
+              the time runs out or the entry cut-off is reached. Catches a strong trend whose cross came on the wrong side of
+              VWAP. 0 = off. Gap mode has its own waiting entry and ignores this.
+            </InfoTip>
+          </div>
+          <Field
+            label="Keep a refused cross armed for (min, 0 = off)"
+            value={String(form.late_entry_min ?? 0)}
+            onChange={(v) => set("late_entry_min", v)}
+            own={isOwn("late_entry_min")}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.counter_entry)}
+              onChange={(e) => set("counter_entry", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("counter_entry") && <OwnTag />}
+            Early reversal: enter before the cross after N candles against the trend
+            <InfoTip label="About the early reversal entry">
+              While flat, a run of candles against the side the SMAs are on (fast below slow, then N green candles closing above
+              the fast SMA) opens the trade that way before the cross, once per SMA run. N is the counter-candle exit count in
+              step 3, or 3 when that is 0. Every check, the cut-off, the caps and the stop still apply.
+            </InfoTip>
+          </label>
+          <SectionTitle>How the entry order is placed</SectionTitle>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.tall_pullback)}
+              onChange={(e) => set("tall_pullback", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("tall_pullback") && <OwnTag />}
+            Tall candle: wait for a pullback before entering
+            <InfoTip label="About the tall-candle pullback">
+              When the signal candle is tall (high − low at least the multiple below × ATR), the bot does not buy at its top or
+              sell at its bottom. It waits for the price to come back: a buy at the higher of the fast SMA and the candle&apos;s
+              half-way point, a sell at the lower of the fast SMA and the half-way point. The first price at that level sends the
+              normal entry (every check, the stop, the trade cap and the cut-off still apply). If the price has not come back
+              after the candles below have closed, no order is sent. Nothing waits on Groww&apos;s book in the meantime. A smaller
+              signal candle orders at once, as before. A flipped stock always orders at once. Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Tall when height ≥ (× ATR)"
+              value={String(form.tall_atr_mult ?? 1.5)}
+              onChange={(v) => set("tall_atr_mult", v)}
+              own={isOwn("tall_atr_mult")}
+            />
+            <Field
+              label="Wait at most (candles)"
+              value={String(form.tall_expiry_candles ?? 2)}
+              onChange={(v) => set("tall_expiry_candles", v)}
+              own={isOwn("tall_expiry_candles")}
+            />
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.extreme_entry)}
+              onChange={(e) => set("extreme_entry", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("extreme_entry") && <OwnTag />}
+            Limit entry at the signal candle&apos;s low / high
+            <InfoTip label="About the candle-extreme limit entry">
+              Every signal (an SMA cross, a gap-mode entry, a join, a late or early-reversal entry; not candle patterns) waits
+              at the signal candle&apos;s favourable extreme instead of ordering at once: a buy at its low, a sell at its high
+              (or the fast SMA when it is nearer, with &quot;Fast SMA&quot; below). It is judged on the side the real order goes,
+              so a flipped stock&apos;s buy signal sells at the high. The wait is cancelled when the price breaks beyond the
+              other side of the candle by more than the % below (SETUP_INVALIDATED_OPPOSITE_BREAK), when a closed candle shows
+              the SMAs crossed against the signal (if ticked), or when the candles below close without a fill. The first price at
+              the limit sends the normal entry: every check, the stop, the trade cap and the cut-off still apply. Nothing waits
+              on Groww&apos;s book. Takes over from the tall-candle pullback when both are on. Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Limit at{isOwn("extreme_anchor") && <OwnTag />}
+              </span>
+              <select
+                value={form.extreme_anchor ?? "CANDLE_EXTREME"}
+                onChange={(e) => set("extreme_anchor", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="CANDLE_EXTREME">Candle low / high</option>
+                <option value="SMA_9">Fast SMA (if nearer)</option>
+              </select>
+            </label>
+            <Field
+              label="Cancel beyond the candle by (%)"
+              value={String(form.extreme_invalid_pct ?? 0.05)}
+              onChange={(v) => set("extreme_invalid_pct", v)}
+              own={isOwn("extreme_invalid_pct")}
+            />
+            <Field
+              label="Wait at most (candles)"
+              value={String(form.extreme_expiry_candles ?? 2)}
+              onChange={(v) => set("extreme_expiry_candles", v)}
+              own={isOwn("extreme_expiry_candles")}
+            />
+            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
+              <input
+                type="checkbox"
+                checked={form.extreme_cancel_on_cross !== false}
+                onChange={(e) => set("extreme_cancel_on_cross", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("extreme_cancel_on_cross") && <OwnTag />}
+              Cancel if the SMAs cross against it
+            </label>
+          </div>
+        </div>
+      </FieldGroup>
+      <FieldGroup id="check" title="2. Checks before entering" hint="Every ticked check must agree, or the signal is skipped" on={onCount("check")} wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle
+            info={
+              <>
+                These apply only when ticked, on a crossover; an unticked box is ignored. A trade needs every ticked filter to
+                agree. Force order skips them.{crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
+              </>
+            }
+          >
+            Main checks
+          </SectionTitle>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.use_adx_filter}
+              onChange={(e) => set("use_adx_filter", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_adx_filter") && <OwnTag />}
+            Only when the trend is strong (ADX)
+            <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
+          </label>
+          <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_vwap)}
+              onChange={(e) => set("use_vwap", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_vwap") && <OwnTag />}
+            Price on the right side of VWAP
+            <InfoTip label="About the VWAP filter">A buy needs the close at or above today&apos;s VWAP; a sell at or below it.</InfoTip>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_volume)}
+              onChange={(e) => set("use_volume", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_volume") && <OwnTag />}
+            Volume above average
+            <InfoTip label="About the volume filter">
+              The closed candle&apos;s volume must be at least the multiple below of the average of the previous 20 candles.
+            </InfoTip>
+          </label>
+          <Field
+            label="Volume multiple"
+            value={String(form.volume_min_ratio ?? 1)}
+            onChange={(v) => set("volume_min_ratio", v)} own={isOwn("volume_min_ratio")}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_density)}
+              onChange={(e) => set("use_density", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_density") && <OwnTag />}
+            Solid candle body (skip doji)
+            <InfoTip label="About the density filter">
+              The candle body must cover at least the percent below of its high-to-low range: skips doji-like, undecided candles.
+            </InfoTip>
+          </label>
+          <Field
+            label="Density" suffix="%"
+            value={String(form.density_min_pct ?? 50)}
+            onChange={(v) => set("density_min_pct", v)} own={isOwn("density_min_pct")}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_rsi)}
+              onChange={(e) => set("use_rsi", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_rsi") && <OwnTag />}
+            RSI(14) in range
+            <InfoTip label="About the RSI filter">A buy needs RSI inside the buy range below; a sell inside the sell range.</InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
+            <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} own={isOwn("rsi_long_max")} />
+            <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
+            <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_bollinger)}
+              onChange={(e) => set("use_bollinger", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_bollinger") && <OwnTag />}
+            Bollinger: skip spikes and squeezes
+            <InfoTip label="About the Bollinger filter">
+              Skips a buy that closed above the upper band (or a sell below the lower): it is chasing a spike. Skips any cross
+              while the bands are squeezed: the stock is going sideways. Squeeze is the band width as % of price on 1-minute
+              candles; 0 turns the squeeze check off.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
+            <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
+            <Field label="Squeeze below" suffix="%" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
+          </div>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Only when the SMA gap is in a range
+            <InfoTip label="About the SMA gap range filter">
+              Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
+              Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
+              usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
+              crosses; skipped crosses show as ✕ on the chart with the gap. Force order skips this check.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid items-end gap-2 sm:grid-cols-2">
+            <div className="rounded-md border border-white/10 p-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.use_gap_long)}
+                  onChange={(e) => set("use_gap_long", e.target.checked)}
+                  className="accent-[#10B981]"
+                />
+                {isOwn("use_gap_long") && <OwnTag />}
+                Buy (LONG)
+              </label>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Min" suffix="%" signed value={String(form.gap_long_min ?? 0.02)} onChange={(v) => set("gap_long_min", v)} own={isOwn("gap_long_min")} />
+                <Field label="Max" suffix="%" signed value={String(form.gap_long_max ?? 0.5)} onChange={(v) => set("gap_long_max", v)} own={isOwn("gap_long_max")} />
+              </div>
+            </div>
+            <div className="rounded-md border border-white/10 p-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.use_gap_short)}
+                  onChange={(e) => set("use_gap_short", e.target.checked)}
+                  className="accent-[#10B981]"
+                />
+                {isOwn("use_gap_short") && <OwnTag />}
+                Sell (SHORT)
+              </label>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Min" suffix="%" signed value={String(form.gap_short_min ?? -0.5)} onChange={(v) => set("gap_short_min", v)} own={isOwn("gap_short_min")} />
+                <Field label="Max" suffix="%" signed value={String(form.gap_short_max ?? -0.02)} onChange={(v) => set("gap_short_max", v)} own={isOwn("gap_short_max")} />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="min-w-0">
+          <SectionTitle>More checks</SectionTitle>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_candle_dir)}
+              onChange={(e) => set("use_candle_dir", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_candle_dir") && <OwnTag />}
+            Last candles must move the trade&apos;s way
+            <InfoTip label="About the candle direction filter">
+              The last N closed candles before the order must move the trade&apos;s way: on the cross candle normally, or in gap
+              mode on the candle where the gap reaches the entry level. Closes: each close beyond the one before (with 2, a buy
+              needs e.g. 100.0 → 100.4 → 100.9). Colour: each candle green for a buy, red for a sell. Both: both rules. Refused
+              crosses show as ✕ “Candles” on the chart. Force order skips this check.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Last candles to check (1–10)"
+              value={String(form.candle_dir_count ?? 2)}
+              onChange={(v) => set("candle_dir_count", v)}
+              own={isOwn("candle_dir_count")}
+            />
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Rule{isOwn("candle_dir_rule") && <OwnTag />}
+              </span>
+              <select
+                value={form.candle_dir_rule ?? "CLOSES"}
+                onChange={(e) => set("candle_dir_rule", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="CLOSES">Closes rising (buy) / falling (sell)</option>
+                <option value="COLOUR">Colour green (buy) / red (sell)</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            EMA lines (check here; the exit is in step 3)
+            <InfoTip label="About the EMA cross">
+              A second pair of lines, like Groww&apos;s &quot;EMA Cross 9 200&quot;: a fast EMA and a slow EMA, with the lengths
+              you type below. The bot still trades the SMA cross; the EMAs are an extra check on its own candles. Entry: a buy
+              only while the fast EMA is above the slow one, a sell only while it is below; otherwise the cross is skipped (✕
+              &quot;EMA&quot; on the chart). Exit: an open trade closes when the two EMAs cross against it after the entry (fast
+              drops below slow in a buy, rises above it in a sell). The slow EMA needs that many closed candles first (200
+              five-minute candles is about 3 days of history). Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Fast EMA (candles)"
+              value={String(form.ema_fast ?? 9)}
+              onChange={(v) => set("ema_fast", v)}
+              own={isOwn("ema_fast")}
+            />
+            <Field
+              label="Slow EMA (candles)"
+              value={String(form.ema_slow ?? 200)}
+              onChange={(v) => set("ema_slow", v)}
+              own={isOwn("ema_slow")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_ema)}
+              onChange={(e) => set("use_ema", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_ema") && <OwnTag />}
+            Buy only while the fast EMA is above the slow one, sell only while below
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Supertrend (check here; the exit is in step 3)
+            <InfoTip label="About the Supertrend">
+              One line that follows the price, the same as Groww&apos;s &quot;Supertrend&quot; (ATR length 10, factor 3). It sits
+              under the price while the trend is up (green) and above it while the trend is down (red), at a distance of
+              factor × ATR, so it gives a fast-moving stock more room. It flips when a candle closes on the other side.
+              Entry: a buy only while it is green, a sell only while it is red; otherwise the cross is skipped (✕ &quot;ST&quot;
+              on the chart). Exit: an open trade closes when the Supertrend flips against it after the entry. A bigger
+              factor (4) means fewer, later exits; a smaller one (2) means earlier exits and more shake-outs. Off by default;
+              try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="ATR length (candles)"
+              value={String(form.st_period ?? 10)}
+              onChange={(v) => set("st_period", v)}
+              own={isOwn("st_period")}
+            />
+            <Field
+              label="Factor (× ATR)"
+              value={String(form.st_mult ?? 3)}
+              onChange={(v) => set("st_mult", v)}
+              own={isOwn("st_mult")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_supertrend)}
+              onChange={(e) => set("use_supertrend", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_supertrend") && <OwnTag />}
+            Buy only while it is green, sell only while red
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Opening range (09:15–09:30, entries only)
+            <InfoTip label="About the opening range">
+              Four checks on the first 15 minutes of the day. Each is its own tick box; a trade is taken only if every ticked
+              check agrees. Volume: the 09:15–09:30 volume is at least the number below times the usual per-minute volume.
+              VWAP: every opening candle closed on the trade&apos;s side of VWAP. SMA spread: the 9 and 21 lines are pulling
+              apart by at least the % below and widening. Break: the first candle at or after 09:30 closes beyond the opening
+              high (buy) or low (sell). Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Volume ≥ × usual (opening)"
+              value={String(form.or_volume_ratio ?? 2)}
+              onChange={(v) => set("or_volume_ratio", v)}
+              own={isOwn("or_volume_ratio")}
+            />
+            <Field
+              label="SMA spread ≥ % (opening)"
+              value={String(form.or_spread_pct ?? 0.1)}
+              onChange={(v) => set("or_spread_pct", v)}
+              own={isOwn("or_spread_pct")}
+            />
+          </div>
+          {([
+            ["use_or_volume", "Volume check"],
+            ["use_or_vwap", "VWAP check (all opening candles on one side)"],
+            ["use_or_spread", "SMA spread check (lines pulling apart)"],
+            ["use_or_break", "Break check (first 09:15–09:30 high or low broken at 09:30)"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form[key])}
+                onChange={(e) => set(key, e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn(key) && <OwnTag />}
+              {label}
+            </label>
+          ))}
+        </div>
+      </FieldGroup>
+      <FieldGroup id="exit" title="3. When to exit" hint="Whichever ticked exit comes first closes the trade" on={onCount("exit")} wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle>Main exit</SectionTitle>
+          <label
+            className={clsx(
+              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+              crossExitOn(form) ? "ring-white/10" : "bg-amber-400/[0.08] ring-amber-400/40"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={crossExitOn(form)}
+              onChange={(e) => set("cross_exit", e.target.checked)}
+              className="mt-1 accent-[#10B981]"
+            />
+            <span>
+              {isOwn("cross_exit") && <OwnTag />}
+              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes and reverses{" "}
+              <InfoTip label="About the SMA cross exit">
+                Ticked, an opposite cross closes the trade and opens the reverse. Unticked, the trade is held through opposite
+                crosses: crosses then only open a trade while flat, and the stop / target, gap fade, Bollinger exit or the{" "}
+                {squareOff} square-off closes it. Works with any of those, or alone. Not used with candle patterns (they close at
+                the end of their candle).
+              </InfoTip>
+            </span>
+          </label>
+          {noExitOn(form) ? (
+            <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
+              No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
+              held, with no stop, until the {squareOff} square-off.
+              <button
+                type="button"
+                onClick={() => {
+                  set("cross_exit", true);
+                  setMsg("Changed — press Save to keep it.");
+                }}
+                className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+              >
+                Turn the SMA cross exit on
+              </button>
+            </p>
+          ) : null}
+          <label className="mt-3 block text-sm text-slate-300">
+            <span className="text-xs uppercase tracking-wider text-slate-400">
+              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
+              <InfoTip label="About the Bollinger exit">
+                Read once per closed candle after the entry, on the Bollinger Period and Width set in step 2 (the bands show on
+                the chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first. Your
+                stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
+              </InfoTip>
+            </span>
+            <select
+              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
+              onChange={(e) => set("bb_exit", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="OFF">Off — no Bollinger exit</option>
+              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
+              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
+              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
+            </select>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.slow_sma_exit)}
+              onChange={(e) => set("slow_sma_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("slow_sma_exit") && <OwnTag />}
+            Close when a candle closes beyond the slow SMA against the trade
+            <InfoTip label="About the slow SMA exit">
+              A trade closes only when a candle closes beyond the slow SMA against it (below for a buy, above for a sell); small
+              candles against it are ignored. While this is on, the counter-candle exit below is not used. Meant for the trend
+              bot (Bot 3).
+            </InfoTip>
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Close after N candles in a row against the trade
+            <InfoTip label="About counter candles">
+              A run of closed candles against the trade often turns it before the SMAs cross: green candles in a sell, red in a
+              buy. Exit: an open trade closes once its last N closed candles (counted after the entry) all went against it,
+              and, with the fast-SMA box ticked, the last close is past the fast SMA on that side. Early entry: while flat, the
+              same run against the side the SMAs are on (fast below slow, then N green candles closing above the fast SMA)
+              opens the trade that way before the cross, once per SMA run. Every filter, the cut-off, the caps and the stop
+              still apply. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Exit after N candles against (0 = off)"
+              value={String(form.counter_exit_count ?? 0)}
+              onChange={(v) => set("counter_exit_count", v)}
+              own={isOwn("counter_exit_count")}
+            />
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Counted by{isOwn("counter_rule") && <OwnTag />}
+              </span>
+              <select
+                value={form.counter_rule ?? "COLOUR"}
+                onChange={(e) => set("counter_rule", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="COLOUR">Colour (green / red)</option>
+                <option value="CLOSES">Closes rising / falling</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.counter_need_fast !== false}
+              onChange={(e) => set("counter_need_fast", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("counter_need_fast") && <OwnTag />}
+            Last close must be past the fast SMA
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Exit: min body × ATR (0 = any size)"
+              value={String(form.counter_min_body ?? 0)}
+              onChange={(v) => set("counter_min_body", v)}
+              own={isOwn("counter_min_body")}
+            />
+            <p className="pb-2 text-xs text-slate-400">
+              Each counter candle&apos;s body (close − open) must be at least this × its ATR, so small candles against the
+              trade do not count. 0.5 = half an ATR.
+            </p>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.ema_exit)}
+              onChange={(e) => set("ema_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("ema_exit") && <OwnTag />}
+            Close when the EMAs cross against the trade (lengths set in step 2)
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.st_exit)}
+              onChange={(e) => set("st_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("st_exit") && <OwnTag />}
+            Close when the Supertrend flips against the trade (settings in step 2)
+          </label>
+        </div>
+        <div className="min-w-0">
+          <SectionTitle>SMA 9 line exits</SectionTitle>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.slope_exit)}
+              onChange={(e) => set("slope_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("slope_exit") && <OwnTag />}
+            Close when the SMA 9 line flattens or turns
+            <InfoTip label="About the SMA 9 slope exit">
+              The angle of a line on the chart depends on its zoom, so the bot reads the fast SMA&apos;s slope in % per candle:
+              how much it moved over the last few candles (below), per candle. Read once per closed candle after the entry, on
+              the trade&apos;s signal side. Bend: the trade closes (SMA9_BEND) once the slope has dropped by the % below from its
+              steepest since the entry, e.g. from 0.20 %/candle to 0.08 % with 60 — the line flattening at the top of a run.
+              Turn: it closes (SMA9_TURN) once the slope is at least the %/candle below against the trade (the line pointing the
+              other way). Usually one or two candles earlier than the SMA cross; in a trend with pauses it also exits on a
+              harmless flattening, so try it on Replay first. 0 % bend = bend exit off. Off by default.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Slope over (candles)"
+              value={String(form.slope_lookback ?? 2)}
+              onChange={(v) => set("slope_lookback", v)}
+              own={isOwn("slope_lookback")}
+            />
+            <Field
+              label="Bend: exit at % off the steepest (0 = off)"
+              value={String(form.slope_bend_pct ?? 60)}
+              onChange={(v) => set("slope_bend_pct", v)}
+              own={isOwn("slope_bend_pct")}
+            />
+            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
+              <input
+                type="checkbox"
+                checked={form.slope_turn !== false}
+                onChange={(e) => set("slope_turn", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("slope_turn") && <OwnTag />}
+              Turn exit
+            </label>
+            <Field
+              label="Turn at (%/candle against)"
+              value={String(form.slope_turn_pct ?? 0.02)}
+              onChange={(v) => set("slope_turn_pct", v)}
+              own={isOwn("slope_turn_pct")}
+            />
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.vturn_exit)}
+              onChange={(e) => set("vturn_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("vturn_exit") && <OwnTag />}
+            V-turn exit: close on a sharp V in the SMA 9 line
+            <InfoTip label="About the V-turn exit">
+              Closes the trade (SMA9_VTURN) when the SMA 9 slope was steep with the trade (at least the first %/candle) and,
+              within the candles below, turns steeply against it (at least the second %/candle): the point of a V — a fall
+              then a sharp climb in a sell, a rise then a sharp drop in a buy. A slow U-shaped rounding or a sideways drift
+              never qualifies, so it is left to the other exits. Uses &quot;Slope over&quot; above; works on its own or next to
+              Bend / Turn. A V in price shows in SMA 9 as an arch about 9 candles wide, so keep the window at 5-8. Off by
+              default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field
+              label="Steep run (%/candle with)"
+              value={String(form.vturn_move_pct ?? 0.02)}
+              onChange={(v) => set("vturn_move_pct", v)}
+              own={isOwn("vturn_move_pct")}
+            />
+            <Field
+              label="Turn back (%/candle against)"
+              value={String(form.vturn_turn_pct ?? 0.015)}
+              onChange={(v) => set("vturn_turn_pct", v)}
+              own={isOwn("vturn_turn_pct")}
+            />
+            <Field
+              label="Within (candles)"
+              value={String(form.vturn_within ?? 6)}
+              onChange={(v) => set("vturn_within", v)}
+              own={isOwn("vturn_within")}
+            />
+          </div>
+        </div>
+      </FieldGroup>
+      <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
+        <div className="min-w-0">
           {form.entry_mode === "PATTERN" ? (
             <p className="mt-1 text-xs leading-snug text-amber-300">
               Not used while “Enter on” is Candle patterns: pattern trades open at the candle start and close at its end.
@@ -779,733 +1486,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
       </FieldGroup>
-      <FieldGroup title="Filters" hint="ADX, VWAP, volume, density, RSI, Bollinger, gap range, candle direction" wide={wide}>
+      <FieldGroup id="stop" title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
         <div className="min-w-0">
-          <SectionTitle
-            info={
-              <>
-                These apply only when ticked, on a crossover; an unticked box is ignored. A trade needs every ticked filter to
-                agree. Force order skips them.{crossExitOn(form) ? " A close still happens on the opposite cross." : ""}
-              </>
-            }
-          >
-            Entry filters
-          </SectionTitle>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={form.use_adx_filter}
-              onChange={(e) => set("use_adx_filter", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_adx_filter") && <OwnTag />}
-            ADX trend filter
-            <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
-          </label>
-          <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_vwap)}
-              onChange={(e) => set("use_vwap", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_vwap") && <OwnTag />}
-            VWAP
-            <InfoTip label="About the VWAP filter">A buy needs the close at or above today&apos;s VWAP; a sell at or below it.</InfoTip>
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_volume)}
-              onChange={(e) => set("use_volume", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_volume") && <OwnTag />}
-            Volume
-            <InfoTip label="About the volume filter">
-              The closed candle&apos;s volume must be at least the multiple below of the average of the previous 20 candles.
-            </InfoTip>
-          </label>
-          <Field
-            label="Volume multiple"
-            value={String(form.volume_min_ratio ?? 1)}
-            onChange={(v) => set("volume_min_ratio", v)} own={isOwn("volume_min_ratio")}
-          />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_density)}
-              onChange={(e) => set("use_density", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_density") && <OwnTag />}
-            Density (candle body)
-            <InfoTip label="About the density filter">
-              The candle body must cover at least the percent below of its high-to-low range: skips doji-like, undecided candles.
-            </InfoTip>
-          </label>
-          <Field
-            label="Density" suffix="%"
-            value={String(form.density_min_pct ?? 50)}
-            onChange={(v) => set("density_min_pct", v)} own={isOwn("density_min_pct")}
-          />
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_rsi)}
-              onChange={(e) => set("use_rsi", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_rsi") && <OwnTag />}
-            RSI(14)
-            <InfoTip label="About the RSI filter">A buy needs RSI inside the buy range below; a sell inside the sell range.</InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field label="Buy RSI from" value={String(form.rsi_long_min ?? 40)} onChange={(v) => set("rsi_long_min", v)} own={isOwn("rsi_long_min")} />
-            <Field label="Buy RSI to" value={String(form.rsi_long_max ?? 70)} onChange={(v) => set("rsi_long_max", v)} own={isOwn("rsi_long_max")} />
-            <Field label="Sell RSI from" value={String(form.rsi_short_min ?? 30)} onChange={(v) => set("rsi_short_min", v)} own={isOwn("rsi_short_min")} />
-            <Field label="Sell RSI to" value={String(form.rsi_short_max ?? 60)} onChange={(v) => set("rsi_short_max", v)} own={isOwn("rsi_short_max")} />
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Late entry
-            <InfoTip label="About late entry">
-              When a filter (VWAP, RSI, ADX or any other ticked one) refuses a cross, keep the cross armed for this many
-              minutes. On each later closed candle the filters are checked again, and the first candle on which they all agree
-              places the order, as long as the fast SMA is still on the cross&apos;s side. It gives up when the SMAs cross back,
-              the time runs out or the entry cut-off is reached. Catches a strong trend whose cross came on the wrong side of
-              VWAP. 0 = off. Gap mode has its own waiting entry and ignores this.
-            </InfoTip>
-          </div>
-          <Field
-            label="Keep a refused cross armed for (min, 0 = off)"
-            value={String(form.late_entry_min ?? 0)}
-            onChange={(v) => set("late_entry_min", v)}
-            own={isOwn("late_entry_min")}
-          />
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.tall_pullback)}
-              onChange={(e) => set("tall_pullback", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("tall_pullback") && <OwnTag />}
-            Tall candle: wait for a pullback before entering
-            <InfoTip label="About the tall-candle pullback">
-              When the signal candle is tall (high − low at least the multiple below × ATR), the bot does not buy at its top or
-              sell at its bottom. It waits for the price to come back: a buy at the higher of the fast SMA and the candle&apos;s
-              half-way point, a sell at the lower of the fast SMA and the half-way point. The first price at that level sends the
-              normal entry (every check, the stop, the trade cap and the cut-off still apply). If the price has not come back
-              after the candles below have closed, no order is sent. Nothing waits on Groww&apos;s book in the meantime. A smaller
-              signal candle orders at once, as before. A flipped stock always orders at once. Off by default; try it on Replay first.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Tall when height ≥ (× ATR)"
-              value={String(form.tall_atr_mult ?? 1.5)}
-              onChange={(v) => set("tall_atr_mult", v)}
-              own={isOwn("tall_atr_mult")}
-            />
-            <Field
-              label="Wait at most (candles)"
-              value={String(form.tall_expiry_candles ?? 2)}
-              onChange={(v) => set("tall_expiry_candles", v)}
-              own={isOwn("tall_expiry_candles")}
-            />
-          </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.extreme_entry)}
-              onChange={(e) => set("extreme_entry", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("extreme_entry") && <OwnTag />}
-            Limit entry at the signal candle&apos;s low / high
-            <InfoTip label="About the candle-extreme limit entry">
-              Every signal (an SMA cross, a gap-mode entry, a join, a late or early-reversal entry; not candle patterns) waits
-              at the signal candle&apos;s favourable extreme instead of ordering at once: a buy at its low, a sell at its high
-              (or the fast SMA when it is nearer, with &quot;Fast SMA&quot; below). It is judged on the side the real order goes,
-              so a flipped stock&apos;s buy signal sells at the high. The wait is cancelled when the price breaks beyond the
-              other side of the candle by more than the % below (SETUP_INVALIDATED_OPPOSITE_BREAK), when a closed candle shows
-              the SMAs crossed against the signal (if ticked), or when the candles below close without a fill. The first price at
-              the limit sends the normal entry: every check, the stop, the trade cap and the cut-off still apply. Nothing waits
-              on Groww&apos;s book. Takes over from the tall-candle pullback when both are on. Off by default; try it on Replay first.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <label className="block text-sm text-slate-300">
-              <span className="text-xs uppercase tracking-wider text-slate-400">
-                Limit at{isOwn("extreme_anchor") && <OwnTag />}
-              </span>
-              <select
-                value={form.extreme_anchor ?? "CANDLE_EXTREME"}
-                onChange={(e) => set("extreme_anchor", e.target.value)}
-                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-              >
-                <option value="CANDLE_EXTREME">Candle low / high</option>
-                <option value="SMA_9">Fast SMA (if nearer)</option>
-              </select>
-            </label>
-            <Field
-              label="Cancel beyond the candle by (%)"
-              value={String(form.extreme_invalid_pct ?? 0.05)}
-              onChange={(v) => set("extreme_invalid_pct", v)}
-              own={isOwn("extreme_invalid_pct")}
-            />
-            <Field
-              label="Wait at most (candles)"
-              value={String(form.extreme_expiry_candles ?? 2)}
-              onChange={(v) => set("extreme_expiry_candles", v)}
-              own={isOwn("extreme_expiry_candles")}
-            />
-            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
-              <input
-                type="checkbox"
-                checked={form.extreme_cancel_on_cross !== false}
-                onChange={(e) => set("extreme_cancel_on_cross", e.target.checked)}
-                className="accent-[#10B981]"
-              />
-              {isOwn("extreme_cancel_on_cross") && <OwnTag />}
-              Cancel if the SMAs cross against it
-            </label>
-          </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.join_trend)}
-              onChange={(e) => set("join_trend", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("join_trend") && <OwnTag />}
-            Join the morning trend
-            <InfoTip label="About joining the morning trend">
-              For a stock that opens already trending (its SMA cross printed yesterday or before 09:20), so the bot has no
-              fresh cross to trade. Once a day, from the minutes below after 09:15, while the bot is flat, it treats the side
-              the SMAs are on as a cross: the first closed candle on which every ticked filter (VWAP, RSI…), ADX and, in gap
-              mode, the gap level agree opens the trade. Only the trend already running at that time is joined; a later cross
-              is traded as a normal cross. A stopped-out join is not re-entered that day.
-            </InfoTip>
-          </label>
-          <Field
-            label="Join from (min after 09:15)"
-            value={String(form.join_after_min ?? 15)}
-            onChange={(v) => set("join_after_min", v)}
-            own={isOwn("join_after_min")}
-          />
-        </div>
-        <div className="min-w-0">
-          <SectionTitle>Entry filters (more)</SectionTitle>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_bollinger)}
-              onChange={(e) => set("use_bollinger", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_bollinger") && <OwnTag />}
-            Bollinger Bands
-            <InfoTip label="About the Bollinger filter">
-              Skips a buy that closed above the upper band (or a sell below the lower): it is chasing a spike. Skips any cross
-              while the bands are squeezed: the stock is going sideways. Squeeze is the band width as % of price on 1-minute
-              candles; 0 turns the squeeze check off.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
-            <Field label="Period" value={String(form.bb_period ?? 20)} onChange={(v) => set("bb_period", v)} own={isOwn("bb_period")} />
-            <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
-            <Field label="Squeeze below" suffix="%" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            SMA 9/21 gap range
-            <InfoTip label="About the SMA gap range filter">
-              Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
-              Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
-              usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
-              crosses; skipped crosses show as ✕ on the chart with the gap. Force order skips this check.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid items-end gap-2 sm:grid-cols-2">
-            <div className="rounded-md border border-white/10 p-2">
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form.use_gap_long)}
-                  onChange={(e) => set("use_gap_long", e.target.checked)}
-                  className="accent-[#10B981]"
-                />
-                {isOwn("use_gap_long") && <OwnTag />}
-                Buy (LONG)
-              </label>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Min" suffix="%" signed value={String(form.gap_long_min ?? 0.02)} onChange={(v) => set("gap_long_min", v)} own={isOwn("gap_long_min")} />
-                <Field label="Max" suffix="%" signed value={String(form.gap_long_max ?? 0.5)} onChange={(v) => set("gap_long_max", v)} own={isOwn("gap_long_max")} />
-              </div>
-            </div>
-            <div className="rounded-md border border-white/10 p-2">
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form.use_gap_short)}
-                  onChange={(e) => set("use_gap_short", e.target.checked)}
-                  className="accent-[#10B981]"
-                />
-                {isOwn("use_gap_short") && <OwnTag />}
-                Sell (SHORT)
-              </label>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Min" suffix="%" signed value={String(form.gap_short_min ?? -0.5)} onChange={(v) => set("gap_short_min", v)} own={isOwn("gap_short_min")} />
-                <Field label="Max" suffix="%" signed value={String(form.gap_short_max ?? -0.02)} onChange={(v) => set("gap_short_max", v)} own={isOwn("gap_short_max")} />
-              </div>
-            </div>
-          </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_candle_dir)}
-              onChange={(e) => set("use_candle_dir", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_candle_dir") && <OwnTag />}
-            Candle direction
-            <InfoTip label="About the candle direction filter">
-              The last N closed candles before the order must move the trade&apos;s way: on the cross candle normally, or in gap
-              mode on the candle where the gap reaches the entry level. Closes: each close beyond the one before (with 2, a buy
-              needs e.g. 100.0 → 100.4 → 100.9). Colour: each candle green for a buy, red for a sell. Both: both rules. Refused
-              crosses show as ✕ “Candles” on the chart. Force order skips this check.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Last candles to check (1–10)"
-              value={String(form.candle_dir_count ?? 2)}
-              onChange={(v) => set("candle_dir_count", v)}
-              own={isOwn("candle_dir_count")}
-            />
-            <label className="block text-sm text-slate-300">
-              <span className="text-xs uppercase tracking-wider text-slate-400">
-                Rule{isOwn("candle_dir_rule") && <OwnTag />}
-              </span>
-              <select
-                value={form.candle_dir_rule ?? "CLOSES"}
-                onChange={(e) => set("candle_dir_rule", e.target.value)}
-                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-              >
-                <option value="CLOSES">Closes rising (buy) / falling (sell)</option>
-                <option value="COLOUR">Colour green (buy) / red (sell)</option>
-                <option value="BOTH">Both</option>
-              </select>
-            </label>
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Counter candles (exit and early entry)
-            <InfoTip label="About counter candles">
-              A run of closed candles against the trade often turns it before the SMAs cross: green candles in a sell, red in a
-              buy. Exit: an open trade closes once its last N closed candles (counted after the entry) all went against it,
-              and, with the fast-SMA box ticked, the last close is past the fast SMA on that side. Early entry: while flat, the
-              same run against the side the SMAs are on (fast below slow, then N green candles closing above the fast SMA)
-              opens the trade that way before the cross, once per SMA run. Every filter, the cut-off, the caps and the stop
-              still apply. Off by default; try it on Replay first.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Exit after N candles against (0 = off)"
-              value={String(form.counter_exit_count ?? 0)}
-              onChange={(v) => set("counter_exit_count", v)}
-              own={isOwn("counter_exit_count")}
-            />
-            <label className="block text-sm text-slate-300">
-              <span className="text-xs uppercase tracking-wider text-slate-400">
-                Counted by{isOwn("counter_rule") && <OwnTag />}
-              </span>
-              <select
-                value={form.counter_rule ?? "COLOUR"}
-                onChange={(e) => set("counter_rule", e.target.value)}
-                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-              >
-                <option value="COLOUR">Colour (green / red)</option>
-                <option value="CLOSES">Closes rising / falling</option>
-                <option value="BOTH">Both</option>
-              </select>
-            </label>
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={form.counter_need_fast !== false}
-              onChange={(e) => set("counter_need_fast", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("counter_need_fast") && <OwnTag />}
-            Last close must be past the fast SMA
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Exit: min body × ATR (0 = any size)"
-              value={String(form.counter_min_body ?? 0)}
-              onChange={(v) => set("counter_min_body", v)}
-              own={isOwn("counter_min_body")}
-            />
-            <p className="pb-2 text-xs text-slate-400">
-              Each counter candle&apos;s body (close − open) must be at least this × its ATR, so small candles against the
-              trade do not count. 0.5 = half an ATR.
-            </p>
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.counter_entry)}
-              onChange={(e) => set("counter_entry", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("counter_entry") && <OwnTag />}
-            Early reversal entry (before the cross; N = exit count, or 3)
-          </label>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            EMA cross (entry and exit)
-            <InfoTip label="About the EMA cross">
-              A second pair of lines, like Groww&apos;s &quot;EMA Cross 9 200&quot;: a fast EMA and a slow EMA, with the lengths
-              you type below. The bot still trades the SMA cross; the EMAs are an extra check on its own candles. Entry: a buy
-              only while the fast EMA is above the slow one, a sell only while it is below; otherwise the cross is skipped (✕
-              &quot;EMA&quot; on the chart). Exit: an open trade closes when the two EMAs cross against it after the entry (fast
-              drops below slow in a buy, rises above it in a sell). The slow EMA needs that many closed candles first (200
-              five-minute candles is about 3 days of history). Off by default; try it on Replay first.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Fast EMA (candles)"
-              value={String(form.ema_fast ?? 9)}
-              onChange={(v) => set("ema_fast", v)}
-              own={isOwn("ema_fast")}
-            />
-            <Field
-              label="Slow EMA (candles)"
-              value={String(form.ema_slow ?? 200)}
-              onChange={(v) => set("ema_slow", v)}
-              own={isOwn("ema_slow")}
-            />
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_ema)}
-              onChange={(e) => set("use_ema", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_ema") && <OwnTag />}
-            Entry: buy only above, sell only below (fast vs slow EMA)
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.ema_exit)}
-              onChange={(e) => set("ema_exit", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("ema_exit") && <OwnTag />}
-            Exit: close the trade when the EMAs cross against it
-          </label>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Supertrend (entry and exit)
-            <InfoTip label="About the Supertrend">
-              One line that follows the price, the same as Groww&apos;s &quot;Supertrend&quot; (ATR length 10, factor 3). It sits
-              under the price while the trend is up (green) and above it while the trend is down (red), at a distance of
-              factor × ATR, so it gives a fast-moving stock more room. It flips when a candle closes on the other side.
-              Entry: a buy only while it is green, a sell only while it is red; otherwise the cross is skipped (✕ &quot;ST&quot;
-              on the chart). Exit: an open trade closes when the Supertrend flips against it after the entry. A bigger
-              factor (4) means fewer, later exits; a smaller one (2) means earlier exits and more shake-outs. Off by default;
-              try it on Replay first.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="ATR length (candles)"
-              value={String(form.st_period ?? 10)}
-              onChange={(v) => set("st_period", v)}
-              own={isOwn("st_period")}
-            />
-            <Field
-              label="Factor (× ATR)"
-              value={String(form.st_mult ?? 3)}
-              onChange={(v) => set("st_mult", v)}
-              own={isOwn("st_mult")}
-            />
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.use_supertrend)}
-              onChange={(e) => set("use_supertrend", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("use_supertrend") && <OwnTag />}
-            Entry: buy only when green, sell only when red
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.st_exit)}
-              onChange={(e) => set("st_exit", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("st_exit") && <OwnTag />}
-            Exit: close the trade when the Supertrend flips against it
-          </label>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.slope_exit)}
-              onChange={(e) => set("slope_exit", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("slope_exit") && <OwnTag />}
-            Exit when the SMA 9 line bends or turns
-            <InfoTip label="About the SMA 9 slope exit">
-              The angle of a line on the chart depends on its zoom, so the bot reads the fast SMA&apos;s slope in % per candle:
-              how much it moved over the last few candles (below), per candle. Read once per closed candle after the entry, on
-              the trade&apos;s signal side. Bend: the trade closes (SMA9_BEND) once the slope has dropped by the % below from its
-              steepest since the entry, e.g. from 0.20 %/candle to 0.08 % with 60 — the line flattening at the top of a run.
-              Turn: it closes (SMA9_TURN) once the slope is at least the %/candle below against the trade (the line pointing the
-              other way). Usually one or two candles earlier than the SMA cross; in a trend with pauses it also exits on a
-              harmless flattening, so try it on Replay first. 0 % bend = bend exit off. Off by default.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Slope over (candles)"
-              value={String(form.slope_lookback ?? 2)}
-              onChange={(v) => set("slope_lookback", v)}
-              own={isOwn("slope_lookback")}
-            />
-            <Field
-              label="Bend: exit at % off the steepest (0 = off)"
-              value={String(form.slope_bend_pct ?? 60)}
-              onChange={(v) => set("slope_bend_pct", v)}
-              own={isOwn("slope_bend_pct")}
-            />
-            <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9">
-              <input
-                type="checkbox"
-                checked={form.slope_turn !== false}
-                onChange={(e) => set("slope_turn", e.target.checked)}
-                className="accent-[#10B981]"
-              />
-              {isOwn("slope_turn") && <OwnTag />}
-              Turn exit
-            </label>
-            <Field
-              label="Turn at (%/candle against)"
-              value={String(form.slope_turn_pct ?? 0.02)}
-              onChange={(v) => set("slope_turn_pct", v)}
-              own={isOwn("slope_turn_pct")}
-            />
-          </div>
-          <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.vturn_exit)}
-              onChange={(e) => set("vturn_exit", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("vturn_exit") && <OwnTag />}
-            V-turn exit: close on a sharp V in the SMA 9 line
-            <InfoTip label="About the V-turn exit">
-              Closes the trade (SMA9_VTURN) when the SMA 9 slope was steep with the trade (at least the first %/candle) and,
-              within the candles below, turns steeply against it (at least the second %/candle): the point of a V — a fall
-              then a sharp climb in a sell, a rise then a sharp drop in a buy. A slow U-shaped rounding or a sideways drift
-              never qualifies, so it is left to the other exits. Uses &quot;Slope over&quot; above; works on its own or next to
-              Bend / Turn. A V in price shows in SMA 9 as an arch about 9 candles wide, so keep the window at 5-8. Off by
-              default; try it on Replay first.
-            </InfoTip>
-          </label>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
-            <Field
-              label="Steep run (%/candle with)"
-              value={String(form.vturn_move_pct ?? 0.02)}
-              onChange={(v) => set("vturn_move_pct", v)}
-              own={isOwn("vturn_move_pct")}
-            />
-            <Field
-              label="Turn back (%/candle against)"
-              value={String(form.vturn_turn_pct ?? 0.015)}
-              onChange={(v) => set("vturn_turn_pct", v)}
-              own={isOwn("vturn_turn_pct")}
-            />
-            <Field
-              label="Within (candles)"
-              value={String(form.vturn_within ?? 6)}
-              onChange={(v) => set("vturn_within", v)}
-              own={isOwn("vturn_within")}
-            />
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Trend defence and recovery (for the trend bot)
-            <InfoTip label="About trend defence and recovery">
-              Slow SMA exit: a trade closes only when a candle closes beyond the slow SMA against it (below for a buy, above
-              for a sell); small candles against it are ignored, and the counter-candle exit is not used while this is on.
-              Recovery hold (needs the SMA cross exit on): on an opposite cross, a trade in profit closes at once and the bot
-              reverses as usual; a trade at a loss is held instead. Each candle close after that, it closes as a recovery when
-              the loss is back within the target % of the entry or the price comes back to the slow SMA, and then (if ticked)
-              the stock moves to Bot 2: flipped, SMA gap mode in at ±0.119 % and out at ±0.003 % with the fade confirmed by a
-              close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60, and the trend breakout back to Bot 3; Bot 2 waits
-              for its next cross. It closes as an
-              emergency when the loss grows to the floor × the loss at the cross, or the ATR floor × ATR, or after the
-              candles below; that stock is then not traded again on this bot today. A held trade still open at the entry
-              cut-off (15:00) closes there. The stop still guards the trade throughout. A practice bot never hands a stock to
-              a LIVE Bot 2. A replay (backtest) moves the stock too, so you can check it after market hours; the stock
-              then leaves the rest of that replay. Off by default; try it on Replay first.
-            </InfoTip>
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.slow_sma_exit)}
-              onChange={(e) => set("slow_sma_exit", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("slow_sma_exit") && <OwnTag />}
-            Exit only on a close beyond the slow SMA (replaces the counter-candle exit)
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.recovery_hold)}
-              onChange={(e) => set("recovery_hold", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("recovery_hold") && <OwnTag />}
-            Recovery hold: on an opposite cross, close a winner, hold a loser for its recovery
-          </label>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Recovery target (% of entry)"
-              value={String(form.recovery_tolerance_pct ?? 0.15)}
-              onChange={(v) => set("recovery_tolerance_pct", v)}
-              own={isOwn("recovery_tolerance_pct")}
-            />
-            <Field
-              label="Give up after (candles)"
-              value={String(form.recovery_max_candles ?? 6)}
-              onChange={(v) => set("recovery_max_candles", v)}
-              own={isOwn("recovery_max_candles")}
-            />
-            <Field
-              label="Loss floor (× loss at the cross)"
-              value={String(form.recovery_emergency_mult ?? 1.5)}
-              onChange={(v) => set("recovery_emergency_mult", v)}
-              own={isOwn("recovery_emergency_mult")}
-            />
-            <Field
-              label="ATR floor (× ATR)"
-              value={String(form.recovery_atr_mult ?? 2.5)}
-              onChange={(v) => set("recovery_atr_mult", v)}
-              own={isOwn("recovery_atr_mult")}
-            />
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={form.recovery_handoff !== false}
-              onChange={(e) => set("recovery_handoff", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("recovery_handoff") && <OwnTag />}
-            After a recovery, move the stock to Bot 2 (flipped, gap mode)
-          </label>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Trend breakout (back to Bot 3)
-            <InfoTip label="About the trend breakout">
-              For the chop bot (Bot 2); every stock a recovery moves to Bot 2 gets it ticked. On each closed candle, a
-              breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
-              volume at least the × below of the last 20 candles&apos; average. Then an open trade on that stock is cut at
-              once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3 with Bot 3&apos;s
-              own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
-              new cross: every Bot 3 check still applies, and the order waits at the breakout candle&apos;s 9 SMA or half-way
-              level for 2 candles instead of buying its top. In LIVE the move waits until Groww shows no shares. A practice
-              bot never hands a stock to a LIVE Bot 3. A replay moves the stock too, but plays one bot, so Bot 3&apos;s entry
-              happens only on the live bots. Off by default; try it on Replay first.
-            </InfoTip>
-          </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.breakout_handoff)}
-              onChange={(e) => set("breakout_handoff", e.target.checked)}
-              className="accent-[#10B981]"
-            />
-            {isOwn("breakout_handoff") && <OwnTag />}
-            On a breakout, cut the trade and move the stock to Bot 3
-          </label>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
-            <Field
-              label="Candle (× ATR)"
-              value={String(form.breakout_atr_mult ?? 1.8)}
-              onChange={(v) => set("breakout_atr_mult", v)}
-              own={isOwn("breakout_atr_mult")}
-            />
-            <Field
-              label="SMA gap (%)"
-              value={String(form.breakout_gap_pct ?? 0.2)}
-              onChange={(v) => set("breakout_gap_pct", v)}
-              own={isOwn("breakout_gap_pct")}
-            />
-            <Field
-              label="Volume (× avg)"
-              value={String(form.breakout_volume_mult ?? 1.5)}
-              onChange={(v) => set("breakout_volume_mult", v)}
-              own={isOwn("breakout_volume_mult")}
-            />
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Opening range (09:15–09:30, entries only)
-            <InfoTip label="About the opening range">
-              Four checks on the first 15 minutes of the day. Each is its own tick box; a trade is taken only if every ticked
-              check agrees. Volume: the 09:15–09:30 volume is at least the number below times the usual per-minute volume.
-              VWAP: every opening candle closed on the trade&apos;s side of VWAP. SMA spread: the 9 and 21 lines are pulling
-              apart by at least the % below and widening. Break: the first candle at or after 09:30 closes beyond the opening
-              high (buy) or low (sell). Off by default; try it on Replay first.
-            </InfoTip>
-          </div>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field
-              label="Volume ≥ × usual (opening)"
-              value={String(form.or_volume_ratio ?? 2)}
-              onChange={(v) => set("or_volume_ratio", v)}
-              own={isOwn("or_volume_ratio")}
-            />
-            <Field
-              label="SMA spread ≥ % (opening)"
-              value={String(form.or_spread_pct ?? 0.1)}
-              onChange={(v) => set("or_spread_pct", v)}
-              own={isOwn("or_spread_pct")}
-            />
-          </div>
-          {([
-            ["use_or_volume", "Volume check"],
-            ["use_or_vwap", "VWAP check (all opening candles on one side)"],
-            ["use_or_spread", "SMA spread check (lines pulling apart)"],
-            ["use_or_break", "Break check (first 09:15–09:30 high or low broken at 09:30)"],
-          ] as const).map(([key, label]) => (
-            <label key={key} className="mt-2 flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={Boolean(form[key])}
-                onChange={(e) => set(key, e.target.checked)}
-                className="accent-[#10B981]"
-              />
-              {isOwn(key) && <OwnTag />}
-              {label}
-            </label>
-          ))}
-        </div>
-      </FieldGroup>
-      <FieldGroup title="Exits & stops" hint="Stop type, ₹ stop / trail / target, ATR stop, cross exit, Bollinger exit" wide={wide}>
-        <div className="min-w-0">
-          <SectionTitle>Stop-loss</SectionTitle>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1624,67 +1606,150 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </div>
           ) : null}
         </div>
+      </FieldGroup>
+      <FieldGroup id="risk" title="6. Size, daily limits and times" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
         <div className="min-w-0">
-          <SectionTitle>Exits</SectionTitle>
-          <label
-            className={clsx(
-              "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
-              crossExitOn(form) ? "ring-white/10" : "bg-amber-400/[0.08] ring-amber-400/40"
-            )}
-          >
+          <SectionTitle>Size</SectionTitle>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
+          </div>
+          {!stockScope && (
+            <>
+              <SectionTitle
+                info={
+                  <>
+                    Max daily loss and trades a day are for this bot only. If the bot stopped on the trade cap, type a higher
+                    max and press Save, then Start. Open positions stay open. A loss-limit stop stays locked for the day.
+                  </>
+                }
+              >
+                Daily limits (this bot)
+              </SectionTitle>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
+                <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+                <Field
+                  label="No new entries after"
+                  value={form.entry_cutoff_time || "15:00"}
+                  onChange={(v) => set("entry_cutoff_time", v)}
+                />
+                <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
+              </div>
+            </>
+          )}
+        </div>
+      </FieldGroup>
+      <FieldGroup id="advanced" title="7. Advanced: moving stocks between bots, asking me" hint="Recovery hold, hand-offs to Bot 2 / Bot 3, 1-minute review" on={onCount("advanced")} defaultOpen={onCount("advanced") > 0} wide={wide}>
+        <div className="min-w-0">
+          <SectionTitle>Recovery hold and hand-offs</SectionTitle>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Trend defence and recovery (for the trend bot)
+            <InfoTip label="About trend defence and recovery">
+              Recovery hold (needs the SMA cross exit on): on an opposite cross, a trade in profit closes at once and the bot
+              reverses as usual; a trade at a loss is held instead. Each candle close after that, it closes as a recovery when
+              the loss is back within the target % of the entry or the price comes back to the slow SMA, and then (if ticked)
+              the stock moves to Bot 2: flipped, SMA gap mode in at ±0.119 % and out at ±0.003 % with the fade confirmed by a
+              close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60, and the trend breakout back to Bot 3; Bot 2 waits
+              for its next cross. It closes as an
+              emergency when the loss grows to the floor × the loss at the cross, or the ATR floor × ATR, or after the
+              candles below; that stock is then not traded again on this bot today. A held trade still open at the entry
+              cut-off (15:00) closes there. The stop still guards the trade throughout. A practice bot never hands a stock to
+              a LIVE Bot 2. A replay (backtest) moves the stock too, so you can check it after market hours; the stock
+              then leaves the rest of that replay. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
-              checked={crossExitOn(form)}
-              onChange={(e) => set("cross_exit", e.target.checked)}
-              className="mt-1 accent-[#10B981]"
+              checked={Boolean(form.recovery_hold)}
+              onChange={(e) => set("recovery_hold", e.target.checked)}
+              className="accent-[#10B981]"
             />
-            <span>
-              {isOwn("cross_exit") && <OwnTag />}
-              <b className="text-slate-100">SMA cross exit</b> — an opposite cross closes and reverses{" "}
-              <InfoTip label="About the SMA cross exit">
-                Ticked, an opposite cross closes the trade and opens the reverse. Unticked, the trade is held through opposite
-                crosses: crosses then only open a trade while flat, and the stop / target, gap fade, Bollinger exit or the{" "}
-                {squareOff} square-off closes it. Works with any of those, or alone. Not used with candle patterns (they close at
-                the end of their candle).
-              </InfoTip>
-            </span>
+            {isOwn("recovery_hold") && <OwnTag />}
+            Recovery hold: on an opposite cross, close a winner, hold a loser for its recovery
           </label>
-          {noExitOn(form) ? (
-            <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
-              No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
-              held, with no stop, until the {squareOff} square-off.
-              <button
-                type="button"
-                onClick={() => {
-                  set("cross_exit", true);
-                  setMsg("Changed — press Save to keep it.");
-                }}
-                className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
-              >
-                Turn the SMA cross exit on
-              </button>
-            </p>
-          ) : null}
-          <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-xs uppercase tracking-wider text-slate-400">
-              Bollinger exit{isOwn("bb_exit") && <OwnTag />}
-              <InfoTip label="About the Bollinger exit">
-                Read once per closed 1-minute candle after the entry, on the Bollinger Period and Width (the bands show on the
-                chart). The middle-band exit waits until a candle has closed on the trade&apos;s side of the middle first. Your
-                stop keeps working; in LIVE the exchange stop is cancelled just before the exit is sent.
-              </InfoTip>
-            </span>
-            <select
-              value={BB_EXITS.includes(form.bb_exit as BbExit) ? form.bb_exit : "OFF"}
-              onChange={(e) => set("bb_exit", e.target.value)}
-              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
-            >
-              <option value="OFF">Off — no Bollinger exit</option>
-              <option value="BAND">Band target — book profit when a candle closes at the far band</option>
-              <option value="MIDDLE">Middle band — exit when a candle closes back across the middle</option>
-              <option value="BOTH">Both — band target or middle band, whichever comes first</option>
-            </select>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Recovery target (% of entry)"
+              value={String(form.recovery_tolerance_pct ?? 0.15)}
+              onChange={(v) => set("recovery_tolerance_pct", v)}
+              own={isOwn("recovery_tolerance_pct")}
+            />
+            <Field
+              label="Give up after (candles)"
+              value={String(form.recovery_max_candles ?? 6)}
+              onChange={(v) => set("recovery_max_candles", v)}
+              own={isOwn("recovery_max_candles")}
+            />
+            <Field
+              label="Loss floor (× loss at the cross)"
+              value={String(form.recovery_emergency_mult ?? 1.5)}
+              onChange={(v) => set("recovery_emergency_mult", v)}
+              own={isOwn("recovery_emergency_mult")}
+            />
+            <Field
+              label="ATR floor (× ATR)"
+              value={String(form.recovery_atr_mult ?? 2.5)}
+              onChange={(v) => set("recovery_atr_mult", v)}
+              own={isOwn("recovery_atr_mult")}
+            />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.recovery_handoff !== false}
+              onChange={(e) => set("recovery_handoff", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("recovery_handoff") && <OwnTag />}
+            After a recovery, move the stock to Bot 2 (flipped, gap mode)
           </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Trend breakout (back to Bot 3)
+            <InfoTip label="About the trend breakout">
+              For the chop bot (Bot 2); every stock a recovery moves to Bot 2 gets it ticked. On each closed candle, a
+              breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
+              volume at least the × below of the last 20 candles&apos; average. Then an open trade on that stock is cut at
+              once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3 with Bot 3&apos;s
+              own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
+              new cross: every Bot 3 check still applies, and the order waits at the breakout candle&apos;s 9 SMA or half-way
+              level for 2 candles instead of buying its top. In LIVE the move waits until Groww shows no shares. A practice
+              bot never hands a stock to a LIVE Bot 3. A replay moves the stock too, but plays one bot, so Bot 3&apos;s entry
+              happens only on the live bots. Off by default; try it on Replay first.
+            </InfoTip>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.breakout_handoff)}
+              onChange={(e) => set("breakout_handoff", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("breakout_handoff") && <OwnTag />}
+            On a breakout, cut the trade and move the stock to Bot 3
+          </label>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field
+              label="Candle (× ATR)"
+              value={String(form.breakout_atr_mult ?? 1.8)}
+              onChange={(v) => set("breakout_atr_mult", v)}
+              own={isOwn("breakout_atr_mult")}
+            />
+            <Field
+              label="SMA gap (%)"
+              value={String(form.breakout_gap_pct ?? 0.2)}
+              onChange={(v) => set("breakout_gap_pct", v)}
+              own={isOwn("breakout_gap_pct")}
+            />
+            <Field
+              label="Volume (× avg)"
+              value={String(form.breakout_volume_mult ?? 1.5)}
+              onChange={(v) => set("breakout_volume_mult", v)}
+              own={isOwn("breakout_volume_mult")}
+            />
+          </div>
+        </div>
+        <div className="min-w-0">
           <SectionTitle
             info={
               <>
@@ -1798,38 +1863,6 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
       </FieldGroup>
-      <FieldGroup title="Risk & session" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
-        <div className="min-w-0">
-          <SectionTitle>Size</SectionTitle>
-          <div className="mt-2 grid grid-cols-2 items-end gap-2">
-            <Field label="Quantity" own={isOwn("qty")} value={String(form.qty)} onChange={(v) => set("qty", v)} />
-          </div>
-          {!stockScope && (
-            <>
-              <SectionTitle
-                info={
-                  <>
-                    Max daily loss and trades a day are for this bot only. If the bot stopped on the trade cap, type a higher
-                    max and press Save, then Start. Open positions stay open. A loss-limit stop stays locked for the day.
-                  </>
-                }
-              >
-                Daily limits (this bot)
-              </SectionTitle>
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
-                <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
-                <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
-                <Field
-                  label="No new entries after"
-                  value={form.entry_cutoff_time || "15:00"}
-                  onChange={(v) => set("entry_cutoff_time", v)}
-                />
-                <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
-              </div>
-            </>
-          )}
-        </div>
-      </FieldGroup>
       <div
         className={clsx(
           "mt-3 flex flex-wrap items-center gap-3",
@@ -1870,13 +1903,218 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   );
 }
 
-/** A collapsible group of settings (open by default). */
-function FieldGroup({ title, hint, wide, children }: { title: string; hint: string; wide: boolean; children: ReactNode }) {
+type RuleGroup = "enter" | "check" | "exit" | "gap" | "stop" | "advanced";
+
+/** One switched-on setting, in plain words, and what "Turn off" sets (none for the core exits). */
+type Rule = { group: RuleGroup; key: string; text: string; off?: Partial<Record<keyof SmaConfig, string | boolean>>; warn?: boolean };
+
+const RULE_GROUPS: { id: RuleGroup; title: string }[] = [
+  { id: "enter", title: "1. When to enter" },
+  { id: "check", title: "2. Checks before entering" },
+  { id: "exit", title: "3. When to exit" },
+  { id: "gap", title: "4. SMA gap mode" },
+  { id: "stop", title: "5. Stop-loss and target" },
+  { id: "advanced", title: "7. Advanced" },
+];
+
+/** Every setting that changes what the bot does, when it is on. Display only: reads the form, saves nothing. */
+export function activeRules(f: SmaConfig): Rule[] {
+  const out: Rule[] = [];
+  const add = (r: Rule) => out.push(r);
+  const n = (v: unknown, fb: number) => (Number.isFinite(Number(v)) ? Number(v) : fb);
+  const fast = f.sma_fast ?? 9;
+  const slow = f.sma_slow ?? 21;
+  const pattern = f.entry_mode === "PATTERN";
+  const medium = f.sma_medium != null && String(f.sma_medium).trim() !== "";
+
+  // 1. When to enter
+  add(
+    pattern
+      ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
+      : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
+  );
+  if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
+  if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });
+  if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
+  if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min`, off: { late_entry_min: "0" } });
+  if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
+  if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
+  if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
+
+  // 2. Checks before entering
+  const check = (key: keyof SmaConfig, on: unknown, text: string) => {
+    if (on) add({ group: "check", key, text, off: { [key]: false } });
+  };
+  check("use_adx_filter", f.use_adx_filter, `Trend strength: ADX at least ${f.adx_threshold}`);
+  check("use_vwap", f.use_vwap, "Price on the right side of VWAP (buy above, sell below)");
+  check("use_volume", f.use_volume, `Volume at least ${n(f.volume_min_ratio, 1)}× the average`);
+  check("use_density", f.use_density, `Candle body at least ${n(f.density_min_pct, 50)}% of the candle`);
+  check("use_rsi", f.use_rsi, `RSI: buy ${n(f.rsi_long_min, 40)}–${n(f.rsi_long_max, 70)}, sell ${n(f.rsi_short_min, 30)}–${n(f.rsi_short_max, 60)}`);
+  check("use_bollinger", f.use_bollinger, "Bollinger: no chasing a spike, no trading a squeeze");
+  check("use_gap_long", f.use_gap_long, `Buy only when the SMA gap is ${n(f.gap_long_min, 0.02)}% to ${n(f.gap_long_max, 0.5)}%`);
+  check("use_gap_short", f.use_gap_short, `Sell only when the SMA gap is ${n(f.gap_short_min, -0.5)}% to ${n(f.gap_short_max, -0.02)}%`);
+  check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
+  check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
+  check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
+  check("use_or_volume", f.use_or_volume, "Opening 15 min: volume check");
+  check("use_or_vwap", f.use_or_vwap, "Opening 15 min: VWAP check");
+  check("use_or_spread", f.use_or_spread, "Opening 15 min: SMA spread check");
+  check("use_or_break", f.use_or_break, "Opening 15 min: high / low break check");
+
+  // 3. When to exit
+  if (!pattern && crossExitOn(f)) add({ group: "exit", key: "cross_exit", text: "Opposite SMA cross closes the trade and reverses it" });
+  if (!pattern && !crossExitOn(f)) add({ group: "exit", key: "cross_exit", text: "SMA cross exit is OFF: trades are held through opposite crosses", warn: true, off: undefined });
+  if (f.bb_exit && f.bb_exit !== "OFF")
+    add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
+  if (f.slow_sma_exit) add({ group: "exit", key: "slow_sma_exit", text: `Close when a candle closes beyond SMA ${slow} against the trade`, off: { slow_sma_exit: false } });
+  if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
+  if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
+  if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
+  if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
+  if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
+
+  // 4. Gap mode
+  if (f.use_gap_mode && !pattern) {
+    add({ group: "gap", key: "use_gap_mode", text: `Enters only once the SMA gap reaches +${n(f.gap_entry_long, 0.05)}% / ${n(f.gap_entry_short, -0.05)}%, closes when it fades back`, off: { use_gap_mode: false } });
+    if (f.gap_fade_intrabar) add({ group: "gap", key: "gap_fade_intrabar", text: "Fade checked every second (can exit early)", off: { gap_fade_intrabar: false } });
+    if (f.gap_fade_minute) add({ group: "gap", key: "gap_fade_minute", text: "Fade checked every 1-minute candle", off: { gap_fade_minute: false } });
+    if (f.gap_fade_confirm_sma) add({ group: "gap", key: "gap_fade_confirm_sma", text: `Rides out pullbacks: fade needs a close past SMA ${slow}`, off: { gap_fade_confirm_sma: false } });
+  }
+
+  // 5. Stop-loss and target
+  if (f.use_stop === false) {
+    add({ group: "stop", key: "use_stop", text: "NO stop-loss on new trades", warn: true });
+  } else if (f.stop_type === "TSL") {
+    const pct = f.tsl_mode === "PERCENT";
+    const u = (v: unknown, fb: number) => (pct ? `${n(v, fb)}%` : `₹${n(v, fb)}`);
+    const target = n(pct ? f.tsl_target_pct : f.tsl_target_points, 0);
+    add({
+      group: "stop",
+      key: "use_stop",
+      text: `Trailing stop ${u(pct ? f.tsl_sl_pct : f.tsl_sl_points, pct ? 1 : 20)}, moves every ${u(pct ? f.tsl_trail_pct : f.tsl_trail_points, pct ? 0.5 : 10)}${target > 0 ? `, target ${pct ? `${target}%` : `₹${target}`}` : ", no target"}`,
+    });
+  } else if (f.stop_type === "SMA_GAP") {
+    add({ group: "stop", key: "use_stop", text: `Moving stop and target from the SMA gap (PAPER only; LIVE uses ${f.atr_multiplier}× ATR)` });
+  } else {
+    add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
+  }
+
+  // 7. Advanced
+  if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
+  if (f.recovery_hold && f.recovery_handoff !== false) add({ group: "advanced", key: "recovery_handoff", text: "After a recovery, the stock moves to Bot 2", off: { recovery_handoff: false } });
+  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the trade is cut and the stock moves to Bot 3", off: { breakout_handoff: false } });
+  if (f.review_on)
+    add({
+      group: "advanced",
+      key: "review_on",
+      text:
+        f.review_default_answer === "EXIT"
+          ? "1-minute review closes the trade by itself when the SMAs get close"
+          : f.review_default_answer === "CONTINUE"
+            ? "1-minute review: noted only, no question asked"
+            : "1-minute review: asks me EXIT or WAIT when the SMAs get close",
+      off: { review_on: false },
+      warn: f.review_default_answer === "EXIT",
+    });
+  return out;
+}
+
+/** "What's switched on": every active rule in plain words, grouped, with a Turn off button (press Save to keep). */
+function ActiveRules({
+  form,
+  scope,
+  onOff,
+}: {
+  form: SmaConfig;
+  scope: string;
+  onOff: (values: Partial<Record<keyof SmaConfig, string | boolean>>) => void;
+}) {
+  const rules = activeRules(form);
+  const extraExits = rules.filter((r) => r.group === "exit" && r.key !== "cross_exit").length + (form.use_gap_mode ? 1 : 0);
+  const checks = rules.filter((r) => r.group === "check").length;
+  const extraEntries = rules.filter((r) => r.group === "enter" && r.off).length;
   return (
-    <details open className="group/fs mt-4 rounded-lg border border-white/10 bg-white/[0.02]">
+    <div className="mt-4 rounded-lg border border-sky-400/25 bg-sky-400/[0.04] p-3">
+      <div className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-slate-100">
+        What&apos;s switched on{scope ? ` for ${scope}` : ""}
+        <span className="text-xs font-normal text-slate-400">
+          {rules.length} rule{rules.length === 1 ? "" : "s"} · Turn off changes the form; press Save to keep it
+        </span>
+      </div>
+      {extraExits >= 3 ? (
+        <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-[12px] leading-snug text-amber-100">
+          {extraExits} extra exits are on. Whichever fires first closes the trade, so trades are cut earlier and smaller. Keep one or
+          two you have checked on Replay.
+        </p>
+      ) : null}
+      {checks >= 4 ? (
+        <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-[12px] leading-snug text-amber-100">
+          {checks} entry checks are on. A trade needs every one of them to agree, so many good crosses are skipped.
+        </p>
+      ) : null}
+      {extraEntries + checks + extraExits === 0 ? (
+        <p className="mt-2 text-xs text-slate-400">Plain SMA cross with the stop below: no extra entries, checks or exits are on.</p>
+      ) : null}
+      <div className="mt-2 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        {RULE_GROUPS.map((g) => {
+          const list = rules.filter((r) => r.group === g.id);
+          if (!list.length) return null;
+          return (
+            <div key={g.id} className="min-w-0">
+              <a href={`#sma-${g.id}`} className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200">
+                {g.title}
+              </a>
+              <ul className="mt-1 space-y-1">
+                {list.map((r) => (
+                  <li key={r.key} className="flex items-start gap-2 text-[13px] leading-snug">
+                    <span aria-hidden className={clsx("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", r.warn ? "bg-amber-400" : "bg-emerald-400")} />
+                    <span className={clsx("min-w-0 flex-1", r.warn ? "text-amber-200" : "text-slate-200")}>{r.text}</span>
+                    {r.off ? (
+                      <button
+                        type="button"
+                        onClick={() => onOff(r.off!)}
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+                      >
+                        Turn off
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** A collapsible group of settings, with how many of its rules are on. */
+function FieldGroup({
+  id,
+  title,
+  hint,
+  wide,
+  on,
+  defaultOpen = true,
+  children,
+}: {
+  id: string;
+  title: string;
+  hint: string;
+  wide: boolean;
+  on?: number;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details id={`sma-${id}`} open={defaultOpen} className="group/fs mt-4 scroll-mt-24 rounded-lg border border-white/10 bg-white/[0.02]">
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 [&::-webkit-details-marker]:hidden">
         <ChevronDown size={16} aria-hidden className="shrink-0 text-slate-400 transition-transform group-[:not([open])]/fs:-rotate-90" />
         {title}
+        {on ? (
+          <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">{on} on</span>
+        ) : null}
         <span className="hidden truncate text-xs font-normal text-slate-400 sm:inline">— {hint}</span>
       </summary>
       <div className={clsx("px-3 pb-3", wide && "lg:grid lg:grid-cols-2 lg:gap-x-10")}>{children}</div>
