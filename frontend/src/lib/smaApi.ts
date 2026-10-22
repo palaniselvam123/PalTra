@@ -872,6 +872,19 @@ export interface AllBotsGuard {
   reason: string;
 }
 
+/** All-bots P&L alert levels (pnl_alerts.py): a message / call only, never a trade. */
+export interface PnlAlertSettings {
+  profit: number;
+  loss: number;
+  telegram: boolean;
+  call: boolean;
+  basis: "GROSS" | "NET";
+  /** Today's P&L of bots 1-4 on that basis. */
+  total?: number;
+  /** Levels already alerted today ("profit" / "loss"), with when and the total then. */
+  sent?: Record<string, { at: string; total: number }>;
+}
+
 export type BotSummary = {
   bot: number;
   name: string;
@@ -1469,6 +1482,13 @@ export const smaApi = {
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
   /** All-bots day target / stop loss (₹, 0 = off) and today's combined P&L before charges. */
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
+  pnlAlerts: () => request<PnlAlertSettings>("/api/bots/pnl-alerts"),
+  savePnlAlerts: (body: PnlAlertSettings) =>
+    request<PnlAlertSettings>("/api/bots/pnl-alerts", {
+      method: "PUT",
+      body: JSON.stringify({ profit: body.profit, loss: body.loss, telegram: body.telegram, call: body.call, basis: body.basis }),
+    }),
+  testPnlAlerts: () => request<Record<string, string>>("/api/bots/pnl-alerts/test", { method: "POST" }),
   saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>
     request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),

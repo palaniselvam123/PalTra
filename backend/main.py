@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
+import pnl_alerts
 import arm_log
 import chop_auto
 import chop_scan
@@ -155,6 +156,7 @@ _task: asyncio.Task | None = None
 _research_task: asyncio.Task | None = None
 _bot_tasks: list[asyncio.Task] = []
 _guard_task: asyncio.Task | None = None
+_pnl_alert_task: asyncio.Task | None = None
 
 
 def boot_engine() -> asyncio.Task | None:
@@ -199,6 +201,11 @@ def boot_engine() -> asyncio.Task | None:
     _guard_task = asyncio.create_task(
         all_bots_guard.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), now_fn=engine._now)
     )
+    # All-bots P&L alerts (pnl_alerts.py): a message / call at a profit or loss level; alerts only.
+    global _pnl_alert_task
+    _pnl_alert_task = asyncio.create_task(
+        pnl_alerts.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), engine._now)
+    )
     return _task
 
 
@@ -224,7 +231,7 @@ def stop_engine() -> None:
     research_engine.stop()
     for eng in bot_engines.values():
         eng.stop()
-    for task in (_task, _research_task, _guard_task, *_bot_tasks):
+    for task in (_task, _research_task, _guard_task, _pnl_alert_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -729,6 +736,7 @@ COPY_SKIP = frozenset({
     "id", "symbol", "trade_symbols", "trade_sources", "trading_mode", "bot_name", "stock_settings",
     "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
+    "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
 })
 
 
@@ -2383,6 +2391,69 @@ async def all_bots_guard_put(body: AllBotsGuard):
         db.commit()
     engine.load_config()
     return await _guard_view()
+
+
+class PnlAlertSettings(BaseModel):
+    profit: float = Field(ge=0, le=pnl_alerts.MAX_AMOUNT)
+    loss: float = Field(ge=0, le=pnl_alerts.MAX_AMOUNT)
+    telegram: bool = True
+    call: bool = True
+    basis: Literal["GROSS", "NET"] = "GROSS"
+
+
+async def _pnl_alert_view() -> dict:
+    bots = _all_bots()
+    conf = pnl_alerts.settings(engine.load_config())
+    net = conf["basis"] == "NET"
+    closed = await asyncio.to_thread(all_bots_guard.closed_total, bots, net)
+    now = engine._now()
+    return {
+        **conf,
+        "total": round(closed + all_bots_guard.open_total(bots, net), 2),
+        "sent": pnl_alerts.alerts.sent_today(now.date()),
+    }
+
+
+@app.get("/api/bots/pnl-alerts")
+async def pnl_alerts_get():
+    """The all-bots P&L alert levels, today's total on their basis and the levels already alerted today."""
+    return await _pnl_alert_view()
+
+
+@app.put("/api/bots/pnl-alerts")
+async def pnl_alerts_put(body: PnlAlertSettings):
+    """Save the all-bots P&L alert levels (₹, 0 = off) on bot 1's settings row. Alerts only, no trading."""
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        row.pnl_alert_profit = float(body.profit)
+        row.pnl_alert_loss = float(body.loss)
+        row.pnl_alert_telegram = bool(body.telegram)
+        row.pnl_alert_call = bool(body.call)
+        row.pnl_alert_basis = body.basis
+        db.commit()
+    engine.load_config()
+    return await _pnl_alert_view()
+
+
+@app.post("/api/bots/pnl-alerts/test")
+async def pnl_alerts_test():
+    """Send a test message and make a test call (any time) through the alert channels."""
+    from app.services.alert_notifier import alert_notifier
+
+    conf = pnl_alerts.settings(engine.load_config())
+    text = "PalTra P&L alert test: this is how a profit / loss level alert will reach you."
+    out = {}
+    if conf["telegram"]:
+        res = await alert_notifier.send(text)
+        out["telegram"] = "sent" if res.ok else (res.skipped_reason or res.error or "not sent")
+    if conf["call"]:
+        res = await alert_notifier.place_call(text, test=True)
+        out["call"] = "ringing" if res.ok else (res.skipped_reason or res.error or "not made")
+    if not out:
+        raise HTTPException(409, "Tick Telegram or Phone call first.")
+    return out
 
 
 @app.post("/api/bots/kill-all")

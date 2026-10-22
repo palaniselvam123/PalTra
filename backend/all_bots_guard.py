@@ -77,25 +77,39 @@ def verdict(total: float, target: float, stop: float, now: dt.datetime | None = 
     return None
 
 
-def closed_total(engines) -> float:
-    """Today's closed P&L of every bot, each in its current book (a DB read: off the event loop)."""
-    out = 0.0
+def closed_by_bot(engines, net: bool = False) -> dict:
+    """Today's closed P&L of each bot, in its current book: before charges, or after with `net`.
+    A DB read: call it off the event loop."""
+    out = {}
     for engine in engines:
         cfg = engine.load_config()
         mode = (cfg.trading_mode or "PAPER").upper()
-        out += float(engine._kpis(mode)["actual_gross"])  # noqa: SLF001 - the screen's own sum
+        kpis = engine._kpis(mode)  # noqa: SLF001 - the screen's own sum
+        out[engine.bot_id] = float(kpis["net"] if net else kpis["actual_gross"])
     return out
 
 
-def open_total(engines) -> float:
-    """Open P&L of every held stock at its last price. On the event loop: _open_pnl moves the focus."""
-    out = 0.0
+def open_by_bot(engines, net: bool = False) -> dict:
+    """Open P&L of each bot's held stocks at their last price. On the event loop: _open_pnl moves the focus."""
+    out = {}
     for engine in engines:
+        total = 0.0
         for name in list(engine.positions):
             value = engine._open_pnl(name)  # noqa: SLF001
             if value:
-                out += float(value["gross"])
+                total += float(value["net" if net else "gross"])
+        out[engine.bot_id] = total
     return out
+
+
+def closed_total(engines, net: bool = False) -> float:
+    """Today's closed P&L of every bot, each in its current book (a DB read: off the event loop)."""
+    return sum(closed_by_bot(engines, net).values())
+
+
+def open_total(engines, net: bool = False) -> float:
+    """Open P&L of every held stock at its last price. On the event loop: _open_pnl moves the focus."""
+    return sum(open_by_bot(engines, net).values())
 
 
 def total(engines) -> float:
