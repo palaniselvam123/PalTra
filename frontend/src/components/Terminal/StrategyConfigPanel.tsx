@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
 import { BB_EXITS, CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
-import { crossExitOn, noExitOn, strategyNotes } from "@/lib/strategyChecks";
+import { crossExitOn, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
 type Props = {
   config: SmaConfig | null;
@@ -510,7 +510,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </p>
           ) : null}
       </div>
-      <ActiveRules form={form} scope={scope} onOff={turnOff} />
+      <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
       <FieldGroup id="enter" title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Moving averages</SectionTitle>
@@ -707,6 +707,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             onChange={(v) => set("late_entry_min", v)}
             own={isOwn("late_entry_min")}
           />
+          {form.use_gap_mode ? (
+            <p className="mt-1 text-xs text-amber-300">Ignored while SMA gap mode is on (gap mode keeps a refused cross waiting itself).</p>
+          ) : null}
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -923,8 +926,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <Field label="Squeeze below" suffix="%" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
           </div>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Only when the SMA gap is in a range
+            {form.use_gap_mode ? "Max gap for entry (don't chase a stretched gap)" : "Only when the SMA gap is in a range"}
             <InfoTip label="About the SMA gap range filter">
+              {form.use_gap_mode
+                ? "Gap mode is on: this is read on the candle where the order goes, so its Min repeats gap mode's entry level (the higher one wins). Only its Max adds anything: no entry while the gap is already wider. "
+                : ""}
               Gap % = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the cross candle: positive when SMA 9 is above, negative when below.
               Tick the side(s) to check; an unticked side trades as before. Negative numbers are allowed (a sell gap is
               usually negative, e.g. −0.5 to −0.02). On the cross candle the gap is usually small, so a tight range skips most
@@ -1381,6 +1387,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_gap_mode") && <OwnTag />}
             SMA gap mode — enter when the gap widens, exit when it fades
             <InfoTip label="About SMA gap mode">
+              Gap % = (SMA {form.sma_fast ?? 9} − SMA {form.sma_slow ?? 21}) ÷ SMA {form.sma_slow ?? 21} × 100. On a ₹1,000 stock,
+              0.05% means SMA {form.sma_fast ?? 9} is ₹0.50 above SMA {form.sma_slow ?? 21} (−0.05% = ₹0.50 below). Buy levels
+              are positive, sell levels negative; keep each exit between 0 and its entry (buy 0 &lt; exit &lt; entry, sell entry
+              &lt; exit &lt; 0).{" "}
               A cross only arms the trade; the order goes on the first closed candle whose gap reaches the entry level (plus
               the wait, if set — the gap must still be there). While the gap keeps widening the trade is held; once it has
               cleared the exit level and fades back to it (or gives back the set share of its widest), the trade closes (exit
@@ -1390,6 +1400,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               back to it; a trade whose gap never gets that wide is left to the stop, the opposite cross and square-off.
             </InfoTip>
           </label>
+          <p className="mt-1 text-xs leading-snug text-slate-400">
+            Gap = how far SMA {form.sma_fast ?? 9} is from SMA {form.sma_slow ?? 21}, in % of the price. Buy numbers positive,
+            sell numbers negative; each exit sits between 0 and its entry (e.g. buy in 0.05 out 0.02, sell in −0.05 out −0.02).
+          </p>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field label="Buy: enter at gap ≥" suffix="%" signed value={String(form.gap_entry_long ?? 0.05)} onChange={(v) => set("gap_entry_long", v)} own={isOwn("gap_entry_long")} />
             <Field label="Buy: exit at gap ≤" suffix="%" signed value={String(form.gap_exit_long ?? 0.02)} onChange={(v) => set("gap_exit_long", v)} own={isOwn("gap_exit_long")} />
@@ -1457,7 +1471,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("gap_fade_intrabar") && <OwnTag />}
-              Check the fade every second{" "}
+              Check the fade every second (market hours only){" "}
               <InfoTip label="About checking the fade every second">
                 Judges the exit on the live price, as if that second closed the candle, instead of waiting for the minute to
                 close. Faster on a sharp reversal; a candle that turns back inside the minute can exit too early. Entries still
@@ -1475,7 +1489,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             <span>
               {isOwn("gap_fade_minute") && <OwnTag />}
-              Check the fade every 1-minute candle{" "}
+              Check the fade every 1-minute candle (live and replays){" "}
               <InfoTip label="About checking the fade every minute">
                 For a bot on 2-minute or longer candles: each closed 1-minute candle&apos;s close is read as if it closed the
                 bot&apos;s candle, so a fade can exit inside a 5-minute candle without waiting for it to close. It uses
@@ -1531,7 +1545,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <div className="grid grid-cols-3 items-end gap-2">
                 <Field label="Stop × gap" value={String(form.gap_sl_mult ?? 1)} onChange={(v) => set("gap_sl_mult", v)} own={isOwn("gap_sl_mult")} />
                 <Field label="Target × gap" value={String(form.gap_tp_mult ?? 2)} onChange={(v) => set("gap_tp_mult", v)} own={isOwn("gap_tp_mult")} />
-                <Field label="Min gap" suffix="%" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
+                <Field label="Min gap for the stop size" suffix="%" value={String(form.gap_min_pct ?? 0.2)} onChange={(v) => set("gap_min_pct", v)} own={isOwn("gap_min_pct")} />
               </div>
               <Hint label="About the SMA gap stop">
                 Gap % = SMA 9 vs SMA 21 on the last closed candle (at least the min gap). A buy gets stop = price −
@@ -1736,7 +1750,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("breakout_atr_mult")}
             />
             <Field
-              label="SMA gap (%)"
+              label="Breakout: SMA gap ≥ (%)"
               value={String(form.breakout_gap_pct ?? 0.2)}
               onChange={(v) => set("breakout_gap_pct", v)}
               own={isOwn("breakout_gap_pct")}
@@ -1780,7 +1794,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field
-              label="Uncertain within ±"
+              label="Ask when the SMA gap is within ±"
               suffix="%"
               own={isOwn("review_gap_pct")}
               value={String(form.review_gap_pct ?? 0.03)}
@@ -1936,7 +1950,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
   if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });
   if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
-  if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min`, off: { late_entry_min: "0" } });
+  if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
@@ -2024,10 +2038,13 @@ function ActiveRules({
   form,
   scope,
   onOff,
+  notes,
 }: {
   form: SmaConfig;
   scope: string;
   onOff: (values: Partial<Record<keyof SmaConfig, string | boolean>>) => void;
+  /** Overlapping or lopsided settings (strategyNotes), each with an optional one-click fix. */
+  notes: StrategyNote[];
 }) {
   const rules = activeRules(form);
   const extraExits = rules.filter((r) => r.group === "exit" && r.key !== "cross_exit").length + (form.use_gap_mode ? 1 : 0);
@@ -2051,6 +2068,35 @@ function ActiveRules({
         <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-[12px] leading-snug text-amber-100">
           {checks} entry checks are on. A trade needs every one of them to agree, so many good crosses are skipped.
         </p>
+      ) : null}
+      {notes.length ? (
+        <div className="mt-2 rounded-md border border-amber-400/40 bg-amber-400/[0.06] p-2">
+          <div className="text-[12px] font-semibold text-amber-200">
+            {notes.length === 1 ? "1 setting overlaps or looks off" : `${notes.length} settings overlap or look off`}
+          </div>
+          <ul className="mt-1 space-y-1.5">
+            {notes.map((note) => (
+              <li key={note.id} className="text-[12px] leading-snug text-amber-100">
+                {note.text}
+                {note.fix ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOff(
+                        Object.fromEntries(
+                          Object.entries(note.fix!.values).map(([k, v]) => [k, typeof v === "boolean" ? v : String(v)])
+                        ) as Partial<Record<keyof SmaConfig, string | boolean>>
+                      )
+                    }
+                    className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-400/15"
+                  >
+                    {note.fix.label}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {extraEntries + checks + extraExits === 0 ? (
         <p className="mt-2 text-xs text-slate-400">Plain SMA cross with the stop below: no extra entries, checks or exits are on.</p>

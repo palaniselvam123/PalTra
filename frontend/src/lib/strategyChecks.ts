@@ -122,12 +122,46 @@ export function strategyNotes(cfg: Partial<SmaConfig> | null | undefined): Strat
     notes.push({
       id: "gap-range",
       text: "The SMA gap range filter is on too. In gap mode it is read on the candle where the order goes, so its minimum repeats the entry level; only its maximum (don't chase a gap that is already wide) adds anything.",
+      fix: { label: "Turn the gap range check off", values: { use_gap_long: false, use_gap_short: false } },
     });
   }
   if (num(cfg.gap_giveback_pct, 0) > 0 && (num(cfg.gap_fade_min_candles, 0) > 0 || cfg.gap_fade_confirm_sma)) {
     notes.push({
       id: "exit-mix",
       text: "Give-back makes the fade exit sooner while “narrowing N candles” / “ride out pullbacks” make it wait. They pull the same exit in opposite directions; change one at a time and compare in Replay.",
+    });
+  }
+  if (cfg.slow_sma_exit && cfg.gap_fade_confirm_sma) {
+    notes.push({
+      id: "slow-sma-fade",
+      text: "“Ride out pullbacks” waits for a close past the slow SMA, and the slow-SMA exit closes the trade on that same candle first, so the gap fade never fires. Keep one of the two.",
+      fix: { label: "Turn “Ride out pullbacks” off", values: { gap_fade_confirm_sma: false } },
+    });
+  }
+  if (cfg.gap_fade_intrabar && cfg.gap_fade_minute) {
+    notes.push({
+      id: "fade-two-speeds",
+      text: "The fade is checked every second and every 1-minute candle. In market hours the every-second check already covers each minute; only replays and after-hours use the 1-minute one. Keeping just the 1-minute check makes live trading match your backtests.",
+      fix: { label: "Keep only the 1-minute check", values: { gap_fade_intrabar: false } },
+    });
+  }
+  if (num(cfg.late_entry_min, 0) > 0) {
+    notes.push({
+      id: "late-entry-ignored",
+      text: "Late entry is ignored in gap mode: gap mode already keeps a refused cross waiting until the checks agree (up to “Give up after the cross”).",
+      fix: { label: "Set late entry to 0", values: { late_entry_min: 0 } },
+    });
+  }
+  if (num(cfg.gap_giveback_pct, 0) > 0 && cfg.slope_exit && num(cfg.slope_bend_pct, 60) > 0) {
+    notes.push({
+      id: "giveback-bend",
+      text: "Give-back and the SMA 9 bend exit do the same job (the trend is losing strength), one on the gap and one on the SMA 9 slope. Whichever reacts first closes the trade; keep one.",
+    });
+  }
+  if (num(cfg.gap_fade_min_candles, 0) > 0 && num(cfg.counter_exit_count, 0) > 0) {
+    notes.push({
+      id: "narrow-counter",
+      text: "“Gap narrowing N candles in a row” and “Close after N candles against the trade” both count a run of candles going the wrong way. Keep one.",
     });
   }
   return notes;
