@@ -177,7 +177,7 @@ async def _scan_universe(stocks: str) -> list[str]:
     if stocks == "armed":
         bots = await _call("GET", "/api/bots")
         return sorted({str(s).upper() for b in bots for s in (b.get("armed") or [])})
-    out = await _desk_call("universe")
+    out = await _desk_call("universe", lists=stocks)
     if not out.get("symbols"):
         raise ToolError(out.get("error") or "The F&O stock list is not loaded yet; try again in a minute.")
     return list(out["symbols"])
@@ -190,8 +190,8 @@ async def start_scan(args: dict) -> Any:
     symbols = [str(s).strip().upper() for s in (args.get("symbols") or []) if str(s).strip()]
     if not symbols:
         stocks = (args.get("stocks") or "fno").lower()
-        if stocks not in ("fno", "armed"):
-            raise ToolError("stocks must be fno or armed")
+        if stocks not in ("fno", "armed", "nifty50", "nifty100", "niftybank"):
+            raise ToolError("stocks must be fno, armed, nifty50, nifty100 or niftybank")
         symbols = await _scan_universe(stocks)
     if not symbols:
         raise ToolError("No stocks to scan (no bot has armed stocks).")
@@ -218,7 +218,7 @@ async def _desk_call(name: str, **kwargs) -> Any:
     if name == "active":
         return await scalp.most_active(**kwargs)
     if name == "universe":
-        return await scalp.fno_universe()
+        return await scalp.fno_universe(lists=kwargs.get("lists", "fno"))
     raise ToolError(f"unknown desk call {name}")
 
 
@@ -535,14 +535,14 @@ TOOLS: dict[str, dict] = {
             "Run a Scalp page scan now (the page's Scan now button). Read-only: it downloads Groww candles and "
             "never orders or changes a bot. kind cross / chop / morning; stocks = fno (the F&O list, as the page) or "
             "armed (every bot's armed stocks), or pass `symbols`. minutes = candle size for cross / chop (1-15, "
-            "default 5). Returns at once; poll get_scans until `running` is false. Refused while scans are paused "
+            "default 5); nifty50 / nifty100 / niftybank scan that index's stocks. Returns at once; poll get_scans until `running` is false. Refused while scans are paused "
             "(or moved to the scanner server), and a rescan of the same candle waits a minute unless force."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": _KIND,
-                "stocks": {"type": "string", "enum": ["fno", "armed"]},
+                "stocks": {"type": "string", "enum": ["fno", "armed", "nifty50", "nifty100", "niftybank"]},
                 "symbols": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SCAN_SYMBOLS},
                 "minutes": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15]},
                 "quiet_min": {"type": "integer", "minimum": 1, "maximum": 375, "description": "Trend quality: quiet-runner minutes."},

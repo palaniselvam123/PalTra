@@ -575,6 +575,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   302s to the stock's groww.in page: the slug comes from Groww's public website search
   (`app/services/groww_links.py`, exact NSE match, cached per symbol; else Groww's search page).
   Opens in a new tab with the browser's own Groww login. Read-only, no trading API, no order.
+- **Scan lists** (`components/Scalp/ScanLists.tsx`, `ScanListPicker`): the Cross scan, 09:30 Morning and Trend quality
+  cards each pick their stocks with tick boxes, joined without repeats: Armed stocks, All F&O, Nifty 50, Nifty 100,
+  Nifty Bank (kept per card in the browser; Trend quality defaults to armed, the others to F&O). Index members come
+  from NSE's constituent CSVs (`app/services/index_lists.py`, archives.nseindia.com, 12 h in memory plus a saved copy
+  next to the desk DB for when NSE refuses). Desk `GET /api/scalp/universe?lists=fno,nifty50,…` (default `fno`; per-list
+  `counts` / `errors`). The Trend quality auto re-scan keeps the card's `lists` (`chop_auto.AutoSettings.lists`,
+  `main._auto_symbols`); MCP `start_scan` takes `stocks` nifty50 / nifty100 / niftybank. Read-only.
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,

@@ -1,13 +1,13 @@
 "use client";
 
+import { ScanListPicker, cleanLists, resolveScanSymbols, type ScanList } from "@/components/Scalp/ScanLists";
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Loader2, RefreshCw, Sunrise } from "lucide-react";
-import { api } from "@/lib/api";
 import { smaApi, type MorningCheck, type MorningScan as MorningScanData, type MorningScanRow } from "@/lib/smaApi";
-import { FilterField, FilterRow, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
+import { FilterField, FilterRow, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -59,44 +59,33 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
   const [show, setShow] = useState<Show>("RUNNERS");
   const [side, setSide] = useState<Side>("ALL");
   const [query, setQuery] = useState("");
-  const [armedOnly, setArmedOnly] = useState(false);
-  const universe = useRef<string[] | null>(null);
+  // Which stocks to scan (Armed / F&O / Nifty 50 / Nifty 100 / Nifty Bank, joined). Default: every F&O stock.
+  const [lists, setLists] = useState<ScanList[]>(["fno"]);
 
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE) || "null");
       if (saved?.show) setShow(saved.show);
       if (saved?.side) setSide(saved.side);
-      if (typeof saved?.armedOnly === "boolean") setArmedOnly(saved.armedOnly);
+      setLists(cleanLists(saved?.lists, saved?.armedOnly === true ? ["armed"] : ["fno"]));
     } catch {
       /* private mode or an old value */
     }
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ show, side, armedOnly }));
+      localStorage.setItem(STORE, JSON.stringify({ show, side, lists }));
     } catch {
       /* private mode */
     }
-  }, [show, side, armedOnly]);
+  }, [show, side, lists]);
 
   const start = useCallback(
     async (force = false) => {
       setBusy(true);
       setError(null);
       try {
-        let symbols: string[];
-        if (armedOnly) {
-          symbols = Array.from(armed.keys());
-          if (symbols.length === 0) throw new Error("No stocks are armed on any bot, so there is nothing to scan.");
-        } else {
-          if (!universe.current || universe.current.length === 0) {
-            const u = await api.scalpUniverse();
-            if (u.symbols.length === 0) throw new Error(u.error || "The F&O stock list is empty, so there is nothing to scan.");
-            universe.current = u.symbols;
-          }
-          symbols = universe.current;
-        }
+        const symbols = await resolveScanSymbols(lists, armed.keys());
         setData(await smaApi.morningScanStart(symbols, force));
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Could not start the scan");
@@ -104,7 +93,7 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
         setBusy(false);
       }
     },
-    [armed, armedOnly]
+    [armed, lists]
   );
 
   // Opening the tab only shows the last result the server holds; nothing is scanned until Scan now.
@@ -247,7 +236,7 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
         />
         <TextFilter value={query} onChange={setQuery} />
         <FilterField label="Stocks">
-          <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list (else every F&O stock)" />
+          <ScanListPicker value={lists} onChange={setLists} />
         </FilterField>
       </FilterRow>
 

@@ -1,11 +1,11 @@
 "use client";
 
+import { ScanListPicker, cleanLists, resolveScanSymbols, type ScanList } from "@/components/Scalp/ScanLists";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
-import { api } from "@/lib/api";
 import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -139,9 +139,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [score, setScore] = useState<ScoreFilter>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  const universe = useRef<string[] | null>(null);
-  // Alert settings. Default: armed stocks only, 60 min of quiet, Telegram ping on.
-  const [armedOnly, setArmedOnly] = useState(true);
+  // Which stocks to scan (Armed / F&O / Nifty 50 / Nifty 100 / Nifty Bank, joined). Default: armed stocks only.
+  const [lists, setLists] = useState<ScanList[]>(["armed"]);
+  const armedOnly = lists.length === 1 && lists[0] === "armed";
+  // Alert settings. Default: 60 min of quiet, Telegram ping on.
   const [quietMin, setQuietMin] = useState(60);
   const [alertOnQuiet, setAlertOnQuiet] = useState(true);
   // The server's own re-scan (chop_auto.py): on/off and every N minutes live on the server, not in this browser.
@@ -167,7 +168,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       const raw = localStorage.getItem(QUIET_STORE);
       if (raw) {
         const saved = JSON.parse(raw);
-        if (typeof saved.armedOnly === "boolean") setArmedOnly(saved.armedOnly);
+        setLists(cleanLists(saved.lists, typeof saved.armedOnly === "boolean" && !saved.armedOnly ? ["fno"] : ["armed"]));
         if (typeof saved.quietMin === "number") setQuietMin(saved.quietMin);
         if (typeof saved.alertOnQuiet === "boolean") setAlertOnQuiet(saved.alertOnQuiet);
         if (typeof saved.minSpeed === "number") setMinSpeed(saved.minSpeed);
@@ -185,30 +186,19 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   useEffect(() => {
     if (saved) return; // a saved scan's view never changes the live card's settings
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
       );
     } catch {
       /* private mode */
     }
-  }, [saved, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
+  }, [saved, lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
 
   const start = useCallback(
     async (force = false) => {
       setBusy(true);
       setError(null);
       try {
-        let symbols: string[];
-        if (armedOnly) {
-          symbols = Array.from(armed.keys());
-          if (symbols.length === 0) throw new Error("No stocks are armed on any bot, so there is nothing to scan.");
-        } else {
-          if (!universe.current || universe.current.length === 0) {
-            const u = await api.scalpUniverse();
-            if (u.symbols.length === 0) throw new Error(u.error || "The F&O stock list is empty, so there is nothing to scan.");
-            universe.current = u.symbols;
-          }
-          symbols = universe.current;
-        }
+        const symbols = await resolveScanSymbols(lists, armed.keys());
         setData(
           await smaApi.chopScanStart(symbols, minutes, force, {
             quiet_min: quietMin,
@@ -223,7 +213,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         setBusy(false);
       }
     },
-    [minutes, armed, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]
+    [minutes, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
@@ -234,6 +224,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         .chopScanAuto({
           minutes,
           armed_only: armedOnly,
+          lists,
           quiet_min: quietMin,
           alert_on_quiet: alertOnQuiet,
           price_min: priceMin,
@@ -245,7 +236,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, saved, minutes, armedOnly, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -421,7 +412,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         className="mb-3"
         lead={`Information only. Each stock's ${label} crosses on today's closed candles are counted, with the longest run since the last one and the average time and move between them.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Untick <b>Armed only</b> to search every F&O stock. <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -556,7 +547,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         {!saved && (
         <FilterGroup title="Scanning">
           <FilterField label="Stocks">
-            <Toggle label="Armed only" checked={armedOnly} onChange={setArmedOnly} title="Only scan stocks on a bot's Trade list" />
+            <ScanListPicker value={lists} onChange={setLists} />
           </FilterField>
           <FilterField label="Server">
             <Toggle

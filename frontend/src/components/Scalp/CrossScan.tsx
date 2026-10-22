@@ -1,11 +1,10 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
-import { api } from "@/lib/api";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -14,6 +13,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { useFirstSeen } from "@/components/Scalp/useFirstSeen";
+import { ScanListPicker, listsLabel, resolveScanSymbols, useScanLists } from "@/components/Scalp/ScanLists";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
@@ -73,26 +73,22 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
   const [minSpeed, setMinSpeed] = useState(0.1);
   const [showCrossed, setShowCrossed] = useState(true);
   const [busy, setBusy] = useState(false);
-  const universe = useRef<string[] | null>(null);
+  const [lists, setLists] = useScanLists("scalp.lists.cross", ["fno"]);
 
   const start = useCallback(
     async (force = false) => {
       setBusy(true);
       setError(null);
       try {
-        if (!universe.current || universe.current.length === 0) {
-          const u = await api.scalpUniverse();
-          if (u.symbols.length === 0) throw new Error(u.error || "The F&O stock list is empty, so there is nothing to scan.");
-          universe.current = u.symbols;
-        }
-        setData(await smaApi.crossScanStart(universe.current, minutes, force));
+        const symbols = await resolveScanSymbols(lists, armed.keys());
+        setData(await smaApi.crossScanStart(symbols, minutes, force));
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Could not start the scan");
       } finally {
         setBusy(false);
       }
     },
-    [minutes]
+    [minutes, lists, armed]
   );
 
   // Nothing is scanned until "Scan now" is pressed. Opening the page only looks at the last result the
@@ -188,8 +184,9 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
           <Crosshair size={15} className="text-accentSky" />{" "}
           {saved
             ? `Cross scan — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute candle`
-            : `Cross scan — F&O stocks about to cross on the ${minutes}-minute candle`}
+            : `Cross scan — ${listsLabel(lists)} about to cross on the ${minutes}-minute candle`}
         </h2>
+        {!saved && <ScanListPicker value={lists} onChange={setLists} disabled={busy || data?.running} />}
         {!saved && (
         <button
           type="button"

@@ -18,7 +18,7 @@ import datetime as dt
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -44,6 +44,11 @@ class AutoSettings:
     alert_on_quiet: bool = True
     price_min: float = 0.0
     price_max: float = 0.0
+    # The card's scan lists ("armed", "fno", "nifty50", "nifty100", "niftybank"); empty = armed_only decides.
+    lists: list = field(default_factory=list)
+
+
+SCAN_LISTS = ("armed", "fno", "nifty50", "nifty100", "niftybank")
 
 
 def settings_path() -> Path:
@@ -77,6 +82,8 @@ def _clean(raw: dict) -> AutoSettings:
     base.quiet_min = min(375, max(1, int(base.quiet_min)))
     base.price_min = max(0.0, float(base.price_min))
     base.price_max = max(0.0, float(base.price_max))
+    raw_lists = base.lists if isinstance(base.lists, (list, tuple)) else []
+    base.lists = [k for k in dict.fromkeys(str(x).lower() for x in raw_lists) if k in SCAN_LISTS]
     return base
 
 
