@@ -15,6 +15,7 @@ import groww_pressure
 import server_role
 from app import state
 from app.core.market_clock import ist_now, is_market_open
+from app.services import index_lists
 from app.services.active_stocks import SORTS, active_scanner
 from app.services.alert_notifier import alert_notifier
 from app.services.backfill import ensure_backfilled
@@ -268,13 +269,38 @@ async def most_active(
     return out
 
 
-@router.get("/universe")
-async def fno_universe():
-    """The F&O stock names, for scans on the SMA terminal (it downloads the candles itself).
+UNIVERSE_LISTS = ("fno", *index_lists.INDEXES)
 
-    Same list as the most-active scan. Empty, with the reason, when the list could not be loaded."""
-    symbols = active_scanner.universe_symbols()
-    return {"symbols": symbols, "error": None if symbols else active_scanner.error}
+
+@router.get("/universe")
+async def fno_universe(lists: str = Query("fno", description="Comma list: fno, nifty50, nifty100, niftybank")):
+    """The stock names for scans on the SMA terminal (it downloads the candles itself).
+
+    `lists` picks the lists to join: the F&O stocks (the most-active scan's list, the default)
+    and / or NSE index constituents. Each list's count and error are given; `error` is set
+    only when nothing could be loaded."""
+    picked = [k.strip().lower() for k in lists.split(",") if k.strip()] or ["fno"]
+    unknown = [k for k in picked if k not in UNIVERSE_LISTS]
+    if unknown:
+        raise HTTPException(400, f"Unknown list(s): {', '.join(unknown)}. Use {', '.join(UNIVERSE_LISTS)}.")
+    symbols: list[str] = []
+    counts: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    for key in dict.fromkeys(picked):
+        if key == "fno":
+            names = active_scanner.universe_symbols()
+            if not names:
+                errors[key] = active_scanner.error or "The F&O stock list is empty."
+        else:
+            try:
+                names = await asyncio.to_thread(index_lists.members, key)
+            except Exception as exc:  # noqa: BLE001 - one list failing leaves the others
+                names = []
+                errors[key] = str(exc)
+        counts[key] = len(names)
+        symbols.extend(n for n in names if n not in symbols)
+    error = "; ".join(errors.values()) if not symbols else None
+    return {"symbols": symbols, "error": error, "counts": counts, "errors": errors}
 
 
 @router.post("/active/scan")

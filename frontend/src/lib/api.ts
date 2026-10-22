@@ -937,7 +937,11 @@ export const api = {
     request<{ paused: boolean }>("/api/scalp/pause", { method: "POST", body: JSON.stringify({ paused }) }),
   scalpPauseStatus: () => request<{ paused: boolean }>("/api/scalp/pause"),
   /** The F&O stock names (for scans on the SMA terminal). `error` says why the list is empty. */
-  scalpUniverse: () => request<{ symbols: string[]; error: string | null }>("/api/scalp/universe"),
+  /** The stocks to scan: F&O (default) and / or NSE index lists, joined (`lists` e.g. ["nifty50", "nifty100"]). */
+  scalpUniverse: (lists: string[] = ["fno"]) =>
+    request<{ symbols: string[]; error: string | null; counts?: Record<string, number>; errors?: Record<string, string> }>(
+      `/api/scalp/universe?lists=${encodeURIComponent(lists.join(","))}`
+    ),
   /** Which server this is: the trading desk, or the scan-only scanner server. */
   serverRole: () => request<ServerRole>("/api/role"),
   /** Scanner server only: one stock's settings on a desk bot (bot 1-4 or "research"), through the link. */

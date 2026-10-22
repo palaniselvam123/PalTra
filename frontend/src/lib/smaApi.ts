@@ -517,6 +517,8 @@ export type ChopAuto = {
   every_min: number;
   minutes: CrossScanMinutes;
   armed_only: boolean;
+  /** The card's scan lists (armed, fno, nifty50, nifty100, niftybank); empty = armed_only decides. */
+  lists?: string[];
   quiet_min: number;
   alert_on_quiet: boolean;
   price_min: number;
@@ -529,7 +531,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */

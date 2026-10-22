@@ -1835,8 +1835,22 @@ async def chop_scan_start(body: ChopScanStart):
     return out
 
 
-async def _auto_symbols(armed_only: bool) -> list[str]:
-    """The stocks an automatic Trend quality scan reads: every bot's Trade list, or the F&O list."""
+async def _auto_symbols(armed_only: bool, lists: list[str] | None = None) -> list[str]:
+    """The stocks an automatic Trend quality scan reads: the card's ticked lists (armed stocks, F&O,
+    Nifty 50 / 100 / Bank) joined, else every bot's Trade list or the F&O list."""
+    if lists:
+        names: list[str] = []
+        if "armed" in lists:
+            names.extend(await _auto_symbols(True))
+        index = [k for k in lists if k != "armed"]
+        if index:
+            from app.api.routes_scalp import fno_universe
+
+            out = await fno_universe(lists=",".join(index))
+            if not out["symbols"] and not names:
+                raise RuntimeError(out.get("error") or "The scan lists are empty, so there is nothing to scan.")
+            names.extend(n for n in out["symbols"] if n not in names)
+        return names[:CROSS_SCAN_MAX]
     if armed_only:
         if server_role.is_scanner():
             from app.api.routes_link import desk_armed
@@ -1865,7 +1879,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         raise RuntimeError("Scans are paused at the top of the Scalp page.")
     if chop_scanner.status.running:
         return
-    symbols = await _auto_symbols(s.armed_only)
+    symbols = await _auto_symbols(s.armed_only, s.lists)
     _start_chop(
         symbols,
         minutes=s.minutes,
@@ -1887,6 +1901,7 @@ class ChopAutoUpdate(BaseModel):
     alert_on_quiet: bool | None = None
     price_min: float | None = Field(default=None, ge=0)
     price_max: float | None = Field(default=None, ge=0)
+    lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
 
 
 @app.put("/api/chop-scan/auto")
