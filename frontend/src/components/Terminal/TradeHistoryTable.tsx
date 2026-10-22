@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
@@ -317,6 +317,24 @@ export function TradeHistoryTable({
   onClose: (trade: TradeRow) => void;
 }) {
   const [book, setBook] = useState<Book>("PAPER");
+  // The top bar pins under the page's sticky header, or at the top of its own scroll box when the
+  // blotter sits in a resized panel or a floating window (there the header offset would leave it
+  // floating over the rows).
+  const barRef = useRef<HTMLDivElement>(null);
+  const [boxed, setBoxed] = useState(false);
+  useEffect(() => {
+    let el = barRef.current?.parentElement?.parentElement ?? null;
+    let inBox = false;
+    while (el && el !== document.body) {
+      const overflow = getComputedStyle(el).overflowY;
+      if (overflow === "auto" || overflow === "scroll") {
+        inBox = true;
+        break;
+      }
+      el = el.parentElement;
+    }
+    if (inBox !== boxed) setBoxed(inBox);
+  });
   // The Backtests tab shows replay runs instead of a trade book.
   const [backtests, setBacktests] = useState(false);
   const [picked, setPicked] = useState(false);
@@ -591,8 +609,9 @@ export function TradeHistoryTable({
     >
       {/* Pinned under the terminal's sticky header while the blotter scrolls by. */}
       <div
+        ref={barRef}
         className="sticky z-20 flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#151921] px-4 py-3"
-        style={{ top: "var(--sma-header-bottom, 0px)" }}
+        style={{ top: boxed ? 0 : "var(--sma-header-bottom, 0px)" }}
       >
         <div>
           <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
