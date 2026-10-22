@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from config import get_settings
 from models import Base, BotConfig
+import arm_log  # noqa: F401,E402  (registers the Trade list change hook)
 
 _engine = None
 _Session: sessionmaker[Session] | None = None

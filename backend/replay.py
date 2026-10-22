@@ -33,6 +33,7 @@ from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, ReviewLog, TradeLog
+import arm_log
 from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_for, settings_snapshot, trade_names
 from tick_sizes import round_price
 import all_bots_guard
@@ -248,8 +249,13 @@ class ReplayEngine(StrategyEngine):
         run_id: int | None = None,
         bot: int = 1,
         settings: dict | None = None,
+        arm_windows: dict[str, list[tuple[int, int]]] | None = None,
     ):
         self.feed = feed
+        # "Replay as armed" (arm_log.py): each stock trades only while it was armed live that
+        # day, {symbol: [(start, end) epoch seconds]}. None = every replayed stock all day.
+        self.arm_windows = arm_windows
+        self._armed_before: set[str] | None = None
         self.run_id = run_id
         # A resumed run plays the settings it was started with, not today's.
         self.saved_settings = dict(settings) if settings else None
@@ -269,7 +275,20 @@ class ReplayEngine(StrategyEngine):
     def _now(self) -> dt.datetime:
         return self.feed.clock
 
+    def _armed_now(self) -> list[str]:
+        if self.arm_windows is None:
+            return self.replay_symbols
+        when = int(self._now().timestamp())
+        return [s for s in self.replay_symbols if arm_log.armed_at(self.arm_windows.get(s, []), when)]
+
     async def tick(self, now: dt.datetime) -> None:
+        if self.arm_windows is not None:
+            armed = set(self._armed_now())
+            if self._armed_before is not None:
+                # Armed now, as it was live: a cross already on the tape is not traded (main.py's arm route).
+                for name in armed - self._armed_before:
+                    self._skip_cross_until[name] = None
+            self._armed_before = armed
         await super().tick(now)
         if self.day_guard and self.status != "HALTED":
             await self._check_day_guard(now)
@@ -324,7 +343,7 @@ class ReplayEngine(StrategyEngine):
                     data[name] = value
         data["trading_mode"] = "REPLAY"
         data["max_trades_per_day"] = REPLAY_TRADE_CAP
-        data["trade_symbols"] = ",".join(self.replay_symbols)
+        data["trade_symbols"] = ",".join(self._armed_now())
         view = (data.get("symbol") or "").upper()
         data["symbol"] = view if view in self.replay_symbols else (self.replay_symbols[0] if self.replay_symbols else "")
         cfg = BotConfig(**data)
@@ -717,6 +736,10 @@ class ReplaySession:
     def active(self) -> bool:
         return self.status in ("LOADING", "PLAYING", "PAUSED", "FINISHED")
 
+    @property
+    def config_id(self) -> int:
+        return 1 if self.bot == 1 else self.bot + 1
+
     def info(self) -> dict:
         eng = self.engine
         clock = eng.feed.clock if eng else None
@@ -914,6 +937,11 @@ class ReplaySession:
                     continue
             # A stock handed off to Bot 2 earlier in the run is no longer this bot's (recovery.py).
             symbols = [s for s in symbols if s not in self.handed_off]
+            windows = None
+            if settings.get("as_armed"):
+                # Each stock only while it was armed live on this bot that day (arm_log.py).
+                windows = arm_log.windows(self.config_id, day)
+                symbols = [s for s in symbols if s in windows]
             if not symbols:
                 self._mark_run(days_done=index + 1)
                 continue
@@ -921,7 +949,7 @@ class ReplaySession:
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved)
+            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows)
             engine.handoff = engine._hand_off
             engine.on_handoff = lambda name: self.handed_off.append(name)
             # A 1-minute review pauses the replay so it can be answered as it

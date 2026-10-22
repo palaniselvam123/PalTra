@@ -147,6 +147,8 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   const [endDay, setEndDay] = useState(lastTradingDay);
   const [start, setStart] = useState("09:15");
   const [speed, setSpeed] = useState(60);
+  // Replay as armed (arm log): each stock trades only while it was armed live that day.
+  const [asArmed, setAsArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -198,7 +200,9 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    void run(() => smaApi.replayStart(day, start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot));
+    void run(() =>
+      smaApi.replayStart(day, asArmed ? "09:15" : start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot, asArmed)
+    );
   };
 
   if (!active) {
@@ -265,9 +269,21 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 <option value={300}>300×</option>
               </select>
             </label>
+            <label
+              className="flex min-h-9 items-center gap-1.5 self-end text-xs text-slate-200"
+              title="Replay the stocks this bot had armed on those days, each one only from the time it was armed live until it was taken off (see the Arm log). Starts at 09:15; the armed list on screen is not used."
+            >
+              <input
+                type="checkbox"
+                checked={asArmed}
+                onChange={(e) => setAsArmed(e.target.checked)}
+                className="accent-violet-400"
+              />
+              As armed live
+            </label>
             <button
               type="submit"
-              disabled={busy || live || armedCount === 0}
+              disabled={busy || live || (armedCount === 0 && !asArmed)}
               className="flex min-h-9 items-center gap-1.5 rounded-md bg-violet-500 px-3 text-sm font-semibold text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? <Loader2 size={14} aria-hidden className="animate-spin" /> : <Play size={14} aria-hidden />}
@@ -276,7 +292,9 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
             <p className="basis-full text-xs leading-snug text-slate-400">
               {live
                 ? `Switch ${botName ?? "this bot"} to PAPER to replay its settings. `
-                : armedCount === 0
+                : asArmed
+                  ? `Replays the stocks ${botName ?? "this bot"} had armed on those days, each only while it was armed live (see the Arm log), from 09:15. `
+                  : armedCount === 0
                   ? "Arm at least one stock in the Stocks panel first. "
                   : `Replays the ${armedCount} armed stock${armedCount > 1 ? "s" : ""} with ${botName ? `${botName}'s` : "your current"} settings. `}
               {open ? (

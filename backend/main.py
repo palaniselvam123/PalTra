@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
+import arm_log
 import chop_auto
 import chop_scan
 import morning_scan
@@ -188,6 +189,11 @@ def boot_engine() -> asyncio.Task | None:
         eng.restore_open_books()
         eng.restore_trades_today()
         _bot_tasks.append(asyncio.create_task(eng.run()))
+    # Arm log (arm_log.py): stocks already armed get a start row, so "replay as armed" can place them.
+    try:
+        arm_log.baseline()
+    except Exception:  # noqa: BLE001
+        logging.getLogger("sma.arm_log").exception("arm log baseline failed")
     # All-bots day target / stop loss (all_bots_guard.py): off until set on Settings.
     global _guard_task
     _guard_task = asyncio.create_task(
@@ -1325,6 +1331,9 @@ class ReplayStart(BaseModel):
     #: The SMA bot whose settings and armed stocks to replay: 1 (main desk, the
     #: default) or 2-4. Practice money whichever bot; never sends an order.
     bot: int = Field(default=1, ge=1, le=4)
+    #: Replay as armed (arm_log.py): the stocks this bot had armed on those days, each traded
+    #: only while it was armed live, from 09:15. `symbols` is ignored then.
+    as_armed: bool = False
 
 
 class ScalpPickStart(BaseModel):
@@ -1434,7 +1443,20 @@ async def replay_start(body: ReplayStart):
         start = parse_start(body.start)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if body.symbols:
+    if body.as_armed:
+        symbols = []
+        cid = arm_log.config_id_of(body.bot)
+        day_at = day
+        while day_at <= end_day:
+            for name in arm_log.windows(cid, day_at):
+                if name not in symbols:
+                    symbols.append(name)
+            day_at += dt.timedelta(days=1)
+        if not symbols:
+            raise HTTPException(400, f"{bot_label} had no stock armed on those days in the arm log.")
+        symbols = symbols[:MAX_TRADE_SYMBOLS]
+        start = parse_start("09:15")
+    elif body.symbols:
         symbols = []
         for raw in body.symbols:
             name = (raw or "").strip().upper()
@@ -1460,7 +1482,13 @@ async def replay_start(body: ReplayStart):
         start,
         body.speed,
         end_day=end_day,
-        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg), "bot": body.bot, "bot_name": bot_label},
+        settings={
+            **settings_snapshot(cfg),
+            "stock_settings": stock_settings(cfg),
+            "bot": body.bot,
+            "bot_name": bot_label,
+            **({"as_armed": True} if body.as_armed else {}),
+        },
         bot=body.bot,
         bot_name=bot_label,
     )
@@ -1930,6 +1958,27 @@ async def open_pnl(
         "every_sec": open_pnl_log.EVERY_SEC,
         "keep_days": open_pnl_log.keep_days(),
     }
+
+
+@app.get("/api/arm-log")
+async def arm_log_day(
+    desk: Literal["1", "2", "3", "4", "research"] = "1",
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+):
+    """When each stock was armed on / taken off a desk's Trade list on one IST day (today when none). Read-only."""
+    pick = dt.date.fromisoformat(day) if day else dt.datetime.now(IST).date()
+    cid = arm_log.config_id_of(desk)
+    rows = await asyncio.to_thread(arm_log.rows, cid, pick)
+    spans = await asyncio.to_thread(arm_log.windows, cid, pick)
+
+    def clock(sec: int) -> str:
+        return dt.datetime.fromtimestamp(sec, IST).strftime("%H:%M:%S")
+
+    stocks = [
+        {"symbol": name, "spans": [{"from": clock(a), "to": clock(b)} for a, b in sorted(parts)]}
+        for name, parts in sorted(spans.items())
+    ]
+    return {"desk": desk, "day": pick.isoformat(), "rows": rows, "stocks": stocks}
 
 
 @app.get("/api/open-pnl/replays")
