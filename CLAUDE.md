@@ -702,6 +702,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   charges) against the target / stop and the replay clock against the square-off time, and on a hit `trip`s itself
   (squared off as `KILL_SWITCH`, HALTED for the rest of that replayed day; the next day starts fresh). A replay plays
   one bot, so it is judged on that bot's P&L alone.
+- `backend/pnl_alerts.py` – all-bots P&L alerts (off by default; alerts only, never trades): `pnl_alert_profit` /
+  `pnl_alert_loss` ₹ on `BotConfig` row 1 (0 = off), `pnl_alert_telegram` / `pnl_alert_call` (both on by default) and
+  `pnl_alert_basis` (`GROSS` before charges, as the screens; `NET` after). While NSE is open `run` (started in
+  `boot_engine`, every `POLL_SEC` 5 s) adds bots 1-4's P&L like the all-bots guard (`all_bots_guard.closed_by_bot` /
+  `open_by_bot`, `net=` for the basis) and, once per level per IST day (`PnlAlerts.sent`, memory only), sends the text
+  through `alert_notifier.send` (trade channel) and / or rings through `place_call` (market hours, 5-minute cooldown).
+  `GET/PUT /api/bots/pnl-alerts`, `POST /api/bots/pnl-alerts/test` (test message + call at any time); Settings →
+  "All bots: P&L alerts" (`components/Settings/PnlAlerts.tsx`). Never copied by Copy settings (`COPY_SKIP`).
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,

@@ -378,6 +378,12 @@ class BotConfig(Base):
     all_bots_target: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_stop: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_squareoff: Mapped[str | None] = mapped_column(String(5), nullable=True, default="")
+    # All-bots P&L alerts (pnl_alerts.py), read from row 1 only: ₹ levels (0 = off), how, which P&L.
+    pnl_alert_profit: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    pnl_alert_loss: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    pnl_alert_telegram: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    pnl_alert_call: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    pnl_alert_basis: Mapped[str | None] = mapped_column(String(5), nullable=True, default="GROSS")
     # Trend breakout handoff back to Bot 3 (breakout.py).
     breakout_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)
