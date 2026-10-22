@@ -761,6 +761,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `get_bot_status`, `get_settings`, `get_trades`, `get_scans`, `list_backtests` (runs filtered by
   `settings.bot`; `/api/replay/runs?limit=` up to 500), `get_backtest`, `get_backtest_trades` (`/api/replay/runs/{id}/trades`, `replay.run_trades`:
   each trade's `best_points` / `worst_points` from `max_high` / `max_low`), `compare_backtests`.
+  Scalp page: `get_scans` (`kind` cross / chop / morning / all, rows trimmed to `limit`), `get_scalp_monitor` and
+  `get_most_active` (the desk's own `routes_scalp` functions, called in-process by `_desk_call`), `list_scan_history`,
+  `get_scan_history`; read-only runs: `start_scan` (stocks = the F&O list, every bot's armed ones or `symbols`) and
+  `check_scan_accuracy`, through the terminal's scan routes (paused / `SCANS=off` refusals apply).
   Write tools (`set_trade_list`,
   `set_stop`, validated by `chat_actions`) only reach a bot in **PAPER**; a LIVE bot is
   refused. `start_backtest` starts a replay at full speed through `/api/replay/start` (PAPER

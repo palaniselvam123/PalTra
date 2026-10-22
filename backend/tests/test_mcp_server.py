@@ -71,6 +71,39 @@ def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
         writes.append(("stock", 1, symbol, body))
         return body
 
+    def scan(name: str) -> dict:
+        return {"running": False, "rows": [{"symbol": f"S{i}", "kind": name} for i in range(5)]}
+
+    @app.get("/api/cross-scan")
+    def cross():
+        return scan("cross")
+
+    @app.get("/api/chop-scan")
+    def chop():
+        return scan("chop")
+
+    @app.get("/api/morning-scan")
+    def morning():
+        return scan("morning")
+
+    @app.post("/api/{kind}-scan/start")
+    def scan_start(kind: str, body: dict):
+        writes.append(("scan", kind, body))
+        return {"running": True, "rows": [{"symbol": "OLD"}]}
+
+    @app.get("/api/scan-history")
+    def history(day: str | None = None, kind: str | None = None):
+        return {"days": [{"day": "2026-10-21", "runs": 2}], "day": day or "2026-10-21", "runs": [{"id": 4, "kind": kind}], "checking": {}}
+
+    @app.get("/api/scan-history/{run_id}")
+    def history_run(run_id: int):
+        return {"id": run_id, "rows": [{"symbol": "A"}, {"symbol": "B"}, {"symbol": "C"}], "check": {"summary": {}}}
+
+    @app.post("/api/scan-history/{run_id}/check")
+    def history_check(run_id: int):
+        writes.append(("check", run_id))
+        return {"running": True}
+
     return app, writes
 
 
@@ -120,7 +153,8 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
     assert names == {
         "list_bots", "get_bot_status", "get_settings", "get_trades", "get_scans",
         "list_backtests", "get_backtest", "get_backtest_trades", "compare_backtests", "start_backtest",
-        "set_trade_list", "set_stop",
+        "set_trade_list", "set_stop", "start_scan", "get_scalp_monitor", "get_most_active",
+        "list_scan_history", "get_scan_history", "check_scan_accuracy",
     }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
@@ -259,3 +293,61 @@ def test_settings_are_locked_while_that_bots_backtest_runs(mcp, monkeypatch):
     err, text = call(client, "set_trade_list", {"bot": 2, "arm": ["SBIN"]})
     assert err and "backtest playing" in text
     assert writes == []
+
+
+def test_scans_are_read_per_kind_and_trimmed(mcp):
+    client, _ = mcp()
+    err, text = call(client, "get_scans", {"kind": "morning", "limit": 2})
+    out = json.loads(text)
+    assert not err and list(out) == ["morning_0930"]
+    assert out["morning_0930"]["rows_total"] == 5 and len(out["morning_0930"]["rows"]) == 2
+    err, text = call(client, "get_scans", {})
+    assert set(json.loads(text)) == {"cross_scan", "trend_quality", "morning_0930"}
+    assert call(client, "get_scans", {"kind": "nope"})[0]
+
+
+def test_start_scan_on_armed_or_fno_stocks(mcp, monkeypatch):
+    client, writes = mcp()
+
+    async def desk(name, **kwargs):
+        assert name == "universe"
+        return {"symbols": ["SBIN", "TCS"], "error": None}
+
+    monkeypatch.setattr(routes_mcp, "_desk_call", desk)
+    err, text = call(client, "start_scan", {"kind": "cross", "minutes": 3})
+    assert not err and json.loads(text)["stocks"] == 2
+    assert writes[-1] == ("scan", "cross", {"symbols": ["SBIN", "TCS"], "force": False, "minutes": 3})
+    err, text = call(client, "start_scan", {"kind": "chop", "symbols": ["infy"], "quiet_min": 45})
+    assert not err and writes[-1] == ("scan", "chop", {"symbols": ["INFY"], "force": False, "minutes": 5, "quiet_min": 45})
+    err, text = call(client, "start_scan", {"kind": "morning", "stocks": "armed"})
+    assert err and "armed" in text  # the fake bots have nothing armed
+    assert call(client, "start_scan", {"kind": "orders"})[0]
+
+
+def test_monitor_and_most_active_come_from_the_desk(mcp, monkeypatch):
+    client, _ = mcp()
+    seen = []
+
+    async def desk(name, **kwargs):
+        seen.append((name, kwargs))
+        return {"rows": [{"symbol": "SBIN"}], "alerts": {"enabled": True}}
+
+    monkeypatch.setattr(routes_mcp, "_desk_call", desk)
+    err, text = call(client, "get_scalp_monitor", {"only_ready": True, "limit": 10})
+    assert not err and "alerts" not in json.loads(text)
+    assert seen[-1][0] == "monitor" and seen[-1][1]["only_ready"] is True and seen[-1][1]["top"] == 10
+    err, _ = call(client, "get_most_active", {"sort": "rvol", "bias": "buy"})
+    assert not err and seen[-1] == ("active", {"sort": "rvol", "top": 40, "bias": "BUY", "min_value_cr": 0.0})
+    assert call(client, "get_most_active", {"sort": "bad"})[0]
+
+
+def test_scan_history_and_accuracy_check(mcp):
+    client, writes = mcp()
+    err, text = call(client, "list_scan_history", {"kind": "chop"})
+    assert not err and json.loads(text)["runs"] == [{"id": 4, "kind": "chop"}] and "checking" not in json.loads(text)
+    err, text = call(client, "get_scan_history", {"run_id": 4, "limit": 1})
+    out = json.loads(text)
+    assert not err and out["rows_total"] == 3 and len(out["rows"]) == 1
+    err, _ = call(client, "check_scan_accuracy", {"run_id": 4})
+    assert not err and writes[-1] == ("check", 4)
+    assert call(client, "get_scan_history", {})[0]
