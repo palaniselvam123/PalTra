@@ -1,5 +1,7 @@
 "use client";
 
+import { usePinned } from "@/lib/usePinned";
+import { PinToggle } from "@/components/ui/PinToggle";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
@@ -322,6 +324,7 @@ export function TradeHistoryTable({
   // offset would leave it floating over the rows). On a phone its buttons stack too tall to pin.
   const barRef = useRef<HTMLDivElement>(null);
   const [boxed, setBoxed] = useState(false);
+  const [barPinned, setBarPinned] = usePinned("blotter-bar");
   useEffect(() => {
     let el = barRef.current?.parentElement?.parentElement ?? null;
     let inBox = false;
@@ -610,11 +613,17 @@ export function TradeHistoryTable({
       {/* Pinned under the terminal's sticky header while the blotter scrolls by. */}
       <div
         ref={barRef}
-        className="z-20 flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#151921] px-4 py-3 md:sticky"
+        className={clsx(
+          "z-20 flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#151921] px-4 py-3",
+          barPinned && "md:sticky"
+        )}
         style={{ top: boxed ? 0 : "var(--sma-header-bottom, 0px)" }}
       >
         <div>
-          <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Trade blotter</div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-slate-400">
+            Trade blotter
+            <PinToggle pinned={barPinned} onChange={setBarPinned} what="the blotter bar" className="hidden md:flex" />
+          </div>
           <h2
             className={clsx(
               "text-sm font-medium",

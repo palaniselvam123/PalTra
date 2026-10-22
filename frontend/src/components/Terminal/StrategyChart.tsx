@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, Table2, TrendingUp, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -23,6 +23,8 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { ChartIndicators } from "./ChartIndicators";
 
 type Props = {
   chart: ChartPayload | null;
@@ -735,6 +737,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [showTable, setShowTable] = useState(false);
   // The SMA 9 slope strip under the candles (always on while the slope exit is).
   const [showSlope, setShowSlope] = useState(false);
+  // Which lines show and how they look (Groww-style indicator settings), kept in this browser.
+  const [look, setLook, resetLook] = useChartStyle();
+  const [showLook, setShowLook] = useState(false);
   const [boxSmall, setBoxSmall] = useState(false);
   const [boxPos, setBoxPos] = useState<{ x: number; y: number } | null>(null);
   const boxDrag = useRef<{ dx: number; dy: number } | null>(null);
@@ -1302,6 +1307,34 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     };
   }, []);
 
+  // Colours, thickness and line patterns from the indicator settings.
+  useEffect(() => {
+    if (!candleRef.current) return;
+    candleRef.current.applyOptions({
+      upColor: look.candleUp,
+      downColor: look.candleDown,
+      borderUpColor: look.candleUp,
+      borderDownColor: look.candleDown,
+      wickUpColor: look.candleUp,
+      wickDownColor: look.candleDown,
+    });
+    const paint = (series: ISeriesApi<"Line"> | null | undefined, l: typeof look.sma9, color = l.color, width = l.width, style = l.style) =>
+      series?.applyOptions({ color, lineWidth: width as 1, lineStyle: style as LineStyle });
+    paint(smaFastRef.current, look.sma9);
+    paint(smaSlowRef.current, look.sma21);
+    paint(vwapRef.current, look.vwap);
+    paint(atrRef.current, look.atr);
+    paint(rsiRef.current, look.rsi);
+    paint(emaRefs.current[0], look.ema);
+    paint(emaRefs.current[1], look.ema, look.ema.color2);
+    paint(stRefs.current[0], look.st);
+    paint(stRefs.current[1], look.st, look.st.color2);
+    // Bollinger: upper and lower in the pattern chosen, the middle line faint and dotted.
+    paint(bbRefs.current[0], look.bb);
+    paint(bbRefs.current[1], look.bb, `${look.bb.color}73`, 1, LineStyle.Dotted);
+    paint(bbRefs.current[2], look.bb);
+  }, [look]);
+
   useEffect(() => {
     const chart = view;
     if (!chart || !candleRef.current || !smaFastRef.current || !smaSlowRef.current || !atrRef.current) return;
@@ -1322,9 +1355,11 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Each line shows only when its setting is in use. An older server sends no
     // filters block: keep ATR as before and hide the rest.
     const filters = chart.filters;
-    const showAtr = filters ? filters.atr_stop : true;
-    const showVwap = Boolean(filters?.use_vwap);
-    const showRsi = Boolean(filters?.use_rsi);
+    const showAtr = shown(look.atr, filters ? filters.atr_stop : true);
+    const showVwap = shown(look.vwap, Boolean(filters?.use_vwap));
+    const showRsi = shown(look.rsi, Boolean(filters?.use_rsi));
+    smaFastRef.current.applyOptions({ visible: look.sma9.show !== "off" });
+    smaSlowRef.current.applyOptions({ visible: look.sma21.show !== "off" });
     const showSlopeBars = showSlope || Boolean(filters?.slope_exit);
     atrRef.current.applyOptions({ visible: showAtr });
     // Both strips at once share the bottom: ATR above, RSI below; the slope strip, when on, sits under both.
@@ -1366,17 +1401,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       );
     }
     // EMA lines come from the server on the bot's own candle; a merged-up size has none.
-    const showEma = Boolean(filters?.ema_lines);
+    // Shown by hand while the strategy has no EMA: worked out here from the candles on screen.
+    const showEma = shown(look.ema, Boolean(filters?.ema_lines));
     emaRefs.current.forEach((series, i) => {
       const key = i === 0 ? "emaFast" : "emaSlow";
-      const length = i === 0 ? filters?.ema_fast : filters?.ema_slow;
+      const length = (i === 0 ? filters?.ema_fast : filters?.ema_slow) ?? (i === 0 ? 9 : 200);
       series.applyOptions({ visible: showEma, title: showEma && length ? `EMA ${length}` : "" });
-      series.setData(
-        showEma ? rows.filter((c) => c[key] != null).map((c) => ({ time: c.time as never, value: c[key] as number })) : []
-      );
+      let points: { time: never; value: number }[] = [];
+      if (showEma) {
+        points = rows.filter((c) => c[key] != null).map((c) => ({ time: c.time as never, value: c[key] as number }));
+        if (!points.length) {
+          const values = emaValues(rows.map((c) => c.close), length);
+          if (!past && values.length) values[values.length - 1] = null; // the forming candle would repaint
+          points = rows.flatMap((c, j) => (values[j] == null ? [] : [{ time: c.time as never, value: values[j] as number }]));
+        }
+      }
+      series.setData(points);
     });
     // Supertrend: one series per side, with gaps where the other side runs (no line across a flip).
-    const showSt = Boolean(filters?.st_line);
+    const showSt = shown(look.st, Boolean(filters?.st_line));
     stRefs.current.forEach((series, i) => {
       const key = i === 0 ? "stUp" : "stDown";
       series.applyOptions({ visible: showSt, title: showSt && i === 0 ? `ST ${filters?.st_period ?? 10},${filters?.st_mult ?? 3}` : "" });
@@ -1388,7 +1431,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           : []
       );
     });
-    const showBb = Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF";
+    const showBb = shown(look.bb, Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF");
     const bands = showBb ? bollingerRows(rows, filters?.bb_period ?? 20, filters?.bb_std ?? 2, !past) : null;
     bbRefs.current.forEach((series, i) => {
       series.applyOptions({ visible: showBb });
@@ -1439,7 +1482,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         /* the held span is no longer in the data (another stock or size) */
       }
     }
-  }, [view, rows, bar, past, trades, allTrades, symbol, showSlope]);
+  }, [view, rows, bar, past, trades, allTrades, symbol, showSlope, look]);
 
   // A new past range opens fitted to the screen; going back to live jumps to the latest bar.
   useEffect(() => {
@@ -1648,6 +1691,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             <TrendingUp size={14} aria-hidden />
             Slope
           </button>
+          <button
+            type="button"
+            onClick={() => setShowLook((v) => !v)}
+            aria-pressed={showLook}
+            aria-expanded={showLook}
+            title="Indicators: show or hide SMA, VWAP, EMA, Bollinger, Supertrend, ATR and RSI, and pick their colours, thickness and line pattern"
+            className={clsx(
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              showLook ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <SlidersHorizontal size={14} aria-hidden />
+            Indicators
+          </button>
           {past ? (
             <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-violet-200 ring-1 ring-inset ring-violet-400/35">
               Past
@@ -1689,13 +1746,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               )}
             </LegendItem>
           )}
-          {filters?.use_bollinger || (filters?.bb_exit ?? "OFF") !== "OFF" ? (
-            <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed border-[#C4B5FD]" />}>
+          {shown(look.bb, Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF") ? (
+            <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed" style={{ borderColor: look.bb.color }} />}>
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
         </ul>
       </div>
+      {showLook ? (
+        <ChartIndicators
+          style={look}
+          onChange={setLook}
+          onReset={resetLook}
+          onClose={() => setShowLook(false)}
+          stAvailable={Boolean(filters?.st_line)}
+        />
+      ) : null}
       <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
       <OhlcLine
         ohlc={ohlc}
@@ -1707,6 +1773,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         rsi={shownRsi}
         slope={shownSlope}
         slopeBack={slopeBack}
+        colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color }}
       />
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
@@ -2110,6 +2177,7 @@ function OhlcLine({
   rsi,
   slope,
   slopeBack,
+  colors,
 }: {
   ohlc: Ohlc | null;
   hovering: boolean;
@@ -2120,6 +2188,7 @@ function OhlcLine({
   rsi: number | null;
   slope: number | null;
   slopeBack: number;
+  colors: { sma9: string; sma21: string; vwap: string; rsi: string };
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -2150,10 +2219,10 @@ function OhlcLine({
         {pct.toFixed(2)}%)
       </span>
       <span className="whitespace-nowrap">
-        <span className="text-[#F43F5E]">SMA 9</span> <span className="text-slate-100">{px(sma9)}</span>
+        <span style={{ color: colors.sma9 }}>SMA 9</span> <span className="text-slate-100">{px(sma9)}</span>
       </span>
       <span className="whitespace-nowrap">
-        <span className="text-[#3B82F6]">SMA 21</span> <span className="text-slate-100">{px(sma21)}</span>
+        <span style={{ color: colors.sma21 }}>SMA 21</span> <span className="text-slate-100">{px(sma21)}</span>
       </span>
       <span className="whitespace-nowrap">
         <span className="text-slate-400">Gap</span>{" "}
@@ -2162,10 +2231,10 @@ function OhlcLine({
         </span>
       </span>
       <span className="whitespace-nowrap">
-        <span className="text-[#22D3EE]">VWAP</span> <span className="text-slate-100">{px(vwap)}</span>
+        <span style={{ color: colors.vwap }}>VWAP</span> <span className="text-slate-100">{px(vwap)}</span>
       </span>
       <span className="whitespace-nowrap">
-        <span className="text-[#F472B6]">RSI</span>{" "}
+        <span style={{ color: colors.rsi }}>RSI</span>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
       <span className="whitespace-nowrap" title={`SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle (what the SMA 9 slope exit reads)`}>
