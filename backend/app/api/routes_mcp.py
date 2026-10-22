@@ -148,8 +148,133 @@ async def get_trades(args: dict) -> Any:
     return {"mode": mode, "bot": bot, "total": book.get("total"), "rows": book.get("rows", [])}
 
 
+SCAN_PATHS = {"cross": "/api/cross-scan", "chop": "/api/chop-scan", "morning": "/api/morning-scan"}
+SCAN_NAMES = {"cross": "cross_scan", "chop": "trend_quality", "morning": "morning_0930"}
+MAX_SCAN_ROWS = 500
+MAX_SCAN_SYMBOLS = 250
+
+
+def _trim(snapshot: dict, limit: int) -> dict:
+    rows = snapshot.get("rows") or []
+    return {**snapshot, "rows": rows[:limit], "rows_total": len(rows)}
+
+
+def _limit(args: dict, default: int) -> int:
+    return max(1, min(int(args.get("limit") or default), MAX_SCAN_ROWS))
+
+
 async def get_scans(args: dict) -> Any:
-    return {"cross_scan": await _call("GET", "/api/cross-scan"), "trend_quality": await _call("GET", "/api/chop-scan")}
+    kind = (args.get("kind") or "all").lower()
+    if kind != "all" and kind not in SCAN_PATHS:
+        raise ToolError("kind must be cross, chop, morning or all")
+    limit = _limit(args, 100)
+    kinds = list(SCAN_PATHS) if kind == "all" else [kind]
+    return {SCAN_NAMES[k]: _trim(await _call("GET", SCAN_PATHS[k]), limit) for k in kinds}
+
+
+async def _scan_universe(stocks: str) -> list[str]:
+    """The stocks a scan reads: the F&O list (as the Scalp page) or every bot's armed ones."""
+    if stocks == "armed":
+        bots = await _call("GET", "/api/bots")
+        return sorted({str(s).upper() for b in bots for s in (b.get("armed") or [])})
+    out = await _desk_call("universe")
+    if not out.get("symbols"):
+        raise ToolError(out.get("error") or "The F&O stock list is not loaded yet; try again in a minute.")
+    return list(out["symbols"])
+
+
+async def start_scan(args: dict) -> Any:
+    kind = (args.get("kind") or "").lower()
+    if kind not in SCAN_PATHS:
+        raise ToolError("kind must be cross, chop or morning")
+    symbols = [str(s).strip().upper() for s in (args.get("symbols") or []) if str(s).strip()]
+    if not symbols:
+        stocks = (args.get("stocks") or "fno").lower()
+        if stocks not in ("fno", "armed"):
+            raise ToolError("stocks must be fno or armed")
+        symbols = await _scan_universe(stocks)
+    if not symbols:
+        raise ToolError("No stocks to scan (no bot has armed stocks).")
+    symbols = symbols[:MAX_SCAN_SYMBOLS]
+    body: dict = {"symbols": symbols, "force": bool(args.get("force"))}
+    if kind in ("cross", "chop"):
+        body["minutes"] = int(args.get("minutes") or 5)
+    if kind == "chop":
+        for key in ("quiet_min", "price_min", "price_max"):
+            if args.get(key) is not None:
+                body[key] = args[key]
+    out = await _call("POST", f"{SCAN_PATHS[kind]}/start", json=body)
+    log.info("mcp.start_scan kind=%s stocks=%d", kind, len(symbols))
+    return {"kind": kind, "stocks": len(symbols), "started": _trim(out, 0) if isinstance(out, dict) else out}
+
+
+async def _desk_call(name: str, **kwargs) -> Any:
+    """The desk's own Scalp routes (this process), called directly: the Google desk lock only
+    guards browser requests, and the MCP token was already checked."""
+    from app.api import routes_scalp as scalp
+
+    if name == "monitor":
+        return await scalp.scalp_monitor(**kwargs)
+    if name == "active":
+        return await scalp.most_active(**kwargs)
+    if name == "universe":
+        return await scalp.fno_universe()
+    raise ToolError(f"unknown desk call {name}")
+
+
+async def get_scalp_monitor(args: dict) -> Any:
+    from app.services.scalp_monitor import DEFAULT_MAX_SPREAD_PCT, DEFAULT_MIN_ATR_PCT, DEFAULT_MIN_VALUE_CR
+
+    out = await _desk_call(
+        "monitor",
+        min_atr_pct=float(args.get("min_atr_pct", DEFAULT_MIN_ATR_PCT)),
+        max_spread_pct=float(args.get("max_spread_pct", DEFAULT_MAX_SPREAD_PCT)),
+        min_value_cr=float(args.get("min_value_cr", DEFAULT_MIN_VALUE_CR)),
+        only_ready=bool(args.get("only_ready", False)),
+        top=max(1, min(int(args.get("limit") or 50), MAX_SCAN_ROWS)),
+    )
+    out.pop("alerts", None)
+    return out
+
+
+async def get_most_active(args: dict) -> Any:
+    sort = (args.get("sort") or "value").lower()
+    if sort not in ("value", "rvol", "change", "pressure"):
+        raise ToolError("sort must be value, rvol, change or pressure")
+    bias = (args.get("bias") or "").upper() or None
+    return await _desk_call(
+        "active", sort=sort, top=max(1, min(int(args.get("limit") or 40), 250)), bias=bias,
+        min_value_cr=float(args.get("min_value_cr") or 0.0),
+    )
+
+
+async def list_scan_history(args: dict) -> Any:
+    params = {}
+    if args.get("day"):
+        params["day"] = str(args["day"])
+    kind = (args.get("kind") or "").lower()
+    if kind:
+        if kind not in ("cross", "chop"):
+            raise ToolError("kind must be cross or chop")
+        params["kind"] = kind
+    out = await _call("GET", "/api/scan-history", params=params)
+    out.pop("checking", None)
+    return out
+
+
+async def get_scan_history(args: dict) -> Any:
+    run_id = args.get("run_id")
+    if not isinstance(run_id, int):
+        raise ToolError("run_id (an integer from list_scan_history) is required")
+    return _trim(await _call("GET", f"/api/scan-history/{run_id}"), _limit(args, 100))
+
+
+async def check_scan_accuracy(args: dict) -> Any:
+    run_id = args.get("run_id")
+    if not isinstance(run_id, int):
+        raise ToolError("run_id (an integer from list_scan_history) is required")
+    out = await _call("POST", f"/api/scan-history/{run_id}/check")
+    return {"run_id": run_id, "started": out}
 
 
 def _run_bot(run: dict) -> int:
@@ -342,6 +467,9 @@ _STOP_PROPS = {
     "gap_min_pct": {"type": "number"},
 }
 _READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
+_SCAN = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+_KIND = {"type": "string", "enum": ["cross", "chop", "morning"]}
+_LIMIT = {"type": "integer", "minimum": 1, "maximum": MAX_SCAN_ROWS, "description": "Rows to return (default 100)."}
 _WRITE = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 
 TOOLS: dict[str, dict] = {
@@ -378,9 +506,113 @@ TOOLS: dict[str, dict] = {
     },
     "get_scans": {
         "fn": get_scans,
-        "description": "Last Cross scan (stocks about to cross / just crossed) and Trend quality scan results.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "description": (
+            "Scalp page scans, last result of each: cross = Cross scan (stocks whose SMA fast/slow are about to "
+            "cross or just crossed, soonest first, with volume and speed); chop = Trend quality (crosses today, "
+            "TRENDING/MIXED/CHOPPY, strong trend, trend phases, quiet runners); morning = 09:30 morning checklist "
+            "(ORB, RVOL, VWAP, gap, candles; runners). `rows_total` is the full count. Use start_scan for a fresh one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"kind": {"type": "string", "enum": ["cross", "chop", "morning", "all"]}, "limit": _LIMIT},
+        },
         "annotations": _READ,
+    },
+    "start_scan": {
+        "fn": start_scan,
+        "description": (
+            "Run a Scalp page scan now (the page's Scan now button). Read-only: it downloads Groww candles and "
+            "never orders or changes a bot. kind cross / chop / morning; stocks = fno (the F&O list, as the page) or "
+            "armed (every bot's armed stocks), or pass `symbols`. minutes = candle size for cross / chop (1-15, "
+            "default 5). Returns at once; poll get_scans until `running` is false. Refused while scans are paused "
+            "(or moved to the scanner server), and a rescan of the same candle waits a minute unless force."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": _KIND,
+                "stocks": {"type": "string", "enum": ["fno", "armed"]},
+                "symbols": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SCAN_SYMBOLS},
+                "minutes": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15]},
+                "quiet_min": {"type": "integer", "minimum": 1, "maximum": 375, "description": "Trend quality: quiet-runner minutes."},
+                "price_min": {"type": "number", "minimum": 0},
+                "price_max": {"type": "number", "minimum": 0},
+                "force": {"type": "boolean"},
+            },
+            "required": ["kind"],
+        },
+        "annotations": _SCAN,
+    },
+    "get_scalp_monitor": {
+        "fn": get_scalp_monitor,
+        "description": (
+            "Scalp page Monitor: F&O stocks scored for scalping now (ATR %, spread %, ₹ traded, score, ready flag), "
+            "best first. Filters as on the page: min_atr_pct (default 0.08), max_spread_pct (0.05), min_value_cr "
+            "(5, ₹ crore traded today), only_ready."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "min_atr_pct": {"type": "number", "minimum": 0, "maximum": 5},
+                "max_spread_pct": {"type": "number", "minimum": 0, "maximum": 5},
+                "min_value_cr": {"type": "number", "minimum": 0},
+                "only_ready": {"type": "boolean"},
+                "limit": _LIMIT,
+            },
+        },
+        "annotations": _READ,
+    },
+    "get_most_active": {
+        "fn": get_most_active,
+        "description": (
+            "Scalp page Most active: F&O stocks ranked by ₹ traded (value), volume vs usual (rvol), % change or "
+            "buy/sell pressure, from the last scan; bias BUY or SELL keeps one side."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sort": {"type": "string", "enum": ["value", "rvol", "change", "pressure"]},
+                "bias": {"type": "string", "enum": ["BUY", "SELL"]},
+                "min_value_cr": {"type": "number", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 250},
+            },
+        },
+        "annotations": _READ,
+    },
+    "list_scan_history": {
+        "fn": list_scan_history,
+        "description": (
+            "Scalp page History: the days with saved Cross scan / Trend quality runs and one day's runs (latest "
+            "day by default) with their time, choices and accuracy summary when checked."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "day": {"type": "string", "description": "YYYY-MM-DD"},
+                "kind": {"type": "string", "enum": ["cross", "chop"]},
+            },
+        },
+        "annotations": _READ,
+    },
+    "get_scan_history": {
+        "fn": get_scan_history,
+        "description": "One saved scan with its rows as the page showed them, and its accuracy check (hit rates, each stock's move after the scan) when one was made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_id": {"type": "integer"}, "limit": _LIMIT},
+            "required": ["run_id"],
+        },
+        "annotations": _READ,
+    },
+    "check_scan_accuracy": {
+        "fn": check_scan_accuracy,
+        "description": (
+            "Start the accuracy check of a saved scan once its day has closed: downloads that day's candles again "
+            "and measures each stock's move 15/30/60 min later and at the close, and the next SMA cross. Read-only. "
+            "Refused on the desk during market hours. Poll get_scan_history for the result."
+        ),
+        "inputSchema": {"type": "object", "properties": {"run_id": {"type": "integer"}}, "required": ["run_id"]},
+        "annotations": _SCAN,
     },
     "list_backtests": {
         "fn": list_backtests,
@@ -479,9 +711,10 @@ TOOLS: dict[str, dict] = {
 
 
 TUNING_GUIDE = (
-    "PalTra SMA trading bots. Read status, settings, trades, scans and backtests. Changes are limited to "
-    "arming stocks and stop settings on PAPER bots, and starting practice backtests outside market hours "
-    "(09:00-15:45 IST, Mon-Fri); orders and LIVE bots are not reachable.\n"
+    "PalTra SMA trading bots. Read status, settings, trades, Scalp page scans (get_scans, get_scalp_monitor, "
+    "get_most_active, scan history and accuracy) and backtests. Changes are limited to arming stocks and stop "
+    "settings on PAPER bots, starting practice backtests outside market hours (09:00-15:45 IST, Mon-Fri), and "
+    "running read-only scans (start_scan, check_scan_accuracy); orders and LIVE bots are not reachable.\n"
     "Tuning stop-loss and target with backtests (the person arms the stocks in the app):\n"
     "1. list_bots / get_settings for the bot: note the armed stocks and current stop settings.\n"
     "2. start_backtest on that bot and a date range; poll list_backtests until its status is FINISHED.\n"

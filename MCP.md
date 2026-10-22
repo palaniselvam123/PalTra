@@ -9,7 +9,12 @@ SMA bots and make two kinds of change on **PAPER** bots only.
 | `get_bot_status` | One bot: running or halted, open positions, P&L, trade count and caps |
 | `get_settings` | One bot's strategy and stop settings, or one stock's |
 | `get_trades` | Newest trades of a bot's PAPER or LIVE book |
-| `get_scans` | Last Cross scan and Trend quality results |
+| `get_scans` | Scalp page scans: last Cross scan, Trend quality and 09:30 Morning results (`kind`, `limit`) |
+| `start_scan` | Run a Scalp scan now (Cross / Trend quality / Morning) on the F&O list, the armed stocks or given stocks. Read-only: candles only |
+| `get_scalp_monitor` | Scalp page Monitor: stocks scored for scalping now (ATR %, spread, ₹ traded, ready) |
+| `get_most_active` | Scalp page Most active: F&O stocks by ₹ traded, volume vs usual, % change or buy/sell pressure |
+| `list_scan_history` / `get_scan_history` | Scalp page History: saved scans by day, one scan's rows and its accuracy check |
+| `check_scan_accuracy` | Measure how a saved scan's stocks moved afterwards, once its day has closed (refused on the desk in market hours) |
 | `list_backtests` | Backtest (replay) runs, newest first, for one bot or all: dates, stocks, status, totals |
 | `get_backtest` | One run's day-by-day P&L, per-stock results and the settings it used |
 | `get_backtest_trades` | One run's trades with each trade's best / worst move from entry (₹ per share), to size a stop and target |
@@ -18,7 +23,7 @@ SMA bots and make two kinds of change on **PAPER** bots only.
 | `set_trade_list` | Arm / unarm stocks (PAPER bots only) |
 | `set_stop` | Stop type, stop / trail / target in ₹ or % (PAPER bots only) |
 
-A LIVE bot is refused for every change, including starting a backtest. Stop settings and the Trade list can't change while that bot's backtest is running (later days would use the new settings). There is no tool for orders, closing a
+Scans never order or change a bot; they are refused while scans are paused on the Scalp page (or moved to the scanner server: then point the tool at `https://paltra-scanner.fly.dev/mcp`, with its own `MCP_TOKEN`). A LIVE bot is refused for every change, including starting a backtest. Stop settings and the Trade list can't change while that bot's backtest is running (later days would use the new settings). There is no tool for orders, closing a
 position, the PAPER/LIVE switch, start/stop or panic.
 
 ## 1. Turn it on (once)
