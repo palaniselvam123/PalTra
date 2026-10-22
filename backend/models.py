@@ -183,6 +183,23 @@ class ReviewLog(Base):
     note: Mapped[str] = mapped_column(String, default="")
 
 
+class ArmLog(Base):
+    """One stock armed on or taken off a desk's Trade list (arm_log.py). Bookkeeping only."""
+
+    __tablename__ = "arm_log"
+    __table_args__ = (Index("ix_arm_log_desk_at", "config_id", "at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime)  # IST, naive
+    #: BotConfig row: 1 = bot 1, 2 = research, 3-5 = bots 2-4.
+    config_id: Mapped[int] = mapped_column(Integer)
+    symbol: Mapped[str] = mapped_column(String)
+    #: ARM / UNARM (a change), or ARMED (already armed when the app started, arm_log.baseline).
+    action: Mapped[str] = mapped_column(String)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class BotConfig(Base):
     __tablename__ = "bot_config"
 

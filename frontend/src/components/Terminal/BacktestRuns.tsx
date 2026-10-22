@@ -84,6 +84,7 @@ export function strategyLabel(s: Settings): string {
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
     if (s.slope_exit) parts.push(`SMA 9 slope exit (bend ${s.slope_bend_pct ?? 60}%, over ${s.slope_lookback ?? 2})`);
     if (s.vturn_exit) parts.push("SMA 9 V-turn exit");
+    if (s.as_armed) parts.push("as armed live");
     if (s.slow_sma_exit) parts.push("slow SMA exit");
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
@@ -281,7 +282,7 @@ export function BacktestRuns() {
     if (!window.confirm(ask)) return;
     setStarting(run.id);
     smaApi
-      .replayStart(run.start_date, run.start_time || "09:15", 300, run.end_date, run.symbols, bot)
+      .replayStart(run.start_date, run.start_time || "09:15", 300, run.end_date, run.symbols, bot, Boolean(run.settings.as_armed))
       .then(() => {
         setError(null);
         load();

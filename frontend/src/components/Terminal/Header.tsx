@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
-import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, Loader2, Moon, Search, Sun } from "lucide-react";
+import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, Search, Sun } from "lucide-react";
 import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
+import { ArmLog } from "@/components/Terminal/ArmLog";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
@@ -184,6 +185,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [error, setError] = useState<string | null>(null);
   const [folded, setFolded] = useState(false);
   const [pnlLog, setPnlLog] = useState(false);
+  const [armLog, setArmLog] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
@@ -777,7 +779,23 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               >
                 <LineChart size={14} aria-hidden /> <span className="hidden md:inline">P&amp;L log</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setArmLog(true)}
+                title="Arm log: when each stock was armed on or taken off this desk"
+                aria-label="Arm log"
+                className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
+              >
+                <ListChecks size={14} aria-hidden /> <span className="hidden md:inline">Arm log</span>
+              </button>
             </h2>
+            {armLog && (
+              <ArmLog
+                desk={desk === "research" ? "research" : String(deskBot ?? 1)}
+                deskName={state?.bot_name || (desk === "research" ? "Research" : undefined)}
+                onClose={() => setArmLog(false)}
+              />
+            )}
             {pnlLog && (
               <OpenPnlLog
                 desk={desk === "research" ? "research" : String(deskBot ?? 1)}

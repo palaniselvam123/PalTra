@@ -709,6 +709,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `EARLY_REVERSAL`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`); a fill from a waiting `PullbackOrder` adds
   `:PULLBACK` or `:EXTREME_LIMIT`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
   card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
+- `backend/arm_log.py` – arm log (bookkeeping only): a SQLAlchemy `before_flush` hook writes an `ArmLog` row
+  (`config_id` 1 / 2 research / 3-5, symbol, `ARM` / `UNARM`, source chip, PAPER/LIVE) for every change of a
+  `BotConfig.trade_symbols` saved through the ORM (Settings, Arm switch, scanner link, copy settings, handoffs, chat /
+  MCP); `baseline()` at boot adds an `ARMED` row for each armed stock whose last row is not an arm. `windows(config_id,
+  day)` gives each stock's armed stretches that day. `GET /api/arm-log?desk=1-4|research&day=` (rows + stretches);
+  terminal Stocks bar "Arm log" button (`components/Terminal/ArmLog.tsx`). **Replay as armed** (`ReplayStart.as_armed`,
+  replay bar "As armed live", saved as `as_armed` in the run's settings so Resume / Run again keep it): the stocks the
+  bot had armed on those days, from 09:15, each traded only inside its stretches (`ReplayEngine.arm_windows`,
+  `_armed_now` feeds the Trade list); a stock armed mid-day waits for a fresh cross, as live. Still refused while the bot
+  is LIVE, like every replay.
 - `backend/indicators.py` – `enrich()` adds `sma_fast`/`sma_slow`
   (`sma_9`/`sma_21`), Wilder `atr_14`, `adx_14`; plus RSI and
   `entry_filter_reason` for the optional VWAP/volume/density/RSI checks.

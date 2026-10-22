@@ -1077,6 +1077,24 @@ export type ReplayCapitalPeak = {
   peak_positions: number;
 };
 
+export type ArmLogRow = {
+  id: number;
+  at: string;
+  symbol: string;
+  /** ARM / UNARM, or ARMED (already armed when the app started). */
+  action: "ARM" | "UNARM" | "ARMED";
+  source: string | null;
+  mode: string | null;
+};
+
+export type ArmLogDay = {
+  desk: string;
+  day: string;
+  rows: ArmLogRow[];
+  /** Each stock's armed stretches that day (HH:MM:SS IST). */
+  stocks: { symbol: string; spans: { from: string; to: string }[] }[];
+};
+
 export type ReplayRun = {
   id: number;
   created_at: string | null;
@@ -1550,15 +1568,27 @@ export const smaApi = {
       20000,
       false
     ),
-  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[], bot = 1) =>
+  /** `asArmed`: the stocks the bot had armed on those days, each traded only while it was armed live (arm log). */
+  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[], bot = 1, asArmed = false) =>
     request<ReplayInfo>(
       "/api/replay/start",
       {
         method: "POST",
-        body: JSON.stringify({ date, end_date: endDate || null, start, speed, symbols: symbols?.length ? symbols : null, bot }),
+        body: JSON.stringify({
+          date,
+          end_date: endDate || null,
+          start,
+          speed,
+          symbols: symbols?.length ? symbols : null,
+          bot,
+          ...(asArmed ? { as_armed: true } : {}),
+        }),
       },
       20000
     ),
+  /** When each stock was armed on / taken off a desk's Trade list on one IST day (arm_log.py). */
+  armLog: (desk: string, day?: string) =>
+    request<ArmLogDay>(`/api/arm-log?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`),
   /** The newest `limit` runs (server default 50, at most 500). */
   replayRuns: (limit?: number): Promise<ReplayRun[]> =>
     request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),

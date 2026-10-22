@@ -79,9 +79,9 @@ class ResearchEngine(ReplayEngine):
     uses_wallet = False  # offline research never touches the practice wallet
     day_guard = False  # the all-bots target / stop / time is the desk's, not the research baseline's
 
-    def __init__(self, feed: ReplayFeed, symbol: str, settings: dict):
+    def __init__(self, feed: ReplayFeed, symbol: str, settings: dict, arm_windows: dict | None = None):
         self._settings = dict(settings)
-        super().__init__(feed, [symbol])
+        super().__init__(feed, [symbol], arm_windows=arm_windows)
 
     def load_config(self) -> BotConfig:
         cfg = getattr(self, "_fixed_cfg", None)
@@ -93,6 +93,7 @@ class ResearchEngine(ReplayEngine):
             data["symbol"] = self.replay_symbols[0]
             cfg = BotConfig(**data)
             self._fixed_cfg = cfg
+        cfg.trade_symbols = ",".join(self._armed_now())
         self._cfg_cache = cfg
         return cfg
 
@@ -132,13 +133,13 @@ def _trade_rows(min_id: int) -> list[dict]:
 
 
 async def replay_day(
-    feed: ReplayFeed, symbol: str, day: dt.date, settings: dict, *, every_10s: bool = False
+    feed: ReplayFeed, symbol: str, day: dt.date, settings: dict, *, every_10s: bool = False, arm_windows: dict | None = None
 ) -> list[dict]:
     """Play one stock through one past session; return its trades."""
     clock = dt.datetime.combine(day, SESSION_OPEN, tzinfo=IST)
     end = dt.datetime.combine(day, SESSION_END, tzinfo=IST)
     feed.clock = clock
-    engine = ResearchEngine(feed, symbol, settings)
+    engine = ResearchEngine(feed, symbol, settings, arm_windows=arm_windows)
     first_id = engine._min_trade_id
     engine.load_config()
     # As ReplaySession does: read the tape, skip the cross already on it, run.
@@ -165,11 +166,11 @@ def trading_days(frame: pd.DataFrame) -> list[dt.date]:
 
 
 async def replay_symbol(
-    frame: pd.DataFrame, symbol: str, days: list[dt.date], settings: dict, *, every_10s: bool = False
+    frame: pd.DataFrame, symbol: str, days: list[dt.date], settings: dict, *, every_10s: bool = False, arm_windows: dict | None = None
 ) -> list[dict]:
     """All requested days of one stock, oldest first."""
     feed = ReplayFeed({symbol: frame}, dt.datetime.combine(days[0], SESSION_OPEN, tzinfo=IST))
     trades: list[dict] = []
     for day in days:
-        trades.extend(await replay_day(feed, symbol, day, settings, every_10s=every_10s))
+        trades.extend(await replay_day(feed, symbol, day, settings, every_10s=every_10s, arm_windows=arm_windows))
     return trades
