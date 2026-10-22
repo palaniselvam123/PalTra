@@ -714,6 +714,90 @@ function queryString(params: Record<string, string | undefined>): string {
 
 const REQUEST_MS = 12000;
 
+/** Options page (desk `/api/options/*`): Groww's option chain and a practice book. */
+export type OptionLeg = {
+  symbol: string;
+  ltp: number | null;
+  oi: number | null;
+  volume: number | null;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+};
+export type OptionChainRow = { strike: number; ce: OptionLeg | null; pe: OptionLeg | null };
+export type OptionChain = {
+  underlying: string;
+  expiry: string;
+  source: "groww" | "simulated";
+  spot: number | null;
+  rows: OptionChainRow[];
+  summary: {
+    atm: number | null;
+    pcr: number | null;
+    ce_oi: number;
+    pe_oi: number;
+    max_pain: number | null;
+    resistance: number | null;
+    support: number | null;
+    atm_iv: number | null;
+    straddle: number | null;
+  };
+  error: string | null;
+  note: string | null;
+  days_to_expiry?: number;
+  fetched_at: string;
+};
+export type OptionExpiries = {
+  underlying: string;
+  source: "groww" | "simulated";
+  expiries: { date: string; lot_size: number | null }[];
+  error: string | null;
+};
+export type OptionTrade = {
+  id: number;
+  underlying: string;
+  expiry: string;
+  strike: number;
+  option_type: "CE" | "PE";
+  symbol: string;
+  side: "BUY" | "SELL";
+  lots: number;
+  lot_size: number;
+  quantity: number;
+  entry_price: number;
+  entry_spot: number | null;
+  feed: "groww" | "simulated";
+  status: "OPEN" | "CLOSED";
+  exit_price: number | null;
+  exit_reason: string | null;
+  pnl: number | null;
+  charges: number | null;
+  opened_at: string | null;
+  closed_at: string | null;
+  ltp?: number | null;
+};
+export type OptionBook = {
+  positions: OptionTrade[];
+  closed: OptionTrade[];
+  totals: {
+    open_pnl: number;
+    open_unpriced: number;
+    closed_today_pnl: number;
+    closed_today_charges: number;
+    closed_today: number;
+  };
+};
+export type OptionOrder = {
+  underlying: string;
+  expiry: string;
+  strike: number;
+  option_type: "CE" | "PE";
+  side: "BUY" | "SELL";
+  lots: number;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_MS);
@@ -1021,6 +1105,18 @@ export const api = {
     }),
   removeFromWatchlist: (symbol: string) =>
     request<{ removed: string }>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
+  optionUnderlyings: () => request<{ indices: string[]; stocks: string[]; error: string | null }>("/api/options/underlyings"),
+  optionExpiries: (underlying: string) =>
+    request<OptionExpiries>(`/api/options/expiries?underlying=${encodeURIComponent(underlying)}`),
+  optionChain: (underlying: string, expiry: string, force = false) =>
+    request<OptionChain>(
+      `/api/options/chain?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}${force ? "&force=true" : ""}`
+    ),
+  optionBook: () => request<OptionBook>("/api/options/book"),
+  /** A practice fill at the chain's last price. Never a Groww order. */
+  optionOrder: (order: OptionOrder) =>
+    request<OptionTrade>("/api/options/order", { method: "POST", body: JSON.stringify(order) }),
+  optionClose: (id: number) => request<OptionTrade>(`/api/options/book/${id}/close`, { method: "POST" }),
   stockNews: (symbol: string, force = false) =>
     request<StockNews>(`/api/instruments/news/${encodeURIComponent(symbol.toUpperCase())}${force ? "?force=true" : ""}`),
   getInstrumentStats: () =>

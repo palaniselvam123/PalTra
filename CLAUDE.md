@@ -779,6 +779,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   asked together, each source's error kept apart (`errors`), merged newest first, cached `CACHE_SEC` (5 min) per symbol.
   Desk `GET /api/instruments/news/{symbol}[?force=true]`; the chart's **News** button (`StockNewsPanel`); MCP
   `get_stock_news`. No key, no order path; nothing in the strategy reads it.
+- `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
+  Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
+  Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
+  `get_expiries`; the chain from Groww's `get_option_chain` (paid API plan; a refusal is shown as is), cached
+  `CHAIN_TTL_SEC` (5 s), not refreshed while the bots are rate-limited (`groww_pressure.bots_under_pressure`). Without a
+  Groww session the page runs on a simulated chain (Black-Scholes around a slowly moving spot, `source: "simulated"`).
+  `summarize`: ATM, PCR (put OI ÷ call OI), max pain, most call OI (resistance) / put OI (support), ATM IV, ATM straddle.
+  **Practice book only** (`OptionPaperTrade` table, `place` / `close` / `book`): fills at the chain's last price on the
+  feed it was opened on (groww | simulated, never mixed); real Groww prices fill only while NSE is open; an expired
+  position closes at intrinsic value from the last spot seen (`settle_expired`); P&L before charges, Groww option
+  charges estimated (`charges`). There is **no live options order path**: nothing here calls Groww's order API.
+  `GET /api/options/underlyings|expiries|chain|book`, `POST /api/options/order`, `POST /api/options/book/{id}/close`.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`

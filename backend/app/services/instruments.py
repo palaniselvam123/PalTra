@@ -43,6 +43,8 @@ class InstrumentMaster:
         self._by_symbol: dict[str, Instrument] = {}
         # NSE stocks with futures (the F&O list): the most traded names.
         self._fno: set[str] = set()
+        # Options per underlying (stocks and indices): expiry (YYYY-MM-DD) -> lot size.
+        self._options: dict[str, dict[str, int]] = {}
         self._fetched_at: float = 0.0
         self._error: str | None = None
 
@@ -64,7 +66,18 @@ class InstrumentMaster:
 
         by_symbol: dict[str, Instrument] = {}
         fno: set[str] = set()
+        options: dict[str, dict[str, int]] = {}
         for row in csv.DictReader(io.StringIO(raw)):
+            if row.get("segment") == "FNO" and row.get("instrument_type") in ("CE", "PE"):
+                under = row.get("underlying_symbol", "").strip().upper()
+                expiry = row.get("expiry_date", "").strip()[:10]
+                if under and expiry:
+                    try:
+                        lot = int(float(row.get("lot_size") or 0))
+                    except ValueError:
+                        lot = 0
+                    options.setdefault(under, {})[expiry] = max(lot, options.get(under, {}).get(expiry, 0))
+                continue
             if (
                 row.get("exchange") == "NSE"
                 and row.get("segment") == "FNO"
@@ -90,6 +103,7 @@ class InstrumentMaster:
             )
 
         self._by_symbol = by_symbol
+        self._options = options
         # Index futures (NIFTY, BANKNIFTY…) have no cash-market stock; keep stocks only.
         self._fno = {s for s in fno if s in by_symbol and by_symbol[s].series == "EQ"}
         self._fetched_at = time.monotonic()
@@ -110,6 +124,16 @@ class InstrumentMaster:
         """NSE cash stocks that have futures, sorted. Empty if the list has none."""
         self.ensure_loaded()
         return sorted(self._fno)
+
+    def option_expiries(self, underlying: str) -> dict[str, int]:
+        """Option expiries of an underlying (stock or index) with their lot size; empty if unknown."""
+        self.ensure_loaded()
+        return dict(sorted(self._options.get(underlying.upper(), {}).items()))
+
+    def option_underlyings(self) -> list[str]:
+        """Every underlying with options (indices and stocks), sorted."""
+        self.ensure_loaded()
+        return sorted(self._options)
 
     def get(self, symbol: str) -> Instrument | None:
         self.ensure_loaded()
