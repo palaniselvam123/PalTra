@@ -22,8 +22,11 @@ import {
 
 type Pin = { seq: number; date: string | null; runId: number | null; symbol: string | null };
 
-function routedFor(info: ReplayInfo | null, runId: number | null): boolean {
-  if (!info || !["PLAYING", "PAUSED", "FINISHED"].includes(info.status)) return false;
+function routedFor(info: ReplayInfo | null, runId: number | null, pastDay = false): boolean {
+  // A page opened on a replay day follows it only while it plays (or is paused). A finished
+  // run has no live replay chart any more: its day is drawn from Groww with the run's trades.
+  const live = pastDay ? ["PLAYING", "PAUSED"] : ["PLAYING", "PAUSED", "FINISHED"];
+  if (!info || !live.includes(info.status)) return false;
   return runId == null || info.run_id == null || info.run_id === runId;
 }
 
@@ -83,7 +86,7 @@ export default function StockChartPage() {
       try {
         const info = await smaApi.replayInfo();
         setReplay(info);
-        const routed = routedFor(info, p.runId);
+        const routed = routedFor(info, p.runId, Boolean(p.date));
         if (p.date) follow = routed;
         else follow = !routed; // a live chart while no replay is on
         setReplayRouting(routed && Boolean(p.date));
@@ -107,6 +110,14 @@ export default function StockChartPage() {
         setChart(nextChart);
         setNote(null);
       } catch (err: unknown) {
+        if (p.date) {
+          // The replay's live chart is gone (ended, stopped or the server restarted): show its day instead of a blank chart.
+          following.current = false;
+          setReplayRouting(false);
+          setNote(null);
+          setPin((prev) => ({ seq: (prev?.seq ?? 1) + 1, date: p.date, runId: p.runId, symbol: p.symbol }));
+          return;
+        }
         setNote(err instanceof Error ? err.message : "The chart did not load.");
       }
     }
