@@ -33,6 +33,8 @@ export type SmaConfig = {
   pattern_tf?: 1 | 3 | 5;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
   candle_minutes?: CandleMinutes;
+  /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */
+  exit_candle_minutes?: number;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";
@@ -859,6 +861,8 @@ export type WalletEntry = {
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
 export type CandleMinutes = 1 | 2 | 3 | 5 | 10 | 15;
 export const CANDLE_MINUTES: CandleMinutes[] = [1, 2, 3, 5, 10, 15];
+/** Exit candle sizes for mixed candles (exit_candle.py); 0 = the entry candle. */
+export const EXIT_CANDLE_MINUTES = [0, 1, 2, 3, 5, 10, 15, 30, 60];
 
 export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 

@@ -59,6 +59,7 @@ from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
 import ema_filter
+import exit_candle
 import supertrend
 import opening_range
 import join_trend
@@ -109,8 +110,14 @@ def flips_orders(cfg) -> bool:
 
 
 def cross_exits(cfg) -> bool:
-    """SMA cross exit (cross_exit, on unless set off): an opposite cross closes the trade."""
-    return getattr(cfg, "cross_exit", None) is not False
+    """SMA cross exit (cross_exit, on unless set off): an opposite cross closes the trade.
+
+    Off for the bot's own candle while a different exit candle is set (exit_candle.py):
+    that candle's cross closes the trade instead (`_watch_exit_candle`).
+    """
+    if getattr(cfg, "cross_exit", None) is False:
+        return False
+    return not exit_candle.active(cfg, candle_minutes(cfg))
 
 
 # Why a trade opened, saved on TradeLog.entry_reason. A fill from a waiting limit adds
@@ -183,6 +190,8 @@ class OpenPosition:
     cc_bar: int | None = None
     # EMA cross exit (ema_filter.py): the last closed candle read.
     ema_bar: int | None = None
+    # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
+    xc_bar: int | None = None
     # Supertrend exit (supertrend.py): the last closed candle read.
     st_bar: int | None = None
     # SMA 9 slope exit (slope_exit.py): the last closed candle read and the steepest slope.
@@ -257,6 +266,7 @@ SNAPSHOT_FIELDS = (
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
+    "exit_candle_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
@@ -1287,6 +1297,7 @@ class StrategyEngine:
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
+            await self._watch_exit_candle(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_slope_exit(symbol_cfg)
             await self._watch_slow_sma(symbol_cfg)
@@ -3165,6 +3176,37 @@ class StrategyEngine:
             return
         self._signals[symbol] = f"{symbol} EMA cross exit — {note}"
         await self._exit_now(cfg, self.ltp, "EMA_CROSS")
+
+    async def _watch_exit_candle(self, cfg: BotConfig) -> None:
+        """Once per closed exit candle: the SMA cross exit read on another candle size (exit_candle.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if not exit_candle.active(cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))):
+            return
+        size = exit_candle.minutes(cfg)
+        frame = exit_candle.closed_frame(self._tapes.get(symbol), size, int(cfg.sma_fast), int(cfg.sma_slow))
+        if frame is None or frame.empty:
+            return
+        closed_ts = int(frame.iloc[-1]["ts"])
+        if pos.xc_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        if closed_ts + size * 60 <= opened.timestamp():
+            # That exit candle had closed before the entry: a cross on it is not "after the entry".
+            return
+        pos.xc_bar = closed_ts
+        own = self._frames.get(symbol)
+        own_closed = own.iloc[:-1] if own is not None and len(own) > 1 else None
+        hit, note = exit_candle.judge(frame, own_closed, pos.signal_direction, int(cfg.sma_fast), int(cfg.sma_slow))
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} {size}-minute exit candle — {note}"
+        await self._exit_now(cfg, self.ltp, exit_candle.REASON)
 
     async def _watch_slope_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the SMA 9 bends or turns against the trade (slope_exit.py)."""

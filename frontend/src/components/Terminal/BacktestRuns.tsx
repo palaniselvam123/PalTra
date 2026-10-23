@@ -74,6 +74,8 @@ export function strategyLabel(s: Settings): string {
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
     if (s.cross_exit === false) parts.push("no cross exit");
+    if (s.cross_exit !== false && Number(s.exit_candle_minutes ?? 0) > 0 && Number(s.exit_candle_minutes) !== Number(s.candle_minutes ?? 1))
+      parts.push(`exit on ${s.exit_candle_minutes}m candle`);
     if (Number(s.late_entry_min ?? 0) > 0) parts.push(`late entry ${s.late_entry_min}m`);
     if (s.join_trend) parts.push(`join morning trend from 09:15+${s.join_after_min ?? 15}m`);
     if (Number(s.counter_exit_count ?? 0) > 0) parts.push(`exit on ${s.counter_exit_count} counter candles`);
@@ -214,7 +216,15 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
               }`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
-  ["SMA cross exit", (s) => (s.cross_exit === false ? "Off (a cross does not close the trade)" : "On")],
+  [
+    "SMA cross exit",
+    (s) =>
+      s.cross_exit === false
+        ? "Off (a cross does not close the trade)"
+        : Number(s.exit_candle_minutes ?? 0) > 0 && Number(s.exit_candle_minutes) !== Number(s.candle_minutes ?? 1)
+          ? `On, read on ${s.exit_candle_minutes}-min candles (no reverse)`
+          : "On",
+  ],
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],

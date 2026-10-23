@@ -323,6 +323,9 @@ class BotConfig(Base):
     # Late entry (late_entry.py): minutes a filter-refused cross stays armed,
     # entering on the first later candle the filters pass (0 = off).
     late_entry_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # Mixed candles (exit_candle.py): the SMA cross exit read on candles of this size instead of
+    # the bot's own (0 = off). Entries stay on candle_minutes.
+    exit_candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Join the morning trend (join_trend.py): once a day, join_after_min after 09:15,
     # enter the side a stock is already trending on when its cross was missed.
     join_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
