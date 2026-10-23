@@ -31,6 +31,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ WATCH_START = dt.time(7, 30)
 WATCH_END = dt.time(20, 0)
 MAX_WATCH = 40
 AI_TTL_SEC = 1800
+START_DELAY_SEC = 30
 AI_TIMEOUT_SEC = 90.0
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
@@ -488,6 +490,9 @@ class NewsWatcher:
         self._next_at = 0.0
 
     def start(self) -> None:
+        # NEWS_WATCH=off (the tests set it) keeps the watcher from touching the desk DB on a test's short-lived loop.
+        if os.environ.get("NEWS_WATCH", "on").strip().lower() == "off":
+            return
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._loop())
 
@@ -499,6 +504,7 @@ class NewsWatcher:
         self._next_at = 0.0
 
     async def _loop(self) -> None:
+        await asyncio.sleep(START_DELAY_SEC)  # let the app finish starting before the first read
         while True:
             try:
                 cfg = await load_settings()
