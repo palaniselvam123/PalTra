@@ -371,6 +371,70 @@ class NewsAlert(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
 
+
+class UsCredential(Base):
+    """Alpaca market-data key pair for the US practice desk, encrypted with the desk's vault. Read-only use."""
+
+    __tablename__ = "us_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, unique=True)  # alpaca
+    key_id_encrypted: Mapped[str] = mapped_column(String)
+    secret_encrypted: Mapped[str] = mapped_column(String)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
+class UsDeskConfig(Base):
+    """US practice desk settings (one row, id 1). See app/services/us_desk.py. Times are New York time."""
+
+    __tablename__ = "us_desk_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    running: Mapped[bool] = mapped_column(Boolean, default=False)
+    symbols: Mapped[str] = mapped_column(String, default="AAPL,MSFT,NVDA,TSLA,AMZN")  # armed, comma-separated
+    candle_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    sma_fast: Mapped[int] = mapped_column(Integer, default=9)
+    sma_slow: Mapped[int] = mapped_column(Integer, default=21)
+    atr_period: Mapped[int] = mapped_column(Integer, default=14)
+    stop_on: Mapped[bool] = mapped_column(Boolean, default=True)
+    atr_mult: Mapped[float] = mapped_column(Float, default=1.5)
+    allow_short: Mapped[bool] = mapped_column(Boolean, default=True)
+    dollars_per_trade: Mapped[float] = mapped_column(Float, default=1000.0)
+    max_trades_per_day: Mapped[int] = mapped_column(Integer, default=20)
+    daily_loss_limit: Mapped[float] = mapped_column(Float, default=200.0)  # $ before charges; 0 = off
+    entry_start: Mapped[str] = mapped_column(String, default="09:35")
+    entry_cutoff: Mapped[str] = mapped_column(String, default="15:30")
+    square_off: Mapped[str] = mapped_column(String, default="15:50")
+    # The Groww US check (read-only): the last answer of Groww's API for a US price.
+    groww_check_symbol: Mapped[str] = mapped_column(String, default="AAPL")
+    groww_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    groww_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    groww_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    groww_alerted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UsPaperTrade(Base):
+    """A US practice trade. Filled locally on the desk's US feed; never sent to any broker."""
+
+    __tablename__ = "us_paper_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    direction: Mapped[str] = mapped_column(String)  # LONG | SHORT
+    qty: Mapped[int] = mapped_column(Integer)
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entry_reason: Mapped[str] = mapped_column(String, default="SMA_CROSS")
+    feed: Mapped[str] = mapped_column(String, default="simulated")  # alpaca | simulated
+    status: Mapped[str] = mapped_column(String, default="OPEN")  # OPEN | CLOSED
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)  # $ before charges
+    charges: Mapped[float | None] = mapped_column(Float, nullable=True)  # $ estimate (SEC + FINRA TAF on the sell)
+    trade_day: Mapped[str] = mapped_column(String, index=True)  # New York date, YYYY-MM-DD
+    opened_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)  # UTC
+    closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)  # UTC
+
 _engine =create_async_engine(get_settings().database_url, echo=False)
 async_session = async_sessionmaker(_engine, expire_on_commit=False)
 

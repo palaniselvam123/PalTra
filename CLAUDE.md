@@ -817,6 +817,23 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   position closes at intrinsic value from the last spot seen (`settle_expired`); P&L before charges, Groww option
   charges estimated (`charges`). There is **no live options order path**: nothing here calls Groww's order API.
   `GET /api/options/underlyings|expiries|chain|book`, `POST /api/options/order`, `POST /api/options/book/{id}/close`.
+- `backend/app/services/us_desk.py` – US practice desk (desk `/us`, `app/api/routes_us.py`, `components/US/`): the SMA
+  cross on US stocks, New York time (`us_market.py`: 09:30-16:00 ET = 19:00-01:30 IST in US summer time, 20:00-02:30 IST
+  in winter; NYSE holidays and early closes listed per year, add the next year's). **Practice fills only, no order path**:
+  every fill is a local `UsPaperTrade` row (US dollars, P&L before charges; SEC + FINRA TAF estimated on the sell);
+  nothing calls Groww's, Alpaca's or any broker's order API. Prices: Alpaca market data (`alpaca.py`, the broker behind
+  Groww US; free key, IEX feed, read-only, the key is checked against the paper host only) when a key is saved
+  (`UsCredential`, Fernet-encrypted, write-only over the API) or set as `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY`;
+  else a simulator (`SimFeed`) that **trades around the clock**. `UsDesk` loop every 5 s (`US_DESK=off` in tests, not on
+  the scanner): 1-minute bars grouped into `candle_minutes` candles from midnight ET, a cross on a closed candle buys /
+  sells (shorts with `allow_short`), the opposite cross closes and reverses (`MA_CROSS`), `atr_mult` × ATR stop
+  (`STOP_LOSS`), `dollars_per_trade` ÷ price whole shares, entries only `entry_start`..`entry_cutoff` ET, `square_off`
+  (`SQUARE_OFF`), a trade from an earlier ET day closes on the next pass (`DAY_END`), `max_trades_per_day`,
+  `daily_loss_limit`. A cross on the tape when a stock is first seen is not traded. Settings row `UsDeskConfig` id 1
+  (`running` off by default). **Groww US check** (`run_groww_check`, read-only): Groww's `get_quote` / `get_ltp` with
+  `exchange="US"` on the desk's Groww session (the SDK has the constant; the API serves NSE / BSE / MCX today), every
+  6 h and on demand (`POST /api/us/groww-check`); one Telegram the first time it answers (`groww_alerted`).
+  `GET /api/us/state|chart|trades|keys`, `PUT /api/us/config|keys`, `POST /api/us/run|close-all|trades/{id}/close`.
 - `backend/app/api/routes_mcp.py` – MCP server for outside AI tools (n8n, Gemini, Claude):
   `POST /mcp` on the desk, streamable HTTP, stateless, JSON responses (hand-written
   JSON-RPC: `initialize`, `ping`, `tools/list`, `tools/call`). Off unless the `MCP_TOKEN`
@@ -896,6 +913,8 @@ Real orders reach Groww in only two places:
    `backend/app/brokers/groww_client.py`, `GrowwClient.place_order`
    (also `square_off_all`, `cancel_order`). Only used when
    `state.manual_live` is true.
+
+The US practice desk (`app/services/us_desk.py`) has no order path at all: its fills are local rows.
 
 On the scanner server (`PALTRA_ROLE=scanner`) both paths refuse before the SDK
 (`server_role.refuse_orders`).
