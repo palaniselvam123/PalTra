@@ -714,6 +714,86 @@ function queryString(params: Record<string, string | undefined>): string {
 
 const REQUEST_MS = 12000;
 
+/** US practice desk (desk `/api/us/*`): the SMA cross on US stocks, New York time, practice fills only. */
+export type UsConfig = {
+  symbols: string[];
+  candle_minutes: number;
+  sma_fast: number;
+  sma_slow: number;
+  atr_period: number;
+  stop_on: boolean;
+  atr_mult: number;
+  allow_short: boolean;
+  dollars_per_trade: number;
+  max_trades_per_day: number;
+  daily_loss_limit: number;
+  entry_start: string;
+  entry_cutoff: string;
+  square_off: string;
+  groww_check_symbol: string;
+  running: boolean;
+};
+export type UsTrade = {
+  id: number;
+  symbol: string;
+  direction: "LONG" | "SHORT";
+  qty: number;
+  entry_price: number;
+  stop_price: number | null;
+  entry_reason: string;
+  feed: "alpaca" | "simulated";
+  status: "OPEN" | "CLOSED";
+  exit_price: number | null;
+  exit_reason: string | null;
+  pnl: number | null;
+  charges: number | null;
+  trade_day: string;
+  opened_at: string | null;
+  closed_at: string | null;
+  last?: number | null;
+  open_pnl?: number | null;
+};
+export type UsMarket = {
+  open: boolean;
+  et: string;
+  ist: string;
+  trading_day: boolean;
+  close_et: string;
+  close_ist: string;
+  next_open_et: string;
+  next_open_ist: string;
+  dst: boolean;
+};
+export type UsGrowwCheck = { symbol: string; checked_at: string | null; ok: boolean; note: string | null; session: boolean };
+export type UsState = {
+  config: UsConfig;
+  feed: "alpaca" | "simulated";
+  key_source: "saved" | "env" | null;
+  market: UsMarket;
+  running: boolean;
+  error: string | null;
+  last_pass: string | null;
+  prices: Record<string, number | null>;
+  positions: UsTrade[];
+  trades: UsTrade[];
+  kpis: { day: string; closed_pnl: number; open_pnl: number; charges: number; trades: number; wins: number; losses: number };
+  events: { at: string; level: string; text: string }[];
+  groww: UsGrowwCheck;
+};
+export type UsChart = {
+  symbol: string;
+  candle_minutes: number;
+  feed: string;
+  candles: { time: number; open: number; high: number; low: number; close: number; fast: number | null; slow: number | null }[];
+  markers: { time: number; kind: "entry" | "exit"; side: "LONG" | "SHORT"; price: number | null; reason?: string | null; pnl?: number | null }[];
+};
+export type UsGrowwResult = {
+  symbol: string;
+  ok: boolean;
+  note: string;
+  tries: { call: string; ok: boolean; price: number | null; note: string | null }[];
+};
+
 /** Options page (desk `/api/options/*`): Groww's option chain and a practice book. */
 export type OptionLeg = {
   symbol: string;
@@ -1184,6 +1264,23 @@ export const api = {
     }),
   removeFromWatchlist: (symbol: string) =>
     request<{ removed: string }>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
+  usState: () => request<UsState>("/api/us/state"),
+  usChart: (symbol: string) => request<UsChart>(`/api/us/chart?symbol=${encodeURIComponent(symbol)}`),
+  usSaveConfig: (patch: Partial<Omit<UsConfig, "running">>) =>
+    request<UsConfig>("/api/us/config", { method: "PUT", body: JSON.stringify(patch) }),
+  usRun: (running: boolean) => request<{ running: boolean }>("/api/us/run", { method: "POST", body: JSON.stringify({ running }) }),
+  /** Practice close at the last price. No broker is called. */
+  usCloseTrade: (id: number) => request<UsTrade>(`/api/us/trades/${id}/close`, { method: "POST" }),
+  usCloseAll: () => request<{ closed: number }>("/api/us/close-all", { method: "POST" }),
+  usKeys: () => request<{ saved: boolean; env: boolean; source: "saved" | "env" | null }>("/api/us/keys"),
+  usSaveKeys: (key_id: string, secret: string) =>
+    request<{ saved: boolean; account: { status: string; currency: string } }>("/api/us/keys", {
+      method: "PUT",
+      body: JSON.stringify({ key_id, secret }),
+    }),
+  usDeleteKeys: () => request<{ saved: boolean }>("/api/us/keys", { method: "DELETE" }),
+  usGrowwCheck: (symbol?: string) =>
+    request<UsGrowwResult>("/api/us/groww-check", { method: "POST", body: JSON.stringify({ symbol: symbol || null }) }),
   optionUnderlyings: () => request<{ indices: string[]; stocks: string[]; error: string | null }>("/api/options/underlyings"),
   optionExpiries: (underlying: string) =>
     request<OptionExpiries>(`/api/options/expiries?underlying=${encodeURIComponent(underlying)}`),

@@ -27,6 +27,7 @@ from app.api import (
     routes_movers,
     routes_link,
     routes_options,
+    routes_us,
     routes_scalp,
     routes_research,
     routes_scanner_engine,
@@ -292,6 +293,11 @@ async def lifespan(app: FastAPI):
 
     if not server_role.is_scanner():
         news_watcher.start()
+    # US practice desk (practice fills only; Alpaca prices or the simulator). Not on the scanner server.
+    from app.services.us_desk import us_desk
+
+    if not server_role.is_scanner():
+        us_desk.start()
     await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
     yield
     if scanner_worker.running:
@@ -314,6 +320,7 @@ async def lifespan(app: FastAPI):
         sma_task.cancel()
     active_scanner.stop_background()
     news_watcher.stop()
+    us_desk.stop()
     tick_task.cancel()
     square_off_task.cancel()
     health_task.cancel()
@@ -347,6 +354,7 @@ app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
 app.include_router(routes_options.router)
 app.include_router(routes_news.router)
+app.include_router(routes_us.router)
 app.include_router(routes_link.router)
 app.include_router(routes_mcp.router)
 # Optional routers that are not in this repository. Skipping a missing module
