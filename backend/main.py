@@ -2288,6 +2288,27 @@ def armed_lists() -> dict:
     }
 
 
+def news_watch_list() -> dict:
+    """Armed and held stocks of bots 1-4, for the desk's news alerts (read-only).
+
+    symbol -> {"armed": [bot names], "held": [{bot, name, mode, side, qty}]}, held stocks first.
+    """
+    out: dict[str, dict] = {}
+    for eng in [engine, *bot_engines.values()]:
+        cfg = eng.load_config()
+        name = getattr(cfg, "bot_name", None) or f"Bot {eng.bot_id}"
+        mode = (cfg.trading_mode or "PAPER").upper()
+        for sym in trade_names(cfg):
+            out.setdefault(sym, {"armed": [], "held": []})["armed"].append(name)
+        for sym, pos in list(eng.positions.items()):
+            if pos is None:
+                continue
+            out.setdefault(sym, {"armed": [], "held": []})["held"].append(
+                {"bot": eng.bot_id, "name": name, "mode": pos.mode or mode, "side": pos.direction, "qty": pos.qty}
+            )
+    return dict(sorted(out.items(), key=lambda kv: (not kv[1]["held"], kv[0])))
+
+
 class WalletMoney(BaseModel):
     amount: float = Field(gt=0, le=paper_wallet.MAX_LOAD)
 

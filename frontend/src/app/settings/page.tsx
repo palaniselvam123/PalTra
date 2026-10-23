@@ -7,6 +7,7 @@ import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
 import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
+import { NewsAlerts } from "@/components/Settings/NewsAlerts";
 import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
 import { SectionNav } from "@/components/Settings/SectionNav";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
@@ -15,6 +16,7 @@ import { useTradingState } from "@/hooks/useTradingState";
 const SECTIONS: [string, string][] = [
   ["all-bots-guard", "All-bots target"],
   ["pnl-alerts", "P&L alerts"],
+  ["news-alerts", "News alerts"],
   ["sma-strategy", "SMA strategy"],
   ["trade-alerts", "Trade alerts"],
   ["broker-keys", "Broker keys"],
@@ -43,6 +45,7 @@ export default function SettingsPage() {
         <SectionNav sections={SECTIONS} />
         <AllBotsGuard />
         <PnlAlerts />
+        <NewsAlerts />
         <SmaStrategySettings />
         {/* The smaller forms sit two to a row on a wide screen instead of stretching across it. */}
         <div className="grid items-start gap-4 xl:grid-cols-2">

@@ -336,6 +336,41 @@ class OptionPaperTrade(Base):
     closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class NewsWatchSettings(Base):
+    """News alerts for armed / held stocks (one row, id 1). See app/services/news_impact.py."""
+
+    __tablename__ = "news_watch_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    every_min: Mapped[int] = mapped_column(Integer, default=15)
+    min_impact: Mapped[str] = mapped_column(String, default="MEDIUM")  # LOW | MEDIUM | HIGH
+    use_ai: Mapped[bool] = mapped_column(Boolean, default=True)  # only when an OpenAI key is saved
+    popup: Mapped[bool] = mapped_column(Boolean, default=True)
+    telegram: Mapped[bool] = mapped_column(Boolean, default=True)
+    call_critical: Mapped[bool] = mapped_column(Boolean, default=True)
+    extra_symbols: Mapped[str] = mapped_column(String, default="")  # comma-separated
+
+
+class NewsAlert(Base):
+    """One news alert (or, with `grouped`, a headline sent inside another alert). `key` is the headline's id."""
+
+    __tablename__ = "news_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    key: Mapped[str] = mapped_column(String, index=True)
+    sentiment: Mapped[str] = mapped_column(String)
+    impact: Mapped[str] = mapped_column(String)
+    critical: Mapped[bool] = mapped_column(Boolean, default=False)
+    action: Mapped[str] = mapped_column(String, default="NO_ACTION")
+    title: Mapped[str] = mapped_column(String)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: text, items, action, overall
+    popup: Mapped[bool] = mapped_column(Boolean, default=True)
+    grouped: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
 _engine =create_async_engine(get_settings().database_url, echo=False)
 async_session = async_sessionmaker(_engine, expire_on_commit=False)
 

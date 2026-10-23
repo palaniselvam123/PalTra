@@ -798,6 +798,85 @@ export type OptionOrder = {
   lots: number;
 };
 
+/** News impact (desk `/api/news-impact/*`): headlines scored, overall view, what to do. Information only. */
+export type NewsSentiment = "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED";
+export type NewsImpact = "LOW" | "MEDIUM" | "HIGH";
+export type NewsAction = { code: string; label: string; why: string };
+export type ScoredNewsItem = StockNewsItem & {
+  score: number;
+  sentiment: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
+  impact: NewsImpact;
+  critical: boolean;
+  why: string;
+  by: "ai" | "rules";
+};
+export type NewsOverall = {
+  score: number;
+  sentiment: NewsSentiment;
+  impact: NewsImpact;
+  critical: boolean;
+  counted: number;
+  summary?: string;
+};
+export type NewsAnalysis = {
+  symbol: string;
+  name: string | null;
+  items: ScoredNewsItem[];
+  overall: NewsOverall;
+  action: NewsAction;
+  side: "LONG" | "SHORT" | null;
+  method: "ai" | "rules";
+  ai_error: string | null;
+  errors: Record<string, string>;
+  fetched_at: string | null;
+  disclaimer: string;
+};
+export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
+export type NewsAlertRow = {
+  id: number;
+  symbol: string;
+  sentiment: NewsSentiment;
+  impact: NewsImpact;
+  critical: boolean;
+  action: string;
+  action_label: string | null;
+  action_why: string | null;
+  title: string;
+  popup: boolean;
+  created_at: string | null;
+  text?: string | null;
+  items?: { title: string; url: string; source: string; at: string | null; sentiment: string; impact: string; why: string }[] | null;
+  method?: string | null;
+  held?: NewsHolding[] | null;
+  armed?: string[] | null;
+};
+export type NewsWatchSettings = {
+  enabled: boolean;
+  every_min: number;
+  min_impact: NewsImpact;
+  use_ai: boolean;
+  popup: boolean;
+  telegram: boolean;
+  call_critical: boolean;
+  extra_symbols: string[];
+  ai_key?: boolean;
+  status?: { last_run: string | null; last_error: string | null; watched: number; alerts_sent: number };
+};
+export type NewsWatchStock = {
+  symbol: string;
+  armed: string[];
+  held: NewsHolding[];
+  latest: {
+    overall: NewsOverall;
+    action: NewsAction;
+    method: string;
+    at: string;
+    top: string | null;
+    count?: number;
+    errors?: Record<string, string>;
+  } | null;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_MS);
@@ -1117,6 +1196,16 @@ export const api = {
   optionOrder: (order: OptionOrder) =>
     request<OptionTrade>("/api/options/order", { method: "POST", body: JSON.stringify(order) }),
   optionClose: (id: number) => request<OptionTrade>(`/api/options/book/${id}/close`, { method: "POST" }),
+  newsImpact: (symbol: string, force = false) =>
+    request<NewsAnalysis>(`/api/news-impact/stock/${encodeURIComponent(symbol.toUpperCase())}${force ? "?force=true" : ""}`),
+  newsAlerts: (afterId = 0, limit = 30) =>
+    request<{ alerts: NewsAlertRow[] }>(`/api/news-impact/alerts?after_id=${afterId}&limit=${limit}`),
+  newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
+  saveNewsSettings: (patch: Partial<NewsWatchSettings>) =>
+    request<NewsWatchSettings>("/api/news-impact/settings", { method: "PUT", body: JSON.stringify(patch) }),
+  newsWatch: () => request<{ stocks: NewsWatchStock[]; status: NewsWatchSettings["status"] }>("/api/news-impact/watch"),
+  newsRunNow: () => request<{ alerts: NewsAlertRow[] }>("/api/news-impact/run", { method: "POST" }),
+  newsTest: () => request<{ alert: NewsAlertRow; telegram: boolean | null; skipped: string | null }>("/api/news-impact/test", { method: "POST" }),
   stockNews: (symbol: string, force = false) =>
     request<StockNews>(`/api/instruments/news/${encodeURIComponent(symbol.toUpperCase())}${force ? "?force=true" : ""}`),
   getInstrumentStats: () =>

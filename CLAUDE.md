@@ -779,6 +779,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   asked together, each source's error kept apart (`errors`), merged newest first, cached `CACHE_SEC` (5 min) per symbol.
   Desk `GET /api/instruments/news/{symbol}[?force=true]`; the chart's **News** button (`StockNewsPanel`); MCP
   `get_stock_news`. No key, no order path; nothing in the strategy reads it.
+- `backend/app/services/news_impact.py` – news impact and news alerts (information only, never trades): each headline from
+  `stock_news` is scored by a rule list (`score_text`: Indian corporate-news phrases with weights, critical phrases such as
+  fraud / raids / SEBI bans / defaults / insolvency / CEO exits / plant fires / open offers; a denial softens it) or, with an
+  OpenAI key saved (Settings → AI Trading Expert) and `use_ai`, by OpenAI (`ai_read`, no web search, JSON schema, cached per
+  headline set; a failure falls back to the rules, `ai_error`). `overall` weights recent headlines (half-life 24 h, 3 days
+  max; MIXED when both ways); `action(view, side)` gives KEEP / EXIT / COVER / TIGHTEN / BUY / SHORT / AVOID / NO_ACTION for
+  the position. Desk `GET /api/news-impact/stock/{symbol}` (the chart's News panel shows the verdict and each headline's
+  chip). **News alerts**: `NewsWatcher` (started in the desk lifespan, not on the scanner) every `every_min` (15) minutes on
+  trading days 07:30-20:00 IST reads every stock armed or held on Bots 1-4 (terminal `news_watch_list`) plus
+  `extra_symbols`; a headline not alerted before (`NewsAlert.key`), at most `ALERT_MAX_AGE_H` (6 h) old, with impact ≥
+  `min_impact` makes one `NewsAlert` row per stock (pop-up: `components/Notifications/NewsAlertPopups.tsx`, polled every 30 s
+  on every page, critical ones stay until dismissed) and a Telegram (`alert_notifier.send`); a **critical** one on a held
+  stock (critical phrase or HIGH impact against the position, `is_critical`) goes through `send_critical(call=True)` (phone
+  call: market hours, 5-minute cooldown). Settings row `NewsWatchSettings` (`GET/PUT /api/news-impact/settings`), `GET
+  /api/news-impact/watch|alerts`, `POST /api/news-impact/run|test`; Settings → "News alerts"
+  (`components/Settings/NewsAlerts.tsx`).
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
