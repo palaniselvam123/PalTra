@@ -116,8 +116,8 @@ async def set_execution(body: ExecutionRequest):
     if mode not in ("paper", "groww"):
         raise HTTPException(400, "mode must be 'paper' or 'groww'")
     if mode == "groww":
-        if server_role.is_scanner():
-            raise HTTPException(403, server_role.SCANNER_NO_ORDERS)
+        if server_role.no_orders():
+            raise HTTPException(403, server_role.no_orders_text())
         if not body.confirm_live:
             raise HTTPException(400, "Real Groww orders require confirm_live=true.")
         from app.services.groww_funds import groww_client

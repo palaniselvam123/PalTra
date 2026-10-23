@@ -229,7 +229,10 @@ async def lifespan(app: FastAPI):
     # disk. Started with the app because a morning that was not recorded cannot
     # be recovered later — there is no backfill for "what was it at 11:00".
     from app.services.market_recorder import market_recorder
-    await market_recorder.start()
+    import server_role
+
+    if not server_role.is_backtest():
+        await market_recorder.start()
 
     # Warm the instrument master in the background so the first search doesn't
     # hit the 7 s CSV download + parse on the event loop.
@@ -273,9 +276,12 @@ async def lifespan(app: FastAPI):
                     {"level": "WARN", "message": f"Could not resume NSE quotes after restart: {exc}"},
                 )
 
-    tick_task = asyncio.create_task(_tick_feed_loop())
-    square_off_task = asyncio.create_task(_square_off_scheduler_loop())
-    health_task = asyncio.create_task(_feed_health_loop())
+    # The backtest server runs replays only: no ORB price feed, bot or square-off loops there.
+    loops = [] if server_role.is_backtest() else [
+        asyncio.create_task(_tick_feed_loop()),
+        asyncio.create_task(_square_off_scheduler_loop()),
+        asyncio.create_task(_feed_health_loop()),
+    ]
     # Most-active scan: one Groww quote per F&O stock every few minutes while
     # the market is open and Groww is connected. Market data only.
     from app.services.active_stocks import active_scanner
@@ -291,19 +297,19 @@ async def lifespan(app: FastAPI):
     # News alerts for the bots' armed and held stocks (information only, never trades).
     from app.services.news_impact import news_watcher
 
-    if not server_role.is_scanner():
+    if server_role.is_desk():
         news_watcher.start()
-    # US practice desk (practice fills only; Alpaca prices or the simulator). Not on the scanner server.
+    # US practice desk (practice fills only; Alpaca prices or the simulator). Desk only.
     from app.services.us_desk import us_desk
 
-    if not server_role.is_scanner():
+    if server_role.is_desk():
         us_desk.start()
     await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
     yield
     if scanner_worker.running:
         await scanner_worker.stop()
-    # The scanner server has no bots to report: a scanner deploy must not ring the owner.
-    if not server_role.is_scanner():
+    # The scanner and backtest servers have no live bots to report: their deploys must not ring the owner.
+    if server_role.is_desk():
         try:
             from sma_terminal_main import announce_shutdown_all
 
@@ -321,9 +327,8 @@ async def lifespan(app: FastAPI):
     active_scanner.stop_background()
     news_watcher.stop()
     us_desk.stop()
-    tick_task.cancel()
-    square_off_task.cancel()
-    health_task.cancel()
+    for task in loops:
+        task.cancel()
 
 
 app = FastAPI(title="Intraday ORB Trading Bot", lifespan=lifespan)
@@ -368,6 +373,26 @@ for _extra in ("routes_volatility", "routes_order_book"):
 app.include_router(routes_research.router)
 app.include_router(routes_ws.router)
 install_desk_lock(app)
+
+
+
+
+async def _backtest_activity(request, call_next):
+    """Backtest server only: a page request keeps it from stopping itself (backtest_server.py)."""
+    from backtest_server import note_request
+
+    note_request(request.url.path)
+    return await call_next(request)
+
+
+def _install_backtest_activity() -> None:
+    import server_role
+
+    if server_role.is_backtest():
+        app.middleware("http")(_backtest_activity)
+
+
+_install_backtest_activity()
 
 try:
     from app.sma_host import mount_terminal

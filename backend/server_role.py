@@ -12,6 +12,12 @@ PalTra can run as two Fly apps from one image:
 so the bots get the machine and the Groww rate limit to themselves. The default
 is on, so nothing changes until the owner sets it.
 
+* ``backtest`` (``PALTRA_ROLE=backtest``): backtests (replays) only, on their own
+  machine that starts when the page is opened and stops itself when idle
+  (``backtest_server.py``). It never sends an order either, runs no live bots and
+  no scans, and copies the bots' settings and the desk's Groww session from the
+  desk over its own link (``BACKTEST_LINK_TOKEN``).
+
 The two servers share one read-only link: the scanner asks the desk which
 stocks each bot has armed (``SCANNER_LINK_TOKEN``, 24+ characters, the same
 secret on both apps). No order, setting or mode crosses it.
@@ -24,6 +30,7 @@ MIN_TOKEN_LEN = 24
 DEFAULT_DESK_URL = "https://paltra.fly.dev"
 
 SCANNER_NO_ORDERS = "This is the scanner server: it never sends orders. Trade from the main desk."
+BACKTEST_NO_ORDERS = "This is the backtest server: it never sends orders. Trade from the main desk."
 SCANS_OFF_TEXT = "Scans are off on this server (SCANS=off): they run on the scanner server."
 
 
@@ -32,17 +39,37 @@ class ScannerNoOrders(RuntimeError):
 
 
 def role() -> str:
-    return "scanner" if os.environ.get("PALTRA_ROLE", "").strip().lower() == "scanner" else "desk"
+    value = os.environ.get("PALTRA_ROLE", "").strip().lower()
+    return value if value in ("scanner", "backtest") else "desk"
 
 
 def is_scanner() -> bool:
     return role() == "scanner"
 
 
+def is_backtest() -> bool:
+    return role() == "backtest"
+
+
+def is_desk() -> bool:
+    return role() == "desk"
+
+
+def no_orders() -> bool:
+    """The scanner and the backtest server never send an order."""
+    return role() in ("scanner", "backtest")
+
+
+def no_orders_text() -> str:
+    return BACKTEST_NO_ORDERS if is_backtest() else SCANNER_NO_ORDERS
+
+
 def scans_enabled() -> bool:
-    """False only on a desk with SCANS=off. The scanner always scans."""
+    """False on a desk with SCANS=off and on the backtest server. The scanner always scans."""
     if is_scanner():
         return True
+    if is_backtest():
+        return False
     return os.environ.get("SCANS", "on").strip().lower() not in ("off", "0", "false", "no")
 
 
@@ -54,6 +81,17 @@ def scanner_url() -> str:
     return os.environ.get("SCANNER_URL", "").strip().rstrip("/")
 
 
+def backtest_url() -> str:
+    return os.environ.get("BACKTEST_URL", "").strip().rstrip("/")
+
+
+def backtest_link_token() -> str:
+    """The desk ↔ backtest server secret, or "" when unset or too short. Not the scanner's token:
+    this link also carries the desk's Groww session, so only the backtest server holds it."""
+    token = os.environ.get("BACKTEST_LINK_TOKEN", "").strip()
+    return token if len(token) >= MIN_TOKEN_LEN else ""
+
+
 def link_token() -> str:
     """The shared read-only link secret, or "" when unset or too short."""
     token = os.environ.get("SCANNER_LINK_TOKEN", "").strip()
@@ -61,9 +99,9 @@ def link_token() -> str:
 
 
 def refuse_orders(what: str = "order") -> None:
-    """Raise on the scanner before any Groww order, modify, cancel or square-off call."""
-    if is_scanner():
-        raise ScannerNoOrders(f"{SCANNER_NO_ORDERS} ({what} refused)")
+    """Raise on the scanner or the backtest server before any Groww order, modify, cancel or square-off call."""
+    if no_orders():
+        raise ScannerNoOrders(f"{no_orders_text()} ({what} refused)")
 
 
 def describe() -> dict:
@@ -74,4 +112,6 @@ def describe() -> dict:
         "desk_url": desk_url(),
         "scanner_url": scanner_url() or None,
         "link": bool(link_token()),
+        "backtest_url": backtest_url() or None,
+        "backtest_link": bool(backtest_link_token()),
     }
