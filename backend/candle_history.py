@@ -13,6 +13,7 @@ import re
 from types import SimpleNamespace
 
 import pandas as pd
+from sqlalchemy import or_
 
 from database import session_factory
 from groww_client import IST, _is_auth_error, _parse_candles
@@ -179,8 +180,18 @@ def _markers(
 ) -> list[dict]:
     """Entries and exits on this stock inside the shown bars."""
     out: list[dict] = []
+    # Only trades with an entry or exit inside the shown bars can get a marker, so ask SQLite for
+    # just those: every replay of a busy stock is tens of thousands of rows otherwise.
+    lo = dt.datetime.fromtimestamp(first, IST).replace(tzinfo=None)
+    hi = dt.datetime.fromtimestamp(last + span - 1, IST).replace(tzinfo=None)
     with session_factory()() as db:
-        rows = db.query(TradeLog).filter(TradeLog.symbol == symbol).order_by(TradeLog.id).all()
+        query = db.query(TradeLog).filter(
+            TradeLog.symbol == symbol,
+            or_(TradeLog.entry_time.between(lo, hi), TradeLog.exit_time.between(lo, hi)),
+        )
+        if run_id is not None:
+            query = query.filter(TradeLog.run_id == run_id)
+        rows = query.order_by(TradeLog.id).all()
     if bot is not None:
         # One SMA bot's practice / real trades; replay and research rows have their own books.
         rows = [
@@ -294,9 +305,13 @@ async def load_history(
     # 21 bars of 30 or 60 minutes need more than four days before From.
     warmup = WARMUP_DAYS if interval <= 15 else 10
     frame = await fetch_frame(broker, symbol, start - dt.timedelta(days=warmup), end)
-    # The stock's own settings (from the run's snapshot for a replay run).
-    settings = settings_for(run_settings(cfg, run_id), symbol)
-    return build_payload(frame, symbol, start, end, settings, interval, run_id, book, bot)
+    def build() -> dict:
+        # The stock's own settings (from the run's snapshot for a replay run).
+        settings = settings_for(run_settings(cfg, run_id), symbol)
+        return build_payload(frame, symbol, start, end, settings, interval, run_id, book, bot)
+
+    # SQLite reads and the indicator maths stay off the event loop the bots share.
+    return await asyncio.to_thread(build)
 
 
 def run_settings(cfg, run_id: int | None):
