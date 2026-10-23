@@ -305,7 +305,38 @@ class AlertPrefs(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
 
-_engine = create_async_engine(get_settings().database_url, echo=False)
+class OptionPaperTrade(Base):
+    """A practice option position on the Options page. Never sent to Groww.
+
+    `feed` is the price feed it was filled on (groww | simulated); it is marked and
+    closed on that feed only, so simulated and real prices never mix in one trade.
+    """
+
+    __tablename__ = "option_paper_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    underlying: Mapped[str] = mapped_column(String)
+    expiry: Mapped[str] = mapped_column(String)  # YYYY-MM-DD
+    strike: Mapped[float] = mapped_column(Float)
+    option_type: Mapped[str] = mapped_column(String)  # CE | PE
+    trading_symbol: Mapped[str] = mapped_column(String)
+    side: Mapped[str] = mapped_column(String)  # BUY | SELL
+    lots: Mapped[int] = mapped_column(Integer)
+    lot_size: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[int] = mapped_column(Integer)
+    entry_price: Mapped[float] = mapped_column(Float)
+    entry_spot: Mapped[float | None] = mapped_column(Float, nullable=True)
+    feed: Mapped[str] = mapped_column(String, default="simulated")
+    status: Mapped[str] = mapped_column(String, default="OPEN")  # OPEN | CLOSED
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)  # MANUAL_EXIT | EXPIRED
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)  # before charges
+    charges: Mapped[float | None] = mapped_column(Float, nullable=True)
+    opened_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+_engine =create_async_engine(get_settings().database_url, echo=False)
 async_session = async_sessionmaker(_engine, expire_on_commit=False)
 
 

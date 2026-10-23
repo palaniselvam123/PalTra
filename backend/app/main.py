@@ -25,6 +25,7 @@ from app.api import (
     routes_scanner,
     routes_movers,
     routes_link,
+    routes_options,
     routes_scalp,
     routes_research,
     routes_scanner_engine,
@@ -337,6 +338,7 @@ app.include_router(routes_course.router)
 app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
+app.include_router(routes_options.router)
 app.include_router(routes_link.router)
 app.include_router(routes_mcp.router)
 # Optional routers that are not in this repository. Skipping a missing module
