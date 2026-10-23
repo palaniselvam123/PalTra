@@ -288,6 +288,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   terminal's Strategy card and Settings warn when no exit is on
   (`strategyChecks.noExitOn`). Candle patterns ignore it (`CANDLE_END`). The
   stock research baseline keeps it on.
+- `backend/exit_candle.py` – mixed candles (`exit_candle_minutes`: 0 = off by default, 1/2/3/5/10/15/30/60; per bot and
+  per stock, PAPER and LIVE): enter on the bot's own candle (`candle_minutes`), exit on the SMA cross of another candle size.
+  While it is set and differs from `candle_minutes` (and `cross_exit` is on), `cross_exits` reads as off for the bot's own
+  candle, so an opposite cross there neither closes nor reverses the trade. `StrategyEngine._watch_exit_candle`, once per
+  newly closed exit candle (`pos.xc_bar`, memory only), groups the 1-minute tape (`_tapes`) into that size from 09:15
+  (`closed_frame`), and `judge` closes the trade (`EXIT_CANDLE_CROSS`, via `_exit_now`, which cancels a LIVE stop first) when
+  the exit candle's SMAs cross against the trade on a candle closed after the entry, or are already against it while the
+  bot's own candle's SMAs are against it too (a trade entered against the exit candle's trend is not held once its own cross
+  turns). No reverse. Stops, targets, the other exits and the square-off are unchanged. A LIVE position restored without its
+  stop id is left to that stop. Settings → 3. When to exit ("Read the cross exit on"). The stock research baseline keeps it off.
 - `backend/late_entry.py` – late entry (`late_entry_min`, 0 = off by default, per bot and
   per stock, PAPER and LIVE): a fresh cross refused only by a ticked entry filter or ADX
   (`late_entry.refused_by_filter`: `… ignored — …` / `closed on … — …`, never the cut-off or

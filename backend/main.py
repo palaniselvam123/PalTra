@@ -51,6 +51,7 @@ import opening_range
 import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
+import exit_candle
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -380,6 +381,7 @@ class ConfigUpdate(BaseModel):
     entry_mode: Literal["SMA", "PATTERN"] | None = None
     pattern_tf: Literal[1, 3, 5] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
@@ -958,6 +960,7 @@ def _gap_dict(row) -> dict:
         "or_volume_ratio": opening_range.ratio(row),
         "or_spread_pct": opening_range.spread_pct(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
+        "exit_candle_minutes": exit_candle.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),
         "review_gap_pct": review.gap_band(row),

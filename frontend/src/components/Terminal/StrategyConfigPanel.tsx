@@ -6,7 +6,7 @@ import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
-import { BB_EXITS, CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
+import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
 type Props = {
@@ -42,6 +42,7 @@ const LABELS: Record<string, string> = {
   sma_medium: "medium MA",
   sma_slow: "slow MA",
   candle_minutes: "candle",
+  exit_candle_minutes: "exit candle",
   atr_period: "ATR period",
   atr_multiplier: "ATR ×",
   use_stop: "stop on/off",
@@ -223,6 +224,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     candle_minutes: (CANDLE_MINUTES.includes(Number(form.candle_minutes) as CandleMinutes)
       ? Number(form.candle_minutes)
       : 1) as CandleMinutes,
+    exit_candle_minutes: EXIT_CANDLE_MINUTES.includes(Number(form.exit_candle_minutes ?? 0))
+      ? Number(form.exit_candle_minutes ?? 0)
+      : 0,
     atr_period: Number(form.atr_period),
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
@@ -1156,6 +1160,33 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </InfoTip>
             </span>
           </label>
+          <div className={clsx("mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10", !crossExitOn(form) && "opacity-50")}>
+            <label htmlFor="sma-exit-candle" className="flex items-center gap-1 text-sm text-slate-300">
+              {isOwn("exit_candle_minutes") && <OwnTag />}
+              <b className="text-slate-100">Read the cross exit on</b>
+              <InfoTip label="About the exit candle (mixed candles)">
+                Enter on one candle size and exit on another. Entries keep the candle interval set in step 1 (for example 1
+                minute). With a different size here (for example 15 minutes), an opposite cross on the entry candle no longer
+                closes the trade: the trade closes when the SMAs cross against it on the exit candle. A trade entered while
+                the exit candle already points the other way closes at the next exit-candle close once its own candle has
+                turned against it too. No reverse: the next trade waits for its own entry signal. The stop, target and the
+                other exits still work on the entry candle. Needs the SMA cross exit ticked.
+              </InfoTip>
+            </label>
+            <select
+              id="sma-exit-candle"
+              disabled={!crossExitOn(form)}
+              value={String(EXIT_CANDLE_MINUTES.includes(Number(form.exit_candle_minutes ?? 0)) ? Number(form.exit_candle_minutes ?? 0) : 0)}
+              onChange={(e) => set("exit_candle_minutes", e.target.value)}
+              className="mt-1 block h-10 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            >
+              {EXIT_CANDLE_MINUTES.map((m) => (
+                <option key={m} value={String(m)}>
+                  {m === 0 ? `Same candle as entries (${form.candle_minutes ?? 1} min)` : `${m}-minute candles${m === Number(form.candle_minutes ?? 1) ? " (same as entries)" : ""}`}
+                </option>
+              ))}
+            </select>
+          </div>
           {noExitOn(form) ? (
             <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
               No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
@@ -1982,7 +2013,10 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_or_break", f.use_or_break, "Opening 15 min: high / low break check");
 
   // 3. When to exit
-  if (!pattern && crossExitOn(f)) add({ group: "exit", key: "cross_exit", text: "Opposite SMA cross closes the trade and reverses it" });
+  const exitCandle = Number(f.exit_candle_minutes ?? 0);
+  if (!pattern && crossExitOn(f) && exitCandle > 0 && exitCandle !== Number(f.candle_minutes ?? 1))
+    add({ group: "exit", key: "cross_exit", text: `Exits on the SMA cross of ${exitCandle}-min candles (entries on ${f.candle_minutes ?? 1}-min); no reverse`, off: { exit_candle_minutes: "0" } });
+  else if (!pattern && crossExitOn(f)) add({ group: "exit", key: "cross_exit", text: "Opposite SMA cross closes the trade and reverses it" });
   if (!pattern && !crossExitOn(f)) add({ group: "exit", key: "cross_exit", text: "SMA cross exit is OFF: trades are held through opposite crosses", warn: true, off: undefined });
   if (f.bb_exit && f.bb_exit !== "OFF")
     add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
