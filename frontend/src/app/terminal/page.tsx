@@ -11,6 +11,7 @@ import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { AlertsStatus } from "@/components/Terminal/WhatsAppAlerts";
 import { SectionTabs, TAB_KEY, TERMINAL_TABS, inTab, type TerminalTab } from "@/components/Terminal/SectionTabs";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
+import { BacktestServerBar } from "@/components/Terminal/BacktestServerBar";
 import { Board } from "@/components/Layout/Board";
 import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
 import {
@@ -512,6 +513,7 @@ export default function TerminalPage() {
           </div>
         )}
         <div className={inTab(shownTab, "live") ? "space-y-4" : "hidden"}>
+        <BacktestServerBar />
         {botNo != null && botNo > 1 ? (
           <>
             <div role="note" className="rounded-xl border border-sky-400/30 bg-sky-500/[0.07] px-3 py-2 text-sm text-sky-100">

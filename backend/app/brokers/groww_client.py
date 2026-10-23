@@ -501,8 +501,8 @@ class GrowwClient(BrokerClient):
     # ---- orders -------------------------------------------------------
 
     async def place_order(self, order: OrderRequest) -> OrderResult:
-        if server_role.is_scanner():
-            raise BrokerOrderError(server_role.SCANNER_NO_ORDERS)
+        if server_role.no_orders():
+            raise BrokerOrderError(server_role.no_orders_text())
         sdk = self._require_session()
         try:
             resp = await asyncio.wait_for(
@@ -548,8 +548,8 @@ class GrowwClient(BrokerClient):
         )
 
     async def cancel_order(self, broker_order_id: str) -> None:
-        if server_role.is_scanner():
-            raise BrokerOrderError(server_role.SCANNER_NO_ORDERS)
+        if server_role.no_orders():
+            raise BrokerOrderError(server_role.no_orders_text())
         sdk = self._require_session()
         try:
             await asyncio.to_thread(sdk.cancel_order, groww_order_id=broker_order_id, segment=self.SEGMENT)
@@ -568,8 +568,8 @@ class GrowwClient(BrokerClient):
                 await self.cancel_order(str(_pick(o, "groww_order_id", "order_id", default="")))
 
     async def square_off_all(self) -> list[OrderResult]:
-        if server_role.is_scanner():
-            raise BrokerOrderError(server_role.SCANNER_NO_ORDERS)
+        if server_role.no_orders():
+            raise BrokerOrderError(server_role.no_orders_text())
         sdk = self._require_session()
         try:
             raw = await asyncio.to_thread(sdk.get_positions_for_user, segment=self.SEGMENT)

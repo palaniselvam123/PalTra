@@ -106,8 +106,53 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 
 
 def token_path(path: str) -> bool:
-    """Desk paths that check SCANNER_LINK_TOKEN themselves (exempt from the Google lock)."""
-    return path in (ARMED_PATH, ARM_PATH) or path.startswith(STOCK_PREFIX)
+    """Desk paths that check a link token themselves (exempt from the Google lock)."""
+    return path in (ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW) or path.startswith(STOCK_PREFIX)
+
+
+# ---- Desk ↔ backtest server (backtest_server.py) ----
+# Separate secret (BACKTEST_LINK_TOKEN): this link carries the desk's Groww session, so the scanner's
+# token never reaches it. Desk role only; 404 elsewhere or while the secret is unset.
+
+BACKTEST_SETTINGS = "/api/link/backtest/settings"
+BACKTEST_GROWW = "/api/link/backtest/groww"
+
+
+def _backtest_authorized(request: Request) -> None:
+    expected = server_role.backtest_link_token()
+    if not server_role.is_desk() or not expected:
+        raise HTTPException(404, "Not found")
+    header = request.headers.get("authorization", "")
+    given = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    if not given or not hmac.compare_digest(given.encode(), expected.encode()):
+        raise HTTPException(401, "Bad link token")
+
+
+@router.get(BACKTEST_SETTINGS)
+async def backtest_settings(request: Request):
+    """Every bot's settings row (bots 1-4, research), for the backtest server's copy. Read-only."""
+    _backtest_authorized(request)
+    from app.sma_host import load_terminal
+
+    mod = load_terminal()
+    if mod is None or not hasattr(mod, "export_bot_settings"):
+        raise HTTPException(503, "The SMA terminal is not loaded.")
+    import asyncio
+
+    return await asyncio.to_thread(mod.export_bot_settings)
+
+
+@router.get(BACKTEST_GROWW)
+async def backtest_groww(request: Request):
+    """The desk's current Groww access token, for past candles on the backtest server (which
+    never orders and keeps it in memory only). Empty when the desk has no session today."""
+    _backtest_authorized(request)
+    from groww_client import desk_session_token
+
+    import asyncio
+
+    token = await asyncio.to_thread(desk_session_token)
+    return {"token": token or ""}
 
 
 def _target(raw: str) -> int | str:

@@ -38,6 +38,7 @@ import open_pnl_log
 import scan_accuracy
 import scan_history
 import scan_worker
+import backtest_server
 import server_role
 import counter_candles
 import ema_filter
@@ -171,6 +172,8 @@ def boot_engine() -> asyncio.Task | None:
     init_db()
     # A deploy or restart mid-replay: those runs can be resumed where they stopped.
     close_orphan_replay_rows(interrupted=True)
+    if server_role.is_backtest():
+        return _boot_backtest_server()
     cfg = engine.load_config()
     tick_store.set_enabled(getattr(cfg, "second_ticks", None) is not False)
     engine.restore_open_books()
@@ -207,6 +210,21 @@ def boot_engine() -> asyncio.Task | None:
     _pnl_alert_task = asyncio.create_task(
         pnl_alerts.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), engine._now)
     )
+    return _task
+
+
+def _boot_backtest_server() -> asyncio.Task:
+    """Backtest server (backtest_server.py): settings rows and replay players only. No live bot loop,
+    scans, guard or alerts run here; the desk's settings are copied in and its Groww session is used."""
+    global _task
+    engine.load_config()
+    ensure_research_config()
+    bots_mod.register(engine)
+    for eng in bot_engines.values():
+        ensure_bot_config(eng.bot_id)
+        bots_mod.register(eng)
+    engine.broker.set_mode("PAPER")
+    _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     return _task
 
 
@@ -1147,8 +1165,8 @@ async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
     if mode not in ("PAPER", "LIVE"):
         raise HTTPException(400, "mode must be PAPER or LIVE")
     if mode == "LIVE":
-        if server_role.is_scanner():
-            raise HTTPException(403, server_role.SCANNER_NO_ORDERS)
+        if server_role.no_orders():
+            raise HTTPException(403, server_role.no_orders_text())
         if not body.confirm_live:
             raise HTTPException(
                 400,
@@ -1183,6 +1201,9 @@ async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
 async def _start_bot(eng: StrategyEngine):
     from strategy_engine import _ist_now
 
+    if server_role.is_backtest():
+        raise HTTPException(409, "This is the backtest server: the bots trade on the main desk. Run backtests here.")
+
     eng._roll_session(_ist_now())
     eng.release_manual_panic()
     eng.release_trade_cap()
@@ -1208,6 +1229,55 @@ async def _start_bot(eng: StrategyEngine):
 @app.post("/api/bot/start")
 async def start_bot():
     return await _start_bot(engine)
+
+
+# ---- Backtest server (backtest_server.py): status, sync, idle time, stop ----
+
+
+def _backtest_only() -> None:
+    if not server_role.is_backtest():
+        raise HTTPException(404, "Not the backtest server")
+
+
+@app.get("/api/backtest/status")
+async def backtest_status():
+    _backtest_only()
+    return backtest_server.status(replays)
+
+
+@app.post("/api/backtest/sync")
+async def backtest_sync():
+    """Copy every bot's settings from the desk again (PAPER forced). Refused while a backtest plays."""
+    _backtest_only()
+    if backtest_server.busy(replays):
+        raise HTTPException(409, "A backtest is running: sync once it has finished, so it keeps the settings it started with.")
+    try:
+        out = await backtest_server.sync(import_bot_settings)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Could not copy the settings from the desk: {exc}") from exc
+    await backtest_server.refresh_token()
+    return {**out, **backtest_server.status(replays)}
+
+
+class IdleUpdate(BaseModel):
+    minutes: int = Field(ge=backtest_server.IDLE_MIN, le=backtest_server.IDLE_MAX)
+
+
+@app.put("/api/backtest/idle")
+async def backtest_idle(body: IdleUpdate):
+    _backtest_only()
+    await asyncio.to_thread(backtest_server.set_idle_minutes, body.minutes)
+    return backtest_server.status(replays)
+
+
+@app.post("/api/backtest/stop")
+async def backtest_stop(force: bool = False):
+    """Stop the backtest server now (Fly stops the machine; opening the page starts it again)."""
+    _backtest_only()
+    if backtest_server.busy(replays) and not force:
+        raise HTTPException(409, "A backtest is running. Stop it first, or stop the server anyway (it can be resumed later).")
+    asyncio.get_running_loop().call_later(1.0, backtest_server.stop_now, "stopped from the page")
+    return {"stopping": True}
 
 
 @app.post("/api/research/bot/start")
@@ -2271,6 +2341,71 @@ def _bot_summary(eng: StrategyEngine) -> dict:
         "net_today": float(kpis["net"]),
         "gross_today": float(kpis["actual_gross"]),
     }
+
+
+# ---- Backtest server link (backtest_server.py) ---------------------------------------------
+
+#: Settings rows copied to the backtest server: bot 1, research, bots 2-4.
+BACKTEST_CONFIG_IDS = (1, 2, 3, 4, 5)
+
+
+def _jsonable(value):
+    if isinstance(value, (dt.datetime, dt.date)):
+        return value.isoformat()
+    return value
+
+
+def export_bot_settings() -> dict:
+    """Desk side: every bot's settings row as plain JSON (no secrets live in BotConfig)."""
+    rows: dict[str, dict] = {}
+    with session_factory()() as db:
+        for config_id in BACKTEST_CONFIG_IDS:
+            row = db.get(BotConfig, config_id)
+            if row is not None:
+                rows[str(config_id)] = {c.name: _jsonable(getattr(row, c.name)) for c in BotConfig.__table__.columns}
+    return {"rows": rows}
+
+
+def _column_value(column, value):
+    if value is None:
+        return None
+    try:
+        kind = column.type.python_type
+    except NotImplementedError:
+        return value
+    if kind is dt.datetime and isinstance(value, str):
+        return dt.datetime.fromisoformat(value)
+    if kind is dt.date and isinstance(value, str):
+        return dt.date.fromisoformat(value)
+    return value
+
+
+def import_bot_settings(rows: dict) -> list[str]:
+    """Backtest server side: write the desk's settings rows here, PAPER forced. Returns the ids copied."""
+    if not server_role.is_backtest():
+        raise RuntimeError("Settings are copied only on the backtest server.")
+    columns = {c.name: c for c in BotConfig.__table__.columns}
+    done: list[str] = []
+    with session_factory()() as db:
+        for key, data in rows.items():
+            try:
+                config_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            if config_id not in BACKTEST_CONFIG_IDS or not isinstance(data, dict):
+                continue
+            row = db.get(BotConfig, config_id)
+            if row is None:
+                row = BotConfig(id=config_id)
+                db.add(row)
+            for name, value in data.items():
+                if name == "id" or name not in columns:
+                    continue
+                setattr(row, name, _column_value(columns[name], value))
+            row.trading_mode = "PAPER"
+            done.append(str(config_id))
+        db.commit()
+    return done
 
 
 def armed_lists() -> dict:

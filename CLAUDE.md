@@ -87,6 +87,7 @@ frontend/src/
                           <origin>/sma off localhost, 127.0.0.1:8001 on localhost)
 scripts/run_sma_terminal.sh   Starts the SMA Terminal backend on :8001 in PAPER
 Dockerfile, fly.toml, .dockerignore   Fly.io deployment
+fly.scanner.toml, fly.backtest.toml   Scanner and backtest servers (SCANNER.md, BACKTEST.md)
 README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 ```
 
@@ -672,6 +673,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the repo variable `DEPLOY_SCANNER` is `true` (secret `FLY_SCANNER_API_TOKEN`), after the desk's deploy job
   (the two shared the org's remote builder and the scanner's deploy hung after pushing layers), even if that
   one failed; each `flyctl deploy` attempt is stopped after 8 minutes and retried once (job limit 25 min).
+- `backend/backtest_server.py` – backtest server (`PALTRA_ROLE=backtest`, third Fly app `paltra-backtest`,
+  `fly.backtest.toml`, setup in `BACKTEST.md`): replays only, on a performance machine that starts on the first visit
+  (`auto_start_machines`) and stops itself when idle (`run`: no replay `LOADING` / `PLAYING` and no page request,
+  `note_request` via the desk app's middleware, for `idle_minutes()`, default 30, 10-240, `backtest_server.json` next to
+  the SMA DB → SIGTERM → exit → Fly stops the machine; `[[restart]] on-failure`). **Never orders**
+  (`server_role.no_orders` covers scanner and backtest: `refuse_orders`, the LIVE switch 403, the desk broker and manual
+  desk) and runs no live bots, scans, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). Copies
+  every `BotConfig` row (1-5) from the desk (`main.export_bot_settings` → desk `GET /api/link/backtest/settings` →
+  `main.import_bot_settings`, PAPER forced) at boot and on "Sync from desk" (refused while a replay plays); never writes
+  back. Past candles use the **desk's Groww session**: desk `GET /api/link/backtest/groww` every 10 min, memory only
+  (`remote_token`, read by `groww_client.desk_session_token` on this role); it never logs in to Groww itself, so it
+  cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
+  Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
+  `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). CI deploys it only when
+  the repo variable `DEPLOY_BACKTEST` is `true` (secret `FLY_BACKTEST_API_TOKEN`), after the desk and the scanner.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
@@ -916,8 +932,8 @@ Real orders reach Groww in only two places:
 
 The US practice desk (`app/services/us_desk.py`) has no order path at all: its fills are local rows.
 
-On the scanner server (`PALTRA_ROLE=scanner`) both paths refuse before the SDK
-(`server_role.refuse_orders`).
+On the scanner server (`PALTRA_ROLE=scanner`) and the backtest server (`PALTRA_ROLE=backtest`)
+both paths refuse before the SDK (`server_role.refuse_orders`, `server_role.no_orders`).
 
 The ORB bot never sends real orders. Every bot and strategy-account entry goes
 through `place_paper_entry` in `backend/app/services/execution.py`, which fills

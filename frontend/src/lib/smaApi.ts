@@ -1308,7 +1308,29 @@ function stockPath(target: ArmTarget, symbol: string): string {
   return target === 1 ? `/api/config/stock/${name}` : `/api/bots/${target}/config/stock/${name}`;
 }
 
+/** Backtest server (backend/backtest_server.py): replays only, stops itself when idle. */
+export type BacktestServerStatus = {
+  role: string;
+  desk_url: string;
+  link: boolean;
+  idle_min: number;
+  idle_left_sec: number;
+  busy: boolean;
+  groww: boolean;
+  groww_error: string | null;
+  synced_at: number | null;
+  synced: string[];
+  sync_error: string | null;
+  up_sec: number;
+};
+
 export const smaApi = {
+  backtestStatus: () => request<BacktestServerStatus>("/api/backtest/status", undefined, 12000, false),
+  backtestSync: () => request<BacktestServerStatus>("/api/backtest/sync", { method: "POST" }, 30000, false),
+  backtestIdle: (minutes: number) =>
+    request<BacktestServerStatus>("/api/backtest/idle", { method: "PUT", body: JSON.stringify({ minutes }) }, 12000, false),
+  backtestStop: (force = false) =>
+    request<{ stopping: boolean }>(`/api/backtest/stop${force ? "?force=true" : ""}`, { method: "POST" }, 12000, false),
   state: () => request<SmaState>("/api/state"),
   /** `symbol` draws that watched stock without moving the chart focus (another tab, a held view). */
   chart: (limit = 240, symbol?: string | null, interval?: number | null) => {

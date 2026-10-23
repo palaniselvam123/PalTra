@@ -336,14 +336,17 @@ export type ScanOptions = {
 
 export type ScanChannel = { provider: string; enabled: boolean; configured: boolean };
 
-/** GET /api/role: "scanner" never sends orders; Arm opens the desk at desk_url. */
+/** GET /api/role: "scanner" and "backtest" never send orders; Arm opens the desk at desk_url. */
 export type ServerRole = {
-  role: "desk" | "scanner";
+  role: "desk" | "scanner" | "backtest";
   /** False on a desk with SCANS=off: its Scalp scans run on the scanner server. */
   scans_enabled: boolean;
   desk_url: string;
   scanner_url: string | null;
   link: boolean;
+  /** The backtest server's address (desk only, BACKTEST_URL), for the "Open backtest server" link. */
+  backtest_url?: string | null;
+  backtest_link?: boolean;
 };
 
 export type DeskArmedBot = { bot: number; name: string; mode: "PAPER" | "LIVE"; armed: string[] };
