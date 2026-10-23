@@ -19,6 +19,7 @@ from app.api import (
     routes_manual,
     routes_marketdata,
     routes_mcp,
+    routes_news,
     routes_watchlist,
     routes_orders,
     routes_reports,
@@ -286,6 +287,11 @@ async def lifespan(app: FastAPI):
     else:
         # SCANS=off: the Scalp scans run on the scanner server; this desk keeps them paused.
         active_scanner.paused = True
+    # News alerts for the bots' armed and held stocks (information only, never trades).
+    from app.services.news_impact import news_watcher
+
+    if not server_role.is_scanner():
+        news_watcher.start()
     await broadcaster.publish("log", {"level": "INFO", "message": "Backend started in PAPER TRADING mode."})
     yield
     if scanner_worker.running:
@@ -307,6 +313,7 @@ async def lifespan(app: FastAPI):
     if sma_task is not None:
         sma_task.cancel()
     active_scanner.stop_background()
+    news_watcher.stop()
     tick_task.cancel()
     square_off_task.cancel()
     health_task.cancel()
@@ -339,6 +346,7 @@ app.include_router(routes_scanner_engine.router)
 app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
 app.include_router(routes_options.router)
+app.include_router(routes_news.router)
 app.include_router(routes_link.router)
 app.include_router(routes_mcp.router)
 # Optional routers that are not in this repository. Skipping a missing module

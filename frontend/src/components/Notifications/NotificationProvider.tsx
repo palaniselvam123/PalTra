@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { ArrowDownRight, ArrowUpRight, ShieldAlert, X } from "lucide-react";
 import { useNotifications, type TradeNotice } from "@/hooks/useNotifications";
 import { markIst, money, timeOnly } from "@/lib/format";
+import { NewsAlertPopups } from "./NewsAlertPopups";
 
 type Ctx = ReturnType<typeof useNotifications>;
 
@@ -20,6 +21,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   return (
     <NotificationContext.Provider value={value}>
       {children}
+      <NewsAlertPopups />
       <div className="fixed bottom-20 right-5 z-50 flex flex-col gap-2 w-[min(380px,calc(100vw-2.5rem))] pointer-events-none">
         {value.toasts.map((t) => (
           <Toast key={t.id} notice={t} onDismiss={() => value.dismiss(t.id)} />

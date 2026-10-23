@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
-import { ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
-import { api, type StockNews } from "@/lib/api";
+import { AlertTriangle, ExternalLink, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { api, type NewsAnalysis } from "@/lib/api";
+import { toneClass, toneWord, urgentAction } from "@/lib/newsTone";
 
 const SOURCE_NAMES: Record<string, string> = { nse: "NSE announcements", google_news: "Google News" };
 
@@ -18,10 +19,12 @@ function ago(at: string | null): string {
 
 /**
  * News for one stock: NSE's own company announcements and Google News headlines, newest first.
- * Groww's trading API has no news, so these two public sources stand in. Read-only.
+ * Groww's trading API has no news, so these two public sources stand in. Each headline is read as
+ * positive / negative (AI when an OpenAI key is saved, else the rule list) and the stock gets an overall
+ * view and a suggestion for your position. Read-only: nothing is traded from it.
  */
 export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: () => void }) {
-  const [data, setData] = useState<StockNews | null>(null);
+  const [data, setData] = useState<NewsAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [only, setOnly] = useState<"all" | "announcement" | "news">("all");
@@ -32,7 +35,7 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
       setLoading(true);
       setError(null);
       api
-        .stockNews(symbol, force)
+        .newsImpact(symbol, force)
         .then(setData)
         .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load the news"))
         .finally(() => setLoading(false));
@@ -97,7 +100,8 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
           .
         </p>
       ) : null}
-      {loading && !data ? <p className="mt-2 text-xs text-slate-400">Loading news…</p> : null}
+      {loading && !data ? <p className="mt-2 text-xs text-slate-400">Loading and reading the news…</p> : null}
+      {data && data.items.length ? <Verdict data={data} /> : null}
       {data && !items.length && !loading && Object.keys(data.errors).length < 2 ? <p className="mt-2 text-xs text-slate-400">No news in the last few days.</p> : null}
       <ul className="mt-2 max-h-80 divide-y divide-white/5 overflow-y-auto">
         {items.map((item) => (
@@ -112,12 +116,24 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
                 {item.kind === "announcement" ? "NSE" : "News"}
               </span>
               <span className="min-w-0 flex-1">
+                <span
+                  title={item.why}
+                  className={clsx(
+                    "mr-1.5 inline-block rounded px-1.5 py-px align-middle text-[10px] font-semibold ring-1 ring-inset",
+                    toneClass(item.sentiment)
+                  )}
+                >
+                  {item.critical ? "⚠ " : ""}
+                  {toneWord(item.sentiment)}
+                  {item.sentiment !== "NEUTRAL" ? ` · ${item.impact.toLowerCase()}` : ""}
+                </span>
                 <span className="text-slate-100 group-hover:text-accentSky group-hover:underline">{item.title}</span>
                 <ExternalLink size={11} aria-hidden className="ml-1 inline opacity-40 group-hover:opacity-100" />
                 {item.detail ? <span className="mt-0.5 block line-clamp-2 text-xs text-slate-400">{item.detail}</span> : null}
                 <span className="mt-0.5 block text-[11px] text-slate-500">
                   {item.source}
                   {item.at ? ` · ${ago(item.at)}` : ""}
+                  {item.sentiment !== "NEUTRAL" && item.why ? ` · ${item.why}` : ""}
                 </span>
               </span>
             </a>
@@ -126,8 +142,43 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
       </ul>
       <p className="mt-2 text-[11px] text-slate-500">
         Groww&apos;s trading API has no news, so this shows NSE&apos;s own company announcements and Google News headlines.
-        Information only: the bot does not read it.
+        The positive / negative read and the suggestion are information only, not investment advice: the bot does not
+        read them and nothing is traded from them.
       </p>
+    </div>
+  );
+}
+
+/** The stock's overall news view and what it suggests for your position. */
+function Verdict({ data }: { data: NewsAnalysis }) {
+  const o = data.overall;
+  const urgent = urgentAction(data.action.code);
+  return (
+    <div
+      className={clsx(
+        "mt-2 rounded-lg border px-3 py-2",
+        urgent ? "border-rose-400/50 bg-rose-500/10" : "border-white/10 bg-white/[0.03]"
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className={clsx("rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", toneClass(o.sentiment))}>
+          {o.critical ? "⚠ " : ""}
+          {toneWord(o.sentiment)} news · {o.impact.toLowerCase()} impact
+        </span>
+        <span className="font-semibold text-slate-100">
+          {urgent ? <AlertTriangle size={13} className="mr-1 inline text-rose-300" aria-hidden /> : null}
+          {data.action.label}
+        </span>
+        <span className="text-xs text-slate-400">
+          {data.side ? `for your ${data.side.toLowerCase()} position` : "you hold none"}
+        </span>
+        <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-500" title={data.ai_error ?? undefined}>
+          {data.method === "ai" ? <Sparkles size={11} aria-hidden /> : null}
+          {data.method === "ai" ? "AI read" : data.ai_error ? "Rule-based read (AI not used)" : "Rule-based read"}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-slate-300">{data.action.why}</p>
+      {o.summary ? <p className="mt-1 text-xs text-slate-400">{o.summary}</p> : null}
     </div>
   );
 }
