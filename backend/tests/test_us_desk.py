@@ -264,9 +264,15 @@ async def test_groww_check_alerts_once(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_config_and_keys_never_leak(db, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    from app.core import encryption
+
     app = FastAPI()
     app.include_router(routes_us.router)
     monkeypatch.delenv("ALPACA_API_KEY_ID", raising=False)
+    # CI has no ENCRYPTION_KEY: a throwaway vault for this test.
+    monkeypatch.setattr(encryption, "_vault", encryption.CredentialVault(Fernet.generate_key().decode()))
 
     class FakeCheck(FakeAlpaca):
         async def account(self):

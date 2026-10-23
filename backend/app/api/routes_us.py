@@ -161,7 +161,10 @@ async def save_keys(body: KeysBody):
         raise HTTPException(400, str(exc)) from exc
     finally:
         await client.aclose()
-    vault = get_vault()
+    try:
+        vault = get_vault()
+    except ValueError as exc:  # ENCRYPTION_KEY missing: the key cannot be stored safely
+        raise HTTPException(500, str(exc)) from exc
     async with async_session() as session:
         row = await session.scalar(select(UsCredential).where(UsCredential.provider == "alpaca"))
         if row is None:
