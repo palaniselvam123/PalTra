@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { CopySettings } from "@/components/Settings/CopySettings";
+import { PinToggle } from "@/components/ui/PinToggle";
+import { usePinned } from "@/lib/usePinned";
 import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } from "@/lib/smaApi";
 
 /**
@@ -22,6 +24,25 @@ export function SmaStrategySettings() {
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [name, setName] = useState("");
   const [nameNote, setNameNote] = useState<string | null>(null);
+  // The bot tabs can be frozen under the menu bar and the section links while the long form scrolls.
+  const [tabsPinned, setTabsPinned] = usePinned("settings-bot-tabs");
+  const [navPinned] = usePinned("navbar");
+  const [sectionsPinned] = usePinned("settings-sections");
+  const [tabsTop, setTabsTop] = useState(0);
+  useEffect(() => {
+    const header = document.querySelector("header");
+    const sections = document.querySelector('nav[aria-label="Settings sections"]');
+    const measure = () =>
+      setTabsTop(
+        (navPinned && header ? header.getBoundingClientRect().height : 0) +
+          (sectionsPinned && sections ? sections.getBoundingClientRect().height : 0)
+      );
+    measure();
+    const watcher = new ResizeObserver(measure);
+    if (header) watcher.observe(header);
+    if (sections) watcher.observe(sections);
+    return () => watcher.disconnect();
+  }, [navPinned, sectionsPinned]);
   useEffect(() => {
     smaApi.bots().then(setBots).catch(() => undefined);
   }, []);
@@ -77,13 +98,21 @@ export function SmaStrategySettings() {
 
   return (
     <section id="sma-strategy" aria-label="SMA terminal strategy" className="terminal-dark scroll-mt-20 rounded-xl">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div
+        style={tabsPinned ? { top: tabsTop } : undefined}
+        className={clsx(
+          "mb-2 flex flex-wrap items-center justify-between gap-2",
+          tabsPinned && "sticky z-[9] -mx-1 bg-base/95 px-1 py-1.5 backdrop-blur"
+        )}
+      >
         <div>
           <h2 className="text-base font-semibold text-slate-100">SMA terminal strategy</h2>
           <p className="text-xs text-slate-400">
             Entry, filters, gap mode, exits, stop and daily limits. The terminal shows a summary.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        <PinToggle pinned={tabsPinned} onChange={setTabsPinned} what="the bot tabs" />
         <div role="group" aria-label="Desk" className="inline-flex rounded-md ring-1 ring-inset ring-white/15">
           {DESKS.map((d) => (
             <button
@@ -102,6 +131,7 @@ export function SmaStrategySettings() {
                   (d === "live" ? "Bot 1" : `Bot ${d.slice(3)}`)}
             </button>
           ))}
+        </div>
         </div>
       </div>
       {error ? (

@@ -195,7 +195,9 @@ async def test_analyze_falls_back_to_rules_without_a_key(monkeypatch):
 
     async def news(symbol, force=False, day=None):
         return {"symbol": "XYZ", "name": "XYZ Ltd", "errors": {},
-                "items": [{"title": "XYZ CEO resigns", "at": at(1), "source": "NSE", "url": "u1"}]}
+                # Stamped against the real clock: analyze() reads it as of now, not as of the fixed NOW.
+                "items": [{"title": "XYZ CEO resigns", "at": (dt.datetime.now(IST) - dt.timedelta(hours=1)).isoformat(),
+                           "source": "NSE", "url": "u1"}]}
 
     async def no_key():
         return None
