@@ -58,11 +58,11 @@ async def test_both_sources_merge_newest_first_and_one_failure_stays_its_own(mon
     sn._cache.clear()
     calls = []
 
-    async def news(symbol, name, client):
+    async def news(symbol, name, client, day=None):
         calls.append("news")
         return sn.parse_google_rss(RSS)
 
-    async def nse(symbol, client):
+    async def nse(symbol, client, day=None):
         raise httpx.HTTPStatusError("blocked", request=httpx.Request("GET", "https://x"), response=httpx.Response(403))
 
     monkeypatch.setattr(sn, "google_news", news)
@@ -74,7 +74,7 @@ async def test_both_sources_merge_newest_first_and_one_failure_stays_its_own(mon
     await sn.stock_news("RELIANCE")  # cached
     assert calls == ["news"]
 
-    async def nse_ok(symbol, client):
+    async def nse_ok(symbol, client, day=None):
         return sn.parse_nse(NSE, symbol)
 
     monkeypatch.setattr(sn, "nse_announcements", nse_ok)

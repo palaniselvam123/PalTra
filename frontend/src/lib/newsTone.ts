@@ -17,3 +17,11 @@ export function toneWord(sentiment: string | null | undefined): string {
 export function urgentAction(code: string | null | undefined): boolean {
   return code === "EXIT" || code === "COVER";
 }
+
+/** Colour for a suggested direction: green for long-side codes, red for short-side ones. */
+export function directionClass(code: string | null | undefined): string {
+  if (code === "BUY" || code === "PREFER_LONG" || code === "COVER") return "text-emerald-300";
+  if (code === "SHORT" || code === "PREFER_SHORT" || code === "EXIT") return "text-rose-300";
+  if (code === "TIGHTEN" || code === "AVOID") return "text-amber-300";
+  return "text-slate-300";
+}

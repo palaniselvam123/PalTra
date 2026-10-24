@@ -8,6 +8,7 @@ import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnosti
 import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
 import { NewsAlerts } from "@/components/Settings/NewsAlerts";
+import { NewsByDay } from "@/components/Settings/NewsByDay";
 import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
 import { SectionNav } from "@/components/Settings/SectionNav";
 import { WhatsAppAlerts } from "@/components/Terminal/WhatsAppAlerts";
@@ -46,6 +47,7 @@ export default function SettingsPage() {
         <AllBotsGuard />
         <PnlAlerts />
         <NewsAlerts />
+        <NewsByDay />
         <SmaStrategySettings />
         {/* The smaller forms sit two to a row on a wide screen instead of stretching across it. */}
         <div className="grid items-start gap-4 xl:grid-cols-2">

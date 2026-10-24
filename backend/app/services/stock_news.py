@@ -10,6 +10,10 @@ website (no documented API), so two public sources are used instead:
 * **Google News** (`google_news`): headlines from Google News' public RSS search
   for the company's name (from the instrument list) or the symbol, last 7 days.
 
+A **past day** (`day=`) asks both sources for that day's window instead (`window`: the
+`LOOKBACK_DAYS` days before it up to its 15:30 close; Google's `after:` / `before:`
+operators, NSE's `from_date` / `to_date`), keeps only items inside it and caches it longer.
+
 `stock_news` asks both at once, keeps each source's error to itself, merges the
 items newest first and caches the answer per symbol for `CACHE_SEC`. Read-only:
 no key, no login, no order path; nothing in the strategy reads it.
@@ -43,12 +47,27 @@ _cache: dict[str, tuple[float, dict]] = {}
 _SUFFIX = re.compile(r"\b(LIMITED|LTD\.?|INDIA LTD|\(INDIA\))\s*$", re.I)
 
 
-def company_query(symbol: str, name: str | None) -> str:
-    """The Google News search: the company's name without "Limited", else the symbol."""
+#: A past day's news (`day=`): that day up to the close, plus the LOOKBACK_DAYS days before it.
+LOOKBACK_DAYS = 2
+SESSION_CLOSE = dt.time(15, 30)
+PAST_CACHE_SEC = 6 * 3600
+
+
+def window(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
+    """The news a trader could have read by `day`'s close: LOOKBACK_DAYS before it, up to 15:30 IST."""
+    start = dt.datetime.combine(day - dt.timedelta(days=LOOKBACK_DAYS), dt.time(0, 0), tzinfo=IST)
+    return start, dt.datetime.combine(day, SESSION_CLOSE, tzinfo=IST)
+
+
+def company_query(symbol: str, name: str | None, day: dt.date | None = None) -> str:
+    """The Google News search: the company's name without "Limited", else the symbol. The last 7 days, or
+    with `day` the dates of its window (Google's after: / before: operators; before is exclusive)."""
     clean = _SUFFIX.sub("", (name or "").strip()).strip(" .,")
-    if clean and clean.upper() != symbol.upper():
-        return f'"{clean}" when:7d'
-    return f'"{symbol}" share when:7d'
+    term = f'"{clean}"' if clean and clean.upper() != symbol.upper() else f'"{symbol}" share'
+    if day is None:
+        return f"{term} when:7d"
+    start, _ = window(day)
+    return f"{term} after:{start:%Y-%m-%d} before:{day + dt.timedelta(days=1):%Y-%m-%d}"
 
 
 def _iso(when: dt.datetime | None) -> str | None:
@@ -117,19 +136,23 @@ def parse_nse(rows: object, symbol: str) -> list[dict]:
     return out
 
 
-async def google_news(symbol: str, name: str | None, client: httpx.AsyncClient) -> list[dict]:
-    url = GOOGLE_RSS.format(q=quote_plus(company_query(symbol, name)))
+async def google_news(symbol: str, name: str | None, client: httpx.AsyncClient, day: dt.date | None = None) -> list[dict]:
+    url = GOOGLE_RSS.format(q=quote_plus(company_query(symbol, name, day)))
     res = await client.get(url, headers={"User-Agent": UA})
     res.raise_for_status()
     return parse_google_rss(res.text)
 
 
-async def nse_announcements(symbol: str, client: httpx.AsyncClient) -> list[dict]:
+async def nse_announcements(symbol: str, client: httpx.AsyncClient, day: dt.date | None = None) -> list[dict]:
     headers = {"User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9"}
     # NSE answers its API only with the cookies its home page sets.
     await client.get(NSE_HOME, headers={**headers, "Accept": "text/html"})
+    url = NSE_API.format(symbol=quote_plus(symbol))
+    if day is not None:
+        start, _ = window(day)
+        url += f"&from_date={start:%d-%m-%Y}&to_date={day:%d-%m-%Y}"
     res = await client.get(
-        NSE_API.format(symbol=quote_plus(symbol)),
+        url,
         headers={**headers, "Referer": NSE_PAGE.format(symbol=symbol)},
     )
     res.raise_for_status()
@@ -154,16 +177,35 @@ def _why(exc: Exception) -> str:
     return str(exc)[:160] or type(exc).__name__
 
 
-async def stock_news(symbol: str, force: bool = False) -> dict:
-    """Both sources for one symbol, newest first, cached for CACHE_SEC."""
+def in_window(item: dict, day: dt.date) -> bool:
+    """A dated item inside `day`'s window (an undated one is kept: the search already asked for those dates)."""
+    at = item.get("at")
+    if not at:
+        return True
+    try:
+        when = dt.datetime.fromisoformat(at)
+    except ValueError:
+        return True
+    when = when if when.tzinfo else when.replace(tzinfo=IST)
+    start, end = window(day)
+    return start <= when <= end
+
+
+async def stock_news(symbol: str, force: bool = False, day: dt.date | None = None) -> dict:
+    """Both sources for one symbol, newest first, cached for CACHE_SEC. With `day`, the news of that past day's
+    window only (`window`), cached longer: an earlier day's news does not change."""
     symbol = symbol.strip().upper()
-    hit = _cache.get(symbol)
-    if hit and not force and time.monotonic() - hit[0] < CACHE_SEC:
+    if day is not None and day >= dt.datetime.now(IST).date():
+        day = None  # today (or later) is the live search
+    key = symbol if day is None else f"{symbol}@{day.isoformat()}"
+    ttl = CACHE_SEC if day is None else PAST_CACHE_SEC
+    hit = _cache.get(key)
+    if hit and not force and time.monotonic() - hit[0] < ttl:
         return hit[1]
     name = await asyncio.to_thread(_name_of, symbol)
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
         news, nse = await asyncio.gather(
-            google_news(symbol, name, client), nse_announcements(symbol, client), return_exceptions=True
+            google_news(symbol, name, client, day), nse_announcements(symbol, client, day), return_exceptions=True
         )
     errors = {}
     items: list[dict] = []
@@ -172,15 +214,18 @@ async def stock_news(symbol: str, force: bool = False) -> dict:
             errors[label] = _why(got)
         else:
             items.extend(got)
+    if day is not None:
+        items = [i for i in items if in_window(i, day)]
     items.sort(key=lambda i: i.get("at") or "", reverse=True)
     out = {
         "symbol": symbol,
         "name": name,
+        "day": day.isoformat() if day else None,
         "items": items[:MAX_ITEMS],
         "errors": errors,
         "fetched_at": dt.datetime.now(IST).isoformat(timespec="seconds"),
     }
     # A total failure is not cached, so the next look tries again at once.
     if items or not errors:
-        _cache[symbol] = (time.monotonic(), out)
+        _cache[key] = (time.monotonic(), out)
     return out

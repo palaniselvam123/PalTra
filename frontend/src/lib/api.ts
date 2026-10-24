@@ -885,6 +885,8 @@ export type OptionOrder = {
 export type NewsSentiment = "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED";
 export type NewsImpact = "LOW" | "MEDIUM" | "HIGH";
 export type NewsAction = { code: string; label: string; why: string };
+/** What the news says to do in every case: a new entry while flat, and an open long or short. */
+export type NewsPlan = { flat: NewsAction; long: NewsAction; short: NewsAction };
 export type ScoredNewsItem = StockNewsItem & {
   score: number;
   sentiment: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
@@ -907,13 +909,30 @@ export type NewsAnalysis = {
   items: ScoredNewsItem[];
   overall: NewsOverall;
   action: NewsAction;
+  plan?: NewsPlan;
   side: "LONG" | "SHORT" | null;
+  /** A past day's news (YYYY-MM-DD), read as of that day's close (`as_of`); null = today's live news. */
+  day?: string | null;
+  as_of?: string;
   method: "ai" | "rules";
   ai_error: string | null;
   errors: Record<string, string>;
   fetched_at: string | null;
   disclaimer: string;
 };
+export type NewsDayRow = {
+  symbol: string;
+  name?: string | null;
+  armed: string[];
+  overall?: NewsOverall;
+  plan?: NewsPlan;
+  count?: number;
+  items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why">)[];
+  method?: "ai" | "rules";
+  errors?: Record<string, string>;
+  error?: string;
+};
+export type NewsDayReport = { day: string; window: { from: string; to: string }; stocks: NewsDayRow[]; disclaimer: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {
   id: number;
@@ -960,9 +979,9 @@ export type NewsWatchStock = {
   } | null;
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, timeoutMs = REQUEST_MS): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const parent = options?.signal;
   if (parent) {
     if (parent.aborted) controller.abort();
@@ -1296,8 +1315,20 @@ export const api = {
   optionOrder: (order: OptionOrder) =>
     request<OptionTrade>("/api/options/order", { method: "POST", body: JSON.stringify(order) }),
   optionClose: (id: number) => request<OptionTrade>(`/api/options/book/${id}/close`, { method: "POST" }),
-  newsImpact: (symbol: string, force = false) =>
-    request<NewsAnalysis>(`/api/news-impact/stock/${encodeURIComponent(symbol.toUpperCase())}${force ? "?force=true" : ""}`),
+  newsImpact: (symbol: string, force = false, date?: string | null) => {
+    const q = new URLSearchParams();
+    if (force) q.set("force", "true");
+    if (date) q.set("date", date);
+    const qs = q.toString();
+    return request<NewsAnalysis>(`/api/news-impact/stock/${encodeURIComponent(symbol.toUpperCase())}${qs ? `?${qs}` : ""}`);
+  },
+  /** Every armed stock's news on a date (or the symbols given), with what to do flat, long or short. */
+  newsDay: (date: string, symbols?: string[]) =>
+    request<NewsDayReport>(
+      `/api/news-impact/day?date=${encodeURIComponent(date)}${symbols?.length ? `&symbols=${encodeURIComponent(symbols.join(","))}` : ""}`,
+      undefined,
+      120_000
+    ),
   newsAlerts: (afterId = 0, limit = 30) =>
     request<{ alerts: NewsAlertRow[] }>(`/api/news-impact/alerts?after_id=${afterId}&limit=${limit}`),
   newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
