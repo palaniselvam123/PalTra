@@ -804,14 +804,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   cookies) and Google News RSS headlines for the company's name from the instrument list (`google_news`, last 7 days),
   asked together, each source's error kept apart (`errors`), merged newest first, cached `CACHE_SEC` (5 min) per symbol.
   Desk `GET /api/instruments/news/{symbol}[?force=true]`; the chart's **News** button (`StockNewsPanel`); MCP
-  `get_stock_news`. No key, no order path; nothing in the strategy reads it.
+  `get_stock_news`. A **past day** (`stock_news(..., day=)`, `?date=YYYY-MM-DD` on the news routes): both sources are asked for
+  that day's window (`window`: `LOOKBACK_DAYS` 2 days before it up to its 15:30 close; Google's `after:` / `before:`, NSE's
+  `from_date` / `to_date`), items outside it are dropped (`in_window`), cached 6 h. No key, no order path; nothing in the
+  strategy reads it.
 - `backend/app/services/news_impact.py` – news impact and news alerts (information only, never trades): each headline from
   `stock_news` is scored by a rule list (`score_text`: Indian corporate-news phrases with weights, critical phrases such as
   fraud / raids / SEBI bans / defaults / insolvency / CEO exits / plant fires / open offers; a denial softens it) or, with an
   OpenAI key saved (Settings → AI Trading Expert) and `use_ai`, by OpenAI (`ai_read`, no web search, JSON schema, cached per
   headline set; a failure falls back to the rules, `ai_error`). `overall` weights recent headlines (half-life 24 h, 3 days
-  max; MIXED when both ways); `action(view, side)` gives KEEP / EXIT / COVER / TIGHTEN / BUY / SHORT / AVOID / NO_ACTION for
-  the position. Desk `GET /api/news-impact/stock/{symbol}` (the chart's News panel shows the verdict and each headline's
+  max; MIXED when both ways); `action(view, side)` gives KEEP / EXIT / COVER / TIGHTEN for an open long or short and, while
+  flat, the direction for a new entry (BUY / PREFER_LONG / NO_ACTION / PREFER_SHORT / SHORT: long and short both, never
+  buy-only); `plan(view)` gives all three (flat, long, short) and is sent with every analysis and shown on the News panel and
+  in alerts. **News on a date** (`day_report`, desk `GET /api/news-impact/day?date=&symbols=`, Settings → "News on a date",
+  `components/Settings/NewsByDay.tsx`; the chart's News panel has a Date box too): every armed / held stock (or the typed
+  ones, up to 40) read as of that day's close (`analyze(..., day=)`: `overall` and the AI read use that time), strongest news
+  first. Desk `GET /api/news-impact/stock/{symbol}` (the chart's News panel shows the verdict and each headline's
   chip). **News alerts**: `NewsWatcher` (started in the desk lifespan, not on the scanner) every `every_min` (15) minutes on
   trading days 07:30-20:00 IST reads every stock armed or held on Bots 1-4 (terminal `news_watch_list`) plus
   `extra_symbols`; a headline not alerted before (`NewsAlert.key`), at most `ALERT_MAX_AGE_H` (6 h) old, with impact ≥

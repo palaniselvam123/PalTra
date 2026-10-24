@@ -70,13 +70,106 @@ def test_overall_weights_recent_and_marks_mixed():
         (-0.6, False, "SHORT", "KEEP"),
         (0.7, False, None, "BUY"),
         (-0.7, False, None, "SHORT"),
-        (-0.7, True, None, "AVOID"),
+        (-0.7, True, None, "SHORT"),
+        (0.3, False, None, "PREFER_LONG"),
+        (-0.3, False, None, "PREFER_SHORT"),
         (0.05, False, None, "NO_ACTION"),
         (-0.3, True, "LONG", "EXIT"),
     ],
 )
 def test_action(score, critical, side, code):
     assert ni.action({"score": score, "critical": critical}, side)["code"] == code
+
+
+def test_plan_covers_both_directions():
+    p = ni.plan({"score": -0.8, "critical": True})
+    assert p["flat"]["code"] == "SHORT" and "small" in p["flat"]["why"]
+    assert p["long"]["code"] == "EXIT" and p["short"]["code"] == "KEEP"
+    p = ni.plan({"score": 0.6, "critical": False})
+    assert p["flat"]["code"] == "BUY" and p["long"]["code"] == "KEEP" and p["short"]["code"] == "COVER"
+    assert "skip short signals" in p["flat"]["why"]
+
+
+def test_past_day_window_and_queries():
+    from app.services import stock_news as sn
+
+    day = dt.date(2026, 10, 20)
+    start, end = sn.window(day)
+    assert start.isoformat().startswith("2026-10-18T00:00") and end.isoformat().startswith("2026-10-20T15:30")
+    q = sn.company_query("TCS", "Tata Consultancy Services Limited", day)
+    assert q == '"Tata Consultancy Services" after:2026-10-18 before:2026-10-21'
+    assert sn.company_query("TCS", "Tata Consultancy Services Limited").endswith("when:7d")
+    assert sn.in_window({"at": "2026-10-19T11:00:00+05:30"}, day)
+    assert not sn.in_window({"at": "2026-10-20T16:10:00+05:30"}, day)  # after the close
+    assert not sn.in_window({"at": "2026-10-17T10:00:00+05:30"}, day)
+    assert sn.in_window({"at": None}, day)
+
+
+@pytest.mark.asyncio
+async def test_past_day_news_is_read_as_of_that_close(monkeypatch):
+    from app.services import stock_news as sn
+
+    day = dt.date(2026, 10, 20)
+    asked = {}
+
+    async def google(symbol, name, client, d=None):
+        asked["google"] = d
+        return [
+            {"kind": "news", "title": "XYZ profit falls 40%, misses estimates", "url": "g1", "source": "G", "at": "2026-10-20T09:00:00+05:30"},
+            {"kind": "news", "title": "XYZ wins big order", "url": "g2", "source": "G", "at": "2026-10-22T09:00:00+05:30"},
+        ]
+
+    async def nse(symbol, client, d=None):
+        asked["nse"] = d
+        return []
+
+    monkeypatch.setattr(sn, "google_news", google)
+    monkeypatch.setattr(sn, "nse_announcements", nse)
+    monkeypatch.setattr(sn, "_name_of", lambda s: "XYZ Ltd")
+    monkeypatch.setattr(sn, "_cache", {})
+
+    async def no_key():
+        return None
+
+    monkeypatch.setattr(ni, "_openai_key", no_key)
+    r = await ni.analyze("XYZ", day=day)
+    assert asked == {"google": day, "nse": day}
+    assert [i["url"] for i in r["items"]] == ["g1"]  # the later headline is outside that day
+    assert r["day"] == "2026-10-20" and r["as_of"].startswith("2026-10-20T15:30")
+    assert r["overall"]["sentiment"] == "NEGATIVE" and r["plan"]["flat"]["code"] in ("SHORT", "PREFER_SHORT")
+    assert r["plan"]["long"]["code"] in ("EXIT", "TIGHTEN")
+
+
+@pytest.mark.asyncio
+async def test_day_report_ranks_stocks_and_keeps_failures(monkeypatch):
+    async def fake(symbol, *, use_ai=True, side=None, day=None, force=False):
+        if symbol == "BAD":
+            raise RuntimeError("source down")
+        score = {"UP": 0.6, "FLAT": 0.0}[symbol]
+        view = {"score": score, "sentiment": ni.sentiment_of(score), "impact": ni.impact_of(score), "critical": False}
+        return {"name": symbol, "items": [{"title": "t", "score": score}], "overall": view, "plan": ni.plan(view),
+                "method": "rules", "errors": {}}
+
+    monkeypatch.setattr(ni, "analyze", fake)
+    out = await ni.day_report(dt.date(2026, 10, 20), {"FLAT": {"armed": ["Bot 1"]}, "UP": {"armed": ["Bot 2"]}, "BAD": {}})
+    assert [r["symbol"] for r in out["stocks"]] == ["UP", "FLAT", "BAD"]
+    assert out["stocks"][0]["plan"]["flat"]["code"] == "BUY" and out["stocks"][0]["armed"] == ["Bot 2"]
+    assert "source down" in out["stocks"][2]["error"]
+
+
+def test_day_route_checks_the_date(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_news
+
+    app = FastAPI()
+    app.include_router(routes_news.router)
+    client = TestClient(app)
+    assert client.get("/api/news-impact/day?date=2026-13-01&symbols=TCS").status_code == 400
+    assert client.get("/api/news-impact/day?date=2999-01-01&symbols=TCS").status_code == 400
+    assert client.get("/api/news-impact/day?date=2020-01-01&symbols=TCS").status_code == 400
+    assert client.get("/api/news-impact/day?date=2026-10-20&symbols=bad%20symbol!").status_code == 400
 
 
 def test_critical_needs_a_held_position_against_it():
@@ -100,7 +193,7 @@ def test_merge_ai_replaces_scores_and_overall():
 async def test_analyze_falls_back_to_rules_without_a_key(monkeypatch):
     from app.services import stock_news
 
-    async def news(symbol, force=False):
+    async def news(symbol, force=False, day=None):
         return {"symbol": "XYZ", "name": "XYZ Ltd", "errors": {},
                 "items": [{"title": "XYZ CEO resigns", "at": at(1), "source": "NSE", "url": "u1"}]}
 
@@ -138,7 +231,7 @@ async def test_watcher_alerts_once_and_rings_only_for_critical(db, monkeypatch):
                   {"title": "ARMED profit rises, beats estimates", "at": at(30), "source": "NSE", "url": "a2"}],
     }
 
-    async def fake_news(symbol, force=False):
+    async def fake_news(symbol, force=False, day=None):
         return {"symbol": symbol, "name": symbol, "errors": {}, "items": news[symbol]}
 
     async def no_key():

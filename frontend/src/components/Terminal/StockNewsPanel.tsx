@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { AlertTriangle, ExternalLink, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { api, type NewsAnalysis } from "@/lib/api";
-import { toneClass, toneWord, urgentAction } from "@/lib/newsTone";
+import { directionClass, toneClass, toneWord, urgentAction } from "@/lib/newsTone";
 
 const SOURCE_NAMES: Record<string, string> = { nse: "NSE announcements", google_news: "Google News" };
 
@@ -28,6 +28,9 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [only, setOnly] = useState<"all" | "announcement" | "news">("all");
+  // A past day's news (read as of that day's close); "" = today's live news.
+  const [date, setDate] = useState("");
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
   const load = useCallback(
     (force: boolean) => {
@@ -35,12 +38,12 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
       setLoading(true);
       setError(null);
       api
-        .newsImpact(symbol, force)
+        .newsImpact(symbol, force, date || null)
         .then(setData)
         .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load the news"))
         .finally(() => setLoading(false));
     },
-    [symbol]
+    [symbol, date]
   );
 
   useEffect(() => {
@@ -56,7 +59,17 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
           News · <span className="text-amber-300">{symbol}</span>
           {data?.name ? <span className="ml-1 font-normal text-slate-400">{data.name}</span> : null}
         </h3>
-        <span className="flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-slate-400" title="News of a past day, read as of that day's 15:30 close">
+            Date
+            <input
+              type="date"
+              value={date}
+              max={today}
+              onChange={(e) => setDate(e.target.value && e.target.value < today ? e.target.value : "")}
+              className="min-h-8 rounded-md border border-white/15 bg-black/30 px-1 text-xs text-slate-100"
+            />
+          </label>
           {(["all", "announcement", "news"] as const).map((k) => (
             <button
               key={k}
@@ -102,7 +115,7 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
       ) : null}
       {loading && !data ? <p className="mt-2 text-xs text-slate-400">Loading and reading the news…</p> : null}
       {data && data.items.length ? <Verdict data={data} /> : null}
-      {data && !items.length && !loading && Object.keys(data.errors).length < 2 ? <p className="mt-2 text-xs text-slate-400">No news in the last few days.</p> : null}
+      {data && !items.length && !loading && Object.keys(data.errors).length < 2 ? <p className="mt-2 text-xs text-slate-400">{date ? `No news found around ${date}.` : "No news in the last few days."}</p> : null}
       <ul className="mt-2 max-h-80 divide-y divide-white/5 overflow-y-auto">
         {items.map((item) => (
           <li key={`${item.url}-${item.title}`} className="py-2">
@@ -178,7 +191,30 @@ function Verdict({ data }: { data: NewsAnalysis }) {
         </span>
       </div>
       <p className="mt-1 text-xs text-slate-300">{data.action.why}</p>
+      {data.plan ? <PlanRows plan={data.plan} /> : null}
+      {data.day ? <p className="mt-1 text-[11px] text-slate-500">News of {data.day}, read as of that day&apos;s 15:30 close.</p> : null}
       {o.summary ? <p className="mt-1 text-xs text-slate-400">{o.summary}</p> : null}
     </div>
+  );
+}
+
+/** What the news says in every case: a new entry either way, and an open long or short. */
+export function PlanRows({ plan }: { plan: NonNullable<NewsAnalysis["plan"]> }) {
+  const rows: [string, (typeof plan)["flat"]][] = [
+    ["New entry", plan.flat],
+    ["If you are long", plan.long],
+    ["If you are short", plan.short],
+  ];
+  return (
+    <dl className="mt-1.5 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
+      {rows.map(([label, a]) => (
+        <div key={label} className="contents">
+          <dt className="text-slate-500">{label}</dt>
+          <dd className={clsx("font-semibold", directionClass(a.code))} title={a.why}>
+            {a.label}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

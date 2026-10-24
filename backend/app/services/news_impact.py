@@ -201,7 +201,9 @@ ACTIONS = {
     "BUY": "Buy candidate: wait for an entry signal",
     "SHORT": "Short candidate: wait for an entry signal",
     "AVOID": "Avoid a new buy",
-    "NO_ACTION": "No action",
+    "PREFER_LONG": "Lean long: favour buy signals",
+    "PREFER_SHORT": "Lean short: favour short signals",
+    "NO_ACTION": "No news bias: trade signals both ways",
 }
 
 
@@ -223,15 +225,29 @@ def action(view: dict, side: str | None) -> dict:
         else:
             code, why = "KEEP", "The news supports or does not hurt your short." if s <= -0.15 else "No news strong enough to act on."
     else:
+        # Flat: which direction the news favours for a NEW entry, long or short, never only buying.
         if s >= 0.5:
-            code, why = "BUY", "Strong positive news. Do not chase a gap: wait for the bot's or your own entry signal."
+            code, why = "BUY", (
+                "Strong positive news: take buy signals, skip short signals. Do not chase a gap up: wait for an entry signal."
+            )
+        elif s >= 0.2:
+            code, why = "PREFER_LONG", "Positive news: buy signals are favoured; be careful with shorts."
         elif s <= -0.5:
-            code, why = "SHORT" if not view.get("critical") else "AVOID", "Strong negative news; avoid buying."
+            code, why = "SHORT", (
+                "Strong negative news: take short signals, skip buy signals. Do not chase a gap down: wait for an entry signal."
+            )
+            if view.get("critical"):
+                why += " Critical news can gap the stock or put it in the F&O ban: keep the size small and the stop on."
         elif s <= -0.2:
-            code, why = "AVOID", "Negative news; avoid a fresh buy for now."
+            code, why = "PREFER_SHORT", "Negative news: short signals are favoured; avoid fresh buys."
         else:
-            code, why = "NO_ACTION", "No news strong enough to act on."
+            code, why = "NO_ACTION", "No news strong enough to favour a side: trade the signals both ways."
     return {"code": code, "label": ACTIONS[code], "why": why}
+
+
+def plan(view: dict) -> dict:
+    """What to do in every case: a new entry while flat, and an open long or short."""
+    return {"flat": action(view, None), "long": action(view, "LONG"), "short": action(view, "SHORT")}
 
 
 # ---- AI ----------------------------------------------------------------------
@@ -296,11 +312,13 @@ async def _ai_model() -> str:
     return (await ai_advisor.config()).model
 
 
-async def ai_read(symbol: str, name: str | None, items: list[dict]) -> dict:
+async def ai_read(symbol: str, name: str | None, items: list[dict], now: dt.datetime | None = None) -> dict:
     """OpenAI's read of the headlines (cached per set of headlines). Raises on any failure."""
     from app.services.ai_advisor import supports_reasoning
 
     digest = hashlib.sha1("|".join(i.get("title", "") for i in items).encode()).hexdigest()
+    now = now or dt.datetime.now(IST)
+    digest = hashlib.sha1(f"{digest}|{now:%Y-%m-%d}".encode()).hexdigest()
     hit = _ai_cache.get((symbol, digest))
     if hit and time.monotonic() - hit[0] < AI_TTL_SEC:
         return hit[1]
@@ -316,7 +334,7 @@ async def ai_read(symbol: str, name: str | None, items: list[dict]) -> dict:
     payload: dict = {
         "model": model,
         "instructions": AI_INSTRUCTIONS,
-        "input": f"Stock: {symbol} ({name or symbol}). Today: {dt.datetime.now(IST):%Y-%m-%d %H:%M} IST.\n\n" + "\n".join(lines),
+        "input": f"Stock: {symbol} ({name or symbol}). Today: {now:%Y-%m-%d %H:%M} IST.\n\n" + "\n".join(lines),
         "max_output_tokens": 6000,
         "text": {"format": {"type": "json_schema", "name": "news_impact", "strict": True, "schema": AI_SCHEMA}},
     }
@@ -339,7 +357,7 @@ async def ai_read(symbol: str, name: str | None, items: list[dict]) -> dict:
     return parsed
 
 
-def merge_ai(items: list[dict], ai: dict) -> tuple[list[dict], dict]:
+def merge_ai(items: list[dict], ai: dict, now: dt.datetime | None = None) -> tuple[list[dict], dict]:
     """Per-headline AI calls replace the rule scores; the overall view is the AI's."""
     by_index = {int(x["index"]): x for x in ai.get("items", []) if isinstance(x, dict) and "index" in x}
     out = []
@@ -351,7 +369,7 @@ def merge_ai(items: list[dict], ai: dict) -> tuple[list[dict], dict]:
                   "critical": bool(x["critical"]), "why": x["why"], "by": "ai"}
         out.append(it)
     o = ai.get("overall") or {}
-    view = overall(out)
+    view = overall(out, now)
     score = max(-1.0, min(1.0, float(o.get("score", view["score"]))))
     view.update({"score": round(score, 3), "sentiment": o.get("sentiment") or view["sentiment"],
                  "impact": impact_of(score), "summary": o.get("summary") or ""})
@@ -361,18 +379,23 @@ def merge_ai(items: list[dict], ai: dict) -> tuple[list[dict], dict]:
 # ---- one stock ---------------------------------------------------------------
 
 
-async def analyze(symbol: str, *, use_ai: bool = True, side: str | None = None, force: bool = False) -> dict:
-    """The stock's news, each headline scored, the overall view and what to do with `side` (LONG/SHORT/None)."""
+async def analyze(
+    symbol: str, *, use_ai: bool = True, side: str | None = None, force: bool = False, day: dt.date | None = None
+) -> dict:
+    """The stock's news, each headline scored, the overall view and what to do with `side` (LONG/SHORT/None),
+    plus `plan` for every case. With `day` (a past date), that day's news as of its 15:30 close."""
     from app.services import stock_news
 
-    news = await stock_news.stock_news(symbol, force=force)
+    news = await stock_news.stock_news(symbol, force=force, day=day)
+    past = news.get("day") is not None
+    now = stock_news.window(day)[1] if past and day else dt.datetime.now(IST)
     items = [{**i, **score_text(i.get("title", ""), i.get("detail")), "by": "rules"} for i in news.get("items", [])]
-    view = overall(items)
+    view = overall(items, now)
     method, ai_error = "rules", None
     if use_ai and items:
         try:
-            ai = await ai_read(news["symbol"], news.get("name"), items[:25])
-            head, view = merge_ai(items[:25], ai)
+            ai = await ai_read(news["symbol"], news.get("name"), items[:25], now)
+            head, view = merge_ai(items[:25], ai, now)
             items = head + items[25:]
             method = "ai"
         except Exception as exc:  # noqa: BLE001 - the rules answer stands
@@ -383,11 +406,60 @@ async def analyze(symbol: str, *, use_ai: bool = True, side: str | None = None, 
         "items": items,
         "overall": view,
         "action": action(view, side),
+        "plan": plan(view),
         "side": side,
+        "day": news.get("day"),
+        "as_of": now.isoformat(timespec="minutes"),
         "method": method,
         "ai_error": ai_error,
         "errors": news.get("errors", {}),
         "fetched_at": news.get("fetched_at"),
+        "disclaimer": "Information only, not investment advice. Nothing is traded from this.",
+    }
+
+
+# ---- a past day, every armed stock -------------------------------------------
+
+DAY_CONCURRENCY = 4
+DAY_ITEMS = 6
+
+
+async def day_report(day: dt.date, symbols: dict[str, dict], *, use_ai: bool = True) -> dict:
+    """Every stock's news for `day` (as of its close): the view and what to do flat, long or short."""
+    sem = asyncio.Semaphore(DAY_CONCURRENCY)
+
+    async def one(symbol: str, entry: dict) -> dict:
+        async with sem:
+            try:
+                r = await analyze(symbol, use_ai=use_ai, side=None, day=day)
+            except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
+                return {"symbol": symbol, "armed": entry.get("armed", []), "error": str(exc)[:200]}
+        items = [
+            {k: it.get(k) for k in ("title", "source", "at", "url", "sentiment", "impact", "critical", "why")}
+            for it in sorted(r["items"], key=lambda i: abs(float(i.get("score") or 0)), reverse=True)[:DAY_ITEMS]
+        ]
+        return {
+            "symbol": symbol,
+            "name": r.get("name"),
+            "armed": entry.get("armed", []),
+            "overall": r["overall"],
+            "plan": r["plan"],
+            "count": len(r["items"]),
+            "items": items,
+            "method": r["method"],
+            "errors": r.get("errors", {}),
+        }
+
+    rows = await asyncio.gather(*(one(s, e) for s, e in symbols.items()))
+    rank = {"NEGATIVE": 0, "POSITIVE": 0, "MIXED": 1, "NEUTRAL": 2}
+    rows.sort(key=lambda r: (rank.get((r.get("overall") or {}).get("sentiment"), 3), -abs((r.get("overall") or {}).get("score") or 0)))
+    from app.services.stock_news import window
+
+    start, end = window(day)
+    return {
+        "day": day.isoformat(),
+        "window": {"from": start.isoformat(timespec="minutes"), "to": end.isoformat(timespec="minutes")},
+        "stocks": rows,
         "disclaimer": "Information only, not investment advice. Nothing is traded from this.",
     }
 
@@ -443,6 +515,9 @@ def alert_text(result: dict, fresh: list[dict], entry: dict, critical: bool) -> 
     elif entry.get("armed"):
         lines.append("Armed on: " + ", ".join(entry["armed"]))
     lines.append(f"What to do: {act['label']}. {act['why']}")
+    if not held:
+        both = result.get("plan") or plan(view)
+        lines.append(f"If you are long: {both['long']['label']} · If you are short: {both['short']['label']}")
     if view.get("summary"):
         lines.append(view["summary"][:300])
     lines.append(f"({'AI' if result['method'] == 'ai' else 'rule-based'} read; not advice, nothing was traded.)")

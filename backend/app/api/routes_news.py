@@ -4,6 +4,7 @@ Information only: nothing here places, closes or changes an order.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 from fastapi import APIRouter, HTTPException, Query
@@ -25,15 +26,61 @@ def _clean(symbol: str) -> str:
     return s
 
 
+MAX_PAST_DAYS = 365
+MAX_DAY_SYMBOLS = 40
+
+
+def _day(date: str | None) -> dt.date | None:
+    """A past date (YYYY-MM-DD) for the news of that day; None or today = the live news."""
+    if not date:
+        return None
+    try:
+        day = dt.date.fromisoformat(date)
+    except ValueError as exc:
+        raise HTTPException(400, "date must be YYYY-MM-DD") from exc
+    today = dt.datetime.now(news_impact.IST).date()
+    if day > today:
+        raise HTTPException(400, "That date is in the future.")
+    if (today - day).days > MAX_PAST_DAYS:
+        raise HTTPException(400, f"Pick a date within the last {MAX_PAST_DAYS} days.")
+    return None if day == today else day
+
+
 @router.get("/stock/{symbol}")
-async def stock(symbol: str, force: bool = False, ai: bool = True, side: str | None = Query(None, pattern="^(LONG|SHORT)$")):
-    """The stock's headlines scored, its overall view, and what to do (KEEP / EXIT / BUY …) for `side`."""
+async def stock(
+    symbol: str,
+    force: bool = False,
+    ai: bool = True,
+    side: str | None = Query(None, pattern="^(LONG|SHORT)$"),
+    date: str | None = None,
+):
+    """The stock's headlines scored, its overall view, what to do for `side`, and `plan` (flat / long / short).
+    With `date` (YYYY-MM-DD, a past day) that day's news as of its close."""
     s = _clean(symbol)
-    if side is None:
+    day = _day(date)
+    if side is None and day is None:
         entry = (await _watch()).get(s)
         side = news_impact.side_of(entry) if entry else None
     cfg = await news_impact.load_settings()
-    return await news_impact.analyze(s, use_ai=ai and cfg.use_ai, side=side, force=force)
+    return await news_impact.analyze(s, use_ai=ai and cfg.use_ai, side=side, force=force, day=day)
+
+
+@router.get("/day")
+async def day_news(date: str, symbols: str | None = None, ai: bool = True):
+    """Every armed / held stock's news on a date (or the `symbols` given, comma-separated): its view and
+    what to do for a new entry either way and for an open long or short. Read-only."""
+    day = _day(date) or dt.datetime.now(news_impact.IST).date()
+    if symbols:
+        names = [_clean(x) for x in symbols.split(",") if x.strip()]
+        watched = {n: {"armed": [], "held": []} for n in dict.fromkeys(names)}
+    else:
+        watched = await _watch()
+    if not watched:
+        raise HTTPException(400, "No armed stocks: arm stocks on a bot or type the symbols.")
+    if len(watched) > MAX_DAY_SYMBOLS:
+        watched = dict(list(watched.items())[:MAX_DAY_SYMBOLS])
+    cfg = await news_impact.load_settings()
+    return await news_impact.day_report(day, watched, use_ai=ai and cfg.use_ai)
 
 
 async def _watch() -> dict:
