@@ -47,6 +47,7 @@ export function BulkArm({
   onDone,
   onClose,
   server,
+  emptyReason,
 }: {
   symbols: string[];
   desks: ArmDesk[];
@@ -55,6 +56,8 @@ export function BulkArm({
   onDone: () => void;
   onClose: () => void;
   server?: ArmServerChoice;
+  /** Why no bot could be listed (the scanner's link error), shown instead of the plain message. */
+  emptyReason?: string | null;
 }) {
   const where = server?.value ?? "desk";
   const names = symbols.map((s) => s.toUpperCase());
@@ -239,7 +242,11 @@ export function BulkArm({
             <p className="mb-2 text-xs text-slate-400">Which bot? They go on its Trade list and order on its next SMA cross.</p>
             {server ? <ArmServerSwitch choice={server} /> : null}
             {where === "backtest" && server?.loading ? null : desks.length === 0 ? (
-              <p className="text-xs text-amber-300">The SMA terminal is not answering, so no bot can be armed right now.</p>
+              <p className="text-xs text-amber-300">
+                {emptyReason
+              ? `No bot can be armed right now: ${emptyReason}`
+              : "The SMA terminal is not answering, so no bot can be armed right now."}
+              </p>
             ) : (
               <ul className="space-y-1.5">
                 {desks.map((d) => (

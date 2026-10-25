@@ -47,6 +47,8 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   const [bt, setBt] = useState<{ bots: BotSummary[]; research: string[] | null }>({ bots: [], research: null });
   const [btLoading, setBtLoading] = useState(false);
   const [btError, setBtError] = useState<string | null>(null);
+  // Scanner only: why the desk's bots could not be read (shown in the dialogs instead of a bare "not answering").
+  const [deskError, setDeskError] = useState<string | null>(null);
 
   const role = useServerRole();
   const onScanner = role?.role === "scanner";
@@ -59,8 +61,9 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
         .then((d) => {
           setBots(asSummary(d.bots));
           setResearchArmed(d.research);
+          setDeskError(d.error);
         })
-        .catch(() => {});
+        .catch((e: unknown) => setDeskError(`Could not reach the scanner's link: ${e instanceof Error ? e.message : "no answer"}`));
       return;
     }
     smaApi.bots().then(setBots).catch(() => {});
@@ -184,6 +187,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           onDone={reload}
           onClose={() => setArmMany(null)}
           server={serverChoice}
+          emptyReason={server === "desk" ? deskError : null}
         />
       ) : null}
       {armFor ? (
@@ -193,6 +197,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           onPick={(d) => armOn(armFor.symbol, d, armFor.source)}
           onClose={() => setArmFor(null)}
           server={serverChoice}
+          emptyReason={server === "desk" ? deskError : null}
         />
       ) : null}
       {armAsk ? (
