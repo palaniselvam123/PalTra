@@ -166,7 +166,7 @@ class _Terminal:
 def link(monkeypatch):
     monkeypatch.delenv("PALTRA_ROLE", raising=False)
     monkeypatch.setattr("app.sma_host.load_terminal", lambda: _Terminal)
-    monkeypatch.setattr(routes_link, "_cache", None)
+    monkeypatch.setattr(routes_link, "_cache", {})
     app = FastAPI()
     app.include_router(routes_link.router)
     return TestClient(app)
@@ -201,7 +201,7 @@ def test_scanner_does_not_serve_the_armed_link(link, monkeypatch, scanner):
 def test_scanner_reads_the_desk_armed_lists(link, monkeypatch, scanner):
     monkeypatch.setenv("SCANNER_LINK_TOKEN", TOKEN)
 
-    async def fake_fetch():
+    async def fake_fetch(server="desk"):
         return _Terminal.armed_lists()
 
     monkeypatch.setattr(routes_link, "_fetch_desk_armed", fake_fetch)
@@ -213,7 +213,7 @@ def test_scanner_reads_the_desk_armed_lists(link, monkeypatch, scanner):
 def test_scanner_link_failure_is_reported_without_the_token(link, monkeypatch, scanner):
     monkeypatch.setenv("SCANNER_LINK_TOKEN", TOKEN)
 
-    async def down():
+    async def down(server="desk"):
         raise RuntimeError("the desk answered 503")
 
     monkeypatch.setattr(routes_link, "_fetch_desk_armed", down)
@@ -349,7 +349,8 @@ def test_scanner_sends_the_live_confirmation_to_the_desk(monkeypatch, scanner):
     monkeypatch.setenv("SCANNER_LINK_TOKEN", TOKEN)
     sent = []
 
-    async def fake_to_desk(method, path, body=None):
+    async def fake_to_desk(method, path, body=None, server="desk"):
+        assert server == "desk"
         sent.append((method, path, body))
         return {"ok": True}
 

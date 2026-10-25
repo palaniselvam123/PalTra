@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import clsx from "clsx";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import type { ArmTarget, BotSummary } from "@/lib/smaApi";
+import type { LinkServer } from "@/lib/api";
 
 export type ArmDesk = {
   target: ArmTarget;
@@ -27,6 +28,70 @@ export function armDesks(bots: BotSummary[], researchArmed: string[] | null): Ar
   return out;
 }
 
+/** Scanner only: arm on the trading desk's bots or on the backtest server's (practice copies). */
+export type ArmServerChoice = {
+  value: LinkServer;
+  onChange: (server: LinkServer) => void;
+  loading: boolean;
+  error: string | null;
+  /** The backtest server's address, for "Open the backtest server". */
+  url: string | null;
+};
+
+/** The terminal page of a bot on the backtest server (bot 1 is the default desk). */
+export function backtestTerminalUrl(url: string, target: ArmTarget): string {
+  const desk = target === "research" ? "research" : target === 1 ? "" : `bot${target}`;
+  return `${url}/terminal/${desk ? `?desk=${desk}` : ""}`;
+}
+
+/**
+ * Main desk / Backtest server switch at the top of the scanner's Arm dialogs. The backtest server's
+ * bots are always PAPER copies of the desk's: arming there never touches the desk.
+ */
+export function ArmServerSwitch({ choice, disabled }: { choice: ArmServerChoice; disabled?: boolean }) {
+  const opts: { v: LinkServer; label: string }[] = [
+    { v: "desk", label: "Main desk" },
+    { v: "backtest", label: "Backtest server" },
+  ];
+  return (
+    <div className="mb-3">
+      <div role="radiogroup" aria-label="Arm on which server" className="grid grid-cols-2 gap-1 rounded-lg bg-slate-500/10 p-1">
+        {opts.map((o) => (
+          <button
+            key={o.v}
+            type="button"
+            role="radio"
+            aria-checked={choice.value === o.v}
+            disabled={disabled}
+            onClick={() => choice.onChange(o.v)}
+            className={clsx(
+              "min-h-9 rounded-md px-2 text-xs font-semibold disabled:opacity-50",
+              choice.value === o.v
+                ? o.v === "backtest"
+                  ? "bg-accentViolet/15 text-accentViolet ring-1 ring-inset ring-accentViolet/50"
+                  : "bg-accentSky/15 text-accentSky ring-1 ring-inset ring-accentSky/40"
+                : "text-slate-400 hover:bg-slate-500/10"
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        {choice.value === "backtest"
+          ? "Practice copies of the bots, for backtests only: nothing here reaches the desk or Groww. The stocks stay armed there when it restarts; Sync from desk on that server replaces them."
+          : "The real bots on the trading desk."}
+      </p>
+      {choice.value === "backtest" && choice.loading ? (
+        <p className="mt-1 flex items-center gap-1.5 text-[11px] text-accentViolet">
+          <Loader2 size={12} className="animate-spin" aria-hidden /> Reaching the backtest server (it may take 20-30 s to start)…
+        </p>
+      ) : null}
+      {choice.error ? <p className="mt-1 text-[11px] text-amber-300">{choice.error}</p> : null}
+    </div>
+  );
+}
+
 /** Short names of the desks a stock is armed on, e.g. ["Bot 1", "Research"]. */
 export function armedOn(desks: ArmDesk[], symbol: string): string[] {
   const name = symbol.toUpperCase();
@@ -43,11 +108,14 @@ export function ArmPicker({
   desks,
   onPick,
   onClose,
+  server,
 }: {
   symbol: string;
   desks: ArmDesk[];
   onPick: (desk: ArmDesk) => void;
   onClose: () => void;
+  /** Scanner with a backtest server: the Main desk / Backtest server switch. */
+  server?: ArmServerChoice;
 }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -55,7 +123,7 @@ export function ArmPicker({
     window.addEventListener("keydown", onKey);
     box.current?.querySelector<HTMLButtonElement>("button[data-pick]:not(:disabled)")?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, desks]);
   const name = symbol.toUpperCase();
   const liveOwner = desks.find((d) => d.mode === "LIVE" && d.armed.includes(name));
 
@@ -80,7 +148,8 @@ export function ArmPicker({
         <p className="mb-3 text-xs text-slate-400">
           It goes on that bot&apos;s Trade list and orders on its next SMA cross, with that bot&apos;s settings.
         </p>
-        {desks.length === 0 ? (
+        {server ? <ArmServerSwitch choice={server} /> : null}
+        {server?.value === "backtest" && server.loading ? null : desks.length === 0 ? (
           <p className="text-xs text-amber-300">The SMA terminal is not answering, so no bot can be armed right now.</p>
         ) : (
           <ul className="space-y-1.5">

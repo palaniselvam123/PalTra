@@ -1321,6 +1321,8 @@ export type BacktestServerStatus = {
   synced_at: number | null;
   synced: string[];
   sync_error: string | null;
+  /** Stocks the scanner armed here, kept on top of the desk's Trade lists at start-up. */
+  scanner_armed?: number;
   up_sec: number;
 };
 

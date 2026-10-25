@@ -19,6 +19,12 @@ never slows the bots. Same image; this role:
   ``idle_minutes()`` (default 30, 10-240, saved next to the SMA DB) → SIGTERM → the process
   exits → Fly stops the machine (``auto_start_machines`` starts it on the next visit). A stopped
   machine is not billed for CPU or memory.
+* **Takes arms from the scanner** (``routes_link``, scanner ``?server=backtest``): with
+  ``SCANNER_LINK_TOKEN`` set here too, the scanner's Arm can put a stock on this server's bots
+  (all PAPER). Each such stock is remembered (``note_scanner_arm``, ``backtest_server.json``), and
+  the start-up copy keeps it, with its own quantity / stop numbers, on top of the desk's Trade list
+  while it is still armed here; "Sync from desk" replaces everything (``clear_scanner_armed``). An
+  arm that wakes the machine waits for the start-up copy first (``wait_first_sync``).
 
 Both link calls need ``Authorization: Bearer <BACKTEST_LINK_TOKEN>`` (24+ characters, set on the
 desk and the backtest server only; not the scanner's token, since this link carries the Groww
@@ -66,6 +72,7 @@ class _State:
         self.synced: list[str] = []
         self.sync_error: str | None = None
         self.stopping = False
+        self.first_sync_done = False
 
 
 state = _State()
@@ -95,21 +102,80 @@ def _settings_path() -> Path:
     return Path("backtest_server.json")
 
 
+def _read_file() -> dict:
+    try:
+        data = json.loads(_settings_path().read_text())
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_file(**changes) -> None:
+    data = {**_read_file(), **changes}
+    path = _settings_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
 def idle_minutes() -> int:
     try:
-        value = int(json.loads(_settings_path().read_text()).get("idle_min", IDLE_DEFAULT_MIN))
-    except (OSError, ValueError, TypeError, AttributeError):
+        value = int(_read_file().get("idle_min", IDLE_DEFAULT_MIN))
+    except (ValueError, TypeError):
         return IDLE_DEFAULT_MIN
     return min(IDLE_MAX, max(IDLE_MIN, value))
 
 
 def set_idle_minutes(minutes: int) -> int:
     value = min(IDLE_MAX, max(IDLE_MIN, int(minutes)))
-    path = _settings_path()
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"idle_min": value}))
-    tmp.replace(path)
+    _write_file(idle_min=value)
     return value
+
+
+# ---- stocks armed here from the scanner ----------------------------------------
+
+
+def scanner_armed() -> dict[int, list[str]]:
+    """config id -> stocks the scanner armed on this server (kept by the start-up copy)."""
+    raw = _read_file().get("scanner_armed")
+    out: dict[int, list[str]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, names in raw.items():
+        try:
+            config_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(names, list):
+            clean = [str(n).upper() for n in names if isinstance(n, str) and n.strip()]
+            if clean:
+                out[config_id] = list(dict.fromkeys(clean))
+    return out
+
+
+def set_scanner_armed(kept: dict[int, list[str]]) -> None:
+    _write_file(scanner_armed={str(k): v for k, v in kept.items() if v})
+
+
+def note_scanner_arm(config_id: int, symbol: str) -> None:
+    kept = scanner_armed()
+    names = kept.setdefault(int(config_id), [])
+    if symbol.upper() not in names:
+        names.append(symbol.upper())
+    set_scanner_armed(kept)
+
+
+def clear_scanner_armed() -> None:
+    set_scanner_armed({})
+
+
+async def wait_first_sync(timeout: float = 30.0) -> None:
+    """On a fresh start, let the start-up copy land before a scanner arm, so it is not copied over."""
+    if not server_role.is_backtest():
+        return
+    deadline = time.monotonic() + timeout
+    while not state.first_sync_done and time.monotonic() < deadline:
+        await asyncio.sleep(0.25)
 
 
 def busy(replays: dict) -> bool:
@@ -181,14 +247,19 @@ async def refresh_token(client: httpx.AsyncClient | None = None) -> bool:
     return bool(token)
 
 
-async def sync(apply: Callable[[dict], list[str]], client: httpx.AsyncClient | None = None) -> dict:
-    """Copy the desk's bot settings here (PAPER forced by `apply`). Raises with a reason on failure."""
+async def sync(
+    apply: Callable[..., list[str]], client: httpx.AsyncClient | None = None, keep: dict[int, list[str]] | None = None
+) -> dict:
+    """Copy the desk's bot settings here (PAPER forced by `apply`). Raises with a reason on failure.
+
+    `keep` (the start-up copy only): stocks the scanner armed here, which `apply` keeps on top of the
+    desk's Trade lists."""
     try:
         body = await _desk_get(SETTINGS_PATH, client)
         rows = body.get("rows")
         if not isinstance(rows, dict) or not rows:
             raise RuntimeError("the desk sent no settings")
-        done = await asyncio.to_thread(apply, rows)
+        done = await asyncio.to_thread(apply, rows, keep) if keep else await asyncio.to_thread(apply, rows)
     except Exception as exc:  # noqa: BLE001
         state.sync_error = str(exc)[:200]
         raise
@@ -210,6 +281,7 @@ def status(replays: dict) -> dict:
         "synced_at": state.synced_at,
         "synced": state.synced,
         "sync_error": state.sync_error,
+        "scanner_armed": sum(len(v) for v in scanner_armed().values()),
         "up_sec": round(time.monotonic() - state.started),
     }
 
@@ -221,9 +293,11 @@ async def run(apply: Callable[[dict], list[str]], replays: Callable[[], dict]) -
     async with httpx.AsyncClient(timeout=15) as client:
         await refresh_token(client)
         try:
-            await sync(apply, client)
+            await sync(apply, client, keep=scanner_armed())
         except Exception:  # noqa: BLE001 - shown on the page; the last synced settings stay
             pass
+        finally:
+            state.first_sync_done = True
         while True:
             await asyncio.sleep(CHECK_EVERY_SEC)
             if time.monotonic() - state.token_at >= TOKEN_EVERY_SEC or not state.token:

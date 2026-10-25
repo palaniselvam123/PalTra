@@ -1,12 +1,21 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { smaApi, type BotSummary } from "@/lib/smaApi";
-import { api } from "@/lib/api";
+import { api, type DeskArmedBot, type LinkServer } from "@/lib/api";
 import { useServerRole } from "@/hooks/useServerRole";
-import { ArmPicker, armDesks, type ArmDesk } from "@/components/Scalp/ArmPicker";
+import {
+  ArmPicker,
+  armDesks,
+  backtestTerminalUrl,
+  type ArmDesk,
+  type ArmServerChoice,
+} from "@/components/Scalp/ArmPicker";
 import { ArmPrompt } from "@/components/Terminal/ArmPrompt";
 import { BulkArm } from "@/components/Scalp/BulkArm";
+
+const asSummary = (bots: DeskArmedBot[]): BotSummary[] =>
+  bots.map((b) => ({ ...b, status: "", held: [], trades_today: 0, net_today: 0 }));
 
 /**
  * Arm a stock on an SMA bot from any page (Scalp, Movers): which bot first,
@@ -19,6 +28,8 @@ import { BulkArm } from "@/components/Scalp/BulkArm";
  * On the scanner server (which never trades) the bots are the desk's: the armed chips,
  * the prompt's settings and the arm itself go through the desk link, PAPER and LIVE.
  * A LIVE bot is confirmed here first and the link refuses it without that confirmation.
+ * With a backtest server set up (`backtest_arm`), the dialogs also offer "Backtest server": the
+ * same arm goes to that server's PAPER copies of the bots instead, for a backtest there.
  */
 export function useArming(priceOf?: (symbol: string) => number | null | undefined) {
   // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them.
@@ -30,17 +41,23 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   // Several ticked stocks armed on one bot with the same quantity / stop / target (BulkArm).
   const [armMany, setArmMany] = useState<{ symbols: string[]; source?: string | null } | null>(null);
   const [arming, setArming] = useState<string | null>(null);
-  const [armNote, setArmNote] = useState<string | null>(null);
+  const [armNote, setArmNote] = useState<ReactNode | null>(null);
+  // Scanner only: arm on the desk (default) or on the backtest server, and that server's Trade lists.
+  const [server, setServer] = useState<LinkServer>("desk");
+  const [bt, setBt] = useState<{ bots: BotSummary[]; research: string[] | null }>({ bots: [], research: null });
+  const [btLoading, setBtLoading] = useState(false);
+  const [btError, setBtError] = useState<string | null>(null);
 
   const role = useServerRole();
   const onScanner = role?.role === "scanner";
+  const btUrl = onScanner && role?.backtest_arm ? (role.backtest_url ?? null) : null;
 
   const loadDesks = useCallback(() => {
     if (onScanner) {
       api
         .deskArmed()
         .then((d) => {
-          setBots(d.bots.map((b) => ({ ...b, status: "", held: [], trades_today: 0, net_today: 0 })));
+          setBots(asSummary(d.bots));
           setResearchArmed(d.research);
         })
         .catch(() => {});
@@ -53,25 +70,62 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
       .catch(() => setResearchArmed(null));
   }, [onScanner]);
 
-  const desks = useMemo(() => armDesks(bots, researchArmed), [bots, researchArmed]);
+  // The backtest server may be stopped: this first call starts it (Fly), so it can take a while.
+  const loadBacktest = useCallback(() => {
+    setBtLoading(true);
+    setBtError(null);
+    api
+      .deskArmed("backtest")
+      .then((d) => {
+        setBt({ bots: asSummary(d.bots), research: d.research });
+        setBtError(d.error);
+      })
+      .catch((e: unknown) => setBtError(`Could not reach the backtest server: ${e instanceof Error ? e.message : "no answer"}`))
+      .finally(() => setBtLoading(false));
+  }, []);
+
+  const deskDesks = useMemo(() => armDesks(bots, researchArmed), [bots, researchArmed]);
+  // The backtest server's bots are always PAPER; shown as such whatever the copy says.
+  const btDesks = useMemo(
+    () => armDesks(bt.bots, bt.research).map((d) => ({ ...d, mode: "PAPER" as const })),
+    [bt]
+  );
+  const desks = server === "backtest" ? btDesks : deskDesks;
+  const serverChoice: ArmServerChoice | undefined = btUrl
+    ? {
+        value: server,
+        onChange: (next) => {
+          setServer(next);
+          if (next === "backtest") loadBacktest();
+        },
+        loading: btLoading,
+        error: server === "backtest" ? btError : null,
+        url: btUrl,
+      }
+    : undefined;
   /** Stock → the desks it is armed on ("Bot 1", "Research", …). */
   const armed = useMemo(() => {
     const out = new Map<string, string[]>();
-    for (const d of desks) for (const s of d.armed) out.set(s, [...(out.get(s) ?? []), d.name]);
+    for (const d of deskDesks) for (const s of d.armed) out.set(s, [...(out.get(s) ?? []), d.name]);
     return out;
-  }, [desks]);
+  }, [deskDesks]);
 
   // "Arm" asks which bot first; a LIVE bot is confirmed again before it is armed.
+  const reload = () => {
+    loadDesks();
+    if (server === "backtest") loadBacktest();
+  };
+
   const arm = (symbol: string, source?: string | null) => {
     setArmNote(null);
-    loadDesks();
+    reload();
     setArmFor({ symbol, source: source ?? null });
   };
   /** Arm every ticked stock on one bot, with one set of numbers (and backtest them there). */
   const armSeveral = (symbols: string[], source?: string | null) => {
     if (!symbols.length) return;
     setArmNote(null);
-    loadDesks();
+    reload();
     setArmMany({ symbols, source: source ?? null });
   };
   const armOn = (symbol: string, desk: ArmDesk, source?: string | null) => {
@@ -80,7 +134,8 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   };
   /** Runs from the prompt: LIVE is confirmed again, the prompt's changes saved, then the stock armed. */
   const armNow = async (symbol: string, desk: ArmDesk, save: () => Promise<void>, source?: string | null) => {
-    if (desk.mode === "LIVE") {
+    const where = server;
+    if (desk.mode === "LIVE" && where === "desk") {
       const ok = window.confirm(
         `Arm ${symbol} on ${desk.name} for LIVE SMA orders? ${desk.name} can buy or sell it with real money on its next SMA cross.`
       );
@@ -91,16 +146,30 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     try {
       await save();
       if (onScanner) {
-        await api.deskArm({ target: desk.target, symbol, source: source ?? null, confirm_live: desk.mode === "LIVE" });
+        await api.deskArm(
+          { target: desk.target, symbol, source: source ?? null, confirm_live: where === "desk" && desk.mode === "LIVE" },
+          where
+        );
       } else {
         await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
       }
-      setArmNote(
-        `${symbol} is armed on ${desk.name}${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
-      );
+      if (where === "backtest" && btUrl) {
+        setArmNote(
+          <>
+            {symbol} is armed on {desk.name} on the backtest server (practice copy).{" "}
+            <a href={backtestTerminalUrl(btUrl, desk.target)} target="_blank" rel="noreferrer" className="font-semibold underline">
+              Open it to run the backtest
+            </a>
+          </>
+        );
+      } else {
+        setArmNote(
+          `${symbol} is armed on ${desk.name}${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
+        );
+      }
     } finally {
       setArming(null);
-      loadDesks();
+      reload();
     }
   };
 
@@ -112,8 +181,9 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           desks={desks}
           onScanner={onScanner}
           source={armMany.source}
-          onDone={loadDesks}
+          onDone={reload}
           onClose={() => setArmMany(null)}
+          server={serverChoice}
         />
       ) : null}
       {armFor ? (
@@ -122,23 +192,24 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           desks={desks}
           onPick={(d) => armOn(armFor.symbol, d, armFor.source)}
           onClose={() => setArmFor(null)}
+          server={serverChoice}
         />
       ) : null}
       {armAsk ? (
         <ArmPrompt
           symbol={armAsk.symbol}
-          deskName={armAsk.desk.name}
+          deskName={server === "backtest" ? `${armAsk.desk.name} (backtest server)` : armAsk.desk.name}
           target={armAsk.desk.target}
-          live={armAsk.desk.mode === "LIVE"}
+          live={server === "desk" && armAsk.desk.mode === "LIVE"}
           price={priceOf?.(armAsk.symbol) ?? null}
           onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source)}
           onClose={() => setArmAsk(null)}
           io={
             onScanner
               ? {
-                  load: (t, s) => api.deskStock(t, s),
+                  load: (t, s) => api.deskStock(t, s, server),
                   // Runs only after armNow's LIVE question was answered yes.
-                  save: (t, s, body) => api.deskSaveStock(t, s, body, armAsk.desk.mode === "LIVE"),
+                  save: (t, s, body) => api.deskSaveStock(t, s, body, server === "desk" && armAsk.desk.mode === "LIVE", server),
                 }
               : undefined
           }

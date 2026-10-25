@@ -35,6 +35,14 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
   is still playing keeps it on even with the tab closed. **Stop server** on the page
   stops it at once; a backtest stopped that way can be resumed next time.
 - **Results stay on the backtest server** (its own volume) and show in its Backtests tab.
+- **The scanner can arm stocks here.** The scanner's Arm (one stock or Arm ticked) has a
+  **Main desk / Backtest server** switch. On Backtest server the stocks go on this server's
+  copies of the bots (always PAPER) with the quantity and stop you set, and the desk is not
+  touched. If this server is stopped, the arm starts it (allow 20-30 s) and waits for its
+  start-up copy from the desk, so the copy does not wipe it. Stocks armed this way are kept
+  each time this server starts again, while they are still armed here; **Sync from desk**
+  replaces them with the desk's lists (it asks first). The bar on the terminal shows how
+  many there are.
 
 ## Setup (one time, outside market hours)
 
@@ -75,12 +83,26 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
    fly deploy -c fly.backtest.toml
    ```
 
-5. **Check it**: open `https://paltra-backtest.fly.dev/terminal/`, sign in. The violet
+5. **Let the scanner arm here (optional)**. Give the backtest server the scanner's link
+   token (the same `SCANNER_LINK_TOKEN` value the desk and the scanner already have), and
+   tell the scanner where the backtest server is:
+
+   ```bash
+   fly secrets set -a paltra-backtest SCANNER_LINK_TOKEN=<the scanner's token>
+   fly secrets set -a paltra-scanner BACKTEST_URL=https://paltra-backtest.fly.dev
+   ```
+
+   If you no longer have the token, make a new one and set it on all three apps (the desk
+   restarts, so do it outside market hours):
+   `fly secrets set -a paltra SCANNER_LINK_TOKEN=...`, then the same on `paltra-scanner` and
+   `paltra-backtest`. The scanner's Arm then shows **Main desk / Backtest server**.
+
+6. **Check it**: open `https://paltra-backtest.fly.dev/terminal/`, sign in. The violet
    **Backtest server** bar should say "Settings copied just now" and "Groww: desk
    session in use" (log in to Groww on the desk first if it says no session). Run a
    backtest as on the desk.
 
-6. **Deploy it from CI** from now on. In GitHub → Settings → Secrets and variables →
+7. **Deploy it from CI** from now on. In GitHub → Settings → Secrets and variables →
    Actions:
    - secret `FLY_BACKTEST_API_TOKEN` = `fly tokens create deploy -a paltra-backtest`
    - variable `DEPLOY_BACKTEST` = `true`

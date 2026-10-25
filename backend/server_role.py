@@ -114,4 +114,6 @@ def describe() -> dict:
         "link": bool(link_token()),
         "backtest_url": backtest_url() or None,
         "backtest_link": bool(backtest_link_token()),
+        # Scanner only: its Arm can also arm on the backtest server (BACKTEST_URL + the link token).
+        "backtest_arm": is_scanner() and bool(backtest_url()) and bool(link_token()),
     }
