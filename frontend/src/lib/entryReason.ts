@@ -27,6 +27,7 @@ const ENTRY_LONG: Record<string, string> = {
 const FILL: Record<string, [string, string]> = {
   EXTREME_LIMIT: ["limit", "filled at the signal candle's extreme limit"],
   PULLBACK: ["pullback", "filled when the price came back to the pullback level"],
+  CANDLE_CONFIRM: ["candle confirmed", "filled once the entry candle went the trade's way (past its open)"],
 };
 
 /** Short label, e.g. "SMA cross · limit"; null for older trades with no reason saved. */

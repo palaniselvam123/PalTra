@@ -404,6 +404,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the limit sends the normal entry through `_open` (every check, stop, cap, cut-off and one LIVE bot per stock apply;
   nothing rests on Groww's book). Takes over from the tall-candle pullback; a breakout arrival's own level still wins.
   Settings → 1. When to enter. The stock research baseline keeps it off.
+- `backend/entry_candle.py` – entry-candle colour check (`entry_candle_confirm`, off by default, per bot and per stock,
+  PAPER and LIVE): the entry checks read closed candles, so a signal from a green candle can still fill on a candle that
+  then closes red. With it on, every entry `apply_signal` would order at once (cross, gap-mode entry, join, late /
+  early-reversal entry, re-entry; not candle patterns) waits as a `PullbackOrder` (`confirm=True`) until the price is
+  `entry_candle_pct` (0.05) % past the **forming** candle's open on the side the real order goes (above it for a buy,
+  below for a sell; a flipped stock is judged on its real order). `StrategyEngine._watch_pullbacks` moves the level to
+  each new forming candle's open, so the next candle can still fill; dropped after `entry_candle_max` (2) closed
+  candles, when the SMAs cross against the signal, at the cut-off or trade cap. The tall-candle pullback, the
+  candle-extreme limit and a breakout arrival take over from it. Entry reason suffix `:CANDLE_CONFIRM`. Settings → 1.
+  When to enter (How the entry order is placed). The stock research baseline keeps it off.
 - `backend/recovery.py` – structural exit, recovery hold and the trend-to-chop handoff (all off by default,
   per bot and per stock, PAPER and LIVE; meant for the trend bot, Bot 3). **Slow SMA exit** (`slow_sma_exit`):
   `StrategyEngine._watch_slow_sma` closes a trade on the first candle closed after the entry beyond the slow SMA
@@ -771,8 +781,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   No order is placed.
 - Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
   saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
-  `EARLY_REVERSAL`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`); a fill from a waiting `PullbackOrder` adds
-  `:PULLBACK` or `:EXTREME_LIMIT`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
+  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`); a fill from a waiting
+  `PullbackOrder` adds `:PULLBACK`, `:EXTREME_LIMIT` or `:CANDLE_CONFIRM`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
   card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
 - `backend/arm_log.py` – arm log (bookkeeping only): a SQLAlchemy `before_flush` hook writes an `ArmLog` row
   (`config_id` 1 / 2 research / 3-5, symbol, `ARM` / `UNARM`, source chip, PAPER/LIVE) for every change of a

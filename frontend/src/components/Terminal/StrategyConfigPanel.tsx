@@ -95,6 +95,9 @@ const LABELS: Record<string, string> = {
   extreme_invalid_pct: "cancel beyond (%)",
   extreme_expiry_candles: "limit wait (candles)",
   extreme_cancel_on_cross: "cancel on an SMA cross against",
+  entry_candle_confirm: "entry candle must go the trade's way",
+  entry_candle_pct: "entry candle margin",
+  entry_candle_max: "entry candle wait",
   slow_sma_exit: "slow SMA exit",
   recovery_hold: "recovery hold",
   recovery_tolerance_pct: "recovery target %",
@@ -319,6 +322,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     extreme_invalid_pct: Math.min(5, Math.max(0, Number(form.extreme_invalid_pct ?? 0.05) || 0)),
     extreme_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.extreme_expiry_candles ?? 2) || 2))),
     extreme_cancel_on_cross: form.extreme_cancel_on_cross !== false,
+    entry_candle_confirm: Boolean(form.entry_candle_confirm),
+    entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
+    entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
     slow_sma_exit: Boolean(form.slow_sma_exit),
     recovery_hold: Boolean(form.recovery_hold),
     recovery_tolerance_pct: Math.min(5, Math.max(0, Number(form.recovery_tolerance_pct ?? 0.15) || 0)),
@@ -827,6 +833,41 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Cancel if the SMAs cross against it
             </label>
           </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.entry_candle_confirm)}
+              onChange={(e) => set("entry_candle_confirm", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("entry_candle_confirm") && <OwnTag />}
+            Enter only while the entry candle goes the trade&apos;s way
+            <InfoTip label="About the entry-candle check">
+              The checks read closed candles, so a signal from a green candle can still fill on a candle that then closes red.
+              With this on, the order waits inside its own candle: a sell goes only once the price is below that candle&apos;s
+              open by the margin (red so far), a buy only once it is above it (green so far). If a candle closes the wrong way
+              the next one can still fill, up to the number of candles below; it is cancelled if the SMAs cross against the
+              signal, at the cut-off or the trade cap. When it fills the price is a little worse than the candle&apos;s open, and
+              a move that dips first may be missed. The tall-candle pullback and the candle-extreme limit wait for their own
+              price and take over from it.
+            </InfoTip>
+          </label>
+          {form.entry_candle_confirm ? (
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field
+                label="Past the candle's open by (%)"
+                value={String(form.entry_candle_pct ?? 0.05)}
+                onChange={(v) => set("entry_candle_pct", v)}
+                own={isOwn("entry_candle_pct")}
+              />
+              <Field
+                label="Wait at most (candles)"
+                value={String(form.entry_candle_max ?? 2)}
+                onChange={(v) => set("entry_candle_max", v)}
+                own={isOwn("entry_candle_max")}
+              />
+            </div>
+          ) : null}
         </div>
       </FieldGroup>
       <FieldGroup id="check" title="2. Checks before entering" hint="Every ticked check must agree, or the signal is skipped" on={onCount("check")} wide={wide}>
@@ -2025,6 +2066,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
+  if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
 
   // 2. Checks before entering
