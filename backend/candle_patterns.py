@@ -6,6 +6,11 @@ A bullish pattern buys at the start of the next candle, a bearish one sells
 short; either way the trade is closed at the end of that candle
 (``CANDLE_END``), then the next candle is judged afresh.
 
+``entry_mode = "COLOUR"`` (`colour_call`) rides the candle colour on the same
+``pattern_tf`` candles instead: a green candle buys, a red one sells, the trade
+is held while the candles keep its colour and the first candle of the other
+colour closes it (``COLOUR_TURN``) and opens the other way.
+
 The pattern names follow ``frontend/src/lib/candlePatterns.ts`` (the chart's
 data table), so what the table calls a candle is what the bot acted on.
 
@@ -30,9 +35,9 @@ from charges import calculate_charges
 
 IST = ZoneInfo("Asia/Kolkata")
 SESSION_OPEN_MIN = 9 * 60 + 15
-PATTERN_TFS = (1, 3, 5)
+PATTERN_TFS = (1, 3, 5, 10, 15)
 PATTERN_SETS = ("STRONG", "ALL")
-ENTRY_MODES = ("SMA", "PATTERN")
+ENTRY_MODES = ("SMA", "PATTERN", "COLOUR")
 
 DEFAULTS = {
     "entry_mode": "SMA",
@@ -57,6 +62,16 @@ def setting(cfg, name: str):
 
 def uses_patterns(cfg) -> bool:
     return str(setting(cfg, "entry_mode")).upper() == "PATTERN"
+
+
+def uses_colour(cfg) -> bool:
+    """Ride the candle colour (``entry_mode = "COLOUR"``), see `colour_call`."""
+    return str(setting(cfg, "entry_mode")).upper() == "COLOUR"
+
+
+def per_candle(cfg) -> bool:
+    """Entries judged on candles of ``pattern_tf`` minutes (patterns or colour), not on the SMA cross."""
+    return uses_patterns(cfg) or uses_colour(cfg)
 
 
 # ---- pattern names (port of candlePatterns.ts) ----------------------------------------------------
@@ -304,3 +319,29 @@ def pattern_call(frame: pd.DataFrame, cfg) -> PatternCall:
                 f"{name} — candles too small for the charges ({range_pct:.3f}% range < {need:.3f}% needed)",
             )
     return PatternCall(side, name, f"{name} on the {tf}-minute candle")
+
+
+def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
+    """Ride the candle colour (``entry_mode = "COLOUR"``): the side the newest closed candle asks for.
+
+    Each time a candle of ``pattern_tf`` minutes closes, a green one (close above open) asks
+    for a long and a red one for a short. The engine holds a trade while the candles keep its
+    colour, and on the first candle of the other colour closes it and opens the other way at
+    the start of the next candle. A doji (close = open) asks for nothing: the trade is held.
+    `frame` is the enriched 1-minute tape with the forming candle last.
+    """
+    tf = int(setting(cfg, "pattern_tf"))
+    closed = frame.iloc[:-1] if frame is not None and len(frame) >= 2 else None
+    if closed is None or closed.empty:
+        return PatternCall(None, "", "waiting for candles")
+    if tf > 1 and not closes_bucket(int(closed["ts"].iloc[-1]), tf):
+        return PatternCall(None, "", f"waiting for the {tf}-minute candle to close")
+    rows = tf_candles(closed, tf)
+    if not rows:
+        return PatternCall(None, "", f"waiting for a closed {tf}-minute candle")
+    last = rows[-1]
+    if last["close"] > last["open"]:
+        return PatternCall("LONG", "Green candle", f"green {tf}-minute candle")
+    if last["close"] < last["open"]:
+        return PatternCall("SHORT", "Red candle", f"red {tf}-minute candle")
+    return PatternCall(None, "Doji", f"doji {tf}-minute candle — holding")

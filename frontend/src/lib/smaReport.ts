@@ -32,6 +32,7 @@ function strategyName(s: TradeRow["strategy"]): string {
   if (!s) return "SMA cross";
   const parts: string[] = [];
   if (String(s.entry_mode ?? "SMA") === "PATTERN") parts.push(`Candle patterns ${s.pattern_tf ?? 1}m`);
+  else if (String(s.entry_mode ?? "SMA") === "COLOUR") parts.push(`Candle colour ${s.pattern_tf ?? 1}m`);
   else if (s.use_gap_mode) parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21} gap mode`);
   else parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21} cross`);
   if (s.flip_orders) parts.push("flipped");

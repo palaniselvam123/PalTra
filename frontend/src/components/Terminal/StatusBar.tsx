@@ -72,7 +72,8 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
     return `${mult}× ATR · Target none`;
   })();
   const cutoff = config?.entry_cutoff_time ?? (config ? "15:00" : null);
-  const patterns = (config?.entry_mode ?? "SMA") === "PATTERN";
+  const patterns = (config?.entry_mode ?? "SMA") !== "SMA";
+  const perCandle = (config?.entry_mode ?? "SMA") === "COLOUR" ? "Colour" : "Pattern";
   const candle = state?.candle_minutes ?? config?.candle_minutes ?? (config ? 1 : null);
   // Stocks set to a different candle than the bot's own (their own strategy settings).
   const ownCandles = Object.entries(state?.stock_settings ?? {})
@@ -221,7 +222,7 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           <Skeleton className="h-4 w-10" />
         ) : (
           <span className="text-slate-100">
-            {patterns ? `Pattern ${config?.pattern_tf ?? 1}m` : `${candle} min`}
+            {patterns ? `${perCandle} ${config?.pattern_tf ?? 1}m` : `${candle} min`}
             {!patterns && ownCandles.length ? (
               <span className="ml-1 font-sans text-xs font-normal text-slate-400">+{ownCandles.length} own</span>
             ) : null}

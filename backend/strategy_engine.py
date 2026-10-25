@@ -51,7 +51,7 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
-from candle_patterns import closes_bucket, pattern_call, setting as pattern_setting, uses_patterns
+from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_patterns
 from candles import bucket_start, candle_minutes, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
@@ -131,6 +131,7 @@ ENTRY_REASONS = (
     "EARLY_REVERSAL",
     "COUNTER_REENTRY",
     "CANDLE_PATTERN",
+    "CANDLE_COLOUR",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
 )
@@ -1457,6 +1458,8 @@ class StrategyEngine:
         self._focus = symbol
         if uses_patterns(cfg):
             return await self._pattern_minute(symbol, frame, cfg, now)
+        if uses_colour(cfg):
+            return await self._colour_minute(symbol, frame, cfg, now)
         self._warn_upcoming(symbol, frame, cfg, now)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -1680,6 +1683,38 @@ class StrategyEngine:
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
         # No Telegram for a refused pattern: one can print on every candle.
         result = await self.apply_signal(signal, frame, cfg, now, alert=False, why="CANDLE_PATTERN")
+        if result.startswith(("opened", "reversed")):
+            result = f"{result} — {call.note}"
+            self._signals[symbol] = result
+            self.last_signal = result
+        return result
+
+    async def _colour_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Ride the candle colour (candle_patterns.colour_call), once per closed candle of pattern_tf minutes.
+
+        A green candle buys and a red one sells at the start of the next candle. The trade is
+        held while the candles keep its colour (a doji holds too); the first candle of the other
+        colour closes it (COLOUR_TURN) and the other side opens at once. Market hours, the
+        cut-off, the Trade list, the caps, the entry filters, the stop and the flip all apply as
+        for a cross; after a stop-out the next candle's colour enters again.
+        """
+        call = colour_call(frame, cfg)
+        pos = self.positions.get(symbol)
+        if call.side is None or (pos is not None and pos.signal_direction == call.side):
+            text = f"{symbol} {'holding' if pos is not None else 'no order'} — {call.note}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        if pos is not None:
+            self._focus = symbol
+            await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN")
+            if symbol in self.positions:
+                text = f"{symbol} could not close on the {call.note} — {self.last_signal}"
+                self._signals[symbol] = text
+                return text
+        signal = "BULLISH" if call.side == "LONG" else "BEARISH"
+        # No Telegram for a refused candle: one closes every few minutes.
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why="CANDLE_COLOUR")
         if result.startswith(("opened", "reversed")):
             result = f"{result} — {call.note}"
             self._signals[symbol] = result
@@ -1967,6 +2002,9 @@ class StrategyEngine:
         pullback = None
         if pullback_at is not None and not flips_orders(cfg):
             pullback = pullback_at
+        elif per_candle(cfg):
+            # Candle patterns / colour order at the start of the next candle: no waiting entry.
+            pass
         elif extreme_entry.applies(cfg):
             # Candle-extreme limit (extreme_entry.py), judged on the side the real order goes.
             real = _opposite(want) if flips_orders(cfg) else want
@@ -2002,7 +2040,7 @@ class StrategyEngine:
                     candles=tall_pullback.expiry(cfg),
                     why=why,
                 )
-        if pullback is None and entry_candle.on(cfg):
+        if pullback is None and entry_candle.on(cfg) and not per_candle(cfg):
             # Entry-candle colour check (entry_candle.py): wait inside the forming candle for the trade's colour.
             real = _opposite(want) if flips_orders(cfg) else want
             span = int(frame.iloc[-1]["ts"]) - int(curr["ts"]) if len(frame) >= 2 else 0
@@ -3407,6 +3445,7 @@ class StrategyEngine:
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
                     "GAP_FADE": "SMA gap faded — flat",
                     "CANDLE_END": "candle closed — flat",
+                    "COLOUR_TURN": "candle turned the other colour — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
@@ -4249,7 +4288,7 @@ class StrategyEngine:
                 episode = None
                 self._review_episode.pop(symbol, None)
             scfg = _cfg_for(cfg, symbol)
-            if not review.review_on(scfg) or uses_patterns(scfg):
+            if not review.review_on(scfg) or per_candle(scfg):
                 continue
             minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
             if minutes < 2:
@@ -4771,6 +4810,7 @@ _ALERT_REASON = {
     "SMA9_VTURN": "SMA 9 V-turn",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
+    "COLOUR_TURN": "candle turned the other colour",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -5183,7 +5223,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 # Exits the bot sends itself while an exchange stop may still be working.
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP",

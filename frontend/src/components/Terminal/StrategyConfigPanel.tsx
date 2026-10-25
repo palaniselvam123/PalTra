@@ -343,8 +343,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_volume_ratio: Math.min(20, Math.max(0, Number(form.or_volume_ratio ?? 2) || 0)),
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
-    entry_mode: form.entry_mode === "PATTERN" ? "PATTERN" : "SMA",
-    pattern_tf: ([1, 3, 5].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5,
+    entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
+    pattern_tf: ([1, 3, 5, 10, 15].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15,
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -597,7 +597,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 at the start of the next candle; the trade closes at the end of that candle (exit “end of the pattern
                 candle”), then the next candle is judged afresh. Entry filters, the stop, the flip, market hours, the cut-off
                 and the caps still apply; gap mode does not. Each trade pays a full round of charges, so the charge check
-                skips candles that usually move less than N× those charges for this quantity. Try it in Replay first.
+                skips candles that usually move less than N× those charges for this quantity. Candle colour: each time a candle of
+                the chosen size closes, green buys and red sells at the start of the next candle; the trade is held while the
+                candles keep its colour (a doji holds) and the first candle of the other colour closes it (exit “candle turned
+                the other colour”) and opens the other way at once. The stop, target, filters and square-off still apply; the
+                pullback, candle-extreme and entry-candle waits do not (patterns and colour order at the candle start).
+                Try it in Replay first.
               </InfoTip>
             </div>
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
@@ -610,10 +615,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 >
                   <option value="SMA">SMA cross</option>
                   <option value="PATTERN">Candle patterns</option>
+                  <option value="COLOUR">Candle colour (hold until the other colour)</option>
                 </select>
               </label>
               <label className="block text-sm text-slate-300">
-                <span className="text-xs uppercase tracking-wider text-slate-400">Pattern candle{isOwn("pattern_tf") ? " (own)" : ""}</span>
+                <span className="text-xs uppercase tracking-wider text-slate-400">
+                  {form.entry_mode === "COLOUR" ? "Colour candle" : "Pattern candle"}
+                  {isOwn("pattern_tf") ? " (own)" : ""}
+                </span>
                 <select
                   value={String(form.pattern_tf ?? 1)}
                   onChange={(e) => set("pattern_tf", e.target.value)}
@@ -622,6 +631,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <option value="1">1 minute</option>
                   <option value="3">3 minutes</option>
                   <option value="5">5 minutes</option>
+                  <option value="10">10 minutes</option>
+                  <option value="15">15 minutes</option>
                 </select>
               </label>
               <label className="block text-sm text-slate-300">
@@ -1483,9 +1494,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       </FieldGroup>
       <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
         <div className="min-w-0">
-          {form.entry_mode === "PATTERN" ? (
+          {form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? (
             <p className="mt-1 text-xs leading-snug text-amber-300">
-              Not used while “Enter on” is Candle patterns: pattern trades open at the candle start and close at its end.
+              Not used while “Enter on” is Candle patterns or Candle colour: those trades open at the start of a candle.
             </p>
           ) : null}
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -2052,13 +2063,16 @@ export function activeRules(f: SmaConfig): Rule[] {
   const fast = f.sma_fast ?? 9;
   const slow = f.sma_slow ?? 21;
   const pattern = f.entry_mode === "PATTERN";
+  const colour = f.entry_mode === "COLOUR";
   const medium = f.sma_medium != null && String(f.sma_medium).trim() !== "";
 
   // 1. When to enter
   add(
     pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
-      : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
+      : colour
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until a candle of the other colour, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
   if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });

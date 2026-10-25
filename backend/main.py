@@ -402,8 +402,8 @@ class ConfigUpdate(BaseModel):
     or_volume_ratio: float | None = Field(default=None, ge=0, le=20)
     or_spread_pct: float | None = Field(default=None, ge=0, le=5)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
-    entry_mode: Literal["SMA", "PATTERN"] | None = None
-    pattern_tf: Literal[1, 3, 5] | None = None
+    entry_mode: Literal["SMA", "PATTERN", "COLOUR"] | None = None
+    pattern_tf: Literal[1, 3, 5, 10, 15] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
     pattern_trend: bool | None = None

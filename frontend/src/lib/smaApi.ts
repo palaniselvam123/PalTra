@@ -27,10 +27,11 @@ export type StopType = "ATR" | "SMA_GAP" | "TSL";
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
   bot_name?: string | null;
-  /** "SMA" (cross, default) or "PATTERN": candle-pattern entries closed at the candle's end. */
-  entry_mode?: "SMA" | "PATTERN";
-  /** Pattern candle size in minutes. */
-  pattern_tf?: 1 | 3 | 5;
+  /** "SMA" (cross, default), "PATTERN" (candle-pattern entries closed at the candle's end) or
+   * "COLOUR" (ride the candle colour: green buys, red sells, reverse on the other colour). */
+  entry_mode?: "SMA" | "PATTERN" | "COLOUR";
+  /** Pattern / colour candle size in minutes. */
+  pattern_tf?: 1 | 3 | 5 | 10 | 15;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
   candle_minutes?: CandleMinutes;
   /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */

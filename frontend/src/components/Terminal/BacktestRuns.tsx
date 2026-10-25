@@ -71,6 +71,8 @@ export function strategyLabel(s: Settings): string {
         s.pattern_trend ? ", with SMA trend" : ""
       })`
     );
+  } else if (String(s.entry_mode ?? "SMA") === "COLOUR") {
+    parts.push(`Candle colour ${s.pattern_tf ?? 1}m (hold while the colour holds)`);
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
     if (s.cross_exit === false) parts.push("no cross exit");

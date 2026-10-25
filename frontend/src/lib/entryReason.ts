@@ -7,6 +7,7 @@ const ENTRY_SHORT: Record<string, string> = {
   EARLY_REVERSAL: "Early reversal",
   COUNTER_REENTRY: "Re-entry",
   CANDLE_PATTERN: "Candle pattern",
+  CANDLE_COLOUR: "Candle colour",
   BREAKOUT_ARRIVAL: "Breakout",
   FORCE_ORDER: "Force order",
 };
@@ -19,6 +20,7 @@ const ENTRY_LONG: Record<string, string> = {
   EARLY_REVERSAL: "Counter candles: a run against the SMA side before the cross",
   COUNTER_REENTRY: "Re-entry: a candle broke the counter-candle exit candle while the SMAs stayed on this side",
   CANDLE_PATTERN: "Candle pattern entry",
+  CANDLE_COLOUR: "Ride the candle colour: a green candle buys, a red one sells",
   BREAKOUT_ARRIVAL: "Breakout handed over from Bot 2",
   FORCE_ORDER: "Force order pressed on the terminal",
 };

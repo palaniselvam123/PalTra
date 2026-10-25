@@ -261,7 +261,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stock research baseline keeps 1.
 - `backend/candle_patterns.py` – candle-pattern entries (`entry_mode =
   "PATTERN"`, default `"SMA"`, per bot and per stock, PAPER and LIVE). Each
-  time a candle of `pattern_tf` minutes (1/3/5, built from the 1-minute tape
+  time a candle of `pattern_tf` minutes (1/3/5/10/15, built from the 1-minute tape
   from 09:15) closes, `StrategyEngine._pattern_minute` first closes the open
   trade (`CANDLE_END`, via `_exit_now`, which cancels a LIVE stop first), then
   `pattern_call` reads the pattern (names identical to
@@ -272,6 +272,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the SMA fast/slow side), `pattern_min_edge` (skip when the last 14 candles'
   average range is under N× the round-trip charges for the qty; 0 = off). No
   Telegram for a refused pattern. The stock research baseline keeps `SMA`.
+  **Candle colour** (`entry_mode = "COLOUR"`, `colour_call`, same `pattern_tf` candles): each
+  time one closes, `StrategyEngine._colour_minute` reads its colour: green asks for a long, red
+  a short, a doji nothing (the trade is held). A trade is held while the candles keep its
+  colour (judged on `signal_direction`, so a flipped stock follows its signal); the first
+  candle of the other colour closes it (`COLOUR_TURN`, via `_exit_now`, which cancels a LIVE
+  stop first) and `apply_signal(..., why="CANDLE_COLOUR")` opens the other way at once (every
+  check, the stop, flip, cut-off, caps and one-LIVE-bot-per-stock apply; after a stop-out the
+  next candle's colour enters again). No Telegram for a refused candle.
+  In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
+  the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
+  limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.
 - Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
   every condition is unchanged, but `StrategyEngine._open` sends the order the
   other way (a buy signal sells, a sell signal buys). The position keeps
@@ -407,7 +418,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/entry_candle.py` – entry-candle colour check (`entry_candle_confirm`, off by default, per bot and per stock,
   PAPER and LIVE): the entry checks read closed candles, so a signal from a green candle can still fill on a candle that
   then closes red. With it on, every entry `apply_signal` would order at once (cross, gap-mode entry, join, late /
-  early-reversal entry, re-entry; not candle patterns) waits as a `PullbackOrder` (`confirm=True`) until the price is
+  early-reversal entry, re-entry; not candle patterns or candle colour) waits as a `PullbackOrder` (`confirm=True`) until the price is
   `entry_candle_pct` (0.05) % past the **forming** candle's open on the side the real order goes (above it for a buy,
   below for a sell; a flipped stock is judged on its real order). `StrategyEngine._watch_pullbacks` moves the level to
   each new forming candle's open, so the next candle can still fill; dropped after `entry_candle_max` (2) closed

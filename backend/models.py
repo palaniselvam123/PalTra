@@ -410,7 +410,8 @@ class BotConfig(Base):
     or_spread_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.10)
     # Entry: "SMA" (cross, the default) or "PATTERN" (candle_patterns.py): buy a
     # bullish / short a bearish pattern at the start of the next pattern_tf
-    # candle and close at its end.
+    # candle and close at its end; or "COLOUR" (candle_patterns.colour_call): ride
+    # the pattern_tf candle colour, reversing on the first candle of the other colour.
     entry_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="SMA")
     pattern_tf: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     # Candle interval in minutes (candles.py: 1, 2, 3, 5, 10, 15). The 1-minute
