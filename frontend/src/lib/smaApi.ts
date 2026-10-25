@@ -133,6 +133,10 @@ export type SmaConfig = {
   counter_need_fast?: boolean;
   /** Exit only: each counter candle's body |close − open| must be at least this × its ATR (0 = any size). */
   counter_min_body?: number;
+  /** After a counter-candle exit, re-enter when a later candle breaks the exit candle the trade's way. */
+  counter_reenter?: boolean;
+  /** Most re-entries per SMA run (1-10, default 3). */
+  counter_reenter_max?: number;
   /** EMA cross check: entry only on the fast/slow EMA side; exit on an EMA cross against the trade. */
   use_ema?: boolean;
   ema_exit?: boolean;

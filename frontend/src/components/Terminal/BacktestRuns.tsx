@@ -80,6 +80,7 @@ export function strategyLabel(s: Settings): string {
     if (s.join_trend) parts.push(`join morning trend from 09:15+${s.join_after_min ?? 15}m`);
     if (Number(s.counter_exit_count ?? 0) > 0) parts.push(`exit on ${s.counter_exit_count} counter candles`);
     if (s.counter_entry) parts.push("early reversal entry");
+    if (Number(s.counter_exit_count ?? 0) > 0 && s.counter_reenter) parts.push(`re-enter up to ${s.counter_reenter_max ?? 3}×`);
     if (s.use_ema) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} entry`);
     if (s.ema_exit) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} exit`);
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
@@ -228,6 +229,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
+  ["Re-enter after counter exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 && s.counter_reenter ? `Up to ${s.counter_reenter_max ?? 3} per SMA run` : "Off")],
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],

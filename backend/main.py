@@ -353,6 +353,8 @@ class ConfigUpdate(BaseModel):
     counter_rule: Literal["COLOUR", "CLOSES", "BOTH"] | None = None
     counter_need_fast: bool | None = None
     counter_min_body: float | None = Field(default=None, ge=0, le=counter_candles.MAX_MIN_BODY)
+    counter_reenter: bool | None = None
+    counter_reenter_max: int | None = Field(default=None, ge=1, le=counter_candles.MAX_REENTER)
     use_ema: bool | None = None
     ema_exit: bool | None = None
     ema_fast: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
@@ -935,6 +937,8 @@ def _gap_dict(row) -> dict:
         "counter_rule": counter_candles.rule(row),
         "counter_need_fast": counter_candles.need_fast(row),
         "counter_min_body": counter_candles.min_body(row),
+        "counter_reenter": bool(getattr(row, "counter_reenter", False)),
+        "counter_reenter_max": counter_candles.reenter_max(row),
         "use_ema": ema_filter.entry_on(row),
         "ema_exit": ema_filter.exit_on(row),
         "ema_fast": ema_filter.lengths(row)[0],

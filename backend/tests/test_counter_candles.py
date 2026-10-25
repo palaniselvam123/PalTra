@@ -151,7 +151,7 @@ def test_api_saves_counter_candles(tmp_path, monkeypatch):
     from main import app
     from strategy_engine import STOCK_FIELDS
 
-    assert {"counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body"} <= set(STOCK_FIELDS)
+    assert {"counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body", "counter_reenter", "counter_reenter_max"} <= set(STOCK_FIELDS)
     with TestClient(app) as client:
         first = client.get("/api/config").json()
         assert first["counter_exit_count"] == 0 and first["counter_entry"] is False
@@ -162,6 +162,63 @@ def test_api_saves_counter_candles(tmp_path, monkeypatch):
         body = client.put("/api/config", json={"counter_min_body": 0.5})
         assert body.status_code == 200 and body.json()["counter_min_body"] == 0.5
         assert client.put("/api/config", json={"counter_min_body": 6}).status_code == 422
+        again = client.put("/api/config", json={"counter_reenter": True, "counter_reenter_max": 2})
+        assert again.status_code == 200 and again.json()["counter_reenter"] is True and again.json()["counter_reenter_max"] == 2
+        assert client.put("/api/config", json={"counter_reenter_max": 0}).status_code == 422
         own = client.put("/api/config/stock/SBIN", json={"counter_entry": False})
         assert own.status_code == 200 and own.json()["counter_entry"] is False
     database.reset_engine()
+
+
+FALL_END = dt.datetime(2026, 9, 22, 12, 15)
+
+
+def _shorts_in_fall(trades):
+    return [t for t in trades if t["direction"] == "SHORT" and dt.datetime(2026, 9, 22, 10, 15) <= t["entry_time"] < FALL_END]
+
+
+@pytest.mark.asyncio
+async def test_reenter_after_a_counter_candle_exit(db):  # noqa: F811
+    # One green candle every 10 minutes in the fall: exit on it, re-enter once a red candle breaks its low.
+    exit_only = _shorts_in_fall(await _trades(db, counter_exit_count=1, counter_need_fast=False))
+    assert len(exit_only) == 1 and exit_only[0]["exit_reason"] == "COUNTER_CANDLES"
+    trades = _shorts_in_fall(await _trades(db, counter_exit_count=1, counter_need_fast=False, counter_reenter=True))
+    again = [t for t in trades if t.get("entry_reason") == "COUNTER_REENTRY"]
+    assert len(again) == counter_candles.REENTER_DEFAULT  # 3 per SMA run, though the fall had more green candles
+    assert trades[0]["entry_time"] == exit_only[0]["entry_time"]
+    for before, after in zip(trades, trades[1:]):
+        assert before["exit_reason"] == "COUNTER_CANDLES"
+        # Never on the exit candle itself: the next one at the earliest, and only after a red candle broke its low.
+        assert after["entry_time"] > before["exit_time"]
+    one = _shorts_in_fall(await _trades(db, counter_exit_count=1, counter_need_fast=False, counter_reenter=True, counter_reenter_max=1))
+    assert len([t for t in one if t.get("entry_reason") == "COUNTER_REENTRY"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_reenter_needs_the_exit(db):  # noqa: F811
+    plain = await _trades(db)
+    same = await _trades(db, counter_reenter=True)  # no counter-candle exit set: nothing changes
+    key = lambda t: (t["direction"], t["entry_time"], t["exit_time"], t["exit_reason"])  # noqa: E731
+    assert [key(t) for t in plain] == [key(t) for t in same]
+
+
+def test_resumes_breaks_the_exit_candle():
+    green_exit = {"open": 100.0, "close": 101.0, "high": 101.2, "low": 99.8}
+    level = counter_candles.exit_level(green_exit, "SHORT")
+    assert level == 99.8
+    assert not counter_candles.resumes({"open": 101.0, "close": 100.0}, "SHORT", level)[0]  # red, but above the low
+    assert not counter_candles.resumes({"open": 99.0, "close": 99.5}, "SHORT", level)[0]  # below, but green
+    assert counter_candles.resumes({"open": 100.5, "close": 99.5}, "SHORT", level)[0]
+    assert counter_candles.exit_level(green_exit, "LONG") == 101.2
+    assert counter_candles.resumes({"open": 101.0, "close": 101.5}, "LONG", 101.2)[0]
+
+    class C:
+        counter_exit_count = 0
+        counter_reenter = True
+        counter_reenter_max = 99
+
+    assert not counter_candles.reenter_on(C)  # needs the exit
+    C.counter_exit_count = 1
+    assert counter_candles.reenter_on(C) and counter_candles.reenter_max(C) == counter_candles.MAX_REENTER
+    C.counter_reenter_max = None
+    assert counter_candles.reenter_max(C) == counter_candles.REENTER_DEFAULT

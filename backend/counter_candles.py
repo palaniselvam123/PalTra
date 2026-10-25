@@ -19,6 +19,14 @@ judged per bot and per stock, in PAPER and LIVE.
   caps, the stop, the flip and one-LIVE-bot-per-stock still apply
   (`StrategyEngine.apply_signal`). The SMA cross that follows is then a normal
   cross. Gap mode and candle patterns ignore it.
+* **Re-enter** (`counter_reenter`, off by default; needs the exit): after a
+  counter-candle exit, while the SMAs stay on the trade's side (the same SMA run),
+  the first later closed candle that breaks the exit candle the trade's way puts
+  the trade back on: for a short, a red candle closing below the exit candle's low;
+  for a long, a green one closing above its high (`resumes`). At most
+  `counter_reenter_max` (default 3) re-entries per SMA run; dropped when the SMAs
+  cross back. Through `apply_signal` like any entry (entry reason
+  `COUNTER_REENTRY`); an opposite candle after it exits it again.
 
 Nothing here places an order on its own; the engine decides.
 """
@@ -33,6 +41,8 @@ from indicators import _direction_reason
 RULES = ("COLOUR", "CLOSES", "BOTH")
 MAX_COUNT = 10
 MAX_MIN_BODY = 5.0
+REENTER_DEFAULT = 3
+MAX_REENTER = 10
 
 
 def exit_count(cfg) -> int:
@@ -51,6 +61,36 @@ def entry_count(cfg) -> int:
     """Candles a reversal entry needs: the exit's count when set, else 3."""
     n = exit_count(cfg)
     return n if n > 0 else 3
+
+
+def reenter_on(cfg) -> bool:
+    """Re-entries only follow this module's own exit."""
+    return bool(getattr(cfg, "counter_reenter", False)) and exit_count(cfg) > 0
+
+
+def reenter_max(cfg) -> int:
+    try:
+        n = int(getattr(cfg, "counter_reenter_max", None) or REENTER_DEFAULT)
+    except (TypeError, ValueError):
+        return REENTER_DEFAULT
+    return max(1, min(MAX_REENTER, n))
+
+
+def exit_level(bar, side: str) -> float | None:
+    """The price a re-entry must close beyond: the exit candle's low for a short, its high for a long."""
+    return _num(bar.get("low" if side == "SHORT" else "high"))
+
+
+def resumes(bar, side: str, level: float) -> tuple[bool, str]:
+    """Does this closed candle carry the trade's way past the exit candle? (side = LONG / SHORT)."""
+    opened, close = _num(bar.get("open")), _num(bar.get("close"))
+    if opened is None or close is None:
+        return False, ""
+    if side == "SHORT":
+        ok = close < opened and close < level
+        return ok, f"red candle closed {close:.2f} below the exit candle's low {level:.2f}"
+    ok = close > opened and close > level
+    return ok, f"green candle closed {close:.2f} above the exit candle's high {level:.2f}"
 
 
 def rule(cfg) -> str:
