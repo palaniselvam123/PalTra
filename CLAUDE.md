@@ -682,7 +682,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   desk) and runs no live bots, scans, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). Copies
   every `BotConfig` row (1-5) from the desk (`main.export_bot_settings` → desk `GET /api/link/backtest/settings` →
   `main.import_bot_settings`, PAPER forced) at boot and on "Sync from desk" (refused while a replay plays); never writes
-  back. Past candles use the **desk's Groww session**: desk `GET /api/link/backtest/groww` every 10 min, memory only
+  back. **Arms from the scanner**: with `SCANNER_LINK_TOKEN` on this server and `BACKTEST_URL` on the scanner, the scanner's
+  Arm / Arm ticked has a Main desk / Backtest server switch (`useArming`, `ArmServerSwitch`; scanner link routes take
+  `?server=backtest`, longer timeout since the call may start the machine). The desk-side link routes answer here too
+  (bots are PAPER); an arm waits for the start-up copy (`backtest_server.wait_first_sync`) and is remembered
+  (`note_scanner_arm`, `backtest_server.json`), so the start-up copy keeps it, with its own source and per-stock settings,
+  on top of the desk's Trade list while it is still armed here (`import_bot_settings(keep=)`); Sync from desk replaces
+  them (`clear_scanner_armed`). Past candles use the **desk's Groww session**: desk `GET /api/link/backtest/groww` every 10 min, memory only
   (`remote_token`, read by `groww_client.desk_session_token` on this role); it never logs in to Groww itself, so it
   cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI

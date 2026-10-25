@@ -347,7 +347,17 @@ export type ServerRole = {
   /** The backtest server's address (desk only, BACKTEST_URL), for the "Open backtest server" link. */
   backtest_url?: string | null;
   backtest_link?: boolean;
+  /** Scanner only: Arm can also arm on the backtest server (BACKTEST_URL and the link token set). */
+  backtest_arm?: boolean;
 };
+
+/** Where the scanner's Arm goes: the trading desk's bots, or the backtest server's (always PAPER). */
+export type LinkServer = "desk" | "backtest";
+// The backtest server may be stopped: Fly starts it on the first request, and an arm waits for its
+// start-up copy of the desk's settings.
+const BACKTEST_LINK_MS = 75_000;
+const linkQuery = (server: LinkServer, first: boolean) => (server === "backtest" ? `${first ? "?" : "&"}server=backtest` : "");
+const linkMs = (server: LinkServer) => (server === "backtest" ? BACKTEST_LINK_MS : REQUEST_MS);
 
 export type DeskArmedBot = { bot: number; name: string; mode: "PAPER" | "LIVE"; armed: string[] };
 
@@ -1210,23 +1220,42 @@ export const api = {
   /** Which server this is: the trading desk, or the scan-only scanner server. */
   serverRole: () => request<ServerRole>("/api/role"),
   /** Scanner server only: one stock's settings on a desk bot (bot 1-4 or "research"), through the link. */
-  deskStock: (target: number | "research", symbol: string) =>
-    request<StockConfig>(`/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}`),
+  deskStock: (target: number | "research", symbol: string, server: LinkServer = "desk") =>
+    request<StockConfig>(
+      `/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}${linkQuery(server, true)}`,
+      undefined,
+      linkMs(server)
+    ),
   /** Scanner server only: save quantity / trailing stop for a stock on a desk bot. LIVE needs confirmLive. */
-  deskSaveStock: (target: number | "research", symbol: string, body: Record<string, unknown>, confirmLive: boolean) =>
-    request<unknown>(`/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}${confirmLive ? "?confirm_live=true" : ""}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+  deskSaveStock: (
+    target: number | "research",
+    symbol: string,
+    body: Record<string, unknown>,
+    confirmLive: boolean,
+    server: LinkServer = "desk"
+  ) =>
+    request<unknown>(
+      `/api/link/desk-stock/${target}/${encodeURIComponent(symbol)}${confirmLive ? "?confirm_live=true" : ""}${linkQuery(server, !confirmLive)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      linkMs(server)
+    ),
   /** Scanner server only: arm a stock on a desk bot. LIVE needs confirmLive (asked in the page first). */
-  deskArm: (body: { target: number | "research"; symbol: string; source?: string | null; confirm_live: boolean }) =>
-    request<unknown>("/api/link/desk-arm", {
-      method: "POST",
-      body: JSON.stringify({ ...body, target: String(body.target), source: body.source ?? null }),
-    }),
-  /** Scanner server only: the desk's Trade lists (read-only link). */
-  deskArmed: () =>
-    request<{ bots: DeskArmedBot[]; research: string[] | null; error: string | null }>("/api/link/desk-armed"),
+  deskArm: (
+    body: { target: number | "research"; symbol: string; source?: string | null; confirm_live: boolean },
+    server: LinkServer = "desk"
+  ) =>
+    request<unknown>(
+      `/api/link/desk-arm${linkQuery(server, true)}`,
+      { method: "POST", body: JSON.stringify({ ...body, target: String(body.target), source: body.source ?? null }) },
+      linkMs(server)
+    ),
+  /** Scanner server only: the desk's (or the backtest server's) Trade lists (read-only link). */
+  deskArmed: (server: LinkServer = "desk") =>
+    request<{ bots: DeskArmedBot[]; research: string[] | null; error: string | null }>(
+      `/api/link/desk-armed${linkQuery(server, true)}`,
+      undefined,
+      linkMs(server)
+    ),
   scalpAlertPreview: () => request<{ messages: { symbol: string; message: string }[] }>("/api/scalp/alerts/preview"),
   moversPriceAt: (params: { symbol: string; at: string; day?: string }) =>
     request<PriceAtResponse>(`/api/movers/price-at${queryString(params)}`),

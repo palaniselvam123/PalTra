@@ -294,3 +294,173 @@ def test_backtest_server_routes(sma_api, monkeypatch):
     monkeypatch.setattr(backtest_server, "sync", no_desk)
     failed = sma_api.post("/api/backtest/sync")
     assert failed.status_code == 502 and "503" in failed.json()["detail"]
+
+
+# ---- arming on the backtest server from the scanner ------------------------------------------
+
+
+def test_scanner_arm_list_survives_the_idle_setting():
+    backtest_server.set_idle_minutes(45)
+    backtest_server.note_scanner_arm(4, "infy")
+    backtest_server.note_scanner_arm(4, "INFY")
+    backtest_server.note_scanner_arm(1, "TCS")
+    assert backtest_server.scanner_armed() == {4: ["INFY"], 1: ["TCS"]}
+    assert backtest_server.idle_minutes() == 45
+    backtest_server.set_idle_minutes(60)
+    assert backtest_server.scanner_armed() == {4: ["INFY"], 1: ["TCS"]}
+    backtest_server.clear_scanner_armed()
+    assert backtest_server.scanner_armed() == {} and backtest_server.idle_minutes() == 60
+
+
+def test_boot_copy_keeps_scanner_arms_and_waits(monkeypatch, backtest):
+    monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
+    backtest_server.note_scanner_arm(4, "INFY")
+    seen = []
+
+    def apply(rows, keep=None):
+        seen.append(keep)
+        return ["4"]
+
+    async def go():
+        async def fake_get(path, client=None):
+            if path == backtest_server.GROWW_PATH:
+                return {"token": ""}
+            return {"rows": {"4": {"qty": 1}}}
+
+        monkeypatch.setattr(backtest_server, "_desk_get", fake_get)
+        monkeypatch.setattr(backtest_server, "CHECK_EVERY_SEC", 60)
+        task = asyncio.create_task(backtest_server.run(apply, lambda: {}))
+        await asyncio.wait_for(backtest_server.wait_first_sync(), 5)
+        assert backtest_server.state.first_sync_done
+        task.cancel()
+
+    asyncio.run(go())
+    assert seen == [{4: ["INFY"]}]
+
+
+def test_import_keeps_scanner_arms_still_armed_here(sma_api, monkeypatch):
+    import json
+
+    import main
+    from database import session_factory
+    from models import BotConfig
+
+    monkeypatch.setenv("PALTRA_ROLE", "backtest")
+    rid = main.link_config_id(3)
+    main.ensure_bot_config(3)
+    with session_factory()() as db:
+        row = db.get(BotConfig, rid)
+        row.trade_symbols = "INFY,SBIN"
+        row.trade_sources = json.dumps({"INFY": "Trend quality", "SBIN": "Manual"})
+        row.stock_settings = json.dumps({"INFY": {"qty": 7, "stop_type": "TSL"}})
+        db.commit()
+    desk_rows = {str(rid): {"qty": 2, "trade_symbols": "RELIANCE", "trade_sources": "{}", "stock_settings": json.dumps({"RELIANCE": {"qty": 3}})}}
+    # TCS was armed from the scanner but has since been unarmed here: it is dropped.
+    main.import_bot_settings(desk_rows, keep={rid: ["INFY", "TCS"]})
+    with session_factory()() as db:
+        row = db.get(BotConfig, rid)
+        assert row.trade_symbols == "RELIANCE,INFY" and row.trading_mode == "PAPER"
+        assert json.loads(row.trade_sources) == {"INFY": "Trend quality"}
+        assert json.loads(row.stock_settings) == {"RELIANCE": {"qty": 3}, "INFY": {"qty": 7, "stop_type": "TSL"}}
+    assert backtest_server.scanner_armed() == {rid: ["INFY"]}
+    # SBIN (armed here by hand, not from the scanner) follows the desk; a full copy keeps nothing.
+    main.import_bot_settings(desk_rows)
+    with session_factory()() as db:
+        assert db.get(BotConfig, rid).trade_symbols == "RELIANCE"
+
+
+def test_manual_sync_clears_scanner_arms(sma_api, monkeypatch):
+    monkeypatch.setenv("PALTRA_ROLE", "backtest")
+    backtest_server.note_scanner_arm(1, "INFY")
+
+    async def ok(apply, client=None, keep=None):
+        assert keep is None
+        return {"synced": ["1"]}
+
+    async def no_token(client=None):
+        return False
+
+    monkeypatch.setattr(backtest_server, "sync", ok)
+    monkeypatch.setattr(backtest_server, "refresh_token", no_token)
+    assert sma_api.get("/api/backtest/status").json()["scanner_armed"] == 1
+    assert sma_api.post("/api/backtest/sync").status_code == 200
+    assert backtest_server.scanner_armed() == {}
+
+
+LINK = "s" * 32
+
+
+def test_scanner_arms_on_the_backtest_server(monkeypatch):
+    monkeypatch.setenv("PALTRA_ROLE", "scanner")
+    monkeypatch.setenv("SCANNER_LINK_TOKEN", LINK)
+    monkeypatch.setattr(routes_link, "_cache", {})
+    app = FastAPI()
+    app.include_router(routes_link.router)
+    http = TestClient(app)
+    monkeypatch.delenv("BACKTEST_URL", raising=False)
+    refused = http.post("/api/link/desk-arm?server=backtest", json={"target": "3", "symbol": "INFY"})
+    assert refused.status_code == 409 and "BACKTEST_URL" in refused.json()["detail"]
+    assert "BACKTEST_URL" in http.get("/api/link/desk-armed?server=backtest").json()["error"]
+
+    monkeypatch.setenv("BACKTEST_URL", "https://bt.example")
+    sent = []
+
+    class _Client:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, headers=None, json=None):
+            sent.append((method, url, json, self.timeout, headers["Authorization"]))
+            return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(routes_link.httpx, "AsyncClient", _Client)
+    assert http.post("/api/link/desk-arm?server=backtest", json={"target": "3", "symbol": "INFY"}).status_code == 200
+    http.get("/api/link/desk-stock/3/infy?server=backtest")
+    http.post("/api/link/desk-arm", json={"target": "3", "symbol": "INFY"})
+    assert sent[0][:2] == ("POST", "https://bt.example/api/link/arm") and sent[0][3] == 60.0
+    assert sent[0][4] == f"Bearer {LINK}"
+    assert sent[1][:2] == ("GET", "https://bt.example/api/link/stock/3/INFY")
+    assert sent[2][1].startswith(server_role.desk_url()) and sent[2][3] == 15
+    assert http.post("/api/link/desk-arm?server=elsewhere", json={"target": "3", "symbol": "INFY"}).status_code == 422
+
+
+def test_backtest_server_takes_a_scanner_arm_and_remembers_it(monkeypatch, backtest):
+    from fastapi import FastAPI as _FastAPI
+
+    monkeypatch.setenv("SCANNER_LINK_TOKEN", LINK)
+    term = _FastAPI()
+    calls = []
+
+    @term.post("/api/bots/{bot}/trade-symbols")
+    def arm_bot(bot: int, body: dict):
+        calls.append((bot, body["symbol"]))
+        return {"trade_symbols": [body["symbol"]]}
+
+    class _Mod:
+        app = term
+
+        @staticmethod
+        def armed_lists():
+            return {"bots": [{"bot": 3, "name": "Bot 3", "mode": "PAPER", "armed": []}]}
+
+        @staticmethod
+        def link_config_id(target):
+            return 4
+
+    monkeypatch.setattr("app.sma_host.load_terminal", lambda: _Mod)
+    app = FastAPI()
+    app.include_router(routes_link.router)
+    http = TestClient(app)
+    backtest_server.state.first_sync_done = True
+    res = http.post("/api/link/arm", headers={"Authorization": f"Bearer {LINK}"}, json={"target": "3", "symbol": "INFY"})
+    assert res.status_code == 200 and calls == [(3, "INFY")]
+    assert backtest_server.scanner_armed() == {4: ["INFY"]}
+    # The backtest server's own link token does not open the scanner's routes.
+    monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
+    assert http.post("/api/link/arm", headers={"Authorization": f"Bearer {TOKEN}"}, json={"target": "3", "symbol": "TCS"}).status_code == 401

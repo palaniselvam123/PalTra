@@ -1255,6 +1255,8 @@ async def backtest_sync():
         out = await backtest_server.sync(import_bot_settings)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Could not copy the settings from the desk: {exc}") from exc
+    # A full copy: stocks armed here from the scanner are replaced like everything else.
+    backtest_server.clear_scanner_armed()
     await backtest_server.refresh_token()
     return {**out, **backtest_server.status(replays)}
 
@@ -2380,12 +2382,17 @@ def _column_value(column, value):
     return value
 
 
-def import_bot_settings(rows: dict) -> list[str]:
-    """Backtest server side: write the desk's settings rows here, PAPER forced. Returns the ids copied."""
+def import_bot_settings(rows: dict, keep: dict[int, list[str]] | None = None) -> list[str]:
+    """Backtest server side: write the desk's settings rows here, PAPER forced. Returns the ids copied.
+
+    `keep` (config id -> stocks the scanner armed here, the start-up copy only): each one still armed
+    here stays on the Trade list on top of the desk's, with its own source and per-stock settings; the
+    ones kept are saved back as the new scanner list (backtest_server.set_scanner_armed)."""
     if not server_role.is_backtest():
         raise RuntimeError("Settings are copied only on the backtest server.")
     columns = {c.name: c for c in BotConfig.__table__.columns}
     done: list[str] = []
+    kept: dict[int, list[str]] = {}
     with session_factory()() as db:
         for key, data in rows.items():
             try:
@@ -2398,14 +2405,63 @@ def import_bot_settings(rows: dict) -> list[str]:
             if row is None:
                 row = BotConfig(id=config_id)
                 db.add(row)
+            ours = _scanner_arms(row, (keep or {}).get(config_id, []))
             for name, value in data.items():
                 if name == "id" or name not in columns:
                     continue
                 setattr(row, name, _column_value(columns[name], value))
             row.trading_mode = "PAPER"
+            if ours:
+                _keep_scanner_arms(row, ours)
+                kept[config_id] = list(ours)
             done.append(str(config_id))
         db.commit()
+    if keep is not None:
+        backtest_server.set_scanner_armed(kept)
     return done
+
+
+def _json_dict(raw) -> dict:
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _scanner_arms(row: BotConfig, names: list[str]) -> dict[str, tuple[str | None, dict | None]]:
+    """The scanner-armed stocks still on this row's Trade list: symbol -> (source, per-stock settings)."""
+    if not names or row.id is None:
+        return {}
+    armed = trade_names(row)
+    sources = trade_sources(row)
+    stocks = _json_dict(row.stock_settings)
+    return {s: (sources.get(s), stocks.get(s)) for s in names if s in armed}
+
+
+def _keep_scanner_arms(row: BotConfig, ours: dict[str, tuple[str | None, dict | None]]) -> None:
+    names = trade_names(row)
+    for sym in ours:
+        if sym not in names:
+            names.append(sym)
+    cap = MAX_RESEARCH_SYMBOLS if row.id == research_engine.config_id else MAX_TRADE_SYMBOLS
+    row.trade_symbols = ",".join(names[:cap])
+    sources = _json_dict(row.trade_sources)
+    stocks = _json_dict(row.stock_settings)
+    for sym, (source, settings) in ours.items():
+        if source:
+            sources[sym] = source
+        if isinstance(settings, dict):
+            stocks[sym] = settings
+    row.trade_sources = json.dumps(sources)
+    row.stock_settings = json.dumps(stocks)
+
+
+def link_config_id(target: int | str) -> int:
+    """The settings row a link target (bot 1-4 or "research") is saved in."""
+    if target == "research":
+        return research_engine.config_id
+    return _bot_engine_for(int(target)).config_id
 
 
 def armed_lists() -> dict:

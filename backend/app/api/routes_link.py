@@ -12,6 +12,13 @@
   ``confirm_live`` (the scanner asks the person first, like the desk); without it the desk answers
   403. The terminal's own checks still apply (one LIVE bot per stock, Trade list size).
 
+* The scanner can arm on the **backtest server** instead (``?server=backtest`` on the scanner routes):
+  the same calls go to ``BACKTEST_URL``, whose desk-side routes above answer with the same
+  ``SCANNER_LINK_TOKEN`` (set on all three apps). Its bots are always PAPER. A call may start the
+  stopped machine, so it waits longer; the arm waits for the backtest server's start-up copy of the
+  desk's settings and is remembered there, so the next start-up copy keeps it
+  (``backtest_server.note_scanner_arm``).
+
 No order and no PAPER/LIVE switch crosses the link: arming only puts a stock on a Trade list.
 """
 from __future__ import annotations
@@ -31,7 +38,11 @@ router = APIRouter(tags=["link"])
 
 ARMED_PATH = "/api/link/armed"
 _CACHE_SEC = 20.0
-_cache: tuple[float, dict] | None = None
+_cache: dict[str, tuple[float, dict]] = {}
+Server = Literal["desk", "backtest"]
+# The backtest server may be stopped: Fly starts it on the first request (about 10-20 s), and an
+# arm then waits for its start-up copy of the desk's settings.
+_BACKTEST_TIMEOUT = 60.0
 
 
 @router.get("/api/role")
@@ -60,37 +71,57 @@ async def armed(request: Request):
     return mod.armed_lists()
 
 
-async def _fetch_desk_armed() -> dict:
-    url = f"{server_role.desk_url()}{ARMED_PATH}"
+def _server_name(server: Server) -> str:
+    return "the backtest server" if server == "backtest" else "the desk"
+
+
+def _base_url(server: Server) -> str:
+    if server == "backtest":
+        url = server_role.backtest_url()
+        if not url:
+            raise HTTPException(409, "BACKTEST_URL is not set on the scanner, so it cannot reach the backtest server.")
+        return url
+    return server_role.desk_url()
+
+
+def _timeout(server: Server, desk: float) -> float:
+    return _BACKTEST_TIMEOUT if server == "backtest" else desk
+
+
+async def _fetch_desk_armed(server: Server = "desk") -> dict:
+    url = f"{_base_url(server)}{ARMED_PATH}"
     headers = {"Authorization": f"Bearer {server_role.link_token()}"}
-    async with httpx.AsyncClient(timeout=6) as client:
+    async with httpx.AsyncClient(timeout=_timeout(server, 6)) as client:
         resp = await client.get(url, headers=headers)
     if resp.status_code != 200:
-        raise RuntimeError(f"the desk answered {resp.status_code}")
+        raise RuntimeError(f"{_server_name(server)} answered {resp.status_code}")
     body = resp.json()
     if not isinstance(body, dict) or not isinstance(body.get("bots"), list):
-        raise RuntimeError("the desk sent an unexpected answer")
+        raise RuntimeError(f"{_server_name(server)} sent an unexpected answer")
     return body
 
 
 @router.get("/api/link/desk-armed")
-async def desk_armed():
-    """The desk's Trade lists, as the scanner sees them. Cached for a few seconds."""
-    global _cache
+async def desk_armed(server: Server = "desk"):
+    """The desk's (or the backtest server's) Trade lists, as the scanner sees them. Cached for a few seconds."""
     if not server_role.is_scanner():
         raise HTTPException(404, "Only the scanner server asks the desk.")
     if not server_role.link_token():
         return {"bots": [], "research": None, "error": "SCANNER_LINK_TOKEN is not set, so armed stocks are unknown."}
     now = time.monotonic()
-    if _cache is not None and now - _cache[0] < _CACHE_SEC:
-        return _cache[1]
+    hit = _cache.get(server)
+    if hit is not None and now - hit[0] < _CACHE_SEC:
+        return hit[1]
     try:
-        body = await _fetch_desk_armed()
+        body = await _fetch_desk_armed(server)
+    except HTTPException as exc:
+        return {"bots": [], "research": None, "error": str(exc.detail)}
     except Exception as exc:  # noqa: BLE001
-        # The token is never in the message: only the desk URL and the status.
-        return {"bots": [], "research": None, "error": f"Could not read the desk's armed stocks: {exc}"[:200]}
+        # The token is never in the message: only which server and the status.
+        where = "the backtest server's" if server == "backtest" else "the desk's"
+        return {"bots": [], "research": None, "error": f"Could not read {where} armed stocks: {exc or type(exc).__name__}"[:200]}
     out = {"bots": body.get("bots", []), "research": body.get("research"), "error": None}
-    _cache = (now, out)
+    _cache[server] = (now, out)
     return out
 
 
@@ -241,13 +272,39 @@ async def desk_stock(target: str, symbol: str, request: Request):
 @router.put(STOCK_PREFIX + "{target}/{symbol}")
 async def desk_stock_save(target: str, symbol: str, body: StockChange, request: Request, confirm_live: bool = False):
     t = _desk_guard(request, target, confirm_live)
+    await _first_sync()
     return await _terminal("PUT", _stock_path(t, _clean_symbol(symbol)), body.model_dump(exclude_none=True))
 
 
 @router.post(ARM_PATH)
 async def desk_arm(body: ArmRequest, request: Request):
     t = _desk_guard(request, body.target, body.confirm_live)
-    return await _terminal("POST", _arm_path(t), {"symbol": body.symbol, "armed": True, "source": body.source})
+    await _first_sync()
+    res = await _terminal("POST", _arm_path(t), {"symbol": body.symbol, "armed": True, "source": body.source})
+    if server_role.is_backtest() and res.status_code == 200:
+        _remember_scanner_arm(t, body.symbol)
+    return res
+
+
+async def _first_sync() -> None:
+    """On the backtest server: a scanner arm that woke the machine waits for its start-up copy."""
+    if server_role.is_backtest():
+        import backtest_server
+
+        await backtest_server.wait_first_sync()
+
+
+def _remember_scanner_arm(target: int | str, symbol: str) -> None:
+    import backtest_server
+    from app.sma_host import load_terminal
+
+    mod = load_terminal()
+    if mod is None or not hasattr(mod, "link_config_id"):
+        return
+    try:
+        backtest_server.note_scanner_arm(mod.link_config_id(target), symbol)
+    except (OSError, KeyError, ValueError):
+        pass  # the stock is armed; only keeping it through the next start-up copy is lost
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -267,42 +324,45 @@ def _scanner_only() -> None:
         raise HTTPException(409, "SCANNER_LINK_TOKEN is not set, so the scanner cannot reach the desk.")
 
 
-async def _to_desk(method: str, path: str, body: dict | None = None):
+async def _to_desk(method: str, path: str, body: dict | None = None, server: Server = "desk"):
     from fastapi.responses import JSONResponse
 
+    base = _base_url(server)
     headers = {"Authorization": f"Bearer {server_role.link_token()}"}
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            res = await client.request(method, f"{server_role.desk_url()}{path}", headers=headers, json=body)
+        async with httpx.AsyncClient(timeout=_timeout(server, 15)) as client:
+            res = await client.request(method, f"{base}{path}", headers=headers, json=body)
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Could not reach the desk: {type(exc).__name__}") from None
+        raise HTTPException(502, f"Could not reach {_server_name(server)}: {type(exc).__name__}") from None
     try:
         content = res.json()
     except ValueError:
-        content = {"detail": f"The desk answered {res.status_code}."}
+        content = {"detail": f"{_server_name(server).capitalize()} answered {res.status_code}."}
     return JSONResponse(content, status_code=res.status_code)
 
 
 @router.get("/api/link/desk-stock/{target}/{symbol}")
-async def scanner_stock(target: str, symbol: str):
+async def scanner_stock(target: str, symbol: str, server: Server = "desk"):
     _scanner_only()
-    return await _to_desk("GET", f"{STOCK_PREFIX}{_target(target)}/{_clean_symbol(symbol)}")
+    return await _to_desk("GET", f"{STOCK_PREFIX}{_target(target)}/{_clean_symbol(symbol)}", server=server)
 
 
 @router.put("/api/link/desk-stock/{target}/{symbol}")
-async def scanner_stock_save(target: str, symbol: str, body: StockChange, confirm_live: bool = False):
+async def scanner_stock_save(target: str, symbol: str, body: StockChange, confirm_live: bool = False, server: Server = "desk"):
     _scanner_only()
     query = "?confirm_live=true" if confirm_live else ""
     return await _to_desk(
-        "PUT", f"{STOCK_PREFIX}{_target(target)}/{_clean_symbol(symbol)}{query}", body.model_dump(exclude_none=True)
+        "PUT",
+        f"{STOCK_PREFIX}{_target(target)}/{_clean_symbol(symbol)}{query}",
+        body.model_dump(exclude_none=True),
+        server=server,
     )
 
 
 @router.post("/api/link/desk-arm")
-async def scanner_arm(body: ArmRequest):
+async def scanner_arm(body: ArmRequest, server: Server = "desk"):
     _scanner_only()
     _target(body.target)
-    out = await _to_desk("POST", ARM_PATH, body.model_dump())
-    global _cache
-    _cache = None  # the armed chips update on the next read
+    out = await _to_desk("POST", ARM_PATH, body.model_dump(), server=server)
+    _cache.pop(server, None)  # the armed chips update on the next read
     return out

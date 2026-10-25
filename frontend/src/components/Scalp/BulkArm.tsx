@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import clsx from "clsx";
-import { FlaskConical, Loader2, X } from "lucide-react";
+import { ExternalLink, FlaskConical, Loader2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
-import type { ArmDesk } from "@/components/Scalp/ArmPicker";
+import { ArmServerSwitch, backtestTerminalUrl, type ArmDesk, type ArmServerChoice } from "@/components/Scalp/ArmPicker";
 
 type Fields = { qty: string; sl: string; trail: string; target: string };
 type Result = { symbol: string; ok: boolean; why?: string };
@@ -34,6 +34,10 @@ function fieldsOf(c: Partial<SmaConfig>): Fields {
  *
  * When done on a PAPER bot (on the trading desk), "Backtest these" replays the
  * stocks on past days with that bot's settings: practice money, no order.
+ *
+ * On the scanner with a backtest server, `server` adds the Main desk / Backtest server switch:
+ * on the backtest server the stocks go on its PAPER copies of the bots, and the result links there
+ * to run the backtest.
  */
 export function BulkArm({
   symbols,
@@ -42,6 +46,7 @@ export function BulkArm({
   source,
   onDone,
   onClose,
+  server,
 }: {
   symbols: string[];
   desks: ArmDesk[];
@@ -49,7 +54,9 @@ export function BulkArm({
   source?: string | null;
   onDone: () => void;
   onClose: () => void;
+  server?: ArmServerChoice;
 }) {
+  const where = server?.value ?? "desk";
   const names = symbols.map((s) => s.toUpperCase());
   const [desk, setDesk] = useState<ArmDesk | null>(null);
   const [f, setF] = useState<Fields | null>(null);
@@ -70,7 +77,7 @@ export function BulkArm({
     setError(null);
     const t = desk.target;
     const load: Promise<Partial<SmaConfig>> = onScanner
-      ? api.deskStock(t, names[0])
+      ? api.deskStock(t, names[0], where)
       : t === "research"
         ? smaApi.researchConfig()
         : smaApi.configOn(t);
@@ -86,7 +93,7 @@ export function BulkArm({
     };
     // `names` follows `symbols`, fixed for the life of the dialog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desk, onScanner]);
+  }, [desk, onScanner, where]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
@@ -138,11 +145,11 @@ export function BulkArm({
       } else {
         try {
           if (Object.keys(body).length) {
-            if (onScanner) await api.deskSaveStock(desk.target, s, body, live);
+            if (onScanner) await api.deskSaveStock(desk.target, s, body, live, where);
             else await smaApi.saveStockConfigOn(desk.target, s, body);
           }
           if (!desk.armed.includes(s)) {
-            if (onScanner) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live });
+            if (onScanner) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live }, where);
             else await smaApi.setTradeSymbolOn(desk.target, s, true, source ?? null);
           }
           out.push({ symbol: s, ok: true, why: desk.armed.includes(s) ? "already armed; numbers saved" : undefined });
@@ -230,7 +237,8 @@ export function BulkArm({
         {!desk ? (
           <>
             <p className="mb-2 text-xs text-slate-400">Which bot? They go on its Trade list and order on its next SMA cross.</p>
-            {desks.length === 0 ? (
+            {server ? <ArmServerSwitch choice={server} /> : null}
+            {where === "backtest" && server?.loading ? null : desks.length === 0 ? (
               <p className="text-xs text-amber-300">The SMA terminal is not answering, so no bot can be armed right now.</p>
             ) : (
               <ul className="space-y-1.5">
@@ -249,7 +257,9 @@ export function BulkArm({
                         <span className="block text-[11px] text-slate-400">
                           {d.target === "research"
                             ? "practice money only"
-                            : d.mode === "LIVE"
+                            : where === "backtest"
+                              ? "practice copy on the backtest server"
+                              : d.mode === "LIVE"
                               ? "real money — asks you to confirm; cannot be backtested while LIVE"
                               : "practice money · can backtest after arming"}
                           {names.some((s) => d.armed.includes(s))
@@ -306,8 +316,20 @@ export function BulkArm({
               <div className="mt-3 rounded-md bg-white/5 px-2 py-2 text-xs">
                 <p className="mb-1 font-semibold text-slate-200">
                   {armedOk.length} of {results.length} armed on {desk.name}
-                  {live ? " (LIVE)" : ""}. They order on the next SMA cross, not now.
+                  {where === "backtest" ? " on the backtest server" : ""}
+                  {live ? " (LIVE)" : ""}.{" "}
+                  {where === "backtest" ? "Run the backtest there." : "They order on the next SMA cross, not now."}
                 </p>
+                {where === "backtest" && server?.url && armedOk.length ? (
+                  <a
+                    href={backtestTerminalUrl(server.url, desk.target)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-1 inline-flex items-center gap-1 font-semibold text-accentViolet hover:underline"
+                  >
+                    Open {desk.name} on the backtest server <ExternalLink size={11} aria-hidden />
+                  </a>
+                ) : null}
                 <ul className="space-y-0.5">
                   {results
                     .filter((r) => !r.ok || r.why)

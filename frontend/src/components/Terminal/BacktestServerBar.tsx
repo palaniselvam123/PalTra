@@ -83,13 +83,19 @@ export function BacktestServerBar() {
         <a href={role.desk_url} className="underline" target="_blank" rel="noreferrer">
           main desk
         </a>
-        ; nothing here sends an order. Settings and armed stocks are copied from the desk.
+        ; nothing here sends an order. Settings and armed stocks are copied from the desk; the scanner&apos;s Arm can also arm
+        stocks here.
       </p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-400">
         <span>
           Settings copied {st ? ago(st.synced_at) : "…"}
           {st?.sync_error ? <span className="text-rose-300"> · {st.sync_error}</span> : null}
         </span>
+        {st?.scanner_armed ? (
+          <span title="Armed here from the scanner's Arm. Kept when this server starts again; Sync from desk replaces them.">
+            {st.scanner_armed} stock{st.scanner_armed === 1 ? "" : "s"} armed from the scanner
+          </span>
+        ) : null}
         <span className={clsx(st && !st.groww && "text-amber-300")}>
           Groww: {st ? (st.groww ? "desk session in use" : st.groww_error || "no session yet") : "…"}
         </span>
@@ -114,8 +120,21 @@ export function BacktestServerBar() {
         <button
           type="button"
           disabled={busy || st?.busy}
-          title={st?.busy ? "Wait for the running backtest to finish" : "Copy every bot's settings and armed stocks from the desk again"}
-          onClick={() => act(() => smaApi.backtestSync(), "Settings copied from the desk.")}
+          title={
+            st?.busy
+              ? "Wait for the running backtest to finish"
+              : "Copy every bot's settings and armed stocks from the desk again (stocks armed here from the scanner are replaced too)"
+          }
+          onClick={() => {
+            if (
+              st?.scanner_armed &&
+              !window.confirm(
+                `Copy everything from the desk? The ${st.scanner_armed} stock(s) armed here from the scanner are replaced by the desk's Trade lists.`
+              )
+            )
+              return;
+            act(() => smaApi.backtestSync(), "Settings copied from the desk.");
+          }}
           className={clsx(BTN, "text-sky-200 ring-sky-400/40 hover:bg-sky-500/10")}
         >
           {busy ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RefreshCw size={12} aria-hidden />} Sync from desk
