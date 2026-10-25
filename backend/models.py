@@ -362,6 +362,11 @@ class BotConfig(Base):
     extreme_invalid_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
     extreme_expiry_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     extreme_cancel_on_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Entry-candle colour check (entry_candle.py): the order waits until its own forming candle is moving the
+    # trade's way (price entry_candle_pct % past its open), for up to entry_candle_max candles.
+    entry_candle_confirm: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    entry_candle_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
+    entry_candle_max: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     # SMA 9 slope exit (slope_exit.py): close when the fast SMA bends or turns against the trade.
     slope_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     slope_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)

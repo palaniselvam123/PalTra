@@ -156,6 +156,10 @@ export type SmaConfig = {
   extreme_invalid_pct?: number;
   extreme_expiry_candles?: number;
   extreme_cancel_on_cross?: boolean;
+  /** Entry-candle check: the order waits until its own candle is past its open the trade's way (entry_candle.py). */
+  entry_candle_confirm?: boolean;
+  entry_candle_pct?: number;
+  entry_candle_max?: number;
   slope_exit?: boolean;
   slope_lookback?: number;
   slope_bend_pct?: number;

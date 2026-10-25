@@ -45,6 +45,7 @@ import ema_filter
 import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
+import entry_candle as entry_candle_mod
 import slope_exit as slope_mod
 import recovery as recovery_mod
 import breakout as breakout_mod
@@ -371,6 +372,9 @@ class ConfigUpdate(BaseModel):
     extreme_invalid_pct: float | None = Field(default=None, ge=0, le=extreme_mod.MAX_INVALID_PCT)
     extreme_expiry_candles: int | None = Field(default=None, ge=1, le=extreme_mod.MAX_EXPIRY)
     extreme_cancel_on_cross: bool | None = None
+    entry_candle_confirm: bool | None = None
+    entry_candle_pct: float | None = Field(default=None, ge=0, le=entry_candle_mod.MAX_PCT)
+    entry_candle_max: int | None = Field(default=None, ge=1, le=entry_candle_mod.MAX_CANDLES)
     slope_exit: bool | None = None
     slope_lookback: int | None = Field(default=None, ge=1, le=slope_mod.MAX_LOOKBACK)
     slope_bend_pct: float | None = Field(default=None, ge=0, le=100)
@@ -955,6 +959,9 @@ def _gap_dict(row) -> dict:
         "extreme_invalid_pct": extreme_mod.invalid_pct(row),
         "extreme_expiry_candles": extreme_mod.expiry(row),
         "extreme_cancel_on_cross": extreme_mod.cancel_on_cross(row),
+        "entry_candle_confirm": entry_candle_mod.on(row),
+        "entry_candle_pct": entry_candle_mod.margin_pct(row),
+        "entry_candle_max": entry_candle_mod.max_candles(row),
         "slope_exit": slope_mod.on(row),
         "slope_lookback": slope_mod.lookback(row),
         "slope_bend_pct": slope_mod.bend_pct(row),
