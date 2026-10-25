@@ -21,10 +21,10 @@ _SESSION_OPEN = 9 * 3600 + 15 * 60  # 09:15 IST
 
 
 def candle_minutes(cfg, own: dict | None = None) -> int:
-    """The interval a stock trades on: its own setting (`own`), else the bot's; 1 for candle patterns."""
+    """The interval a stock trades on: its own setting (`own`), else the bot's; 1 for candle patterns / colour."""
     own = own or {}
     mode = own.get("entry_mode", getattr(cfg, "entry_mode", None))
-    if str(mode or "SMA").upper() == "PATTERN":
+    if str(mode or "SMA").upper() in ("PATTERN", "COLOUR"):
         return 1
     try:
         value = int(own.get("candle_minutes", getattr(cfg, "candle_minutes", None)) or DEFAULT_MINUTES)

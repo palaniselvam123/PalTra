@@ -71,6 +71,9 @@ const GAP_EXITS: Toggle[] = [
 
 const BB_LABEL: Record<BbExit, string> = { OFF: "Off", BAND: "Band", MIDDLE: "Middle", BOTH: "Both" };
 const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap" };
+type PatternTf = "1" | "3" | "5" | "10" | "15";
+const PATTERN_TFS: PatternTf[] = ["1", "3", "5", "10", "15"];
+const PATTERN_TF_LABEL: Record<PatternTf, string> = { "1": "1 min", "3": "3 min", "5": "5 min", "10": "10 min", "15": "15 min" };
 
 /**
  * Strategy selection on the terminal: switch each part of the strategy on or
@@ -336,15 +339,19 @@ export function StrategySummary({
           "Entry",
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              {segmented<"SMA" | "PATTERN">(
+              {segmented<"SMA" | "PATTERN" | "COLOUR">(
                 "Enter on",
-                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN",
-                ["SMA", "PATTERN"],
-                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns" },
-                (v) => save({ entry_mode: v }, v === "PATTERN" ? "Entry on candle patterns" : "Entry on the SMA cross")
+                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN" | "COLOUR",
+                ["SMA", "PATTERN", "COLOUR"],
+                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns", COLOUR: "Candle colour" },
+                (v) =>
+                  save(
+                    { entry_mode: v },
+                    v === "PATTERN" ? "Entry on candle patterns" : v === "COLOUR" ? "Ride the candle colour" : "Entry on the SMA cross"
+                  )
               )}
             </div>
-            {(c.entry_mode ?? "SMA") !== "PATTERN" ? (
+            {(c.entry_mode ?? "SMA") === "SMA" ? (
               <div className="sm:col-span-2">
                 {segmented<"1" | "2" | "3" | "5" | "10" | "15">(
                   "Candle",
@@ -352,6 +359,25 @@ export function StrategySummary({
                   ["1", "2", "3", "5", "10", "15"],
                   { "1": "1m", "2": "2m", "3": "3m", "5": "5m", "10": "10m", "15": "15m" },
                   (v) => save({ candle_minutes: Number(v) as CandleMinutes }, `${v}-minute candles`)
+                )}
+              </div>
+            ) : null}
+            {(c.entry_mode ?? "SMA") === "COLOUR" ? (
+              <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
+                <div className="flex items-center gap-1 text-xs text-slate-400">
+                  <InfoTip label="About riding the candle colour">
+                    When a candle closes green the bot buys, red it sells, at the start of the next candle. The trade is held
+                    while the candles keep its colour (a doji holds too); the first candle of the other colour closes it and
+                    opens the other way at once. The stop, target, filters and square-off still apply.
+                  </InfoTip>
+                  How candle-colour trades work
+                </div>
+                {segmented<PatternTf>(
+                  "Candle",
+                  String(c.pattern_tf ?? 1) as PatternTf,
+                  PATTERN_TFS,
+                  PATTERN_TF_LABEL,
+                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 }, `Colour candle ${v} min`)
                 )}
               </div>
             ) : null}
@@ -364,12 +390,12 @@ export function StrategySummary({
                   </InfoTip>
                   How pattern trades work
                 </div>
-                {segmented<"1" | "3" | "5">(
+                {segmented<PatternTf>(
                   "Candle",
-                  String(c.pattern_tf ?? 1) as "1" | "3" | "5",
-                  ["1", "3", "5"],
-                  { "1": "1 min", "3": "3 min", "5": "5 min" },
-                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 }, `Pattern candle ${v} min`)
+                  String(c.pattern_tf ?? 1) as PatternTf,
+                  PATTERN_TFS,
+                  PATTERN_TF_LABEL,
+                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 }, `Pattern candle ${v} min`)
                 )}
                 {segmented<"STRONG" | "ALL">(
                   "Patterns",
@@ -391,9 +417,9 @@ export function StrategySummary({
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : (c.entry_mode ?? "SMA") === "SMA" ? (
               ENTRY.map(switchChip)
-            )}
+            ) : null}
             {switchChip({
               key: "flip_orders",
               label: "Flip (buy ⇄ sell)",
@@ -444,7 +470,7 @@ export function StrategySummary({
                 key: "cross_exit",
                 label: "SMA cross exit",
                 detail: () => (crossExitOn ? "opposite cross closes and reverses" : "off: a cross does not close the trade"),
-                when: () => (c.entry_mode ?? "SMA") !== "PATTERN",
+                when: () => (c.entry_mode ?? "SMA") === "SMA",
                 on: () => crossExitOn,
               })}
               {gapExits.map(switchChip)}
@@ -455,7 +481,7 @@ export function StrategySummary({
                   Number(c.candle_minutes ?? 1) < 2
                     ? "needs a candle of 2 minutes or more"
                     : `asks EXIT / WAIT at a gap within ±${c.review_gap_pct ?? 0.03}% · no answer keeps the trade`,
-                when: () => (c.entry_mode ?? "SMA") !== "PATTERN",
+                when: () => (c.entry_mode ?? "SMA") === "SMA",
               })}
             </div>
             {noExit ? (
@@ -475,7 +501,9 @@ export function StrategySummary({
             <p className="text-xs text-slate-400">
               {(c.entry_mode ?? "SMA") === "PATTERN"
                 ? "Always: the trade closes at the end of its candle"
-                : crossExitOn
+                : (c.entry_mode ?? "SMA") === "COLOUR"
+                  ? "A candle of the other colour closes the trade and opens the other way"
+                  : crossExitOn
                   ? "The opposite cross closes the trade"
                   : "An opposite cross does not close the trade"}
               {c.use_gap_mode ? ` · gap fades back to ${c.gap_exit_long ?? 0.02}% / ${c.gap_exit_short ?? -0.02}%` : ""}

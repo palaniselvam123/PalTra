@@ -29,12 +29,12 @@ export const crossExitOn = (cfg: Partial<SmaConfig>): boolean => cfg.cross_exit 
 /**
  * No exit is on: SMA entries with the cross exit, stop-loss, gap mode and
  * Bollinger exit and counter-candle exit all off, so a trade is held until the square-off. (Candle
- * patterns always close at the end of their candle.)
+ * patterns always close at the end of their candle; candle colour on the other colour.)
  */
 export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
   if (!cfg) return false;
   return (
-    (cfg.entry_mode ?? "SMA") !== "PATTERN" &&
+    (cfg.entry_mode ?? "SMA") === "SMA" &&
     !crossExitOn(cfg) &&
     cfg.use_stop === false &&
     !cfg.use_gap_mode &&

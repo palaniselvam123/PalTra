@@ -47,8 +47,8 @@ def on(cfg) -> bool:
 
 
 def applies(cfg) -> bool:
-    """On, and not for candle-pattern trades (they close at their candle's end)."""
-    return on(cfg) and (getattr(cfg, "entry_mode", None) or "SMA").upper() != "PATTERN"
+    """On, and not for candle-pattern or candle-colour trades (they order at the next candle's start)."""
+    return on(cfg) and (getattr(cfg, "entry_mode", None) or "SMA").upper() not in ("PATTERN", "COLOUR")
 
 
 def anchor(cfg) -> str:
