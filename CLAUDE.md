@@ -816,7 +816,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   strategy reads it.
 - `backend/app/services/news_impact.py` – news impact and news alerts (information only, never trades): each headline from
   `stock_news` is scored by a rule list (`score_text`: Indian corporate-news phrases with weights, critical phrases such as
-  fraud / raids / SEBI bans / defaults / insolvency / CEO exits / plant fires / open offers; a denial softens it) or, with an
+  fraud / raids / SEBI bans / defaults / insolvency / CEO exits / plant fires / open offers; plain share-price moves of the
+  stock or its ADRs such as "ADRs fall 3%" / "shares rise", "under pressure", guidance cuts, a regulator's crackdown; a denial
+  softens it). A headline that does not name the stock (`mark_relevance` / `about_stock`: symbol, company name or its first
+  word; NSE filings always count) is marked "mainly about another company" (`about: False`): only `OFF_TARGET_WEIGHT`
+  (25%) of its score counts in `overall`, and it never alerts or rings. Or, with an
   OpenAI key saved (Settings → AI Trading Expert) and `use_ai`, by OpenAI (`ai_read`, no web search, JSON schema, cached per
   headline set; a failure falls back to the rules, `ai_error`). `overall` weights recent headlines (half-life 24 h, 3 days
   max; MIXED when both ways); `action(view, side)` gives KEEP / EXIT / COVER / TIGHTEN for an open long or short and, while
