@@ -39,6 +39,58 @@ def test_rules(title, sentiment, critical):
         assert r["impact"] == "HIGH"
 
 
+@pytest.mark.parametrize(
+    "title,sentiment",
+    [
+        # The share price moving, said plainly (the owner's Wipro 8 Oct headlines read Neutral before).
+        ("Indian IT Stocks Under Pressure: Infosys, Wipro ADRs Fall After US Suspends Major Firms From Immigration Programme", "NEGATIVE"),
+        ("Infosys, Wipro ADRs drop 3% as Cognizant, Infosys, TCS, Wipro, HCL among IT firms suspended from US green card programme", "NEGATIVE"),
+        ("Infosys, Wipro ADRs fall nearly 3% after TCS earnings, US crackdown on H-1B-linked green card programme", "NEGATIVE"),
+        ("Wipro Ltd. 52 Week Low Streak After Another Weak Session", "NEGATIVE"),
+        ("Wipro cuts revenue guidance for FY27", "NEGATIVE"),
+        ("Wipro shares rise 2% after strong deal pipeline", "POSITIVE"),
+        ("Infosys stock gains 1.5 per cent in early trade", "POSITIVE"),
+        ("Government lifts ban on exports of rice", "NEUTRAL"),
+    ],
+)
+def test_price_moves_and_regulatory_hits(title, sentiment):
+    assert ni.score_text(title)["sentiment"] == sentiment
+
+
+WIPRO_8_OCT = [
+    "Indian IT Stocks Under Pressure: Infosys, Wipro ADRs Fall After US Suspends Major Firms From Immigration Programme",
+    "Wipro Ltd. 52 Week Low Streak After Another Weak Session",
+    "Infosys, Wipro ADRs drop 3% as Cognizant, Infosys, TCS, Wipro, HCL among IT firms suspended from US green card programme",
+    "Infosys, Wipro ADRs fall nearly 3% after TCS earnings, US crackdown on H-1B-linked green card programme",
+    "- The HinduBusinessLine",
+    "TCS Q2 FY27 results: net profit rises, declares Rs 10 interim dividend",
+]
+
+
+def test_another_companys_news_barely_counts():
+    items = [{"kind": "news", "title": t, "at": at(3), **ni.score_text(t)} for t in WIPRO_8_OCT]
+    marked = ni.mark_relevance(items, "WIPRO", "Wipro Limited")
+    assert [m["about"] for m in marked] == [True, True, True, True, False, False]
+    assert "another company" in marked[-1]["why"]
+    view = ni.overall(marked, NOW)
+    assert view["sentiment"] == "NEGATIVE"  # was "Positive · low impact" on the owner's screen
+    # Only other companies' news: the TCS dividend alone no longer reads as good news for Wipro.
+    tcs_only = marked[4:]
+    assert ni.overall([{**i, "about": True} for i in tcs_only], NOW)["sentiment"] == "POSITIVE"  # the old read
+    assert ni.overall(tcs_only, NOW)["sentiment"] == "NEUTRAL"
+    # A filing is always the company's own; the symbol or the name's first word also names it.
+    assert ni.about_stock({"kind": "announcement", "title": "Board meeting"}, "WIPRO", "Wipro Limited")
+    assert ni.about_stock({"kind": "news", "title": "Bajaj Finserv shares slip"}, "BAJAJFINSV", "Bajaj Finserv Limited")
+    assert ni.about_stock({"kind": "news", "title": "M&M Q2 profit up"}, "M&M", "Mahindra & Mahindra Limited")
+    assert not ni.about_stock({"kind": "news", "title": "Wiproz rallies"}, "WIPRO", "Wipro Limited")
+
+
+def test_another_companys_critical_news_never_rings():
+    other = {"sentiment": "NEGATIVE", "impact": "HIGH", "critical": True, "about": False}
+    assert not ni.is_critical(other, "LONG")
+    assert ni.overall([{**other, "score": -1.0, "at": at(1)}], NOW)["critical"] is False
+
+
 def test_denial_softens_and_is_not_critical():
     r = ni.score_text("Company denies reports of income tax raids")
     assert not r["critical"] and r["impact"] != "HIGH" and r["score"] < 0

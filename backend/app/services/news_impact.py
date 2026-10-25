@@ -72,6 +72,9 @@ POSITIVE: list[tuple[str, float]] = [
     (r"\b(record high|all[- ]time high|52[- ]week high|rallies|rally|surges?|soars?|zooms?|jumps?|skyrockets?)\b", 0.3),
     (r"\b(open offer|takeover bid|to be acquired by)\b", 0.7),
     (r"\b(debt[- ]free|deleverag\w+|repays? debt|reduces? debt)\b", 0.35),
+    # The share price itself moving up (the stock, its shares or its ADRs), or up by a stated %.
+    (r"\b(shares?|stocks?|scrip|adrs?)\b.{0,40}\b(rises?|rose|gains?|gained|climbs?|climbed|advances?|advanced|up)\b"
+     r"|\b(rises?|rose|gains?|gained|climbs?|climbed|up)\b.{0,15}\b\d+(\.\d+)?\s?(%|per ?cent)", 0.3),
 ]
 NEGATIVE: list[tuple[str, float]] = [
     (r"\b(profit|pat|net income|earnings|ebitda|revenue|sales|margins?)\b.{0,30}\b(falls?|fell|drops?|declines?|slumps?|plunges?|dips?|down|lower|shrinks?|halves|misses?|contracts?)", -0.6),
@@ -88,6 +91,14 @@ NEGATIVE: list[tuple[str, float]] = [
     (r"\b(slumps?|plunges?|tanks?|crashes?|tumbles?|sinks?|slides?|52[- ]week low|lower circuit|sell[- ]off)\b", -0.35),
     (r"\b(lawsuit|sued|litigation|arbitration award against|court (order|rejects))\b", -0.35),
     (r"\b(delay(s|ed)?|postpone[ds]?|deferr?ed|cancel(s|led)?)\b.{0,30}\b(results?|project|order|launch|ipo|listing|deal)", -0.3),
+    # The share price itself moving down (the stock, its shares or its ADRs), or down by a stated %.
+    (r"\b(shares?|stocks?|scrip|adrs?)\b.{0,40}\b(falls?|fell|drops?|dropped|slips?|slipped|declines?|declined|"
+     r"down|lose|loses|lost|sheds?|weaken\w*)\b"
+     r"|\b(falls?|fell|drops?|dropped|slips?|slipped|declines?|declined|down|lower|sheds?)\b.{0,15}\b\d+(\.\d+)?\s?(%|per ?cent)", -0.3),
+    (r"\bunder pressure\b|\bweak (session|trade|trading|show|quarter|guidance|outlook|demand)\b"
+     r"|\b(cuts?|lowers?|trims?) (\w+ ){0,2}(guidance|outlook|forecast)\b", -0.3),
+    # A regulator or government acting against the company (not a production halt, matched above).
+    (r"\bcrackdown\b|\bsuspend(s|ed)?\b.{0,40}\b(from|programme|program|licen[cs]e|registration)\b|(?<!lifts )(?<!lifted )(?<!removes )\bban(s|ned)? on\b", -0.35),
 ]
 # Critical phrases: always HIGH impact, and a phone call when the stock is held.
 CRITICAL_NEG: list[str] = [
@@ -167,8 +178,40 @@ def _age_hours(at: str | None, now: dt.datetime) -> float | None:
     return max((now - when).total_seconds() / 3600, 0.0)
 
 
+# A headline that does not name the stock (Google matched the name somewhere in the article, e.g. a TCS results
+# story for Wipro): this share of its score counts in the overall view.
+OFF_TARGET_WEIGHT = 0.25
+_NAME_SUFFIX = re.compile(r"\b(limited|ltd\.?|india ltd|\(india\))\s*$", re.I)
+
+
+def about_stock(item: dict, symbol: str, name: str | None) -> bool:
+    """True when the headline names the stock (its symbol or company name). NSE filings are always its own."""
+    if item.get("kind") == "announcement":
+        return True
+    text = f"{item.get('title') or ''} {item.get('detail') or ''}".lower()
+    terms = {symbol.lower()}
+    core = _NAME_SUFFIX.sub("", (name or "").strip()).strip(" .,").lower()
+    if core:
+        terms.add(core)
+        first = core.split()[0]
+        if len(first) >= 4:
+            terms.add(first)
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", text) for t in terms if t)
+
+
+def mark_relevance(items: list[dict], symbol: str, name: str | None) -> list[dict]:
+    out = []
+    for it in items:
+        about = about_stock(it, symbol, name)
+        if not about:
+            it = {**it, "why": f"{it.get('why') or 'no market-moving phrase'} · mainly about another company"}
+        out.append({**it, "about": about})
+    return out
+
+
 def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
-    """Recency-weighted view of a stock's analysed headlines (each needs `score`, `at`)."""
+    """Recency-weighted view of a stock's analysed headlines (each needs `score`, `at`). A headline marked
+    `about: False` (mark_relevance) counts OFF_TARGET_WEIGHT of its score."""
     now = now or dt.datetime.now(IST)
     num = den = 0.0
     counted = 0
@@ -179,14 +222,22 @@ def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
             age = 24.0  # undated: count it, as a day old
         if age > MAX_AGE_DAYS * 24:
             continue
-        weight = 0.5 ** (age / HALF_LIFE_H) * (1.5 if it.get("impact") == "HIGH" else 1.0)
-        num += weight * float(it.get("score") or 0)
+        off = it.get("about") is False
+        weight = 0.5 ** (age / HALF_LIFE_H) * (1.5 if it.get("impact") == "HIGH" and not off else 1.0)
+        # Another company's headline still counts as a headline, but its score only a quarter: it pulls the view
+        # toward neutral rather than either way.
+        part = OFF_TARGET_WEIGHT if off else 1.0
+        num += weight * part * float(it.get("score") or 0)
         den += weight
         counted += 1
-        critical = critical or (bool(it.get("critical")) and age <= 24)
+        critical = critical or (bool(it.get("critical")) and age <= 24 and it.get("about") is not False)
     score = num / den if den else 0.0
     # Headlines pulling both ways read as mixed rather than a weak average.
-    signs = {it.get("sentiment") for it in items if (_age_hours(it.get("at"), now) or 0) <= MAX_AGE_DAYS * 24}
+    signs = {
+        it.get("sentiment")
+        for it in items
+        if (_age_hours(it.get("at"), now) or 0) <= MAX_AGE_DAYS * 24 and it.get("about") is not False
+    }
     label = sentiment_of(score)
     if label == "NEUTRAL" and {"POSITIVE", "NEGATIVE"} <= signs:
         label = "MIXED"
@@ -390,6 +441,7 @@ async def analyze(
     past = news.get("day") is not None
     now = stock_news.window(day)[1] if past and day else dt.datetime.now(IST)
     items = [{**i, **score_text(i.get("title", ""), i.get("detail")), "by": "rules"} for i in news.get("items", [])]
+    items = mark_relevance(items, news["symbol"], news.get("name"))
     view = overall(items, now)
     method, ai_error = "rules", None
     if use_ai and items:
@@ -495,7 +547,7 @@ def side_of(entry: dict) -> str | None:
 
 def is_critical(item: dict, side: str | None) -> bool:
     """A phone call: a critical headline, or a HIGH one against the position, on a held stock."""
-    if side is None:
+    if side is None or item.get("about") is False:
         return False
     against = (side == "LONG" and item.get("sentiment") == "NEGATIVE") or (
         side == "SHORT" and item.get("sentiment") == "POSITIVE"
@@ -622,7 +674,7 @@ class NewsWatcher:
                     continue
                 self._seen.add(key)
                 age = _age_hours(it.get("at"), now)
-                if age is None or age > ALERT_MAX_AGE_H:
+                if age is None or age > ALERT_MAX_AGE_H or it.get("about") is False:
                     continue
                 if IMPACT_LEVELS.index(it["impact"]) < min_level and not is_critical(it, side):
                     continue
