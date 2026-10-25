@@ -128,6 +128,7 @@ ENTRY_REASONS = (
     "JOIN_TREND",
     "LATE_ENTRY",
     "EARLY_REVERSAL",
+    "COUNTER_REENTRY",
     "CANDLE_PATTERN",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
@@ -255,6 +256,7 @@ SNAPSHOT_FIELDS = (
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar", "gap_fade_minute",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
+    "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -896,6 +898,10 @@ class StrategyEngine:
         self._joined_today: set[str] = set()
         # Early reversal entry (counter_candles.py): the SMA run each stock was entered against.
         self._counter_done: dict[str, tuple[str, int]] = {}
+        # Re-entry after a counter-candle exit (counter_candles.py): the exit waiting to be undone
+        # (signal side, SMA run start, exit candle's level, exit candle ts), and re-entries used per SMA run.
+        self._reentry: dict[str, tuple[str, int, float, int]] = {}
+        self._reentry_used: dict[str, tuple[int, int]] = {}
         # Heads-up keys already sent, so a near cross does not message every minute.
         self._warned: set[tuple] = set()
         # Latest order refusal per stock (Groww's own words), kept for the
@@ -1147,6 +1153,8 @@ class StrategyEngine:
             self._recovery_blocked.clear()
             self._side_entered.clear()
             self._joined_today.clear()
+            self._reentry.clear()
+            self._reentry_used.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1386,7 +1394,7 @@ class StrategyEngine:
         """
         for table in (
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
-            self._pullback, self._side_entered, self._counter_done,
+            self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode,
         ):
             for symbol in [key for key in table if key not in watch]:
@@ -1464,6 +1472,10 @@ class StrategyEngine:
             run = self._joinable(symbol, frame, cfg, now)
             if run is not None:
                 return await self._join_minute(symbol, run, frame, cfg, now)
+        if (signal is None or signal_frame is None) and symbol in self._reentry:
+            text = await self._reentry_minute(symbol, frame, cfg, now)
+            if text is not None:
+                return text
         if (signal is None or signal_frame is None) and counter_candles.entry_on(cfg) and symbol not in self.positions:
             text = await self._counter_minute(symbol, frame, cfg, now)
             if text is not None:
@@ -1482,6 +1494,7 @@ class StrategyEngine:
             self.last_signal = text
             return text
         self._late_pending.pop(symbol, None)
+        self._reentry.pop(symbol, None)  # a fresh cross takes over from a waiting re-entry
         result = await self.apply_signal(signal, signal_frame, cfg, now)
         window = late_entry.window_min(cfg)
         if window > 0 and symbol not in self.positions and late_entry.refused_by_filter(signal, result):
@@ -1557,6 +1570,50 @@ class StrategyEngine:
             text = f"{result} — early reversal: {note}"
         else:
             text = f"{symbol} no order — early {want} reversal ({note}): {result}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
+
+    async def _reentry_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
+        """After a counter-candle exit: put the trade back on once a closed candle breaks the exit candle the
+        trade's way, while the SMAs stay on its side (counter_candles.resumes). None = nothing to say."""
+        side, run_ts, level, exit_ts = self._reentry[symbol]
+        closed = frame.iloc[:-1]
+        run = join_trend.side_start(frame)
+        if symbol in self.positions or not counter_candles.reenter_on(cfg) or closed.empty:
+            self._reentry.pop(symbol, None)
+            return None
+        if run is None or run[0] != side or int(run[1]) != run_ts:
+            self._reentry.pop(symbol, None)  # the SMAs crossed back: no re-entry on this run
+            return None
+        used = self._reentry_used.get(symbol)
+        done = used[1] if used and used[0] == run_ts else 0
+        limit = counter_candles.reenter_max(cfg)
+        if done >= limit:
+            self._reentry.pop(symbol, None)
+            return None
+        bar = closed.iloc[-1]
+        word = "below the exit candle's low" if side == "SHORT" else "above the exit candle's high"
+        waiting = f"{symbol} out after counter candles — re-enters {side} on a candle closing {word} {level:.2f} ({done}/{limit} used)"
+        if int(bar["ts"]) <= exit_ts:
+            text = waiting
+        else:
+            hit, note = counter_candles.resumes(bar, side, level)
+            if not hit:
+                text = waiting
+            else:
+                sig = "BULLISH" if side == "LONG" else "BEARISH"
+                result = await self.apply_signal(sig, frame, cfg, now, alert=False, why="COUNTER_REENTRY")
+                if result.startswith("blocked — order PENDING"):
+                    return result
+                if result.startswith("opened"):
+                    self._reentry.pop(symbol, None)
+                    self._reentry_used[symbol] = (run_ts, done + 1)
+                    text = f"{result} — re-entered ({done + 1}/{limit}): {note}"
+                else:
+                    if "no new entries after" in result or "trade cap" in result:
+                        self._reentry.pop(symbol, None)  # no later candle of today will do better
+                    text = f"{symbol} no order — re-entry ({note}): {result}"
         self._signals[symbol] = text
         self.last_signal = text
         return text
@@ -3150,7 +3207,14 @@ class StrategyEngine:
         if not hit:
             return
         self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
+        side = pos.signal_direction
         await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")
+        if counter_candles.reenter_on(cfg) and symbol not in self.positions:
+            run = join_trend.side_start(enriched)
+            level = counter_candles.exit_level(closed.iloc[-1], side)
+            # Only while the SMAs are still on the trade's side; an exit on the cross itself waits for that cross.
+            if run is not None and run[0] == side and level is not None:
+                self._reentry[symbol] = (side, int(run[1]), level, int(closed_ts))
 
     async def _watch_ema_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the EMAs cross against the trade (ema_filter.py)."""

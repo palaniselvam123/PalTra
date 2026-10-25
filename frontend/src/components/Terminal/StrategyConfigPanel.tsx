@@ -67,6 +67,8 @@ const LABELS: Record<string, string> = {
   counter_rule: "counter-candle rule",
   counter_need_fast: "counter-candle fast SMA",
   counter_min_body: "counter-candle min body",
+  counter_reenter: "re-enter after counter candles",
+  counter_reenter_max: "counter re-entries per run",
   counter_entry: "early reversal entry",
   use_ema: "EMA entry",
   ema_exit: "EMA exit",
@@ -289,6 +291,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       : "COLOUR",
     counter_need_fast: form.counter_need_fast !== false,
     counter_min_body: Math.min(5, Math.max(0, Number(form.counter_min_body ?? 0) || 0)),
+    counter_reenter: Boolean(form.counter_reenter),
+    counter_reenter_max: Math.min(10, Math.max(1, Math.round(Number(form.counter_reenter_max ?? 3)) || 3)),
     counter_entry: Boolean(form.counter_entry),
     use_ema: Boolean(form.use_ema),
     ema_exit: Boolean(form.ema_exit),
@@ -1296,6 +1300,37 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
+              checked={Boolean(form.counter_reenter)}
+              disabled={!(Number(form.counter_exit_count ?? 0) > 0)}
+              onChange={(e) => set("counter_reenter", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("counter_reenter") && <OwnTag />}
+            Re-enter if the move carries on
+            <InfoTip label="About re-entering after a counter-candle exit">
+              After the counter-candle exit, the bot keeps watching while the SMAs stay on the trade&apos;s side. The first
+              later candle that breaks the exit candle the trade&apos;s way puts the trade back on: in a sell, a red candle
+              closing below the green exit candle&apos;s low; in a buy, a green candle closing above the red one&apos;s high.
+              Another candle against it exits again. Stops when the SMAs cross back, or after the number of re-entries
+              below in one SMA run. Every filter, the cut-off, the caps and the stop still apply. Needs the exit above (N ≥ 1).
+            </InfoTip>
+          </label>
+          {form.counter_reenter && Number(form.counter_exit_count ?? 0) > 0 ? (
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field
+                label="Re-entries per SMA run (1-10)"
+                value={String(form.counter_reenter_max ?? 3)}
+                onChange={(v) => set("counter_reenter_max", v)}
+                own={isOwn("counter_reenter_max")}
+              />
+              <p className="pb-2 text-xs text-slate-400">
+                Caps the round trips when a stock chops sideways without crossing. The daily trade cap still applies.
+              </p>
+            </div>
+          ) : null}
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
               checked={Boolean(form.ema_exit)}
               onChange={(e) => set("ema_exit", e.target.checked)}
               className="accent-[#10B981]"
@@ -2022,6 +2057,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
   if (f.slow_sma_exit) add({ group: "exit", key: "slow_sma_exit", text: `Close when a candle closes beyond SMA ${slow} against the trade`, off: { slow_sma_exit: false } });
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
+  if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });

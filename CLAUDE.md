@@ -330,7 +330,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   on (fast below slow then N green closing above the fast SMA buys; N = the exit count, else 3)
   through `apply_signal` (alert off; every check, cut-off, cap, stop, flip and one-LIVE-bot-per-stock
   apply), once per SMA run (`_counter_done`, keyed on `join_trend.side_start`). Gap mode and candle
-  patterns ignore it. Settings → 1. When to enter (early entry) and 3. When to exit. The stock research baseline keeps both off.
+  patterns ignore it. **Re-enter** (`counter_reenter`, off by default, needs the exit; `counter_reenter_max` 1-10, default 3):
+  after a counter-candle exit while the SMAs are still on the trade's side, `_watch_counter_candles` keeps the exit candle's
+  low (short) / high (long) in `_reentry` (memory only); `_reentry_minute` re-enters through `apply_signal` (entry reason
+  `COUNTER_REENTRY`, alert off, every check applies) on the first later closed candle that breaks it the trade's way
+  (`counter_candles.resumes`: a red candle closing below that low / a green one above that high), at most
+  `counter_reenter_max` times per SMA run (`_reentry_used`); dropped when the SMAs cross back, at the cut-off / trade cap,
+  or when a fresh cross takes over. Settings → 1. When to enter (early entry) and 3. When to exit. The stock research
+  baseline keeps all three off.
 - `backend/ema_filter.py` – EMA cross check (off by default, per bot and per stock, PAPER and LIVE): a
   second pair of lines next to the SMA ones, like Groww's "EMA Cross 9 200" (`ema_fast` / `ema_slow`,
   defaults 9 / 200, 1-500, typed in Settings → 2. Checks before entering; the exit box is in 3. When to exit). The bot still trades the SMA
