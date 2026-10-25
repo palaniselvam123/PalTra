@@ -109,6 +109,7 @@ export function ArmPicker({
   onPick,
   onClose,
   server,
+  emptyReason,
 }: {
   symbol: string;
   desks: ArmDesk[];
@@ -116,6 +117,8 @@ export function ArmPicker({
   onClose: () => void;
   /** Scanner with a backtest server: the Main desk / Backtest server switch. */
   server?: ArmServerChoice;
+  /** Why no bot could be listed (the scanner's link error), shown instead of the plain message. */
+  emptyReason?: string | null;
 }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -150,7 +153,11 @@ export function ArmPicker({
         </p>
         {server ? <ArmServerSwitch choice={server} /> : null}
         {server?.value === "backtest" && server.loading ? null : desks.length === 0 ? (
-          <p className="text-xs text-amber-300">The SMA terminal is not answering, so no bot can be armed right now.</p>
+          <p className="text-xs text-amber-300">
+            {emptyReason
+              ? `No bot can be armed right now: ${emptyReason}`
+              : "The SMA terminal is not answering, so no bot can be armed right now."}
+          </p>
         ) : (
           <ul className="space-y-1.5">
             {desks.map((d) => {
