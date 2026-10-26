@@ -111,7 +111,9 @@ export function NewsAlertPopups() {
             )}
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="font-semibold text-slate-100">{a.critical ? "Critical news" : "News"} · {a.symbol}</span>
+                <span className="font-semibold text-slate-100">
+                  {a.critical ? "Critical news" : a.scope === "fno" ? "F&O news" : "News"} · {a.symbol}
+                </span>
                 <span className={clsx("rounded px-1.5 py-px text-[10px] font-semibold ring-1 ring-inset", toneClass(a.sentiment))}>
                   {toneWord(a.sentiment)} · {a.impact.toLowerCase()}
                 </span>

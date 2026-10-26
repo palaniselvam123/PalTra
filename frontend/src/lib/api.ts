@@ -946,6 +946,8 @@ export type NewsDayReport = { day: string; window: { from: string; to: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {
   id: number;
+  /** "fno": from the all-F&O NSE filings pass (a stock not armed or held). */
+  scope?: string | null;
   symbol: string;
   sentiment: NewsSentiment;
   impact: NewsImpact;
@@ -970,9 +972,33 @@ export type NewsWatchSettings = {
   popup: boolean;
   telegram: boolean;
   call_critical: boolean;
+  /** Every F&O stock's NSE filings too (one market-wide request a pass); pop-up for HIGH / critical ones. */
+  all_fno: boolean;
+  /** Also Telegram those F&O-wide alerts (never a call). */
+  fno_telegram: boolean;
   extra_symbols: string[];
   ai_key?: boolean;
-  status?: { last_run: string | null; last_error: string | null; watched: number; alerts_sent: number };
+  status?: {
+    last_run: string | null;
+    last_error: string | null;
+    watched: number;
+    alerts_sent: number;
+    fno_last_run?: string | null;
+    fno_error?: string | null;
+    fno_items?: number;
+  };
+};
+/** One NSE filing of an F&O stock from the watcher's market-wide pass (`GET /api/news-impact/feed`). */
+export type NewsFeedItem = {
+  symbol: string;
+  title: string;
+  detail?: string | null;
+  url: string;
+  at: string | null;
+  sentiment: string;
+  impact: NewsImpact;
+  critical?: boolean;
+  watched?: boolean;
 };
 export type NewsWatchStock = {
   symbol: string;
@@ -1363,6 +1389,8 @@ export const api = {
   newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
   saveNewsSettings: (patch: Partial<NewsWatchSettings>) =>
     request<NewsWatchSettings>("/api/news-impact/settings", { method: "PUT", body: JSON.stringify(patch) }),
+  newsFeed: (limit = 100) =>
+    request<{ items: NewsFeedItem[]; status: NewsWatchSettings["status"] }>(`/api/news-impact/feed?limit=${limit}`),
   newsWatch: () => request<{ stocks: NewsWatchStock[]; status: NewsWatchSettings["status"] }>("/api/news-impact/watch"),
   newsRunNow: () => request<{ alerts: NewsAlertRow[] }>("/api/news-impact/run", { method: "POST" }),
   newsTest: () => request<{ alert: NewsAlertRow; telegram: boolean | null; skipped: string | null }>("/api/news-impact/test", { method: "POST" }),

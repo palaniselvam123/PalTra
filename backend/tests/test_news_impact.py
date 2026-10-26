@@ -332,3 +332,88 @@ def test_routes_mounted():
 
     paths = {getattr(r, "path", "") for r in app.routes}
     assert {"/api/news-impact/stock/{symbol}", "/api/news-impact/alerts", "/api/news-impact/settings"} <= paths
+
+
+def test_market_feed_rows_carry_their_symbol():
+    from app.services import stock_news
+
+    rows = {"data": [
+        {"symbol": "tcs", "desc": "TCS bags order worth Rs 2,000 crore", "attchmntText": "", "attchmntFile": "u1",
+         "sort_date": "2026-10-23 09:30:00"},
+        {"symbol": "", "desc": "no symbol"},
+        "junk",
+    ]}
+    items = stock_news.parse_nse_market(rows)
+    assert len(items) == 1 and items[0]["symbol"] == "TCS" and items[0]["source"] == "NSE" and items[0]["url"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_all_fno_pass_pops_up_high_news_on_other_stocks_without_telegram(db, monkeypatch):
+    from app.services import stock_news
+    from app.services.alert_notifier import alert_notifier
+
+    feed = [
+        {"symbol": "OTHER", "title": "OTHER Ltd: income tax raids at offices", "url": "o1", "source": "NSE", "at": at(1)},
+        {"symbol": "OTHER", "title": "OTHER to hold AGM", "url": "o2", "source": "NSE", "at": at(1)},
+        {"symbol": "HELD", "title": "HELD faces SEBI ban", "url": "h9", "source": "NSE", "at": at(1)},
+        {"symbol": "NOTFNO", "title": "NOTFNO income tax raids", "url": "n1", "source": "NSE", "at": at(1)},
+        {"symbol": "OLD", "title": "OLD Ltd: income tax raids", "url": "x1", "source": "NSE", "at": at(30)},
+    ]
+
+    async def fake_market(client):
+        return [dict(f) for f in feed]
+
+    async def fake_news(symbol, force=False, day=None):
+        return {"symbol": symbol, "name": symbol, "errors": {}, "items": []}
+
+    sent = []
+
+    async def send(msg):
+        sent.append(msg)
+
+    monkeypatch.setattr(stock_news, "nse_market_announcements", fake_market)
+    monkeypatch.setattr(stock_news, "stock_news", fake_news)
+    monkeypatch.setattr(ni, "_fno_set", lambda: {"OTHER", "HELD", "OLD"})
+    monkeypatch.setattr(ni, "watch_list", lambda extra=None: {"HELD": {"armed": [], "held": []}})
+    monkeypatch.setattr(alert_notifier, "send", send)
+
+    watcher = ni.NewsWatcher()
+    cfg = NewsWatchSettings(id=1, enabled=True, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,
+                            telegram=True, call_critical=True, extra_symbols="", all_fno=True, fno_telegram=False)
+    made = await watcher.run_once(cfg, NOW)
+    # Only OTHER's raid: HELD is read in full on its own, NOTFNO is not F&O, OLD is 30 h old, the AGM is not HIGH.
+    assert [r.symbol for r in made] == ["OTHER"] and made[0].popup and sent == []
+    assert ni.alert_out(made[0])["scope"] == "fno"
+    feed_symbols = {it["symbol"] for it in watcher.market}
+    assert feed_symbols == {"OTHER", "HELD", "OLD"} and watcher.status.fno_items == 4
+    assert await watcher.run_once(cfg, NOW) == [] and len(watcher.market) == 4  # nothing twice
+
+    cfg.fno_telegram = True
+    feed.append({"symbol": "OTHER", "title": "OTHER CEO resigns with immediate effect", "url": "o3", "source": "NSE",
+                 "at": at(0.5)})
+    made = await watcher.run_once(cfg, NOW)
+    assert [r.symbol for r in made] == ["OTHER"] and len(sent) == 1 and "F&O news" in sent[0]
+
+    cfg.all_fno = False
+    feed.append({"symbol": "OTHER", "title": "OTHER plant fire halts output", "url": "o4", "source": "NSE", "at": at(0.2)})
+    assert await watcher.run_once(cfg, NOW) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failing_market_feed_keeps_the_armed_alerts(db, monkeypatch):
+    from app.services import stock_news
+
+    async def broken(client):
+        raise RuntimeError("NSE answered 403")
+
+    async def fake_news(symbol, force=False, day=None):
+        return {"symbol": symbol, "name": symbol, "errors": {}, "items": []}
+
+    monkeypatch.setattr(stock_news, "nse_market_announcements", broken)
+    monkeypatch.setattr(stock_news, "stock_news", fake_news)
+    monkeypatch.setattr(ni, "watch_list", lambda extra=None: {})
+    watcher = ni.NewsWatcher()
+    cfg = NewsWatchSettings(id=1, enabled=True, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,
+                            telegram=False, call_critical=False, extra_symbols="", all_fno=True, fno_telegram=False)
+    assert await watcher.run_once(cfg, NOW) == []
+    assert "403" in watcher.status.fno_error

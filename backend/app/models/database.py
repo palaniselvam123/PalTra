@@ -350,6 +350,10 @@ class NewsWatchSettings(Base):
     telegram: Mapped[bool] = mapped_column(Boolean, default=True)
     call_critical: Mapped[bool] = mapped_column(Boolean, default=True)
     extra_symbols: Mapped[str] = mapped_column(String, default="")  # comma-separated
+    # Every F&O stock's NSE filings too (one market-wide request a pass): a pop-up for HIGH / critical
+    # news; Telegram for them only with fno_telegram. The armed / held stocks keep the full read above.
+    all_fno: Mapped[bool] = mapped_column(Boolean, default=True)
+    fno_telegram: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class NewsAlert(Base):
@@ -481,6 +485,10 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     },
     "alert_channels": {
         "channel_type": "TEXT DEFAULT 'trade'",
+    },
+    "news_watch_settings": {
+        "all_fno": "BOOLEAN DEFAULT 1",
+        "fno_telegram": "BOOLEAN DEFAULT 0",
     },
 }
 

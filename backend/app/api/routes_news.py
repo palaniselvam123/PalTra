@@ -98,6 +98,8 @@ class SettingsBody(BaseModel):
     popup: bool | None = None
     telegram: bool | None = None
     call_critical: bool | None = None
+    all_fno: bool | None = None
+    fno_telegram: bool | None = None
     extra_symbols: list[str] | None = Field(None, max_length=30)
 
 
@@ -136,6 +138,12 @@ async def watch():
         "stocks": [{"symbol": s, **e, "latest": news_watcher.latest.get(s)} for s, e in watched.items()],
         "status": news_watcher.status.__dict__,
     }
+
+
+@router.get("/feed")
+async def feed(limit: int = Query(100, ge=1, le=news_impact.MARKET_KEEP)):
+    """Every F&O stock's latest NSE filings from the watcher's last passes, scored, newest first."""
+    return {"items": news_watcher.market[:limit], "status": news_watcher.status.__dict__}
 
 
 @router.post("/run")

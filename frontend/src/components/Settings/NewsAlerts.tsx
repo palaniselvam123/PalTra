@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { useCallback, useEffect, useState } from "react";
-import { api, type NewsAlertRow, type NewsImpact, type NewsWatchSettings, type NewsWatchStock } from "@/lib/api";
+import { api, type NewsAlertRow, type NewsFeedItem, type NewsImpact, type NewsWatchSettings, type NewsWatchStock } from "@/lib/api";
 import { toneClass, toneWord, urgentAction } from "@/lib/newsTone";
 
 const EVERY = [5, 10, 15, 20, 30, 60];
@@ -19,6 +19,8 @@ export function NewsAlerts() {
   const [extra, setExtra] = useState("");
   const [watch, setWatch] = useState<NewsWatchStock[]>([]);
   const [recent, setRecent] = useState<NewsAlertRow[]>([]);
+  const [feed, setFeed] = useState<NewsFeedItem[]>([]);
+  const [feedHigh, setFeedHigh] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -37,6 +39,10 @@ export function NewsAlerts() {
     api
       .newsAlerts(0, 10)
       .then((r) => setRecent(r.alerts))
+      .catch(() => undefined);
+    api
+      .newsFeed(150)
+      .then((r) => setFeed(r.items))
       .catch(() => undefined);
   }, []);
 
@@ -110,6 +116,12 @@ export function NewsAlerts() {
         {box("popup", "Pop-up")}
         {box("telegram", "Telegram")}
         {box("call_critical", "Phone call for critical news")}
+        {box(
+          "all_fno",
+          "All F&O stocks (NSE filings)",
+          "One NSE request a pass reads every company's latest filings. F&O stocks you don't hold or arm pop up for HIGH or critical news only; no AI, no phone call."
+        )}
+        {cfg?.all_fno ? box("fno_telegram", "Telegram for all-F&O alerts too") : null}
         {box("use_ai", "Use AI", cfg?.ai_key ? undefined : "No OpenAI key saved: the rule list is used")}
         <label className="flex items-center gap-2 text-xs text-slate-400">
           Every
@@ -179,6 +191,11 @@ export function NewsAlerts() {
         <p className="mt-2 text-[11px] text-slate-500">
           Watching {st.watched} stock(s){st.last_run ? ` · last check ${st.last_run.slice(11, 16)}` : ""} · {st.alerts_sent} alert(s) since the
           app started{st.last_error ? ` · last problem: ${st.last_error}` : ""}
+          {cfg?.all_fno
+            ? ` · all F&O: ${st.fno_last_run ? `${st.fno_items ?? 0} filing(s), read ${st.fno_last_run.slice(11, 16)}` : "not read yet"}${
+                st.fno_error ? ` (problem: ${st.fno_error})` : ""
+              }`
+            : ""}
         </p>
       ) : null}
 
@@ -238,6 +255,45 @@ export function NewsAlerts() {
           )}
         </div>
       </div>
+
+      {cfg?.all_fno ? (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">All F&amp;O news feed (NSE filings, last 3 days)</h3>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              <input type="checkbox" checked={feedHigh} onChange={(e) => setFeedHigh(e.target.checked)} className="accent-[#10B981]" />
+              High impact only
+            </label>
+          </div>
+          {(() => {
+            const rows = feed.filter((f) => !feedHigh || f.impact === "HIGH" || f.critical);
+            return rows.length ? (
+              <ul className="mt-1 max-h-96 divide-y divide-white/5 overflow-y-auto text-xs">
+                {rows.map((f) => (
+                  <li key={`${f.symbol}|${f.url}|${f.title}`} className="flex flex-wrap items-baseline gap-2 py-1.5">
+                    <span className="text-slate-500">{f.at ? f.at.slice(5, 16).replace("T", " ") : "—"}</span>
+                    <span className="w-24 font-semibold text-slate-100">
+                      {f.symbol}
+                      {f.watched ? <span className="ml-1 text-[10px] font-normal text-sky-300">watched</span> : null}
+                    </span>
+                    <span className={clsx("rounded px-1 text-[10px] font-semibold ring-1 ring-inset", toneClass(f.sentiment))}>
+                      {f.critical ? "⚠ " : ""}
+                      {toneWord(f.sentiment)} · {f.impact.toLowerCase()}
+                    </span>
+                    <a href={f.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 text-slate-300 hover:underline">
+                      {f.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">
+                {feed.length ? "Nothing with high impact." : "No filings read yet: the next check fills this (or press Check the news now)."}
+              </p>
+            );
+          })()}
+        </div>
+      ) : null}
     </section>
   );
 }
