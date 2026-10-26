@@ -2512,6 +2512,17 @@ def armed_lists() -> dict:
     }
 
 
+def news_prices(symbols: list[str]) -> dict[str, float]:
+    """The SMA bots' own last prices for these stocks, for the desk's news page and alerts (read-only)."""
+    wanted = {(s or "").upper() for s in symbols}
+    out: dict[str, float] = {}
+    for eng in [engine, *bot_engines.values(), research_engine]:
+        for sym, ltp in list(getattr(eng, "_ltps", {}).items()):
+            if sym in wanted and sym not in out and ltp:
+                out[sym] = float(ltp)
+    return out
+
+
 def news_watch_list() -> dict:
     """Armed and held stocks of bots 1-4, for the desk's news alerts (read-only).
 

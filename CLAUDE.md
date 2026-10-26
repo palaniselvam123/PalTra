@@ -78,7 +78,7 @@ backend/
   config.py, database.py, models.py, charges.py   SMA Terminal settings, DB, cost model
   tests/                  pytest suite (both engines)
 frontend/src/
-  app/                    Pages: / (dashboard), chart, trade, movers, scanner,
+  app/                    Pages: / (dashboard), chart, trade, movers, scanner, news,
                           reports, settings, terminal (SMA terminal UI)
   components/             UI by feature (Dashboard, Trade, Terminal, Chart, ...)
   hooks/                  useTradingState, useWebSocket, useNotifications, useTheme
@@ -913,6 +913,25 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   news feed"), and for a HIGH-impact or critical filing on a stock that is not armed or held saves a pop-up `NewsAlert`
   (`scope: "fno"`, `_market_alert`; Telegram only with `fno_telegram`, off by default; never AI, never a call). A failing
   market feed only sets `status.fno_error`; the armed / held alerts still go.
+- **News page** (desk `/news`, `components/News/NewsPage.tsx`, nav "News"; information only, never trades): tabs for the
+  bots' armed / held stocks, each **watch list**, stocks sent from the Scalp page (`/news/?symbols=A,B`), every F&O stock's
+  NSE filings (`GET /api/news-impact/feed?valid_only=&prices=`) and the alerts sent (each with the price then). Rows show the
+  last price, the watcher's latest view (`/api/news-impact/watch`, `latest`), the new-entry call, the top headline, a News
+  button (`StockNewsPanel`), Arm (`useArming`, Trade list only) and add-to-list. **Watch lists** (`app/services/news_lists.py`,
+  `NewsWatchList` rows: name + any NSE symbols, checked against the instrument list when it is loaded; at most `MAX_LISTS` 50
+  lists of `MAX_PER_LIST` 200): `GET/POST /api/news-impact/lists`, `PUT/DELETE /api/news-impact/lists/{id}` (`name`, `symbols`,
+  `add`, `remove`). `news_impact.watch_list(extra, lists)` adds every list's stocks after the bots' and the extra ones
+  (entries carry `lists`), up to `MAX_WATCH` 120 a pass. **Validity** (`valid_until` / `is_valid` / `with_validity`): a
+  headline counts until 15:30 IST on the next trading day (Mon-Fri, no holiday list) after the day it came out (Friday's
+  news till Monday's close); past it, it no longer moves `overall`, is never alerted, and shows as expired (items carry
+  `valid` / `valid_until`). **Prices** (`news_lists.prices`, `GET /api/news-impact/prices?symbols=`): the bots' own last
+  prices (terminal `main.news_prices`), then the desk's live feed (`state.latest_quotes`), then one batched Groww LTP call
+  on the desk's session (skipped while the bots are rate-limited), cached `PRICE_TTL_SEC` 30 s; the alert text, pop-up and
+  `NewsAlert` body (`price`, `lists`, `valid_until`) carry it. **Scalp page**: every scan table row has a 📰 button (the
+  stock's news, `TickArm.NewsModal`) and the tick bar a **Watch news** button (`components/News/WatchNewsDialog.tsx`: add the
+  ticked stocks to a list or a new one, open their news). On the scanner server the lists are the desk's, through the link
+  (`useNewsLists`; scanner `GET /api/link/desk-news-lists`, `POST /api/link/desk-news-lists/add` → desk `/api/link/news-lists`
+  `[/add]`, `SCANNER_LINK_TOKEN`), and "Open their news" opens the desk's News page.
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's

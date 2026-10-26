@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   LineChart,
   MoreHorizontal,
+  Newspaper,
   Radar,
   Radio,
   Settings,
@@ -58,6 +59,7 @@ export const NAV = [
   { href: "/trade", label: "Trade", icon: CandlestickChart },
   { href: "/movers", label: "Movers", icon: Zap },
   { href: "/scalp", label: "Scalp", icon: Gauge },
+  { href: "/news", label: "News", icon: Newspaper },
   { href: "/options", label: "Options", icon: Layers },
   { href: "/us", label: "US", icon: Globe },
   { href: "/scanner", label: "Scanner", icon: Radar },
@@ -202,7 +204,7 @@ export function Navbar({
           <span className="grad-text hidden text-title font-bold sm:inline">ORB Desk</span>
         </Link>
 
-        <nav className="hidden min-w-0 items-center gap-3 self-stretch xl:flex 2xl:gap-5">
+        <nav className="hidden min-w-0 items-center gap-2 self-stretch overflow-x-auto [scrollbar-width:none] xl:flex 2xl:gap-5 [&::-webkit-scrollbar]:hidden">
           {NAV.map(({ href, label }) => {
             const active = isActive(pathname, href);
             return (

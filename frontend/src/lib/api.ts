@@ -904,6 +904,9 @@ export type ScoredNewsItem = StockNewsItem & {
   critical: boolean;
   why: string;
   by: "ai" | "rules";
+  /** False once past its validity: 15:30 IST on the next trading day after it came out (`valid_until`). */
+  valid?: boolean;
+  valid_until?: string | null;
 };
 export type NewsOverall = {
   score: number;
@@ -967,6 +970,12 @@ export type NewsAlertRow = {
   method?: string | null;
   held?: NewsHolding[] | null;
   armed?: string[] | null;
+  /** News watch lists the stock is on. */
+  lists?: string[] | null;
+  /** The stock's last price when the alert was made. */
+  price?: number | null;
+  /** The headline counts until then (the next trading day's close). */
+  valid_until?: string | null;
 };
 export type NewsWatchSettings = {
   enabled: boolean;
@@ -1003,11 +1012,17 @@ export type NewsFeedItem = {
   impact: NewsImpact;
   critical?: boolean;
   watched?: boolean;
+  valid?: boolean;
+  valid_until?: string | null;
+  price?: number | null;
 };
+/** A named list of stocks whose news is watched (desk `news_lists.py`). */
+export type NewsWatchList = { id: number; name: string; symbols: string[] };
 export type NewsWatchStock = {
   symbol: string;
   armed: string[];
   held: NewsHolding[];
+  lists?: string[];
   latest: {
     overall: NewsOverall;
     action: NewsAction;
@@ -1393,8 +1408,25 @@ export const api = {
   newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
   saveNewsSettings: (patch: Partial<NewsWatchSettings>) =>
     request<NewsWatchSettings>("/api/news-impact/settings", { method: "PUT", body: JSON.stringify(patch) }),
-  newsFeed: (limit = 100) =>
-    request<{ items: NewsFeedItem[]; status: NewsWatchSettings["status"] }>(`/api/news-impact/feed?limit=${limit}`),
+  newsFeed: (limit = 100, validOnly = false, prices = false) =>
+    request<{ items: NewsFeedItem[]; status: NewsWatchSettings["status"] }>(
+      `/api/news-impact/feed?limit=${limit}${validOnly ? "&valid_only=true" : ""}${prices ? "&prices=true" : ""}`
+    ),
+  newsLists: () => request<{ lists: NewsWatchList[]; max_lists: number; max_per_list: number }>("/api/news-impact/lists"),
+  createNewsList: (name: string, symbols: string[]) =>
+    request<NewsWatchList>("/api/news-impact/lists", { method: "POST", body: JSON.stringify({ name, symbols }) }),
+  updateNewsList: (id: number, patch: { name?: string; symbols?: string[]; add?: string[]; remove?: string[] }) =>
+    request<NewsWatchList>(`/api/news-impact/lists/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteNewsList: (id: number) => request<{ ok: boolean }>(`/api/news-impact/lists/${id}`, { method: "DELETE" }),
+  newsPrices: (symbols: string[]) =>
+    request<{ prices: Record<string, number> }>(`/api/news-impact/prices?symbols=${encodeURIComponent(symbols.join(","))}`),
+  /** Scanner server: the desk's news watch lists, over the link. */
+  deskNewsLists: () => request<{ lists: NewsWatchList[] }>("/api/link/desk-news-lists"),
+  deskNewsListAdd: (symbols: string[], listId: number | null, newName: string | null) =>
+    request<NewsWatchList>("/api/link/desk-news-lists/add", {
+      method: "POST",
+      body: JSON.stringify({ symbols, list_id: listId, new_name: newName }),
+    }),
   newsWatch: () => request<{ stocks: NewsWatchStock[]; status: NewsWatchSettings["status"] }>("/api/news-impact/watch"),
   newsRunNow: () => request<{ alerts: NewsAlertRow[] }>("/api/news-impact/run", { method: "POST" }),
   newsTest: () => request<{ alert: NewsAlertRow; telegram: boolean | null; skipped: string | null }>("/api/news-impact/test", { method: "POST" }),

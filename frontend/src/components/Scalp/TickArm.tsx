@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CheckSquare } from "lucide-react";
+import { createPortal } from "react-dom";
+import { CheckSquare, Newspaper } from "lucide-react";
+import { StockNewsPanel } from "@/components/Terminal/StockNewsPanel";
+import { WatchNewsDialog } from "@/components/News/WatchNewsDialog";
 
 /** Ticked stocks in a scan table, for "Arm ticked" (several stocks on one bot at once). */
 export function useTicks() {
@@ -18,9 +21,10 @@ export function useTicks() {
 
 type Ticks = ReturnType<typeof useTicks>;
 
-/** The bar above a scan table: how many are ticked, Clear, and Arm ticked. */
+/** The bar above a scan table: how many are ticked, Clear, Watch news and Arm ticked. */
 export function TickBar({ ticks, onArm }: { ticks: Ticks; onArm: (symbols: string[]) => void }) {
   const n = ticks.ticked.size;
+  const [watch, setWatch] = useState<string[] | null>(null);
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-profit/25 bg-profit/[0.05] px-3 py-1.5 text-xs text-slate-300">
       <CheckSquare size={13} className="text-profit" />
@@ -33,8 +37,18 @@ export function TickBar({ ticks, onArm }: { ticks: Ticks; onArm: (symbols: strin
       <button
         type="button"
         disabled={n === 0}
+        onClick={() => setWatch(Array.from(ticks.ticked))}
+        title="Add the ticked stocks to a news watch list and open their news"
+        className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md bg-amber-500/10 px-3 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/20 disabled:opacity-40"
+      >
+        <Newspaper size={13} /> Watch news{n ? ` (${n})` : ""}
+      </button>
+      {watch ? <WatchNewsDialog symbols={watch} onClose={() => setWatch(null)} /> : null}
+      <button
+        type="button"
+        disabled={n === 0}
         onClick={() => onArm(Array.from(ticks.ticked))}
-        className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md bg-profit/15 px-3 font-semibold text-profit ring-1 ring-inset ring-profit/40 hover:bg-profit/25 disabled:opacity-40"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-profit/15 px-3 font-semibold text-profit ring-1 ring-inset ring-profit/40 hover:bg-profit/25 disabled:opacity-40"
       >
         Arm ticked{n ? ` (${n})` : ""}
       </button>
@@ -68,8 +82,9 @@ export function TickHead({ ticks, symbols }: { ticks: Ticks; symbols: string[] }
 }
 
 export function TickCell({ ticks, symbol }: { ticks: Ticks; symbol: string }) {
+  const [news, setNews] = useState(false);
   return (
-    <td className="py-1.5">
+    <td className="whitespace-nowrap py-1.5">
       <input
         type="checkbox"
         aria-label={`Tick ${symbol}`}
@@ -77,6 +92,28 @@ export function TickCell({ ticks, symbol }: { ticks: Ticks; symbol: string }) {
         checked={ticks.ticked.has(symbol)}
         onChange={(e) => ticks.toggle(symbol, e.target.checked)}
       />
+      <button
+        type="button"
+        onClick={() => setNews(true)}
+        aria-label={`${symbol} news`}
+        title={`${symbol} news`}
+        className="ml-1 rounded p-0.5 align-middle text-slate-500 hover:bg-white/5 hover:text-amber-300"
+      >
+        <Newspaper size={12} />
+      </button>
+      {news ? <NewsModal symbol={symbol} onClose={() => setNews(false)} /> : null}
     </td>
+  );
+}
+
+/** One stock's news (the chart's News panel) over the page. */
+export function NewsModal({ symbol, onClose }: { symbol: string; onClose: () => void }) {
+  return createPortal(
+    <div className="terminal-dark fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/50 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label={`${symbol} news`} className="mt-10 w-full max-w-3xl overflow-hidden rounded-xl border border-border shadow-xl">
+        <StockNewsPanel symbol={symbol} onClose={onClose} />
+      </div>
+    </div>,
+    document.body
   );
 }

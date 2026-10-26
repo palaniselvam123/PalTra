@@ -132,13 +132,18 @@ async def desk_armed(server: Server = "desk"):
 # Trade list; the bot orders on its next SMA cross, as when armed on the desk.
 
 ARM_PATH = "/api/link/arm"
+# News watch lists (news_lists.py) live on the desk: the scanner's Scalp page reads and adds to them here.
+NEWS_LISTS = "/api/link/news-lists"
+NEWS_LISTS_ADD = "/api/link/news-lists/add"
 STOCK_PREFIX = "/api/link/stock/"
 LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 
 
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
-    return path in (ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW) or path.startswith(STOCK_PREFIX)
+    return path in (ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, NEWS_LISTS, NEWS_LISTS_ADD) or path.startswith(
+        STOCK_PREFIX
+    )
 
 
 # ---- Desk ↔ backtest server (backtest_server.py) ----
@@ -366,3 +371,63 @@ async def scanner_arm(body: ArmRequest, server: Server = "desk"):
     out = await _to_desk("POST", ARM_PATH, body.model_dump(), server=server)
     _cache.pop(server, None)  # the armed chips update on the next read
     return out
+
+
+# ---- news watch lists over the link (the Scalp page's "Watch news" on the scanner) ----------------
+
+
+class NewsListAdd(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=200)
+    list_id: int | None = None
+    new_name: str | None = Field(None, max_length=40)
+
+
+def _news_guard(request: Request) -> None:
+    if not server_role.is_desk() or not server_role.link_token():
+        raise HTTPException(404, "Not found")
+    if not _authorized(request):
+        raise HTTPException(401, "Bad link token")
+
+
+async def add_to_news_list(body: NewsListAdd) -> dict:
+    """Add stocks to a watch list, or to a new one named `new_name`. Information only: nothing is armed."""
+    from app.services import news_lists
+    from app.services.news_impact import news_watcher
+
+    try:
+        if body.list_id:
+            row = await news_lists.update(body.list_id, add=body.symbols)
+        else:
+            row = await news_lists.create(body.new_name or "Watch list", body.symbols)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    news_watcher.kick()
+    return row
+
+
+@router.get(NEWS_LISTS)
+async def desk_news_lists(request: Request):
+    from app.services import news_lists
+
+    _news_guard(request)
+    return {"lists": await news_lists.all_lists()}
+
+
+@router.post(NEWS_LISTS_ADD)
+async def desk_news_lists_add(body: NewsListAdd, request: Request):
+    _news_guard(request)
+    return await add_to_news_list(body)
+
+
+@router.get("/api/link/desk-news-lists")
+async def scanner_news_lists():
+    _scanner_only()
+    return await _to_desk("GET", NEWS_LISTS)
+
+
+@router.post("/api/link/desk-news-lists/add")
+async def scanner_news_lists_add(body: NewsListAdd):
+    _scanner_only()
+    return await _to_desk("POST", NEWS_LISTS_ADD, body.model_dump())

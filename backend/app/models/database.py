@@ -376,6 +376,17 @@ class NewsAlert(Base):
 
 
 
+class NewsWatchList(Base):
+    """A named list of stocks whose news is watched (the News page). See app/services/news_lists.py."""
+
+    __tablename__ = "news_watch_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    symbols: Mapped[str] = mapped_column(Text, default="")  # comma-separated, in the order added
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
 class UsCredential(Base):
     """Alpaca market-data key pair for the US practice desk, encrypted with the desk's vault. Read-only use."""
 

@@ -114,6 +114,7 @@ export function NewsAlertPopups() {
                 <span className="font-semibold text-slate-100">
                   {a.critical ? "Critical news" : a.scope === "fno" ? "F&O news" : "News"} · {a.symbol}
                 </span>
+                {a.price ? <span className="font-mono text-slate-300">₹{a.price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> : null}
                 <span className={clsx("rounded px-1.5 py-px text-[10px] font-semibold ring-1 ring-inset", toneClass(a.sentiment))}>
                   {toneWord(a.sentiment)} · {a.impact.toLowerCase()}
                 </span>
