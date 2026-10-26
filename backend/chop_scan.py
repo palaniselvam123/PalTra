@@ -230,21 +230,27 @@ def _crosses(closed: pd.DataFrame, today: int) -> list[dict]:
 
     The gap is signed `(fast - slow) / slow x 100`; a flip from negative to
     positive is a bullish cross, the other way round is bearish. Zeros do not
-    count as a cross.
+    count as a cross. A candle without a gap (SMAs not formed yet) is skipped:
+    the next one is compared with the last candle that had one. Whole columns at
+    once (the scan reads every stock on six candle sizes).
     """
-    if closed is None or len(closed) < 2:
+    if closed is None or len(closed) < 2 or "sma_9" not in closed or "sma_21" not in closed:
         return []
-    hits: list[dict] = []
-    prev_gap: float | None = None
-    for _, row in closed.iterrows():
-        gap = sma_gap_pct(row.get("sma_9"), row.get("sma_21"))
-        if gap is None or prev_gap is None:
-            prev_gap = gap if gap is not None else prev_gap
-            continue
-        if prev_gap != 0 and gap != 0 and (prev_gap < 0) != (gap < 0) and _ist_day(int(row["ts"])) == today:
-            hits.append({"ts": int(row["ts"]), "close": float(row.get("close") or 0.0), "side": "BULLISH" if gap > 0 else "BEARISH"})
-        prev_gap = gap
-    return hits
+    fast = pd.to_numeric(closed["sma_9"], errors="coerce")
+    slow = pd.to_numeric(closed["sma_21"], errors="coerce")
+    gap = ((fast - slow) / slow * 100.0).where(slow != 0)
+    valid = gap.notna()
+    g = gap[valid]
+    prev = g.shift(1)
+    ts = closed["ts"][valid].astype("int64")
+    flip = prev.notna() & (prev != 0) & (g != 0) & ((prev < 0) != (g < 0)) & ((ts + 19_800) // 86_400 == today)
+    if not flip.any():
+        return []
+    close = pd.to_numeric(closed["close"][valid], errors="coerce").fillna(0.0)
+    return [
+        {"ts": int(t), "close": float(c), "side": "BULLISH" if v > 0 else "BEARISH"}
+        for t, c, v in zip(ts[flip], close[flip], g[flip])
+    ]
 
 
 def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT) -> ChopRow | None:

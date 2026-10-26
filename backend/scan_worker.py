@@ -8,10 +8,16 @@ for it. Here each stock's download *and* analysis run in a separate process
 (one worker, started on the first scan, at a lower CPU priority); the main
 process only keeps the scan's progress and gets back the finished row.
 
-Groww's rate limit is per account, so the worker also paces itself: at most one
-candle request every `MIN_GAP_SEC`, and a "rate limit" answer is retried after
-2, 4 and 8 seconds instead of failing the stock. Sleeping in the worker costs
-the bots nothing.
+Groww's rate limit is per account, so the workers also pace themselves: together at
+most one candle request every `MIN_GAP_SEC` (each of `WORKERS` processes waits
+`WORKERS` × that), and a "rate limit" answer is retried after 2, 4 and 8 seconds
+instead of failing the stock. Sleeping in the worker costs the bots nothing.
+`WORKERS` follows `CROSS_SCAN_CONCURRENCY` (1 by default, 3 on the scanner server),
+so Groww's answer time for one stock overlaps the next ones.
+
+Earlier days never change, so the Cross scan and Trend quality keep each stock's
+candles before today in the main process (`_PAST`, memory only, today's only) after its
+first scan of the day; later scans download just today (`run_cached`).
 
 Read-only: candles only, no order path. The Groww access token is handed to the
 worker over the process pipe for its own SDK session; it is never logged.
@@ -30,7 +36,7 @@ from concurrent.futures.process import BrokenProcessPool
 
 log = logging.getLogger("sma.scanworker")
 
-MIN_GAP_SEC = 0.35  # between two Groww candle requests from the worker
+MIN_GAP_SEC = 0.35  # between two Groww candle requests, over all workers together
 RATE_RETRY_SEC = (2, 4, 8)  # waits after a "rate limit" answer
 JOB_TIMEOUT_SEC = 90  # one stock: pacing + retries + a 4-day download
 NICE = 10  # the worker yields the CPU to the bots
@@ -52,9 +58,11 @@ def enabled() -> bool:
 
 _sdk_cache: dict = {"token": None, "sdk": None}
 _last_call = [0.0]
+_workers = [1]  # workers in the pool: each spaces its own calls MIN_GAP_SEC × this
 
 
-def _init_worker() -> None:
+def _init_worker(workers: int = 1) -> None:
+    _workers[0] = max(1, int(workers))
     try:
         os.nice(NICE)
     except (AttributeError, OSError):
@@ -86,7 +94,7 @@ class _Paced:
     def get_historical_candle_data(self, **kwargs):
         waits = list(RATE_RETRY_SEC)
         while True:
-            gap = MIN_GAP_SEC - (time.monotonic() - _last_call[0])
+            gap = MIN_GAP_SEC * _workers[0] - (time.monotonic() - _last_call[0])
             if gap > 0:
                 time.sleep(gap)
             _last_call[0] = time.monotonic()
@@ -113,16 +121,39 @@ def _frame(token: str, symbol: str, start: dt.datetime, end: dt.datetime):
         raise ScanFailed(f"Groww did not send candles: {detail}"[:240]) from None
 
 
-def cross_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
+def _midnight(end: dt.datetime) -> dt.datetime:
+    return end.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _frame_with_past(token, symbol, start, end, past):
+    """(candles start..end, the days before today to keep). With `past` only today is downloaded."""
+    import pandas as pd
+
+    from groww_client import IST
+
+    if past is not None and not past.empty:
+        today = _frame(token, symbol, _midnight(end), end)
+        frame = pd.concat([past, today]).sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
+        return frame, None
+    frame = _frame(token, symbol, start, end)
+    cut = int(_midnight(end).replace(tzinfo=IST).timestamp())
+    return frame, frame[frame["ts"].astype("int64") < cut].reset_index(drop=True)
+
+
+def cross_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, past=None):
+    """(row, earlier days to keep); see `run_cached`."""
     from cross_scan import scan_one
 
-    return scan_one(symbol, _frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now)
+    frame, keep = _frame_with_past(token, symbol, start, end, past)
+    return scan_one(symbol, frame, sma_fast, sma_slow, minutes, now), keep
 
 
-def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min):
+def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min, past=None):
+    """(row, earlier days to keep); see `run_cached`."""
     from chop_scan import analyze
 
-    return analyze(_frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min)
+    frame, keep = _frame_with_past(token, symbol, start, end, past)
+    return analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min), keep
 
 
 def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
@@ -141,15 +172,38 @@ def check_job(token, symbol, start, end, kind, row, as_of, minutes, sma_fast, sm
 # ---- main-process side ---------------------------------------------------------------------
 
 _pool: ProcessPoolExecutor | None = None
+# Each stock's candles before today, from its first scan today: {(symbol, window start): frame}.
+_PAST: dict = {}
+_PAST_DAY: list = [None]
+
+
+def workers() -> int:
+    from cross_scan import CONCURRENCY
+
+    return max(1, int(CONCURRENCY))
 
 
 def _executor() -> ProcessPoolExecutor:
     global _pool
     if _pool is None:
+        n = workers()
         _pool = ProcessPoolExecutor(
-            max_workers=1, mp_context=multiprocessing.get_context("spawn"), initializer=_init_worker
+            max_workers=n, mp_context=multiprocessing.get_context("spawn"), initializer=_init_worker, initargs=(n,)
         )
     return _pool
+
+
+async def run_cached(broker, fn, symbol: str, start: dt.datetime, end: dt.datetime, *args):
+    """`run` for a job that returns (row, earlier days): the earlier days are kept for today's next scans."""
+    day = end.date()
+    if _PAST_DAY[0] != day:
+        _PAST.clear()
+        _PAST_DAY[0] = day
+    key = (symbol, start)
+    row, keep = await run(broker, fn, symbol, start, end, *args, _PAST.get(key))
+    if keep is not None and not keep.empty:
+        _PAST[key] = keep
+    return row
 
 
 def shutdown() -> None:
