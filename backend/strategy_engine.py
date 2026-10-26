@@ -270,7 +270,7 @@ SNAPSHOT_FIELDS = (
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
-    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within",
+    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -2336,14 +2336,15 @@ class StrategyEngine:
             return  # the exit did not go through
         text = f"{symbol} recovery target hit — {note}"
         if recovery.handoff_on(cfg) and self.handoff is not None:
-            flat = True
-            if live:
-                net = await self._groww_net(symbol)
-                flat = net == 0
-            moved = self.handoff(self.bot_id, symbol, live) if flat else "no handoff: Groww still shows shares"
-            text += f"; {moved}"
+            text += f"; {await self._hand_to_chop_bot(symbol, live)}"
             self._alert(text)
         self._signals[symbol] = text
+
+    async def _hand_to_chop_bot(self, symbol: str, live: bool) -> str:
+        """Move a stock that just closed to Bot 2 (recovery.handoff); in LIVE only once Groww shows no shares."""
+        if live and await self._groww_net(symbol) != 0:
+            return "no handoff: Groww still shows shares"
+        return self.handoff(self.bot_id, symbol, live)
 
     async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
         """A breakout candle on the chop bot: cut the trade, hand the stock to Bot 3 (breakout.py).
@@ -3464,7 +3465,19 @@ class StrategyEngine:
             return
         reason, note = hit
         self._signals[symbol] = f"{symbol} SMA 9 slope exit — {note}"
-        await self._exit_now(cfg, self.ltp, reason)
+        price, live = self.ltp, (pos.mode or "PAPER").upper() == "LIVE"
+        await self._exit_now(cfg, price, reason)
+        if (
+            reason == slope_exit.VTURN_EXIT
+            and slope_exit.vturn_handoff_on(cfg)
+            and self.handoff is not None
+            and self.position is None
+            and slope_exit.lost(pos.direction, pos.entry_price, price)
+        ):
+            # A losing V-turn: the stock goes to the chop bot, like a recovery (vturn_handoff).
+            text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live)}"
+            self._signals[symbol] = text
+            self._alert(text)
 
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""

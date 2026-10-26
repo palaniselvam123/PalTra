@@ -85,6 +85,7 @@ const LABELS: Record<string, string> = {
   vturn_move_pct: "V-turn steep run",
   vturn_turn_pct: "V-turn turn back",
   vturn_within: "V-turn within",
+  vturn_handoff: "V-turn loss → Bot 2",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -312,6 +313,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     vturn_move_pct: Math.min(5, Math.max(0, Number(form.vturn_move_pct ?? 0.02) || 0)),
     vturn_turn_pct: Math.min(5, Math.max(0, Number(form.vturn_turn_pct ?? 0.015) || 0)),
     vturn_within: Math.min(10, Math.max(1, Math.round(Number(form.vturn_within ?? 6)) || 6)),
+    vturn_handoff: Boolean(form.vturn_exit) && Boolean(form.vturn_handoff),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1490,6 +1492,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("vturn_within")}
             />
           </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.vturn_handoff)}
+              disabled={!form.vturn_exit}
+              onChange={(e) => set("vturn_handoff", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("vturn_handoff") && <OwnTag />}
+            After a V-turn exit at a loss, move the stock to Bot 2 (flipped, gap mode)
+            <InfoTip label="About the V-turn hand-off">
+              When the V-turn exit closes a trade below its entry (a buy) or above it (a sell), the stock leaves this bot&apos;s
+              Trade list and is armed on Bot 2 with the same chop settings as the recovery hand-off (flipped, gap mode). Bot 2
+              waits for its next cross. A V-turn exit in profit stays here. In LIVE it moves only once Groww shows no shares; a
+              PAPER bot never arms a LIVE Bot 2, and one LIVE bot per stock still applies. In a backtest the stock leaves the
+              rest of the run. Nothing on Bot 2 itself.
+            </InfoTip>
+          </label>
         </div>
       </FieldGroup>
       <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
@@ -2118,6 +2138,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
+  if (f.vturn_exit && f.vturn_handoff) add({ group: "advanced", key: "vturn_handoff", text: "After a losing V-turn exit, the stock moves to Bot 2", off: { vturn_handoff: false } });
 
   // 4. Gap mode
   if (f.use_gap_mode && !pattern) {

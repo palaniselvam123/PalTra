@@ -381,7 +381,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the trade. **V-turn** (`vturn_exit`, off, its own tick box, independent of `slope_exit`; `slope_exit.judge_vturn`):
   closes as `SMA9_VTURN` once the slope is at least `vturn_turn_pct` (0.015) %/candle against the trade within
   `vturn_within` (6, max 10) candles of having been at least `vturn_move_pct` (0.02) %/candle with it (signed slopes since
-  the entry in `pos.slope_state["hist"]`): a sharp V, never a slow U or a drift. Same `slope_lookback`; the chart's slope strip
+  the entry in `pos.slope_state["hist"]`): a sharp V, never a slow U or a drift. **V-turn hand-off** (`vturn_handoff`, off,
+  needs the V-turn exit; `slope_exit.vturn_handoff_on` / `lost`): a V-turn exit at a loss (before charges) moves the stock to Bot 2
+  like a recovery (`StrategyEngine._hand_to_chop_bot` → `recovery.handoff`: flipped, gap mode; LIVE only once Groww shows no
+  shares; a PAPER source never arms a LIVE Bot 2; replays drop the stock from the rest of the run); a winner stays. Same `slope_lookback`; the chart's slope strip
   shows while either is on (`slope_exit.watched`). Both count as an exit for `strategyChecks.noExitOn`. Settings →
   Supertrend / exits. The research baseline keeps both off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,

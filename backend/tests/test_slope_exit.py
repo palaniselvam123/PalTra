@@ -196,3 +196,68 @@ def test_api_saves_the_vturn_settings(tmp_path, monkeypatch):
         assert ok.status_code == 200 and ok.json()["vturn_exit"] is True and ok.json()["vturn_within"] == 4
         assert client.put("/api/config", json={"vturn_within": 11}).status_code == 422
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exit_price,handoff_on,moved",
+    [(105.0, True, True), (95.0, True, False), (105.0, False, False)],
+)
+async def test_a_losing_vturn_moves_the_stock_to_bot_2(monkeypatch, tmp_path, exit_price, handoff_on, moved):
+    """vturn_handoff: a V-turn exit at a loss hands the stock to Bot 2; a winner or the box off keeps it."""
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/v.db")
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    import database
+    from tests.test_sma_atr_terminal import _FakeBroker, _instant
+    from strategy_engine import OpenPosition, StrategyEngine
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    eng._sleep = _instant
+    entry = dt.datetime(2026, 9, 22, 10, 0, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    eng._focus = "SIMV"
+    eng.position = OpenPosition(
+        direction="SHORT", qty=10, entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger=0.0,
+        sl_order_id="", entry_order_id="E1", entry_time=entry, trade_id=0, mode="PAPER", stop_active=False,
+    )
+    eng.status = "RUNNING"
+    eng.ltp = exit_price
+    base = int(entry.timestamp())
+    eng._frames["SIMV"] = pd.DataFrame({"ts": [base + 60 * i for i in range(30)], "close": [100.0] * 30})
+    calls = []
+    eng.handoff = lambda bot, symbol, live, to_bot=2: calls.append((bot, symbol, live)) or "moved to Bot 2"
+
+    async def fake_exit(cfg, price, reason):
+        assert reason == slope_exit.VTURN_EXIT
+        eng.position = None
+
+    monkeypatch.setattr(eng, "_exit_now", fake_exit)
+    monkeypatch.setattr(slope_exit, "slope", lambda *a, **k: 0.05)
+    monkeypatch.setattr(slope_exit, "judge_vturn", lambda *a, **k: (slope_exit.VTURN_EXIT, "V"))
+    cfg = _cfg(symbol="SIMV", sma_fast=9, vturn_exit=True, vturn_handoff=handoff_on, candle_minutes=1, stock_settings="")
+    await eng._watch_slope_exit(cfg)
+    assert eng.position is None
+    assert (calls == [(eng.bot_id, "SIMV", False)]) is moved
+    database.reset_engine()
+
+
+def test_api_saves_the_vturn_handoff(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "vturn_handoff" in STOCK_FIELDS
+    with TestClient(app) as client:
+        assert client.get("/api/config").json()["vturn_handoff"] is False
+        ok = client.put("/api/config", json={"vturn_exit": True, "vturn_handoff": True})
+        assert ok.status_code == 200 and ok.json()["vturn_handoff"] is True
+    assert not slope_exit.vturn_handoff_on(_cfg(vturn_exit=False, vturn_handoff=True))
+    assert slope_exit.lost("SHORT", 100, 101) and not slope_exit.lost("LONG", 100, 101)
+    database.reset_engine()

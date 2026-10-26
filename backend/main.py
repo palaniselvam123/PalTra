@@ -389,6 +389,7 @@ class ConfigUpdate(BaseModel):
     vturn_move_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
+    vturn_handoff: bool | None = None
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -977,6 +978,7 @@ def _gap_dict(row) -> dict:
         "vturn_move_pct": slope_mod.vturn_move_pct(row),
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),
+        "vturn_handoff": bool(getattr(row, "vturn_handoff", False)),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),
