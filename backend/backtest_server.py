@@ -178,8 +178,23 @@ async def wait_first_sync(timeout: float = 30.0) -> None:
         await asyncio.sleep(0.25)
 
 
+_busy_checks: list = []  # more work that keeps the machine awake (a Scalp scan pass, main.py)
+
+
+def add_busy_check(check) -> None:
+    _busy_checks.append(check)
+
+
 def busy(replays: dict) -> bool:
-    return any(getattr(r, "status", "") in BUSY_STATUSES for r in replays.values())
+    if any(getattr(r, "status", "") in BUSY_STATUSES for r in replays.values()):
+        return True
+    for check in _busy_checks:
+        try:
+            if check():
+                return True
+        except Exception:  # noqa: BLE001 - a broken check never keeps the machine up
+            continue
+    return False
 
 
 def idle_seconds_left(replays: dict, now: float | None = None) -> float:

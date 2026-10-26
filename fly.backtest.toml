@@ -18,6 +18,9 @@ kill_timeout = '15s'
 [env]
   PALTRA_ROLE = 'backtest'
   DESK_URL = 'https://paltra.fly.dev'
+  # Scalp scans run here on demand with this server's own Groww login (scan_session.py):
+  # three stocks' candles at once, together one Groww request per 0.35 s (scan_worker.py).
+  CROSS_SCAN_CONCURRENCY = '3'
 
 [http_service]
   internal_port = 3000

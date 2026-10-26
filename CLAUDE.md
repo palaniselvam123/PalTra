@@ -719,7 +719,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `note_request` via the desk app's middleware, for `idle_minutes()`, default 30, 10-240, `backtest_server.json` next to
   the SMA DB → SIGTERM → exit → Fly stops the machine; `[[restart]] on-failure`). **Never orders**
   (`server_role.no_orders` covers scanner and backtest: `refuse_orders`, the LIVE switch 403, the desk broker and manual
-  desk) and runs no live bots, scans, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). Copies
+  desk) and runs no live bots, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). **Scalp scans
+  on demand** (`server_role.scans_enabled` is true here; Scan now only: no background most-active loop, auto re-scan off by
+  default): they download with **this server's own Groww login** (`scan_session.OwnSession`, the token saved by its own
+  Settings → Broker keys in its own trading.db via `groww_client._read_desk_token`; `main._scan_broker`), never the desk's
+  session the replays borrow, so a scan never shares the live bots' rate limit; without a login a scan says to log in here.
+  Three scan workers (`CROSS_SCAN_CONCURRENCY` in `fly.backtest.toml`), and a running Cross / Trend quality / 09:30 pass keeps
+  the machine awake like a playing replay (`backtest_server.add_busy_check`). The accuracy check runs here in market hours too
+  (only the desk refuses it). Its key must not be the scanner server's: logging one key in on two servers can end the other's
+  session. Copies
   every `BotConfig` row (1-5) from the desk (`main.export_bot_settings` → desk `GET /api/link/backtest/settings` →
   `main.import_bot_settings`, PAPER forced) at boot and on "Sync from desk" (refused while a replay plays); never writes
   back. **Arms from the scanner**: with `SCANNER_LINK_TOKEN` on this server and `BACKTEST_URL` on the scanner, the scanner's

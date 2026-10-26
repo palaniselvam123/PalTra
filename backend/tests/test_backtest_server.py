@@ -35,10 +35,10 @@ def _no_sdk(*_a, **_k):
     raise AssertionError("the backtest server reached the Groww SDK")
 
 
-def test_role_never_orders_and_never_scans(monkeypatch, backtest):
-    monkeypatch.setenv("SCANS", "on")
+def test_role_never_orders_and_scans_on_demand(monkeypatch, backtest):
+    monkeypatch.setenv("SCANS", "off")
     assert server_role.role() == "backtest" and server_role.is_backtest() and not server_role.is_desk()
-    assert server_role.no_orders() and not server_role.scans_enabled()
+    assert server_role.no_orders() and server_role.scans_enabled()
     with pytest.raises(server_role.ScannerNoOrders, match="backtest server"):
         server_role.refuse_orders()
     monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
@@ -464,3 +464,52 @@ def test_backtest_server_takes_a_scanner_arm_and_remembers_it(monkeypatch, backt
     # The backtest server's own link token does not open the scanner's routes.
     monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
     assert http.post("/api/link/arm", headers={"Authorization": f"Bearer {TOKEN}"}, json={"target": "3", "symbol": "TCS"}).status_code == 401
+
+
+# ---- Scalp scans here: this server's own Groww login, never the desk's ----
+
+
+def test_scans_use_this_servers_own_login_not_the_desk_session(monkeypatch, backtest):
+    import groww_client
+    import main
+    import scan_session
+
+    backtest_server.state.token = "desk-session"  # what the replays borrow
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "own-login")
+    broker = main._scan_broker()
+    assert isinstance(broker, scan_session.OwnSession) and broker is not main.engine.broker
+    broker.adopt_saved_session()
+    assert broker.token == "own-login"
+    # A rejected login is not tried again; with nothing else saved the scan says where to log in.
+    assert broker._recover_from_auth_failure() is False and broker.token == ""
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "")
+    fresh = scan_session.OwnSession()
+    with pytest.raises(RuntimeError, match="this server's Settings"):
+        fresh._require_sdk()
+    monkeypatch.setenv("PALTRA_ROLE", "desk")
+    assert main._scan_broker() is main.engine.broker
+
+
+def test_no_login_message_names_this_server(monkeypatch, backtest):
+    import groww_client
+    import scan_session
+    import scan_worker
+    from candle_history import HistoryError, fetch_frame
+
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "")
+    start, end = dt.datetime(2026, 10, 8), dt.datetime(2026, 10, 12, 10)
+    for call in (fetch_frame(scan_session.OwnSession(), "TCS", start, end),
+                 scan_worker.run(scan_session.OwnSession(), lambda *a: None, "TCS", start, end)):
+        with pytest.raises(HistoryError, match="this server's Settings"):
+            asyncio.run(call)
+
+
+def test_a_running_scan_keeps_the_machine_awake(monkeypatch):
+    running = [True]
+    monkeypatch.setattr(backtest_server, "_busy_checks", [lambda: running[0], lambda: 1 / 0])
+    now = time.monotonic()
+    backtest_server.set_idle_minutes(10)
+    backtest_server.state.last_request = backtest_server.state.last_busy = now - 11 * 60
+    assert backtest_server.busy({}) and backtest_server.idle_seconds_left({}, now) == 600
+    running[0] = False
+    assert not backtest_server.busy({})  # a broken check never keeps it up
