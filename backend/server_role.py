@@ -65,11 +65,10 @@ def no_orders_text() -> str:
 
 
 def scans_enabled() -> bool:
-    """False on a desk with SCANS=off and on the backtest server. The scanner always scans."""
-    if is_scanner():
+    """False on a desk with SCANS=off. The scanner always scans; the backtest server scans on demand
+    with its own Groww login (scan_session.py), never the desk's session its replays borrow."""
+    if is_scanner() or is_backtest():
         return True
-    if is_backtest():
-        return False
     return os.environ.get("SCANS", "on").strip().lower() not in ("off", "0", "false", "no")
 
 

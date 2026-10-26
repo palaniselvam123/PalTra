@@ -289,7 +289,10 @@ async def lifespan(app: FastAPI):
 
     import server_role
 
-    if server_role.scans_enabled():
+    if server_role.is_backtest():
+        # Scans run on demand here (Scan now), never as a background loop.
+        pass
+    elif server_role.scans_enabled():
         active_scanner.start_background(_groww_session)
     else:
         # SCANS=off: the Scalp scans run on the scanner server; this desk keeps them paused.

@@ -222,7 +222,7 @@ async def run(broker, fn, symbol: str, start: dt.datetime, end: dt.datetime, *ar
     if not broker.token:
         broker.adopt_saved_session()
     if not broker.token:
-        raise HistoryError("Past candles come from Groww. Log in to Groww on the desk Settings page first.")
+        raise HistoryError(getattr(broker, "no_login_text", "Past candles come from Groww. Log in to Groww on the desk Settings page first."))
     import groww_pressure
 
     # Bots first: while a bot's Groww call was refused for the rate limit lately, wait.

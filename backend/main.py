@@ -225,6 +225,10 @@ def _boot_backtest_server() -> asyncio.Task:
         ensure_bot_config(eng.bot_id)
         bots_mod.register(eng)
     engine.broker.set_mode("PAPER")
+    # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
+    backtest_server.add_busy_check(
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner))
+    )
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     return _task
 
@@ -1744,6 +1748,16 @@ async def replay_bot_kill(bot: int = 1):
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
 
 
+def _scan_broker():
+    """The Groww session the Scalp scans download with: the bots' one, or on the backtest server its
+    own login (scan_session.py), so a scan there never shares the desk's rate limit with the bots."""
+    if server_role.is_backtest():
+        import scan_session
+
+        return scan_session.own_session()
+    return engine.broker
+
+
 def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = (), cached: bool = False):
     """Each stock's read in the scanner process (scan_worker.py), or None to read in-process.
 
@@ -1754,7 +1768,7 @@ def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = (),
     runner = scan_worker.run_cached if cached else scan_worker.run
 
     async def job(symbol, start, end):
-        return await runner(engine.broker, fn, symbol, start, end, sma_fast, sma_slow, minutes, now, *extra)
+        return await runner(_scan_broker(), fn, symbol, start, end, sma_fast, sma_slow, minutes, now, *extra)
 
     return job
 
@@ -1815,7 +1829,7 @@ async def cross_scan_start(body: CrossScanStart):
     try:
         return cross_scanner.start(
             body.symbols,
-            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
             minutes=body.minutes,
             sma_fast=int(cfg.sma_fast),
             sma_slow=int(cfg.sma_slow),
@@ -1875,7 +1889,7 @@ def _start_chop(
     cfg = engine.load_config()
     return chop_scanner.start(
         symbols,
-        lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+        lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
         minutes=minutes,
         sma_fast=int(cfg.sma_fast),
         sma_slow=int(cfg.sma_slow),
@@ -2024,7 +2038,7 @@ async def morning_scan_start(body: MorningScanStart):
     try:
         return morning_scanner.start(
             body.symbols,
-            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
             sma_fast=int(cfg.sma_fast),
             sma_slow=int(cfg.sma_slow),
             force=body.force,
@@ -2146,7 +2160,7 @@ def _check_job():
         return None
 
     async def job(symbol, start, end, *args):
-        return await scan_worker.run(engine.broker, scan_worker.check_job, symbol, start, end, *args)
+        return await scan_worker.run(_scan_broker(), scan_worker.check_job, symbol, start, end, *args)
 
     return job
 
@@ -2155,7 +2169,7 @@ def _check_job():
 async def scan_history_check(run_id: int):
     """Download that day's candles again and measure what each stock did after the scan. Read-only."""
     _refuse_when_paused()
-    if not server_role.is_scanner() and market_is_open():
+    if server_role.is_desk() and market_is_open():
         raise HTTPException(409, "During market hours the check runs only on the scanner server, so it never shares the bots' Groww limit.")
     run = await asyncio.to_thread(scan_history.get, run_id)
     if run is None:
@@ -2163,7 +2177,7 @@ async def scan_history_check(run_id: int):
     try:
         return scan_checker.start(
             run,
-            lambda symbol, start, end: fetch_frame(engine.broker, symbol, start, end),
+            lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
             save=scan_history.save_check,
             job=_check_job(),
         )
