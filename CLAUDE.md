@@ -803,6 +803,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   through `alert_notifier.send` (trade channel) and / or rings through `place_call` (market hours, 5-minute cooldown).
   `GET/PUT /api/bots/pnl-alerts`, `POST /api/bots/pnl-alerts/test` (test message + call at any time); Settings →
   "All bots: P&L alerts" (`components/Settings/PnlAlerts.tsx`). Never copied by Copy settings (`COPY_SKIP`).
+- `backend/news_entry.py` – news entries (off by default; PAPER and LIVE): the bot picked in `news_entry_bot` (1-4 on
+  `BotConfig` row 1, 0 = off) enters at once on a strong, fresh headline: positive buys, negative shorts, NEUTRAL or a headline
+  mainly about another company (`about: False`) never. `news_entry_impact` LOW / MEDIUM / HIGH is the weakest that trades (critical
+  counts as HIGH), `news_entry_max_age_min` (15) the oldest, `news_entry_max_day` (5) news entries per bot per IST day,
+  `news_entry_scope` `FNO` (any F&O stock: put on the bot's Trade list with the source chip "News", `arm`; a stock another LIVE bot
+  owns is refused) or `ARMED`. The desk's `NewsWatcher` hands every fresh headline (`_entries`: per-stock reads in `run_once`, and
+  NSE's market-wide filings in `_market_pass`) to terminal `main.news_entry_consider` → `news_entry.consider`; while a news bot is
+  set it also reads NSE's filings every `ENTRY_POLL_SEC` (60 s) from 09:15 to 15:30 (`entries_active`, even with News alerts off).
+  The order goes through `StrategyEngine.news_order` (entry reason `NEWS`): no SMA cross, candle pattern, entry filter, ADX,
+  pullback or candle wait is read and the flip setting is not applied; only a RUNNING bot, market hours, the cut-off, the Trade
+  list, the halt / loss lock, the trade cap and (in `_open`) one LIVE bot per stock apply. An opposite position is closed and
+  reversed like an opposite cross (held when the SMA cross exit is off). Then the bot's own stop / TSL / target and exits run the
+  trade. Each headline is acted on once (`_taken`, memory); `recent` keeps the last 50 decisions. `GET/PUT /api/bots/news-entry`
+  (a LIVE bot needs `confirm_live`, 409 without), Settings → "News entries" (`components/Settings/NewsEntries.tsx`, asks before a
+  LIVE bot). Never copied by Copy settings (`COPY_SKIP`). Replays and research never see news.
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,
@@ -812,7 +827,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   No order is placed.
 - Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
   saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
-  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`); a fill from a waiting
+  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`); a fill from a waiting
   `PullbackOrder` adds `:PULLBACK`, `:EXTREME_LIMIT` or `:CANDLE_CONFIRM`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
   card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
 - `backend/arm_log.py` – arm log (bookkeeping only): a SQLAlchemy `before_flush` hook writes an `ArmLog` row
@@ -998,7 +1013,8 @@ Real orders reach Groww in only two places:
    (MIS limit orders with a 0.20% protection buffer, plus an exchange `SL`).
    In PAPER these return local `PAPER…` ids and never touch the SDK.
    Called from `strategy_engine.py` (`_open`, `_close_position`,
-   `_cancel_sl_verified`). Bots 2-4 send theirs through their own
+   `_cancel_sl_verified`); a news entry on a LIVE bot (`news_order`,
+   `news_entry.py`) goes through the same `_open`. Bots 2-4 send theirs through their own
    `bots.BotGrowwClient` (a `GrowwClient` with its own mode), never through
    the main desk's client.
 2. **ORB Desk manual desk, "groww" execution** –

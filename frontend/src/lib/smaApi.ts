@@ -902,6 +902,21 @@ export interface PnlAlertSettings {
   sent?: Record<string, { at: string; total: number }>;
 }
 
+/** News entries (news_entry.py): one bot enters at once on a strong, fresh headline. */
+export interface NewsEntrySettings {
+  /** 0 = off, else the bot (1-4) that takes news entries. */
+  bot: number;
+  impact: "LOW" | "MEDIUM" | "HIGH";
+  /** FNO: any F&O stock (armed on the bot as "News"); ARMED: only stocks already armed there. */
+  scope: "FNO" | "ARMED";
+  max_age_min: number;
+  max_day: number;
+  /** The picked bot's PAPER / LIVE mode. */
+  mode?: "PAPER" | "LIVE" | null;
+  /** The latest headlines that qualified and what each did. */
+  recent?: { at: string; bot: number; symbol: string; side: "BUY" | "SHORT"; impact: string; title: string; url?: string; result: string }[];
+}
+
 export type BotSummary = {
   bot: number;
   name: string;
@@ -1528,6 +1543,19 @@ export const smaApi = {
     request<PnlAlertSettings>("/api/bots/pnl-alerts", {
       method: "PUT",
       body: JSON.stringify({ profit: body.profit, loss: body.loss, telegram: body.telegram, call: body.call, basis: body.basis }),
+    }),
+  newsEntry: () => request<NewsEntrySettings>("/api/bots/news-entry"),
+  saveNewsEntry: (body: NewsEntrySettings, confirmLive = false) =>
+    request<NewsEntrySettings>("/api/bots/news-entry", {
+      method: "PUT",
+      body: JSON.stringify({
+        bot: body.bot,
+        impact: body.impact,
+        scope: body.scope,
+        max_age_min: body.max_age_min,
+        max_day: body.max_day,
+        confirm_live: confirmLive,
+      }),
     }),
   testPnlAlerts: () => request<Record<string, string>>("/api/bots/pnl-alerts/test", { method: "POST" }),
   saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>

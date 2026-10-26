@@ -10,6 +10,7 @@ const ENTRY_SHORT: Record<string, string> = {
   CANDLE_COLOUR: "Candle colour",
   BREAKOUT_ARRIVAL: "Breakout",
   FORCE_ORDER: "Force order",
+  NEWS: "News",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -23,6 +24,7 @@ const ENTRY_LONG: Record<string, string> = {
   CANDLE_COLOUR: "Ride the candle colour: a green candle buys, a red one sells",
   BREAKOUT_ARRIVAL: "Breakout handed over from Bot 2",
   FORCE_ORDER: "Force order pressed on the terminal",
+  NEWS: "News entry: a strong, fresh headline (good news buys, bad news shorts), no SMA cross or pattern read",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

@@ -134,6 +134,7 @@ ENTRY_REASONS = (
     "CANDLE_COLOUR",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
+    "NEWS",
 )
 
 
@@ -2531,6 +2532,105 @@ class StrategyEngine:
         self._skip_cross_until.pop(symbol, None)
         return False
 
+    async def _manual_ready(self, name: str, cfg: BotConfig) -> tuple[pd.DataFrame, float, float, float]:
+        """Candles, price, reference close and ATR for an order that does not wait for a cross (Force / news)."""
+        frame = self._frames.get(name)
+        if frame is None or getattr(frame, "empty", True):
+            try:
+                ltp, frame, source = await self.broker.refresh(name)
+            except Exception as exc:  # noqa: BLE001
+                raise ForceRefused(str(exc)) from exc
+            if frame is None or getattr(frame, "empty", True):
+                raise ForceRefused(f"{name} has no candles yet")
+            frame = resample(frame, candle_minutes(cfg, stock_overrides(cfg, name)))
+            self._frames[name] = frame
+            self._ltps[name] = float(ltp)
+            if name == (cfg.symbol or "").upper():
+                self.ltp = float(ltp)
+                self.last_error = ""
+                self.data_source = source
+        own = _cfg_for(cfg, name)
+        enriched = enrich(frame, own.sma_fast, own.sma_slow, own.atr_period, getattr(own, "sma_medium", None))
+        price = float(self._ltps.get(name) or enriched.iloc[-1]["close"] or 0)
+        if price <= 0:
+            raise ForceRefused(f"{name} has no price")
+        self._ltps[name] = price
+        # No cross here. The reference is the last closed candle, so the
+        # report still shows how far the fill was from it.
+        reference = _finite(enriched.iloc[-2]["close"]) if len(enriched) >= 2 else None
+        reference = round_price(name, reference) if reference else price
+        atr = _latest_atr(enriched)
+        if atr is None:
+            raise ForceRefused(f"{name} ATR is not ready")
+        return enriched, price, reference, atr
+
+    async def news_order(self, symbol: str, signal: str, note: str = "") -> str:
+        """Enter at once on a news headline (news_entry.py): `signal` BULLISH buys, BEARISH shorts.
+
+        No SMA cross, candle pattern or entry filter is read, and no pullback / candle wait:
+        the order goes now. Only a RUNNING bot takes it. Market hours, the entry cut-off, the
+        Trade list, the halt / loss lock, the trade cap and (in `_open`) one LIVE bot per stock
+        still apply. The news side is the order side (the flip setting is not applied). An
+        opposite position is closed and reversed like an opposite cross (held if the SMA cross
+        exit is off). After that the bot's own exits manage the trade: stop / trailing stop /
+        target, the SMA cross, candle colour or pattern, the other exits and the square-off.
+        """
+        if signal not in ("BULLISH", "BEARISH"):
+            raise ForceRefused("news has no direction")
+        if self.status != "RUNNING":
+            raise ForceRefused(f"bot is {self.status}, not RUNNING")
+        name = (symbol or "").upper().strip()
+        if not is_nse_symbol(name):
+            raise ForceRefused(f"{name or 'stock'} is not an NSE symbol")
+        want = "LONG" if signal == "BULLISH" else "SHORT"
+        held = self.positions.get(name)
+        if held is not None and held.direction == want:
+            raise ForceRefused(f"{name} is already {want}")
+        cfg = self.load_config()
+        clock = self._now()
+        if not market_is_open(clock):
+            raise ForceRefused("market is closed")
+        if clock.time() >= _parse_hhmm(cfg.square_off_time):
+            raise ForceRefused(f"past the {cfg.square_off_time} IST square-off")
+        if clock.time() >= _entry_cutoff(cfg):
+            raise ForceRefused(f"no new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST")
+        if name not in trade_names(cfg):
+            raise ForceRefused(f"{name} is not on the Trade list")
+        enriched, price, reference, atr = await self._manual_ready(name, cfg)
+        own = _cfg_for(cfg, name)
+        own.flip_orders = False
+        # A cross already on the tape must not turn the news trade straight round.
+        self.hold_for_next_cross([name])
+        self.ltp = price
+        now = self._now()
+        async with self.lock:
+            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                raise ForceRefused("blocked — order PENDING/TRANSIT")
+            self.inflight = "TRANSIT"
+            self._focus = name
+            try:
+                result = await self._apply_locked(
+                    signal=signal,
+                    cross_price=price,
+                    atr=atr,
+                    adx_blocks_entry=False,
+                    cfg=own,
+                    now=now,
+                    why="NEWS",
+                )
+            except SlCancelFailed as exc:
+                self.last_error = str(exc)
+                self._order_refused(name, str(exc))
+                raise ForceRefused(str(exc)) from exc
+            finally:
+                self.inflight = None
+        self._signals[name] = result
+        self._log_decision(
+            signal, enriched, own, now, result,
+            note="News entry: no SMA cross, pattern or entry filter is read" + (f". {note}" if note else "."),
+        )
+        return result
+
     async def force_order(self, symbol: str) -> str:
         """Buy or sell from the live SMA side, then leave the bot running.
 
@@ -2564,37 +2664,11 @@ class StrategyEngine:
             raise ForceRefused(f"No new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST.")
         if name not in trade_names(cfg):
             raise ForceRefused(f"{name} is not on the Trade list. Press Trade on {name} first.")
-        frame = self._frames.get(name)
-        if frame is None or getattr(frame, "empty", True):
-            try:
-                ltp, frame, source = await self.broker.refresh(name)
-            except Exception as exc:  # noqa: BLE001
-                raise ForceRefused(str(exc)) from exc
-            if frame is None or getattr(frame, "empty", True):
-                raise ForceRefused(f"{name} has no candles yet")
-            frame = resample(frame, candle_minutes(cfg, stock_overrides(cfg, name)))
-            self._frames[name] = frame
-            self._ltps[name] = float(ltp)
-            if name == (cfg.symbol or "").upper():
-                self.ltp = float(ltp)
-                self.last_error = ""
-                self.data_source = source
-        own = _cfg_for(cfg, name)
-        enriched = enrich(frame, own.sma_fast, own.sma_slow, own.atr_period, getattr(own, "sma_medium", None))
+        enriched, price, reference, atr = await self._manual_ready(name, cfg)
         side = _live_ma_side(enriched)
         if side is None:
             raise ForceRefused(f"{name} has no SMA yet")
-        price = float(self._ltps.get(name) or enriched.iloc[-1]["close"] or 0)
-        if price <= 0:
-            raise ForceRefused(f"{name} has no price")
-        self._ltps[name] = price
-        # No cross here. The reference is the last closed candle, so the
-        # report still shows how far the fill was from it.
-        reference = _finite(enriched.iloc[-2]["close"]) if len(enriched) >= 2 else None
-        reference = round_price(name, reference) if reference else price
-        atr = _latest_atr(enriched)
-        if atr is None:
-            raise ForceRefused(f"{name} ATR is not ready")
+        own = _cfg_for(cfg, name)
         # Filters do not stop a Force order. Keep what they would have said
         # for the decision log, so a forced entry can be reviewed later.
         overridden = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", own, price=price)

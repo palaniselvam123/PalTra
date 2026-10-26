@@ -396,6 +396,12 @@ class BotConfig(Base):
     pnl_alert_telegram: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     pnl_alert_call: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     pnl_alert_basis: Mapped[str | None] = mapped_column(String(5), nullable=True, default="GROSS")
+    # News entries (news_entry.py), read from row 1 only: the bot (0 = off), weakest impact, scope, age, per-day cap.
+    news_entry_bot: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    news_entry_impact: Mapped[str | None] = mapped_column(String(6), nullable=True, default="HIGH")
+    news_entry_scope: Mapped[str | None] = mapped_column(String(5), nullable=True, default="FNO")
+    news_entry_max_age_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)
+    news_entry_max_day: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
     # Trend breakout handoff back to Bot 3 (breakout.py).
     breakout_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)
