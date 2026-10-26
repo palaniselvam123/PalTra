@@ -431,7 +431,8 @@ def merge_ai(items: list[dict], ai: dict, now: dt.datetime | None = None) -> tup
 
 
 async def analyze(
-    symbol: str, *, use_ai: bool = True, side: str | None = None, force: bool = False, day: dt.date | None = None
+    symbol: str, *, use_ai: bool = True, side: str | None = None, force: bool = False, day: dt.date | None = None,
+    now: dt.datetime | None = None,
 ) -> dict:
     """The stock's news, each headline scored, the overall view and what to do with `side` (LONG/SHORT/None),
     plus `plan` for every case. With `day` (a past date), that day's news as of its 15:30 close."""
@@ -439,7 +440,7 @@ async def analyze(
 
     news = await stock_news.stock_news(symbol, force=force, day=day)
     past = news.get("day") is not None
-    now = stock_news.window(day)[1] if past and day else dt.datetime.now(IST)
+    now = stock_news.window(day)[1] if past and day else (now or dt.datetime.now(IST))
     items = [{**i, **score_text(i.get("title", ""), i.get("detail")), "by": "rules"} for i in news.get("items", [])]
     items = mark_relevance(items, news["symbol"], news.get("name"))
     view = overall(items, now)
@@ -657,7 +658,7 @@ class NewsWatcher:
         for symbol, entry in watched.items():
             side = side_of(entry)
             try:
-                result = await analyze(symbol, use_ai=cfg.use_ai, side=side)
+                result = await analyze(symbol, use_ai=cfg.use_ai, side=side, now=now)
             except Exception as exc:  # noqa: BLE001 - next stock
                 self.status.last_error = f"{symbol}: {exc}"[:200]
                 continue
