@@ -51,12 +51,13 @@ from app.models.database import NewsAlert, NewsWatchSettings, async_session
 log = logging.getLogger(__name__)
 
 HALF_LIFE_H = 24.0
-MAX_AGE_DAYS = 3  # older headlines do not move the overall view
+MAX_AGE_DAYS = 3  # the News feed keeps filings this long (shown as expired once past their validity)
+VALID_CLOSE = dt.time(15, 30)  # a headline counts until this time on the next trading day (valid_until)
 ALERT_MAX_AGE_H = 6.0  # a headline older than this when first seen is not alerted
 IMPACT_LEVELS = ("LOW", "MEDIUM", "HIGH")
 WATCH_START = dt.time(7, 30)
 WATCH_END = dt.time(20, 0)
-MAX_WATCH = 40
+MAX_WATCH = 120  # stocks read in full each pass: the bots' armed / held first, then extra, then the watch lists
 MARKET_KEEP = 300  # all-F&O feed items kept in memory for the News feed
 AI_TTL_SEC = 1800
 START_DELAY_SEC = 30
@@ -189,6 +190,37 @@ def _age_hours(at: str | None, now: dt.datetime) -> float | None:
     return max((now - when).total_seconds() / 3600, 0.0)
 
 
+def valid_until(at: str | None) -> dt.datetime | None:
+    """When a headline stops counting: 15:30 IST on the next trading day (Mon-Fri) after the day it came out.
+
+    Out today, valid till tomorrow's close; out on Friday (or the weekend), valid till Monday's close. NSE
+    holidays are not known here (like `market_clock`), so a holiday counts as a trading day.
+    """
+    if not at:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(at)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=IST)
+    day = when.astimezone(IST).date() + dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day += dt.timedelta(days=1)
+    return dt.datetime.combine(day, VALID_CLOSE, tzinfo=IST)
+
+
+def is_valid(at: str | None, now: dt.datetime) -> bool:
+    """Still inside its validity (an undated headline counts as valid)."""
+    until = valid_until(at)
+    return until is None or now <= until
+
+
+def with_validity(item: dict, now: dt.datetime) -> dict:
+    until = valid_until(item.get("at"))
+    return {**item, "valid_until": until.isoformat(timespec="minutes") if until else None, "valid": until is None or now <= until}
+
+
 # A headline that does not name the stock (Google matched the name somewhere in the article, e.g. a TCS results
 # story for Wipro): this share of its score counts in the overall view.
 OFF_TARGET_WEIGHT = 0.25
@@ -231,8 +263,8 @@ def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
         age = _age_hours(it.get("at"), now)
         if age is None:
             age = 24.0  # undated: count it, as a day old
-        if age > MAX_AGE_DAYS * 24:
-            continue
+        if not is_valid(it.get("at"), now):
+            continue  # past its validity (the next trading day's close)
         off = it.get("about") is False
         weight = 0.5 ** (age / HALF_LIFE_H) * (1.5 if it.get("impact") == "HIGH" and not off else 1.0)
         # Another company's headline still counts as a headline, but its score only a quarter: it pulls the view
@@ -247,7 +279,7 @@ def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
     signs = {
         it.get("sentiment")
         for it in items
-        if (_age_hours(it.get("at"), now) or 0) <= MAX_AGE_DAYS * 24 and it.get("about") is not False
+        if is_valid(it.get("at"), now) and it.get("about") is not False
     }
     label = sentiment_of(score)
     if label == "NEUTRAL" and {"POSITIVE", "NEGATIVE"} <= signs:
@@ -518,6 +550,7 @@ async def analyze(
     now = stock_news.window(day)[1] if past and day else (now or dt.datetime.now(IST))
     items = [{**i, **score_text(i.get("title", ""), i.get("detail")), "by": "rules"} for i in news.get("items", [])]
     items = mark_relevance(items, news["symbol"], news.get("name"))
+    items = [with_validity(i, now) for i in items]
     view = overall(items, now)
     method, ai_error = "rules", None
     if use_ai and items:
@@ -602,8 +635,9 @@ def item_key(symbol: str, item: dict) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
-def watch_list(extra: list[str] | None = None) -> dict[str, dict]:
-    """symbol -> {"armed": [bot names], "held": [{bot, name, mode, side, qty}]} from the SMA bots, plus `extra`."""
+def watch_list(extra: list[str] | None = None, lists: list[dict] | None = None) -> dict[str, dict]:
+    """symbol -> {"armed": [bot names], "held": [{bot, name, mode, side, qty}], "lists": [watch-list names]}:
+    the SMA bots' stocks, then `extra`, then every watch list's (news_lists), at most MAX_WATCH."""
     out: dict[str, dict] = {}
     try:
         from app.sma_host import load_terminal
@@ -615,6 +649,9 @@ def watch_list(extra: list[str] | None = None) -> dict[str, dict]:
         log.warning("news watch: could not read the bots' stocks: %s", exc)
     for s in extra or []:
         out.setdefault(s.upper(), {"armed": [], "held": []})
+    for wl in lists or []:
+        for s in wl.get("symbols", []):
+            out.setdefault(s.upper(), {"armed": [], "held": []}).setdefault("lists", []).append(wl.get("name") or "")
     return dict(list(out.items())[:MAX_WATCH])
 
 
@@ -644,17 +681,22 @@ def is_critical(item: dict, side: str | None) -> bool:
     return against and (bool(item.get("critical")) or item.get("impact") == "HIGH")
 
 
-def alert_text(result: dict, fresh: list[dict], entry: dict, critical: bool) -> str:
+def alert_text(result: dict, fresh: list[dict], entry: dict, critical: bool, price: float | None = None) -> str:
     view, act = result["overall"], result["action"]
     head = "🚨 CRITICAL NEWS" if critical else "📰 News"
-    lines = [f"{head} · {result['symbol']} · {view['sentiment']} ({view['impact'].lower()} impact)"]
+    px = f" · price ₹{price:,.2f}" if price else ""
+    lines = [f"{head} · {result['symbol']}{px} · {view['sentiment']} ({view['impact'].lower()} impact)"]
     for it in fresh[:3]:
-        lines.append(f"• {it['title'][:160]} ({it.get('source') or ''}) → {it['sentiment'].lower()}, {it['impact'].lower()}")
+        until = valid_until(it.get("at"))
+        valid = f", valid till {until:%a %d %b %H:%M}" if until else ""
+        lines.append(f"• {it['title'][:160]} ({it.get('source') or ''}) → {it['sentiment'].lower()}, {it['impact'].lower()}{valid}")
     held = entry.get("held") or []
     if held:
         lines.append("You hold: " + "; ".join(f"{h['side']} {h['qty']} on {h['name']} ({h['mode']})" for h in held))
     elif entry.get("armed"):
         lines.append("Armed on: " + ", ".join(entry["armed"]))
+    if entry.get("lists"):
+        lines.append("Watch lists: " + ", ".join(entry["lists"]))
     lines.append(f"What to do: {act['label']}. {act['why']}")
     if not held:
         both = result.get("plan") or plan(view)
@@ -744,7 +786,10 @@ class NewsWatcher:
                     # A bot enters on news: NSE's filings for every company, once a minute (one request).
                     self._next_fast = time.monotonic() + ENTRY_POLL_SEC
                     if await asyncio.to_thread(entries_active):
-                        watched = await asyncio.to_thread(watch_list, settings_out(cfg)["extra_symbols"])
+                        from app.services import news_lists
+
+                        lists = await news_lists.lists_or_none()
+                        watched = await asyncio.to_thread(watch_list, settings_out(cfg)["extra_symbols"], lists)
                         try:
                             await self._market_pass(cfg, now, watched, alerts=cfg.enabled and cfg.all_fno)
                             self.status.fno_error = None
@@ -760,7 +805,10 @@ class NewsWatcher:
     async def run_once(self, cfg: NewsWatchSettings, now: dt.datetime | None = None) -> list[NewsAlert]:
         now = now or dt.datetime.now(IST)
         settings = settings_out(cfg)
-        watched = await asyncio.to_thread(watch_list, settings["extra_symbols"])
+        from app.services import news_lists
+
+        lists = await news_lists.lists_or_none()
+        watched = await asyncio.to_thread(watch_list, settings["extra_symbols"], lists)
         self.status.watched = len(watched)
         min_level = IMPACT_LEVELS.index(cfg.min_impact) if cfg.min_impact in IMPACT_LEVELS else 1
         made: list[NewsAlert] = []
@@ -785,7 +833,7 @@ class NewsWatcher:
                     continue
                 self._seen.add(key)
                 age = _age_hours(it.get("at"), now)
-                if age is None or age > ALERT_MAX_AGE_H or it.get("about") is False:
+                if age is None or age > ALERT_MAX_AGE_H or it.get("about") is False or not is_valid(it.get("at"), now):
                     continue
                 if IMPACT_LEVELS.index(it["impact"]) < min_level and not is_critical(it, side):
                     continue
@@ -800,7 +848,8 @@ class NewsWatcher:
                 if not fresh:
                     continue
                 critical = any(is_critical(f, side) for f in fresh)
-                text = alert_text(result, fresh, entry, critical)
+                price = (await news_lists.prices([symbol])).get(symbol)
+                text = alert_text(result, fresh, entry, critical, price)
                 row = NewsAlert(
                     symbol=symbol,
                     key=fresh[0]["key"],
@@ -813,6 +862,8 @@ class NewsWatcher:
                         "text": text, "items": [{k: f.get(k) for k in ("title", "url", "source", "at", "sentiment", "impact", "why")} for f in fresh],
                         "action": result["action"], "overall": result["overall"], "method": result["method"],
                         "held": entry.get("held", []), "armed": entry.get("armed", []),
+                        "lists": entry.get("lists", []), "price": price,
+                        "valid_until": fresh[0].get("valid_until"),
                     }),
                     popup=cfg.popup,
                 )
@@ -853,8 +904,8 @@ class NewsWatcher:
             if fno and symbol not in fno:
                 continue
             key = item_key(symbol, it)
-            scored = {**it, **score_text(it.get("title", ""), it.get("detail")), "by": "rules", "about": True, "key": key,
-                      "watched": symbol in watched}
+            scored = with_validity({**it, **score_text(it.get("title", ""), it.get("detail")), "by": "rules", "about": True,
+                                    "key": key, "watched": symbol in watched}, now)
             if key not in known:
                 fresh_feed.append(scored)
                 known.add(key)
@@ -863,7 +914,7 @@ class NewsWatcher:
                 continue  # an armed / held stock was read in full above
             self._seen.add(key)
             age = _age_hours(scored.get("at"), now)
-            if age is None or age > ALERT_MAX_AGE_H:
+            if age is None or age > ALERT_MAX_AGE_H or not scored["valid"]:
                 continue
             if scored["impact"] != "HIGH" and not scored.get("critical"):
                 continue
@@ -906,7 +957,10 @@ class NewsWatcher:
         result = {"symbol": symbol, "overall": view, "action": act, "method": "rules", "plan": plan(view),
                   "timing": timing(view, [item], now)}
         entry = {"armed": [], "held": []}
-        text = alert_text(result, [item], entry, False).replace("📰 News", "📰 F&O news", 1)
+        from app.services import news_lists
+
+        price = (await news_lists.prices([symbol])).get(symbol)
+        text = alert_text(result, [item], entry, False, price).replace("📰 News", "📰 F&O news", 1)
         async with async_session() as s:
             if (await s.execute(select(NewsAlert.id).where(NewsAlert.key == item["key"]))).first():
                 return None
@@ -917,6 +971,7 @@ class NewsWatcher:
                     "text": text, "scope": "fno",
                     "items": [{k: item.get(k) for k in ("title", "url", "source", "at", "sentiment", "impact", "why")}],
                     "action": act, "overall": view, "method": "rules", "held": [], "armed": [],
+                    "price": price, "valid_until": item.get("valid_until"),
                 }),
                 popup=cfg.popup,
             )
@@ -980,7 +1035,7 @@ def alert_out(row: NewsAlert) -> dict:
         "critical": row.critical, "action": row.action, "title": row.title, "popup": row.popup,
         "created_at": row.created_at.replace(tzinfo=dt.timezone.utc).astimezone(IST).isoformat(timespec="seconds")
         if row.created_at else None,
-        **{k: body.get(k) for k in ("text", "items", "overall", "method", "held", "armed", "scope")},
+        **{k: body.get(k) for k in ("text", "items", "overall", "method", "held", "armed", "scope", "lists", "price", "valid_until")},
         "action_label": (body.get("action") or {}).get("label"),
         "action_why": (body.get("action") or {}).get("why"),
     }

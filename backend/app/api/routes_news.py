@@ -86,8 +86,11 @@ async def day_news(date: str, symbols: str | None = None, ai: bool = True):
 async def _watch() -> dict:
     import asyncio
 
+    from app.services import news_lists
+
     cfg = await news_impact.load_settings()
-    return await asyncio.to_thread(news_impact.watch_list, news_impact.settings_out(cfg)["extra_symbols"])
+    lists = await news_lists.all_lists()
+    return await asyncio.to_thread(news_impact.watch_list, news_impact.settings_out(cfg)["extra_symbols"], lists)
 
 
 class SettingsBody(BaseModel):
@@ -141,9 +144,99 @@ async def watch():
 
 
 @router.get("/feed")
-async def feed(limit: int = Query(100, ge=1, le=news_impact.MARKET_KEEP)):
-    """Every F&O stock's latest NSE filings from the watcher's last passes, scored, newest first."""
-    return {"items": news_watcher.market[:limit], "status": news_watcher.status.__dict__}
+async def feed(limit: int = Query(100, ge=1, le=news_impact.MARKET_KEEP), valid_only: bool = False, prices: bool = False):
+    """Every F&O stock's latest NSE filings from the watcher's last passes, scored, newest first.
+    Each carries `valid` / `valid_until` (the next trading day's close); `valid_only` drops expired ones,
+    `prices` adds each stock's last price."""
+    now = dt.datetime.now(news_impact.IST)
+    items = [news_impact.with_validity(it, now) for it in news_watcher.market]
+    if valid_only:
+        items = [it for it in items if it["valid"]]
+    items = items[:limit]
+    if prices and items:
+        from app.services import news_lists
+
+        px = await news_lists.prices([it["symbol"] for it in items])
+        items = [{**it, "price": px.get(it["symbol"])} for it in items]
+    return {"items": items, "status": news_watcher.status.__dict__}
+
+
+# ---- watch lists (the News page) ----------------------------------------------------
+
+
+class ListBody(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    symbols: list[str] = Field(default_factory=list, max_length=200)
+
+
+class ListPatch(BaseModel):
+    name: str | None = Field(None, max_length=40)
+    symbols: list[str] | None = Field(None, max_length=200)
+    add: list[str] | None = Field(None, max_length=200)
+    remove: list[str] | None = Field(None, max_length=200)
+
+
+def _list_call(exc: Exception) -> HTTPException:
+    from app.services.news_lists import ListError
+
+    if isinstance(exc, LookupError):
+        return HTTPException(404, str(exc))
+    if isinstance(exc, ListError):
+        return HTTPException(400, str(exc))
+    return HTTPException(500, str(exc))
+
+
+@router.get("/lists")
+async def lists():
+    """Every news watch list (name and stocks)."""
+    from app.services import news_lists
+
+    return {"lists": await news_lists.all_lists(), "max_lists": news_lists.MAX_LISTS, "max_per_list": news_lists.MAX_PER_LIST}
+
+
+@router.post("/lists")
+async def create_list(body: ListBody):
+    from app.services import news_lists
+
+    try:
+        row = await news_lists.create(body.name, body.symbols)
+    except (LookupError, ValueError) as exc:
+        raise _list_call(exc) from exc
+    news_watcher.kick()
+    return row
+
+
+@router.put("/lists/{list_id}")
+async def update_list(list_id: int, body: ListPatch):
+    """Rename, replace the stocks, or add / remove some."""
+    from app.services import news_lists
+
+    try:
+        row = await news_lists.update(list_id, name=body.name, symbols=body.symbols, add=body.add, remove=body.remove)
+    except (LookupError, ValueError) as exc:
+        raise _list_call(exc) from exc
+    news_watcher.kick()
+    return row
+
+
+@router.delete("/lists/{list_id}")
+async def delete_list(list_id: int):
+    from app.services import news_lists
+
+    try:
+        await news_lists.delete(list_id)
+    except (LookupError, ValueError) as exc:
+        raise _list_call(exc) from exc
+    return {"ok": True}
+
+
+@router.get("/prices")
+async def stock_prices(symbols: str):
+    """Last prices for up to 100 stocks (bots' quotes, the live feed, else one Groww LTP call)."""
+    from app.services import news_lists
+
+    names = [_clean(x) for x in symbols.split(",") if x.strip()][:100]
+    return {"prices": await news_lists.prices(names)}
 
 
 @router.post("/run")

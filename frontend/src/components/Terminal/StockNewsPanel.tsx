@@ -17,6 +17,15 @@ function ago(at: string | null): string {
   return new Date(at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
 }
 
+/** "Mon 26 Oct 15:30" for a headline's validity end (IST). */
+export function validTill(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return at;
+  return d.toLocaleString("en-IN", {
+    weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+  });
+}
+
 /**
  * News for one stock: NSE's own company announcements and Google News headlines, newest first.
  * Groww's trading API has no news, so these two public sources stand in. Each headline is read as
@@ -144,8 +153,10 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
                 <ExternalLink size={11} aria-hidden className="ml-1 inline opacity-40 group-hover:opacity-100" />
                 {item.detail ? <span className="mt-0.5 block line-clamp-2 text-xs text-slate-400">{item.detail}</span> : null}
                 <span className="mt-0.5 block text-[11px] text-slate-500">
+                  {item.valid === false ? <span className="mr-1 text-slate-600 line-through">expired</span> : null}
                   {item.source}
                   {item.at ? ` · ${ago(item.at)}` : ""}
+                  {item.valid_until ? ` · ${item.valid === false ? "was valid" : "valid"} till ${validTill(item.valid_until)}` : ""}
                   {item.sentiment !== "NEUTRAL" && item.why ? ` · ${item.why}` : ""}
                 </span>
               </span>

@@ -9,7 +9,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.market_clock import IST
-from app.models.database import NewsAlert, NewsWatchSettings
+from app.models.database import NewsAlert, NewsWatchList, NewsWatchSettings
 from app.services import news_impact as ni
 
 NOW = dt.datetime(2026, 10, 23, 10, 0, tzinfo=IST)
@@ -267,8 +267,12 @@ async def db(monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(NewsAlert.__table__.create)
         await conn.run_sync(NewsWatchSettings.__table__.create)
+        await conn.run_sync(NewsWatchList.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(ni, "async_session", maker)
+    from app.services import news_lists
+
+    monkeypatch.setattr(news_lists, "async_session", maker)
     yield maker
     await engine.dispose()
 
@@ -301,7 +305,7 @@ async def test_watcher_alerts_once_and_rings_only_for_critical(db, monkeypatch):
 
     monkeypatch.setattr(stock_news, "stock_news", fake_news)
     monkeypatch.setattr(ni, "_openai_key", no_key)
-    monkeypatch.setattr(ni, "watch_list", lambda extra=None: {
+    monkeypatch.setattr(ni, "watch_list", lambda extra=None, lists=None: {
         "HELD": {"armed": ["Bot 1"], "held": [{"bot": 1, "name": "Bot 1", "mode": "PAPER", "side": "LONG", "qty": 10}]},
         "ARMED": {"armed": ["Bot 2"], "held": []},
     })
@@ -374,7 +378,7 @@ async def test_all_fno_pass_pops_up_high_news_on_other_stocks_without_telegram(d
     monkeypatch.setattr(stock_news, "nse_market_announcements", fake_market)
     monkeypatch.setattr(stock_news, "stock_news", fake_news)
     monkeypatch.setattr(ni, "_fno_set", lambda: {"OTHER", "HELD", "OLD"})
-    monkeypatch.setattr(ni, "watch_list", lambda extra=None: {"HELD": {"armed": [], "held": []}})
+    monkeypatch.setattr(ni, "watch_list", lambda extra=None, lists=None: {"HELD": {"armed": [], "held": []}})
     monkeypatch.setattr(alert_notifier, "send", send)
 
     watcher = ni.NewsWatcher()
@@ -411,7 +415,7 @@ async def test_a_failing_market_feed_keeps_the_armed_alerts(db, monkeypatch):
 
     monkeypatch.setattr(stock_news, "nse_market_announcements", broken)
     monkeypatch.setattr(stock_news, "stock_news", fake_news)
-    monkeypatch.setattr(ni, "watch_list", lambda extra=None: {})
+    monkeypatch.setattr(ni, "watch_list", lambda extra=None, lists=None: {})
     watcher = ni.NewsWatcher()
     cfg = NewsWatchSettings(id=1, enabled=True, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,
                             telegram=False, call_critical=False, extra_symbols="", all_fno=True, fno_telegram=False)
