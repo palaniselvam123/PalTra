@@ -152,6 +152,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "vturn_within": "INTEGER DEFAULT 6",
             "vturn_handoff": "BOOLEAN DEFAULT 0",
             "handoff_now": "BOOLEAN DEFAULT 0",
+            "pivot_target": "VARCHAR(3) DEFAULT 'OFF'",
             "slow_sma_exit": "BOOLEAN DEFAULT 0",
             "recovery_hold": "BOOLEAN DEFAULT 0",
             "recovery_tolerance_pct": "FLOAT DEFAULT 0.15",

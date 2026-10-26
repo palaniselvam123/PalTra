@@ -56,6 +56,7 @@ BASELINE_OFF = {
     "vturn_exit": False,
     "vturn_handoff": False,
     "handoff_now": False,
+    "pivot_target": "OFF",
     "slow_sma_exit": False,
     "recovery_hold": False,
     "breakout_handoff": False,

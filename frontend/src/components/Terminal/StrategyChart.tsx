@@ -723,6 +723,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
+  const pivotLines = useRef<IPriceLine[]>([]);
   const pnlGrossRef = useRef<number | null>(null);
   // Entry, stop and target of the open position, kept in view by autoscale.
   const levelsRef = useRef<number[]>([]);
@@ -1534,6 +1535,36 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     place(slLine, slLevel, "#F59E0B");
     place(targetLine, targetLevel, "#34D399");
   }, [slLevel, targetLevel]);
+
+  // Classic daily pivots from the previous session (pivots.py): P, R1 / S1, R2 / S2 as labelled lines.
+  const pv = view?.pivots ?? null;
+  const pivotsOn = shown(look.pivots, (view?.pivot_target ?? "OFF") !== "OFF");
+  const pivotKey = pivotsOn && pv ? [pv.p, pv.r1, pv.r2, pv.s1, pv.s2].join(",") : "";
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series) return;
+    for (const line of pivotLines.current) series.removePriceLine(line);
+    pivotLines.current = [];
+    if (!pivotKey || !pv) return;
+    const lines: [string, number, string][] = [
+      ["R2", pv.r2, look.pivots.color],
+      ["R1", pv.r1, look.pivots.color],
+      ["P", pv.p, look.pivots.color2 ?? look.pivots.color],
+      ["S1", pv.s1, look.pivots.color],
+      ["S2", pv.s2, look.pivots.color],
+    ];
+    pivotLines.current = lines.map(([title, price, color]) =>
+      series.createPriceLine({
+        price,
+        color,
+        lineWidth: look.pivots.width as 1,
+        lineStyle: look.pivots.style as LineStyle,
+        axisLabelVisible: true,
+        title,
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pivotKey, look.pivots.color, look.pivots.color2, look.pivots.width, look.pivots.style]);
 
   const latest = latestSma(rows);
   const filters = view?.filters;

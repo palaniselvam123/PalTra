@@ -69,6 +69,7 @@ import extreme_entry
 import entry_candle
 import slope_exit
 import recovery
+import pivots
 import breakout
 import review
 import paper_wallet
@@ -271,7 +272,7 @@ SNAPSHOT_FIELDS = (
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
-    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now",
+    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -951,6 +952,8 @@ class StrategyEngine:
         # closed candle each held stock was last reviewed on, the uncertain
         # stretch per stock ({trade_id, open, last_at}), and recent reviews.
         self._tapes: dict[str, pd.DataFrame] = {}
+        # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
+        self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1321,6 +1324,7 @@ class StrategyEngine:
             await self._watch_slow_sma(symbol_cfg)
             await self._watch_recovery(symbol_cfg, now)
             await self._watch_gap_fade(symbol_cfg)
+            await self._watch_pivot_target(symbol_cfg)
 
         await self._watch_pullbacks(cfg, now)
 
@@ -3498,6 +3502,37 @@ class StrategyEngine:
             self._signals[symbol] = text
             self._alert(text)
 
+    def _pivots(self, symbol: str, day: dt.date) -> dict | None:
+        """Classic pivots for `day` from the stock's previous session (pivots.py); None until that day is loaded."""
+        key = ((symbol or "").upper(), day)
+        hit = self._pivot_cache.get(key)
+        if hit is not None:
+            return hit
+        frame = self._tapes.get(key[0])
+        if frame is None or getattr(frame, "empty", True):
+            frame = self._frames.get(key[0])
+        found = pivots.levels(frame, day)
+        if found is not None:
+            self._pivot_cache[key] = found
+        return found
+
+    async def _watch_pivot_target(self, cfg: BotConfig) -> None:
+        """Every price: book the trade's profit at its pivot level (pivot_target, pivots.py)."""
+        pos = self.position
+        mode = pivots.target_mode(cfg)
+        if pos is None or mode == "OFF" or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        goal = pivots.target_for(pos.direction, pos.entry_price, self._pivots(symbol, opened.astimezone(IST).date()), mode)
+        if goal is None or not pivots.reached(pos.direction, self.ltp, goal[1]):
+            return
+        self._signals[symbol] = f"{symbol} pivot target {goal[0]} {goal[1]:.2f} reached"
+        await self._exit_now(cfg, self.ltp, pivots.PIVOT_EXIT)
+
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
         pos = self.position
@@ -3552,6 +3587,7 @@ class StrategyEngine:
                     "GAP_FADE": "SMA gap faded — flat",
                     "CANDLE_END": "candle closed — flat",
                     "COLOUR_TURN": "candle turned the other colour — flat",
+                    "PIVOT_TARGET": "pivot target reached — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
@@ -4775,6 +4811,9 @@ class StrategyEngine:
             "filters": chart_filters(cfg),
             # Minutes per candle sent (candles.py); the chart only merges up from it.
             "candle_minutes": alt or (candle_minutes(cfg, stock_overrides(cfg, view)) if cfg else 1),
+            # Classic daily pivots from the previous session (pivots.py), drawn as lines; display only.
+            "pivots": self._pivots(view, self._now().date()) if view else None,
+            "pivot_target": pivots.target_mode(cfg) if cfg is not None else "OFF",
         }
 
     def _kpis(self, mode: str = "PAPER") -> dict:
@@ -4917,6 +4956,7 @@ _ALERT_REASON = {
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "COLOUR_TURN": "candle turned the other colour",
+    "PIVOT_TARGET": "pivot target (R1 / S1)",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -5332,7 +5372,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP",
+    "BREAKOUT_STOP", "PIVOT_TARGET",
 )
 
 

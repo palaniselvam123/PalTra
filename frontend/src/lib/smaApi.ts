@@ -175,6 +175,8 @@ export type SmaConfig = {
   vturn_handoff?: boolean;
   /** After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (no filters). */
   handoff_now?: boolean;
+  /** Book the profit at a daily pivot level: R1 (S1 for a short; R2 / S2 when the entry is already past it) or R2. */
+  pivot_target?: "OFF" | "R1" | "R2";
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;
@@ -939,6 +941,9 @@ export type ChartPayload = {
   symbol?: string;
   /** Minutes per candle the server sends (the bot's candle interval); 1 when absent. */
   candle_minutes?: number;
+  /** Classic daily pivots from the previous session (pivots.py); null until that day is loaded. */
+  pivots?: { day: string; p: number; r1: number; r2: number; s1: number; s2: number } | null;
+  pivot_target?: "OFF" | "R1" | "R2";
   candles: Candle[];
   markers: {
     time: number;

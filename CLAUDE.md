@@ -119,6 +119,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `tsl_settings(cfg, entry_price=fill)` turns them into ₹ at trade
   entry so the trail / target maths is unchanged. The display always
   reports both sets of numbers plus `tsl_mode`.
+- `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
+  session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
+  on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and
+  day in `StrategyEngine._pivot_cache` / `_pivots`). The chart payload carries `pivots` and `pivot_target`; the chart
+  draws them as labelled lines (Indicators → "Pivot points", `chartStyle` key `pivots`, Auto = while the pivot target is
+  on). **Pivot target** (`pivot_target`: `OFF` default | `R1` | `R2`, per bot and per stock): `_watch_pivot_target`, every
+  price, closes a long at R1 (a short at S1), or at R2 / S2 when the entry is already beyond the first level (`R2` uses R2
+  / S2 only; no level beyond the entry = no pivot target), via `_exit_now` (`PIVOT_TARGET`; a LIVE stop is cancelled
+  first, a LIVE position restored without its stop id is left to that stop). Settings → 5. Stop-loss and target. Counts
+  as an exit for `strategyChecks.noExitOn`. The stock research baseline keeps it off.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /

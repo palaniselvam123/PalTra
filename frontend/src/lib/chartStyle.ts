@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & { candleUp: string; candleDown: string };
 
@@ -46,6 +46,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   st: { name: "Supertrend", auto: "while the Supertrend check or exit is on", color2: "down" },
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
+  pivots: { name: "Pivot points (P, R1/S1, R2/S2)", auto: "while the pivot target is on", color2: "P" },
 };
 
 export const DEFAULT_CHART_STYLE: ChartStyle = {
@@ -59,6 +60,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   st: { show: "auto", color: "#16A34A", color2: "#DC2626", width: 2, style: 0 },
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
+  pivots: { show: "auto", color: "#EAB308", color2: "#94A3B8", width: 1, style: 2 },
 };
 
 const KEY = "sma.chart.style.v1";

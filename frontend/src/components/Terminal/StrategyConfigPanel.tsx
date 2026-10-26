@@ -87,6 +87,7 @@ const LABELS: Record<string, string> = {
   vturn_within: "V-turn within",
   vturn_handoff: "V-turn loss → Bot 2",
   handoff_now: "Bot 2 orders at once",
+  pivot_target: "pivot target",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -316,6 +317,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     vturn_within: Math.min(10, Math.max(1, Math.round(Number(form.vturn_within ?? 6)) || 6)),
     vturn_handoff: Boolean(form.vturn_exit) && Boolean(form.vturn_handoff),
     handoff_now: Boolean(form.handoff_now),
+    pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1678,6 +1680,28 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
             </select>
           </label>
+          <label className="mt-3 block text-sm text-slate-300">
+            <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
+              Pivot target{isOwn("pivot_target") && <OwnTag />}
+              <InfoTip label="About the pivot target">
+                Classic daily pivots from the previous session&apos;s high, low and close: P = (H + L + C) ÷ 3, R1 = 2P − L,
+                S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L). &quot;R1&quot; books a long&apos;s profit at R1 and a short&apos;s at S1;
+                when the entry is already past that level it uses R2 / S2, and with no level beyond the entry the trade has no
+                pivot target. &quot;R2&quot; uses R2 / S2 only. Checked on every price; whichever exit comes first closes the
+                trade (the stop, any other target and the other exits are unchanged). The levels are drawn on the chart
+                (Indicators → Pivot points). Off by default.
+              </InfoTip>
+            </span>
+            <select
+              value={form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF"}
+              onChange={(e) => set("pivot_target", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="OFF">Off — no pivot target</option>
+              <option value="R1">R1 for a buy, S1 for a sell (then R2 / S2)</option>
+              <option value="R2">R2 for a buy, S2 for a sell</option>
+            </select>
+          </label>
           {form.stop_type !== "TSL" ? (
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
@@ -2184,6 +2208,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "use_stop", text: `Moving stop and target from the SMA gap (PAPER only; LIVE uses ${f.atr_multiplier}× ATR)` });
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
+  if (f.pivot_target === "R1" || f.pivot_target === "R2")
+    add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
   }
 
   // 7. Advanced

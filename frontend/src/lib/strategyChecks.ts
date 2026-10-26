@@ -44,6 +44,7 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.st_exit &&
     !cfg.slope_exit &&
     !cfg.vturn_exit &&
+    !(cfg.pivot_target === "R1" || cfg.pivot_target === "R2") &&
     !cfg.slow_sma_exit
   );
 }
