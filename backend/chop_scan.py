@@ -197,6 +197,9 @@ class ChopRow:
     # Start of the last cross candle today per size (epoch seconds) and its direction; None without one.
     last_cross_ts_by_minutes: dict = field(default_factory=dict)
     last_cross_side_by_minutes: dict = field(default_factory=dict)
+    # The strong-trend read (`trend_strength.read`) on every candle size: STRONG_BULLISH /
+    # STRONG_BEARISH, or None (no strong trend, or too few candles). The "Trend on" filter.
+    trend_by_minutes: dict = field(default_factory=dict)
     # When a scan first read this stock as a quiet runner today, and when its Telegram went (IST).
     first_quiet_at: str | None = None
     alerted_at: str | None = None
@@ -287,18 +290,22 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
-    by_size = {m: _cross_read(hits, enriched) if m == minutes else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today)
+    vwap = _vwap_today(frame_1m, now)
+    trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
+    by_size = {m: (*_cross_read(hits, enriched), trend["trend"]) if m == minutes
+               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap)
                for m in CANDLE_MINUTES}
     return replace(
         base,
         **activity(frame_1m),
-        **trend_strength.read(enriched, _vwap_today(frame_1m, now), now=now, tape=frame_1m),
+        **trend,
         **trend_phases.summary(trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)),
         day_move_pct=_day_move(frame_1m),
         crosses_by_minutes={m: r[0] for m, r in by_size.items()},
         side_by_minutes={m: r[1] for m, r in by_size.items()},
         last_cross_ts_by_minutes={m: r[2] for m, r in by_size.items()},
         last_cross_side_by_minutes={m: r[3] for m, r in by_size.items()},
+        trend_by_minutes={m: r[4] for m, r in by_size.items()},
     )
 
 
@@ -307,13 +314,15 @@ def _side(enriched: pd.DataFrame) -> str | None:
     return None if gap is None or gap == 0 else ("BULLISH" if gap > 0 else "BEARISH")
 
 
-def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int):
-    """(crosses today, side, last cross ts, last cross side) on `minutes`-long candles; Nones when too short."""
+def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
+                vwap: float | None = None):
+    """(crosses today, side, last cross ts, last cross side, strong trend) on `minutes`-long candles; Nones when too short."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
-        return None, None, None, None
+        return None, None, None, None, None
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
-    return _cross_read(_crosses(enriched, today), enriched)
+    strong = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)["trend"]
+    return (*_cross_read(_crosses(enriched, today), enriched), strong)
 
 
 def _cross_read(hits: list[dict], enriched: pd.DataFrame):

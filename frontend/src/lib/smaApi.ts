@@ -371,6 +371,8 @@ export type ChopScanRow = {
   /** Start of today's last cross candle per size (epoch seconds), and that cross's direction. */
   last_cross_ts_by_minutes?: Record<string, number | null>;
   last_cross_side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
+  /** Strong-trend read on every candle size (6 of 7 checks): STRONG_BULLISH / STRONG_BEARISH, or null. */
+  trend_by_minutes?: Record<string, "STRONG_BULLISH" | "STRONG_BEARISH" | null>;
   /** Today's trend phases on the scan's candle (older servers leave them out): the phase now and every phase, oldest first. */
   phase?: ChopPhaseSide | null;
   phase_since_ts?: number | null;

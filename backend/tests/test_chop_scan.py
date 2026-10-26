@@ -358,3 +358,25 @@ def test_rows_keep_when_each_stock_was_first_quiet_and_alerted_today(monkeypatch
     assert second["EARLY"]["first_quiet_at"].startswith(f"{DAY.isoformat()}T11:00")  # kept, not moved to 11:30
     assert second["LATE"]["first_quiet_at"].startswith(f"{DAY.isoformat()}T11:30")
     assert second["LATE"]["alerted_at"].startswith(f"{DAY.isoformat()}T11:30")
+
+
+def test_strong_trend_is_read_on_every_candle_size():
+    """A steady rise reads a strong bullish trend on the short candles; a fall reads bearish.
+
+    The 15-minute slow SMA reaches back into yesterday, under today's VWAP, so it fails the VWAP check.
+    """
+    yesterday = [100 + i * 0.05 for i in range(375)]
+    up = pd.concat([_minutes(yesterday, dt.date(2026, 10, 7)),
+                    _minutes([yesterday[-1] + i * 0.05 for i in range(200)])], ignore_index=True)
+    row = chop_scan.analyze(up, 9, 21, 5, _at(12, 40), symbol="UP")
+    assert row is not None
+    assert row.trend_by_minutes[5] == row.trend == "STRONG_BULLISH"
+    assert all(row.trend_by_minutes[m] == "STRONG_BULLISH" for m in (1, 2, 3, 5)), row.trend_by_minutes
+    assert row.trend_by_minutes[15] is None and row.side_by_minutes[15] == "BULLISH"
+    fall = [200 - i * 0.05 for i in range(375)]
+    down = pd.concat([_minutes(fall, dt.date(2026, 10, 7)),
+                      _minutes([fall[-1] - i * 0.05 for i in range(200)])], ignore_index=True)
+    row = chop_scan.analyze(down, 9, 21, 5, _at(12, 40), symbol="DOWN")
+    assert all(row.trend_by_minutes[m] == "STRONG_BEARISH" for m in (1, 2, 3, 5)), row.trend_by_minutes
+    short = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(60)]), 9, 21, 1, _at(10, 20), symbol="NEW")
+    assert short.trend_by_minutes[15] is None
