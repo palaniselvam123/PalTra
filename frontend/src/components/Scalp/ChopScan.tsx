@@ -48,6 +48,35 @@ function crossRuleMatches(rule: CrossRule, count: number | null | undefined, las
   if (rule.startsWith("ge")) return count >= Number(rule.slice(2));
   return count === Number(rule);
 }
+// "Trend on" filter: which way every ticked candle size must point, and how strong.
+const TREND_DIRS = [
+  ["UP", "Bullish"],
+  ["DOWN", "Bearish"],
+  ["SAME", "Same way (either)"],
+] as const;
+type TrendDir = (typeof TREND_DIRS)[number][0];
+const TREND_KINDS = [
+  ["SIDE", "SMA side (fast above / below slow)"],
+  ["STRONG", "Strong trend (6 of 7 checks)"],
+] as const;
+type TrendKind = (typeof TREND_KINDS)[number][0];
+
+/** The side a candle size points to under `kind`: BULLISH / BEARISH, or null (none / too few candles). */
+function trendSideOn(r: ChopScanRow, m: number, kind: TrendKind): "BULLISH" | "BEARISH" | null {
+  const k = String(m);
+  if (kind === "SIDE") return r.side_by_minutes?.[k] ?? null;
+  const t = r.trend_by_minutes?.[k];
+  return t === "STRONG_BULLISH" ? "BULLISH" : t === "STRONG_BEARISH" ? "BEARISH" : null;
+}
+
+/** Every ticked size points the chosen way (a size with no read never matches). */
+function trendMatches(r: ChopScanRow, sizes: number[], dir: TrendDir, kind: TrendKind): boolean {
+  const sides = sizes.map((m) => trendSideOn(r, m, kind));
+  if (sides.some((s) => s == null)) return false;
+  if (dir === "UP") return sides.every((s) => s === "BULLISH");
+  if (dir === "DOWN") return sides.every((s) => s === "BEARISH");
+  return sides.every((s) => s === sides[0]);
+}
 const POLL_MS = 3_000;
 // Auto re-scan period in milliseconds (30 min). GitHub-cron-style, best-effort; the browser
 // has to be awake. On mobile a backgrounded tab may skip ticks.
@@ -155,6 +184,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [noCrossOn, setNoCrossOn] = useState<CrossScanMinutes[]>([]);
   // How many crosses today the ticked sizes must have (CROSS_RULES: none, exactly N, at most N, N or more, one up / down).
   const [crossCount, setCrossCount] = useState<CrossRule>("0");
+  // Trend on: every ticked candle size must point the chosen way (none ticked = off).
+  const [trendOn, setTrendOn] = useState<CrossScanMinutes[]>([]);
+  const [trendDir, setTrendDir] = useState<TrendDir>("UP");
+  const [trendKind, setTrendKind] = useState<TrendKind>("SIDE");
   // Price range in ₹ (0 = no bound): filters the table, the quiet pop-up and the Telegram alert.
   const [priceMin, setPriceMin] = useState(0);
   const [priceMax, setPriceMax] = useState(0);
@@ -178,6 +211,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         if (Array.isArray(saved.noCrossOn))
           setNoCrossOn(saved.noCrossOn.filter((m: unknown) => CANDLE_CHOICES.includes(m as CrossScanMinutes)));
         if (typeof saved.score === "string") setScore(saved.score as ScoreFilter);
+        if (Array.isArray(saved.trendOn))
+          setTrendOn(saved.trendOn.filter((m: unknown) => CANDLE_CHOICES.includes(m as CrossScanMinutes)));
+        if (TREND_DIRS.some(([v]) => v === saved.trendDir)) setTrendDir(saved.trendDir as TrendDir);
+        if (TREND_KINDS.some(([v]) => v === saved.trendKind)) setTrendKind(saved.trendKind as TrendKind);
       }
     } catch {
       /* private mode */
@@ -186,12 +223,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   useEffect(() => {
     if (saved) return; // a saved scan's view never changes the live card's settings
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax })
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind })
       );
     } catch {
       /* private mode */
     }
-  }, [saved, lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax]);
+  }, [saved, lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind]);
 
   const start = useCallback(
     async (force = false) => {
@@ -339,9 +376,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
       if (noCrossOn.some((m) => !crossRuleMatches(crossCount, r.crosses_by_minutes?.[String(m)], r.last_cross_side_by_minutes?.[String(m)])))
         return false;
+      if (trendOn.length > 0 && !trendMatches(r, trendOn, trendDir, trendKind)) return false;
       return true;
     },
-    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax]
+    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
   const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
@@ -500,6 +538,56 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             })}
             {noCrossOn.length > 0 && (
               <button type="button" onClick={() => setNoCrossOn([])} className="text-xs text-slate-500 underline-offset-2 hover:underline">
+                clear
+              </button>
+            )}
+          </FilterField>
+          <FilterField label="Trend on">
+            <select
+              value={trendDir}
+              onChange={(e) => setTrendDir(e.target.value as TrendDir)}
+              aria-label="Trend direction on every ticked candle size"
+              className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
+            >
+              {TREND_DIRS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={trendKind}
+              onChange={(e) => setTrendKind(e.target.value as TrendKind)}
+              aria-label="How strong the trend must be"
+              className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
+              title="SMA side: the fast SMA is above the slow one (bullish) or below (bearish) on the last closed candle of that size. Strong trend: the card's strong-trend read (6 of 7 checks: stack, VWAP, slope, fan, hold, structure, run) on that size. Every ticked size must agree; a size with too few candles never matches."
+            >
+              {TREND_KINDS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-400">on</span>
+            {CANDLE_CHOICES.map((m) => {
+              const on = trendOn.includes(m);
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setTrendOn((cur) => (on ? cur.filter((x) => x !== m) : [...cur, m].sort((a, b) => a - b)))}
+                  className={clsx(
+                    "min-h-9 min-w-10 rounded-md px-2.5 text-xs font-semibold ring-1 ring-inset",
+                    on ? "bg-profit/15 text-profit ring-profit/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
+                  )}
+                >
+                  {m}m
+                </button>
+              );
+            })}
+            {trendOn.length > 0 && (
+              <button type="button" onClick={() => setTrendOn([])} className="text-xs text-slate-500 underline-offset-2 hover:underline">
                 clear
               </button>
             )}

@@ -567,6 +567,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`chop_scan._crosses_on`; None while a size has too few candles). The card keeps only stocks whose count
   matches the chosen rule on every ticked size (a size with no count never matches; ↑ / ↓ also read
   `last_cross_side_by_minutes`) and shows a single cross as `@HH:MM ↑/↓`.
+  **Trend on** (`TREND_DIRS` Bullish / Bearish / Same way, `TREND_KINDS` SMA side / Strong trend; multi-select
+  1/2/3/5/10/15 min, kept in the browser): each row also carries `trend_by_minutes`, the strong-trend read
+  (`trend_strength.read`, the same 7 checks as the card's own `trend`) on every candle size (`chop_scan._crosses_on`;
+  None without a strong trend or with too few candles). The card keeps only stocks where every ticked size points the
+  chosen way, by `side_by_minutes` (SMA side) or `trend_by_minutes` (Strong trend); a size with no read never matches.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute
