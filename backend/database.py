@@ -150,6 +150,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "vturn_move_pct": "FLOAT DEFAULT 0.02",
             "vturn_turn_pct": "FLOAT DEFAULT 0.015",
             "vturn_within": "INTEGER DEFAULT 6",
+            "vturn_handoff": "BOOLEAN DEFAULT 0",
             "slow_sma_exit": "BOOLEAN DEFAULT 0",
             "recovery_hold": "BOOLEAN DEFAULT 0",
             "recovery_tolerance_pct": "FLOAT DEFAULT 0.15",

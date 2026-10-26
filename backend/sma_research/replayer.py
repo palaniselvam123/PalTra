@@ -54,6 +54,7 @@ BASELINE_OFF = {
     "extreme_entry": False,
     "slope_exit": False,
     "vturn_exit": False,
+    "vturn_handoff": False,
     "slow_sma_exit": False,
     "recovery_hold": False,
     "breakout_handoff": False,

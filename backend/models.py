@@ -378,6 +378,8 @@ class BotConfig(Base):
     vturn_move_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.02)
     vturn_turn_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.015)
     vturn_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
+    # After a V-turn exit at a loss, move the stock to Bot 2 like a recovery (slope_exit.vturn_handoff_on).
+    vturn_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

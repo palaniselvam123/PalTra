@@ -24,6 +24,8 @@ signed so that positive is with the trade (rising for a buy, falling for a sell)
     within `vturn_within` (6) candles of having been at least `vturn_move_pct`
     (0.02 %/candle) with it: a steep run and a steep turn back, the point of a V. A slow
     U-shaped rounding or a sideways drift never qualifies. Uses the same `slope_lookback`.
+    With `vturn_handoff` (off), a V-turn exit at a loss moves the stock to Bot 2 like a
+    recovery (`recovery.handoff`: flipped, gap mode; in LIVE only once Groww shows no shares).
 
 The steepest slope is kept in memory, so after a restart it is measured again from
 the candles closed after that point. Exits go through `_exit_now`, which cancels a
@@ -87,6 +89,16 @@ def turn_pct(cfg) -> float:
 
 def vturn_on(cfg) -> bool:
     return bool(getattr(cfg, "vturn_exit", False))
+
+
+def vturn_handoff_on(cfg) -> bool:
+    """After a V-turn exit at a loss, move the stock to Bot 2 (recovery.handoff), off by default."""
+    return vturn_on(cfg) and bool(getattr(cfg, "vturn_handoff", False))
+
+
+def lost(direction: str, entry: float, exit_price: float) -> bool:
+    """The trade closed at a loss (before charges): a long below its entry, a short above it."""
+    return exit_price < entry if direction == "LONG" else exit_price > entry
 
 
 def vturn_move_pct(cfg) -> float:
