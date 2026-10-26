@@ -936,12 +936,16 @@ export type NewsDayRow = {
   armed: string[];
   overall?: NewsOverall;
   plan?: NewsPlan;
+  /** When to act while flat: buy now / later / don't, and the same for a short (news_impact.timing). */
+  timing?: NewsTiming | null;
   count?: number;
   items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why">)[];
   method?: "ai" | "rules";
   errors?: Record<string, string>;
   error?: string;
 };
+export type NewsTimingCall = { code: string; label: string; why: string };
+export type NewsTiming = { buy: NewsTimingCall; short: NewsTimingCall; fresh_hours: number | null };
 export type NewsDayReport = { day: string; window: { from: string; to: string }; stocks: NewsDayRow[]; disclaimer: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {

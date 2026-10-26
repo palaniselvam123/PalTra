@@ -874,10 +874,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   max; MIXED when both ways); `action(view, side)` gives KEEP / EXIT / COVER / TIGHTEN for an open long or short and, while
   flat, the direction for a new entry (BUY / PREFER_LONG / NO_ACTION / PREFER_SHORT / SHORT: long and short both, never
   buy-only); `plan(view)` gives all three (flat, long, short) and is sent with every analysis and shown on the News panel and
-  in alerts. **News on a date** (`day_report`, desk `GET /api/news-impact/day?date=&symbols=`, Settings → "News on a date",
+  in alerts. `timing(view, items, now)` adds when to act while flat (`BUY_NOW` / `BUY_LATER` / `NO_BUY` / `DONT_BUY`, and
+  `SHORT_*` the same way): strong news (|score| ≥ 0.5) newer than `FRESH_HOURS` (6 h) is "now", strong-but-older or a milder
+  lean is "later" (a dip / the bot's next signal), no lean "don't X on news", the other way "don't X"; sent with every
+  analysis and day-report row, and as a "New entry:" line in alerts for stocks you don't hold. **News on a date** (`day_report`, desk `GET /api/news-impact/day?date=&symbols=`, Settings → "News on a date",
   `components/Settings/NewsByDay.tsx`; the chart's News panel has a Date box too): every armed / held stock (or the typed
   ones, up to 40) read as of that day's close (`analyze(..., day=)`: `overall` and the AI read use that time), strongest news
-  first. Desk `GET /api/news-impact/stock/{symbol}` (the chart's News panel shows the verdict and each headline's
+  first; the card also shows Buy? / Short? (the timing), each stock as a `GrowwLink`, an Arm button (`useArming`, the Scalp
+  page's arm prompt: Trade list only, no order) and "F&O stocks with news" (fills the stocks box from the all-F&O feed: F&O
+  stocks with medium / high filings in that day's window, up to 40). Desk `GET /api/news-impact/stock/{symbol}` (the chart's News panel shows the verdict and each headline's
   chip). **News alerts**: `NewsWatcher` (started in the desk lifespan, not on the scanner) every `every_min` (15) minutes on
   trading days 07:30-20:00 IST reads every stock armed or held on Bots 1-4 (terminal `news_watch_list`) plus
   `extra_symbols`; a headline not alerted before (`NewsAlert.key`), at most `ALERT_MAX_AGE_H` (6 h) old, with impact ≥
