@@ -173,6 +173,8 @@ export type SmaConfig = {
   vturn_within?: number;
   /** After a V-turn exit at a loss, move the stock to Bot 2 (flipped, gap mode). */
   vturn_handoff?: boolean;
+  /** After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (no filters). */
+  handoff_now?: boolean;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;

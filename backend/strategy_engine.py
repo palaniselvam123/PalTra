@@ -135,6 +135,7 @@ ENTRY_REASONS = (
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
     "NEWS",
+    "HANDOFF",
 )
 
 
@@ -270,7 +271,7 @@ SNAPSHOT_FIELDS = (
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
-    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff",
+    "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -861,6 +862,8 @@ class StrategyEngine:
     handoff = None
     # Set by bots.register: queue Bot 3's entry after a breakout handoff (breakout.py).
     breakout_arrival = None
+    # Set by bots.register: Bot 2 orders at once after a hand-off (recovery.order_now, `handoff_now`).
+    handoff_order = None
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
@@ -2336,15 +2339,27 @@ class StrategyEngine:
             return  # the exit did not go through
         text = f"{symbol} recovery target hit — {note}"
         if recovery.handoff_on(cfg) and self.handoff is not None:
-            text += f"; {await self._hand_to_chop_bot(symbol, live)}"
+            text += f"; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
             self._alert(text)
         self._signals[symbol] = text
 
-    async def _hand_to_chop_bot(self, symbol: str, live: bool) -> str:
-        """Move a stock that just closed to Bot 2 (recovery.handoff); in LIVE only once Groww shows no shares."""
+    async def _hand_to_chop_bot(self, symbol: str, live: bool, cfg: BotConfig | None = None, closed: str | None = None) -> str:
+        """Move a stock that just closed to Bot 2 (recovery.handoff); in LIVE only once Groww shows no shares.
+
+        With `handoff_now` Bot 2 then orders at once the opposite way of the trade that closed (`closed`,
+        its real side): no filters, its own stop and exits (recovery.order_now)."""
         if live and await self._groww_net(symbol) != 0:
             return "no handoff: Groww still shows shares"
-        return self.handoff(self.bot_id, symbol, live)
+        moved = self.handoff(self.bot_id, symbol, live)
+        if (
+            moved.startswith("moved")
+            and closed in ("LONG", "SHORT")
+            and cfg is not None
+            and recovery.handoff_now_on(cfg)
+            and self.handoff_order is not None
+        ):
+            moved += "; " + self.handoff_order(recovery.HANDOFF_BOT, symbol, _opposite(closed))
+        return moved
 
     async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
         """A breakout candle on the chop bot: cut the trade, hand the stock to Bot 3 (breakout.py).
@@ -2566,7 +2581,11 @@ class StrategyEngine:
         return enriched, price, reference, atr
 
     async def news_order(self, symbol: str, signal: str, note: str = "") -> str:
-        """Enter at once on a news headline (news_entry.py): `signal` BULLISH buys, BEARISH shorts.
+        """Enter at once on a news headline (news_entry.py): `signal` BULLISH buys, BEARISH shorts."""
+        return await self.direct_order(symbol, signal, why="NEWS", note=note)
+
+    async def direct_order(self, symbol: str, signal: str, why: str, note: str = "") -> str:
+        """Enter at once, `signal` BULLISH buys and BEARISH shorts (a news entry, or a hand-off arrival).
 
         No SMA cross, candle pattern or entry filter is read, and no pullback / candle wait:
         the order goes now. Only a RUNNING bot takes it. Market hours, the entry cut-off, the
@@ -2577,7 +2596,7 @@ class StrategyEngine:
         target, the SMA cross, candle colour or pattern, the other exits and the square-off.
         """
         if signal not in ("BULLISH", "BEARISH"):
-            raise ForceRefused("news has no direction")
+            raise ForceRefused("no direction")
         if self.status != "RUNNING":
             raise ForceRefused(f"bot is {self.status}, not RUNNING")
         name = (symbol or "").upper().strip()
@@ -2617,7 +2636,7 @@ class StrategyEngine:
                     adx_blocks_entry=False,
                     cfg=own,
                     now=now,
-                    why="NEWS",
+                    why=why,
                 )
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
@@ -2628,7 +2647,7 @@ class StrategyEngine:
         self._signals[name] = result
         self._log_decision(
             signal, enriched, own, now, result,
-            note="News entry: no SMA cross, pattern or entry filter is read" + (f". {note}" if note else "."),
+            note=f"{why} entry: no SMA cross, pattern or entry filter is read" + (f". {note}" if note else "."),
         )
         return result
 
@@ -3475,7 +3494,7 @@ class StrategyEngine:
             and slope_exit.lost(pos.direction, pos.entry_price, price)
         ):
             # A losing V-turn: the stock goes to the chop bot, like a recovery (vturn_handoff).
-            text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live)}"
+            text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
             self._signals[symbol] = text
             self._alert(text)
 

@@ -95,6 +95,49 @@ def handoff_on(cfg) -> bool:
     return getattr(cfg, "recovery_handoff", None) is not False
 
 
+def handoff_now_on(cfg) -> bool:
+    """Bot 2 orders at once after a hand-off (the opposite of the closed trade), off by default."""
+    return bool(getattr(cfg, "handoff_now", False))
+
+
+def order_now(to_bot: int, symbol: str, direction: str) -> str:
+    """Bot `to_bot` orders `direction` (LONG / SHORT) on `symbol` at once (`handoff_now`). Never raises.
+
+    The order runs on the event loop as Bot 2's own task (`StrategyEngine.direct_order`, entry reason
+    HANDOFF): no filters, its own stop and exits; a RUNNING bot, market hours, the cut-off, the trade
+    cap and one LIVE bot per stock still apply. The result goes to Bot 2's alerts and its signal line.
+    """
+    import asyncio
+
+    import bots
+
+    engine = bots.engines().get(int(to_bot))
+    if engine is None:
+        return f"Bot {to_bot} is not running: no order"
+    signal = "BULLISH" if direction == "LONG" else "BEARISH"
+    word = "buys" if direction == "LONG" else "sells"
+
+    async def go() -> None:
+        from strategy_engine import ForceRefused
+
+        name = symbol.upper()
+        try:
+            result = await engine.direct_order(name, signal, why="HANDOFF", note=f"handed over, {word} at once")
+        except ForceRefused as exc:
+            result = f"not ordered: {exc}"
+        except Exception as exc:  # noqa: BLE001 - the stock stays armed for its next cross
+            log.exception("hand-off order failed for %s", name)
+            result = f"not ordered: {exc}"
+        engine._signals[name] = f"{name} hand-off order: {result}"  # noqa: SLF001
+        engine._alert(f"{name} handed over: Bot {to_bot} {word} at once — {result}")  # noqa: SLF001
+
+    try:
+        asyncio.get_running_loop().create_task(go())
+    except RuntimeError:
+        return f"Bot {to_bot} order not sent: no event loop"
+    return f"Bot {to_bot} {word} at once"
+
+
 def tolerance_pct(cfg) -> float:
     return _num(cfg, "recovery_tolerance_pct", DEFAULT_TOLERANCE_PCT, 0.0, 5.0)
 
