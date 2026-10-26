@@ -382,6 +382,8 @@ class BotConfig(Base):
     vturn_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (recovery.order_now).
     handoff_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Book the profit at a daily pivot level: OFF | R1 (R1 / S1, else R2 / S2) | R2 (pivots.py).
+    pivot_target: Mapped[str | None] = mapped_column(String(3), nullable=True, default="OFF")
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
