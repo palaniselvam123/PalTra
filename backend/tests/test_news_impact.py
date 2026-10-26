@@ -442,3 +442,37 @@ def test_timing_ignores_another_companys_headline():
     items = [{"title": "x", "score": 0.9, "about": False, "at": at(1)}, {"title": "y", "score": 0.6, "about": True, "at": at(30)}]
     t = ni.timing({"score": 0.6}, items, NOW)
     assert t["buy"]["code"] == "BUY_LATER" and t["fresh_hours"] == 30
+
+
+@pytest.mark.asyncio
+async def test_fresh_filings_reach_the_news_entry_bot_even_without_alerts(db, monkeypatch):
+    import types
+
+    from app import sma_host
+    from app.services import stock_news
+
+    feed = [
+        {"symbol": "OTHER", "title": "OTHER Ltd: income tax raids at offices", "url": "o1", "source": "NSE", "at": at(0.1)},
+        {"symbol": "OLD", "title": "OLD Ltd: income tax raids", "url": "x1", "source": "NSE", "at": at(30)},
+    ]
+
+    async def fake_market(client):
+        return [dict(f) for f in feed]
+
+    got = []
+
+    async def consider(symbol, item, now):
+        got.append((symbol, item["sentiment"], item["key"]))
+        return "opened SHORT"
+
+    fake = types.SimpleNamespace(news_entry_consider=consider, news_entry_active=lambda: True)
+    monkeypatch.setattr(sma_host, "load_terminal", lambda: fake)
+    monkeypatch.setattr(stock_news, "nse_market_announcements", fake_market)
+    monkeypatch.setattr(ni, "_fno_set", lambda: {"OTHER", "OLD"})
+    assert ni.entries_active()
+    watcher = ni.NewsWatcher()
+    cfg = NewsWatchSettings(id=1, enabled=False, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,
+                            telegram=False, call_critical=False, extra_symbols="", all_fno=False, fno_telegram=False)
+    made = await watcher._market_pass(cfg, NOW, {}, alerts=False)
+    # The 30-hour-old filing is never handed over; no pop-up is made with alerts off.
+    assert made == [] and [(s, d) for s, d, _ in got] == [("OTHER", "NEGATIVE")]

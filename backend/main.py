@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
 import pnl_alerts
+import news_entry
 import arm_log
 import chop_auto
 import chop_scan
@@ -767,6 +768,7 @@ COPY_SKIP = frozenset({
     "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
     "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
+    "news_entry_bot", "news_entry_impact", "news_entry_scope", "news_entry_max_age_min", "news_entry_max_day",
 })
 
 
@@ -2712,6 +2714,67 @@ async def pnl_alerts_test():
     if not out:
         raise HTTPException(409, "Tick Telegram or Phone call first.")
     return out
+
+
+class NewsEntrySettings(BaseModel):
+    bot: int = Field(ge=0, le=4)  # 0 = off
+    impact: Literal["LOW", "MEDIUM", "HIGH"] = "HIGH"
+    scope: Literal["FNO", "ARMED"] = "FNO"
+    max_age_min: int = Field(default=15, ge=1, le=news_entry.MAX_AGE_MIN)
+    max_day: int = Field(default=5, ge=1, le=news_entry.MAX_DAY)
+    confirm_live: bool = False
+
+
+def _news_entry_view() -> dict:
+    conf = news_entry.settings(engine.load_config())
+    bot = conf["bot"]
+    mode = None
+    if bot:
+        mode = (_bot_engine_for(bot).load_config().trading_mode or "PAPER").upper()
+    return {**conf, "mode": mode, "recent": news_entry.recent[:20]}
+
+
+@app.get("/api/bots/news-entry")
+async def news_entry_get():
+    """News entries: which bot enters at once on fresh news, how strong, and the latest decisions."""
+    return _news_entry_view()
+
+
+@app.put("/api/bots/news-entry")
+async def news_entry_put(body: NewsEntrySettings):
+    """Save the news-entry settings on bot 1's row. A LIVE bot needs `confirm_live`. No order is placed here."""
+    if body.bot:
+        if body.bot in EXTRA_BOTS:
+            ensure_bot_config(body.bot)
+        live = (_bot_engine_for(body.bot).load_config().trading_mode or "PAPER").upper() == "LIVE"
+        if live and not body.confirm_live:
+            raise HTTPException(409, f"Bot {body.bot} is LIVE: news entries would place real Groww orders. Confirm first.")
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        row.news_entry_bot = int(body.bot)
+        row.news_entry_impact = body.impact
+        row.news_entry_scope = body.scope
+        row.news_entry_max_age_min = int(body.max_age_min)
+        row.news_entry_max_day = int(body.max_day)
+        db.commit()
+    engine.load_config()
+    return _news_entry_view()
+
+
+def news_entry_active() -> bool:
+    """True while a bot takes news entries (the desk's news watcher then reads NSE every minute)."""
+    return bool(news_entry.settings(engine.load_config())["bot"])
+
+
+async def news_entry_consider(symbol: str, item: dict, now) -> str | None:
+    """A fresh scored headline from the desk's news watcher: enter on it if the settings allow."""
+    conf = news_entry.settings(engine.load_config())
+    if not conf["bot"]:
+        return None
+    eng = _bot_engine_for(conf["bot"]) if conf["bot"] == 1 or conf["bot"] in bot_engines else None
+    return await news_entry.consider(symbol, item, engine.load_config(), eng, now)
 
 
 @app.post("/api/bots/kill-all")

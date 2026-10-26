@@ -60,6 +60,10 @@ MAX_WATCH = 40
 MARKET_KEEP = 300  # all-F&O feed items kept in memory for the News feed
 AI_TTL_SEC = 1800
 START_DELAY_SEC = 30
+ENTRY_POLL_SEC = 60  # NSE's market-wide filings while a bot takes news entries (news_entry.py)
+ENTRY_MAX_AGE_MIN = 240  # older headlines are not handed to the news-entry bot
+ENTRY_START = dt.time(9, 15)
+ENTRY_END = dt.time(15, 30)
 AI_TIMEOUT_SEC = 90.0
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
@@ -614,6 +618,17 @@ def watch_list(extra: list[str] | None = None) -> dict[str, dict]:
     return dict(list(out.items())[:MAX_WATCH])
 
 
+def entries_active() -> bool:
+    """True while an SMA bot takes news entries (news_entry.py)."""
+    try:
+        from app.sma_host import load_terminal
+
+        mod = load_terminal()
+        return bool(mod is not None and hasattr(mod, "news_entry_active") and mod.news_entry_active())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def side_of(entry: dict) -> str | None:
     sides = {h.get("side") for h in entry.get("held", [])}
     return sides.pop() if len(sides) == 1 else None
@@ -698,6 +713,7 @@ class NewsWatcher:
         self._seen: set[str] = set()
         self._task: asyncio.Task | None = None
         self._next_at = 0.0
+        self._next_fast = 0.0
 
     def start(self) -> None:
         # NEWS_WATCH=off (the tests set it) keeps the watcher from touching the desk DB on a test's short-lived loop.
@@ -722,7 +738,18 @@ class NewsWatcher:
                 due = time.monotonic() >= self._next_at
                 if cfg.enabled and due and is_trading_day(now) and WATCH_START <= now.time() <= WATCH_END:
                     self._next_at = time.monotonic() + max(cfg.every_min, 5) * 60
+                    self._next_fast = time.monotonic() + ENTRY_POLL_SEC
                     await self.run_once(cfg, now)
+                elif time.monotonic() >= self._next_fast and is_trading_day(now) and ENTRY_START <= now.time() <= ENTRY_END:
+                    # A bot enters on news: NSE's filings for every company, once a minute (one request).
+                    self._next_fast = time.monotonic() + ENTRY_POLL_SEC
+                    if await asyncio.to_thread(entries_active):
+                        watched = await asyncio.to_thread(watch_list, settings_out(cfg)["extra_symbols"])
+                        try:
+                            await self._market_pass(cfg, now, watched, alerts=cfg.enabled and cfg.all_fno)
+                            self.status.fno_error = None
+                        except Exception as exc:  # noqa: BLE001 - next minute
+                            self.status.fno_error = str(exc)[:200] or type(exc).__name__
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - keep watching
@@ -750,6 +777,7 @@ class NewsWatcher:
                 "top": result["items"][0]["title"] if result["items"] else None,
                 "count": len(result["items"]), "errors": result.get("errors") or {},
             }
+            await self._entries(symbol, [{**it, "key": item_key(symbol, it)} for it in result["items"]], now)
             fresh = []
             for it in result["items"]:
                 key = item_key(symbol, it)
@@ -808,8 +836,10 @@ class NewsWatcher:
         self.status.last_error = None if made or self.status.last_error is None else self.status.last_error
         return made
 
-    async def _market_pass(self, cfg: NewsWatchSettings, now: dt.datetime, watched: dict) -> list[NewsAlert]:
-        """Every F&O stock's NSE filings in one request: the News feed, and a pop-up for HIGH / critical ones."""
+    async def _market_pass(
+        self, cfg: NewsWatchSettings, now: dt.datetime, watched: dict, alerts: bool = True
+    ) -> list[NewsAlert]:
+        """Every F&O stock's NSE filings in one request: the News feed, news entries, and a pop-up for HIGH / critical ones."""
         from app.services import stock_news
 
         async with httpx.AsyncClient(timeout=stock_news.TIMEOUT, follow_redirects=True) as client:
@@ -828,7 +858,8 @@ class NewsWatcher:
             if key not in known:
                 fresh_feed.append(scored)
                 known.add(key)
-            if symbol in watched or key in self._seen:
+            await self._entries(symbol, [scored], now)
+            if not alerts or symbol in watched or key in self._seen:
                 continue  # an armed / held stock was read in full above
             self._seen.add(key)
             age = _age_hours(scored.get("at"), now)
@@ -847,6 +878,27 @@ class NewsWatcher:
         self.status.fno_last_run = now.isoformat(timespec="seconds")
         self.status.fno_items = len(self.market)
         return made
+
+    async def _entries(self, symbol: str, items: list[dict], now: dt.datetime) -> None:
+        """Hand fresh headlines to the SMA terminal's news-entry bot (news_entry.py). Never raises."""
+        def young(it: dict) -> bool:
+            age = _age_hours(it.get("at"), now)
+            return age is not None and age * 60 <= ENTRY_MAX_AGE_MIN
+
+        recent = [it for it in items if it.get("about") is not False and young(it)]
+        if not recent:
+            return
+        try:
+            from app.sma_host import load_terminal
+
+            mod = load_terminal()
+            consider = getattr(mod, "news_entry_consider", None) if mod is not None else None
+            if consider is None:
+                return
+            for it in recent:
+                await consider(symbol, it, now)
+        except Exception:  # noqa: BLE001 - alerts go on
+            log.exception("news entry hand-off failed for %s", symbol)
 
     async def _market_alert(self, cfg: NewsWatchSettings, symbol: str, item: dict, now: dt.datetime) -> NewsAlert | None:
         view = overall([item], now)

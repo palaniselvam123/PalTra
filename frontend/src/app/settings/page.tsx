@@ -7,6 +7,7 @@ import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
 import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
+import { NewsEntries } from "@/components/Settings/NewsEntries";
 import { NewsAlerts } from "@/components/Settings/NewsAlerts";
 import { NewsByDay } from "@/components/Settings/NewsByDay";
 import { SmaStrategySettings } from "@/components/Settings/SmaStrategySettings";
@@ -17,6 +18,7 @@ import { useTradingState } from "@/hooks/useTradingState";
 const SECTIONS: [string, string][] = [
   ["all-bots-guard", "All-bots target"],
   ["pnl-alerts", "P&L alerts"],
+  ["news-entries", "News entries"],
   ["news-alerts", "News alerts"],
   ["sma-strategy", "SMA strategy"],
   ["trade-alerts", "Trade alerts"],
@@ -46,6 +48,7 @@ export default function SettingsPage() {
         <SectionNav sections={SECTIONS} />
         <AllBotsGuard />
         <PnlAlerts />
+        <NewsEntries />
         <NewsAlerts />
         <NewsByDay />
         <SmaStrategySettings />
