@@ -41,6 +41,9 @@ UA = (
 NSE_HOME = "https://www.nseindia.com/"
 NSE_API = "https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={symbol}"
 NSE_PAGE = "https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
+# Every listed company's latest announcements in one answer (the all-F&O news pass, news_impact.NewsWatcher).
+NSE_MARKET_API = "https://www.nseindia.com/api/corporate-announcements?index=equities"
+NSE_MARKET_PAGE = "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
 GOOGLE_RSS = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 _cache: dict[str, tuple[float, dict]] = {}
@@ -134,6 +137,30 @@ def parse_nse(rows: object, symbol: str) -> list[dict]:
             }
         )
     return out
+
+
+def parse_nse_market(rows: object) -> list[dict]:
+    """NSE's market-wide announcements: each one as `parse_nse` reads it, plus its `symbol`."""
+    if isinstance(rows, dict):
+        rows = rows.get("data") or []
+    out: list[dict] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        out.extend({**item, "symbol": symbol} for item in parse_nse([row], symbol))
+    return out
+
+
+async def nse_market_announcements(client: httpx.AsyncClient) -> list[dict]:
+    """One request for every company's latest NSE announcements (not one per stock)."""
+    headers = {"User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9"}
+    await client.get(NSE_HOME, headers={**headers, "Accept": "text/html"})
+    res = await client.get(NSE_MARKET_API, headers={**headers, "Referer": NSE_MARKET_PAGE})
+    res.raise_for_status()
+    return parse_nse_market(res.json())
 
 
 async def google_news(symbol: str, name: str | None, client: httpx.AsyncClient, day: dt.date | None = None) -> list[dict]:

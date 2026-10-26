@@ -886,7 +886,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stock (critical phrase or HIGH impact against the position, `is_critical`) goes through `send_critical(call=True)` (phone
   call: market hours, 5-minute cooldown). Settings row `NewsWatchSettings` (`GET/PUT /api/news-impact/settings`), `GET
   /api/news-impact/watch|alerts`, `POST /api/news-impact/run|test`; Settings → "News alerts"
-  (`components/Settings/NewsAlerts.tsx`).
+  (`components/Settings/NewsAlerts.tsx`). **All F&O** (`NewsWatchSettings.all_fno`, on by default): each pass also reads
+  NSE's market-wide announcements in one request (`stock_news.nse_market_announcements` / `parse_nse_market`, not one per
+  stock; Google News stays per stock for the armed / held ones), keeps the F&O stocks' filings (`_fno_set`) scored by the
+  rules in `NewsWatcher.market` (last `MAX_AGE_DAYS`, at most `MARKET_KEEP`; `GET /api/news-impact/feed`, the card's "All F&O
+  news feed"), and for a HIGH-impact or critical filing on a stock that is not armed or held saves a pop-up `NewsAlert`
+  (`scope: "fno"`, `_market_alert`; Telegram only with `fno_telegram`, off by default; never AI, never a call). A failing
+  market feed only sets `status.fno_error`; the armed / held alerts still go.
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's

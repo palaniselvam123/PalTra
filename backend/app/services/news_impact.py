@@ -17,6 +17,12 @@ into a plain suggestion given the position: KEEP, EXIT (sell / cover), BUY or SH
 (watch for an entry), AVOID, NO_ACTION. Information only: nothing here places, closes or
 changes an order; it is not investment advice.
 
+**All F&O** (`all_fno`, on by default): each pass also reads NSE's market-wide announcements in ONE
+request (`stock_news.nse_market_announcements`), keeps the F&O stocks' filings scored by the rules in
+`NewsWatcher.market` (the News feed, `GET /api/news-impact/feed`), and for a HIGH-impact or critical
+filing on a stock that is not armed or held saves a pop-up `NewsAlert` (Telegram only with
+`fno_telegram`; never a call, never AI). Google News stays per stock, for the armed / held ones only.
+
 `NewsWatcher` (started in the desk lifespan) reads the news of every armed or held stock
 (plus `extra_symbols`) every `every_min` minutes on trading days, and for each headline it
 has not alerted before, published within `ALERT_MAX_AGE_H`, with at least `min_impact`, saves a
@@ -51,6 +57,7 @@ IMPACT_LEVELS = ("LOW", "MEDIUM", "HIGH")
 WATCH_START = dt.time(7, 30)
 WATCH_END = dt.time(20, 0)
 MAX_WATCH = 40
+MARKET_KEEP = 300  # all-F&O feed items kept in memory for the News feed
 AI_TTL_SEC = 1800
 START_DELAY_SEC = 30
 AI_TIMEOUT_SEC = 90.0
@@ -583,6 +590,9 @@ class WatchStatus:
     last_error: str | None = None
     watched: int = 0
     alerts_sent: int = 0
+    fno_last_run: str | None = None
+    fno_error: str | None = None
+    fno_items: int = 0
 
 
 async def load_settings() -> NewsWatchSettings:
@@ -605,6 +615,8 @@ def settings_out(row: NewsWatchSettings) -> dict:
         "popup": row.popup,
         "telegram": row.telegram,
         "call_critical": row.call_critical,
+        "all_fno": bool(row.all_fno),
+        "fno_telegram": bool(row.fno_telegram),
         "extra_symbols": [s for s in (row.extra_symbols or "").split(",") if s],
     }
 
@@ -613,6 +625,7 @@ class NewsWatcher:
     def __init__(self) -> None:
         self.status = WatchStatus()
         self.latest: dict[str, dict] = {}  # symbol -> last analysis summary
+        self.market: list[dict] = []  # all-F&O NSE filings, scored, newest first (the News feed)
         self._seen: set[str] = set()
         self._task: asyncio.Task | None = None
         self._next_at = 0.0
@@ -716,9 +729,87 @@ class NewsWatcher:
             made.append(row)
             self.status.alerts_sent += 1
             await self._deliver(cfg, text, critical)
+        if cfg.all_fno:
+            try:
+                made.extend(await self._market_pass(cfg, now, watched))
+                self.status.fno_error = None
+            except Exception as exc:  # noqa: BLE001 - the armed / held alerts above still went
+                self.status.fno_error = str(exc)[:200] or type(exc).__name__
         self.status.last_run = now.isoformat(timespec="seconds")
         self.status.last_error = None if made or self.status.last_error is None else self.status.last_error
         return made
+
+    async def _market_pass(self, cfg: NewsWatchSettings, now: dt.datetime, watched: dict) -> list[NewsAlert]:
+        """Every F&O stock's NSE filings in one request: the News feed, and a pop-up for HIGH / critical ones."""
+        from app.services import stock_news
+
+        async with httpx.AsyncClient(timeout=stock_news.TIMEOUT, follow_redirects=True) as client:
+            raw = await stock_news.nse_market_announcements(client)
+        fno = await asyncio.to_thread(_fno_set)
+        made: list[NewsAlert] = []
+        known = {it["key"] for it in self.market}
+        fresh_feed: list[dict] = []
+        for it in raw:
+            symbol = it["symbol"]
+            if fno and symbol not in fno:
+                continue
+            key = item_key(symbol, it)
+            scored = {**it, **score_text(it.get("title", ""), it.get("detail")), "by": "rules", "about": True, "key": key,
+                      "watched": symbol in watched}
+            if key not in known:
+                fresh_feed.append(scored)
+                known.add(key)
+            if symbol in watched or key in self._seen:
+                continue  # an armed / held stock was read in full above
+            self._seen.add(key)
+            age = _age_hours(scored.get("at"), now)
+            if age is None or age > ALERT_MAX_AGE_H:
+                continue
+            if scored["impact"] != "HIGH" and not scored.get("critical"):
+                continue
+            row = await self._market_alert(cfg, symbol, scored, now)
+            if row is not None:
+                made.append(row)
+        cutoff = now - dt.timedelta(days=MAX_AGE_DAYS)
+        merged = fresh_feed + self.market
+        merged = [it for it in merged if (_when(it.get("at")) or now) >= cutoff]
+        merged.sort(key=lambda it: it.get("at") or "", reverse=True)
+        self.market = merged[:MARKET_KEEP]
+        self.status.fno_last_run = now.isoformat(timespec="seconds")
+        self.status.fno_items = len(self.market)
+        return made
+
+    async def _market_alert(self, cfg: NewsWatchSettings, symbol: str, item: dict, now: dt.datetime) -> NewsAlert | None:
+        view = overall([item], now)
+        act = action(view, None)
+        result = {"symbol": symbol, "overall": view, "action": act, "method": "rules", "plan": plan(view)}
+        entry = {"armed": [], "held": []}
+        text = alert_text(result, [item], entry, False).replace("📰 News", "📰 F&O news", 1)
+        async with async_session() as s:
+            if (await s.execute(select(NewsAlert.id).where(NewsAlert.key == item["key"]))).first():
+                return None
+            row = NewsAlert(
+                symbol=symbol, key=item["key"], sentiment=view["sentiment"], impact=item["impact"], critical=False,
+                action=act["code"], title=item["title"][:300],
+                body=json.dumps({
+                    "text": text, "scope": "fno",
+                    "items": [{k: item.get(k) for k in ("title", "url", "source", "at", "sentiment", "impact", "why")}],
+                    "action": act, "overall": view, "method": "rules", "held": [], "armed": [],
+                }),
+                popup=cfg.popup,
+            )
+            s.add(row)
+            await s.commit()
+            await s.refresh(row)
+        self.status.alerts_sent += 1
+        if cfg.fno_telegram:
+            try:
+                from app.services.alert_notifier import alert_notifier
+
+                await alert_notifier.send(text)
+            except Exception as exc:  # noqa: BLE001 - the pop-up row is saved either way
+                self.status.fno_error = f"alert delivery: {exc}"[:200]
+        return row
 
     async def _deliver(self, cfg: NewsWatchSettings, text: str, critical: bool) -> None:
         from app.services.alert_notifier import alert_notifier
@@ -735,6 +826,26 @@ class NewsWatcher:
 news_watcher = NewsWatcher()
 
 
+def _fno_set() -> set[str]:
+    """The F&O stocks (empty if the instrument list is not loaded: then every filing is kept)."""
+    try:
+        from app.services.instruments import instrument_master
+
+        return set(instrument_master.fno_stocks())
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _when(at: str | None) -> dt.datetime | None:
+    if not at:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(at)
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=IST)
+
+
 def alert_out(row: NewsAlert) -> dict:
     body = {}
     if row.body:
@@ -747,7 +858,7 @@ def alert_out(row: NewsAlert) -> dict:
         "critical": row.critical, "action": row.action, "title": row.title, "popup": row.popup,
         "created_at": row.created_at.replace(tzinfo=dt.timezone.utc).astimezone(IST).isoformat(timespec="seconds")
         if row.created_at else None,
-        **{k: body.get(k) for k in ("text", "items", "overall", "method", "held", "armed")},
+        **{k: body.get(k) for k in ("text", "items", "overall", "method", "held", "armed", "scope")},
         "action_label": (body.get("action") or {}).get("label"),
         "action_why": (body.get("action") or {}).get("why"),
     }
