@@ -417,3 +417,28 @@ async def test_a_failing_market_feed_keeps_the_armed_alerts(db, monkeypatch):
                             telegram=False, call_critical=False, extra_symbols="", all_fno=True, fno_telegram=False)
     assert await watcher.run_once(cfg, NOW) == []
     assert "403" in watcher.status.fno_error
+
+
+@pytest.mark.parametrize(
+    "score,hours,buy,short",
+    [
+        (0.7, 2, "BUY_NOW", "DONT_SHORT"),
+        (0.7, 20, "BUY_LATER", "DONT_SHORT"),
+        (0.3, 2, "BUY_LATER", "DONT_SHORT"),
+        (0.05, 2, "NO_BUY", "NO_SHORT"),
+        (-0.3, 2, "DONT_BUY", "SHORT_LATER"),
+        (-0.8, 1, "DONT_BUY", "SHORT_NOW"),
+    ],
+)
+def test_timing_says_now_later_or_not(score, hours, buy, short):
+    items = [{"title": "x", "score": score, "about": True, "at": at(hours)}]
+    t = ni.timing({"score": score}, items, NOW)
+    assert (t["buy"]["code"], t["short"]["code"]) == (buy, short)
+    assert t["fresh_hours"] == (hours if abs(score) >= 0.2 else None)  # a weak headline does not count as news
+    assert t["buy"]["label"] and t["short"]["why"]
+
+
+def test_timing_ignores_another_companys_headline():
+    items = [{"title": "x", "score": 0.9, "about": False, "at": at(1)}, {"title": "y", "score": 0.6, "about": True, "at": at(30)}]
+    t = ni.timing({"score": 0.6}, items, NOW)
+    assert t["buy"]["code"] == "BUY_LATER" and t["fresh_hours"] == 30

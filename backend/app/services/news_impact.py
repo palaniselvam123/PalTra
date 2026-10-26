@@ -308,6 +308,70 @@ def plan(view: dict) -> dict:
     return {"flat": action(view, None), "long": action(view, "LONG"), "short": action(view, "SHORT")}
 
 
+FRESH_HOURS = 6.0  # strong news newer than this can be traded now; older news has usually been priced in
+
+TIMING = {
+    "BUY_NOW": "Buy now",
+    "BUY_LATER": "Buy later",
+    "NO_BUY": "Don't buy on news",
+    "DONT_BUY": "Don't buy",
+    "SHORT_NOW": "Short now",
+    "SHORT_LATER": "Short later",
+    "NO_SHORT": "Don't short on news",
+    "DONT_SHORT": "Don't short",
+}
+
+
+def _fresh_hours(items: list[dict], now: dt.datetime) -> float | None:
+    """Age of the newest headline that moves the stock (|score| >= 0.2, about this company)."""
+    ages = [
+        a for it in items
+        if it.get("about") is not False and abs(float(it.get("score") or 0)) >= 0.2
+        and (a := _age_hours(it.get("at"), now)) is not None and a >= 0
+    ]
+    return min(ages) if ages else None
+
+
+def timing(view: dict, items: list[dict], now: dt.datetime) -> dict:
+    """When to act on the news while flat: buy now, buy later, or don't buy (and the same for a short).
+
+    Strong news (|score| >= 0.5) newer than FRESH_HOURS is "now"; strong but older news, or a milder lean, is
+    "later" (on a pullback or the bot's next signal: the first move is often already in the price); no clear
+    lean is "don't X on news"; news the other way is "don't X". Information only."""
+    s = float(view.get("score") or 0)
+    fresh = _fresh_hours(items, now)
+    is_fresh = fresh is not None and fresh <= FRESH_HOURS
+    age = f"{fresh:.0f} h old" if fresh is not None else "undated"
+
+    def side(sign: int, now_code: str, later_code: str, none_code: str, against_code: str, word: str, dip: str) -> dict:
+        v = s * sign
+        if v >= 0.5 and is_fresh:
+            code, why = now_code, (
+                f"Strong {'good' if sign > 0 else 'bad'} news, fresh ({age}): {word} now with a stop, or on the first "
+                f"{word} signal. Don't chase a gap of more than about 2%."
+            )
+        elif v >= 0.5:
+            code, why = later_code, (
+                f"Strong {'good' if sign > 0 else 'bad'} news but {age}: the first move is probably in the price. "
+                f"{word.capitalize()} later, on a {dip} or the bot's next {word} signal."
+            )
+        elif v >= 0.2:
+            code, why = later_code, f"Mild lean ({age}): {word} later, only on the bot's {word} signal."
+        elif v > -0.2:
+            code, why = none_code, f"No news strong enough to {word} on; trade the signals as usual."
+        else:
+            code, why = against_code, f"The news points the other way: don't {word}."
+            if view.get("critical"):
+                why += " Critical news: the stock can gap or enter the F&O ban."
+        return {"code": code, "label": TIMING[code], "why": why}
+
+    return {
+        "buy": side(1, "BUY_NOW", "BUY_LATER", "NO_BUY", "DONT_BUY", "buy", "dip"),
+        "short": side(-1, "SHORT_NOW", "SHORT_LATER", "NO_SHORT", "DONT_SHORT", "short", "bounce"),
+        "fresh_hours": round(fresh, 1) if fresh is not None else None,
+    }
+
+
 # ---- AI ----------------------------------------------------------------------
 
 AI_SCHEMA = {
@@ -467,6 +531,7 @@ async def analyze(
         "overall": view,
         "action": action(view, side),
         "plan": plan(view),
+        "timing": timing(view, items, now),
         "side": side,
         "day": news.get("day"),
         "as_of": now.isoformat(timespec="minutes"),
@@ -504,6 +569,7 @@ async def day_report(day: dt.date, symbols: dict[str, dict], *, use_ai: bool = T
             "armed": entry.get("armed", []),
             "overall": r["overall"],
             "plan": r["plan"],
+            "timing": r.get("timing"),
             "count": len(r["items"]),
             "items": items,
             "method": r["method"],
@@ -578,6 +644,9 @@ def alert_text(result: dict, fresh: list[dict], entry: dict, critical: bool) -> 
     if not held:
         both = result.get("plan") or plan(view)
         lines.append(f"If you are long: {both['long']['label']} · If you are short: {both['short']['label']}")
+        when = result.get("timing")
+        if when:
+            lines.append(f"New entry: {when['buy']['label']} · {when['short']['label']}")
     if view.get("summary"):
         lines.append(view["summary"][:300])
     lines.append(f"({'AI' if result['method'] == 'ai' else 'rule-based'} read; not advice, nothing was traded.)")
@@ -782,7 +851,8 @@ class NewsWatcher:
     async def _market_alert(self, cfg: NewsWatchSettings, symbol: str, item: dict, now: dt.datetime) -> NewsAlert | None:
         view = overall([item], now)
         act = action(view, None)
-        result = {"symbol": symbol, "overall": view, "action": act, "method": "rules", "plan": plan(view)}
+        result = {"symbol": symbol, "overall": view, "action": act, "method": "rules", "plan": plan(view),
+                  "timing": timing(view, [item], now)}
         entry = {"armed": [], "held": []}
         text = alert_text(result, [item], entry, False).replace("📰 News", "📰 F&O news", 1)
         async with async_session() as s:
