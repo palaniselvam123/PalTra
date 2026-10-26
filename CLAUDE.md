@@ -665,6 +665,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   token goes to the worker over the process pipe (never logged); a rejected session switches to
   the saved token like `fetch_frame`; a crashed worker restarts on the next stock.
   `SCAN_WORKER=off` reads in-process as before. Read-only, no order path.
+  **Workers** (`scan_worker.workers()` = `CROSS_SCAN_CONCURRENCY`, 1 by default, 3 on the scanner server in
+  `fly.scanner.toml`): that many worker processes; each spaces its own Groww calls `MIN_GAP_SEC` × workers, so all of
+  them together keep the one-request-per-`MIN_GAP_SEC` pace while Groww's answer for one stock overlaps the next.
+  **Earlier days kept** (`run_cached`, Cross scan and Trend quality): `cross_job` / `chop_job` return (row, the
+  stock's candles before today); the main process keeps them in `_PAST` (memory only, keyed by stock and window start,
+  cleared when the day changes) and hands them back, so later scans that day download only today
+  (`_frame_with_past`). `chop_scan._crosses` counts crosses on whole columns (same result as the old row loop).
   **Pause all scans** (top of the Scalp page; memory only, a restart resumes): the page sets
   both switches. Terminal `PUT /api/scans/pause` refuses Cross / Trend quality starts (409)
   and stops a running pass (`scanner.stop`, the last rows stay); desk `POST /api/scalp/pause`

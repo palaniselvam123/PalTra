@@ -1744,14 +1744,17 @@ async def replay_bot_kill(bot: int = 1):
     return {"bot_status": eng.status, "halt_reason": eng.halt_reason}
 
 
-def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = ()):
-    """Each stock's read in the scanner process (scan_worker.py), or None to read in-process."""
+def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = (), cached: bool = False):
+    """Each stock's read in the scanner process (scan_worker.py), or None to read in-process.
+
+    `cached`: the job keeps each stock's earlier days, so later scans today download only today."""
     if not scan_worker.enabled():
         return None
     now = dt.datetime.now(IST)
+    runner = scan_worker.run_cached if cached else scan_worker.run
 
     async def job(symbol, start, end):
-        return await scan_worker.run(engine.broker, fn, symbol, start, end, sma_fast, sma_slow, minutes, now, *extra)
+        return await runner(engine.broker, fn, symbol, start, end, sma_fast, sma_slow, minutes, now, *extra)
 
     return job
 
@@ -1817,7 +1820,7 @@ async def cross_scan_start(body: CrossScanStart):
             sma_fast=int(cfg.sma_fast),
             sma_slow=int(cfg.sma_slow),
             force=body.force,
-            job=_scan_job(scan_worker.cross_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes),
+            job=_scan_job(scan_worker.cross_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, cached=True),
             meta={"stocks": len(body.symbols), "source": "manual"},
         )
     except ValueError as exc:
@@ -1882,7 +1885,7 @@ def _start_chop(
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min,)),
+        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min,), cached=True),
         meta={
             "stocks": len(symbols),
             "source": source,

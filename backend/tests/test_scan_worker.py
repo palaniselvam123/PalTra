@@ -174,3 +174,46 @@ def test_stop_cancels_a_running_pass_and_keeps_the_last_rows():
         assert scanner.snapshot()["rows"] == [{"symbol": "OLD"}]  # a cancelled pass writes nothing
 
     asyncio.run(go())
+
+
+def test_each_worker_spaces_its_calls_by_the_number_of_workers(monkeypatch):
+    """Three workers together keep the pace of one: each waits 3 × MIN_GAP_SEC between its own calls."""
+    monkeypatch.setattr(scan_worker, "MIN_GAP_SEC", 0.05)
+    monkeypatch.setattr(scan_worker, "_workers", [3])
+    paced = scan_worker._Paced(_FlakySdk([]))
+    t0 = dt.datetime.now()
+    for _ in range(3):
+        paced.get_historical_candle_data()
+    assert (dt.datetime.now() - t0).total_seconds() >= 0.29
+
+
+def test_later_scans_today_download_only_today(monkeypatch):
+    import pandas as pd
+
+    from groww_client import IST as ist
+
+    end = dt.datetime(2026, 10, 12, 11, 0)
+    cut = int(dt.datetime(2026, 10, 12, tzinfo=ist).timestamp())
+    asked = []
+
+    def fake_frame(token, symbol, start, stop):
+        asked.append((start, stop))
+        first = cut - 3 * 3600 if start < dt.datetime(2026, 10, 12) else cut + 3 * 3600
+        return pd.DataFrame({"ts": [first, cut + 4 * 3600], "close": [1.0, 2.0]})
+
+    monkeypatch.setattr(scan_worker, "_frame", fake_frame)
+    frame, keep = scan_worker._frame_with_past("tok", "TCS", START, end, None)
+    assert asked[-1] == (START, end) and len(frame) == 2 and list(keep["ts"]) == [cut - 3 * 3600]
+    frame, keep = scan_worker._frame_with_past("tok", "TCS", START, end, frame.iloc[:1])
+    assert asked[-1] == (dt.datetime(2026, 10, 12), end) and keep is None
+    assert list(frame["ts"]) == [cut - 3 * 3600, cut + 3 * 3600, cut + 4 * 3600]
+
+
+def test_run_cached_hands_the_earlier_days_to_the_next_scan(pool):
+    scan_worker._PAST.clear()
+    scan_worker._PAST_DAY[0] = None
+    first = asyncio.run(scan_worker.run_cached(_Broker(), fakes.past_job, "TCS", START, END, 9))
+    second = asyncio.run(scan_worker.run_cached(_Broker(), fakes.past_job, "TCS", START, END, 9))
+    other = asyncio.run(scan_worker.run_cached(_Broker(), fakes.past_job, "INFY", START, END, 9))
+    tomorrow = asyncio.run(scan_worker.run_cached(_Broker(), fakes.past_job, "TCS", START, END + dt.timedelta(days=1), 9))
+    assert (first, second, other, tomorrow) == ("full", "cached", "full", "full")

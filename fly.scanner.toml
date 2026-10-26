@@ -14,6 +14,9 @@ kill_timeout = '15s'
 [env]
   PALTRA_ROLE = 'scanner'
   DESK_URL = 'https://paltra.fly.dev'
+  # Three stocks' candles at once (scan_worker.py: three worker processes that together keep
+  # one Groww request per 0.35 s). This server has its own Groww key and no bots.
+  CROSS_SCAN_CONCURRENCY = '3'
 
 [http_service]
   internal_port = 3000
@@ -28,7 +31,8 @@ kill_timeout = '15s'
   source = 'scanner_data'
   destination = '/data'
 
-# Measured: about 0.4 GB in use while scanning, so 1 GB leaves headroom.
+# Measured: about 0.4 GB in use while scanning with one worker; each extra scan worker
+# (CROSS_SCAN_CONCURRENCY) adds about 0.1 GB, so 1 GB still leaves headroom.
 [[vm]]
   cpu_kind = 'shared'
   cpus = 2
