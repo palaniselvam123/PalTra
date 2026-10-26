@@ -86,6 +86,7 @@ const LABELS: Record<string, string> = {
   vturn_turn_pct: "V-turn turn back",
   vturn_within: "V-turn within",
   vturn_handoff: "V-turn loss → Bot 2",
+  handoff_now: "Bot 2 orders at once",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -314,6 +315,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     vturn_turn_pct: Math.min(5, Math.max(0, Number(form.vturn_turn_pct ?? 0.015) || 0)),
     vturn_within: Math.min(10, Math.max(1, Math.round(Number(form.vturn_within ?? 6)) || 6)),
     vturn_handoff: Boolean(form.vturn_exit) && Boolean(form.vturn_handoff),
+    handoff_now: Boolean(form.handoff_now),
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1860,6 +1862,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("recovery_handoff") && <OwnTag />}
             After a recovery, move the stock to Bot 2 (flipped, gap mode)
           </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.handoff_now)}
+              onChange={(e) => set("handoff_now", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("handoff_now") && <OwnTag />}
+            Bot 2 orders at once: the opposite of this bot&apos;s trade (no filters)
+            <InfoTip label="About Bot 2 ordering at once">
+              When a stock moves to Bot 2 (after a recovery, or a losing V-turn exit with that box ticked), Bot 2 orders straight
+              away the opposite way of the trade this bot just closed: a short that lost makes Bot 2 buy, a long makes it sell.
+              No SMA cross, gap mode, VWAP / RSI / ADX or flip is read; Bot 2&apos;s own stop, trailing stop, target and exits then
+              run the trade. Bot 2 must be running, and market hours, its cut-off, trade cap, loss limit and one LIVE bot per
+              stock still apply. If Bot 2 is LIVE this is a real Groww order. Replays only move the stock (they play one bot).
+              Off by default; without it Bot 2 waits for its next cross.
+            </InfoTip>
+          </label>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Trend breakout (back to Bot 3)
             <InfoTip label="About the trend breakout">
@@ -2169,6 +2189,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   // 7. Advanced
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
   if (f.recovery_hold && f.recovery_handoff !== false) add({ group: "advanced", key: "recovery_handoff", text: "After a recovery, the stock moves to Bot 2", off: { recovery_handoff: false } });
+  if (f.handoff_now && ((f.recovery_hold && f.recovery_handoff !== false) || (f.vturn_exit && f.vturn_handoff))) add({ group: "advanced", key: "handoff_now", text: "Bot 2 orders at once on a handed-over stock (opposite of this bot's trade, no filters)", off: { handoff_now: false }, warn: true });
   if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the trade is cut and the stock moves to Bot 3", off: { breakout_handoff: false } });
   if (f.review_on)
     add({

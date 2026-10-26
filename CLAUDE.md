@@ -449,7 +449,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   list and arms it on Bot 2 (`HANDOFF_BOT`) with its own settings (`HANDOFF_SETTINGS`: flipped, gap mode ±0.119 in /
   ±0.003 out with the slow-SMA fade confirmation, VWAP, RSI 40-70 / 30-60); Bot 2 waits for its next cross
   (`hold_for_next_cross`). A PAPER source never arms a LIVE Bot 2, and the one-LIVE-bot-per-stock rule applies (a
-  refused handoff leaves the stock off both bots). The stock research baseline keeps them off.
+  refused handoff leaves the stock off both bots). **Bot 2 orders at once** (`handoff_now`, off by default, per bot and per stock, on
+  the sending bot): after a recovery or a losing V-turn hand-off, `StrategyEngine._hand_to_chop_bot` calls `engine.handoff_order`
+  (`recovery.order_now`, set by `bots.register` on the live bots only, so replays only move the stock), which runs Bot 2's
+  `direct_order` as its own task the opposite way of the closed trade's real side (a losing short → Bot 2 buys; entry reason
+  `HANDOFF`): no cross, gap mode, entry filter, ADX or flip is read; Bot 2 must be RUNNING, and market hours, its cut-off,
+  trade cap, loss lock and one LIVE bot per stock (in `_open`) apply; the result goes to Bot 2's alert and signal line. The stock research baseline keeps them off.
 - `backend/breakout.py` – trend breakout handoff, the reverse of the recovery handoff (`breakout_handoff`, off by
   default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2, and ticked for every stock
   `recovery.HANDOFF_SETTINGS` moves there). On each newly closed candle of an armed stock (the bot's own candle; not the
@@ -814,7 +819,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   owns is refused) or `ARMED`. The desk's `NewsWatcher` hands every fresh headline (`_entries`: per-stock reads in `run_once`, and
   NSE's market-wide filings in `_market_pass`) to terminal `main.news_entry_consider` → `news_entry.consider`; while a news bot is
   set it also reads NSE's filings every `ENTRY_POLL_SEC` (60 s) from 09:15 to 15:30 (`entries_active`, even with News alerts off).
-  The order goes through `StrategyEngine.news_order` (entry reason `NEWS`): no SMA cross, candle pattern, entry filter, ADX,
+  The order goes through `StrategyEngine.news_order` → `direct_order` (entry reason `NEWS`): no SMA cross, candle pattern, entry filter, ADX,
   pullback or candle wait is read and the flip setting is not applied; only a RUNNING bot, market hours, the cut-off, the Trade
   list, the halt / loss lock, the trade cap and (in `_open`) one LIVE bot per stock apply. An opposite position is closed and
   reversed like an opposite cross (held when the SMA cross exit is off). Then the bot's own stop / TSL / target and exits run the
@@ -830,7 +835,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   No order is placed.
 - Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
   saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
-  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`); a fill from a waiting
+  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`, `HANDOFF`); a fill from a waiting
   `PullbackOrder` adds `:PULLBACK`, `:EXTREME_LIMIT` or `:CANDLE_CONFIRM`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
   card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
 - `backend/arm_log.py` – arm log (bookkeeping only): a SQLAlchemy `before_flush` hook writes an `ArmLog` row

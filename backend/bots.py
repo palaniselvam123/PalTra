@@ -150,6 +150,8 @@ def register(engine: StrategyEngine) -> None:
     import breakout
 
     engine.breakout_arrival = breakout.arrive  # type: ignore[attr-defined]
+    # With `handoff_now`, Bot 2 orders at once after a hand-off (recovery.order_now).
+    engine.handoff_order = recovery.order_now  # type: ignore[attr-defined]
 
 
 def engines() -> dict[int, StrategyEngine]:
