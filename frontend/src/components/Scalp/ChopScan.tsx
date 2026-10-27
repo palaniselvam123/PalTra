@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
-import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes } from "@/lib/smaApi";
+import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes, type TrendAlerts } from "@/lib/smaApi";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
@@ -15,6 +15,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 
@@ -61,22 +62,6 @@ const TREND_KINDS = [
 ] as const;
 type TrendKind = (typeof TREND_KINDS)[number][0];
 
-/** The side a candle size points to under `kind`: BULLISH / BEARISH, or null (none / too few candles). */
-function trendSideOn(r: ChopScanRow, m: number, kind: TrendKind): "BULLISH" | "BEARISH" | null {
-  const k = String(m);
-  if (kind === "SIDE") return r.side_by_minutes?.[k] ?? null;
-  const t = r.trend_by_minutes?.[k];
-  return t === "STRONG_BULLISH" ? "BULLISH" : t === "STRONG_BEARISH" ? "BEARISH" : null;
-}
-
-/** Every ticked size points the chosen way (a size with no read never matches). */
-function trendMatches(r: ChopScanRow, sizes: number[], dir: TrendDir, kind: TrendKind): boolean {
-  const sides = sizes.map((m) => trendSideOn(r, m, kind));
-  if (sides.some((s) => s == null)) return false;
-  if (dir === "UP") return sides.every((s) => s === "BULLISH");
-  if (dir === "DOWN") return sides.every((s) => s === "BEARISH");
-  return sides.every((s) => s === sides[0]);
-}
 const POLL_MS = 3_000;
 // Auto re-scan period in milliseconds (30 min). GitHub-cron-style, best-effort; the browser
 // has to be awake. On mobile a backgrounded tab may skip ticks.
@@ -102,9 +87,9 @@ type Props = {
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
-type SortKey = "symbol" | "ltp" | "score" | "first" | "trend" | "phase" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "trend", "phase", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -145,6 +130,14 @@ const inPriceRange = (ltp: number | null | undefined, min: number, max: number) 
 
 const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+// A trend's start: "10:20" today, "Mon 14:05" on an earlier day (IST).
+function sinceText(ts: number): string {
+  const d = new Date(ts * 1000);
+  const day = (x: Date) => x.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+  const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+  if (day(d) === day(new Date())) return time;
+  return `${d.toLocaleDateString("en-IN", { weekday: "short", timeZone: "Asia/Kolkata" })} ${time}`;
+}
 const num = (v: number | null | undefined, digits = 2) => (v == null ? "—" : v.toFixed(digits));
 
 function shares(v: number | null | undefined): string {
@@ -188,6 +181,13 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [trendOn, setTrendOn] = useState<CrossScanMinutes[]>([]);
   const [trendDir, setTrendDir] = useState<TrendDir>("UP");
   const [trendKind, setTrendKind] = useState<TrendKind>("SIDE");
+  // With Trend on: how old the aligned trend may be (market minutes, 0 = any), how wide its SMA gap must be,
+  // and whether to hide a trend whose gap has shrunk to under half its widest (fading).
+  const [maxAge, setMaxAge] = useState(0);
+  const [minGap, setMinGap] = useState(0);
+  const [hideFading, setHideFading] = useState(false);
+  // The server's trend-rank alert (Telegram / call for the top ranks after each pass).
+  const [trendAlert, setTrendAlert] = useState<TrendAlerts | null>(null);
   // Price range in ₹ (0 = no bound): filters the table, the quiet pop-up and the Telegram alert.
   const [priceMin, setPriceMin] = useState(0);
   const [priceMax, setPriceMax] = useState(0);
@@ -215,6 +215,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           setTrendOn(saved.trendOn.filter((m: unknown) => CANDLE_CHOICES.includes(m as CrossScanMinutes)));
         if (TREND_DIRS.some(([v]) => v === saved.trendDir)) setTrendDir(saved.trendDir as TrendDir);
         if (TREND_KINDS.some(([v]) => v === saved.trendKind)) setTrendKind(saved.trendKind as TrendKind);
+        if (typeof saved.maxAge === "number") setMaxAge(saved.maxAge);
+        if (typeof saved.minGap === "number") setMinGap(saved.minGap);
+        if (typeof saved.hideFading === "boolean") setHideFading(saved.hideFading);
       }
     } catch {
       /* private mode */
@@ -223,12 +226,46 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   useEffect(() => {
     if (saved) return; // a saved scan's view never changes the live card's settings
     try {
-      localStorage.setItem(QUIET_STORE, JSON.stringify({ lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind })
+      localStorage.setItem(QUIET_STORE, JSON.stringify({ lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading })
       );
     } catch {
       /* private mode */
     }
-  }, [saved, lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind]);
+  }, [saved, lists, armedOnly, quietMin, alertOnQuiet, minSpeed, score, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading]);
+
+  useEffect(() => {
+    if (saved) return;
+    smaApi
+      .trendAlerts()
+      .then(setTrendAlert)
+      .catch(() => {
+        /* an older server without trend alerts */
+      });
+  }, [saved]);
+  const changeTrendAlert = (change: Partial<Omit<TrendAlerts, "recent">>) => {
+    setError(null);
+    smaApi
+      .saveTrendAlerts(change)
+      .then(setTrendAlert)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not save the trend alert"));
+  };
+  // The alert follows the Trend on filter and the age / gap limits set here.
+  const alertFromFilters = () => ({
+    sizes: trendOn,
+    direction: trendDir,
+    kind: trendKind,
+    max_age_min: maxAge,
+    min_gap_pct: minGap,
+    skip_fading: hideFading,
+  });
+  const alertMatchesFilters =
+    !!trendAlert &&
+    trendAlert.sizes.join(",") === trendOn.join(",") &&
+    trendAlert.direction === trendDir &&
+    trendAlert.kind === trendKind &&
+    trendAlert.max_age_min === maxAge &&
+    Math.abs(trendAlert.min_gap_pct - minGap) < 1e-9 &&
+    trendAlert.skip_fading === hideFading;
 
   const start = useCallback(
     async (force = false) => {
@@ -376,13 +413,30 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
       if (noCrossOn.some((m) => !crossRuleMatches(crossCount, r.crosses_by_minutes?.[String(m)], r.last_cross_side_by_minutes?.[String(m)])))
         return false;
-      if (trendOn.length > 0 && !trendMatches(r, trendOn, trendDir, trendKind)) return false;
+      if (trendOn.length > 0) {
+        const t = trendRead(r, trendOn, trendDir, trendKind);
+        if (t == null) return false;
+        if (maxAge > 0 && t.ageMin > maxAge) return false;
+        if (t.gapPct < minGap) return false;
+        if (hideFading && t.fading) return false;
+      }
       return true;
     },
-    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind]
+    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
   const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
+  // Trend age, gap and rank (1 = fresh and wide) among the stocks that pass every filter but the stock search.
+  const ranks = useMemo(() => {
+    if (trendOn.length === 0) return new Map<string, RankedTrend>();
+    const reads = new Map<string, TrendRead>();
+    for (const r of shownRows) {
+      if (!passes(r)) continue;
+      const t = trendRead(r, trendOn, trendDir, trendKind);
+      if (t) reads.set(r.symbol, t);
+    }
+    return rankTrends(reads);
+  }, [shownRows, passes, trendOn, trendDir, trendKind]);
   // When each stock first showed up in this list (these filters) in today's saved scans.
   const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes);
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
@@ -393,6 +447,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         return r.ltp;
       case "first":
         return firstSeen.get(r.symbol) ?? null;
+      case "rank":
+        return ranks.get(r.symbol)?.rank ?? null;
+      case "age":
+        return ranks.get(r.symbol)?.ageMin ?? null;
+      case "gap":
+        return ranks.get(r.symbol)?.gapPct ?? null;
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
@@ -592,7 +652,93 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               </button>
             )}
           </FilterField>
+          {trendOn.length > 0 && (
+            <>
+              <NumberFilter
+                label="Trend age at most (0 = any)"
+                value={maxAge}
+                onChange={(v) => setMaxAge(Math.min(1440, Math.max(0, Math.round(v))))}
+                min={0}
+                max={240}
+                step={5}
+                suffix=" min"
+                className="w-40"
+              />
+              <NumberFilter
+                label="SMA gap at least"
+                value={minGap}
+                onChange={(v) => setMinGap(Math.min(5, Math.max(0, Math.round(v * 100) / 100)))}
+                min={0}
+                max={1}
+                step={0.01}
+                suffix="%"
+                className="w-36"
+              />
+              <FilterField label="Fading">
+                <Toggle
+                  label="Hide fading trends"
+                  checked={hideFading}
+                  onChange={setHideFading}
+                  title="Hide a trend whose SMA gap on any ticked size has shrunk to under half its widest in this trend"
+                />
+              </FilterField>
+            </>
+          )}
         </FilterGroup>
+        {!saved && trendAlert && (
+          <FilterGroup title="Trend rank alert">
+            <FilterField label="Alert">
+              <Toggle
+                label={trendAlert.on ? "On" : "Off"}
+                checked={trendAlert.on}
+                onChange={(on) => changeTrendAlert(on ? { on, ...alertFromFilters() } : { on })}
+                title="After each Trend quality scan in market hours (yours or the server's auto re-scan), send the top ranks of the Trend on filter, each stock once a day. Information only: nothing is traded."
+              />
+              <Toggle label="Telegram" checked={trendAlert.telegram} onChange={(telegram) => changeTrendAlert({ telegram })} />
+              <Toggle
+                label="Phone call"
+                checked={trendAlert.call}
+                onChange={(call) => changeTrendAlert({ call })}
+                title="Rings during market hours, at most once every 5 minutes (the call card in Settings)"
+              />
+            </FilterField>
+            <NumberFilter
+              label="Top ranks to alert"
+              value={trendAlert.top_n}
+              onChange={(v) => changeTrendAlert({ top_n: Math.min(20, Math.max(1, Math.round(v))) })}
+              min={1}
+              max={20}
+              step={1}
+              className="w-36"
+            />
+            <FilterField label="Uses">
+              <span className="text-xs text-slate-400">
+                {trendAlert.sizes.length
+                  ? `${trendAlert.sizes.map((m) => `${m}m`).join(" / ")} · ${trendAlert.direction === "UP" ? "bullish" : trendAlert.direction === "DOWN" ? "bearish" : "same way"} · ${trendAlert.kind === "STRONG" ? "strong trend" : "SMA side"} · age ≤ ${trendAlert.max_age_min || "any"}${trendAlert.max_age_min ? " min" : ""} · gap ≥ ${trendAlert.min_gap_pct}%${trendAlert.skip_fading ? " · not fading" : ""}`
+                  : "No candle size yet: tick Trend on sizes, then Use these filters"}
+              </span>
+              {!alertMatchesFilters && trendOn.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => changeTrendAlert(alertFromFilters())}
+                  className="min-h-9 rounded-md px-2.5 text-xs font-semibold text-accentSky ring-1 ring-inset ring-accentSky/50 hover:bg-accentSky/10"
+                >
+                  Use these filters
+                </button>
+              )}
+            </FilterField>
+            {trendAlert.recent.length > 0 && (
+              <FilterField label="Last sent">
+                <span className="text-xs text-slate-400">
+                  {trendAlert.recent
+                    .slice(0, 5)
+                    .map((a) => `${clock(a.at)} #${a.rank} ${a.symbol} ${a.side === "BULLISH" ? "▲" : "▼"}`)
+                    .join(" · ")}
+                </span>
+              </FilterField>
+            )}
+          </FilterGroup>
+        )}
         <FilterGroup title={saved ? "Price" : "Price & alert"}>
           <NumberFilter
             label="Price from (0 = any)"
@@ -703,6 +849,39 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       drag={cols.dragProps("first")}
                     />
                   ),
+                  rank: (
+                    <SortTh
+                      label="Rank"
+                      k="rank"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="With Trend on: 1 = the freshest trend with the widest SMA gap. The average of the stock's place by trend age (youngest first) and by SMA gap (widest first)"
+                      drag={cols.dragProps("rank")}
+                    />
+                  ),
+                  age: (
+                    <SortTh
+                      label="Trend age"
+                      k="age"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="With Trend on: market minutes every ticked size has pointed this way (closed candles x size, the shortest), and since when"
+                      drag={cols.dragProps("age")}
+                    />
+                  ),
+                  gap: (
+                    <SortTh
+                      label="SMA gap %"
+                      k="gap"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="With Trend on: |SMA fast − slow| / slow %, averaged over the ticked sizes. ⚠ fading = on a size the gap is under half its widest in this trend"
+                      drag={cols.dragProps("gap")}
+                    />
+                  ),
                   trend: (
                     <SortTh label="Trend" k="trend" sort={sort} onSort={onSort} text title="Strong trend label and how many of the 7 checks pass" drag={cols.dragProps("trend")} />
                   ),
@@ -767,7 +946,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} rank={ranks.get(r.symbol) ?? null} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -781,6 +960,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
 function Row({
   order,
   row: r,
+  rank,
   tick,
   firstAt,
   armedOn,
@@ -789,6 +969,7 @@ function Row({
 }: {
   order: readonly Col[];
   row: ChopScanRow;
+  rank: RankedTrend | null;
   tick: React.ReactNode;
   firstAt: string | null;
   armedOn: string[];
@@ -845,6 +1026,41 @@ function Row({
               >
                 {clock(firstAt)}
                 {r.alerted_at ? " 📨" : ""}
+              </span>
+            ) : (
+              <span className="text-slate-600">—</span>
+            )}
+          </td>
+        ),
+        rank: (
+          <td className="py-1.5 text-right tabular-nums">
+            {rank ? (
+              <span className={clsx("font-semibold", rank.rank <= 3 ? "text-amber-300" : "text-slate-200")} title={`Rank ${rank.rank} of ${rank.of}`}>
+                #{rank.rank}
+              </span>
+            ) : (
+              <span className="text-slate-600">—</span>
+            )}
+          </td>
+        ),
+        age: (
+          <td className="py-1.5 text-right tabular-nums text-xs">
+            {rank ? (
+              <span title={`All ticked sizes this way since ${sinceText(rank.sinceTs)} IST`}>
+                <span className={rank.side === "BULLISH" ? "text-profit" : "text-loss"}>{rank.side === "BULLISH" ? "▲" : "▼"}</span>{" "}
+                <span className="text-slate-200">{ageText(rank.ageMin)}</span>
+                <span className="ml-1 text-slate-500">{sinceText(rank.sinceTs)}</span>
+              </span>
+            ) : (
+              <span className="text-slate-600">—</span>
+            )}
+          </td>
+        ),
+        gap: (
+          <td className="py-1.5 text-right tabular-nums text-xs">
+            {rank ? (
+              <span className={rank.fading ? "text-amber-300" : "text-slate-200"}>
+                {rank.gapPct.toFixed(2)}%{rank.fading ? " ⚠ fading" : ""}
               </span>
             ) : (
               <span className="text-slate-600">—</span>

@@ -466,8 +466,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `HANDOFF`): no cross, gap mode, entry filter, ADX or flip is read; Bot 2 must be RUNNING, and market hours, its cut-off,
   trade cap, loss lock and one LIVE bot per stock (in `_open`) apply; the result goes to Bot 2's alert and signal line. The stock research baseline keeps them off.
 - `backend/breakout.py` – trend breakout handoff, the reverse of the recovery handoff (`breakout_handoff`, off by
-  default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2, and ticked for every stock
-  `recovery.HANDOFF_SETTINGS` moves there). On each newly closed candle of an armed stock (the bot's own candle; not the
+  default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2; a hand-off does not tick it, so a
+  moved stock follows Bot 2's own setting). On each newly closed candle of an armed stock (the bot's own candle; not the
   candle on the tape when the stock was armed), `StrategyEngine._watch_breakout` (before `on_minute`, in the armed loop)
   runs `breakout.read`: height ≥ `breakout_atr_mult` (1.8) × ATR and either |SMA fast − slow| / slow ≥ `breakout_gap_pct`
   (0.20) % or the candle's volume ≥ `breakout_volume_mult` (1.5) × the previous 20 candles' average (missing volume never
@@ -590,6 +590,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`trend_strength.read`, the same 7 checks as the card's own `trend`) on every candle size (`chop_scan._crosses_on`;
   None without a strong trend or with too few candles). The card keeps only stocks where every ticked size points the
   chosen way, by `side_by_minutes` (SMA side) or `trend_by_minutes` (Strong trend); a size with no read never matches.
+  **Trend age, SMA gap and rank** (`backend/trend_rank.py`, `frontend/src/lib/trendRank.ts`, same arithmetic): each row
+  also carries, per size, how long the current SMA side has run (`chop_scan._run_read`, across the download's days:
+  `run_since_ts_by_minutes`, `run_candles_by_minutes`) and the signed SMA gap % now and its widest in that run
+  (`gap_pct_by_minutes`, `gap_peak_pct_by_minutes`). With Trend on ticked, the card shows Rank, Trend age (market minutes
+  all ticked sizes have pointed that way: the shortest `candles x size`, and since when) and SMA gap % (average |gap| over
+  the sizes; ⚠ fading when a size's gap is under `FADE_SHARE` 0.5 of its widest), filters "Trend age at most", "SMA gap
+  at least" and "Hide fading". Rank = average of the stock's place by age (youngest first) and by gap (widest first).
+  **Trend rank alert** (`trend_rank.AlertSettings`, `trend_alerts.json` next to the SMA DB, off by default; `GET/PUT
+  /api/chop-scan/trend-alerts`, the card's "Trend rank alert" group, "Use these filters" copies the Trend on sizes /
+  direction / kind / age / gap / fading): after every finished Trend quality pass in market hours (`main._chop_done` →
+  `trend_rank.after_scan`, manual or auto re-scan), the top `top_n` ranks inside the limits, each stock and side once
+  per IST day (`_SENT`, memory), go out as one Telegram through the quiet-runner channel and / or a phone call
+  (`place_call`: market hours, 5-minute cooldown). Information only: nothing in the strategy reads it.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute
@@ -760,6 +773,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). CI deploys it only when
   the repo variable `DEPLOY_BACKTEST` is `true` (secret `FLY_BACKTEST_API_TOKEN`), after the desk and the scanner.
+- `backend/auto_start.py` – auto-start for PAPER bots (`auto_start`, off by default, per bot 1-4, not per stock; Settings →
+  6. Size, daily limits and times; in `COPY_SKIP`). The bots boot STOPPED after a deploy or restart and a finished day rolls
+  back to STOPPED; with it on, `run` (started in `boot_engine` on the desk only, not with `server_role.no_orders()`) presses
+  Start every `POLL_SEC` (15 s) while NSE is open for a bot that is STOPPED and in PAPER, through the same `_start_bot` as
+  the button (a cross already on the tape is not traded; all-bots guard halts apply). Never a LIVE bot, a PAUSED one, or a
+  HALTED / DAY_COMPLETED one (loss limit, trade cap, panic, square-off). No order is placed by it.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
