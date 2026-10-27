@@ -167,3 +167,62 @@ export function strategyNotes(cfg: Partial<SmaConfig> | null | undefined): Strat
   }
   return notes;
 }
+
+/** One exit that is switched on, in the order the bot checks it (backend `StrategyEngine.tick`). */
+export type ExitStep = { name: string; when: string; code: string };
+
+/**
+ * The exits switched on for these settings, in the order the bot checks them on each pass (about once a
+ * second): stop and target first on the live price, then the candle-close exits, then gap fade and the pivot
+ * target, then (as each candle of the stock closes) square-off, candle modes, breakout and the SMA cross, and
+ * last the 1-minute review. The first one that fires closes the trade. Display only: mirrors the engine.
+ */
+export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[] {
+  if (!cfg) return [];
+  const out: ExitStep[] = [];
+  const price = "every price";
+  const candle = "candle close";
+  const stopOn = cfg.use_stop !== false;
+  const type = String(cfg.stop_type ?? "ATR").toUpperCase();
+  const pct = cfg.tsl_mode === "PERCENT";
+  if (stopOn) {
+    if (type === "TSL") out.push({ name: `Trailing stop (${pct ? "%" : "₹"})`, when: price, code: "TSL_HIT" });
+    else if (type === "SUPERTREND") out.push({ name: "Supertrend stop (moves each candle)", when: price, code: "ST_SL_HIT" });
+    else if (type === "SMA_GAP") out.push({ name: "SMA-gap moving stop (PAPER; LIVE uses ATR)", when: price, code: "GAP_SL_HIT" });
+    else out.push({ name: `ATR stop (${cfg.atr_multiplier ?? 1.5}× ATR)`, when: price, code: "ATR_SL_HIT" });
+    const tslTarget = type === "TSL" && num(pct ? cfg.tsl_target_pct : cfg.tsl_target_points, 0) > 0;
+    if (tslTarget || type === "SMA_GAP") out.push({ name: type === "TSL" ? "Trailing-stop target" : "SMA-gap target", when: price, code: "TARGET_HIT" });
+  }
+  const bb = String(cfg.bb_exit ?? "OFF").toUpperCase();
+  if (bb !== "OFF") out.push({ name: `Bollinger exit (${bb.toLowerCase()})`, when: candle, code: bb === "MIDDLE" ? "BB_MIDDLE" : bb === "BAND" ? "BB_TARGET" : "BB_TARGET / BB_MIDDLE" });
+  if (num(cfg.counter_exit_count, 0) > 0 && !cfg.slow_sma_exit)
+    out.push({ name: `Counter candles (${cfg.counter_exit_count} against the trade)`, when: candle, code: "COUNTER_CANDLES" });
+  if (cfg.ema_exit) out.push({ name: `EMA cross exit (${cfg.ema_fast ?? 9}/${cfg.ema_slow ?? 200})`, when: candle, code: "EMA_CROSS" });
+  const exitCandle = num(cfg.exit_candle_minutes, 0);
+  const ownCandle = num(cfg.candle_minutes, 1);
+  const mixed = crossExitOn(cfg) && exitCandle > 0 && exitCandle !== ownCandle;
+  if (mixed) out.push({ name: `SMA cross on the ${exitCandle}-minute candle`, when: candle, code: "EXIT_CANDLE_CROSS" });
+  if (cfg.st_exit) out.push({ name: "Supertrend flip (candle closes beyond it)", when: candle, code: "SUPERTREND" });
+  if (cfg.slope_exit) out.push({ name: "SMA 9 slope turn / bend", when: candle, code: "SMA9_TURN / SMA9_BEND" });
+  if (cfg.vturn_exit) out.push({ name: "SMA 9 V-turn", when: candle, code: "SMA9_VTURN" });
+  if (cfg.slow_sma_exit) out.push({ name: "Close beyond the slow SMA", when: candle, code: "SLOW_SMA_BREACH" });
+  if (cfg.recovery_hold && crossExitOn(cfg))
+    out.push({ name: "Recovery rules (a losing trade held past the cross)", when: candle, code: "RECOVERY_TARGET_HIT / EMERGENCY_RECOVERY_ABORT" });
+  if (cfg.use_gap_mode)
+    out.push({
+      name: "Gap-mode fade",
+      when: cfg.gap_fade_intrabar ? "every second" : cfg.gap_fade_minute ? "each 1-minute candle" : candle,
+      code: "GAP_FADE",
+    });
+  if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
+  out.push({ name: `Square-off at ${cfg.square_off_time ?? "15:15"}`, when: "time", code: "EOD_SQUARE_OFF" });
+  const mode = String(cfg.entry_mode ?? "SMA").toUpperCase();
+  if (mode === "PATTERN") out.push({ name: "Candle pattern: each candle closes the trade", when: candle, code: "CANDLE_END" });
+  if (mode === "COLOUR") out.push({ name: "Candle colour: a candle of the other colour", when: candle, code: "COLOUR_TURN" });
+  if (cfg.breakout_handoff) out.push({ name: "Breakout: cut and move to Bot 3", when: candle, code: "BREAKOUT_STOP" });
+  if (mode === "SMA" && crossExitOn(cfg) && !mixed)
+    out.push({ name: cfg.recovery_hold ? "Opposite SMA cross (a loser is held for recovery)" : "Opposite SMA cross (then reverse)", when: candle, code: "MA_CROSS" });
+  if (cfg.review_on && String(cfg.review_default_answer ?? "PROMPT").toUpperCase() === "EXIT")
+    out.push({ name: "1-minute review answers EXIT by itself", when: candle, code: "AUTO_REVIEW_EXIT" });
+  return out;
+}
