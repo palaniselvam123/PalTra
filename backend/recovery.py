@@ -68,8 +68,7 @@ HANDOFF_SETTINGS = {
     "rsi_long_max": 70.0,
     "rsi_short_min": 30.0,
     "rsi_short_max": 60.0,
-    # A breakout hands it back to the trend bot (breakout.py).
-    "breakout_handoff": True,
+    # The breakout hand-back to Bot 3 (breakout.py) is not ticked here: it follows Bot 2's own setting.
 }
 
 

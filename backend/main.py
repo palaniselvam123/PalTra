@@ -30,6 +30,7 @@ from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
 import pnl_alerts
 import pivots
+import auto_start
 import news_entry
 import arm_log
 import chop_auto
@@ -162,6 +163,7 @@ _research_task: asyncio.Task | None = None
 _bot_tasks: list[asyncio.Task] = []
 _guard_task: asyncio.Task | None = None
 _pnl_alert_task: asyncio.Task | None = None
+_auto_start_task: asyncio.Task | None = None
 
 
 def boot_engine() -> asyncio.Task | None:
@@ -213,6 +215,12 @@ def boot_engine() -> asyncio.Task | None:
     _pnl_alert_task = asyncio.create_task(
         pnl_alerts.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), engine._now)
     )
+    # Auto-start (auto_start.py): presses Start for a STOPPED PAPER bot with it on while NSE is open.
+    global _auto_start_task
+    if not server_role.no_orders():
+        _auto_start_task = asyncio.create_task(
+            auto_start.run(_all_bots, _start_bot, lambda: market_is_open(engine._now()))
+        )
     return _task
 
 
@@ -257,7 +265,7 @@ def stop_engine() -> None:
     research_engine.stop()
     for eng in bot_engines.values():
         eng.stop()
-    for task in (_task, _research_task, _guard_task, _pnl_alert_task, *_bot_tasks):
+    for task in (_task, _research_task, _guard_task, _pnl_alert_task, _auto_start_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -392,6 +400,7 @@ class ConfigUpdate(BaseModel):
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
     vturn_handoff: bool | None = None
     handoff_now: bool | None = None
+    auto_start: bool | None = None
     pivot_target: Literal["OFF", "R1", "R2"] | None = None
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
@@ -773,6 +782,7 @@ COPY_SKIP = frozenset({
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
     "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
     "news_entry_bot", "news_entry_impact", "news_entry_scope", "news_entry_max_age_min", "news_entry_max_day",
+    "auto_start",
 })
 
 
@@ -983,6 +993,7 @@ def _gap_dict(row) -> dict:
         "vturn_within": slope_mod.vturn_within(row),
         "vturn_handoff": bool(getattr(row, "vturn_handoff", False)),
         "handoff_now": recovery_mod.handoff_now_on(row),
+        "auto_start": bool(getattr(row, "auto_start", False)),
         "pivot_target": pivots.target_mode(row),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),

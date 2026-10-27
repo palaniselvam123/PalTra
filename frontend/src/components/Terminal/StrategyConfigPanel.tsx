@@ -6,7 +6,7 @@ import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
-import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
+import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
 type Props = {
@@ -443,6 +443,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
         entry_cutoff_time: form.entry_cutoff_time || "15:00",
+        ...(currentDesk() === "research" ? {} : { auto_start: Boolean(form.auto_start) }),
       });
       markDirty(false);
       setMsg("Saved. Press Start bot. Open positions stay open.");
@@ -1817,6 +1818,27 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 />
                 <Field label="Square-off" value={form.square_off_time} onChange={(v) => set("square_off_time", v)} />
               </div>
+              {currentDesk() !== "research" && (
+                <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.auto_start)}
+                    onChange={(e) => set("auto_start", e.target.checked)}
+                    className="accent-[#10B981]"
+                  />
+                  Start this bot by itself (PAPER only)
+                  <InfoTip label="About auto-start">
+                    The bots come back stopped after every deploy or restart, and each morning after the day&apos;s square-off.
+                    With this on, the bot presses Start by itself while it is stopped in PAPER and NSE is open, the same as your
+                    Start press: a cross already on the chart is not traded, the next one is. It never starts a LIVE bot (that
+                    stays your press), a paused bot (Pause is your choice) or one stopped for the day by the loss limit, the
+                    trade cap, a panic or the all-bots stop. Works only on the main desk, not the backtest server.
+                  </InfoTip>
+                  {String(form.trading_mode ?? "").toUpperCase() === "LIVE" && form.auto_start ? (
+                    <span className="text-xs text-amber-300">This bot is LIVE: it will not start by itself.</span>
+                  ) : null}
+                </label>
+              )}
             </>
           )}
         </div>
@@ -1907,7 +1929,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Trend breakout (back to Bot 3)
             <InfoTip label="About the trend breakout">
-              For the chop bot (Bot 2); every stock a recovery moves to Bot 2 gets it ticked. On each closed candle, a
+              For the chop bot (Bot 2). A hand-off does not tick it: a stock moved to Bot 2 follows Bot 2&apos;s own setting here
+              (all stocks, or that stock&apos;s own). On each closed candle, a
               breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
               volume at least the × below of the last 20 candles&apos; average. Then an open trade on that stock is cut at
               once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3 with Bot 3&apos;s

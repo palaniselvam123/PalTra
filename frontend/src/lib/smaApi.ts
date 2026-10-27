@@ -175,6 +175,8 @@ export type SmaConfig = {
   vturn_handoff?: boolean;
   /** After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (no filters). */
   handoff_now?: boolean;
+  /** Press Start by itself while STOPPED in PAPER and NSE is open (auto_start.py). Bots 1-4 only. */
+  auto_start?: boolean;
   /** Book the profit at a daily pivot level: R1 (S1 for a short; R2 / S2 when the entry is already past it) or R2. */
   pivot_target?: "OFF" | "R1" | "R2";
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */

@@ -85,7 +85,7 @@ def test_check_rules():
     tight = type("C", (), {"breakout_atr_mult": 3.0})()
     assert not breakout.check(bar, 2.0, 100.25, 100.0, None, None, tight)[0]
     assert breakout.atr_mult(type("C", (), {"breakout_atr_mult": 99})()) == 10.0
-    assert recovery.HANDOFF_SETTINGS["breakout_handoff"] is True  # every stock moved to Bot 2 gets it
+    assert "breakout_handoff" not in recovery.HANDOFF_SETTINGS  # a hand-off does not tick it; Bot 2's own setting rules
 
 
 @pytest.mark.asyncio

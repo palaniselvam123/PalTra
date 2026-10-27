@@ -466,8 +466,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `HANDOFF`): no cross, gap mode, entry filter, ADX or flip is read; Bot 2 must be RUNNING, and market hours, its cut-off,
   trade cap, loss lock and one LIVE bot per stock (in `_open`) apply; the result goes to Bot 2's alert and signal line. The stock research baseline keeps them off.
 - `backend/breakout.py` – trend breakout handoff, the reverse of the recovery handoff (`breakout_handoff`, off by
-  default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2, and ticked for every stock
-  `recovery.HANDOFF_SETTINGS` moves there). On each newly closed candle of an armed stock (the bot's own candle; not the
+  default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2; a hand-off does not tick it, so a
+  moved stock follows Bot 2's own setting). On each newly closed candle of an armed stock (the bot's own candle; not the
   candle on the tape when the stock was armed), `StrategyEngine._watch_breakout` (before `on_minute`, in the armed loop)
   runs `breakout.read`: height ≥ `breakout_atr_mult` (1.8) × ATR and either |SMA fast − slow| / slow ≥ `breakout_gap_pct`
   (0.20) % or the candle's volume ≥ `breakout_volume_mult` (1.5) × the previous 20 candles' average (missing volume never
@@ -760,6 +760,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). CI deploys it only when
   the repo variable `DEPLOY_BACKTEST` is `true` (secret `FLY_BACKTEST_API_TOKEN`), after the desk and the scanner.
+- `backend/auto_start.py` – auto-start for PAPER bots (`auto_start`, off by default, per bot 1-4, not per stock; Settings →
+  6. Size, daily limits and times; in `COPY_SKIP`). The bots boot STOPPED after a deploy or restart and a finished day rolls
+  back to STOPPED; with it on, `run` (started in `boot_engine` on the desk only, not with `server_role.no_orders()`) presses
+  Start every `POLL_SEC` (15 s) while NSE is open for a bot that is STOPPED and in PAPER, through the same `_start_bot` as
+  the button (a cross already on the tape is not traded; all-bots guard halts apply). Never a LIVE bot, a PAUSED one, or a
+  HALTED / DAY_COMPLETED one (loss limit, trade cap, panic, square-off). No order is placed by it.
 - `backend/paper_wallet.py` – practice wallet for bots 1-4 in PAPER, like one
   Groww account (`PaperWallet` row 1; `/api/wallet`, add / withdraw / repay /
   reset / margin; the WalletChip top right in the Navbar and terminal header).
