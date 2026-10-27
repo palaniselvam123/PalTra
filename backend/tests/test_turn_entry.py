@@ -141,3 +141,64 @@ def test_api_saves_the_turn_switches_per_bot_and_per_stock(tmp_path, monkeypatch
         assert one.status_code == 200
         assert client.get("/api/bots/3/config/stock/ASHOKLEY").json()["turn_entry"] is False
     database.reset_engine()
+
+
+# ---- rounded U (uturn_on) ------------------------------------------------------------------------
+
+import math  # noqa: E402
+
+WAVE = [100 + 2 * math.sin(i / 12) for i in range(80)]  # a slow, rounded top then bottom
+
+
+def _hits(closes, cfg, start=25):
+    return [(n, h) for n in range(start, len(closes) + 1) if (h := turn_entry.detect(_closed(closes[:n]), 9, cfg))]
+
+
+def test_rounded_u_is_caught_only_with_its_switch_and_before_the_v():
+    plain = _hits(WAVE, SimpleNamespace())
+    with_u = _hits(WAVE, SimpleNamespace(uturn_on=True))
+    assert all(h[1].startswith("V:") for _, h in plain)
+    u = [(n, h) for n, h in with_u if h[1].startswith("U:")]
+    assert u and u[0][1][0] == "LONG" and "rounded bottom" in u[0][1][1]
+    v_bottom = next(n for n, h in plain if h[0] == "LONG")
+    assert u[0][0] < v_bottom  # the U shows a candle or more before the V would
+
+
+def test_u_needs_a_real_run_first():
+    drift = [100 + (0.001 if i % 2 else -0.001) for i in range(60)]  # wiggles under the 0.005 %/candle floor
+    assert _hits(drift, SimpleNamespace(uturn_on=True)) == []
+    short_run = [100] * 30 + [100 + i * 0.01 for i in range(1, 4)] + [100.03 - i * 0.01 for i in range(1, 10)]
+    assert _hits(short_run, SimpleNamespace(uturn_on=True, uturn_run=8)) == []
+
+
+def test_a_u_then_its_v_alerts_once(db):  # noqa: F811
+    from strategy_engine import StrategyEngine
+
+    eng = StrategyEngine()
+    sent: list[str] = []
+    eng._alert = lambda message, critical=False, call=False: sent.append(message)
+    cfg = SimpleNamespace(turn_alert=True, turn_entry=False, sma_fast=9, bot_name="Bot 3", uturn_on=True)
+    frame = lambda n: pd.DataFrame({"ts": [60 * i for i in range(n + 1)], "close": WAVE[:n] + [WAVE[n - 1]]})  # noqa: E731
+    for n in range(40, len(WAVE) + 1):
+        eng._turn_now("ASHOKLEY", frame(n), cfg)
+    ups = [m for m in sent if m.startswith("▲")]
+    assert len(ups) == 1 and "U: " in ups[0]
+
+
+def test_api_saves_the_u_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+
+    import main
+
+    with TestClient(main.app) as client:
+        got = client.get("/api/bots/2/config").json()
+        assert got["uturn_on"] is False and got["uturn_run"] == 5 and got["uturn_min_pct"] == 0.005
+        ok = client.put("/api/bots/2/config", json={"uturn_on": True, "uturn_run": 8, "uturn_min_pct": 0.01})
+        assert ok.status_code == 200 and ok.json()["uturn_run"] == 8
+        assert client.put("/api/bots/2/config", json={"uturn_run": 1}).status_code == 422
+    database.reset_engine()

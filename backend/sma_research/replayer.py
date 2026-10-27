@@ -56,6 +56,7 @@ BASELINE_OFF = {
     "vturn_exit": False,
     "turn_alert": False,
     "turn_entry": False,
+    "uturn_on": False,
     "vturn_handoff": False,
     "handoff_now": False,
     "pivot_target": "OFF",

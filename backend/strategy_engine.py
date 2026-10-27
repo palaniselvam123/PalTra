@@ -279,7 +279,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "turn_alert", "turn_entry",
+    "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -920,6 +920,8 @@ class StrategyEngine:
         self._turn_seen: dict[str, int] = {}
         self._turn_hit: dict[str, tuple[int, str, str]] = {}
         self._turn_done: dict[str, int] = {}
+        # The last turn alerted per stock (direction, candle ts): a V right after a U the same way is the same turn.
+        self._turn_last: dict[str, tuple[str, int]] = {}
         # Re-entry after a counter-candle exit (counter_candles.py): the exit waiting to be undone
         # (signal side, SMA run start, exit candle's level, exit candle ts), and re-entries used per SMA run.
         self._reentry: dict[str, tuple[str, int, float, int]] = {}
@@ -1426,6 +1428,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
+            self._turn_last,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1594,9 +1597,19 @@ class StrategyEngine:
             return None
         if last != ts:
             found = turn_entry.detect(frame.iloc[:-1], int(cfg.sma_fast), cfg)
+            before = self._turn_last.get(symbol)
+            span = ts - last if last and ts > last else 60
+            if (
+                found is not None
+                and before is not None
+                and before[0] == found[0]
+                and ts - before[1] <= turn_entry.SAME_TURN_CANDLES * span
+            ):
+                found = None  # the same turn, read again a candle or two later (a U, then its V)
             if found is None:
                 self._turn_hit.pop(symbol, None)
             else:
+                self._turn_last[symbol] = (found[0], ts)
                 self._turn_hit[symbol] = (ts, found[0], found[1])
                 if turn_entry.alert_on(cfg):
                     bot = getattr(cfg, "bot_name", None) or f"Bot {self.bot_id}"

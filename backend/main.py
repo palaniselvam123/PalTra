@@ -33,6 +33,7 @@ import pivots
 import auto_start
 import trend_rank
 import scan_arm
+import turn_entry as turn_entry_mod
 import news_entry
 import arm_log
 import chop_auto
@@ -431,6 +432,9 @@ class ConfigUpdate(BaseModel):
     vturn_exit: bool | None = None
     turn_alert: bool | None = None
     turn_entry: bool | None = None
+    uturn_on: bool | None = None
+    uturn_run: int | None = Field(default=None, ge=2, le=turn_entry_mod.MAX_U_RUN)
+    uturn_min_pct: float | None = Field(default=None, ge=0, le=turn_entry_mod.MAX_U_MIN)
     vturn_move_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
@@ -1026,6 +1030,9 @@ def _gap_dict(row) -> dict:
         "vturn_exit": slope_mod.vturn_on(row),
         "turn_alert": bool(getattr(row, "turn_alert", False)),
         "turn_entry": bool(getattr(row, "turn_entry", False)),
+        "uturn_on": turn_entry_mod.u_on(row),
+        "uturn_run": turn_entry_mod.u_run(row),
+        "uturn_min_pct": turn_entry_mod.u_min(row),
         "vturn_move_pct": slope_mod.vturn_move_pct(row),
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),

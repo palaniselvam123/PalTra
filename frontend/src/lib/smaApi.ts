@@ -171,6 +171,10 @@ export type SmaConfig = {
   /** SMA 9 turn (turn_entry.py): a Telegram, and / or an order at once, on the candle the fast SMA makes a V. */
   turn_alert?: boolean;
   turn_entry?: boolean;
+  /** Also count a rounded U turn: a run of N candles one way, then the slope at least uturn_min_pct the other way. */
+  uturn_on?: boolean;
+  uturn_run?: number;
+  uturn_min_pct?: number;
   vturn_move_pct?: number;
   vturn_turn_pct?: number;
   vturn_within?: number;
