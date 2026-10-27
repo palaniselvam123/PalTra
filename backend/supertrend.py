@@ -14,6 +14,12 @@ and per stock, in PAPER and LIVE.
   the entry on which the Supertrend flips against it (a close beyond the line).
   Exit reason `SUPERTREND`.
 
+* **Stop loss** (`stop_type = "SUPERTREND"`, with the stop on): the stop sits on the Supertrend line of the last
+  closed candle when the line is on the safe side of the real position (under the price for a long, above it for a
+  short), else the ATR stop is kept until it is. On each newly closed candle `StrategyEngine._trail_supertrend` moves it
+  to the new line, tighter only; in LIVE the exchange stop is moved with Groww's modify (like the trailing stop). Hit
+  on the price like any stop: exit reason `ST_SL_HIT`.
+
 Nothing here places an order on its own; the engine decides.
 """
 from __future__ import annotations
@@ -48,6 +54,27 @@ def entry_on(cfg) -> bool:
 
 def exit_on(cfg) -> bool:
     return bool(getattr(cfg, "st_exit", False))
+
+
+def stop_on(cfg) -> bool:
+    """The Supertrend line is this entry's stop (only when the stop itself is on)."""
+    if not bool(getattr(cfg, "use_stop", True)):
+        return False
+    return str(getattr(cfg, "stop_type", "ATR") or "ATR").upper() == "SUPERTREND"
+
+
+def stop_level(closed: pd.DataFrame | None, direction: str, cfg) -> float | None:
+    """The Supertrend line on the last closed candle when it guards `direction` (under a long, above a short)."""
+    if closed is None or len(closed) < 2:
+        return None
+    line, trend = _state(closed, cfg)
+    if line[-1] is None or trend[-1] is None:
+        return None
+    if direction == "LONG" and trend[-1] == 1:
+        return float(line[-1])
+    if direction == "SHORT" and trend[-1] == -1:
+        return float(line[-1])
+    return None
 
 
 def compute(frame: pd.DataFrame, period: int, factor: float) -> tuple[list[float | None], list[int | None]]:

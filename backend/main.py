@@ -340,7 +340,7 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND"] | None = None
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_target_points: float | None = Field(default=None, ge=0, le=100000)

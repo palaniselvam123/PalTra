@@ -119,6 +119,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `tsl_settings(cfg, entry_price=fill)` turns them into ₹ at trade
   entry so the trail / target maths is unchanged. The display always
   reports both sets of numbers plus `tsl_mode`.
+  The Scalp page's Arm prompt and Arm ticked (`ArmPrompt`, `BulkArm`) have a ₹ / % switch that saves
+  `tsl_mode` with the matching numbers as the stock's own (the scanner link's `StockChange` takes them too).
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and
@@ -378,7 +380,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   chart ✕ "ST"): a buy only while it is up, a sell only while down. **Exit** (`st_exit`):
   `StrategyEngine._watch_supertrend_exit` closes the trade (`SUPERTREND`, via `_exit_now`, which cancels a
   LIVE stop first) on a candle closed after the entry on which it flipped against the trade; once per closed
-  candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. The chart draws
+  candle (`pos.st_bar`); a LIVE position restored without its stop id is left to that stop. **Stop loss** (`stop_type = "SUPERTREND"`,
+  with the stop on; Settings → 5. Stop type "Supertrend"): at entry the stop sits on the line of the last closed candle when
+  it guards the real position (`supertrend.stop_level`: under a long, above a short, and beyond the fill), else the ATR
+  stop until it does; `StrategyEngine._trail_supertrend`, once per newly closed candle (`pos.st_stop_bar`), moves it to the
+  new line, tighter only, through `_move_stop` (shared with the TSL: LIVE modifies the Groww stop with `modify_sl`, 2 s
+  apart, a refused modify keeps the old live stop, a LIVE position restored without its stop id stays at its saved stop;
+  saved on `TradeLog.sl_trigger_price`). Hit on the price like any stop (`ST_SL_HIT`; in LIVE the exchange stop fills it,
+  no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
 - `backend/slope_exit.py` – SMA 9 slope exit (`slope_exit`, off by default, per bot and per stock, PAPER and LIVE):

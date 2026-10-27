@@ -22,7 +22,7 @@ function resolveSmaApi(): string {
 
 export const SMA_API = resolveSmaApi();
 
-export type StopType = "ATR" | "SMA_GAP" | "TSL";
+export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND";
 
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */

@@ -239,7 +239,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
     use_stop: form.use_stop !== false,
-    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR",
+    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR",
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
@@ -1661,7 +1661,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ? "Stop-loss on new entries (moving, from the SMA gap)"
               : form.stop_type === "TSL"
                 ? "Trailing stop-loss on new entries"
-                : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+                : form.stop_type === "SUPERTREND"
+                  ? "Stop-loss on the Supertrend line (moves each candle)"
+                  : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
             <InfoTip label="About the stop-loss">
               Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
               and the square-off close them.
@@ -1672,15 +1674,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Stop type{isOwn("stop_type") && <OwnTag />}
             </span>
             <select
-              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" ? form.stop_type : "ATR"}
+              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR"}
               onChange={(e) => set("stop_type", e.target.value)}
               className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
               <option value="ATR">ATR — fixed stop at {String(form.atr_multiplier)}× ATR</option>
               <option value="SMA_GAP">SMA gap — moving stop + target</option>
-              <option value="TSL">Trailing stop (TSL) — ₹ steps, like Groww</option>
+              <option value="TSL">Trailing stop (TSL) — ₹ or % steps, like Groww</option>
+              <option value="SUPERTREND">Supertrend — stop on the Supertrend line, moves each candle</option>
             </select>
           </label>
+          {form.stop_type === "SUPERTREND" ? (
+            <p className="mt-2 text-xs text-slate-400">
+              The stop sits on the Supertrend line ({String(form.st_period ?? 10)} candles, ×{String(form.st_mult ?? 3)}; set them under
+              Supertrend in 3. When to exit) and moves to the new line after every closed candle, only ever tighter. A price at or past
+              the line closes the trade (Supertrend SL). If the line is on the wrong side when the trade opens, the ATR stop below is
+              used until the line comes under a buy or above a sell. LIVE moves the Groww stop order the same way.
+            </p>
+          ) : null}
           <label className="mt-3 block text-sm text-slate-300">
             <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
               Pivot target{isOwn("pivot_target") && <OwnTag />}
@@ -2229,11 +2240,13 @@ export function activeRules(f: SmaConfig): Rule[] {
     });
   } else if (f.stop_type === "SMA_GAP") {
     add({ group: "stop", key: "use_stop", text: `Moving stop and target from the SMA gap (PAPER only; LIVE uses ${f.atr_multiplier}× ATR)` });
+  } else if (f.stop_type === "SUPERTREND") {
+    add({ group: "stop", key: "use_stop", text: `Stop on the Supertrend line (${n(f.st_period, 10)}, ×${n(f.st_mult, 3)}), moved each candle, tighter only` });
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
+  }
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
-  }
 
   // 7. Advanced
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });

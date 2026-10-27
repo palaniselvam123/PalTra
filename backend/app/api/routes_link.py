@@ -250,7 +250,7 @@ _SYMBOL = r"^[A-Z0-9&_-]{1,30}$"
 
 
 class StockChange(BaseModel):
-    """Only what the Arm prompt changes: quantity and the trailing stop numbers."""
+    """Only what the Arm prompt changes: quantity and the trailing stop numbers (₹ or %)."""
 
     qty: int | None = Field(default=None, ge=1, le=1_000_000)
     stop_type: Literal["TSL"] | None = None
@@ -258,6 +258,11 @@ class StockChange(BaseModel):
     tsl_sl_points: float | None = Field(default=None, gt=0)
     tsl_trail_points: float | None = Field(default=None, gt=0)
     tsl_target_points: float | None = Field(default=None, ge=0)
+    # The same trailing stop in % of the entry price (tsl.py, tsl_mode PERCENT); the terminal's own bounds.
+    tsl_mode: Literal["POINTS", "PERCENT"] | None = None
+    tsl_sl_pct: float | None = Field(default=None, gt=0, le=50)
+    tsl_trail_pct: float | None = Field(default=None, gt=0, le=50)
+    tsl_target_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 class ArmRequest(BaseModel):

@@ -60,6 +60,15 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
       return `SL ${rupees(pos.tsl_points)} · Trail ${rupees(pos.tsl_step)} · Target ${target}`;
     }
     if (pos?.trailing) return `SMA gap · Target ${pos.target != null ? rupees(Math.abs(pos.target - pos.entry_price)) : "next candle"}`;
+    if (stopType === "SUPERTREND") {
+      return pos ? `Supertrend SL ${rupees(pos.sl_trigger)} · Target none` : "Supertrend line · Target none";
+    }
+    if (stopType === "TSL" && (points?.tsl_mode ?? config?.tsl_mode) === "PERCENT") {
+      const sl = points?.tsl_sl_pct ?? config?.tsl_sl_pct ?? 1;
+      const trail = points?.tsl_trail_pct ?? config?.tsl_trail_pct ?? 0.5;
+      const target = points?.tsl_target_pct ?? config?.tsl_target_pct ?? 0;
+      return `SL ${sl}% · Trail ${trail}% · Target ${target > 0 ? `${target}%` : "none"}`;
+    }
     if (stopType === "TSL") {
       const sl = points?.tsl_sl_points ?? config?.tsl_sl_points ?? 20;
       const trail = points?.tsl_trail_points ?? config?.tsl_trail_points ?? 10;

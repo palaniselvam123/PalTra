@@ -102,11 +102,8 @@ export function strategyLabel(s: Settings): string {
   if (s.flip_orders) parts.push("FLIPPED (buy signals sell)");
   if (s.use_stop === false) parts.push("no stop");
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
-  else if (s.stop_type === "TSL")
-    parts.push(
-      `TSL ₹${s.tsl_sl_points ?? 20} · trail ₹${s.tsl_trail_points ?? 10}` +
-        (Number(s.tsl_target_points ?? 0) > 0 ? ` · target ₹${s.tsl_target_points}` : "")
-    );
+  else if (s.stop_type === "TSL") parts.push(tslText(s));
+  else if (s.stop_type === "SUPERTREND") parts.push(`Supertrend stop (${s.st_period ?? 10}, ×${s.st_mult ?? 3})`);
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
   if (gapModeText(s)) parts.push(`Gap mode ${gapModeText(s)}`);
@@ -124,14 +121,29 @@ export function strategyLabel(s: Settings): string {
   return parts.join(" · ");
 }
 
+/** A trailing stop's numbers in its own unit: ₹ points, or % of the entry price. */
+function tslText(s: Settings): string {
+  if (s.tsl_mode === "PERCENT") {
+    const target = Number(s.tsl_target_pct ?? 0) > 0 ? ` · target ${s.tsl_target_pct}%` : "";
+    return `TSL ${s.tsl_sl_pct ?? 1}% · trail ${s.tsl_trail_pct ?? 0.5}%${target}`;
+  }
+  const target = Number(s.tsl_target_points ?? 0) > 0 ? ` · target ₹${s.tsl_target_points}` : "";
+  return `TSL ₹${s.tsl_sl_points ?? 20} · trail ₹${s.tsl_trail_points ?? 10}${target}`;
+}
+
 /** The stop part of a strategy in a few words, e.g. "1.5× ATR" or "TSL ₹20 / ₹10". */
 export function stopShort(s: Settings): string {
   if (s.use_stop === false) return "No stop";
   if (s.stop_type === "SMA_GAP") return `SMA-gap ×${s.gap_sl_mult}/×${s.gap_tp_mult}`;
   if (s.stop_type === "TSL") {
+    if (s.tsl_mode === "PERCENT") {
+      const target = Number(s.tsl_target_pct ?? 0) > 0 ? ` · T ${s.tsl_target_pct}%` : "";
+      return `TSL ${s.tsl_sl_pct ?? 1}% / ${s.tsl_trail_pct ?? 0.5}%${target}`;
+    }
     const target = Number(s.tsl_target_points ?? 0) > 0 ? ` · T ₹${s.tsl_target_points}` : "";
     return `TSL ₹${s.tsl_sl_points ?? 20} / ₹${s.tsl_trail_points ?? 10}${target}`;
   }
+  if (s.stop_type === "SUPERTREND") return `Supertrend ${s.st_period ?? 10}/×${s.st_mult ?? 3}`;
   return `${s.atr_multiplier ?? 1.5}× ATR`;
 }
 
@@ -215,9 +227,9 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
         : s.stop_type === "SMA_GAP"
           ? `SMA gap: stop ×${s.gap_sl_mult}, target ×${s.gap_tp_mult}, min gap ${s.gap_min_pct}%`
           : s.stop_type === "TSL"
-            ? `Trailing: ₹${s.tsl_sl_points ?? 20} from entry, every ₹${s.tsl_trail_points ?? 10}, target ${
-                Number(s.tsl_target_points ?? 0) > 0 ? `₹${s.tsl_target_points}` : "none"
-              }`
+            ? `Trailing: ${tslText(s)}`
+          : s.stop_type === "SUPERTREND"
+            ? `Supertrend line (${s.st_period ?? 10} candles, ×${s.st_mult ?? 3}), moved each candle`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   [

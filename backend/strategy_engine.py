@@ -191,6 +191,10 @@ class OpenPosition:
     tsl_best: float | None = None
     # LIVE: monotonic time of the last stop modify sent to Groww.
     tsl_modified_at: float = 0.0
+    # Supertrend stop (supertrend.py, stop_type SUPERTREND): the stop follows the line, tighter only;
+    # st_stop_bar is the last closed candle read.
+    st_stop: bool = False
+    st_stop_bar: int | None = None
     # Bollinger exit: the last closed candle read, and whether a close has
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
@@ -1122,6 +1126,8 @@ class StrategyEngine:
                 tsl_step=tsl_step,
                 tsl_points=tsl_points,
                 tsl_best=entry if tsl_step else None,
+                # Supertrend stop: resumes from the saved stop, tighter only.
+                st_stop=bool(stop_active and own is not None and not trailing and not tsl_step and supertrend.stop_on(own)),
                 # Ticks before a restart are not kept; the range restarts at entry.
                 high=entry,
                 low=entry,
@@ -1316,6 +1322,7 @@ class StrategyEngine:
             symbol_cfg = _cfg_for(cfg, symbol)
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
+            await self._trail_supertrend(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
@@ -3002,6 +3009,16 @@ class StrategyEngine:
             sl_tsl, tp_tsl = tsl_entry_levels(direction, fill, tsl_points, tgt_points)
             sl = round_price(cfg.symbol, sl_tsl)
             target = round_price(cfg.symbol, tp_tsl) if tp_tsl is not None else None
+        st_stop = supertrend.stop_on(cfg)
+        st_bar = None
+        if st_stop:
+            frame = self._frames.get((cfg.symbol or "").upper())
+            closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
+            line = supertrend.stop_level(closed, direction, cfg)
+            # The line only when it is on the safe side of the fill; else the ATR stop until it is.
+            if line is not None and ((direction == "LONG" and line < fill) or (direction == "SHORT" and line > fill)):
+                sl = round_price(cfg.symbol, line)
+            st_bar = _closed_bar_ts(frame)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -3057,6 +3074,8 @@ class StrategyEngine:
             tsl_step=tsl_step,
             tsl_points=tsl_points,
             tsl_best=fill if tsl_step else None,
+            st_stop=st_stop,
+            st_stop_bar=st_bar,
             high=fill,
             low=fill,
             flipped=flipped,
@@ -3159,23 +3178,53 @@ class StrategyEngine:
         moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, proposed))
         if moved == pos.sl_trigger:
             return
+        await self._move_stop(pos, symbol, moved, "Trailing stop")
+
+    async def _trail_supertrend(self, cfg: BotConfig) -> None:
+        """Once per newly closed candle: move a Supertrend stop to the line (tighter only).
+
+        The line is read on the bot's own closed candles; it only counts while it guards the real
+        position (under a long, above a short). LIVE moves the exchange stop like the trailing stop.
+        """
+        pos = self.position
+        if pos is None or not pos.st_stop or not pos.stop_active:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or closed_ts == pos.st_stop_bar:
+            return
+        line = supertrend.stop_level(frame.iloc[:-1], pos.direction, cfg)
+        if line is None:
+            pos.st_stop_bar = closed_ts
+            return
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, line))
+        if moved == pos.sl_trigger:
+            pos.st_stop_bar = closed_ts
+            return
+        if await self._move_stop(pos, symbol, moved, "Supertrend stop"):
+            pos.st_stop_bar = closed_ts
+
+    async def _move_stop(self, pos: OpenPosition, symbol: str, moved: float, label: str) -> bool:
+        """Move an open trade's stop to `moved` (already tighter). LIVE modifies the exchange stop first;
+        a refused modify leaves the old stop in place (still live). Saved so a restart keeps it."""
         if (pos.mode or "PAPER").upper() == "LIVE":
             if not pos.sl_order_id:
                 # Restored after a restart: the exchange stop id is unknown,
                 # so it stays where it is.
-                return
+                return False
             if time.monotonic() - pos.tsl_modified_at < 2.0:
-                return
+                return False
             pos.tsl_modified_at = time.monotonic()
             modify = getattr(self.broker, "modify_sl", None)
             if modify is None:
-                return
+                return False
             side = "SELL" if pos.direction == "LONG" else "BUY"
             try:
                 await modify(pos.sl_order_id, symbol, side, pos.qty, moved)
             except Exception as exc:  # noqa: BLE001
-                self.last_error = f"Trailing stop not moved ({exc}). The stop at {pos.sl_trigger} is still live."
-                return
+                self.last_error = f"{label} not moved ({exc}). The stop at {pos.sl_trigger} is still live."
+                return False
         pos.sl_trigger = moved
         # Saved so a restart keeps the trailed stop, not the entry one.
         with session_factory()() as db:
@@ -3183,6 +3232,7 @@ class StrategyEngine:
             if row is not None and row.exit_time is None:
                 row.sl_trigger_price = moved
                 db.commit()
+        return True
 
     def _sl_price(self, direction: str, entry: float, atr: float, mult: float, symbol: str = "") -> float:
         symbol = symbol or self._focus
@@ -3309,7 +3359,7 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
-        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else "ATR_SL_HIT")
+        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else "ATR_SL_HIT"))
         if not hit and pos.target is not None and self.ltp > 0:
             if (pos.direction == "LONG" and self.ltp >= pos.target) or (
                 pos.direction == "SHORT" and self.ltp <= pos.target
@@ -3574,7 +3624,7 @@ class StrategyEngine:
                         await self._cancel_sl_verified(self.position)
                     except SlCancelFailed:
                         # It filled as we cancelled: the stop closed the trade.
-                        reason = "TSL_HIT" if self.position.tsl_step else "ATR_SL_HIT"
+                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else "ATR_SL_HIT")
                         fill_price = self.position.sl_trigger or fill_price
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
@@ -3584,6 +3634,7 @@ class StrategyEngine:
                     "TARGET_HIT": "target hit — flat",
                     "GAP_SL_HIT": "moving stop hit — flat",
                     "TSL_HIT": "trailing stop hit — flat",
+                    "ST_SL_HIT": "Supertrend stop hit — flat",
                     "BB_TARGET": "Bollinger band target — flat",
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
                     "GAP_FADE": "SMA gap faded — flat",
@@ -3670,7 +3721,7 @@ class StrategyEngine:
         px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT"))
+        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT"))
         if send_exit and live:
             net = await self._groww_net(cfg.symbol)
             if net is None:
@@ -4948,6 +4999,7 @@ _ALERT_REASON = {
     "ATR_SL_HIT": "ATR stop",
     "GAP_SL_HIT": "moving stop (SMA gap)",
     "TSL_HIT": "trailing stop",
+    "ST_SL_HIT": "Supertrend stop",
     "TARGET_HIT": "target hit",
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",

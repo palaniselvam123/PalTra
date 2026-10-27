@@ -366,3 +366,69 @@ def test_tsl_settings_percent_without_entry_falls_back_to_points_for_display():
     )
     # No entry price (display path, e.g. _stop_points): returns the stored points, never nonsense.
     assert _tsl.tsl_settings(cfg, entry_price=None) == (20.0, 10.0, 0.0)
+
+
+def _st_cfg(eng):
+    import database
+    from models import BotConfig
+
+    _cfg(eng)
+    with database.session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.stop_type = "SUPERTREND"
+        row.st_period = 5
+        row.st_mult = 1.5
+        db.commit()
+    return eng.load_config()
+
+
+@pytest.mark.asyncio
+async def test_supertrend_stop_follows_the_line_and_moves_the_live_stop(eng):
+    cfg = _st_cfg(eng)
+    rising = [1000.0 + i for i in range(30)]
+    eng.status = "RUNNING"
+    eng._focus = "RELIANCE"
+    eng._frames["RELIANCE"] = _frame(rising)
+    eng._ltps["RELIANCE"] = eng.ltp = 1030.0
+    await eng._open("LONG", 1030.0, 2.0, cfg, NOW)
+    pos = eng.positions["RELIANCE"]
+    assert pos.st_stop and pos.tsl_step is None
+    first = pos.sl_trigger
+    assert 1000.0 < first < 1030.0  # on the line under the price, not 1.5x ATR (1027)
+    assert first != pytest.approx(1027.0)
+    # LIVE: the next closed candle moves the exchange stop up to the new line (stub broker, no Groww).
+    pos.mode, pos.sl_order_id = "LIVE", "SL9"
+    book = _LiveStopBook()
+    eng.broker = book
+    eng._frames["RELIANCE"] = _frame(rising + [1030.0, 1034.0])
+    await eng._trail_supertrend(cfg)
+    assert book.moves and book.moves[-1][:4] == ("SL9", "RELIANCE", "SELL", 10)
+    assert pos.sl_trigger == pytest.approx(book.moves[-1][-1]) and pos.sl_trigger > first
+    assert _saved_stop(pos.trade_id) == pytest.approx(pos.sl_trigger)
+    # The same closed candle again moves nothing; a falling line never loosens the stop.
+    await eng._trail_supertrend(cfg)
+    assert len(book.moves) == 1
+    held = pos.sl_trigger
+    eng._frames["RELIANCE"] = _frame(rising + [1030.0, 1034.0, 1033.0, 1033.5])
+    pos.tsl_modified_at = 0.0
+    await eng._trail_supertrend(cfg)
+    assert pos.sl_trigger >= held
+
+
+@pytest.mark.asyncio
+async def test_practice_supertrend_stop_is_hit_as_st_sl_hit(eng):
+    cfg = _st_cfg(eng)
+    rising = [1000.0 + i for i in range(30)]
+    eng.status = "RUNNING"
+    eng._focus = "RELIANCE"
+    eng._frames["RELIANCE"] = _frame(rising)
+    eng._ltps["RELIANCE"] = eng.ltp = 1030.0
+    await eng._open("LONG", 1030.0, 2.0, cfg, NOW)
+    pos = eng.positions["RELIANCE"]
+    await _tick(eng, cfg, pos.sl_trigger - 0.5)
+    import database
+    from models import TradeLog
+
+    with database.session_factory()() as db:
+        row = db.get(TradeLog, pos.trade_id)
+    assert row.exit_reason == "ST_SL_HIT"
