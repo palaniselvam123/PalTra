@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
-import { crossExitOn, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
+import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
 type Props = {
   config: SmaConfig | null;
@@ -2367,7 +2367,35 @@ function ActiveRules({
           );
         })}
       </div>
+      <ExitOrder form={form} />
     </div>
+  );
+}
+
+/** The exits switched on, in the order the bot checks them; the first that fires closes the trade. */
+function ExitOrder({ form }: { form: SmaConfig }) {
+  const steps = exitOrder(form);
+  return (
+    <details className="mt-3 rounded-md border border-white/10 bg-black/20 p-2">
+      <summary className="cursor-pointer text-[12px] font-semibold text-slate-200">
+        Exit order: {steps.length} exit{steps.length === 1 ? "" : "s"} checked in this order
+      </summary>
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        About once a second the bot runs down this list for each open trade. The first one that fires closes the trade; the ones after
+        it see no trade. Price exits act on the live price, candle exits wait for the candle to close, so a stop can beat them inside a
+        candle. Square-off, the daily loss limit and Panic always win. In LIVE the Groww stop is cancelled before any other exit.
+      </p>
+      <ol className="mt-2 space-y-1">
+        {steps.map((s, i) => (
+          <li key={s.code + i} className="flex items-baseline gap-2 text-[12px]">
+            <span className="w-5 shrink-0 text-right font-mono text-slate-500">{i + 1}.</span>
+            <span className="min-w-0 flex-1 text-slate-200">{s.name}</span>
+            <span className="shrink-0 rounded bg-white/5 px-1.5 text-[10px] text-slate-400">{s.when}</span>
+            <span className="hidden shrink-0 font-mono text-[10px] text-slate-500 sm:inline">{s.code}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 
