@@ -32,6 +32,7 @@ import pnl_alerts
 import pivots
 import auto_start
 import trend_rank
+import scan_arm
 import news_entry
 import arm_log
 import chop_auto
@@ -111,6 +112,8 @@ chop_scanner = ChopScanner()
 morning_scanner = morning_scan.MorningScanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
+# Scan & arm presets: a Trend quality pass, then arm the matches on a bot, now or at set times (scan_arm.py).
+scan_arm_runner = scan_arm.Runner()
 scan_checker = scan_accuracy.AccuracyChecker()
 open_pnl_recorder = open_pnl_log.OpenPnlRecorder()
 
@@ -215,6 +218,7 @@ def boot_engine() -> asyncio.Task | None:
     _task = asyncio.create_task(engine.run())
     chop_autos.reload()
     chop_autos.start_loop(_chop_auto_start)
+    scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     open_pnl_recorder.start(_open_pnl_desks)
     ensure_research_config()
     research_engine.restore_open_books()
@@ -266,6 +270,8 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(
         lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner))
     )
+    backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
+    scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     return _task
 
@@ -285,6 +291,7 @@ async def announce_shutdown_all() -> None:
 def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
+    scan_arm_runner.stop()
     open_pnl_recorder.stop()
     scan_checker.stop("Stopped: the app is shutting down.")
     scan_worker.shutdown()
@@ -2101,6 +2108,226 @@ async def trend_alerts_put(body: TrendAlertUpdate):
         raise HTTPException(400, "Tick at least one candle size under Trend on first")
     await asyncio.to_thread(trend_rank.save, data)
     return _trend_alerts()
+
+
+# ---- Scan & arm (scan_arm.py) -------------------------------------------------------------------
+# A Trend quality pass, then the matching stocks go on one bot's Trade list (arming only, no order).
+# On the desk the bots are armed in-process; on the scanner (and the backtest server with the link
+# token) through the desk link, so the desk's own checks apply (LIVE needs confirm_live).
+
+SCAN_ARM_WAIT_SEC = 30 * 60
+
+
+def _scan_arm_can_scan() -> bool:
+    return server_role.scans_enabled() and not _scans_paused
+
+
+def _scan_arm_remote() -> bool:
+    """True where the bots to arm are the desk's, reached over the link."""
+    return server_role.is_scanner() or (server_role.is_backtest() and bool(server_role.link_token()))
+
+
+async def _scan_arm_bots() -> dict[int, dict]:
+    if _scan_arm_remote():
+        from app.api.routes_link import desk_armed
+
+        body = await desk_armed()
+        if body.get("error"):
+            raise RuntimeError(body["error"])
+    else:
+        body = await asyncio.to_thread(armed_lists)
+    return {int(b["bot"]): b for b in body.get("bots", []) if b.get("bot") in (1, 2, 3, 4)}
+
+
+async def _scan_arm_arm(bot: int, symbol: str, source: str, confirm_live: bool) -> str | None:
+    """Put one stock on a bot's Trade list. None when armed, else why not."""
+    if _scan_arm_remote():
+        from app.api import routes_link
+
+        try:
+            res = await routes_link._to_desk(
+                "POST",
+                routes_link.ARM_PATH,
+                {"target": str(bot), "symbol": symbol, "source": source, "confirm_live": confirm_live},
+            )
+        except HTTPException as exc:
+            return str(exc.detail)
+        finally:
+            routes_link._cache.pop("desk", None)
+        if res.status_code == 200:
+            return None
+        try:
+            detail = json.loads(res.body).get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        return str(detail or f"the desk answered {res.status_code}")
+    try:
+        await _set_trade_symbol(_bot_engine_for(bot), TradeSymbolUpdate(symbol=symbol, armed=True, source=source))
+    except HTTPException as exc:
+        return str(exc.detail)
+    return None
+
+
+async def _scan_arm_scan(symbols: list[str], minutes: int, progress) -> dict:
+    """One Trend quality pass of these stocks (waits for a pass already running), then its snapshot."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + SCAN_ARM_WAIT_SEC
+    while True:
+        if not server_role.scans_enabled():
+            raise RuntimeError(server_role.SCANS_OFF_TEXT)
+        if _scans_paused:
+            raise RuntimeError(_PAUSED_TEXT)
+        if not chop_scanner.status.running:
+            before, as_of = chop_scanner.passes, chop_scanner.status.as_of
+            _start_chop(
+                symbols, minutes=minutes, quiet_min=chop_scan.QUIET_MIN_DEFAULT, alert_on_quiet=False,
+                price_min=0.0, price_max=0.0, force=True, source="scan-arm",
+            )
+            if chop_scanner.passes != before:
+                break
+            progress("Waiting a minute after the last scan")
+        else:
+            progress("Waiting for the Trend quality scan already running")
+        if loop.time() > deadline:
+            raise RuntimeError("The scan could not start in time.")
+        await asyncio.sleep(3)
+    while chop_scanner.status.running:
+        st = chop_scanner.status
+        progress(f"Scanning {st.done}/{st.total} stocks")
+        if loop.time() > deadline:
+            raise RuntimeError("The scan took too long.")
+        await asyncio.sleep(2)
+    snap = chop_scanner.snapshot()
+    if snap.get("as_of") == as_of:
+        raise RuntimeError(snap.get("error") or "The scan did not finish.")
+    return snap
+
+
+def _scan_arm_hooks() -> dict:
+    return {
+        "symbols": lambda lists: _auto_symbols(False, lists),
+        "scan": _scan_arm_scan,
+        "bots": _scan_arm_bots,
+        "arm": _scan_arm_arm,
+    }
+
+
+async def _scan_arm_alert(message: str) -> None:
+    from app.services.alert_notifier import alert_notifier
+
+    await alert_notifier.send(message)
+
+
+def _scan_arm_scheduled(p: scan_arm.Preset, at: str) -> None:
+    """A preset's time came: run it (PAPER bots only) and send the result as a Telegram."""
+    scan_arm_runner.start(p, trigger="schedule", at=at, notify=_scan_arm_alert, **_scan_arm_hooks())
+
+
+class ScanArmPresetBody(BaseModel):
+    id: str | None = Field(default=None, max_length=16)
+    name: str | None = Field(default=None, max_length=40)
+    bot: Literal[1, 2, 3, 4] | None = None
+    lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
+    minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    sizes: list[Literal[1, 2, 3, 5, 10, 15]] | None = Field(default=None, max_length=6)
+    direction: Literal["UP", "DOWN", "SAME"] | None = None
+    kind: Literal["SIDE", "STRONG"] | None = None
+    max_age_min: int | None = Field(default=None, ge=0, le=24 * 60)
+    min_gap_pct: float | None = Field(default=None, ge=0, le=5)
+    skip_fading: bool | None = None
+    top_n: int | None = Field(default=None, ge=1, le=scan_arm.MAX_TOP)
+    times: list[str] | None = Field(default=None, max_length=scan_arm.MAX_TIMES)
+    on: bool | None = None
+
+
+class ScanArmRunBody(BaseModel):
+    preset_id: str | None = Field(default=None, max_length=16)
+    # Or a one-off recipe, not saved.
+    preset: ScanArmPresetBody | None = None
+    # The person confirmed arming on a LIVE bot (terminal button only; MCP and the schedule never send it).
+    confirm_live: bool = False
+    source: Literal["manual", "mcp"] = "manual"
+
+
+def _scan_arm_state() -> dict:
+    return {
+        "presets": [scan_arm.preset_dict(p) for p in scan_arm.load()],
+        "running": {"name": scan_arm_runner.current, "stage": scan_arm_runner.stage} if scan_arm_runner.busy else None,
+        "recent": scan_arm_runner.recent[:10],
+        "scans_enabled": server_role.scans_enabled(),
+        "paused": _scans_paused,
+        "arms_desk": _scan_arm_remote(),
+        "grace_min": scan_arm.GRACE_MIN,
+    }
+
+
+@app.get("/api/scan-arm")
+async def scan_arm_get():
+    """Scan & arm presets, the run in progress and the last runs (scan_arm.py)."""
+    return await asyncio.to_thread(_scan_arm_state)
+
+
+@app.put("/api/scan-arm/presets")
+async def scan_arm_save(body: ScanArmPresetBody):
+    """Add (no id) or change a Scan & arm preset. Times are IST "HH:MM" between 09:15 and 15:30."""
+    data = body.model_dump(exclude_none=True)
+    if body.sizes is not None and not body.sizes:
+        raise HTTPException(400, "Tick at least one candle size")
+    if body.times is not None:
+        bad = [t for t in body.times if not scan_arm._clean_times([t])]
+        if bad:
+            raise HTTPException(400, f"Times are HH:MM between 09:15 and 15:30 IST (not {', '.join(bad[:3])})")
+    if body.id and scan_arm.get(body.id) is None:
+        raise HTTPException(404, "No such preset")
+    try:
+        p = await asyncio.to_thread(scan_arm.save, data)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return scan_arm.preset_dict(p)
+
+
+@app.delete("/api/scan-arm/presets/{pid}")
+async def scan_arm_delete(pid: str):
+    if not await asyncio.to_thread(scan_arm.delete, pid):
+        raise HTTPException(404, "No such preset")
+    return {"deleted": pid}
+
+
+@app.post("/api/scan-arm/run")
+async def scan_arm_run(body: ScanArmRunBody):
+    """Run a preset (or a one-off recipe) now, in the background: scan, then arm the matches.
+    Poll GET /api/scan-arm. Arming only: no order. A LIVE bot needs confirm_live (never from MCP)."""
+    if not server_role.scans_enabled():
+        raise HTTPException(409, server_role.SCANS_OFF_TEXT)
+    if _scans_paused:
+        raise HTTPException(409, _PAUSED_TEXT)
+    if scan_arm_runner.busy:
+        raise HTTPException(409, "A Scan & arm run is already going; wait for it to finish.")
+    if body.preset_id:
+        p = await asyncio.to_thread(scan_arm.get, body.preset_id)
+        if p is None:
+            raise HTTPException(404, "No such preset")
+    elif body.preset is not None:
+        p = scan_arm.clean(body.preset.model_dump(exclude_none=True, exclude={"id", "times", "on"}))
+        p.name = body.preset.name or "One-off scan"
+    else:
+        raise HTTPException(400, "Give a preset_id or a preset")
+    confirm_live = body.confirm_live and body.source == "manual"
+    try:
+        bots_now = await _scan_arm_bots()
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    bot = bots_now.get(p.bot)
+    if bot is None:
+        raise HTTPException(404, f"Bot {p.bot} was not found")
+    if (bot.get("mode") or "PAPER").upper() == "LIVE" and not confirm_live:
+        raise HTTPException(
+            409,
+            f"{bot.get('name') or f'Bot {p.bot}'} is LIVE: confirm the LIVE arm in the terminal"
+            + (" (outside tools only arm PAPER bots)." if body.source == "mcp" else "."),
+        )
+    scan_arm_runner.start(p, trigger=body.source, confirm_live=confirm_live, **_scan_arm_hooks())
+    return {"started": True, "preset": scan_arm.preset_dict(p)}
 
 
 class MorningScanStart(BaseModel):

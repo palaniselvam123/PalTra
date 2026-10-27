@@ -12,6 +12,10 @@
   ``confirm_live`` (the scanner asks the person first, like the desk); without it the desk answers
   403. The terminal's own checks still apply (one LIVE bot per stock, Trade list size).
 
+* The **backtest server** arms on the desk the same way (its Scalp page's Main desk / This server switch):
+  its scanner-side routes below answer there too, but only towards the desk (``server=desk``), with the
+  same ``SCANNER_LINK_TOKEN`` set on it. Its own (PAPER) bots are armed in-process, as on the desk.
+
 * The scanner can arm on the **backtest server** instead (``?server=backtest`` on the scanner routes):
   the same calls go to ``BACKTEST_URL``, whose desk-side routes above answer with the same
   ``SCANNER_LINK_TOKEN`` (set on all three apps). Its bots are always PAPER. A call may start the
@@ -101,11 +105,16 @@ async def _fetch_desk_armed(server: Server = "desk") -> dict:
     return body
 
 
+def _link_caller(server: Server = "desk") -> bool:
+    """The scanner reaches the desk and the backtest server; the backtest server reaches the desk only."""
+    return server_role.is_scanner() or (server_role.is_backtest() and server == "desk")
+
+
 @router.get("/api/link/desk-armed")
 async def desk_armed(server: Server = "desk"):
     """The desk's (or the backtest server's) Trade lists, as the scanner sees them. Cached for a few seconds."""
-    if not server_role.is_scanner():
-        raise HTTPException(404, "Only the scanner server asks the desk.")
+    if not _link_caller(server):
+        raise HTTPException(404, "Only the scanner and the backtest server ask the desk.")
     if not server_role.link_token():
         return {"bots": [], "research": None, "error": "SCANNER_LINK_TOKEN is not set, so armed stocks are unknown."}
     now = time.monotonic()
@@ -327,11 +336,11 @@ def _clean_symbol(symbol: str) -> str:
 # ---- scanner side: the same three calls, sent to the desk with the token ----------------------
 
 
-def _scanner_only() -> None:
-    if not server_role.is_scanner():
-        raise HTTPException(404, "Only the scanner server arms through the desk link.")
+def _scanner_only(server: Server = "desk") -> None:
+    if not _link_caller(server):
+        raise HTTPException(404, "Only the scanner and the backtest server arm through the desk link.")
     if not server_role.link_token():
-        raise HTTPException(409, "SCANNER_LINK_TOKEN is not set, so the scanner cannot reach the desk.")
+        raise HTTPException(409, "SCANNER_LINK_TOKEN is not set on this server, so it cannot reach the desk.")
 
 
 async def _to_desk(method: str, path: str, body: dict | None = None, server: Server = "desk"):
@@ -353,13 +362,13 @@ async def _to_desk(method: str, path: str, body: dict | None = None, server: Ser
 
 @router.get("/api/link/desk-stock/{target}/{symbol}")
 async def scanner_stock(target: str, symbol: str, server: Server = "desk"):
-    _scanner_only()
+    _scanner_only(server)
     return await _to_desk("GET", f"{STOCK_PREFIX}{_target(target)}/{_clean_symbol(symbol)}", server=server)
 
 
 @router.put("/api/link/desk-stock/{target}/{symbol}")
 async def scanner_stock_save(target: str, symbol: str, body: StockChange, confirm_live: bool = False, server: Server = "desk"):
-    _scanner_only()
+    _scanner_only(server)
     query = "?confirm_live=true" if confirm_live else ""
     return await _to_desk(
         "PUT",
@@ -371,7 +380,7 @@ async def scanner_stock_save(target: str, symbol: str, body: StockChange, confir
 
 @router.post("/api/link/desk-arm")
 async def scanner_arm(body: ArmRequest, server: Server = "desk"):
-    _scanner_only()
+    _scanner_only(server)
     _target(body.target)
     out = await _to_desk("POST", ARM_PATH, body.model_dump(), server=server)
     _cache.pop(server, None)  # the armed chips update on the next read

@@ -409,6 +409,54 @@ export type TrendAlerts = {
   call: boolean;
   recent: { at: string; symbol: string; side: "BULLISH" | "BEARISH"; rank: number; age_min: number; gap_pct: number }[];
 };
+/** A Scan & arm preset (scan_arm.py): a Trend quality scan, then the matches armed on one bot, now or at set IST times. */
+export type ScanArmPreset = {
+  id: string;
+  name: string;
+  bot: 1 | 2 | 3 | 4;
+  lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
+  minutes: number;
+  sizes: number[];
+  direction: "UP" | "DOWN" | "SAME";
+  kind: "SIDE" | "STRONG";
+  max_age_min: number;
+  min_gap_pct: number;
+  skip_fading: boolean;
+  top_n: number;
+  times: string[];
+  on: boolean;
+  fired?: Record<string, string>;
+  last?: ScanArmRun | null;
+  rule?: string;
+};
+export type ScanArmRun = {
+  at: string;
+  finished_at?: string;
+  trigger: "manual" | "schedule" | "mcp";
+  time: string | null;
+  preset: string;
+  name: string;
+  bot: number;
+  bot_name?: string;
+  mode?: "PAPER" | "LIVE";
+  rule: string;
+  scanned: number;
+  matched: { symbol: string; side: "BULLISH" | "BEARISH"; rank: number; age_min: number; gap_pct: number; ltp: number | null }[];
+  armed: string[];
+  already: string[];
+  skipped: { symbol: string; why: string }[];
+  error: string | null;
+};
+export type ScanArmState = {
+  presets: ScanArmPreset[];
+  running: { name: string | null; stage: string | null } | null;
+  recent: ScanArmRun[];
+  scans_enabled: boolean;
+  paused: boolean;
+  /** True on the scanner / backtest server: the bots armed are the main desk's, over the link. */
+  arms_desk: boolean;
+  grace_min: number;
+};
 export type ChopPhaseSide = "BULL" | "BEAR" | "CHOP";
 export type ChopPhase = { side: ChopPhaseSide; start_ts: number; end_ts: number; candles: number; move_pct: number | null };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
@@ -1576,6 +1624,20 @@ export const smaApi = {
   trendAlerts: () => request<TrendAlerts>("/api/chop-scan/trend-alerts", undefined, undefined, false),
   saveTrendAlerts: (body: Partial<Omit<TrendAlerts, "recent">>) =>
     request<TrendAlerts>("/api/chop-scan/trend-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  /** Scan & arm: presets, the run in progress, the last runs. */
+  scanArm: () => request<ScanArmState>("/api/scan-arm", undefined, undefined, false),
+  scanArmSave: (body: Partial<ScanArmPreset>) =>
+    request<ScanArmPreset>("/api/scan-arm/presets", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  scanArmDelete: (id: string) =>
+    request<{ deleted: string }>(`/api/scan-arm/presets/${encodeURIComponent(id)}`, { method: "DELETE" }, undefined, false),
+  /** Run a preset now (scan, then arm the matches; arming only). A LIVE bot needs confirmLive. */
+  scanArmRun: (presetId: string, confirmLive = false) =>
+    request<{ started: boolean }>(
+      "/api/scan-arm/run",
+      { method: "POST", body: JSON.stringify({ preset_id: presetId, confirm_live: confirmLive }) },
+      undefined,
+      false
+    ),
   /** Pause / resume the terminal's Scalp scans (Cross scan, Trend quality). */
   scansPause: (paused: boolean) =>
     request<{ paused: boolean }>("/api/scans/pause", { method: "PUT", body: JSON.stringify({ paused }) }, undefined, false),

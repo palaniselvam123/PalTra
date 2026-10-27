@@ -349,6 +349,8 @@ export type ServerRole = {
   backtest_link?: boolean;
   /** Scanner only: Arm can also arm on the backtest server (BACKTEST_URL and the link token set). */
   backtest_arm?: boolean;
+  /** Backtest server only: Arm can also arm the desk's bots over the link (the link token set there). */
+  desk_arm?: boolean;
 };
 
 /** Where the scanner's Arm goes: the trading desk's bots, or the backtest server's (always PAPER). */

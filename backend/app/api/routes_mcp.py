@@ -461,6 +461,51 @@ async def set_stop(args: dict) -> Any:
     return {"bot": p.bot, "symbol": p.symbol, "saved": {k: saved.get(k) for k in changes}}
 
 
+# ---- Scan & arm (scan_arm.py on the terminal) ----
+
+_SCAN_ARM_KEYS = (
+    "name", "bot", "lists", "minutes", "sizes", "direction", "kind", "max_age_min",
+    "min_gap_pct", "skip_fading", "top_n", "times", "on",
+)
+
+
+def _scan_arm_body(args: dict) -> dict:
+    return {k: args[k] for k in _SCAN_ARM_KEYS if args.get(k) is not None}
+
+
+async def get_scan_arm(args: dict) -> Any:
+    return await _call("GET", "/api/scan-arm")
+
+
+async def save_scan_arm(args: dict) -> Any:
+    body = _scan_arm_body(args)
+    if args.get("preset_id"):
+        body["id"] = str(args["preset_id"])
+        if "bot" not in body:
+            state = await _call("GET", "/api/scan-arm")
+            old = next((p for p in state.get("presets", []) if p.get("id") == body["id"]), None)
+            if old is None:
+                raise ToolError("No such preset; see get_scan_arm")
+            body["bot"] = old.get("bot")
+    await _require_paper(int(body.get("bot") or 3))
+    saved = await _call("PUT", "/api/scan-arm/presets", json=body)
+    log.info("mcp.save_scan_arm id=%s bot=%s times=%s", saved.get("id"), saved.get("bot"), saved.get("times"))
+    return saved
+
+
+async def run_scan_arm(args: dict) -> Any:
+    if args.get("preset_id"):
+        body: dict = {"preset_id": str(args["preset_id"])}
+    else:
+        preset = _scan_arm_body(args)
+        if not preset.get("sizes"):
+            raise ToolError("Give a preset_id, or at least sizes (and bot, kind, direction) for a one-off run")
+        body = {"preset": preset}
+    out = await _call("POST", "/api/scan-arm/run", json={**body, "source": "mcp"})
+    log.info("mcp.run_scan_arm %s", body.get("preset_id") or "one-off")
+    return {**out, "note": "Started in the background (a scan takes a few minutes); see get_scan_arm for the result."}
+
+
 _BOT = {"type": "integer", "enum": [1, 2, 3, 4], "description": "SMA bot: 1 = main desk, 2-4 = bots 2-4. Default 1."}
 _STOP_PROPS = {
     "use_stop": {"type": "boolean"},
@@ -732,13 +777,78 @@ TOOLS: dict[str, dict] = {
         "inputSchema": {"type": "object", "properties": {"bot": _BOT, "symbol": {"type": "string"}, **_STOP_PROPS}},
         "annotations": _WRITE,
     },
+    "get_scan_arm": {
+        "fn": get_scan_arm,
+        "description": (
+            "Scan & arm presets (a Trend quality scan, then the matching stocks are armed on one bot, now or at set "
+            "IST times), the run in progress and the last runs with what was armed."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": _READ,
+    },
+    "save_scan_arm": {
+        "fn": save_scan_arm,
+        "description": (
+            "Create (no preset_id) or change a Scan & arm preset on a PAPER bot (refused on a LIVE bot). It scans "
+            "`lists` with the Trend quality scan and arms the best `top_n` stocks whose trend points `direction` "
+            "(UP bullish, DOWN bearish, SAME either) on every candle size in `sizes` (1/2/3/5/10/15 min), judged by "
+            "`kind` SIDE (SMA fast vs slow) or STRONG (the strong-trend checks). Optional max_age_min, min_gap_pct, "
+            "skip_fading. `times` (IST HH:MM, 09:15-15:30) with on=true runs it by itself each trading day, e.g. "
+            "[\"10:00\", \"10:15\"]. Arming only: no order; the bot trades on its next signal."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "preset_id": {"type": "string", "description": "Change this preset; omit to create one."},
+                "name": {"type": "string"},
+                "bot": _BOT,
+                "lists": {"type": "array", "items": {"type": "string", "enum": ["fno", "nifty50", "nifty100", "niftybank", "armed"]}},
+                "minutes": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15], "description": "The scan's own candle (default 5)."},
+                "sizes": {"type": "array", "items": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15]}},
+                "direction": {"type": "string", "enum": ["UP", "DOWN", "SAME"]},
+                "kind": {"type": "string", "enum": ["SIDE", "STRONG"]},
+                "max_age_min": {"type": "integer", "minimum": 0},
+                "min_gap_pct": {"type": "number", "minimum": 0},
+                "skip_fading": {"type": "boolean"},
+                "top_n": {"type": "integer", "minimum": 1, "maximum": 20},
+                "times": {"type": "array", "items": {"type": "string"}},
+                "on": {"type": "boolean", "description": "Run at `times` by itself."},
+            },
+        },
+        "annotations": _WRITE,
+    },
+    "run_scan_arm": {
+        "fn": run_scan_arm,
+        "description": (
+            "Run a Scan & arm preset now (preset_id), or a one-off recipe with the same fields as save_scan_arm, on "
+            "a PAPER bot (refused on a LIVE bot). Starts in the background; read get_scan_arm for what was armed. "
+            "Arming only: no order is placed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "preset_id": {"type": "string"},
+                "bot": _BOT,
+                "lists": {"type": "array", "items": {"type": "string", "enum": ["fno", "nifty50", "nifty100", "niftybank", "armed"]}},
+                "minutes": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15]},
+                "sizes": {"type": "array", "items": {"type": "integer", "enum": [1, 2, 3, 5, 10, 15]}},
+                "direction": {"type": "string", "enum": ["UP", "DOWN", "SAME"]},
+                "kind": {"type": "string", "enum": ["SIDE", "STRONG"]},
+                "max_age_min": {"type": "integer", "minimum": 0},
+                "min_gap_pct": {"type": "number", "minimum": 0},
+                "skip_fading": {"type": "boolean"},
+                "top_n": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
 }
 
 
 TUNING_GUIDE = (
     "PalTra SMA trading bots. Read status, settings, trades, Scalp page scans (get_scans, get_scalp_monitor, "
     "get_most_active, scan history and accuracy) and backtests. Changes are limited to arming stocks and stop "
-    "settings on PAPER bots, starting practice backtests outside market hours (09:00-15:45 IST, Mon-Fri), and "
+    "settings on PAPER bots, Scan & arm on PAPER bots (get_scan_arm, save_scan_arm, run_scan_arm), starting practice backtests outside market hours (09:00-15:45 IST, Mon-Fri), and "
     "running read-only scans (start_scan, check_scan_accuracy); orders and LIVE bots are not reachable.\n"
     "Tuning stop-loss and target with backtests (the person arms the stocks in the app):\n"
     "1. list_bots / get_settings for the bot: note the armed stocks and current stop settings.\n"

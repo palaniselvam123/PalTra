@@ -373,3 +373,26 @@ def test_scanner_sends_the_live_confirmation_to_the_desk(monkeypatch, scanner):
 
 def test_desk_does_not_forward_arms(link):
     assert link.post("/api/link/desk-arm", json={"target": "1", "symbol": "INFY"}).status_code == 404
+
+
+def test_backtest_server_arms_the_desk_but_not_itself(monkeypatch):
+    monkeypatch.setenv("PALTRA_ROLE", "backtest")
+    monkeypatch.setenv("SCANNER_LINK_TOKEN", TOKEN)
+    assert server_role.describe()["desk_arm"] is True and server_role.describe()["backtest_arm"] is False
+    sent = []
+
+    async def fake_to_desk(method, path, body=None, server="desk"):
+        sent.append((method, path, server))
+        return {"ok": True}
+
+    monkeypatch.setattr(routes_link, "_to_desk", fake_to_desk)
+    app = FastAPI()
+    app.include_router(routes_link.router)
+    http = TestClient(app)
+    assert http.post("/api/link/desk-arm", json={"target": "3", "symbol": "SBIN"}).status_code == 200
+    assert sent == [("POST", "/api/link/arm", "desk")]
+    assert http.post("/api/link/desk-arm?server=backtest", json={"target": "3", "symbol": "SBIN"}).status_code == 404
+    assert http.get("/api/link/desk-armed?server=backtest").status_code == 404
+    monkeypatch.delenv("SCANNER_LINK_TOKEN")
+    assert server_role.describe()["desk_arm"] is False
+    assert http.post("/api/link/desk-arm", json={"target": "3", "symbol": "SBIN"}).status_code == 409

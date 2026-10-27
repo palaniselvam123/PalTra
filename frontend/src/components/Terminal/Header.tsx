@@ -4,9 +4,10 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
-import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, Search, Sun } from "lucide-react";
+import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
 import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { ArmLog } from "@/components/Terminal/ArmLog";
+import { ScanArm } from "@/components/Terminal/ScanArm";
 import { useTheme } from "@/hooks/useTheme";
 import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
@@ -190,6 +191,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [folded, setFolded] = useState(false);
   const [pnlLog, setPnlLog] = useState(false);
   const [armLog, setArmLog] = useState(false);
+  const [scanArm, setScanArm] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (config?.symbol) setSymbol(config.symbol);
@@ -797,7 +799,22 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               >
                 <ListChecks size={14} aria-hidden /> <span className="hidden md:inline">Arm log</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setScanArm(true)}
+                title="Scan & arm: run the Trend quality scan and arm what it finds on a bot, now or at set times"
+                aria-label="Scan and arm"
+                className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
+              >
+                <ScanSearch size={14} aria-hidden /> <span className="hidden md:inline">Scan &amp; arm</span>
+              </button>
             </h2>
+            {scanArm && (
+              <ScanArm
+                defaultBot={desk === "research" ? 3 : ((deskBot ?? 1) as 1 | 2 | 3 | 4)}
+                onClose={() => setScanArm(false)}
+              />
+            )}
             {armLog && (
               <ArmLog
                 desk={desk === "research" ? "research" : String(deskBot ?? 1)}

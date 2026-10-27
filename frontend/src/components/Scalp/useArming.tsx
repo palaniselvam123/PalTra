@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { smaApi, type BotSummary } from "@/lib/smaApi";
 import { api, type DeskArmedBot, type LinkServer } from "@/lib/api";
 import { useServerRole } from "@/hooks/useServerRole";
@@ -30,6 +30,9 @@ const asSummary = (bots: DeskArmedBot[]): BotSummary[] =>
  * A LIVE bot is confirmed here first and the link refuses it without that confirmation.
  * With a backtest server set up (`backtest_arm`), the dialogs also offer "Backtest server": the
  * same arm goes to that server's PAPER copies of the bots instead, for a backtest there.
+ *
+ * On the backtest server with the link token (`desk_arm`) the same switch arms the desk's bots
+ * ("Main desk", over the link like the scanner) or this server's own PAPER copies ("Backtest server").
  */
 export function useArming(priceOf?: (symbol: string) => number | null | undefined) {
   // Every SMA bot's Trade list (and the research desk's), so a stock can be armed on any of them.
@@ -53,9 +56,19 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
   const role = useServerRole();
   const onScanner = role?.role === "scanner";
   const btUrl = onScanner && role?.backtest_arm ? (role.backtest_url ?? null) : null;
+  // Backtest server with the link token: "Main desk" goes over the link, "Backtest server" is this one.
+  const onBtServer = role?.role === "backtest" && !!role.desk_arm;
+  /** Where a call for this side goes: over the link to that server, or null for this server's own terminal. */
+  const linkFor = (side: LinkServer): LinkServer | null =>
+    onScanner ? side : onBtServer && side === "desk" ? "desk" : null;
+
+  // On the backtest server the dialogs open on its own (PAPER) bots; "Main desk" is one tap away.
+  useEffect(() => {
+    if (onBtServer) setServer("backtest");
+  }, [onBtServer]);
 
   const loadDesks = useCallback(() => {
-    if (onScanner) {
+    if (onScanner || onBtServer) {
       api
         .deskArmed()
         .then((d) => {
@@ -63,7 +76,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           setResearchArmed(d.research);
           setDeskError(d.error);
         })
-        .catch((e: unknown) => setDeskError(`Could not reach the scanner's link: ${e instanceof Error ? e.message : "no answer"}`));
+        .catch((e: unknown) => setDeskError(`Could not reach the desk link: ${e instanceof Error ? e.message : "no answer"}`));
       return;
     }
     smaApi.bots().then(setBots).catch(() => {});
@@ -71,10 +84,18 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
       .researchConfig()
       .then((c) => setResearchArmed(c.trade_symbols ?? []))
       .catch(() => setResearchArmed(null));
-  }, [onScanner]);
+  }, [onScanner, onBtServer]);
 
   // The backtest server may be stopped: this first call starts it (Fly), so it can take a while.
   const loadBacktest = useCallback(() => {
+    if (onBtServer) {
+      // This server's own bots (always PAPER copies).
+      setBtError(null);
+      Promise.all([smaApi.bots(), smaApi.researchConfig().catch(() => null)])
+        .then(([b, r]) => setBt({ bots: b, research: r ? (r.trade_symbols ?? []) : null }))
+        .catch((e: unknown) => setBtError(`This server's bots could not be read: ${e instanceof Error ? e.message : "no answer"}`));
+      return;
+    }
     setBtLoading(true);
     setBtError(null);
     api
@@ -85,7 +106,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
       })
       .catch((e: unknown) => setBtError(`Could not reach the backtest server: ${e instanceof Error ? e.message : "no answer"}`))
       .finally(() => setBtLoading(false));
-  }, []);
+  }, [onBtServer]);
 
   const deskDesks = useMemo(() => armDesks(bots, researchArmed), [bots, researchArmed]);
   // The backtest server's bots are always PAPER; shown as such whatever the copy says.
@@ -94,7 +115,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     [bt]
   );
   const desks = server === "backtest" ? btDesks : deskDesks;
-  const serverChoice: ArmServerChoice | undefined = btUrl
+  const serverChoice: ArmServerChoice | undefined = btUrl || onBtServer
     ? {
         value: server,
         onChange: (next) => {
@@ -106,6 +127,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
         url: btUrl,
       }
     : undefined;
+  const linkTo = linkFor(server);
   /** Stock → the desks it is armed on ("Bot 1", "Research", …). */
   const armed = useMemo(() => {
     const out = new Map<string, string[]>();
@@ -148,10 +170,11 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     setArmNote(null);
     try {
       await save();
-      if (onScanner) {
+      const via = linkFor(where);
+      if (via) {
         await api.deskArm(
           { target: desk.target, symbol, source: source ?? null, confirm_live: where === "desk" && desk.mode === "LIVE" },
-          where
+          via
         );
       } else {
         await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
@@ -164,6 +187,12 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
               Open it to run the backtest
             </a>
           </>
+        );
+      } else if (onBtServer) {
+        setArmNote(
+          where === "desk"
+            ? `${symbol} is armed on ${desk.name} on the main desk${desk.mode === "LIVE" ? " (LIVE)" : ""}. It orders on its next SMA cross, not now.`
+            : `${symbol} is armed on ${desk.name} on this backtest server (practice copy). Backtest it from the terminal here.`
         );
       } else {
         setArmNote(
@@ -182,7 +211,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
         <BulkArm
           symbols={armMany.symbols}
           desks={desks}
-          onScanner={onScanner}
+          linkTo={linkTo}
           source={armMany.source}
           onDone={reload}
           onClose={() => setArmMany(null)}
@@ -203,18 +232,24 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
       {armAsk ? (
         <ArmPrompt
           symbol={armAsk.symbol}
-          deskName={server === "backtest" ? `${armAsk.desk.name} (backtest server)` : armAsk.desk.name}
+          deskName={
+            server === "backtest"
+              ? `${armAsk.desk.name} (backtest server)`
+              : onBtServer
+                ? `${armAsk.desk.name} (main desk)`
+                : armAsk.desk.name
+          }
           target={armAsk.desk.target}
           live={server === "desk" && armAsk.desk.mode === "LIVE"}
           price={priceOf?.(armAsk.symbol) ?? null}
           onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source)}
           onClose={() => setArmAsk(null)}
           io={
-            onScanner
+            linkTo
               ? {
-                  load: (t, s) => api.deskStock(t, s, server),
+                  load: (t, s) => api.deskStock(t, s, linkTo),
                   // Runs only after armNow's LIVE question was answered yes.
-                  save: (t, s, body) => api.deskSaveStock(t, s, body, server === "desk" && armAsk.desk.mode === "LIVE", server),
+                  save: (t, s, body) => api.deskSaveStock(t, s, body, server === "desk" && armAsk.desk.mode === "LIVE", linkTo),
                 }
               : undefined
           }
