@@ -31,6 +31,7 @@ import all_bots_guard
 import pnl_alerts
 import pivots
 import auto_start
+import trend_rank
 import news_entry
 import arm_log
 import chop_auto
@@ -131,7 +132,33 @@ def _keep_scan(kind: str):
 
 _history_tasks: set = set()
 cross_scanner.on_done = _keep_scan("cross")
-chop_scanner.on_done = _keep_scan("chop")
+_keep_chop = _keep_scan("chop")
+
+
+def _chop_done(snapshot: dict, meta: dict) -> None:
+    """A finished Trend quality pass: keep it in the history, then the trend-rank alert (trend_rank.py)."""
+    _keep_chop(snapshot, meta)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send(message: str) -> None:
+        from app.services.alert_notifier import alert_notifier
+
+        await alert_notifier.send_quiet(message)
+
+    async def _call(message: str) -> None:
+        from app.services.alert_notifier import alert_notifier
+
+        await alert_notifier.place_call(message)
+
+    task = loop.create_task(trend_rank.after_scan(snapshot, _send, _call))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+chop_scanner.on_done = _chop_done
 #: One replay player per SMA bot (1-4), so all four bots can replay at once
 #: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
 replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
@@ -2039,6 +2066,41 @@ async def chop_scan_auto(body: ChopAutoUpdate):
 @app.get("/api/chop-scan")
 async def chop_scan_status():
     return {**chop_scanner.snapshot(), "paused": _scans_paused, "auto": chop_autos.snapshot()}
+
+
+class TrendAlertUpdate(BaseModel):
+    on: bool | None = None
+    sizes: list[Literal[1, 2, 3, 5, 10, 15]] | None = None
+    direction: Literal["UP", "DOWN", "SAME"] | None = None
+    kind: Literal["SIDE", "STRONG"] | None = None
+    top_n: int | None = Field(default=None, ge=1, le=trend_rank.MAX_TOP)
+    max_age_min: int | None = Field(default=None, ge=0, le=24 * 60)
+    min_gap_pct: float | None = Field(default=None, ge=0, le=5)
+    skip_fading: bool | None = None
+    telegram: bool | None = None
+    call: bool | None = None
+
+
+def _trend_alerts() -> dict:
+    from dataclasses import asdict
+
+    return {**asdict(trend_rank.load()), "recent": trend_rank.recent[:20]}
+
+
+@app.get("/api/chop-scan/trend-alerts")
+async def trend_alerts_get():
+    """The trend-rank alert settings and the last alerts sent (trend_rank.py). Information only."""
+    return _trend_alerts()
+
+
+@app.put("/api/chop-scan/trend-alerts")
+async def trend_alerts_put(body: TrendAlertUpdate):
+    """Save the trend-rank alert: after each Trend quality pass in market hours, Telegram / call the top ranks."""
+    data = body.model_dump(exclude_none=True)
+    if data.get("on") and not (data.get("sizes") or trend_rank.load().sizes):
+        raise HTTPException(400, "Tick at least one candle size under Trend on first")
+    await asyncio.to_thread(trend_rank.save, data)
+    return _trend_alerts()
 
 
 class MorningScanStart(BaseModel):

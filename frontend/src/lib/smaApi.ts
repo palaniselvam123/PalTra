@@ -381,6 +381,12 @@ export type ChopScanRow = {
   last_cross_side_by_minutes?: Record<string, "BULLISH" | "BEARISH" | null>;
   /** Strong-trend read on every candle size (6 of 7 checks): STRONG_BULLISH / STRONG_BEARISH, or null. */
   trend_by_minutes?: Record<string, "STRONG_BULLISH" | "STRONG_BEARISH" | null>;
+  /** How long the current SMA side has run per size (older servers leave them out): start of its first candle
+   * (epoch seconds), closed candles in the run, the signed SMA gap % now and the widest |gap| % in the run. */
+  run_since_ts_by_minutes?: Record<string, number | null>;
+  run_candles_by_minutes?: Record<string, number | null>;
+  gap_pct_by_minutes?: Record<string, number | null>;
+  gap_peak_pct_by_minutes?: Record<string, number | null>;
   /** Today's trend phases on the scan's candle (older servers leave them out): the phase now and every phase, oldest first. */
   phase?: ChopPhaseSide | null;
   phase_since_ts?: number | null;
@@ -388,6 +394,20 @@ export type ChopScanRow = {
   phase_candles?: number;
   phases?: ChopPhase[];
   strong_phases?: number;
+};
+/** Trend-rank alert (backend trend_rank.py): Telegram / call the top ranks after each Trend quality pass. */
+export type TrendAlerts = {
+  on: boolean;
+  sizes: number[];
+  direction: "UP" | "DOWN" | "SAME";
+  kind: "SIDE" | "STRONG";
+  top_n: number;
+  max_age_min: number;
+  min_gap_pct: number;
+  skip_fading: boolean;
+  telegram: boolean;
+  call: boolean;
+  recent: { at: string; symbol: string; side: "BULLISH" | "BEARISH"; rank: number; age_min: number; gap_pct: number }[];
 };
 export type ChopPhaseSide = "BULL" | "BEAR" | "CHOP";
 export type ChopPhase = { side: ChopPhaseSide; start_ts: number; end_ts: number; candles: number; move_pct: number | null };
@@ -1540,6 +1560,9 @@ export const smaApi = {
   /** Turn the server's Trend quality re-scan on/off, how often, and the choices it scans with. */
   chopScanAuto: (body: ChopAutoUpdate) =>
     request<ChopAuto>("/api/chop-scan/auto", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  trendAlerts: () => request<TrendAlerts>("/api/chop-scan/trend-alerts", undefined, undefined, false),
+  saveTrendAlerts: (body: Partial<Omit<TrendAlerts, "recent">>) =>
+    request<TrendAlerts>("/api/chop-scan/trend-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   /** Pause / resume the terminal's Scalp scans (Cross scan, Trend quality). */
   scansPause: (paused: boolean) =>
     request<{ paused: boolean }>("/api/scans/pause", { method: "PUT", body: JSON.stringify({ paused }) }, undefined, false),

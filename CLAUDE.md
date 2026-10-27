@@ -590,6 +590,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`trend_strength.read`, the same 7 checks as the card's own `trend`) on every candle size (`chop_scan._crosses_on`;
   None without a strong trend or with too few candles). The card keeps only stocks where every ticked size points the
   chosen way, by `side_by_minutes` (SMA side) or `trend_by_minutes` (Strong trend); a size with no read never matches.
+  **Trend age, SMA gap and rank** (`backend/trend_rank.py`, `frontend/src/lib/trendRank.ts`, same arithmetic): each row
+  also carries, per size, how long the current SMA side has run (`chop_scan._run_read`, across the download's days:
+  `run_since_ts_by_minutes`, `run_candles_by_minutes`) and the signed SMA gap % now and its widest in that run
+  (`gap_pct_by_minutes`, `gap_peak_pct_by_minutes`). With Trend on ticked, the card shows Rank, Trend age (market minutes
+  all ticked sizes have pointed that way: the shortest `candles x size`, and since when) and SMA gap % (average |gap| over
+  the sizes; ⚠ fading when a size's gap is under `FADE_SHARE` 0.5 of its widest), filters "Trend age at most", "SMA gap
+  at least" and "Hide fading". Rank = average of the stock's place by age (youngest first) and by gap (widest first).
+  **Trend rank alert** (`trend_rank.AlertSettings`, `trend_alerts.json` next to the SMA DB, off by default; `GET/PUT
+  /api/chop-scan/trend-alerts`, the card's "Trend rank alert" group, "Use these filters" copies the Trend on sizes /
+  direction / kind / age / gap / fading): after every finished Trend quality pass in market hours (`main._chop_done` →
+  `trend_rank.after_scan`, manual or auto re-scan), the top `top_n` ranks inside the limits, each stock and side once
+  per IST day (`_SENT`, memory), go out as one Telegram through the quiet-runner channel and / or a phone call
+  (`place_call`: market hours, 5-minute cooldown). Information only: nothing in the strategy reads it.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute

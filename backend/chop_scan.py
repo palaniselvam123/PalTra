@@ -200,6 +200,13 @@ class ChopRow:
     # The strong-trend read (`trend_strength.read`) on every candle size: STRONG_BULLISH /
     # STRONG_BEARISH, or None (no strong trend, or too few candles). The "Trend on" filter.
     trend_by_minutes: dict = field(default_factory=dict)
+    # How long the current SMA side has run on every size (`_run_read`, all days in the download): the
+    # start of its first candle (epoch seconds), how many closed candles, the signed SMA gap % now and the
+    # widest |gap| % in that run (a gap well under its widest = the trend is fading). None = too few candles.
+    run_since_ts_by_minutes: dict = field(default_factory=dict)
+    run_candles_by_minutes: dict = field(default_factory=dict)
+    gap_pct_by_minutes: dict = field(default_factory=dict)
+    gap_peak_pct_by_minutes: dict = field(default_factory=dict)
     # When a scan first read this stock as a quiet runner today, and when its Telegram went (IST).
     first_quiet_at: str | None = None
     alerted_at: str | None = None
@@ -311,7 +318,11 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         side_by_minutes={m: r[1] for m, r in by_size.items()},
         last_cross_ts_by_minutes={m: r[2] for m, r in by_size.items()},
         last_cross_side_by_minutes={m: r[3] for m, r in by_size.items()},
-        trend_by_minutes={m: r[4] for m, r in by_size.items()},
+        run_since_ts_by_minutes={m: r[4] for m, r in by_size.items()},
+        run_candles_by_minutes={m: r[5] for m, r in by_size.items()},
+        gap_pct_by_minutes={m: r[6] for m, r in by_size.items()},
+        gap_peak_pct_by_minutes={m: r[7] for m, r in by_size.items()},
+        trend_by_minutes={m: r[8] for m, r in by_size.items()},
     )
 
 
@@ -322,10 +333,11 @@ def _side(enriched: pd.DataFrame) -> str | None:
 
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
                 vwap: float | None = None):
-    """(crosses today, side, last cross ts, last cross side, strong trend) on `minutes`-long candles; Nones when too short."""
+    """(crosses today, side, last cross ts, last cross side, run since ts, run candles, gap %, widest gap %,
+    strong trend) on `minutes`-long candles; Nones when too short."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
-        return None, None, None, None, None
+        return (None,) * 9
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     strong = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)["trend"]
     return (*_cross_read(_crosses(enriched, today), enriched), strong)
@@ -333,7 +345,32 @@ def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast
 
 def _cross_read(hits: list[dict], enriched: pd.DataFrame):
     last = hits[-1] if hits else None
-    return len(hits), _side(enriched), (last["ts"] if last else None), (last["side"] if last else None)
+    return (len(hits), _side(enriched), (last["ts"] if last else None), (last["side"] if last else None),
+            *_run_read(enriched))
+
+
+def _run_read(enriched: pd.DataFrame):
+    """(start ts, closed candles, signed gap % now, widest |gap| % in the run) of the current SMA side.
+
+    The run is the unbroken stretch of closed candles whose signed gap `(fast - slow) / slow x 100` has the
+    same sign as the last one, across days (the download's earlier sessions too, so a trend from yesterday
+    counts; it can only be as long as the download). Candles without a gap or with a zero gap are skipped.
+    """
+    if enriched is None or len(enriched) == 0 or "sma_9" not in enriched or "sma_21" not in enriched:
+        return None, None, None, None
+    fast = pd.to_numeric(enriched["sma_9"], errors="coerce")
+    slow = pd.to_numeric(enriched["sma_21"], errors="coerce")
+    gap = ((fast - slow) / slow * 100.0).where(slow != 0)
+    keep = gap.notna() & (gap != 0)
+    g = gap[keep].reset_index(drop=True)
+    if g.empty:
+        return None, None, None, None
+    ts = enriched["ts"][keep].astype("int64").reset_index(drop=True)
+    up = g > 0
+    other = (up != up.iloc[-1]).to_numpy().nonzero()[0]
+    first = int(other[-1]) + 1 if len(other) else 0
+    run = g.iloc[first:]
+    return int(ts.iloc[first]), int(len(run)), round(float(g.iloc[-1]), 4), round(float(run.abs().max()), 4)
 
 
 def _today_1m(frame_1m: pd.DataFrame) -> pd.DataFrame:
