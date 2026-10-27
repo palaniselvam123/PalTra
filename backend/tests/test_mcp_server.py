@@ -104,6 +104,20 @@ def _fake_terminal(modes: dict[int, str]) -> tuple[FastAPI, list]:
         writes.append(("check", run_id))
         return {"running": True}
 
+    @app.get("/api/scan-arm")
+    def scan_arm_state():
+        return {"presets": [{"id": "ab12", "bot": 3}, {"id": "cd34", "bot": 2}], "running": None, "recent": []}
+
+    @app.put("/api/scan-arm/presets")
+    def scan_arm_save(body: dict):
+        writes.append(("scan_arm_save", body))
+        return {**body, "id": body.get("id") or "new1"}
+
+    @app.post("/api/scan-arm/run")
+    def scan_arm_run(body: dict):
+        writes.append(("scan_arm_run", body))
+        return {"started": True}
+
     return app, writes
 
 
@@ -155,6 +169,7 @@ def test_initialize_and_tool_list_have_no_order_path(mcp):
         "list_backtests", "get_backtest", "get_backtest_trades", "compare_backtests", "start_backtest",
         "set_trade_list", "set_stop", "start_scan", "get_scalp_monitor", "get_most_active",
         "list_scan_history", "get_scan_history", "check_scan_accuracy", "get_stock_news",
+        "get_scan_arm", "save_scan_arm", "run_scan_arm",
     }
     blob = json.dumps(rpc(client, "tools/list").json()).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force_order", "close_position"):
@@ -351,3 +366,18 @@ def test_scan_history_and_accuracy_check(mcp):
     err, _ = call(client, "check_scan_accuracy", {"run_id": 4})
     assert not err and writes[-1] == ("check", 4)
     assert call(client, "get_scan_history", {})[0]
+
+
+def test_scan_arm_tools_reach_paper_bots_only(mcp):
+    client, writes = mcp()
+    err, text = call(client, "save_scan_arm", {"bot": 2, "sizes": [1, 5, 15], "kind": "SIDE", "times": ["10:00", "10:15"], "on": True})
+    assert not err and json.loads(text)["id"] == "new1"
+    assert writes[-1] == ("scan_arm_save", {"bot": 2, "sizes": [1, 5, 15], "kind": "SIDE", "times": ["10:00", "10:15"], "on": True})
+    err, text = call(client, "save_scan_arm", {"bot": 3, "sizes": [5]})
+    assert err and "LIVE" in text
+    err, text = call(client, "save_scan_arm", {"preset_id": "ab12", "top_n": 3})  # preset ab12 arms bot 3 (LIVE)
+    assert err and "LIVE" in text
+    err, text = call(client, "run_scan_arm", {"preset_id": "cd34"})
+    assert not err and writes[-1] == ("scan_arm_run", {"preset_id": "cd34", "source": "mcp"})
+    err, text = call(client, "run_scan_arm", {"bot": 2})
+    assert err and "sizes" in text

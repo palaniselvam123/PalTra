@@ -612,6 +612,24 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `trend_rank.after_scan`, manual or auto re-scan), the top `top_n` ranks inside the limits, each stock and side once
   per IST day (`_SENT`, memory), go out as one Telegram through the quiet-runner channel and / or a phone call
   (`place_call`: market hours, 5-minute cooldown). Information only: nothing in the strategy reads it.
+- `backend/scan_arm.py` – **Scan & arm** (arming only, no order; desk, scanner and backtest server): saved recipes
+  (`Preset`, `scan_arm.json` next to the SMA DB, `SCAN_ARM_FILE`, at most 20) that run one Trend quality pass on `lists`
+  (F&O / Nifty 50 / 100 / Bank / armed, `main._auto_symbols`) through the shared `chop_scanner` (`main._scan_arm_scan`
+  waits for a pass already running; `ChopScanner.passes` tells its own pass apart) and arm the best `top_n` of
+  `trend_rank.ranked(rows, sizes, direction, kind)` (every ticked size the same way, `kind` SIDE = SMA side, STRONG = strong
+  trend; optional `max_age_min`, `min_gap_pct`, `skip_fading`) on bot `bot` (1-4) with the source chip "Scan & arm: <name>".
+  Already-armed stocks are left alone; nothing is unarmed. Arms go through `_set_trade_symbol` on the desk, or the desk link
+  (`routes_link._to_desk` → `/api/link/arm`) on the scanner and on the backtest server with `SCANNER_LINK_TOKEN`
+  (`main._scan_arm_remote`). **Schedule**: `times` (IST HH:MM, 09:15-15:30) with `on`, run by `Runner.start_loop` (every
+  `CHECK_SEC` 20 s while scans are on and not paused) once per time per trading day (`fired`, saved); a time missed by more
+  than `GRACE_MIN` (15) minutes is skipped; one run at a time; each scheduled run sends `scan_arm.text` through
+  `alert_notifier.send`. **LIVE**: a scheduled or MCP run refuses a LIVE bot (`LiveRefused`, before scanning); the
+  terminal's Run now asks the person and sends `confirm_live` (`POST /api/scan-arm/run`, `source` manual only). Routes:
+  `GET /api/scan-arm`, `PUT /api/scan-arm/presets`, `DELETE /api/scan-arm/presets/{id}`, `POST /api/scan-arm/run`
+  (`preset_id` or a one-off `preset`; runs in the background, poll GET). UI: terminal Stocks bar "Scan & arm"
+  (`components/Terminal/ScanArm.tsx`: recipes, Run now, schedule switch, last runs, two templates: strong bullish/bearish
+  at 10:00/10:15, and the same trend on 1m/5m/15m → Bot 3). MCP: `get_scan_arm`, `save_scan_arm`, `run_scan_arm` (PAPER
+  bots only). The bot still trades on its next SMA cross; its "Join the morning trend" enters a running trend.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute
@@ -784,7 +802,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`remote_token`, read by `groww_client.desk_session_token` on this role); it never logs in to Groww itself, so it
   cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
-  `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). CI deploys it only when
+  `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
+  page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /
+  This backtest server switch (`useArming`, opens on this server's own PAPER bots): Main desk goes over the same link as
+  the scanner (`routes_link._link_caller`: the backtest server reaches the desk only, never `server=backtest`), so the
+  desk's checks apply and a LIVE bot is confirmed first. CI deploys it only when
   the repo variable `DEPLOY_BACKTEST` is `true` (secret `FLY_BACKTEST_API_TOKEN`), after the desk and the scanner.
 - `backend/auto_start.py` – auto-start for PAPER bots (`auto_start`, off by default, per bot 1-4, not per stock; Settings →
   6. Size, daily limits and times; in `COPY_SKIP`). The bots boot STOPPED after a deploy or restart and a finished day rolls
@@ -1025,7 +1047,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `get_scan_history`; read-only runs: `start_scan` (stocks = the F&O list, every bot's armed ones or `symbols`) and
   `check_scan_accuracy`, through the terminal's scan routes (paused / `SCANS=off` refusals apply).
   Write tools (`set_trade_list`,
-  `set_stop`, validated by `chat_actions`) only reach a bot in **PAPER**; a LIVE bot is
+  `set_stop`, validated by `chat_actions`; `save_scan_arm` / `run_scan_arm`, Scan & arm) only reach a bot in **PAPER**; a LIVE bot is
   refused. `start_backtest` starts a replay at full speed through `/api/replay/start` (PAPER
   bot only, refused 09:00-15:45 IST Mon-Fri and while that bot's replay is LOADING /
   PLAYING / PAUSED, since `ReplaySession.begin` would stop it). `set_stop` / `set_trade_list` are refused while that bot's replay

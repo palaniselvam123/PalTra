@@ -28,7 +28,7 @@ export function armDesks(bots: BotSummary[], researchArmed: string[] | null): Ar
   return out;
 }
 
-/** Scanner only: arm on the trading desk's bots or on the backtest server's (practice copies). */
+/** Scanner (and the backtest server): arm on the trading desk's bots or on the backtest server's (practice copies). */
 export type ArmServerChoice = {
   value: LinkServer;
   onChange: (server: LinkServer) => void;
@@ -51,7 +51,7 @@ export function backtestTerminalUrl(url: string, target: ArmTarget): string {
 export function ArmServerSwitch({ choice, disabled }: { choice: ArmServerChoice; disabled?: boolean }) {
   const opts: { v: LinkServer; label: string }[] = [
     { v: "desk", label: "Main desk" },
-    { v: "backtest", label: "Backtest server" },
+    { v: "backtest", label: choice.url ? "Backtest server" : "This backtest server" },
   ];
   return (
     <div className="mb-3">
@@ -79,8 +79,10 @@ export function ArmServerSwitch({ choice, disabled }: { choice: ArmServerChoice;
       </div>
       <p className="mt-1.5 text-[11px] text-slate-400">
         {choice.value === "backtest"
-          ? "Practice copies of the bots, for backtests only: nothing here reaches the desk or Groww. The stocks stay armed there when it restarts; Sync from desk on that server replaces them."
-          : "The real bots on the trading desk."}
+          ? choice.url
+            ? "Practice copies of the bots, for backtests only: nothing here reaches the desk or Groww. The stocks stay armed there when it restarts; Sync from desk on that server replaces them."
+            : "This server's practice copies of the bots, for backtests here: nothing reaches the desk or Groww. Sync from desk replaces them."
+          : "The real bots on the trading desk (a LIVE bot asks you to confirm)."}
       </p>
       {choice.value === "backtest" && choice.loading ? (
         <p className="mt-1 flex items-center gap-1.5 text-[11px] text-accentViolet">

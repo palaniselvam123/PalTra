@@ -434,6 +434,8 @@ class ChopScanner:
         # Called with (snapshot, meta) when a pass finishes with something read (scan_history).
         self.on_done: Callable[[dict, dict], None] | None = None
         self._meta: dict = {}
+        # Counts the passes started, so a caller can tell its own pass from one already running (scan_arm).
+        self.passes = 0
 
     def stop(self, reason: str) -> None:
         """Cancel a running pass (the Scalp page's Pause scans). The last finished rows stay."""
@@ -495,6 +497,7 @@ class ChopScanner:
         if time.monotonic() - self._started_at < MIN_RESCAN_SEC and self._key is not None:
             return self.snapshot()
         self._started_at = time.monotonic()
+        self.passes += 1
         self._meta = dict(meta or {})
         self.status.running = True
         self.status.done = 0

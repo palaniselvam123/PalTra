@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import clsx from "clsx";
 import { ExternalLink, FlaskConical, Loader2, X } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type LinkServer } from "@/lib/api";
 import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ArmServerSwitch, backtestTerminalUrl, type ArmDesk, type ArmServerChoice } from "@/components/Scalp/ArmPicker";
@@ -41,12 +41,14 @@ function fieldsOf(c: Partial<SmaConfig>, unit: Unit = c.tsl_mode === "PERCENT" ?
  *
  * On the scanner with a backtest server, `server` adds the Main desk / Backtest server switch:
  * on the backtest server the stocks go on its PAPER copies of the bots, and the result links there
- * to run the backtest.
+ * to run the backtest. On the backtest server the same switch arms the desk's bots (over the link)
+ * or this server's own PAPER copies. `linkTo` says where the calls go: over the link to that
+ * server, or null for this server's own terminal.
  */
 export function BulkArm({
   symbols,
   desks,
-  onScanner,
+  linkTo,
   source,
   onDone,
   onClose,
@@ -55,7 +57,7 @@ export function BulkArm({
 }: {
   symbols: string[];
   desks: ArmDesk[];
-  onScanner: boolean;
+  linkTo: LinkServer | null;
   source?: string | null;
   onDone: () => void;
   onClose: () => void;
@@ -85,8 +87,8 @@ export function BulkArm({
     setF(null);
     setError(null);
     const t = desk.target;
-    const load: Promise<Partial<SmaConfig>> = onScanner
-      ? api.deskStock(t, names[0], where)
+    const load: Promise<Partial<SmaConfig>> = linkTo
+      ? api.deskStock(t, names[0], linkTo)
       : t === "research"
         ? smaApi.researchConfig()
         : smaApi.configOn(t);
@@ -106,7 +108,7 @@ export function BulkArm({
     };
     // `names` follows `symbols`, fixed for the life of the dialog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desk, onScanner, where]);
+  }, [desk, linkTo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
@@ -161,11 +163,11 @@ export function BulkArm({
       } else {
         try {
           if (Object.keys(body).length) {
-            if (onScanner) await api.deskSaveStock(desk.target, s, body, live, where);
+            if (linkTo) await api.deskSaveStock(desk.target, s, body, live, linkTo);
             else await smaApi.saveStockConfigOn(desk.target, s, body);
           }
           if (!desk.armed.includes(s)) {
-            if (onScanner) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live }, where);
+            if (linkTo) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live }, linkTo);
             else await smaApi.setTradeSymbolOn(desk.target, s, true, source ?? null);
           }
           out.push({ symbol: s, ok: true, why: desk.armed.includes(s) ? "already armed; numbers saved" : undefined });
@@ -181,7 +183,7 @@ export function BulkArm({
   };
 
   const armedOk = results?.filter((r) => r.ok).map((r) => r.symbol) ?? [];
-  const canBacktest = !onScanner && desk != null && desk.target !== "research" && !live && armedOk.length > 0;
+  const canBacktest = !linkTo && desk != null && desk.target !== "research" && !live && armedOk.length > 0;
 
   const backtest = async () => {
     if (!desk || desk.target === "research" || !armedOk.length) return;
@@ -361,7 +363,11 @@ export function BulkArm({
                   {armedOk.length} of {results.length} armed on {desk.name}
                   {where === "backtest" ? " on the backtest server" : ""}
                   {live ? " (LIVE)" : ""}.{" "}
-                  {where === "backtest" ? "Run the backtest there." : "They order on the next SMA cross, not now."}
+                  {where === "backtest"
+                    ? linkTo
+                      ? "Run the backtest there."
+                      : "Backtest them below."
+                    : "They order on the next SMA cross, not now."}
                 </p>
                 {where === "backtest" && server?.url && armedOk.length ? (
                   <a
