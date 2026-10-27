@@ -417,8 +417,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   after gap mode, when no cross is on that candle; a stale pre-arm cross does not block it) asks `apply_signal(...,
   alert=False, why="SMA9_TURN")` once per turn (`_turn_done`): every check, the stop, flip, cut-off, caps and one LIVE bot
   per stock apply; an opposite trade is closed and reversed like an opposite cross (held when the cross exit is off); the
-  same side already held is left. Gap mode and candle patterns / colour take no turn entries. Settings → 1. When to enter
-  (the numbers are in 3. When to exit, V-turn). The stock research baseline keeps both off.
+  same side already held is left. Gap mode and candle patterns / colour take no turn entries. **Rounded U** (`uturn_on`,
+  off; `turn_entry._detect_u`): also fires on the first candle whose slope is at least `uturn_min_pct` (0.005) the new way
+  after `uturn_run` (5, 2-30) candles at least that the other way (up to `U_MAX_FLAT` 10 near-flat candles of rounding in
+  between); a V is read first, and a turn the same way within `SAME_TURN_CANDLES` (6) candles of the last one is the same
+  turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. Settings → 1. When to enter (the V numbers are in
+  3. When to exit, V-turn). The stock research baseline keeps all of them off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the

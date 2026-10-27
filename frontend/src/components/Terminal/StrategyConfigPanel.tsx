@@ -72,6 +72,9 @@ const LABELS: Record<string, string> = {
   counter_entry: "early reversal entry",
   turn_alert: "SMA 9 turn alert",
   turn_entry: "SMA 9 turn entry",
+  uturn_on: "rounded U turns",
+  uturn_run: "U: run before (candles)",
+  uturn_min_pct: "U: slope at least",
   use_ema: "EMA entry",
   ema_exit: "EMA exit",
   ema_fast: "fast EMA",
@@ -304,6 +307,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     counter_entry: Boolean(form.counter_entry),
     turn_alert: Boolean(form.turn_alert),
     turn_entry: Boolean(form.turn_entry),
+    uturn_on: Boolean(form.uturn_on),
+    uturn_run: Math.min(30, Math.max(2, Math.round(Number(form.uturn_run ?? 5)) || 5)),
+    uturn_min_pct: Math.min(1, Math.max(0, Number(form.uturn_min_pct ?? 0.005) || 0)),
     use_ema: Boolean(form.use_ema),
     ema_exit: Boolean(form.ema_exit),
     ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
@@ -796,6 +802,40 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               the turn entry above is ticked too. Uses the V-turn numbers in step 3.
             </InfoTip>
           </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.uturn_on)}
+              disabled={!form.turn_entry && !form.turn_alert}
+              onChange={(e) => set("uturn_on", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("uturn_on") && <OwnTag />}
+            Also count a rounded U turn (not only a sharp V)
+            <InfoTip label="About the rounded U turn">
+              A gentle turn: the fast SMA rose (or fell) for at least the candles below, flattened out, and now moves the other
+              way by at least the slope below. It fires on the first candle beyond that slope, often a candle or two before a
+              sharp V would. Used by the turn alert and the turn entry above; the alert says whether it was a V or a U. A turn
+              the same way within 6 candles of the last one is the same turn (one alert, one order). Catches more turns, so
+              more alerts in sideways stocks.
+            </InfoTip>
+          </label>
+          {form.uturn_on ? (
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field
+                label="U: run before (candles)"
+                value={String(form.uturn_run ?? 5)}
+                onChange={(v) => set("uturn_run", v)}
+                own={isOwn("uturn_run")}
+              />
+              <Field
+                label="U: slope at least (%/candle)"
+                value={String(form.uturn_min_pct ?? 0.005)}
+                onChange={(v) => set("uturn_min_pct", v)}
+                own={isOwn("uturn_min_pct")}
+              />
+            </div>
+          ) : null}
           <SectionTitle>How the entry order is placed</SectionTitle>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -2217,6 +2257,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });
+  if (f.uturn_on && (f.turn_entry || f.turn_alert)) add({ group: "enter", key: "uturn_on", text: `Rounded U turns count too (after ${f.uturn_run ?? 5} candles one way)`, off: { uturn_on: false } });
   if (f.turn_alert) add({ group: "enter", key: "turn_alert", text: `Telegram when the SMA ${fast} line makes a sharp V`, off: { turn_alert: false } });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
