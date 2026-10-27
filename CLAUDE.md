@@ -406,6 +406,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   shares; a PAPER source never arms a LIVE Bot 2; replays drop the stock from the rest of the run); a winner stays. Same `slope_lookback`; the chart's slope strip
   shows while either is on (`slope_exit.watched`). Both count as an exit for `strategyChecks.noExitOn`. Settings →
   Supertrend / exits. The research baseline keeps both off.
+- `backend/turn_entry.py` – SMA 9 turn alert and entry (`turn_alert` / `turn_entry`, off by default, per bot and per stock,
+  PAPER and LIVE): act on the fast SMA's V before the 9/21 cross. Read once per closed candle of each armed stock of a
+  RUNNING bot on its own candles (`StrategyEngine._turn_now`, called in `on_minute`), with the V-turn exit's numbers
+  (`slope_lookback`, `vturn_move_pct`, `vturn_turn_pct`, `vturn_within`; `turn_entry.detect`): a turn is the candle where the
+  slope first reaches the turn-back level one way after the steep-run level the other way within the window (rising then
+  falling = SHORT, falling then rising = LONG); a slow rounding or drift never counts. The first candle read for a stock only
+  sets the mark (`_turn_seen`), so a turn from before arming or a restart is ignored. **Alert**: one Telegram per turn
+  (`turn_entry.alert_text`, `_alert`; replays and research send none). **Entry**: `_turn_minute` (in the `on_minute` chain
+  after gap mode, when no cross is on that candle; a stale pre-arm cross does not block it) asks `apply_signal(...,
+  alert=False, why="SMA9_TURN")` once per turn (`_turn_done`): every check, the stop, flip, cut-off, caps and one LIVE bot
+  per stock apply; an opposite trade is closed and reversed like an opposite cross (held when the cross exit is off); the
+  same side already held is left. Gap mode and candle patterns / colour take no turn entries. Settings → 1. When to enter
+  (the numbers are in 3. When to exit, V-turn). The stock research baseline keeps both off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the
@@ -899,7 +912,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   No order is placed.
 - Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
   saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
-  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`, `HANDOFF`); a fill from a waiting
+  `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`, `HANDOFF`, `SMA9_TURN`); a fill from a waiting
   `PullbackOrder` adds `:PULLBACK`, `:EXTREME_LIMIT` or `:CANDLE_CONFIRM`. NULL on older rows. Shown in the blotter's Entry reason column, the chart trade
   card and the CSVs (`frontend/src/lib/entryReason.ts`). Nothing in the strategy reads it.
 - `backend/arm_log.py` – arm log (bookkeeping only): a SQLAlchemy `before_flush` hook writes an `ArmLog` row

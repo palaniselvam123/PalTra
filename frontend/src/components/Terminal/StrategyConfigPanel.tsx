@@ -70,6 +70,8 @@ const LABELS: Record<string, string> = {
   counter_reenter: "re-enter after counter candles",
   counter_reenter_max: "counter re-entries per run",
   counter_entry: "early reversal entry",
+  turn_alert: "SMA 9 turn alert",
+  turn_entry: "SMA 9 turn entry",
   use_ema: "EMA entry",
   ema_exit: "EMA exit",
   ema_fast: "fast EMA",
@@ -300,6 +302,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     counter_reenter: Boolean(form.counter_reenter),
     counter_reenter_max: Math.min(10, Math.max(1, Math.round(Number(form.counter_reenter_max ?? 3)) || 3)),
     counter_entry: Boolean(form.counter_entry),
+    turn_alert: Boolean(form.turn_alert),
+    turn_entry: Boolean(form.turn_entry),
     use_ema: Boolean(form.use_ema),
     ema_exit: Boolean(form.ema_exit),
     ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
@@ -759,6 +763,37 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               While flat, a run of candles against the side the SMAs are on (fast below slow, then N green candles closing above
               the fast SMA) opens the trade that way before the cross, once per SMA run. N is the counter-candle exit count in
               step 3, or 3 when that is 0. Every check, the cut-off, the caps and the stop still apply.
+            </InfoTip>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.turn_entry)}
+              onChange={(e) => set("turn_entry", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("turn_entry") && <OwnTag />}
+            SMA {form.sma_fast ?? 9} turn: order at once when the fast SMA makes a V
+            <InfoTip label="About the SMA 9 turn entry">
+              On the candle where the fast SMA turns sharply (rising then falling = sell, falling then rising = buy), the bot
+              orders that way at once, before the 9/21 cross. A turn is read with the V-turn numbers in step 3 (steep run, turn
+              back, within N candles); a slow rounding or a sideways drift never counts. An open trade the other way is closed
+              and reversed like an opposite cross (held when the SMA cross exit is off). Every check, the stop, the cut-off and
+              the caps still apply. The SMA cross keeps trading as before. Gap mode and candle patterns ignore it.
+            </InfoTip>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.turn_alert)}
+              onChange={(e) => set("turn_alert", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("turn_alert") && <OwnTag />}
+            Telegram me when the SMA {form.sma_fast ?? 9} turns (V) on an armed stock
+            <InfoTip label="About the SMA 9 turn alert">
+              One Telegram on the candle the fast SMA turns sharply, for each armed stock while the bot runs. Alert only, unless
+              the turn entry above is ticked too. Uses the V-turn numbers in step 3.
             </InfoTip>
           </label>
           <SectionTitle>How the entry order is placed</SectionTitle>
@@ -1497,6 +1532,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("vturn_within")}
             />
           </div>
+          {form.turn_entry || form.turn_alert ? (
+            <p className="mt-1 text-xs text-slate-400">
+              These V-turn numbers also drive the SMA {form.sma_fast ?? 9} turn {form.turn_entry ? "entry" : "alert"} in step 1.
+            </p>
+          ) : null}
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2176,6 +2216,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });
   if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
+  if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });
+  if (f.turn_alert) add({ group: "enter", key: "turn_alert", text: `Telegram when the SMA ${fast} line makes a sharp V`, off: { turn_alert: false } });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
   if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });

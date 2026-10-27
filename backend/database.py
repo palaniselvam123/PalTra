@@ -147,6 +147,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "slope_turn": "BOOLEAN DEFAULT 1",
             "slope_turn_pct": "FLOAT DEFAULT 0.02",
             "vturn_exit": "BOOLEAN DEFAULT 0",
+            "turn_alert": "BOOLEAN DEFAULT 0",
+            "turn_entry": "BOOLEAN DEFAULT 0",
             "vturn_move_pct": "FLOAT DEFAULT 0.02",
             "vturn_turn_pct": "FLOAT DEFAULT 0.015",
             "vturn_within": "INTEGER DEFAULT 6",
