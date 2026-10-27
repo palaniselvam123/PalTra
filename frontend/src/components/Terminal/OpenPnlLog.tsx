@@ -11,7 +11,7 @@ import { saveFile } from "@/lib/chartTable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 
-type SortKey = "time" | "gross" | "net" | "held";
+type SortKey = "time" | "total" | "closed" | "gross" | "net" | "held";
 
 const W = 760;
 const H = 220;
@@ -33,6 +33,11 @@ function dayText(day: string) {
   });
 }
 
+// The day's P&L at that minute: closed + open (an older point without closed P&L counts as open only).
+const totalOf = (p: OpenPnlPoint) => p.total_gross ?? p.gross;
+const closedOf = (p: OpenPnlPoint) => p.closed_gross ?? 0;
+const totalNetOf = (p: OpenPnlPoint) => p.total_net ?? p.net;
+
 const stocksText = (p: OpenPnlPoint) =>
   p.stocks.map((s) => `${s.symbol} ${s.side === "LONG" ? "L" : "S"}×${s.qty} ${rupees(s.gross)}`).join(" · ");
 
@@ -46,13 +51,14 @@ const SESSION_MIN = 375; // 09:15 to 15:30
 function Chart({ points }: { points: OpenPnlPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const svg = useRef<SVGSVGElement | null>(null);
-  const values = points.map((p) => p.gross);
+  const values = points.flatMap((p) => [totalOf(p), p.gross]);
   const top = Math.max(0, ...values);
   const bottom = Math.min(0, ...values);
   const span = top - bottom || 1;
   const x = (iso: string) => PAD.l + (Math.min(SESSION_MIN, Math.max(0, minuteOf(iso))) / SESSION_MIN) * (W - PAD.l - PAD.r);
   const y = (v: number) => PAD.t + ((top - v) / span) * (H - PAD.t - PAD.b);
-  const line = points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.gross).toFixed(1)}`).join("");
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(totalOf(p)).toFixed(1)}`).join("");
+  const openLine = points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.gross).toFixed(1)}`).join("");
   // The top, zero and bottom of the day (zero is the dashed line).
   const ticks = Array.from(new Set([top, 0, bottom]));
   const hours = ["09:15", "10:15", "11:15", "12:15", "13:15", "14:15", "15:15"];
@@ -74,7 +80,7 @@ function Chart({ points }: { points: OpenPnlPoint[] }) {
         viewBox={`0 0 ${W} ${H}`}
         className="h-auto w-full touch-none select-none"
         role="img"
-        aria-label="Open P&L before charges through the day"
+        aria-label="Day P&L (closed + open) and open P&L before charges through the day"
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
@@ -93,11 +99,12 @@ function Chart({ points }: { points: OpenPnlPoint[] }) {
             {t}
           </text>
         ))}
+        <path d={openLine} fill="none" className="stroke-slate-400" strokeWidth={1.25} strokeDasharray="3 3" strokeLinejoin="round" />
         <path d={line} fill="none" className="stroke-accentSky" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {h && (
           <g>
             <line x1={x(h.t)} x2={x(h.t)} y1={PAD.t} y2={H - PAD.b} className="stroke-slate-400" strokeWidth={1} />
-            <circle cx={x(h.t)} cy={y(h.gross)} r={4} className="fill-accentSky stroke-surface" strokeWidth={2} />
+            <circle cx={x(h.t)} cy={y(totalOf(h))} r={4} className="fill-accentSky stroke-surface" strokeWidth={2} />
           </g>
         )}
       </svg>
@@ -107,7 +114,10 @@ function Chart({ points }: { points: OpenPnlPoint[] }) {
           style={{ left: `${Math.min(70, (x(h.t) / W) * 100)}%` }}
         >
           <div className="font-semibold text-slate-100">
-            {clock(h.t)} · {rupees(h.gross)}
+            {clock(h.t)} · Day {rupees(totalOf(h))}
+          </div>
+          <div className="text-slate-400">
+            Closed {rupees(closedOf(h))} · Open {rupees(h.gross)}
           </div>
           <div className="text-slate-400">{h.held ? stocksText(h) : "No open position"}</div>
         </div>
@@ -181,23 +191,23 @@ export function OpenPnlLog({
   const newestFirst = useMemo(() => [...points].reverse(), [points]);
   // Newest first until a column is clicked; the third click on a column comes back here.
   const { sorted, sort, onSort } = useSort<OpenPnlPoint, SortKey>(newestFirst, (p, k) =>
-    k === "time" ? p.t : k === "gross" ? p.gross : k === "net" ? p.net : p.held
+    k === "time" ? p.t : k === "total" ? totalOf(p) : k === "closed" ? closedOf(p) : k === "gross" ? p.gross : k === "net" ? totalNetOf(p) : p.held
   );
   const paged = usePaged(sorted, "terminal.openPnl.pageSize");
   const s = data?.summary;
 
   const csv = () => {
-    const head = "Time,Open P&L before charges,Open P&L after charges,Stocks held,Stocks";
-    const rows = points.map((p) => [clock(p.t), p.gross, p.net, p.held, `"${stocksText(p).replace(/₹/g, "Rs ").replace(/−/g, "-")}"`].join(","));
+    const head = "Time,Day P&L before charges (closed + open),Closed P&L before charges,Open P&L before charges,Day P&L after charges,Open P&L after charges,Stocks held,Stocks";
+    const rows = points.map((p) => [clock(p.t), totalOf(p), closedOf(p), p.gross, totalNetOf(p), p.net, p.held, `"${stocksText(p).replace(/₹/g, "Rs ").replace(/−/g, "-")}"`].join(","));
     saveFile(`open-pnl-${source === "replay" ? `replay${shownRun ?? ""}` : desk}-${data?.day ?? "day"}.csv`, [head, ...rows].join("\n"), "text/csv;charset=utf-8");
   };
 
   return createPortal(
     <div className="terminal-dark fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="Open P&L through the day" className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-border bg-surface p-4 text-sm shadow-xl">
+      <div role="dialog" aria-modal="true" aria-label="P&L through the day" className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-border bg-surface p-4 text-sm shadow-xl">
         <div className="mb-1 flex items-center gap-2">
           <h2 className="mr-auto font-semibold text-slate-100">
-            Open P&amp;L through the day{deskName ? <span className="font-normal text-slate-400"> · {deskName}</span> : null}
+            P&amp;L through the day{deskName ? <span className="font-normal text-slate-400"> · {deskName}</span> : null}
           </h2>
           <button type="button" aria-label="Refresh" onClick={() => void load()} className="rounded p-1 text-slate-400 hover:bg-white/5">
             {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
@@ -207,7 +217,8 @@ export function OpenPnlLog({
           </button>
         </div>
         <p className="mb-3 text-xs text-slate-400">
-          The &quot;Open&quot; figure of the Stocks bar (open trades, before charges),{" "}
+          The day&apos;s P&amp;L before charges: today&apos;s closed trades plus the open ones (the blue line; the dashed line is
+          open trades only),{" "}
           {source === "replay"
             ? "saved for every replayed minute of each replay run"
             : "saved once a minute while the market is open"}{" "}
@@ -280,7 +291,7 @@ export function OpenPnlLog({
         {!points.length ? (
           <p className="py-8 text-center text-xs text-slate-400">
             {source === "replay"
-              ? "No replay recorded yet. Play a past day with Replay and its open P&L is saved minute by minute."
+              ? "No replay recorded yet. Play a past day with Replay and its P&L is saved minute by minute."
               : `Nothing recorded ${data?.day ? "on this day" : "yet"}. A point is saved every minute from 09:15 to 15:30 on market days.`}
           </p>
         ) : (
@@ -288,7 +299,7 @@ export function OpenPnlLog({
             {s && (
               <div className="mb-3 grid grid-cols-3 gap-2 text-xs">
                 {[
-                  ["Latest", s.last, s.last_at],
+                  [s.basis === "gross" ? "Latest" : "Day P&L now", s.last, s.last_at],
                   ["Highest", s.high, s.high_at],
                   ["Lowest", s.low, s.low_at],
                 ].map(([label, v, at]) => (
@@ -310,8 +321,10 @@ export function OpenPnlLog({
               <thead className="text-left text-slate-400">
                 <tr className="[&_th]:px-2 [&_th]:py-1.5 [&_th]:font-medium">
                   <SortTh label="Time" k="time" text sort={sort} onSort={onSort} title="Sort by time (earliest first, then latest first)" />
-                  <SortTh label="Open (before charges)" k="gross" num sort={sort} onSort={onSort} title="Sort by open P&L before charges (highest first)" />
-                  <SortTh label="After charges" k="net" num sort={sort} onSort={onSort} title="Sort by open P&L after charges (highest first)" />
+                  <SortTh label="Day (closed + open)" k="total" num sort={sort} onSort={onSort} title="The day's P&L before charges at that minute: closed trades plus open ones" />
+                  <SortTh label="Closed" k="closed" num sort={sort} onSort={onSort} title="Today's closed trades before charges, at that minute" />
+                  <SortTh label="Open" k="gross" num sort={sort} onSort={onSort} title="Open trades before charges, at that minute" />
+                  <SortTh label="Day after charges" k="net" num sort={sort} onSort={onSort} title="The day's P&L after charges (closed + open)" />
                   <SortTh label="Stocks held" k="held" sort={sort} onSort={onSort} title="Sort by how many stocks were held (most first)" />
                 </tr>
               </thead>
@@ -319,8 +332,10 @@ export function OpenPnlLog({
                 {paged.shown.map((p) => (
                   <tr key={p.t} className="border-t border-white/5 [&_td]:px-2 [&_td]:py-1.5">
                     <td className="font-mono text-slate-200">{clock(p.t)}</td>
-                    <td className={clsx("text-right font-mono", p.gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{rupees(p.gross)}</td>
-                    <td className="text-right font-mono text-slate-300">{rupees(p.net)}</td>
+                    <td className={clsx("text-right font-mono font-semibold", totalOf(p) >= 0 ? "text-emerald-300" : "text-rose-300")}>{rupees(totalOf(p))}</td>
+                    <td className="text-right font-mono text-slate-300">{rupees(closedOf(p))}</td>
+                    <td className={clsx("text-right font-mono", p.gross >= 0 ? "text-emerald-300/80" : "text-rose-300/80")}>{rupees(p.gross)}</td>
+                    <td className="text-right font-mono text-slate-300">{rupees(totalNetOf(p))}</td>
                     <td className="text-slate-400">{p.held ? stocksText(p) : "—"}</td>
                   </tr>
                 ))}

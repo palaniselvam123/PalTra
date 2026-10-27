@@ -782,8 +782,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               <button
                 type="button"
                 onClick={() => setPnlLog(true)}
-                title="Open P&L through the day: the Open figure saved every minute"
-                aria-label="Open P&L through the day"
+                title="P&L through the day: closed + open P&L, saved every minute"
+                aria-label="P&L through the day"
                 className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
               >
                 <LineChart size={14} aria-hidden /> <span className="hidden md:inline">P&amp;L log</span>

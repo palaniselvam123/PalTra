@@ -47,7 +47,43 @@ def test_sample_adds_every_held_stock_like_the_stocks_bar():
         "TCS": ("LONG", 10, 4050.0, 500.0),
         "INFY": ("SHORT", 20, 1510.0, -200.0),
     }
-    assert open_pnl_log.sample(FakeEngine({})) == {"gross": 0.0, "net": 0.0, "held": 0, "stocks": []}
+    assert open_pnl_log.sample(FakeEngine({})) == {
+        "gross": 0.0, "net": 0.0, "held": 0, "stocks": [], "closed_gross": 0.0, "closed_net": 0.0,
+    }
+
+
+def test_the_day_total_adds_todays_closed_trades_to_the_open_ones():
+    rec = open_pnl_log.OpenPnlRecorder()
+    eng = FakeEngine({"TCS": ("LONG", 10, 4000.0, 4050.0, 500.0)})
+    eng.realized_gross, eng.realized_net = 1200.0, 1100.0  # today's closed trades, as the engine keeps them
+
+    async def go():
+        await rec.record_once(lambda: [("2", eng)], now=_at(11, 0))
+        eng.positions.clear()  # TCS closed for +500: the book is flat, the day is 1700 up
+        eng.realized_gross, eng.realized_net = 1700.0, 1580.0
+        await rec.record_once(lambda: [("2", eng)], now=_at(11, 1))
+
+    asyncio.run(go())
+    a, b = open_pnl_log.points("2026-10-14", "2")
+    assert (a["gross"], a["closed_gross"], a["total_gross"], a["total_net"]) == (500.0, 1200.0, 1700.0, 1580.0)
+    assert (b["gross"], b["closed_gross"], b["total_gross"], b["held"]) == (0.0, 1700.0, 1700.0, 0)
+    summary = open_pnl_log.summary([a, b])
+    assert summary["basis"] == "total_gross" and summary["last"] == 1700.0 and summary["open"]["last"] == 0.0
+
+
+def test_a_file_from_before_closed_pnl_is_upgraded_and_reads_zero_closed(tmp_path, monkeypatch):
+    import sqlite3
+
+    file = tmp_path / "old.db"
+    monkeypatch.setenv("OPEN_PNL_FILE", str(file))
+    con = sqlite3.connect(file)
+    con.execute("CREATE TABLE open_pnl (day TEXT NOT NULL, minute TEXT NOT NULL, desk TEXT NOT NULL, mode TEXT, gross REAL,"
+                " net REAL, held INTEGER, stocks TEXT, PRIMARY KEY (desk, minute))")
+    con.execute("INSERT INTO open_pnl VALUES ('2026-10-14', '2026-10-14T10:00+05:30', '1', 'PAPER', 250.0, 230.0, 1, '[]')")
+    con.commit()
+    con.close()
+    (p,) = open_pnl_log.points("2026-10-14", "1")
+    assert (p["gross"], p["closed_gross"], p["total_gross"]) == (250.0, 0.0, 250.0)
 
 
 def test_points_are_kept_per_desk_and_minute_and_read_back_with_high_and_low():

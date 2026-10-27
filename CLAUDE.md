@@ -677,7 +677,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Stocks bar (bot 1, bots 2-4, research; `sample` uses `engine._open_pnl`, the screen's own
   arithmetic) is saved with its mode and every held stock (side, qty, entry, last price, open P&L)
   in its own SQLite file next to the SMA DB (`open_pnl.db`, `OPEN_PNL_FILE`, `OPEN_PNL_DAYS`
-  default 90). `GET /api/open-pnl?desk=1|2|3|4|research&day=` gives a day's points plus its high /
+  default 90). Each point also keeps today's **closed** P&L of that desk's current book at the minute
+  (`closed_gross` / `closed_net`, from the engine's `realized_gross` / `realized_net`, refreshed after every close by
+  `_refresh_realized`; no extra DB read), and the API adds `total_gross` / `total_net` = closed + open: the log, its
+  chart (blue = day total, dashed = open only), high / low / latest (`summary`, on `total_gross`) and CSV show the day's
+  P&L, not just the open trades. Files from before get the two columns added (older rows read 0 closed). `GET /api/open-pnl?desk=1|2|3|4|research&day=` gives a day's points plus its high /
   low / latest. **Replays too**: each `ReplaySession` day gets an `open_pnl_log.ReplayRecorder`
   (run id, bot) that keeps the first tick of each replayed minute after `eng.tick` (`_note_pnl`) and
   saves in batches off the loop (`flush` every 30 points, at the day's end and on Stop) into

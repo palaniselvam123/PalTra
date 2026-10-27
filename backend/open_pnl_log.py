@@ -1,4 +1,4 @@
-"""Open P&L log (open_pnl_log.py): the "Open +₹…" figure of each desk, kept minute by minute.
+"""P&L log (open_pnl_log.py): each desk's day P&L, kept minute by minute.
 
 The terminal's Stocks bar shows the open (unrealized) P&L of every held stock right
 now, and it changes every second. This records it once a minute while NSE is open,
@@ -9,6 +9,11 @@ Each point: the minute (IST), the desk, its mode (PAPER / LIVE), the open P&L be
 charges (the screen's figure) and after charges, and every held stock (side, qty,
 entry, last price, open P&L). Its own small SQLite file next to the SMA terminal's
 database (`open_pnl.db`, `OPEN_PNL_FILE`), kept `OPEN_PNL_DAYS` (default 90) days.
+
+Each point also keeps today's **closed** P&L of the desk's current book at that minute (the engine's
+`realized_gross` / `realized_net`, refreshed after every close from the screen's KPI sum, so no extra DB
+read), and `total_*` = closed + open: the day's P&L as it stood then. Rows saved before closed P&L was
+kept read 0 closed.
 
 Read-only: it only reads the engines' positions and last prices (`_open_pnl`, the
 same arithmetic as the screen); no order path, nothing in the strategy reads it.
@@ -73,6 +78,8 @@ def _connect() -> sqlite3.Connection:
             net REAL,
             held INTEGER,
             stocks TEXT,
+            closed_gross REAL,
+            closed_net REAL,
             PRIMARY KEY (desk, minute)
         );
         CREATE INDEX IF NOT EXISTS open_pnl_day ON open_pnl (day, desk);
@@ -86,11 +93,19 @@ def _connect() -> sqlite3.Connection:
             held INTEGER,
             stocks TEXT,
             saved_at TEXT NOT NULL,
+            closed_gross REAL,
+            closed_net REAL,
             PRIMARY KEY (run_id, minute)
         );
         CREATE INDEX IF NOT EXISTS replay_pnl_bot ON replay_pnl (bot, run_id);
         """
     )
+    # Files made before closed P&L was kept: add the two columns (older rows read 0 closed).
+    for table in ("open_pnl", "replay_pnl"):
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for col in ("closed_gross", "closed_net"):
+            if col not in have:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {col} REAL")
     return con
 
 
@@ -118,7 +133,34 @@ def sample(engine) -> dict:
                 "net": round(n, 2),
             }
         )
-    return {"gross": round(gross, 2), "net": round(net, 2), "held": len(stocks), "stocks": stocks}
+    closed_gross = float(getattr(engine, "realized_gross", 0.0) or 0.0)
+    closed_net = float(getattr(engine, "realized_net", 0.0) or 0.0)
+    return {
+        "gross": round(gross, 2),
+        "net": round(net, 2),
+        "held": len(stocks),
+        "stocks": stocks,
+        "closed_gross": round(closed_gross, 2),
+        "closed_net": round(closed_net, 2),
+    }
+
+
+def _point(r, mode: str) -> dict:
+    """One stored row as the API sends it: open, closed and their total (the day's P&L at that minute)."""
+    cg = float(r["closed_gross"] or 0.0)
+    cn = float(r["closed_net"] or 0.0)
+    return {
+        "t": r["minute"],
+        "mode": mode,
+        "gross": r["gross"],
+        "net": r["net"],
+        "closed_gross": round(cg, 2),
+        "closed_net": round(cn, 2),
+        "total_gross": round(cg + float(r["gross"] or 0.0), 2),
+        "total_net": round(cn + float(r["net"] or 0.0), 2),
+        "held": r["held"],
+        "stocks": json.loads(r["stocks"] or "[]"),
+    }
 
 
 def _mode(engine) -> str:
@@ -131,14 +173,19 @@ def save(minute: dt.datetime, rows: Iterable[tuple[str, str, dict]]) -> int:
     stamp = minute.astimezone(IST).replace(second=0, microsecond=0)
     day, at = stamp.date().isoformat(), stamp.isoformat(timespec="minutes")
     data = [
-        (day, at, desk, mode, s["gross"], s["net"], s["held"], json.dumps(s["stocks"], separators=(",", ":")))
+        (day, at, desk, mode, s["gross"], s["net"], s["held"], json.dumps(s["stocks"], separators=(",", ":")),
+         s.get("closed_gross", 0.0), s.get("closed_net", 0.0))
         for desk, mode, s in rows
     ]
     if not data:
         return 0
     try:
         with _lock, _connect() as con:
-            con.executemany("INSERT OR REPLACE INTO open_pnl VALUES (?, ?, ?, ?, ?, ?, ?, ?)", data)
+            con.executemany(
+                "INSERT OR REPLACE INTO open_pnl (day, minute, desk, mode, gross, net, held, stocks, closed_gross, closed_net)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                data,
+            )
             cutoff = (stamp.date() - dt.timedelta(days=keep_days())).isoformat()
             con.execute("DELETE FROM open_pnl WHERE day < ?", (cutoff,))
         return len(data)
@@ -160,35 +207,29 @@ def days(desk: str | None = None, limit: int = 120) -> list[dict]:
 def points(day: str, desk: str) -> list[dict]:
     with _lock, _connect() as con:
         out = con.execute(
-            "SELECT minute, mode, gross, net, held, stocks FROM open_pnl WHERE day = ? AND desk = ? ORDER BY minute",
+            "SELECT minute, mode, gross, net, held, stocks, closed_gross, closed_net FROM open_pnl"
+            " WHERE day = ? AND desk = ? ORDER BY minute",
             (day, desk),
         ).fetchall()
-    return [
-        {
-            "t": r["minute"],
-            "mode": r["mode"],
-            "gross": r["gross"],
-            "net": r["net"],
-            "held": r["held"],
-            "stocks": json.loads(r["stocks"] or "[]"),
-        }
-        for r in out
-    ]
+    return [_point(r, r["mode"]) for r in out]
 
 
-def summary(series: list[dict]) -> dict | None:
-    """High, low and last of the day's open P&L (before charges), with when."""
+def summary(series: list[dict], key: str = "total_gross") -> dict | None:
+    """High, low and last of the day's P&L (closed + open, before charges by default), with when."""
     if not series:
         return None
-    high = max(series, key=lambda p: p["gross"])
-    low = min(series, key=lambda p: p["gross"])
+    val = lambda p: p.get(key, p["gross"])  # noqa: E731
+    high = max(series, key=val)
+    low = min(series, key=val)
     return {
-        "high": high["gross"],
+        "high": val(high),
         "high_at": high["t"],
-        "low": low["gross"],
+        "low": val(low),
         "low_at": low["t"],
-        "last": series[-1]["gross"],
+        "last": val(series[-1]),
         "last_at": series[-1]["t"],
+        "basis": key,
+        "open": summary(series, "gross") if key != "gross" else None,
     }
 
 
@@ -205,14 +246,18 @@ def save_replay(run_id: int, bot: int, rows: Iterable[tuple[dt.datetime, dict]])
             (
                 int(run_id), int(bot), stamp.date().isoformat(), stamp.isoformat(timespec="minutes"),
                 s["gross"], s["net"], s["held"], json.dumps(s["stocks"], separators=(",", ":")),
-                now.isoformat(timespec="seconds"),
+                now.isoformat(timespec="seconds"), s.get("closed_gross", 0.0), s.get("closed_net", 0.0),
             )
         )
     if not data:
         return 0
     try:
         with _lock, _connect() as con:
-            con.executemany("INSERT OR REPLACE INTO replay_pnl VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", data)
+            con.executemany(
+                "INSERT OR REPLACE INTO replay_pnl (run_id, bot, day, minute, gross, net, held, stocks, saved_at,"
+                " closed_gross, closed_net) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                data,
+            )
             cutoff = (now - dt.timedelta(days=keep_days())).isoformat(timespec="seconds")
             con.execute("DELETE FROM replay_pnl WHERE saved_at < ?", (cutoff,))
         return len(data)
@@ -252,13 +297,11 @@ def replay_days(run_id: int) -> list[dict]:
 def replay_points(run_id: int, day: str) -> list[dict]:
     with _lock, _connect() as con:
         out = con.execute(
-            "SELECT minute, gross, net, held, stocks FROM replay_pnl WHERE run_id = ? AND day = ? ORDER BY minute",
+            "SELECT minute, gross, net, held, stocks, closed_gross, closed_net FROM replay_pnl"
+            " WHERE run_id = ? AND day = ? ORDER BY minute",
             (int(run_id), day),
         ).fetchall()
-    return [
-        {"t": r["minute"], "mode": "REPLAY", "gross": r["gross"], "net": r["net"], "held": r["held"], "stocks": json.loads(r["stocks"] or "[]")}
-        for r in out
-    ]
+    return [_point(r, "REPLAY") for r in out]
 
 
 class ReplayRecorder:

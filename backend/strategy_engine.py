@@ -940,6 +940,7 @@ class StrategyEngine:
         self.last_tick_at: float | None = None  # monotonic time the 1-second loop last finished a pass (deep health)
         self._sleep = asyncio.sleep
         self.realized_net = 0.0
+        self.realized_gross = 0.0  # today's closed P&L before charges (the P&L log reads it)
         self.trades_today = 0
         self._session_date = self._now().date().isoformat()
         self._quote_symbol = ""
@@ -1155,6 +1156,7 @@ class StrategyEngine:
         if day != self._session_date:
             self._session_date = day
             self.realized_net = 0.0
+            self.realized_gross = 0.0
             self._realized_mode = None
             self.trades_today = 0
             self._warned.clear()
@@ -3807,7 +3809,9 @@ class StrategyEngine:
             cfg = self._cfg_cache
             mode = (cfg.trading_mode if cfg is not None else None) or "PAPER"
         self._realized_mode = mode.upper()
-        self.realized_net = float(self._kpis(self._realized_mode)["net"])
+        kpis = self._kpis(self._realized_mode)
+        self.realized_net = float(kpis["net"])
+        self.realized_gross = float(kpis["actual_gross"])
         return self.realized_net
 
     def _day_open_and_change(self) -> tuple[float | None, float | None]:

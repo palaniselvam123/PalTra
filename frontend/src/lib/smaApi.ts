@@ -435,13 +435,26 @@ export type ChopScan = {
 
 /** One minute of a desk's open P&L (the Stocks bar's "Open" figure), from the open P&L log. */
 export type OpenPnlStock = { symbol: string; side: string; qty: number; entry: number | null; ltp: number | null; gross: number; net: number };
-export type OpenPnlPoint = { t: string; mode: string; gross: number; net: number; held: number; stocks: OpenPnlStock[] };
+/** One minute of the P&L log: open (gross / net), today's closed P&L, and the day total (closed + open). */
+export type OpenPnlPoint = {
+  t: string;
+  mode: string;
+  gross: number;
+  net: number;
+  closed_gross?: number;
+  closed_net?: number;
+  total_gross?: number;
+  total_net?: number;
+  held: number;
+  stocks: OpenPnlStock[];
+};
 export type OpenPnlLog = {
   desk: string;
   day: string | null;
   days: { day: string; points: number; held_points: number }[];
   points: OpenPnlPoint[];
-  summary: { high: number; high_at: string; low: number; low_at: string; last: number; last_at: string } | null;
+  /** High / low / last of the day's P&L (closed + open, before charges; `basis` "total_gross"; older servers: open only). */
+  summary: { high: number; high_at: string; low: number; low_at: string; last: number; last_at: string; basis?: string } | null;
   every_sec: number;
   keep_days: number;
 };
