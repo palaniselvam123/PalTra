@@ -10,17 +10,21 @@ import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ArmServerSwitch, backtestTerminalUrl, type ArmDesk, type ArmServerChoice } from "@/components/Scalp/ArmPicker";
 
-type Fields = { qty: string; sl: string; trail: string; target: string };
+// The trailing stop in ₹ (points) or % of the entry price (tsl_mode).
+type Unit = "POINTS" | "PERCENT";
+type Fields = { qty: string; sl: string; trail: string; target: string; unit: Unit };
 type Result = { symbol: string; ok: boolean; why?: string };
 
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
 
-function fieldsOf(c: Partial<SmaConfig>): Fields {
+function fieldsOf(c: Partial<SmaConfig>, unit: Unit = c.tsl_mode === "PERCENT" ? "PERCENT" : "POINTS"): Fields {
+  const pct = unit === "PERCENT";
   return {
     qty: String(c.qty ?? 1),
-    sl: String(c.tsl_sl_points ?? 20),
-    trail: String(c.tsl_trail_points ?? 10),
-    target: String(c.tsl_target_points ?? 0),
+    sl: String(pct ? c.tsl_sl_pct ?? 1 : c.tsl_sl_points ?? 20),
+    trail: String(pct ? c.tsl_trail_pct ?? 0.5 : c.tsl_trail_points ?? 10),
+    target: String(pct ? c.tsl_target_pct ?? 0 : c.tsl_target_points ?? 0),
+    unit,
   };
 }
 
@@ -63,6 +67,8 @@ export function BulkArm({
   const names = symbols.map((s) => s.toUpperCase());
   const [desk, setDesk] = useState<ArmDesk | null>(null);
   const [f, setF] = useState<Fields | null>(null);
+  // The settings the boxes came from, so switching ₹ / % shows that unit's saved numbers.
+  const [loaded, setLoaded] = useState<Partial<SmaConfig>>({});
   const [applyAll, setApplyAll] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(0);
@@ -85,7 +91,11 @@ export function BulkArm({
         ? smaApi.researchConfig()
         : smaApi.configOn(t);
     load
-      .then((c) => alive && setF(fieldsOf(c)))
+      .then((c) => {
+        if (!alive) return;
+        setLoaded(c);
+        setF(fieldsOf(c));
+      })
       .catch((e: unknown) => {
         if (!alive) return;
         setF(fieldsOf({}));
@@ -109,9 +119,11 @@ export function BulkArm({
     if (!f || !applyAll) return null;
     const qty = num(f.qty);
     if (!Number.isInteger(qty) || qty < 1) return "Quantity is a whole number, 1 or more.";
-    if (!(num(f.sl) > 0)) return "Stop loss is more than ₹0.";
-    if (!(num(f.trail) > 0)) return "Trail is more than ₹0.";
-    if (!(num(f.target) >= 0)) return "Target is ₹0 (none) or more.";
+    const u = f.unit === "PERCENT" ? "0%" : "₹0";
+    if (!(num(f.sl) > 0)) return `Stop loss is more than ${u}.`;
+    if (!(num(f.trail) > 0)) return `Trail is more than ${u}.`;
+    if (!(num(f.target) >= 0)) return `Target is ${u} (none) or more.`;
+    if (f.unit === "PERCENT" && (num(f.sl) > 50 || num(f.trail) > 50 || num(f.target) > 100)) return "Percent stops are at most 50% (target 100%).";
     return null;
   })();
 
@@ -131,9 +143,10 @@ export function BulkArm({
           qty: num(f.qty),
           stop_type: "TSL",
           use_stop: true,
-          tsl_sl_points: num(f.sl),
-          tsl_trail_points: num(f.trail),
-          tsl_target_points: num(f.target),
+          tsl_mode: f.unit,
+          ...(f.unit === "PERCENT"
+            ? { tsl_sl_pct: num(f.sl), tsl_trail_pct: num(f.trail), tsl_target_pct: num(f.target) }
+            : { tsl_sl_points: num(f.sl), tsl_trail_points: num(f.trail), tsl_target_points: num(f.target) }),
         }
       : {};
     setBusy(true);
@@ -196,7 +209,7 @@ export function BulkArm({
 
   const terminalHref = desk && desk.target !== 1 && desk.target !== "research" ? `/terminal/?desk=bot${desk.target}` : "/terminal";
 
-  const field = (label: string, key: keyof Fields, hint: string) => (
+  const field = (label: string, key: Exclude<keyof Fields, "unit">, hint: string) => (
     <label className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
       <span>
         <span className="block text-slate-200">{label}</span>
@@ -306,9 +319,32 @@ export function BulkArm({
             {f ? (
               <div className="divide-y divide-white/5">
                 {field("Quantity", "qty", "Shares per order")}
-                {field("Stop loss", "sl", "₹ from the entry price")}
-                {field("Trail stop loss", "trail", "Moves the stop ₹ per ₹ gained")}
-                {field("Target", "target", "₹ from entry, 0 = none")}
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
+                  <span>
+                    <span className="block text-slate-200">Trailing stop in</span>
+                    <span className="block text-xs text-slate-500">₹ points, or % of each entry price</span>
+                  </span>
+                  <div className="flex overflow-hidden rounded-md border border-white/15" role="group" aria-label="Trailing stop unit">
+                    {(["POINTS", "PERCENT"] as const).map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        aria-pressed={f.unit === u}
+                        disabled={busy || !applyAll || results != null}
+                        onClick={() => f.unit !== u && setF({ ...fieldsOf(loaded, u), qty: f.qty })}
+                        className={clsx(
+                          "h-8 px-2.5 text-xs disabled:opacity-50",
+                          f.unit === u ? "bg-accentSky/15 font-semibold text-accentSky" : "text-slate-300 hover:bg-white/5"
+                        )}
+                      >
+                        {u === "POINTS" ? "₹" : "%"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {field("Stop loss", "sl", f.unit === "PERCENT" ? "% below / above the entry price" : "₹ from the entry price")}
+                {field("Trail stop loss", "trail", f.unit === "PERCENT" ? "Moves the stop this % per same % gained" : "Moves the stop ₹ per ₹ gained")}
+                {field("Target", "target", f.unit === "PERCENT" ? "% from entry, 0 = none" : "₹ from entry, 0 = none")}
               </div>
             ) : (
               <p className="flex items-center gap-2 py-4 text-slate-400">

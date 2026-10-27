@@ -115,6 +115,7 @@ STRATEGY_GUIDE = {
         "ATR_SL_HIT": "ATR stop",
         "GAP_SL_HIT": "SMA-gap moving stop",
         "TSL_HIT": "trailing stop",
+        "ST_SL_HIT": "Supertrend stop",
         "TARGET_HIT": "target",
         "BB_TARGET": "Bollinger band target",
         "BB_MIDDLE": "Bollinger middle band exit",

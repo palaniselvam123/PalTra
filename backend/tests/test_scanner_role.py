@@ -335,6 +335,11 @@ def test_arm_link_needs_the_token_and_sane_input(arm_link):
     res = http.put("/api/link/stock/2/INFY?confirm_live=true", headers=AUTH, json={"qty": 4, "trading_mode": "PAPER"})
     assert res.status_code == 200
     assert ("PUT", 2, "INFY", {"qty": 4}) in calls
+    # A trailing stop in % of the entry price goes through too; out-of-range numbers are refused.
+    pct = {"stop_type": "TSL", "use_stop": True, "tsl_mode": "PERCENT", "tsl_sl_pct": 0.8, "tsl_trail_pct": 0.4, "tsl_target_pct": 2}
+    assert http.put("/api/link/stock/2/INFY?confirm_live=true", headers=AUTH, json=pct).status_code == 200
+    assert ("PUT", 2, "INFY", pct) in calls
+    assert http.put("/api/link/stock/2/INFY?confirm_live=true", headers=AUTH, json={"tsl_sl_pct": 90}).status_code == 422
 
 
 def test_arm_link_paths_pass_the_google_lock(monkeypatch):

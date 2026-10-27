@@ -146,3 +146,28 @@ def test_api_saves_the_supertrend_settings(tmp_path, monkeypatch):
         own = client.put("/api/config/stock/SBIN", json={"st_exit": False})
         assert own.status_code == 200 and own.json()["st_exit"] is False
     database.reset_engine()
+
+
+def test_stop_on_and_stop_level():
+    assert supertrend.stop_on(Cfg(use_stop=True, stop_type="SUPERTREND"))
+    assert not supertrend.stop_on(Cfg(use_stop=False, stop_type="SUPERTREND"))
+    assert not supertrend.stop_on(Cfg(use_stop=True, stop_type="TSL"))
+    cfg = Cfg(st_period=5, st_mult=1.5)
+    up = _bars([100 + i * 0.5 for i in range(40)])
+    level = supertrend.stop_level(up, "LONG", cfg)
+    assert level is not None and level < float(up["close"].iloc[-1])  # under a long in an uptrend
+    assert supertrend.stop_level(up, "SHORT", cfg) is None  # a short is not guarded by a rising line
+    down = _bars([140 - i * 0.5 for i in range(40)])
+    assert supertrend.stop_level(down, "SHORT", cfg) > float(down["close"].iloc[-1])
+    assert supertrend.stop_level(up.iloc[:1], "LONG", cfg) is None
+
+
+@pytest.mark.asyncio
+async def test_supertrend_stop_trails_and_closes_the_short_on_the_turn(db):  # noqa: F811
+    plain = _first(await _trades(db), "SHORT")
+    stopped = _first(await _trades(db, use_stop=True, stop_type="SUPERTREND", st_period=5, st_mult=1.5), "SHORT")
+    assert stopped["entry_time"] == plain["entry_time"]
+    assert stopped["exit_reason"] == "ST_SL_HIT"
+    # The line followed the fall down, so the turn hits it well before the SMAs cross back.
+    assert TURN <= stopped["exit_time"] < plain["exit_time"]
+    assert stopped["exit_price"] < stopped["entry_price"]

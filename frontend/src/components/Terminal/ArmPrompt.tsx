@@ -5,21 +5,26 @@ import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
 import { inr, smaApi, type ArmTarget, type SmaConfig, type StockConfig } from "@/lib/smaApi";
 
-type Fields = { qty: string; sl: string; trail: string; target: string };
+// The trailing stop in ₹ (points) or % of the entry price (tsl_mode).
+type Unit = "POINTS" | "PERCENT";
+type Fields = { qty: string; sl: string; trail: string; target: string; unit: Unit };
 
-function fieldsOf(c: StockConfig): Fields {
+function fieldsOf(c: StockConfig, unit: Unit = c.tsl_mode === "PERCENT" ? "PERCENT" : "POINTS"): Fields {
+  const pct = unit === "PERCENT";
   return {
     qty: String(c.qty ?? ""),
-    sl: String(c.tsl_sl_points ?? 20),
-    trail: String(c.tsl_trail_points ?? 10),
-    target: String(c.tsl_target_points ?? 0),
+    sl: String(pct ? c.tsl_sl_pct ?? 1 : c.tsl_sl_points ?? 20),
+    trail: String(pct ? c.tsl_trail_pct ?? 0.5 : c.tsl_trail_points ?? 10),
+    target: String(pct ? c.tsl_target_pct ?? 0 : c.tsl_target_points ?? 0),
+    unit,
   };
 }
 
 /** What stop the stock uses now, in words. */
 function stopInUse(c: StockConfig): string {
   if (c.use_stop === false) return "Stop is OFF";
-  if (c.stop_type === "TSL") return "Trailing stop (₹)";
+  if (c.stop_type === "TSL") return c.tsl_mode === "PERCENT" ? "Trailing stop (%)" : "Trailing stop (₹)";
+  if (c.stop_type === "SUPERTREND") return `Supertrend stop (${c.st_period ?? 10}, ×${c.st_mult ?? 3})`;
   if (c.stop_type === "SMA_GAP") return `SMA gap stop (×${c.gap_sl_mult ?? 1})`;
   return `ATR stop (${c.atr_multiplier ?? 1.5}× ATR)`;
 }
@@ -96,9 +101,11 @@ export function ArmPrompt({
     if (!f) return null;
     const qty = num(f.qty);
     if (!Number.isInteger(qty) || qty < 1) return "Quantity is a whole number, 1 or more.";
-    if (!(num(f.sl) > 0)) return "Stop loss is more than ₹0.";
-    if (!(num(f.trail) > 0)) return "Trail is more than ₹0.";
-    if (!(num(f.target) >= 0)) return "Target is ₹0 (none) or more.";
+    const u = f.unit === "PERCENT" ? "0%" : "₹0";
+    if (!(num(f.sl) > 0)) return `Stop loss is more than ${u}.`;
+    if (!(num(f.trail) > 0)) return `Trail is more than ${u}.`;
+    if (!(num(f.target) >= 0)) return `Target is ${u} (none) or more.`;
+    if (f.unit === "PERCENT" && (num(f.sl) > 50 || num(f.trail) > 50 || num(f.target) > 100)) return "Percent stops are at most 50% (target 100%).";
     return null;
   })();
 
@@ -108,15 +115,15 @@ export function ArmPrompt({
     const base = fieldsOf(cfg);
     const body: Partial<SmaConfig> = {};
     if (num(f.qty) !== num(base.qty)) body.qty = num(f.qty);
-    const stopChanged = f.sl !== base.sl || f.trail !== base.trail || f.target !== base.target;
+    const stopChanged = f.unit !== base.unit || f.sl !== base.sl || f.trail !== base.trail || f.target !== base.target;
     if (stopChanged) {
-      Object.assign(body, {
-        stop_type: "TSL",
-        use_stop: true,
-        tsl_sl_points: num(f.sl),
-        tsl_trail_points: num(f.trail),
-        tsl_target_points: num(f.target),
-      });
+      Object.assign(
+        body,
+        { stop_type: "TSL", use_stop: true, tsl_mode: f.unit },
+        f.unit === "PERCENT"
+          ? { tsl_sl_pct: num(f.sl), tsl_trail_pct: num(f.trail), tsl_target_pct: num(f.target) }
+          : { tsl_sl_points: num(f.sl), tsl_trail_points: num(f.trail), tsl_target_points: num(f.target) }
+      );
     }
     return body;
   };
@@ -147,12 +154,14 @@ export function ArmPrompt({
   const stopChanged = (() => {
     if (!cfg || !f) return false;
     const base = fieldsOf(cfg);
-    return f.sl !== base.sl || f.trail !== base.trail || f.target !== base.target;
+    return f.unit !== base.unit || f.sl !== base.sl || f.trail !== base.trail || f.target !== base.target;
   })();
   const own = cfg?.own ?? {};
   const fromStock = (keys: (keyof SmaConfig)[]) => keys.some((k) => k in own);
 
-  const row = (label: string, key: keyof Fields, hint: string, ownKeys: (keyof SmaConfig)[], unit = "₹") => (
+  const pct = f?.unit === "PERCENT";
+  const money = (v: string) => (pct ? `${v}%` : `₹${v}`);
+  const row = (label: string, key: Exclude<keyof Fields, "unit">, hint: string, ownKeys: (keyof SmaConfig)[], unit = "₹") => (
     <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
       <div>
         <div className="text-slate-200">{label}</div>
@@ -172,7 +181,7 @@ export function ArmPrompt({
         />
       ) : (
         <span className="font-mono font-semibold text-slate-100">
-          {f ? (unit === "₹" ? `₹${f[key]}` : f[key]) : "…"}
+          {f ? (unit === "₹" ? money(f[key]) : f[key]) : "…"}
           {key === "target" && f && num(f.target) === 0 ? <span className="ml-1 text-xs font-normal text-slate-400">(none)</span> : null}
         </span>
       )}
@@ -208,9 +217,34 @@ export function ArmPrompt({
         {cfg && f ? (
           <div className="divide-y divide-white/5">
             {row("Quantity", "qty", "Shares per order", ["qty"], "")}
-            {row("Stop loss", "sl", "₹ from the entry price", ["tsl_sl_points", "stop_type", "use_stop"])}
-            {row("Trail stop loss", "trail", "Moves the stop ₹ per ₹ gained", ["tsl_trail_points"])}
-            {row("Target", "target", "₹ from entry, 0 = none", ["tsl_target_points"])}
+            <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
+              <div>
+                <div className="text-slate-200">Trailing stop in</div>
+                <div className="text-xs text-slate-500">₹ points, or % of the entry price (worked out at each fill)</div>
+              </div>
+              <div className="flex overflow-hidden rounded-md border border-white/15" role="group" aria-label="Trailing stop unit">
+                {(["POINTS", "PERCENT"] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    aria-pressed={f.unit === u}
+                    disabled={!editing && f.unit !== u}
+                    onClick={() => {
+                      if (f.unit === u) return;
+                      setEditing(true);
+                      // Switching unit shows that unit's saved numbers (or the defaults).
+                      setF({ ...fieldsOf(cfg, u), qty: f.qty });
+                    }}
+                    className={f.unit === u ? "h-8 bg-accentSky/15 px-2.5 text-xs font-semibold text-accentSky" : "h-8 px-2.5 text-xs text-slate-300 hover:bg-white/5 disabled:opacity-40"}
+                  >
+                    {u === "POINTS" ? "₹" : "%"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {row("Stop loss", "sl", pct ? "% below / above the entry price" : "₹ from the entry price", ["tsl_sl_points", "tsl_sl_pct", "tsl_mode", "stop_type", "use_stop"])}
+            {row("Trail stop loss", "trail", pct ? "Moves the stop this % per same % gained" : "Moves the stop ₹ per ₹ gained", ["tsl_trail_points", "tsl_trail_pct"])}
+            {row("Target", "target", pct ? "% from entry, 0 = none" : "₹ from entry, 0 = none", ["tsl_target_points", "tsl_target_pct"])}
             <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
               <div>
                 <div className="text-slate-200">Entry price</div>

@@ -70,7 +70,7 @@ const GAP_EXITS: Toggle[] = [
 ];
 
 const BB_LABEL: Record<BbExit, string> = { OFF: "Off", BAND: "Band", MIDDLE: "Middle", BOTH: "Both" };
-const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap" };
+const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap", SUPERTREND: "Supertrend" };
 type PatternTf = "1" | "3" | "5" | "10" | "15";
 const PATTERN_TFS: PatternTf[] = ["1", "3", "5", "10", "15"];
 const PATTERN_TF_LABEL: Record<PatternTf, string> = { "1": "1 min", "3": "3 min", "5": "5 min", "10": "10 min", "15": "15 min" };
@@ -458,8 +458,12 @@ export function StrategySummary({
                   <span className="block text-xs text-slate-400">
                     {stopOn
                       ? c.stop_type === "TSL"
-                        ? `TSL ₹${c.tsl_sl_points ?? 20} · trail ₹${c.tsl_trail_points ?? 10}`
-                        : c.stop_type === "SMA_GAP"
+                        ? c.tsl_mode === "PERCENT"
+                          ? `TSL ${c.tsl_sl_pct ?? 1}% · trail ${c.tsl_trail_pct ?? 0.5}%`
+                          : `TSL ₹${c.tsl_sl_points ?? 20} · trail ₹${c.tsl_trail_points ?? 10}`
+                        : c.stop_type === "SUPERTREND"
+                          ? `Supertrend line (${c.st_period ?? 10}, ×${c.st_mult ?? 3})`
+                          : c.stop_type === "SMA_GAP"
                           ? `SMA gap ×${c.gap_sl_mult ?? 1} · target ×${c.gap_tp_mult ?? 2}`
                           : `${c.atr_multiplier}× ATR`
                       : "no stop order on new entries"}
@@ -491,7 +495,7 @@ export function StrategySummary({
               </p>
             ) : null}
             {stopOn
-              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP"], STOP_LABEL, (v) =>
+              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP", "SUPERTREND"], STOP_LABEL, (v) =>
                   save({ stop_type: v }, `Stop type ${STOP_LABEL[v]}`)
                 )
               : null}
