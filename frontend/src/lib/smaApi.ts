@@ -168,6 +168,9 @@ export type SmaConfig = {
   slope_turn_pct?: number;
   /** SMA 9 V-turn exit: a steep slope with the trade, then a steep one against it within N candles. */
   vturn_exit?: boolean;
+  /** SMA 9 turn (turn_entry.py): a Telegram, and / or an order at once, on the candle the fast SMA makes a V. */
+  turn_alert?: boolean;
+  turn_entry?: boolean;
   vturn_move_pct?: number;
   vturn_turn_pct?: number;
   vturn_within?: number;

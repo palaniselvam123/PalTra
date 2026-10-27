@@ -68,6 +68,7 @@ import tall_pullback
 import extreme_entry
 import entry_candle
 import slope_exit
+import turn_entry
 import recovery
 import pivots
 import breakout
@@ -137,6 +138,7 @@ ENTRY_REASONS = (
     "FORCE_ORDER",
     "NEWS",
     "HANDOFF",
+    "SMA9_TURN",
 )
 
 
@@ -277,6 +279,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
+    "turn_alert", "turn_entry",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -913,6 +916,10 @@ class StrategyEngine:
         self._joined_today: set[str] = set()
         # Early reversal entry (counter_candles.py): the SMA run each stock was entered against.
         self._counter_done: dict[str, tuple[str, int]] = {}
+        # SMA 9 turn (turn_entry.py): the last closed candle read, the turn on it, and the turn already acted on.
+        self._turn_seen: dict[str, int] = {}
+        self._turn_hit: dict[str, tuple[int, str, str]] = {}
+        self._turn_done: dict[str, int] = {}
         # Re-entry after a counter-candle exit (counter_candles.py): the exit waiting to be undone
         # (signal side, SMA run start, exit candle's level, exit candle ts), and re-entries used per SMA run.
         self._reentry: dict[str, tuple[str, int, float, int]] = {}
@@ -1418,7 +1425,7 @@ class StrategyEngine:
         for table in (
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
-            self._tapes, self._review_bar, self._review_episode,
+            self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1473,6 +1480,7 @@ class StrategyEngine:
             return ""
         symbol = (cfg.symbol or "").upper()
         self._focus = symbol
+        turn = self._turn_now(symbol, frame, cfg)
         if uses_patterns(cfg):
             return await self._pattern_minute(symbol, frame, cfg, now)
         if uses_colour(cfg):
@@ -1482,7 +1490,7 @@ class StrategyEngine:
         # stock was armed, is skipped. The next cross on a newer closed bar
         # is the one that may trade. Being flat does not enter early.
         stale = self._cross_is_stale(symbol, frame)
-        if stale and not join_trend.enabled(cfg):
+        if stale and not join_trend.enabled(cfg) and not (turn is not None and turn_entry.entry_on(cfg)):
             text = f"{symbol} no order — that cross already printed, waiting for a new cross. {_filter_note(cfg)}"
             self._signals[symbol] = text
             self.last_signal = text
@@ -1491,6 +1499,10 @@ class StrategyEngine:
         signal, signal_frame = (None, None) if stale else _signal_on_unjudged_bars(frame, self._judged_bar.get(symbol))
         if uses_gap_mode(cfg):
             return await self._gap_minute(symbol, signal, signal_frame, frame, cfg, now)
+        if (signal is None or signal_frame is None) and turn is not None and turn_entry.entry_on(cfg):
+            text = await self._turn_minute(symbol, turn, frame, cfg, now)
+            if text is not None:
+                return text
         if (signal is None or signal_frame is None) and symbol in self._late_pending:
             return await self._late_minute(symbol, frame, cfg, now)
         if signal is None or signal_frame is None:
@@ -1563,6 +1575,56 @@ class StrategyEngine:
             text = f"{symbol} no order — gave up joining the {direction} trend today: {result}"
         else:
             text = f"{symbol} no order — {result}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
+
+    def _turn_now(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig) -> tuple[int, str, str] | None:
+        """The SMA 9 turn printed on the newest closed candle (turn_entry.py), read once per candle; alerts once.
+
+        The first candle read for a stock only sets the mark: a turn from before it was armed is old news."""
+        if not turn_entry.watched(cfg):
+            return None
+        ts = _closed_bar_ts(frame)
+        if ts is None:
+            return None
+        last = self._turn_seen.get(symbol)
+        self._turn_seen[symbol] = ts
+        if last is None:
+            return None
+        if last != ts:
+            found = turn_entry.detect(frame.iloc[:-1], int(cfg.sma_fast), cfg)
+            if found is None:
+                self._turn_hit.pop(symbol, None)
+            else:
+                self._turn_hit[symbol] = (ts, found[0], found[1])
+                if turn_entry.alert_on(cfg):
+                    bot = getattr(cfg, "bot_name", None) or f"Bot {self.bot_id}"
+                    price = _finite(frame.iloc[-2].get("close"))
+                    self._alert(turn_entry.alert_text(bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg)))
+        hit = self._turn_hit.get(symbol)
+        return hit if hit is not None and hit[0] == ts else None
+
+    async def _turn_minute(
+        self, symbol: str, turn: tuple[int, str, str], frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime
+    ) -> str | None:
+        """SMA 9 turn entry (turn_entry.py): order on the turn's side through the usual entry path, once per turn."""
+        ts, want, note = turn
+        if self._turn_done.get(symbol) == ts:
+            return None
+        held = self.positions.get(symbol)
+        if held is not None and held.signal_direction == want:
+            self._turn_done[symbol] = ts
+            return None
+        sig = "BULLISH" if want == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, frame, cfg, now, alert=False, why=turn_entry.ENTRY_REASON)
+        if result.startswith("blocked — order PENDING"):
+            return result
+        self._turn_done[symbol] = ts
+        if result.startswith("opened") or result.startswith("reversed"):
+            text = f"{result} — {note}"
+        else:
+            text = f"{symbol} no order on the SMA {want} turn ({note}): {result}"
         self._signals[symbol] = text
         self.last_signal = text
         return text

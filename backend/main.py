@@ -429,6 +429,8 @@ class ConfigUpdate(BaseModel):
     slope_turn: bool | None = None
     slope_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_exit: bool | None = None
+    turn_alert: bool | None = None
+    turn_entry: bool | None = None
     vturn_move_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
@@ -1022,6 +1024,8 @@ def _gap_dict(row) -> dict:
         "slope_turn": slope_mod.turn_on(row),
         "slope_turn_pct": slope_mod.turn_pct(row),
         "vturn_exit": slope_mod.vturn_on(row),
+        "turn_alert": bool(getattr(row, "turn_alert", False)),
+        "turn_entry": bool(getattr(row, "turn_entry", False)),
         "vturn_move_pct": slope_mod.vturn_move_pct(row),
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),

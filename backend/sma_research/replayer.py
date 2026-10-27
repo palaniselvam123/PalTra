@@ -54,6 +54,8 @@ BASELINE_OFF = {
     "extreme_entry": False,
     "slope_exit": False,
     "vturn_exit": False,
+    "turn_alert": False,
+    "turn_entry": False,
     "vturn_handoff": False,
     "handoff_now": False,
     "pivot_target": "OFF",
