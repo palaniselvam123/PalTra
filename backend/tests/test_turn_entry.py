@@ -424,3 +424,34 @@ async def test_the_sma9_vturn_exit_waits_for_a_red_candle():
     eng._frames["Y"] = red
     await eng._watch_slope_exit(cfg)
     assert exits == [slope_exit.VTURN_EXIT]
+
+
+@pytest.mark.asyncio
+async def test_the_candle_bought_partway_into_does_not_count():
+    """FEDERALBNK, 15-minute candles: bought at 11:35 inside a red 11:30 candle; only a later red candle closes it."""
+    cfg = SimpleNamespace(symbol="FEDERALBNK", turn_colour_exit=True, candle_minutes=15)
+    eng, exits = _held_engine("FEDERALBNK")
+    start = 1_700_000_000
+    eng.positions["FEDERALBNK"].entry_time = dt.datetime.fromtimestamp(start + 5 * 60, dt.timezone.utc)
+
+    def frame(colours):
+        rows = []
+        for i, c in enumerate(colours + ["g"]):
+            o, cl = (100.0, 100.5) if c == "g" else (100.5, 100.0)
+            rows.append({"ts": start + 900 * i, "open": o, "high": 101.0, "low": 99.5, "close": cl})
+        return pd.DataFrame(rows)
+
+    eng._frames["FEDERALBNK"] = frame(["r"])  # the entry candle closed red: not counted
+    await eng._watch_turn_colour(cfg)
+    eng._frames["FEDERALBNK"] = frame(["r", "g"])  # the next candle green: kept
+    await eng._watch_turn_colour(cfg)
+    assert exits == []
+    eng._frames["FEDERALBNK"] = frame(["r", "g", "r"])  # a red candle after the buy: closed
+    await eng._watch_turn_colour(cfg)
+    assert exits == [turn_entry.COLOUR_EXIT]
+    # A buy at the open of a candle (within the first minute) does count that candle.
+    eng2, exits2 = _held_engine("FEDERALBNK")
+    eng2.positions["FEDERALBNK"].entry_time = dt.datetime.fromtimestamp(start + 10, dt.timezone.utc)
+    eng2._frames["FEDERALBNK"] = frame(["r"])
+    await eng2._watch_turn_colour(cfg)
+    assert exits2 == [turn_entry.COLOUR_EXIT]

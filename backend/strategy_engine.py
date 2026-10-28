@@ -3750,8 +3750,10 @@ class StrategyEngine:
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
             return  # restored after a restart without its stop id: left to that stop
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        if closed_ts + candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60 <= opened.timestamp():
-            return  # that candle closed before the entry
+        if opened.timestamp() - closed_ts > TURN_COLOUR_GRACE_SEC:
+            # The candle had opened before the entry (or the trade bought partway into it): its colour is
+            # mostly the price before the trade, so only candles that open with or after the entry count.
+            return
         pos.tc_bar = closed_ts
         if not turn_entry.candle_against(frame.iloc[-2], pos.signal_direction):
             return
@@ -5630,6 +5632,10 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 
 
 # Exits the bot sends itself while an exchange stop may still be working.
+# The turn-trade colour exit counts a candle only when the trade opened within this many seconds of its start
+# (an entry at the candle's open, judged a pass or two after the candle before it closed).
+TURN_COLOUR_GRACE_SEC = 60
+
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST",

@@ -41,7 +41,7 @@ The same switch holds the SMA 9 slope / V-turn exits (slope_exit.py) too: a hit 
 own colour is held, and the next closed candle is judged again.
 
 **Close a turn trade on the other colour** (`turn_colour_exit`, off): a trade opened by a turn closes on the first
-candle closed after its entry that goes the other way (red for a long, green for a short; `COLOUR_TURN`, no reverse;
+candle that opens with or after its entry (one bought partway into is not counted) and goes the other way (red for a long, green for a short; `COLOUR_TURN`, no reverse;
 `StrategyEngine._watch_turn_colour`).
 
 A trade closed by a turn is saved as `SMA9_TURN_AGAINST` ("SMA 9 turned against").
