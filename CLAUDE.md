@@ -431,7 +431,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_watch_slope_exit`) on a candle of the trade's own colour (judged again on the next candle). **Close a turn trade on the
   other colour** (`turn_colour_exit`, off; `StrategyEngine._watch_turn_colour`, `OpenPosition.entry_why` / `tc_bar`, restored
   from `TradeLog.entry_reason`): a trade whose entry reason starts `SMA9_TURN` closes (`COLOUR_TURN`, via `_exit_now`, no
-  reverse) on the first candle closed after its entry of the other colour. A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
+  reverse) on the first candle of the other colour that opened with or after its entry (`TURN_COLOUR_GRACE_SEC` 60: a candle
+  bought partway into is not counted). A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
   instead of recovery hold's `PROFITABLE_TREND_EXHAUSTION`); the alert says when it waits or points away. Settings → 1. When
   to enter (the V numbers are in 3. When to exit, V-turn). The stock research baseline keeps all of them off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
