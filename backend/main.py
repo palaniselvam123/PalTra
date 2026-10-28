@@ -272,9 +272,24 @@ def _boot_backtest_server() -> asyncio.Task:
         lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
+    # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
+    # so it does not stop itself between two passes.
+    chop_autos.reload()
+    chop_autos.start_loop(_chop_auto_start)
+    backtest_server.add_busy_check(_auto_scans_due)
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     return _task
+
+
+def _auto_scans_due(now: dt.datetime | None = None) -> bool:
+    """Backtest server: the auto re-scan or a scheduled Scan & arm wants this machine during market hours."""
+    now = now or dt.datetime.now(IST)
+    if _scans_paused or not market_is_open(now):
+        return False
+    if chop_autos.settings.on:
+        return True
+    return any(p.on and p.times for p in scan_arm.load())
 
 
 def _all_bots() -> list[StrategyEngine]:
