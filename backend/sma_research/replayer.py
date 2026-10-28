@@ -50,6 +50,7 @@ BASELINE_OFF = {
     "use_ema": False,
     "ema_exit": False,
     "use_supertrend": False,
+    "use_level": False,
     "tall_pullback": False,
     "extreme_entry": False,
     "slope_exit": False,

@@ -145,6 +145,9 @@ export type SmaConfig = {
   ema_slow?: number;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
   use_supertrend?: boolean;
+  /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */
+  use_level?: boolean;
+  level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1";
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;

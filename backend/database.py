@@ -127,6 +127,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "ema_fast": "INTEGER DEFAULT 9",
             "ema_slow": "INTEGER DEFAULT 200",
             "use_supertrend": "BOOLEAN DEFAULT 0",
+            "use_level": "BOOLEAN DEFAULT 0",
+            "level_line": "VARCHAR DEFAULT 'BB_MIDDLE'",
             "st_exit": "BOOLEAN DEFAULT 0",
             "st_period": "INTEGER DEFAULT 10",
             "st_mult": "FLOAT DEFAULT 3.0",

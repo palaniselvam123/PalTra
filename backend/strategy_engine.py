@@ -69,6 +69,7 @@ import extreme_entry
 import entry_candle
 import slope_exit
 import turn_entry
+import level_check
 import day_extreme
 import recovery
 import pivots
@@ -276,7 +277,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_supertrend", "st_exit", "st_period", "st_mult",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
@@ -497,6 +498,10 @@ def _entry_block(
         st = supertrend.entry_reason(frame, direction, cfg)
         if st:
             reason = f"{reason}; {st}" if reason else st
+    if on("level"):
+        lvl = level_check.entry_reason(frame, direction, cfg)
+        if lvl:
+            reason = f"{reason}; {lvl}" if reason else lvl
     if any(on(name) for name in opening_range.CHECKS):
         opening = opening_range.entry_reason(frame, direction, cfg, only=only)
         if opening:
@@ -597,6 +602,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("ST")
         elif low.startswith("opening"):
             parts.append("Open range")
+        elif low.startswith("price level"):
+            parts.append("Level")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -658,7 +665,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"), ("level", "Price level"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
 
@@ -708,6 +715,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return ema_filter.passed_text(frame, direction, cfg)
         if name == "supertrend":
             return supertrend.passed_text(frame, direction, cfg)
+        if name == "level":
+            return level_check.passed_text(frame, direction, cfg)
         if name in opening_range.CHECKS:
             return opening_range.passed_text(frame, direction, cfg, name)
         if name == "density":
@@ -787,7 +796,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_supertrend", "st_exit", "st_period", "st_mult",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
 
@@ -5665,6 +5674,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("EMA")
     if bool(getattr(cfg, "use_supertrend", False)):
         checked.append("Supertrend")
+    if bool(getattr(cfg, "use_level", False)):
+        checked.append("price level")
     if opening_range.any_on(cfg):
         checked.append("opening range")
     if bool(getattr(cfg, "use_adx_filter", False)):
