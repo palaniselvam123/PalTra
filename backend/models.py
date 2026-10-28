@@ -382,6 +382,8 @@ class BotConfig(Base):
     # of the other colour only.
     turn_toward_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     turn_exit_candle: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # A trade opened by a turn closes on the first candle of the other colour (turn_entry.py).
+    turn_colour_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     uturn_run: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

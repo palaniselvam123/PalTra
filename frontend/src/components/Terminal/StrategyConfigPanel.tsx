@@ -74,7 +74,8 @@ const LABELS: Record<string, string> = {
   turn_entry: "SMA 9 turn entry",
   uturn_on: "rounded U turns",
   turn_toward_cross: "turns only toward the 9/21 cross",
-  turn_exit_candle: "turn closes on a candle of the other colour",
+  turn_exit_candle: "SMA 9 turns and exits close on a candle of the other colour",
+  turn_colour_exit: "turn trades close on the first candle of the other colour",
   uturn_run: "U: run before (candles)",
   uturn_min_pct: "U: slope at least",
   use_ema: "EMA entry",
@@ -316,6 +317,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     uturn_on: Boolean(form.uturn_on),
     turn_toward_cross: Boolean(form.turn_toward_cross),
     turn_exit_candle: Boolean(form.turn_exit_candle),
+    turn_colour_exit: Boolean(form.turn_colour_exit),
     uturn_run: Math.min(30, Math.max(2, Math.round(Number(form.uturn_run ?? 5)) || 5)),
     uturn_min_pct: Math.min(1, Math.max(0, Number(form.uturn_min_pct ?? 0.005) || 0)),
     use_ema: Boolean(form.use_ema),
@@ -857,12 +859,30 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("turn_exit_candle") && <OwnTag />}
-            A turn closes a trade only on a candle of the other colour
+            SMA 9 turns and SMA 9 exits close a trade only on a candle of the other colour
             <InfoTip label="About waiting for the candle colour">
               SMA 9 is an average of the last 9 candles, so it can turn down on a green candle. With this on, a turn against an
               open long closes it only when a red candle closes (a short: a green one). A turn on a candle of the trade&apos;s own
-              colour waits: the first later red (or green) candle closes the trade and, when allowed, reverses it. The wait ends
-              if SMA 9 swings back with the trade. The stop and every other exit still guard the trade meanwhile.
+              colour waits: the first later red (or green) candle closes the trade and, when allowed, orders the other way. The
+              wait ends if SMA 9 swings back with the trade. The SMA 9 slope and V-turn exits in step 3 wait the same way: a hit
+              on a candle of the trade&apos;s own colour is held and judged again on the next candle. The stop and the other exits
+              still guard the trade meanwhile.
+            </InfoTip>
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.turn_colour_exit)}
+              disabled={!form.turn_entry}
+              onChange={(e) => set("turn_colour_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("turn_colour_exit") && <OwnTag />}
+            Close a turn trade on the first candle of the other colour
+            <InfoTip label="About closing a turn trade on the candle colour">
+              A trade opened by an SMA 9 turn closes on the first candle that closes the other way after its entry: red for a
+              long, green for a short (saved as &quot;Colour turned&quot;). No reverse: the next turn opens the next trade.
+              Trades opened by a cross, gap mode or anything else are not affected. The stop and the other exits still apply.
             </InfoTip>
           </label>
           {form.uturn_on ? (
@@ -2345,7 +2365,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });
   if (f.turn_toward_cross && f.turn_entry) add({ group: "enter", key: "turn_toward_cross", text: "SMA 9 turns trade only toward the 9/21 cross (sell above, buy below)", off: { turn_toward_cross: false } });
-  if (f.turn_exit_candle && f.turn_entry) add({ group: "exit", key: "turn_exit_candle", text: "A turn closes a trade only once a candle of the other colour closes", off: { turn_exit_candle: false } });
+  if (f.turn_exit_candle && f.turn_entry) add({ group: "exit", key: "turn_exit_candle", text: "SMA 9 turns and SMA 9 exits close a trade only once a candle of the other colour closes", off: { turn_exit_candle: false } });
+  if (f.turn_colour_exit && f.turn_entry) add({ group: "exit", key: "turn_colour_exit", text: "A turn trade closes on the first candle of the other colour", off: { turn_colour_exit: false } });
   if (f.uturn_on && (f.turn_entry || f.turn_alert)) add({ group: "enter", key: "uturn_on", text: `Rounded U turns count too (after ${f.uturn_run ?? 5} candles one way)`, off: { uturn_on: false } });
   if (f.turn_alert) add({ group: "enter", key: "turn_alert", text: `Telegram when the SMA ${fast} line makes a sharp V`, off: { turn_alert: false } });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });

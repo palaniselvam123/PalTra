@@ -37,6 +37,13 @@ on a candle of the trade's own colour waits (`StrategyEngine._turn_wait`): the f
 candle of the other colour closes it (and reverses when allowed); the wait ends when the SMA 9 slope
 swings back with the trade by the turn-back level, or the trade closes.
 
+The same switch holds the SMA 9 slope / V-turn exits (slope_exit.py) too: a hit on a candle of the trade's
+own colour is held, and the next closed candle is judged again.
+
+**Close a turn trade on the other colour** (`turn_colour_exit`, off): a trade opened by a turn closes on the first
+candle closed after its entry that goes the other way (red for a long, green for a short; `COLOUR_TURN`, no reverse;
+`StrategyEngine._watch_turn_colour`).
+
 A trade closed by a turn is saved as `SMA9_TURN_AGAINST` ("SMA 9 turned against").
 """
 from __future__ import annotations
@@ -47,6 +54,7 @@ import slope_exit
 
 ENTRY_REASON = "SMA9_TURN"
 EXIT_REASON = "SMA9_TURN_AGAINST"
+COLOUR_EXIT = "COLOUR_TURN"
 DEFAULT_U_RUN = 5
 MAX_U_RUN = 30
 DEFAULT_U_MIN = 0.005
@@ -74,6 +82,10 @@ def toward_on(cfg) -> bool:
 
 def exit_candle_on(cfg) -> bool:
     return bool(getattr(cfg, "turn_exit_candle", False))
+
+
+def colour_exit_on(cfg) -> bool:
+    return bool(getattr(cfg, "turn_colour_exit", False))
 
 
 def toward_cross(closed: pd.DataFrame, direction: str) -> bool:

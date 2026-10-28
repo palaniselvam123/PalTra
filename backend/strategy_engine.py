@@ -231,6 +231,9 @@ class OpenPosition:
     rec_bar: int | None = None
     # Slow SMA exit (recovery.py): the last closed candle read.
     slow_bar: int | None = None
+    # Why the trade opened (TradeLog.entry_reason), and the last closed candle the turn-trade colour exit read.
+    entry_why: str = ""
+    tc_bar: int | None = None
 
     @property
     def signal_direction(self) -> str:
@@ -280,7 +283,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle",
+    "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
@@ -1089,6 +1092,7 @@ class StrategyEngine:
                     _strategy_of(row) or {},
                     getattr(row, "recovery_loss", None),
                     getattr(row, "recovery_bar", None),
+                    getattr(row, "entry_reason", None) or "",
                 )
                 for row in rows
             ]
@@ -1096,7 +1100,7 @@ class StrategyEngine:
             cfg = self.load_config()
         except Exception:  # noqa: BLE001
             cfg = None
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry, rec_loss, rec_bar in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry, rec_loss, rec_bar, why in pending:
             if not symbol or symbol in self.positions:
                 continue
             # The stop the trade was opened with: this stock's own settings,
@@ -1149,6 +1153,7 @@ class StrategyEngine:
                 recovery_loss=float(rec_loss) if rec_loss is not None else None,
                 recovery_bar=int(rec_bar) if rec_bar is not None else None,
                 rec_bar=int(rec_bar) if rec_bar is not None else None,
+                entry_why=why,
             )
 
     def _bot_rows(self):
@@ -1344,6 +1349,7 @@ class StrategyEngine:
             await self._watch_exit_candle(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_slope_exit(symbol_cfg)
+            await self._watch_turn_colour(symbol_cfg)
             await self._watch_slow_sma(symbol_cfg)
             await self._watch_recovery(symbol_cfg, now)
             await self._watch_gap_fade(symbol_cfg)
@@ -3247,6 +3253,7 @@ class StrategyEngine:
             high=fill,
             low=fill,
             flipped=flipped,
+            entry_why=why or "",
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -3707,6 +3714,11 @@ class StrategyEngine:
         if hit is None:
             return
         reason, note = hit
+        if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(frame.iloc[-2], pos.signal_direction):
+            # Wait for a candle of the other colour (turn_exit_candle); the next candle is judged again.
+            colour = "red" if pos.signal_direction == "LONG" else "green"
+            self._signals[symbol] = f"{symbol} {note} — held until a {colour} candle closes"
+            return
         self._signals[symbol] = f"{symbol} SMA 9 slope exit — {note}"
         price, live = self.ltp, (pos.mode or "PAPER").upper() == "LIVE"
         await self._exit_now(cfg, price, reason)
@@ -3721,6 +3733,31 @@ class StrategyEngine:
             text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
             self._signals[symbol] = text
             self._alert(text)
+
+    async def _watch_turn_colour(self, cfg: BotConfig) -> None:
+        """A trade opened by an SMA 9 turn closes on the first candle of the other colour closed after its entry
+        (turn_colour_exit, turn_entry.py): red for a long, green for a short. No reverse."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not turn_entry.colour_exit_on(cfg) or self.ltp <= 0:
+            return
+        if not pos.entry_why.startswith(turn_entry.ENTRY_REASON):
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.tc_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            return  # restored after a restart without its stop id: left to that stop
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        if closed_ts + candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60 <= opened.timestamp():
+            return  # that candle closed before the entry
+        pos.tc_bar = closed_ts
+        if not turn_entry.candle_against(frame.iloc[-2], pos.signal_direction):
+            return
+        colour = "red" if pos.signal_direction == "LONG" else "green"
+        self._signals[symbol] = f"{symbol} SMA 9 turn trade closed on a {colour} candle"
+        await self._exit_now(cfg, self.ltp, turn_entry.COLOUR_EXIT)
 
     def _pivots(self, symbol: str, day: dt.date) -> dict | None:
         """Classic pivots for `day` from the stock's previous session (pivots.py); None until that day is loaded."""

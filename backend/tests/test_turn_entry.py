@@ -335,4 +335,92 @@ def test_api_saves_the_new_turn_switches(tmp_path, monkeypatch):
         assert got["turn_toward_cross"] is False and got["turn_exit_candle"] is False
         ok = client.put("/api/bots/4/config", json={"turn_toward_cross": True, "turn_exit_candle": True}).json()
         assert ok["turn_toward_cross"] is True and ok["turn_exit_candle"] is True
+        assert got["turn_colour_exit"] is False
+        assert client.put("/api/bots/4/config", json={"turn_colour_exit": True}).json()["turn_colour_exit"] is True
     database.reset_engine()
+
+
+# ---- SMA 9 exits wait for a candle of the other colour; a turn trade closes on the other colour -----------------
+
+
+def _held_engine(symbol, why="SMA9_TURN", direction="LONG"):
+    from strategy_engine import OpenPosition, StrategyEngine
+
+    eng = StrategyEngine()
+    eng.status = "RUNNING"
+    eng._focus = symbol
+    eng.positions[symbol] = OpenPosition(
+        direction=direction, qty=1, entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger=95.0,
+        sl_order_id="", entry_order_id="", entry_time=dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc), trade_id=1,
+        mode="PAPER", entry_why=why,
+    )
+    eng.ltp = 100.0
+    exits: list = []
+
+    async def exit_now(cfg, price, reason):
+        exits.append(reason)
+        eng.positions.pop(symbol, None)
+
+    eng._exit_now = exit_now
+    return eng, exits
+
+
+def _colour_frame(colours):
+    """Closed candles of the given colours ('g' / 'r') and one forming candle, a minute apart."""
+    rows = []
+    for i, c in enumerate(colours + ["g"]):
+        o, cl = (100.0, 100.5) if c == "g" else (100.5, 100.0)
+        rows.append({"ts": 1_700_000_000 + 60 * i, "open": o, "high": 101.0, "low": 99.5, "close": cl})
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_trade_closes_on_the_first_candle_of_the_other_colour():
+    cfg = SimpleNamespace(symbol="KARURVYSYA", turn_colour_exit=True, candle_minutes=1)
+    eng, exits = _held_engine("KARURVYSYA")
+    eng._frames["KARURVYSYA"] = _colour_frame(["g"])
+    await eng._watch_turn_colour(cfg)
+    assert exits == []  # a green candle keeps the long
+    eng._frames["KARURVYSYA"] = _colour_frame(["g", "r"])
+    await eng._watch_turn_colour(cfg)
+    assert exits == [turn_entry.COLOUR_EXIT]
+    # A trade opened by an SMA cross is left alone, and so is everything with the switch off.
+    eng2, exits2 = _held_engine("KARURVYSYA", why="SMA_CROSS")
+    eng2._frames["KARURVYSYA"] = _colour_frame(["g", "r"])
+    await eng2._watch_turn_colour(cfg)
+    eng3, exits3 = _held_engine("KARURVYSYA")
+    eng3._frames["KARURVYSYA"] = _colour_frame(["g", "r"])
+    await eng3._watch_turn_colour(SimpleNamespace(symbol="KARURVYSYA", candle_minutes=1))
+    assert exits2 == [] and exits3 == []
+
+
+@pytest.mark.asyncio
+async def test_a_short_turn_trade_closes_on_a_green_candle():
+    cfg = SimpleNamespace(symbol="X", turn_colour_exit=True, candle_minutes=1)
+    eng, exits = _held_engine("X", why="SMA9_TURN:PULLBACK", direction="SHORT")
+    eng._frames["X"] = _colour_frame(["r", "g"])
+    await eng._watch_turn_colour(cfg)
+    assert exits == [turn_entry.COLOUR_EXIT]
+
+
+@pytest.mark.asyncio
+async def test_the_sma9_vturn_exit_waits_for_a_red_candle():
+    import slope_exit
+
+    closes = [100 + i * 0.1 for i in range(30)] + [102.9 - (i + 1) * 0.4 for i in range(4)]
+    rows = [{"ts": 1_700_000_000 + 60 * i, "open": c - 0.05, "high": c + 0.2, "low": c - 0.2, "close": c} for i, c in enumerate(closes)]
+    rows.append({**rows[-1], "ts": rows[-1]["ts"] + 60})
+    frame = pd.DataFrame(rows)  # every candle green (close above open) while SMA 9 turns down
+    cfg = SimpleNamespace(symbol="Y", vturn_exit=True, slope_exit=False, sma_fast=9, candle_minutes=1, turn_exit_candle=True)
+    eng, exits = _held_engine("Y", why="SMA_CROSS")
+    eng.positions["Y"].slope_state = {"hist": [0.1, 0.1, 0.1]}
+    eng._frames["Y"] = frame
+    assert slope_exit.vturn_on(cfg)
+    await eng._watch_slope_exit(cfg)
+    assert exits == [] and "held until a red candle closes" in eng._signals["Y"]
+    red = frame.copy()
+    red.loc[red.index[-2], "open"] = red.loc[red.index[-2], "close"] + 0.1
+    red["ts"] = red["ts"] + 60
+    eng._frames["Y"] = red
+    await eng._watch_slope_exit(cfg)
+    assert exits == [slope_exit.VTURN_EXIT]
