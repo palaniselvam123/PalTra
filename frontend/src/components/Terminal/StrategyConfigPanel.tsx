@@ -83,6 +83,8 @@ const LABELS: Record<string, string> = {
   ema_fast: "fast EMA",
   ema_slow: "slow EMA",
   use_supertrend: "Supertrend entry",
+  use_level: "price level entry check",
+  level_line: "price level line",
   st_exit: "Supertrend exit",
   slope_exit: "SMA 9 slope exit",
   slope_lookback: "slope over (candles)",
@@ -325,6 +327,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
     ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
     use_supertrend: Boolean(form.use_supertrend),
+    use_level: Boolean(form.use_level),
+    level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
     st_exit: Boolean(form.st_exit),
     slope_exit: Boolean(form.slope_exit),
     slope_lookback: Math.min(10, Math.max(1, Math.round(Number(form.slope_lookback ?? 2) || 2))),
@@ -1336,6 +1340,40 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_supertrend") && <OwnTag />}
             Buy only while it is green, sell only while red
           </label>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_level)}
+              onChange={(e) => set("use_level", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_level") && <OwnTag />}
+            Enter only beyond a price level
+            <InfoTip label="About the price level check">
+              The signal candle must close beyond the line picked below, on the trade&apos;s side: a buy above it, a sell below
+              it. Bollinger middle: the 20-candle average (Bollinger numbers in this step). Upper band: a buy above the upper
+              band, a sell below the lower band (only breakouts). Pivot P / R1: the day&apos;s pivot from the previous session; a
+              buy above P (or R1), a sell below P (or S1). When the line is not known yet (too few candles, no previous session)
+              the entry is refused. Read like the other checks, so with late entry on a refused signal can still enter once the
+              price gets there.
+            </InfoTip>
+          </label>
+          {form.use_level ? (
+            <label className="mt-2 flex flex-col gap-1 text-xs text-slate-400">
+              {isOwn("level_line") && <OwnTag />}
+              Price level (buy above / sell below)
+              <select
+                value={String(form.level_line ?? "BB_MIDDLE")}
+                onChange={(e) => set("level_line", e.target.value)}
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                <option value="BB_MIDDLE">Bollinger middle band</option>
+                <option value="BB_UPPER">Upper band for a buy, lower band for a sell</option>
+                <option value="PIVOT_P">Pivot P</option>
+                <option value="PIVOT_R1">R1 for a buy, S1 for a sell</option>
+              </select>
+            </label>
+          ) : null}
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
             <InfoTip label="About the opening range">
@@ -2390,6 +2428,16 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
   check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
+  check(
+    "use_level",
+    f.use_level,
+    {
+      BB_MIDDLE: "Price beyond the Bollinger middle band (buy above, sell below)",
+      BB_UPPER: "Price beyond the outer Bollinger band (buy above the upper, sell below the lower)",
+      PIVOT_P: "Price beyond the pivot P (buy above, sell below)",
+      PIVOT_R1: "Price beyond R1 / S1 (buy above R1, sell below S1)",
+    }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
+  );
   check("use_or_volume", f.use_or_volume, "Opening 15 min: volume check");
   check("use_or_vwap", f.use_or_vwap, "Opening 15 min: VWAP check");
   check("use_or_spread", f.use_or_spread, "Opening 15 min: SMA spread check");

@@ -390,6 +390,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
+  entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
+  `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /
+  `bb_std`), `BB_UPPER` (buy above the upper band, sell below the lower), `PIVOT_P` (the day's pivot P, `pivots.levels` on
+  the frame's previous session) or `PIVOT_R1` (buy above R1, sell below S1). A line not known yet refuses the entry.
+  Settings → 2. Checks before entering. The stock research baseline keeps it off.
 - `backend/slope_exit.py` – SMA 9 slope exit (`slope_exit`, off by default, per bot and per stock, PAPER and LIVE):
   the chart angle depends on zoom, so the fast SMA's slope is read in % per candle over `slope_lookback` (2) closed
   candles, signed with the trade's signal side. `StrategyEngine._watch_slope_exit`, once per candle closed after the

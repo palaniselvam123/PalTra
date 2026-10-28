@@ -36,6 +36,7 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_move
+import level_check
 import news_entry
 import arm_log
 import chop_auto
@@ -475,6 +476,8 @@ class ConfigUpdate(BaseModel):
     ema_fast: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
     ema_slow: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
     use_supertrend: bool | None = None
+    use_level: bool | None = None
+    level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
     st_exit: bool | None = None
     st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
     st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
@@ -1080,6 +1083,8 @@ def _gap_dict(row) -> dict:
         "ema_fast": ema_filter.lengths(row)[0],
         "ema_slow": ema_filter.lengths(row)[1],
         "use_supertrend": supertrend.entry_on(row),
+        "use_level": bool(getattr(row, "use_level", False)),
+        "level_line": level_check.line_of(row),
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
         "st_mult": supertrend.settings(row)[1],
