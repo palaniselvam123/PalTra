@@ -421,8 +421,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   off; `turn_entry._detect_u`): also fires on the first candle whose slope is at least `uturn_min_pct` (0.005) the new way
   after `uturn_run` (5, 2-30) candles at least that the other way (up to `U_MAX_FLAT` 10 near-flat candles of rounding in
   between); a V is read first, and a turn the same way within `SAME_TURN_CANDLES` (6) candles of the last one is the same
-  turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. Settings → 1. When to enter (the V numbers are in
-  3. When to exit, V-turn). The stock research baseline keeps all of them off.
+  turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. **Only toward the cross** (`turn_toward_cross`, off;
+  `turn_entry.toward_cross`): a turn opens a trade only when it points toward the 9/21 cross (down while SMA fast > slow, up
+  while below); a turn the other way opens nothing and, against an open trade, only closes it (`_turn_act` → `_exit_now`, no
+  reverse). **Close on a candle of the other colour** (`turn_exit_candle`, off; `turn_entry.candle_against`): a turn against an
+  open trade read on a candle of the trade's own colour waits in `StrategyEngine._turn_wait`; `_turn_wait_minute` closes it (and
+  reverses when allowed) on the first later closed candle of the other colour, and drops the wait when the SMA 9 slope swings
+  back with the trade by `vturn_turn_pct` or the trade closes. A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
+  instead of recovery hold's `PROFITABLE_TREND_EXHAUSTION`); the alert says when it waits or points away. Settings → 1. When
+  to enter (the V numbers are in 3. When to exit, V-turn). The stock research baseline keeps all of them off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the
@@ -464,6 +471,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candles, when the SMAs cross against the signal, at the cut-off or trade cap. The tall-candle pullback, the
   candle-extreme limit and a breakout arrival take over from it. Entry reason suffix `:CANDLE_CONFIRM`. Settings → 1.
   When to enter (How the entry order is placed). The stock research baseline keeps it off.
+- `backend/day_extreme.py` – day high/low guard (`day_extreme_guard`, off by default, per bot and per stock, PAPER and
+  LIVE): in a strong trend the signal candle often closes at the day's high (buy) or low (short). With it on, an entry
+  `apply_signal` would order at once (not candle patterns or candle colour) whose real side buys within `day_extreme_pct`
+  (0.15) % of today's high (sells within that of today's low; `day_range` on the bot's closed candles of that IST session)
+  waits as a `PullbackOrder` (`plan`) at the nearer of the fast SMA and `day_extreme_pull_pct` (0.15) % back from the
+  close; `_watch_pullbacks` fills it on the first price at or past that level (every check applies), dropped after
+  `day_extreme_candles` (3) closed candles, an SMA cross against it, the cut-off or trade cap: no pullback, no trade.
+  Entry reason suffix `:PULLBACK`. The tall-candle pullback and candle-extreme limit take over from it; it takes over
+  from the entry-candle check. Settings → 1. When to enter. The stock research baseline keeps it off.
 - `backend/recovery.py` – structural exit, recovery hold and the trend-to-chop handoff (all off by default,
   per bot and per stock, PAPER and LIVE; meant for the trend bot, Bot 3). **Slow SMA exit** (`slow_sma_exit`):
   `StrategyEngine._watch_slow_sma` closes a trade on the first candle closed after the entry beyond the slow SMA
@@ -733,7 +749,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   lists a bot's runs, `GET /api/open-pnl/replay/{run_id}?day=` gives one replayed day.
   UI: the Stocks bar's "P&L log" button (`OpenPnlLog`: Market days / Replays switch, run and day
   pickers, chart with hover, table, CSV; opens on Replays while the desk shows a replay).
+  **Per stock** (`open_pnl_log.by_stock`, `by_stock` on both routes): each traded stock's P&L at every logged minute
+  (its trades closed by that minute, `gross_pnl` from the trade book, plus its open P&L in the point). The log's Stocks
+  chips pick one or more: one line each plus their total, and the summary, table and CSV follow the pick.
   No order path; nothing in the strategy reads it.
+- `backend/fast_move.py` – fast-move alerts (off by default; alerts only, never trades; `fast_moves.json` next to the
+  SMA DB, `FAST_MOVE_FILE`): **armed and held** (`on`, desk only, `fast_move.watcher` started in `boot_engine`): every
+  `POLL_SEC` (5 s) while NSE is open, the bots' own last prices (`main._fast_move_prices`, no extra Groww call) of every
+  armed / held stock on Bots 1-4; a move of at least `pct` (0.5) % within `minutes` (3) alerts. **Scan** (`scan_on`):
+  after each Trend quality pass in market hours (`main._chop_done` → `_fast_move_scan`), rows whose 10-minute speed is at
+  least `scan_speed` (0.10) %/min either way, one message. Each stock once per `cooldown_min` (15); Telegram through
+  `alert_notifier.send`, a call too with `call` (`place_call`: market hours, 5-minute cooldown). `GET/PUT /api/fast-moves`;
+  Settings → "Fast-move alerts" (`components/Settings/FastMoveAlerts.tsx`).
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the
@@ -1022,6 +1049,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   ticked stocks to a list or a new one, open their news). On the scanner server the lists are the desk's, through the link
   (`useNewsLists`; scanner `GET /api/link/desk-news-lists`, `POST /api/link/desk-news-lists/add` → desk `/api/link/news-lists`
   `[/add]`, `SCANNER_LINK_TOKEN`), and "Open their news" opens the desk's News page.
+- `backend/app/services/news_validation.py` – news check, "Did it move?" (the News page's tab, `components/News/NewsCheck.tsx`;
+  read-only, never trades): for a day, each headline (the `NewsAlert` rows saved that day via `from_alert`, plus the news of
+  typed symbols and, with `armed`, every armed / held stock, `news_impact.analyze(use_ai=False, day=)`; out after the previous
+  weekday's 15:30, `for_day`) is set against that day's 1-minute candles from the terminal's `main.news_candles` (today's armed
+  stocks from the bots' `_tapes`, else `fetch_frame` on `_scan_broker()` one at a time after `groww_pressure.wait_for_bots`).
+  `measure`: news before 09:15 from the previous close (the gap counts), in the session from the open of its minute; the move
+  15 / 30 / 60 min later and at the close (in market hours: so far, `so_far`), best / worst move and minutes to the best;
+  signed the news' way; verdict `WITH` / `AGAINST` (closed `min_move` %, default 0.5, either way), `FADED`, `NO_EFFECT`,
+  `NEUTRAL`, `AFTER_CLOSE`, `PENDING`, `NO_DATA`. `summarize`: per positive / negative × high / medium / low (hit rate, average
+  signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a run. Desk
+  `GET /api/news-impact/validate?date=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's

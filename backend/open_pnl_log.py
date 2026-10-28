@@ -214,6 +214,27 @@ def points(day: str, desk: str) -> list[dict]:
     return [_point(r, r["mode"]) for r in out]
 
 
+def by_stock(series: list[dict], closed: list[tuple[str, str, float]]) -> dict[str, list[dict]]:
+    """Each stock's P&L through the day, one point per logged minute (before charges).
+
+    `closed` is the day's closed trades of that book as (symbol, exit "HH:MM", gross P&L). At each minute a
+    stock's total is its closed trades up to that minute plus its open P&L in the point."""
+    names = sorted({s.get("symbol") for p in series for s in p.get("stocks") or [] if s.get("symbol")} | {c[0] for c in closed})
+    out: dict[str, list[dict]] = {}
+    for name in names:
+        mine = sorted((at, g) for sym, at, g in closed if sym == name)
+        rows = []
+        for p in series:
+            minute = str(p["t"])[11:16]
+            done = round(sum(g for at, g in mine if at <= minute), 2)
+            held = next((s for s in p.get("stocks") or [] if s.get("symbol") == name), None)
+            opened = float(held.get("gross", held.get("net")) or 0.0) if held else 0.0
+            rows.append({"t": p["t"], "closed": done, "open": round(opened, 2), "total": round(done + opened, 2),
+                         "side": held.get("side") if held else None})
+        out[name] = rows
+    return out
+
+
 def summary(series: list[dict], key: str = "total_gross") -> dict | None:
     """High, low and last of the day's P&L (closed + open, before charges by default), with when."""
     if not series:

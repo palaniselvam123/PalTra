@@ -54,6 +54,11 @@ def test_alert_text_says_whether_it_orders():
     msg = turn_entry.alert_text("Bot 3", "ASHOKLEY", "SHORT", "SMA 9 turned down", 142.97, entry=False)
     assert "▼ ASHOKLEY" in msg and "₹142.97" in msg and "Alert only" in msg
     assert "orders a buy" in turn_entry.alert_text("Bot 3", "X", "LONG", "n", None, entry=True)
+    # Already on the turn's side: the bot keeps the trade and orders nothing, and the alert says so.
+    same = turn_entry.alert_text("Bot 4", "DABUR", "SHORT", "n", 360.4, entry=True, held="SHORT")
+    assert "already holds a short" in same and "orders" not in same
+    rev = turn_entry.alert_text("Bot 4", "DABUR", "SHORT", "n", 360.4, entry=True, held="LONG")
+    assert "closes its long and orders a short" in rev
 
 
 def _v_day() -> pd.DataFrame:
@@ -201,4 +206,133 @@ def test_api_saves_the_u_settings(tmp_path, monkeypatch):
         ok = client.put("/api/bots/2/config", json={"uturn_on": True, "uturn_run": 8, "uturn_min_pct": 0.01})
         assert ok.status_code == 200 and ok.json()["uturn_run"] == 8
         assert client.put("/api/bots/2/config", json={"uturn_run": 1}).status_code == 422
+    database.reset_engine()
+
+
+# ---- only toward the cross, and closing on a candle of the other colour ------------------------------------------
+
+
+def _bars(rows):
+    """[(open, close, sma_fast, sma_slow), ...] plus one forming candle, one a minute."""
+    out = [{"ts": 60 * i, "open": o, "close": c, "sma_fast": f, "sma_slow": s} for i, (o, c, f, s) in enumerate(rows)]
+    out.append({**out[-1], "ts": out[-1]["ts"] + 60})
+    return pd.DataFrame(out)
+
+
+def test_toward_cross_and_candle_colour():
+    above = _bars([(100, 101, 101.0, 100.0)]).iloc[:-1]
+    assert turn_entry.toward_cross(above, "SHORT") and not turn_entry.toward_cross(above, "LONG")
+    below = _bars([(100, 101, 99.0, 100.0)]).iloc[:-1]
+    assert turn_entry.toward_cross(below, "LONG") and not turn_entry.toward_cross(below, "SHORT")
+    assert not turn_entry.toward_cross(pd.DataFrame({"close": [1.0]}), "LONG")  # SMAs unknown: not toward
+    green, red = {"open": 100, "close": 101}, {"open": 101, "close": 100}
+    assert turn_entry.candle_against(red, "LONG") and not turn_entry.candle_against(green, "LONG")
+    assert turn_entry.candle_against(green, "SHORT") and not turn_entry.candle_against(red, "SHORT")
+
+
+def test_alert_says_away_and_wait():
+    away = turn_entry.alert_text("Bot 4", "X", "LONG", "n", None, entry=True, away=True)
+    assert "No order" in away and "away from the 9/21 cross" in away
+    waits = turn_entry.alert_text("Bot 4", "X", "SHORT", "n", None, entry=True, held="LONG", waits=True)
+    assert "keeps its long until a red candle closes" in waits
+
+
+class _Eng:
+    """The engine with apply_signal / _exit_now recorded instead of trading."""
+
+    def __init__(self, held=None):
+        from strategy_engine import StrategyEngine
+
+        self.eng = StrategyEngine()
+        self.calls: list = []
+        if held:
+            self.eng.positions["KPITTECH"] = SimpleNamespace(signal_direction=held, direction=held)
+
+        async def apply(sig, frame, cfg, now, alert=True, pullback_at=None, why="SMA_CROSS"):
+            self.calls.append(("apply", sig, why))
+            return "reversed to SHORT" if sig == "BEARISH" else "opened LONG"
+
+        async def exit_now(cfg, price, reason):
+            self.calls.append(("exit", reason))
+            self.eng.positions.pop("KPITTECH", None)
+
+        self.eng.apply_signal = apply
+        self.eng._exit_now = exit_now
+        self.eng._exit_price = lambda symbol, pos: 544.0
+
+
+CFG_T = SimpleNamespace(turn_entry=True, turn_toward_cross=True, turn_exit_candle=True, sma_fast=9, cross_exit=True)
+NOW = dt.datetime(2026, 10, 28, 14, 20)
+
+
+@pytest.mark.asyncio
+async def test_an_up_turn_above_the_slow_sma_does_not_buy():
+    e = _Eng()
+    frame = _bars([(549, 550, 549.8, 543.8)])  # SMA 9 above SMA 21: an up turn points away from the cross
+    text = await e.eng._turn_minute("KPITTECH", (0, "LONG", "V up"), frame, CFG_T, NOW)
+    assert e.calls == [] and "away from the 9/21 cross" in text
+    # A down turn there points toward the cross and sells.
+    e2 = _Eng()
+    await e2.eng._turn_minute("KPITTECH", (0, "SHORT", "V down"), frame, CFG_T, NOW)
+    assert e2.calls == [("apply", "BEARISH", turn_entry.ENTRY_REASON)]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_on_a_green_candle_waits_for_a_red_one_to_close_a_long():
+    e = _Eng(held="LONG")
+    green = _bars([(544.3, 544.4, 549.8, 543.8)])  # the turn down came on a green candle
+    text = await e.eng._turn_minute("KPITTECH", (0, "SHORT", "V down"), green, CFG_T, NOW)
+    assert e.calls == [] and "closes on the next red candle" in text and "KPITTECH" in e.eng._turn_wait
+    # The same candle again: still waiting, nothing done.
+    assert await e.eng._turn_wait_minute("KPITTECH", green, CFG_T, NOW) is None and e.calls == []
+    # Another green candle (SMA 9 still falling): keeps waiting.
+    falling = [549.9 - i * 0.2 for i in range(30)]
+    more = pd.DataFrame(
+        [{"ts": 60 * i, "open": 544.0, "close": 544.2, "sma_fast": 549.0, "sma_slow": 543.8} for i in range(30)]
+    )
+    more["close"] = falling  # closes fall, so the slope stays against the long
+    more["open"] = more["close"] - 0.1  # green candles
+    more["ts"] = more["ts"] + 120
+    text = await e.eng._turn_wait_minute("KPITTECH", more, CFG_T, NOW)
+    assert e.calls == [] and "still waiting for a red candle" in text
+    # A red candle closes: the long is closed and reversed (the down turn points toward the cross).
+    red = more.copy()
+    red.loc[red.index[-2], "open"] = red.loc[red.index[-2], "close"] + 0.3
+    red["ts"] = red["ts"] + 60
+    await e.eng._turn_wait_minute("KPITTECH", red, CFG_T, NOW)
+    assert e.calls == [("apply", "BEARISH", turn_entry.ENTRY_REASON)] and "KPITTECH" not in e.eng._turn_wait
+
+
+@pytest.mark.asyncio
+async def test_a_turn_away_from_the_cross_closes_without_a_reverse():
+    e = _Eng(held="SHORT")
+    above = _bars([(549, 550, 549.8, 543.8)])  # holding a short, SMA 9 above 21; a green candle goes against the short
+    await e.eng._turn_minute("KPITTECH", (0, "LONG", "V up"), above, CFG_T, NOW)
+    assert e.calls == [("exit", turn_entry.EXIT_REASON)]
+
+
+@pytest.mark.asyncio
+async def test_off_by_default_the_turn_acts_at_once():
+    e = _Eng(held="LONG")
+    cfg = SimpleNamespace(turn_entry=True, sma_fast=9, cross_exit=True)
+    green = _bars([(544.3, 544.4, 549.8, 543.8)])
+    await e.eng._turn_minute("KPITTECH", (0, "SHORT", "V down"), green, cfg, NOW)
+    assert e.calls == [("apply", "BEARISH", turn_entry.ENTRY_REASON)]
+
+
+def test_api_saves_the_new_turn_switches(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+
+    import main
+
+    with TestClient(main.app) as client:
+        got = client.get("/api/bots/4/config").json()
+        assert got["turn_toward_cross"] is False and got["turn_exit_candle"] is False
+        ok = client.put("/api/bots/4/config", json={"turn_toward_cross": True, "turn_exit_candle": True}).json()
+        assert ok["turn_toward_cross"] is True and ok["turn_exit_candle"] is True
     database.reset_engine()

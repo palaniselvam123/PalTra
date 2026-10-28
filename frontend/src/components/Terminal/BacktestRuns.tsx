@@ -95,6 +95,7 @@ export function strategyLabel(s: Settings): string {
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
     if (s.tall_pullback) parts.push(`tall-candle pullback (${s.tall_atr_mult ?? 1.5}× ATR, ${s.tall_expiry_candles ?? 2} candles)`);
+    if (s.day_extreme_guard) parts.push(`day high/low guard (${s.day_extreme_pct ?? 0.15}%, pull ${s.day_extreme_pull_pct ?? 0.15}%)`);
     if (s.entry_candle_confirm) parts.push(`entry candle ${s.entry_candle_pct ?? 0.05}% past open`);
     if (s.extreme_entry) parts.push(`limit at candle ${s.extreme_anchor === "SMA_9" ? "extreme / fast SMA" : "extreme"} (${s.extreme_expiry_candles ?? 2} candles)`);
     const orChecks = [s.use_or_volume && "volume", s.use_or_vwap && "VWAP", s.use_or_spread && "SMA spread", s.use_or_break && "break"].filter(Boolean);
@@ -245,7 +246,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
-  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""})` : "Off")],
+  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""}${s.turn_toward_cross ? "; only toward the 9/21 cross" : ""}${s.turn_exit_candle ? "; closes on a candle of the other colour" : ""})` : "Off")],
   ["Re-enter after counter exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 && s.counter_reenter ? `Up to ${s.counter_reenter_max ?? 3} per SMA run` : "Off")],
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
@@ -257,6 +258,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Recovery hold", (s) => (s.recovery_hold ? `On (target ${s.recovery_tolerance_pct ?? 0.15}%, floor ${s.recovery_emergency_mult ?? 1.5}× / ${s.recovery_atr_mult ?? 2.5}× ATR, ${s.recovery_max_candles ?? 6} candles${s.recovery_handoff === false ? "" : ", hand-off to Bot 2"})` : "Off")],
   ["Breakout hand-off", (s) => (s.breakout_handoff ? `On (candle ${s.breakout_atr_mult ?? 1.8}× ATR + gap ${s.breakout_gap_pct ?? 0.2}% or volume ${s.breakout_volume_mult ?? 1.5}×, to Bot 3)` : "Off")],
   ["Tall-candle pullback", (s) => (s.tall_pullback ? `On (${s.tall_atr_mult ?? 1.5}× ATR, wait ${s.tall_expiry_candles ?? 2} candles)` : "Off")],
+  ["Day high/low guard", (s) => (s.day_extreme_guard ? `On (within ${s.day_extreme_pct ?? 0.15}%, wait ${s.day_extreme_pull_pct ?? 0.15}% back or the fast SMA, ${s.day_extreme_candles ?? 3} candles)` : "Off")],
   ["Entry candle must go the trade's way", (s) => (s.entry_candle_confirm ? `On (${s.entry_candle_pct ?? 0.05}% past its open, wait ${s.entry_candle_max ?? 2} candles)` : "Off")],
   ["Candle-extreme limit", (s) => (s.extreme_entry ? `On (${s.extreme_anchor === "SMA_9" ? "low/high or fast SMA" : "low/high"}, cancel beyond ${s.extreme_invalid_pct ?? 0.05}%, wait ${s.extreme_expiry_candles ?? 2} candles${s.extreme_cancel_on_cross === false ? "" : ", cancel on a cross against"})` : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],

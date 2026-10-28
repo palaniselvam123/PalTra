@@ -34,6 +34,8 @@ import auto_start
 import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
+import day_extreme as day_extreme_mod
+import fast_move
 import news_entry
 import arm_log
 import chop_auto
@@ -160,6 +162,50 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
     task = loop.create_task(trend_rank.after_scan(snapshot, _send, _call))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(_fast_move_scan(snapshot))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+async def _fast_move_send(message: str) -> None:
+    from app.services.alert_notifier import alert_notifier
+
+    await alert_notifier.send(message)
+
+
+async def _fast_move_call(message: str) -> None:
+    from app.services.alert_notifier import alert_notifier
+
+    await alert_notifier.place_call(message)
+
+
+async def _fast_move_scan(snapshot: dict) -> None:
+    """Fast-move alert on a finished Trend quality pass (fast_move.py, `scan_on`). Never raises."""
+    try:
+        s = await asyncio.to_thread(fast_move.load)
+        if not s.scan_on or not market_is_open(dt.datetime.now(IST)):
+            return
+        hits = fast_move.watcher.scan_hits(snapshot.get("rows") or [], s)
+        if hits:
+            await _fast_move_send(fast_move.scan_text(hits, s))
+            if s.call:
+                await _fast_move_call(fast_move.call_text(hits))
+    except Exception:  # noqa: BLE001
+        logging.getLogger("sma.fast_move").exception("fast-move scan alert failed")
+
+
+def _fast_move_prices() -> dict[str, float]:
+    """Last prices of every stock armed or held on bots 1-4 (the bots' own quotes; no extra Groww call)."""
+    out: dict[str, float] = {}
+    for eng in _all_bots():
+        cfg = getattr(eng, "_cfg_cache", None)
+        names = set(trade_names(cfg)) if cfg is not None else set()
+        names |= {name for name, pos in eng.positions.items() if pos is not None}
+        for name in names:
+            price = eng._ltps.get(name)
+            if price:
+                out[name] = float(price)
+    return out
 
 
 chop_scanner.on_done = _chop_done
@@ -247,6 +293,9 @@ def boot_engine() -> asyncio.Task | None:
     _pnl_alert_task = asyncio.create_task(
         pnl_alerts.run(_all_bots, engine.load_config, lambda: market_is_open(engine._now()), engine._now)
     )
+    # Fast-move alerts on armed / held stocks (fast_move.py): off until turned on; alerts only.
+    if not server_role.no_orders():
+        fast_move.watcher.start(_fast_move_prices, _fast_move_send, _fast_move_call)
     # Auto-start (auto_start.py): presses Start for a STOPPED PAPER bot with it on while NSE is open.
     global _auto_start_task
     if not server_role.no_orders():
@@ -307,6 +356,7 @@ async def announce_shutdown_all() -> None:
 def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
+    fast_move.watcher.stop()
     scan_arm_runner.stop()
     open_pnl_recorder.stop()
     scan_checker.stop("Stopped: the app is shutting down.")
@@ -448,8 +498,14 @@ class ConfigUpdate(BaseModel):
     turn_alert: bool | None = None
     turn_entry: bool | None = None
     uturn_on: bool | None = None
+    turn_toward_cross: bool | None = None
+    turn_exit_candle: bool | None = None
     uturn_run: int | None = Field(default=None, ge=2, le=turn_entry_mod.MAX_U_RUN)
     uturn_min_pct: float | None = Field(default=None, ge=0, le=turn_entry_mod.MAX_U_MIN)
+    day_extreme_guard: bool | None = None
+    day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
+    day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
+    day_extreme_candles: int | None = Field(default=None, ge=1, le=day_extreme_mod.MAX_CANDLES)
     vturn_move_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
@@ -1046,8 +1102,14 @@ def _gap_dict(row) -> dict:
         "turn_alert": bool(getattr(row, "turn_alert", False)),
         "turn_entry": bool(getattr(row, "turn_entry", False)),
         "uturn_on": turn_entry_mod.u_on(row),
+        "turn_toward_cross": turn_entry_mod.toward_on(row),
+        "turn_exit_candle": turn_entry_mod.exit_candle_on(row),
         "uturn_run": turn_entry_mod.u_run(row),
         "uturn_min_pct": turn_entry_mod.u_min(row),
+        "day_extreme_guard": day_extreme_mod.on(row),
+        "day_extreme_pct": day_extreme_mod.near_pct(row),
+        "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),
+        "day_extreme_candles": day_extreme_mod.candles(row),
         "vturn_move_pct": slope_mod.vturn_move_pct(row),
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),
@@ -2356,6 +2418,40 @@ async def scan_arm_run(body: ScanArmRunBody):
     return {"started": True, "preset": scan_arm.preset_dict(p)}
 
 
+class FastMoveUpdate(BaseModel):
+    on: bool | None = None
+    pct: float | None = Field(default=None, ge=0.05, le=fast_move.MAX_PCT)
+    minutes: int | None = Field(default=None, ge=1, le=fast_move.MAX_MINUTES)
+    scan_on: bool | None = None
+    scan_speed: float | None = Field(default=None, ge=0.01, le=fast_move.MAX_SPEED)
+    cooldown_min: int | None = Field(default=None, ge=1, le=240)
+    call: bool | None = None
+
+
+def _fast_moves() -> dict:
+    from dataclasses import asdict
+
+    return {
+        **asdict(fast_move.load()),
+        "recent": fast_move.watcher.recent[:20],
+        "watches_armed": not server_role.no_orders(),
+        "scans_enabled": server_role.scans_enabled(),
+    }
+
+
+@app.get("/api/fast-moves")
+async def fast_moves_get():
+    """Fast-move alert settings and the last alerts (fast_move.py). Alerts only."""
+    return await asyncio.to_thread(_fast_moves)
+
+
+@app.put("/api/fast-moves")
+async def fast_moves_put(body: FastMoveUpdate):
+    """Save the fast-move alerts: armed / held stocks moving `pct` % within `minutes`, and fast movers in the scans."""
+    await asyncio.to_thread(fast_move.save, body.model_dump(exclude_none=True))
+    return await asyncio.to_thread(_fast_moves)
+
+
 class MorningScanStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
     force: bool = False
@@ -2401,6 +2497,30 @@ def _open_pnl_desks() -> list[tuple[str, object]]:
     return out
 
 
+def _closed_by_stock(day: str, desk: str | None = None, modes: set[str] | None = None, run_id: int | None = None):
+    """The day's closed trades of one book as (symbol, exit "HH:MM", gross P&L), for the per-stock P&L log."""
+    from sqlalchemy import or_
+
+    from models import TradeLog
+    from strategy_engine import _mode_filter, bot_rows
+
+    with session_factory()() as db:
+        q = db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.gross_pnl).filter(
+            TradeLog.date == day, TradeLog.exit_time.isnot(None)
+        )
+        if run_id is not None:
+            q = q.filter(TradeLog.run_id == run_id)
+        elif desk == "research":
+            q = q.filter(TradeLog.mode == "RESEARCH")
+        else:
+            q = q.filter(bot_rows(int(desk or 1)), or_(*[_mode_filter(m) for m in (modes or {"PAPER"})]))
+        return [
+            (str(sym).upper(), exit_at.strftime("%H:%M"), float(gross or 0.0))
+            for sym, exit_at, gross in q.all()
+            if exit_at is not None
+        ]
+
+
 @app.get("/api/open-pnl")
 async def open_pnl(
     desk: Literal["1", "2", "3", "4", "research"] = "1",
@@ -2410,11 +2530,14 @@ async def open_pnl(
     days = await asyncio.to_thread(open_pnl_log.days, desk)
     pick = day or (days[0]["day"] if days else None)
     series = await asyncio.to_thread(open_pnl_log.points, pick, desk) if pick else []
+    modes = {str(p.get("mode") or "PAPER").upper() for p in series} or {"PAPER"}
+    closed = await asyncio.to_thread(_closed_by_stock, pick, desk, modes) if pick else []
     return {
         "desk": desk,
         "day": pick,
         "days": days,
         "points": series,
+        "by_stock": open_pnl_log.by_stock(series, closed),
         "summary": open_pnl_log.summary(series),
         "every_sec": open_pnl_log.EVERY_SEC,
         "keep_days": open_pnl_log.keep_days(),
@@ -2454,11 +2577,13 @@ async def open_pnl_replay(run_id: int, day: str | None = Query(None, pattern=r"^
     days = await asyncio.to_thread(open_pnl_log.replay_days, run_id)
     pick = day or (days[-1]["day"] if days else None)
     series = await asyncio.to_thread(open_pnl_log.replay_points, run_id, pick) if pick else []
+    closed = await asyncio.to_thread(_closed_by_stock, pick, run_id=run_id) if pick else []
     return {
         "run_id": run_id,
         "day": pick,
         "days": days,
         "points": series,
+        "by_stock": open_pnl_log.by_stock(series, closed),
         "summary": open_pnl_log.summary(series),
         "keep_days": open_pnl_log.keep_days(),
     }
@@ -2853,6 +2978,57 @@ def news_prices(symbols: list[str]) -> dict[str, float]:
         for sym, ltp in list(getattr(eng, "_ltps", {}).items()):
             if sym in wanted and sym not in out and ltp:
                 out[sym] = float(ltp)
+    return out
+
+
+NEWS_CANDLE_DAYS = 6  # calendar days back, so the previous session's close is in the download
+
+
+def _day_rows(frame, day: dt.date) -> tuple[list[list[float]], float | None]:
+    """[[ts, open, high, low, close], ...] of `day`'s session and the close of the session before it."""
+    if frame is None or getattr(frame, "empty", True):
+        return [], None
+    start = int(dt.datetime.combine(day, dt.time(0, 0), tzinfo=IST).timestamp())
+    stop = start + 86400
+    ts = frame["ts"].astype("int64")
+    today = frame[(ts >= start) & (ts < stop)]
+    before = frame[ts < start]
+    prev = float(before["close"].iloc[-1]) if not before.empty else None
+    rows = [[int(r.ts), float(r.open), float(r.high), float(r.low), float(r.close)] for r in today.itertuples()]
+    return rows, prev
+
+
+def _tape_for(symbol: str):
+    for eng in [engine, *bot_engines.values(), research_engine]:
+        tape = getattr(eng, "_tapes", {}).get(symbol)
+        if tape is not None and not getattr(tape, "empty", True):
+            return tape
+    return None
+
+
+async def news_candles(symbols: list[str], day: dt.date) -> dict[str, dict]:
+    """1-minute candles of `day` for the desk's news check (app/services/news_validation.py), read-only.
+
+    symbol -> {"rows": [[ts, o, h, l, c], ...], "prev_close": x} or {"error": text}. Today's armed stocks come
+    from the bots' own 1-minute tapes (no Groww call); the rest are downloaded one at a time, after the bots
+    (groww_pressure.wait_for_bots), on the scans' Groww session."""
+    now = dt.datetime.now(IST)
+    start = dt.datetime.combine(day - dt.timedelta(days=NEWS_CANDLE_DAYS), dt.time(9, 15), tzinfo=IST)
+    end = min(dt.datetime.combine(day, dt.time(15, 30), tzinfo=IST), now)
+    out: dict[str, dict] = {}
+    for symbol in dict.fromkeys(s.upper() for s in symbols if s):
+        frame = _tape_for(symbol) if day == now.date() else None
+        rows, prev = _day_rows(frame, day)
+        if not rows or prev is None:
+            try:
+                await groww_pressure.wait_for_bots()
+                frame = await fetch_frame(_scan_broker(), symbol, start, end)
+                await asyncio.sleep(scan_worker.MIN_GAP_SEC)
+            except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
+                out[symbol] = {"error": str(exc)[:200]}
+                continue
+            rows, prev = _day_rows(frame, day)
+        out[symbol] = {"rows": rows, "prev_close": prev} if rows else {"error": "No candles for that day."}
     return out
 
 

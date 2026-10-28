@@ -9,8 +9,9 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { useArming } from "@/components/Scalp/useArming";
 import { StockNewsPanel, validTill } from "@/components/Terminal/StockNewsPanel";
 import { WatchNewsDialog } from "@/components/News/WatchNewsDialog";
+import { NewsCheckPanel } from "@/components/News/NewsCheck";
 
-type Tab = { kind: "list"; id: number } | { kind: "bots" } | { kind: "feed" } | { kind: "alerts" } | { kind: "picked" };
+type Tab = { kind: "list"; id: number } | { kind: "bots" } | { kind: "feed" } | { kind: "alerts" } | { kind: "picked" } | { kind: "check" };
 
 const card = "terminal-dark rounded-xl border border-white/10 p-4";
 const field = "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
@@ -116,6 +117,7 @@ export function NewsPage() {
     ...(picked.length ? [{ key: "picked", label: `From Scalp (${picked.length})`, tab: { kind: "picked" } as Tab }] : []),
     { key: "feed", label: "All F&O filings", tab: { kind: "feed" } },
     { key: "alerts", label: "Alerts", tab: { kind: "alerts" } },
+    { key: "check", label: "Did it move?", tab: { kind: "check" } },
   ];
   const keyOf = (t: Tab) => (t.kind === "list" ? `l${t.id}` : t.kind);
 
@@ -232,7 +234,9 @@ export function NewsPage() {
         </section>
       ) : null}
 
-      {tab.kind === "feed" ? (
+      {tab.kind === "check" ? (
+        <NewsCheckPanel />
+      ) : tab.kind === "feed" ? (
         <FeedTable showExpired={showExpired} onOpen={setOpen} onArm={(s) => arm(s, "News")} onAdded={() => void load()} />
       ) : tab.kind === "alerts" ? (
         <AlertsTable onOpen={setOpen} />

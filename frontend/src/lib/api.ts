@@ -951,6 +951,62 @@ export type NewsDayRow = {
 };
 export type NewsTimingCall = { code: string; label: string; why: string };
 export type NewsTiming = { buy: NewsTimingCall; short: NewsTimingCall; fresh_hours: number | null };
+export type NewsCheckRow = {
+  symbol: string;
+  title: string;
+  url?: string | null;
+  source?: string | null;
+  at: string | null;
+  sentiment: string;
+  impact: string;
+  critical?: boolean;
+  from: "alert" | "news";
+  verdict: "WITH" | "AGAINST" | "FADED" | "NO_EFFECT" | "NEUTRAL" | "AFTER_CLOSE" | "PENDING" | "NO_DATA";
+  timing?: "BEFORE_OPEN" | "IN_SESSION";
+  base?: number;
+  last?: number;
+  gap_pct?: number | null;
+  move_15m?: number | null;
+  move_30m?: number | null;
+  move_60m?: number | null;
+  move_close?: number;
+  best_up?: number;
+  worst_down?: number;
+  signed_close?: number;
+  best_with?: number;
+  worst_against?: number;
+  peak_after_min?: number;
+  range_pct?: number;
+  so_far?: boolean;
+  error?: string;
+};
+export type NewsCheckGroup = {
+  group: string;
+  sentiment: string | null;
+  impact: string | null;
+  headlines: number;
+  with: number;
+  against: number;
+  faded: number;
+  no_effect: number;
+  hit_rate: number | null;
+  avg_signed_30m: number | null;
+  avg_signed_close: number | null;
+  avg_best: number | null;
+  avg_worst: number | null;
+  avg_peak_min: number | null;
+};
+export type NewsCheck = {
+  day: string;
+  as_of: string;
+  so_far: boolean;
+  min_move: number;
+  rows: NewsCheckRow[];
+  summary: NewsCheckGroup[];
+  stocks: number;
+  skipped_stocks: string[];
+  disclaimer: string;
+};
 export type NewsDayReport = { day: string; window: { from: string; to: string }; stocks: NewsDayRow[]; disclaimer: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {
@@ -1405,6 +1461,12 @@ export const api = {
       undefined,
       120_000
     ),
+  /** Did the news move the stock? Each headline of the day against its 1-minute candles (news_validation.py). */
+  newsCheck: (p: { date: string; symbols?: string[]; alerts: boolean; armed: boolean; minMove: number }) => {
+    const q = new URLSearchParams({ date: p.date, alerts: String(p.alerts), armed: String(p.armed), min_move: String(p.minMove) });
+    if (p.symbols?.length) q.set("symbols", p.symbols.join(","));
+    return request<NewsCheck>(`/api/news-impact/validate?${q.toString()}`, undefined, 300_000);
+  },
   newsAlerts: (afterId = 0, limit = 30) =>
     request<{ alerts: NewsAlertRow[] }>(`/api/news-impact/alerts?after_id=${afterId}&limit=${limit}`),
   newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
