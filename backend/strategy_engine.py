@@ -1616,7 +1616,11 @@ class StrategyEngine:
                 if turn_entry.alert_on(cfg):
                     bot = getattr(cfg, "bot_name", None) or f"Bot {self.bot_id}"
                     price = _finite(frame.iloc[-2].get("close"))
-                    self._alert(turn_entry.alert_text(bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg)))
+                    pos = self.positions.get(symbol)
+                    held = pos.signal_direction if pos is not None else None
+                    self._alert(
+                        turn_entry.alert_text(bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg), held=held)
+                    )
         hit = self._turn_hit.get(symbol)
         return hit if hit is not None and hit[0] == ts else None
 

@@ -54,6 +54,11 @@ def test_alert_text_says_whether_it_orders():
     msg = turn_entry.alert_text("Bot 3", "ASHOKLEY", "SHORT", "SMA 9 turned down", 142.97, entry=False)
     assert "▼ ASHOKLEY" in msg and "₹142.97" in msg and "Alert only" in msg
     assert "orders a buy" in turn_entry.alert_text("Bot 3", "X", "LONG", "n", None, entry=True)
+    # Already on the turn's side: the bot keeps the trade and orders nothing, and the alert says so.
+    same = turn_entry.alert_text("Bot 4", "DABUR", "SHORT", "n", 360.4, entry=True, held="SHORT")
+    assert "already holds a short" in same and "orders" not in same
+    rev = turn_entry.alert_text("Bot 4", "DABUR", "SHORT", "n", 360.4, entry=True, held="LONG")
+    assert "closes its long and orders a short" in rev
 
 
 def _v_day() -> pd.DataFrame:

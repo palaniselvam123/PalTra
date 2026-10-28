@@ -138,12 +138,22 @@ def _detect_v(closed: pd.DataFrame, fast: int, cfg) -> tuple[str, str] | None:
     return None
 
 
-def alert_text(bot: str, symbol: str, direction: str, note: str, price: float | None, entry: bool) -> str:
+def alert_text(
+    bot: str, symbol: str, direction: str, note: str, price: float | None, entry: bool, held: str | None = None
+) -> str:
+    """`held` is the side of the trade the bot already holds on the stock (its signal side), if any."""
     arrow = "▼" if direction == "SHORT" else "▲"
     at = f" at ₹{price:.2f}" if price else ""
-    then = (
-        f"{bot} orders {'a short' if direction == 'SHORT' else 'a buy'} now (every entry check applies)."
-        if entry
-        else "Alert only: no order."
-    )
+    want = "a short" if direction == "SHORT" else "a buy"
+    if not entry:
+        then = "Alert only: no order."
+    elif held == direction:
+        then = f"{bot} already holds {'a short' if held == 'SHORT' else 'a long'}: kept, no new order."
+    elif held in ("LONG", "SHORT"):
+        then = (
+            f"{bot} closes its {'short' if held == 'SHORT' else 'long'} and orders {want} now "
+            "(every entry check applies; held if the SMA cross exit is off)."
+        )
+    else:
+        then = f"{bot} orders {want} now (every entry check applies)."
     return f"{arrow} {symbol} SMA turn{at} ({bot})\n{note}\n{then}"
