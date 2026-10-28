@@ -178,6 +178,9 @@ export type SmaConfig = {
   turn_entry?: boolean;
   /** Also count a rounded U turn: a run of N candles one way, then the slope at least uturn_min_pct the other way. */
   uturn_on?: boolean;
+  /** Turn entry: only turns toward the 9/21 cross open trades; a turn closes a trade on a candle of the other colour only. */
+  turn_toward_cross?: boolean;
+  turn_exit_candle?: boolean;
   uturn_run?: number;
   uturn_min_pct?: number;
   vturn_move_pct?: number;

@@ -25,6 +25,19 @@ first; the alert and the order name which shape it was.
 
 The first candle the bot reads for a stock only sets the mark, so a turn printed before the
 stock was armed (or before a restart) is neither alerted nor traded.
+
+**Only toward the cross** (`turn_toward_cross`, off): a turn opens a trade only when it points
+toward the 9/21 cross: a turn down while SMA 9 is above SMA 21 (sell), a turn up while it is
+below (buy). A turn the other way opens nothing; against an open trade it only closes it
+(`SMA9_TURN_AGAINST`, no reverse).
+
+**Close on a candle of the other colour** (`turn_exit_candle`, off): a turn against an open trade
+closes it only once a candle closes the other way (red for a long, green for a short). A turn read
+on a candle of the trade's own colour waits (`StrategyEngine._turn_wait`): the first later closed
+candle of the other colour closes it (and reverses when allowed); the wait ends when the SMA 9 slope
+swings back with the trade by the turn-back level, or the trade closes.
+
+A trade closed by a turn is saved as `SMA9_TURN_AGAINST` ("SMA 9 turned against").
 """
 from __future__ import annotations
 
@@ -33,6 +46,7 @@ import pandas as pd
 import slope_exit
 
 ENTRY_REASON = "SMA9_TURN"
+EXIT_REASON = "SMA9_TURN_AGAINST"
 DEFAULT_U_RUN = 5
 MAX_U_RUN = 30
 DEFAULT_U_MIN = 0.005
@@ -52,6 +66,35 @@ def entry_on(cfg) -> bool:
 
 def watched(cfg) -> bool:
     return alert_on(cfg) or entry_on(cfg)
+
+
+def toward_on(cfg) -> bool:
+    return bool(getattr(cfg, "turn_toward_cross", False))
+
+
+def exit_candle_on(cfg) -> bool:
+    return bool(getattr(cfg, "turn_exit_candle", False))
+
+
+def toward_cross(closed: pd.DataFrame, direction: str) -> bool:
+    """A turn toward the 9/21 cross: down (SHORT) while SMA fast > slow, up (LONG) while below, on the last
+    closed candle. False when the SMAs are not known."""
+    if closed is None or getattr(closed, "empty", True) or not {"sma_fast", "sma_slow"} <= set(closed.columns):
+        return False
+    fast = pd.to_numeric(pd.Series([closed["sma_fast"].iloc[-1]]), errors="coerce").iloc[0]
+    slow = pd.to_numeric(pd.Series([closed["sma_slow"].iloc[-1]]), errors="coerce").iloc[0]
+    if pd.isna(fast) or pd.isna(slow):
+        return False
+    return fast > slow if direction == "SHORT" else fast < slow
+
+
+def candle_against(bar, held: str) -> bool:
+    """The closed candle went against a trade on `held`'s side: red for a long, green for a short."""
+    try:
+        o, c = float(bar["open"]), float(bar["close"])
+    except (KeyError, TypeError, ValueError):
+        return True  # no candle colour to read: do not hold the exit back
+    return c < o if held == "LONG" else c > o
 
 
 def u_on(cfg) -> bool:
@@ -139,16 +182,27 @@ def _detect_v(closed: pd.DataFrame, fast: int, cfg) -> tuple[str, str] | None:
 
 
 def alert_text(
-    bot: str, symbol: str, direction: str, note: str, price: float | None, entry: bool, held: str | None = None
+    bot: str, symbol: str, direction: str, note: str, price: float | None, entry: bool, held: str | None = None,
+    away: bool = False, waits: bool = False,
 ) -> str:
-    """`held` is the side of the trade the bot already holds on the stock (its signal side), if any."""
+    """`held` is the side of the trade the bot already holds on the stock (its signal side), if any; `away` = the
+    turn points away from the 9/21 cross under "only toward the cross"; `waits` = the close waits for a candle of
+    the other colour."""
     arrow = "▼" if direction == "SHORT" else "▲"
     at = f" at ₹{price:.2f}" if price else ""
     want = "a short" if direction == "SHORT" else "a buy"
+    own = "short" if held == "SHORT" else "long"
     if not entry:
         then = "Alert only: no order."
     elif held == direction:
         then = f"{bot} already holds {'a short' if held == 'SHORT' else 'a long'}: kept, no new order."
+    elif held in ("LONG", "SHORT") and waits:
+        colour = "red" if held == "LONG" else "green"
+        then = f"{bot} keeps its {own} until a {colour} candle closes (this candle went the trade's way)."
+    elif held in ("LONG", "SHORT") and away:
+        then = f"{bot} closes its {own}; no {want[2:]}: the turn points away from the 9/21 cross."
+    elif away:
+        then = "No order: the turn points away from the 9/21 cross."
     elif held in ("LONG", "SHORT"):
         then = (
             f"{bot} closes its {'short' if held == 'SHORT' else 'long'} and orders {want} now "

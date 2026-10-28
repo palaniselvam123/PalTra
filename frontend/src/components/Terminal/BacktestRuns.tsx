@@ -246,7 +246,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
-  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""})` : "Off")],
+  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""}${s.turn_toward_cross ? "; only toward the 9/21 cross" : ""}${s.turn_exit_candle ? "; closes on a candle of the other colour" : ""})` : "Off")],
   ["Re-enter after counter exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 && s.counter_reenter ? `Up to ${s.counter_reenter_max ?? 3} per SMA run` : "Off")],
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],

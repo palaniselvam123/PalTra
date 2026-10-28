@@ -498,6 +498,8 @@ class ConfigUpdate(BaseModel):
     turn_alert: bool | None = None
     turn_entry: bool | None = None
     uturn_on: bool | None = None
+    turn_toward_cross: bool | None = None
+    turn_exit_candle: bool | None = None
     uturn_run: int | None = Field(default=None, ge=2, le=turn_entry_mod.MAX_U_RUN)
     uturn_min_pct: float | None = Field(default=None, ge=0, le=turn_entry_mod.MAX_U_MIN)
     day_extreme_guard: bool | None = None
@@ -1100,6 +1102,8 @@ def _gap_dict(row) -> dict:
         "turn_alert": bool(getattr(row, "turn_alert", False)),
         "turn_entry": bool(getattr(row, "turn_entry", False)),
         "uturn_on": turn_entry_mod.u_on(row),
+        "turn_toward_cross": turn_entry_mod.toward_on(row),
+        "turn_exit_candle": turn_entry_mod.exit_candle_on(row),
         "uturn_run": turn_entry_mod.u_run(row),
         "uturn_min_pct": turn_entry_mod.u_min(row),
         "day_extreme_guard": day_extreme_mod.on(row),

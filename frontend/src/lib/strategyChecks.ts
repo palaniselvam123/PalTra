@@ -205,6 +205,12 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (cfg.st_exit) out.push({ name: "Supertrend flip (candle closes beyond it)", when: candle, code: "SUPERTREND" });
   if (cfg.slope_exit) out.push({ name: "SMA 9 slope turn / bend", when: candle, code: "SMA9_TURN / SMA9_BEND" });
   if (cfg.vturn_exit) out.push({ name: "SMA 9 V-turn", when: candle, code: "SMA9_VTURN" });
+  if (cfg.turn_entry && crossExitOn(cfg))
+    out.push({
+      name: cfg.turn_exit_candle ? "SMA 9 turn against the trade (on a candle of the other colour)" : "SMA 9 turn against the trade",
+      when: candle,
+      code: "SMA9_TURN_AGAINST",
+    });
   if (cfg.slow_sma_exit) out.push({ name: "Close beyond the slow SMA", when: candle, code: "SLOW_SMA_BREACH" });
   if (cfg.recovery_hold && crossExitOn(cfg))
     out.push({ name: "Recovery rules (a losing trade held past the cross)", when: candle, code: "RECOVERY_TARGET_HIT / EMERGENCY_RECOVERY_ABORT" });

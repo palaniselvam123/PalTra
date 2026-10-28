@@ -378,6 +378,10 @@ class BotConfig(Base):
     turn_alert: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     turn_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     uturn_on: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Turn entry (turn_entry.py): only turns toward the 9/21 cross open trades; a turn closes a trade on a candle
+    # of the other colour only.
+    turn_toward_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    turn_exit_candle: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     uturn_run: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

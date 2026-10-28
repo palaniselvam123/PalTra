@@ -421,8 +421,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   off; `turn_entry._detect_u`): also fires on the first candle whose slope is at least `uturn_min_pct` (0.005) the new way
   after `uturn_run` (5, 2-30) candles at least that the other way (up to `U_MAX_FLAT` 10 near-flat candles of rounding in
   between); a V is read first, and a turn the same way within `SAME_TURN_CANDLES` (6) candles of the last one is the same
-  turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. Settings → 1. When to enter (the V numbers are in
-  3. When to exit, V-turn). The stock research baseline keeps all of them off.
+  turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. **Only toward the cross** (`turn_toward_cross`, off;
+  `turn_entry.toward_cross`): a turn opens a trade only when it points toward the 9/21 cross (down while SMA fast > slow, up
+  while below); a turn the other way opens nothing and, against an open trade, only closes it (`_turn_act` → `_exit_now`, no
+  reverse). **Close on a candle of the other colour** (`turn_exit_candle`, off; `turn_entry.candle_against`): a turn against an
+  open trade read on a candle of the trade's own colour waits in `StrategyEngine._turn_wait`; `_turn_wait_minute` closes it (and
+  reverses when allowed) on the first later closed candle of the other colour, and drops the wait when the SMA 9 slope swings
+  back with the trade by `vturn_turn_pct` or the trade closes. A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
+  instead of recovery hold's `PROFITABLE_TREND_EXHAUSTION`); the alert says when it waits or points away. Settings → 1. When
+  to enter (the V numbers are in 3. When to exit, V-turn). The stock research baseline keeps all of them off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
   **entries only**): four tick boxes, all ticked must agree, read on the bot's closed candles of the session of
   the last closed candle (the window is always 09:15–09:30 IST). `or_volume` (`or_volume_ratio`, default 2): the

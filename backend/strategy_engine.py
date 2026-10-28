@@ -280,7 +280,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct",
+    "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
@@ -924,6 +924,9 @@ class StrategyEngine:
         self._turn_done: dict[str, int] = {}
         # The last turn alerted per stock (direction, candle ts): a V right after a U the same way is the same turn.
         self._turn_last: dict[str, tuple[str, int]] = {}
+        # A turn against the open trade waiting for a candle of the other colour (turn_exit_candle):
+        # (turn direction, last candle read, note).
+        self._turn_wait: dict[str, tuple[str, int, str]] = {}
         # Re-entry after a counter-candle exit (counter_candles.py): the exit waiting to be undone
         # (signal side, SMA run start, exit candle's level, exit candle ts), and re-entries used per SMA run.
         self._reentry: dict[str, tuple[str, int, float, int]] = {}
@@ -1430,7 +1433,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last,
+            self._turn_last, self._turn_wait,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1506,6 +1509,10 @@ class StrategyEngine:
             return await self._gap_minute(symbol, signal, signal_frame, frame, cfg, now)
         if (signal is None or signal_frame is None) and turn is not None and turn_entry.entry_on(cfg):
             text = await self._turn_minute(symbol, turn, frame, cfg, now)
+            if text is not None:
+                return text
+        elif (signal is None or signal_frame is None) and symbol in self._turn_wait and turn_entry.entry_on(cfg):
+            text = await self._turn_wait_minute(symbol, frame, cfg, now)
             if text is not None:
                 return text
         if (signal is None or signal_frame is None) and symbol in self._late_pending:
@@ -1618,8 +1625,17 @@ class StrategyEngine:
                     price = _finite(frame.iloc[-2].get("close"))
                     pos = self.positions.get(symbol)
                     held = pos.signal_direction if pos is not None else None
+                    closed = frame.iloc[:-1]
+                    away = turn_entry.toward_on(cfg) and not turn_entry.toward_cross(closed, found[0])
+                    waits = (
+                        held not in (None, found[0])
+                        and turn_entry.exit_candle_on(cfg)
+                        and not turn_entry.candle_against(closed.iloc[-1], held)
+                    )
                     self._alert(
-                        turn_entry.alert_text(bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg), held=held)
+                        turn_entry.alert_text(
+                            bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg), held=held, away=away, waits=waits
+                        )
                     )
         hit = self._turn_hit.get(symbol)
         return hit if hit is not None and hit[0] == ts else None
@@ -1635,18 +1651,69 @@ class StrategyEngine:
         if held is not None and held.signal_direction == want:
             self._turn_done[symbol] = ts
             return None
+        toward = not turn_entry.toward_on(cfg) or turn_entry.toward_cross(frame.iloc[:-1], want)
+        if held is None and not toward:
+            self._turn_done[symbol] = ts
+            return self._say(symbol, f"{symbol} no order on the SMA {want} turn — it points away from the 9/21 cross ({note})")
+        if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(frame.iloc[-2], held.signal_direction):
+            # The turn came on a candle of the trade's own colour: wait for one of the other colour to close.
+            self._turn_done[symbol] = ts
+            self._turn_wait[symbol] = (want, ts, note)
+            colour = "red" if held.signal_direction == "LONG" else "green"
+            return self._say(symbol, f"{symbol} holding {held.direction} — SMA 9 turned {want}, closes on the next {colour} candle ({note})")
+        result = await self._turn_act(symbol, want, note, toward, frame, cfg, now)
+        if result is not None and not result.startswith("blocked — order PENDING"):
+            self._turn_done[symbol] = ts
+        return result
+
+    def _say(self, symbol: str, text: str) -> str:
+        self._signals[symbol] = text
+        self.last_signal = text
+        return text
+
+    async def _turn_act(
+        self, symbol: str, want: str, note: str, toward: bool, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime
+    ) -> str | None:
+        """Act on a turn: open / close-and-reverse through apply_signal, or, for a turn away from the cross against
+        an open trade, close it without a reverse (turn_entry.py)."""
+        self._turn_wait.pop(symbol, None)
+        held = self.positions.get(symbol)
+        if held is not None and not toward:
+            if not cross_exits(cfg):
+                return self._say(symbol, f"{symbol} holding {held.direction} — SMA cross exit is off; the turn does not close it")
+            await self._exit_now(cfg, self._exit_price(symbol, held), turn_entry.EXIT_REASON)
+            return self._say(symbol, f"{symbol} closed {held.direction} — SMA 9 turned {want}; no reverse, it points away from the 9/21 cross ({note})")
         sig = "BULLISH" if want == "LONG" else "BEARISH"
         result = await self.apply_signal(sig, frame, cfg, now, alert=False, why=turn_entry.ENTRY_REASON)
         if result.startswith("blocked — order PENDING"):
             return result
-        self._turn_done[symbol] = ts
         if result.startswith("opened") or result.startswith("reversed"):
-            text = f"{result} — {note}"
-        else:
-            text = f"{symbol} no order on the SMA {want} turn ({note}): {result}"
-        self._signals[symbol] = text
-        self.last_signal = text
-        return text
+            return self._say(symbol, f"{result} — {note}")
+        return self._say(symbol, f"{symbol} no order on the SMA {want} turn ({note}): {result}")
+
+    async def _turn_wait_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
+        """A turn against the open trade waiting for a candle of the other colour (turn_exit_candle). None = nothing
+        to say."""
+        want, since, note = self._turn_wait[symbol]
+        held = self.positions.get(symbol)
+        closed = frame.iloc[:-1]
+        if held is None or held.signal_direction == want or closed.empty:
+            self._turn_wait.pop(symbol, None)
+            return None
+        bar = closed.iloc[-1]
+        if int(bar["ts"]) <= since:
+            return None
+        side = 1.0 if held.signal_direction == "LONG" else -1.0
+        slope = turn_entry.slopes(closed, int(cfg.sma_fast), slope_exit.lookback(cfg)).iloc[-1]
+        if not pd.isna(slope) and float(slope) * side >= slope_exit.vturn_turn_pct(cfg):
+            self._turn_wait.pop(symbol, None)
+            return self._say(symbol, f"{symbol} keeps its {held.direction} — SMA 9 swung back with the trade")
+        if not turn_entry.candle_against(bar, held.signal_direction):
+            self._turn_wait[symbol] = (want, int(bar["ts"]), note)
+            colour = "red" if held.signal_direction == "LONG" else "green"
+            return self._say(symbol, f"{symbol} holding {held.direction} — still waiting for a {colour} candle to close (SMA 9 turned {want})")
+        toward = not turn_entry.toward_on(cfg) or turn_entry.toward_cross(closed, want)
+        return await self._turn_act(symbol, want, note, toward, frame, cfg, now)
 
     async def _counter_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
         """Early reversal entry (counter_candles.py): N candles against the SMAs' side, before the cross.
@@ -2282,7 +2349,7 @@ class StrategyEngine:
                 "Bollinger exit or square-off closes it"
             )
 
-        exit_reason = "MA_CROSS"
+        exit_reason = turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS"
         if pos is not None and pos.signal_direction != want and recovery.on(cfg):
             # Recovery hold (recovery.py): close a winner at once, hold a loser for its recovery.
             if pos.recovery_loss is not None:
@@ -2291,7 +2358,7 @@ class StrategyEngine:
             loss = recovery.loss_per_share(pos.direction, pos.entry_price, price)
             if loss >= 0:
                 return self._enter_recovery(pos, cfg, max(loss, 0.0))
-            exit_reason = recovery.PROFIT_EXIT
+            exit_reason = turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else recovery.PROFIT_EXIT
 
         if pos is not None and pos.signal_direction != want:
             # Opposite cross: cancel SL, verify, flatten, then maybe reverse.
@@ -3748,6 +3815,7 @@ class StrategyEngine:
                     "SMA9_BEND": "SMA 9 bent — flat",
                     "SMA9_TURN": "SMA 9 turned against the trade — flat",
                     "SMA9_VTURN": "SMA 9 V-turn — flat",
+                    "SMA9_TURN_AGAINST": "SMA 9 turned against the trade — flat",
                     "SLOW_SMA_BREACH": "closed beyond the slow SMA — flat",
                     "RECOVERY_TARGET_HIT": "recovery target hit — flat",
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
@@ -5527,7 +5595,7 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 # Exits the bot sends itself while an exchange stop may still be working.
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
-    "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN",
+    "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET",
 )
