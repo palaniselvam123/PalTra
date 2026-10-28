@@ -513,3 +513,45 @@ def test_a_running_scan_keeps_the_machine_awake(monkeypatch):
     assert backtest_server.busy({}) and backtest_server.idle_seconds_left({}, now) == 600
     running[0] = False
     assert not backtest_server.busy({})  # a broken check never keeps it up
+
+
+def test_auto_rescan_runs_and_keeps_the_backtest_server_awake(monkeypatch, backtest, tmp_path):
+    monkeypatch.setenv("CHOP_AUTO_FILE", str(tmp_path / "chop_auto.json"))
+    monkeypatch.setenv("SCAN_ARM_FILE", str(tmp_path / "scan_arm.json"))
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/bt.db")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    import main
+
+    started = []
+    monkeypatch.setattr(main.chop_autos, "start_loop", lambda start: started.append(start))
+    monkeypatch.setattr(main.scan_arm_runner, "start_loop", lambda *a: None)
+    monkeypatch.setattr(main.backtest_server, "_busy_checks", [])
+
+    async def no_run(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(main.backtest_server, "run", no_run)
+
+    async def boot():
+        task = main._boot_backtest_server()
+        await task
+
+    asyncio.run(boot())
+    assert started == [main._chop_auto_start]  # the auto re-scan loop runs on this server too
+    assert main._auto_scans_due in main.backtest_server._busy_checks
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    open_at, night = dt.datetime(2026, 10, 27, 11, 0, tzinfo=ist), dt.datetime(2026, 10, 27, 20, 0, tzinfo=ist)
+    monkeypatch.setattr(main, "_scans_paused", False)
+    main.chop_autos.settings.on = False
+    assert main._auto_scans_due(open_at) is False
+    main.chop_autos.settings.on = True
+    assert main._auto_scans_due(open_at) is True and main._auto_scans_due(night) is False
+    main.chop_autos.settings.on = False
+    import scan_arm
+
+    scan_arm.save({"bot": 3, "sizes": [5], "times": ["10:00"], "on": True})
+    assert main._auto_scans_due(open_at) is True
+    database.reset_engine()

@@ -799,8 +799,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the SMA DB → SIGTERM → exit → Fly stops the machine; `[[restart]] on-failure`). **Never orders**
   (`server_role.no_orders` covers scanner and backtest: `refuse_orders`, the LIVE switch 403, the desk broker and manual
   desk) and runs no live bots, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). **Scalp scans
-  on demand** (`server_role.scans_enabled` is true here; Scan now only: no background most-active loop, auto re-scan off by
-  default): they download with **this server's own Groww login** (`scan_session.OwnSession`, the token saved by its own
+  on demand** (`server_role.scans_enabled` is true here; no background most-active loop; the Trend quality auto re-scan,
+  off by default, runs here too once turned on (`chop_autos.start_loop` in `_boot_backtest_server`), and while it or a
+  scheduled Scan & arm preset is on the machine stays awake in market hours (`main._auto_scans_due` busy check)): they download with **this server's own Groww login** (`scan_session.OwnSession`, the token saved by its own
   Settings → Broker keys in its own trading.db via `groww_client._read_desk_token`; `main._scan_broker`), never the desk's
   session the replays borrow, so a scan never shares the live bots' rate limit; without a login a scan says to log in here.
   Three scan workers (`CROSS_SCAN_CONCURRENCY` in `fly.backtest.toml`), and a running Cross / Trend quality / 09:30 pass keeps
