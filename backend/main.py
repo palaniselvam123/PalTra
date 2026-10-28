@@ -2977,6 +2977,57 @@ def news_prices(symbols: list[str]) -> dict[str, float]:
     return out
 
 
+NEWS_CANDLE_DAYS = 6  # calendar days back, so the previous session's close is in the download
+
+
+def _day_rows(frame, day: dt.date) -> tuple[list[list[float]], float | None]:
+    """[[ts, open, high, low, close], ...] of `day`'s session and the close of the session before it."""
+    if frame is None or getattr(frame, "empty", True):
+        return [], None
+    start = int(dt.datetime.combine(day, dt.time(0, 0), tzinfo=IST).timestamp())
+    stop = start + 86400
+    ts = frame["ts"].astype("int64")
+    today = frame[(ts >= start) & (ts < stop)]
+    before = frame[ts < start]
+    prev = float(before["close"].iloc[-1]) if not before.empty else None
+    rows = [[int(r.ts), float(r.open), float(r.high), float(r.low), float(r.close)] for r in today.itertuples()]
+    return rows, prev
+
+
+def _tape_for(symbol: str):
+    for eng in [engine, *bot_engines.values(), research_engine]:
+        tape = getattr(eng, "_tapes", {}).get(symbol)
+        if tape is not None and not getattr(tape, "empty", True):
+            return tape
+    return None
+
+
+async def news_candles(symbols: list[str], day: dt.date) -> dict[str, dict]:
+    """1-minute candles of `day` for the desk's news check (app/services/news_validation.py), read-only.
+
+    symbol -> {"rows": [[ts, o, h, l, c], ...], "prev_close": x} or {"error": text}. Today's armed stocks come
+    from the bots' own 1-minute tapes (no Groww call); the rest are downloaded one at a time, after the bots
+    (groww_pressure.wait_for_bots), on the scans' Groww session."""
+    now = dt.datetime.now(IST)
+    start = dt.datetime.combine(day - dt.timedelta(days=NEWS_CANDLE_DAYS), dt.time(9, 15), tzinfo=IST)
+    end = min(dt.datetime.combine(day, dt.time(15, 30), tzinfo=IST), now)
+    out: dict[str, dict] = {}
+    for symbol in dict.fromkeys(s.upper() for s in symbols if s):
+        frame = _tape_for(symbol) if day == now.date() else None
+        rows, prev = _day_rows(frame, day)
+        if not rows or prev is None:
+            try:
+                await groww_pressure.wait_for_bots()
+                frame = await fetch_frame(_scan_broker(), symbol, start, end)
+                await asyncio.sleep(scan_worker.MIN_GAP_SEC)
+            except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
+                out[symbol] = {"error": str(exc)[:200]}
+                continue
+            rows, prev = _day_rows(frame, day)
+        out[symbol] = {"rows": rows, "prev_close": prev} if rows else {"error": "No candles for that day."}
+    return out
+
+
 def news_watch_list() -> dict:
     """Armed and held stocks of bots 1-4, for the desk's news alerts (read-only).
 

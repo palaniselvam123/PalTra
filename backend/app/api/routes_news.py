@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.models.database import NewsAlert, async_session
-from app.services import news_impact
+from app.services import news_impact, news_validation
 from app.services.news_impact import news_watcher
 
 router = APIRouter(prefix="/api/news-impact", tags=["news"])
@@ -81,6 +81,39 @@ async def day_news(date: str, symbols: str | None = None, ai: bool = True):
         watched = dict(list(watched.items())[:MAX_DAY_SYMBOLS])
     cfg = await news_impact.load_settings()
     return await news_impact.day_report(day, watched, use_ai=ai and cfg.use_ai)
+
+
+def _news_candles():
+    """The SMA terminal's 1-minute candle reader for the news check (main.news_candles), or None."""
+    from app.sma_host import load_terminal
+
+    mod = load_terminal()
+    return getattr(mod, "news_candles", None) if mod is not None else None
+
+
+@router.get("/validate")
+async def validate(
+    date: str | None = None,
+    symbols: str | None = None,
+    alerts: bool = True,
+    armed: bool = False,
+    min_move: float = Query(news_validation.DEFAULT_MIN_MOVE, ge=0.05, le=10),
+):
+    """Did the news move the stock? Each headline of the day (the news alerts saved that day, plus the news of
+    `symbols` and, with `armed`, every armed / held stock) against that day's 1-minute candles: the move 15 /
+    30 / 60 minutes later and at the close (in market hours: so far), the best and worst move, and a verdict,
+    summed up per positive / negative × high / medium / low impact. Read-only."""
+    day = _day(date) or dt.datetime.now(news_impact.IST).date()
+    names = [_clean(x) for x in (symbols or "").split(",") if x.strip()]
+    if armed:
+        names += list((await _watch()).keys())
+    names = list(dict.fromkeys(names))[:MAX_DAY_SYMBOLS]
+    if not alerts and not names:
+        raise HTTPException(400, "Nothing to check: keep the news alerts ticked, tick the armed stocks or type symbols.")
+    candles = _news_candles()
+    if candles is None:
+        raise HTTPException(503, "Candles come from the SMA terminal, which is not running in this process.")
+    return await news_validation.validate(day, names, candles, alerts=alerts, min_move=min_move)
 
 
 async def _watch() -> dict:

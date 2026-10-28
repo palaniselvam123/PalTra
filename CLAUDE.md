@@ -1042,6 +1042,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   ticked stocks to a list or a new one, open their news). On the scanner server the lists are the desk's, through the link
   (`useNewsLists`; scanner `GET /api/link/desk-news-lists`, `POST /api/link/desk-news-lists/add` → desk `/api/link/news-lists`
   `[/add]`, `SCANNER_LINK_TOKEN`), and "Open their news" opens the desk's News page.
+- `backend/app/services/news_validation.py` – news check, "Did it move?" (the News page's tab, `components/News/NewsCheck.tsx`;
+  read-only, never trades): for a day, each headline (the `NewsAlert` rows saved that day via `from_alert`, plus the news of
+  typed symbols and, with `armed`, every armed / held stock, `news_impact.analyze(use_ai=False, day=)`; out after the previous
+  weekday's 15:30, `for_day`) is set against that day's 1-minute candles from the terminal's `main.news_candles` (today's armed
+  stocks from the bots' `_tapes`, else `fetch_frame` on `_scan_broker()` one at a time after `groww_pressure.wait_for_bots`).
+  `measure`: news before 09:15 from the previous close (the gap counts), in the session from the open of its minute; the move
+  15 / 30 / 60 min later and at the close (in market hours: so far, `so_far`), best / worst move and minutes to the best;
+  signed the news' way; verdict `WITH` / `AGAINST` (closed `min_move` %, default 0.5, either way), `FADED`, `NO_EFFECT`,
+  `NEUTRAL`, `AFTER_CLOSE`, `PENDING`, `NO_DATA`. `summarize`: per positive / negative × high / medium / low (hit rate, average
+  signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a run. Desk
+  `GET /api/news-impact/validate?date=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
