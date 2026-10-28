@@ -106,6 +106,10 @@ const LABELS: Record<string, string> = {
   entry_candle_confirm: "entry candle must go the trade's way",
   entry_candle_pct: "entry candle margin",
   entry_candle_max: "entry candle wait",
+  day_extreme_guard: "don't buy at the day's high / short at the day's low",
+  day_extreme_pct: "day high/low distance",
+  day_extreme_pull_pct: "day high/low pullback",
+  day_extreme_candles: "day high/low wait",
   slow_sma_exit: "slow SMA exit",
   recovery_hold: "recovery hold",
   recovery_tolerance_pct: "recovery target %",
@@ -341,6 +345,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     entry_candle_confirm: Boolean(form.entry_candle_confirm),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
+    day_extreme_guard: Boolean(form.day_extreme_guard),
+    day_extreme_pct: Math.min(5, Math.max(0, Number(form.day_extreme_pct ?? 0.15) || 0)),
+    day_extreme_pull_pct: Math.min(5, Math.max(0, Number(form.day_extreme_pull_pct ?? 0.15) || 0)),
+    day_extreme_candles: Math.min(10, Math.max(1, Math.round(Number(form.day_extreme_candles ?? 3)) || 3)),
     slow_sma_exit: Boolean(form.slow_sma_exit),
     recovery_hold: Boolean(form.recovery_hold),
     recovery_tolerance_pct: Math.min(5, Math.max(0, Number(form.recovery_tolerance_pct ?? 0.15) || 0)),
@@ -958,6 +966,48 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 value={String(form.entry_candle_max ?? 2)}
                 onChange={(v) => set("entry_candle_max", v)}
                 own={isOwn("entry_candle_max")}
+              />
+            </div>
+          ) : null}
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.day_extreme_guard)}
+              onChange={(e) => set("day_extreme_guard", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("day_extreme_guard") && <OwnTag />}
+            Don&apos;t buy at the day&apos;s high or short at the day&apos;s low: wait for a pullback
+            <InfoTip label="About the day high/low guard">
+              In a strong trend the signal candle often closes right at the day&apos;s high (a buy) or low (a short), so the
+              order fills at the most stretched price of the day and the first pullback turns it into a loss. With this on, a
+              buy whose signal candle closed within the distance below of today&apos;s high (a sell: of today&apos;s low) waits
+              instead at the nearer of the fast SMA and the pullback below the close. It fills on the first price at or past
+              that level (every check, the stop, caps and the cut-off still apply) and is dropped after the candles below, if
+              the SMAs cross against it, at the cut-off or the trade cap: if the price never comes back, there is no trade.
+              Candle patterns and candle colour do not use it; the tall-candle pullback and the candle-extreme limit already
+              wait for a better price and take over from it.
+            </InfoTip>
+          </label>
+          {form.day_extreme_guard ? (
+            <div className="mt-2 grid grid-cols-3 items-end gap-2">
+              <Field
+                label="Near the high/low (%)"
+                value={String(form.day_extreme_pct ?? 0.15)}
+                onChange={(v) => set("day_extreme_pct", v)}
+                own={isOwn("day_extreme_pct")}
+              />
+              <Field
+                label="Wait for a pullback of (%)"
+                value={String(form.day_extreme_pull_pct ?? 0.15)}
+                onChange={(v) => set("day_extreme_pull_pct", v)}
+                own={isOwn("day_extreme_pull_pct")}
+              />
+              <Field
+                label="Wait at most (candles)"
+                value={String(form.day_extreme_candles ?? 3)}
+                onChange={(v) => set("day_extreme_candles", v)}
+                own={isOwn("day_extreme_candles")}
               />
             </div>
           ) : null}
@@ -2261,6 +2311,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.turn_alert) add({ group: "enter", key: "turn_alert", text: `Telegram when the SMA ${fast} line makes a sharp V`, off: { turn_alert: false } });
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
+  if (f.day_extreme_guard) add({ group: "enter", key: "day_extreme_guard", text: `Never buys within ${n(f.day_extreme_pct, 0.15)}% of the day's high (or shorts near its low): waits ${n(f.day_extreme_pull_pct, 0.15)}% back or at the fast SMA, up to ${n(f.day_extreme_candles, 3)} candles`, off: { day_extreme_guard: false } });
   if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
 

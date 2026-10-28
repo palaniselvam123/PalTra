@@ -161,6 +161,11 @@ export type SmaConfig = {
   entry_candle_confirm?: boolean;
   entry_candle_pct?: number;
   entry_candle_max?: number;
+  /** Day high/low guard: a buy near today's high (a sell near its low) waits for a pullback (day_extreme.py). */
+  day_extreme_guard?: boolean;
+  day_extreme_pct?: number;
+  day_extreme_pull_pct?: number;
+  day_extreme_candles?: number;
   slope_exit?: boolean;
   slope_lookback?: number;
   slope_bend_pct?: number;
@@ -512,7 +517,32 @@ export type OpenPnlLog = {
   summary: { high: number; high_at: string; low: number; low_at: string; last: number; last_at: string; basis?: string } | null;
   every_sec: number;
   keep_days: number;
+  /** Each stock's day P&L at every logged minute: its closed trades so far plus its open P&L (before charges). */
+  by_stock?: Record<string, OpenPnlStockPoint[]>;
 };
+export type FastMoveSettings = {
+  on: boolean;
+  pct: number;
+  minutes: number;
+  scan_on: boolean;
+  scan_speed: number;
+  cooldown_min: number;
+  call: boolean;
+  recent?: {
+    at: string;
+    source: "armed" | "scan";
+    symbol: string;
+    move_pct?: number | null;
+    speed?: number;
+    price?: number | null;
+    from?: number;
+    secs?: number;
+    minutes?: number | null;
+  }[];
+  watches_armed?: boolean;
+  scans_enabled?: boolean;
+};
+export type OpenPnlStockPoint = { t: string; closed: number; open: number; total: number; side: "LONG" | "SHORT" | null };
 
 export type OpenPnlReplayRun = { run_id: number; first: string; last: string; days: number; points: number; saved_at: string };
 export type OpenPnlReplayLog = Omit<OpenPnlLog, "desk" | "every_sec"> & { run_id: number };
@@ -1655,6 +1685,10 @@ export const smaApi = {
   /** All-bots day target / stop loss (₹, 0 = off) and today's combined P&L before charges. */
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
   pnlAlerts: () => request<PnlAlertSettings>("/api/bots/pnl-alerts"),
+  /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
+  fastMoves: () => request<FastMoveSettings>("/api/fast-moves"),
+  saveFastMoves: (body: Omit<FastMoveSettings, "recent" | "watches_armed" | "scans_enabled">) =>
+    request<FastMoveSettings>("/api/fast-moves", { method: "PUT", body: JSON.stringify(body) }),
   savePnlAlerts: (body: PnlAlertSettings) =>
     request<PnlAlertSettings>("/api/bots/pnl-alerts", {
       method: "PUT",

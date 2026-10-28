@@ -187,3 +187,17 @@ def test_api_lists_a_bots_replay_runs_and_returns_a_days_points(sma_api):
     assert body["day"] == "2026-10-09" and body["points"][0]["gross"] == -42.0
     assert sma_api.get("/api/open-pnl/replay/11?day=2026-10-08").json()["summary"]["low"] == -42.0
     assert sma_api.get("/api/open-pnl/replays?bot=9").status_code == 422
+
+
+def test_by_stock_adds_closed_trades_and_open_pnl():
+    series = [
+        {"t": "2026-10-27T10:00+05:30", "stocks": [{"symbol": "SBIN", "side": "LONG", "gross": 120.0}]},
+        {"t": "2026-10-27T10:01+05:30", "stocks": [{"symbol": "SBIN", "side": "LONG", "gross": -30.0}]},
+        {"t": "2026-10-27T10:02+05:30", "stocks": [{"symbol": "TCS", "side": "SHORT", "gross": 15.0}]},
+    ]
+    closed = [("SBIN", "10:02", -40.0), ("INFY", "09:55", 200.0)]
+    out = open_pnl_log.by_stock(series, closed)
+    assert sorted(out) == ["INFY", "SBIN", "TCS"]
+    assert [p["total"] for p in out["SBIN"]] == [120.0, -30.0, -40.0]
+    assert [p["closed"] for p in out["INFY"]] == [200.0, 200.0, 200.0]
+    assert [p["open"] for p in out["TCS"]] == [0.0, 0.0, 15.0] and out["TCS"][2]["side"] == "SHORT"

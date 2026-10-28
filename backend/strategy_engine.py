@@ -69,6 +69,7 @@ import extreme_entry
 import entry_candle
 import slope_exit
 import turn_entry
+import day_extreme
 import recovery
 import pivots
 import breakout
@@ -280,6 +281,7 @@ SNAPSHOT_FIELDS = (
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct",
+    "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
@@ -2132,6 +2134,26 @@ class StrategyEngine:
                     candles=tall_pullback.expiry(cfg),
                     why=why,
                 )
+        if pullback is None and day_extreme.on(cfg) and not per_candle(cfg):
+            # Day-extreme guard (day_extreme.py): a buy at today's high / a sell at today's low waits for a pullback.
+            real = _opposite(want) if flips_orders(cfg) else want
+            found = day_extreme.plan(frame.iloc[:-1], real, cfg)
+            if found is not None:
+                span = int(frame.iloc[-1]["ts"]) - int(curr["ts"]) if len(frame) >= 2 else 0
+                pullback = PullbackOrder(
+                    direction=want,
+                    limit=round_price(cfg.symbol, found[0]),
+                    cross_price=cross_price,
+                    atr=atr,
+                    signal_ts=int(curr["ts"]),
+                    span_sec=span if span > 0 else 60,
+                    candles=day_extreme.candles(cfg),
+                    side=real,
+                    sma_side=extreme_entry.sma_side(curr),
+                    cancel_on_cross=True,
+                    note=day_extreme.NOTE,
+                    why=why,
+                )
         if pullback is None and entry_candle.on(cfg) and not per_candle(cfg):
             # Entry-candle colour check (entry_candle.py): wait inside the forming candle for the trade's colour.
             real = _opposite(want) if flips_orders(cfg) else want
@@ -2323,7 +2345,7 @@ class StrategyEngine:
                 f"candle{'s' if order.candles != 1 else ''}, cancelled {beyond} {order.invalid_at:.2f}"
             )
         return (
-            f"pullback {side} at {order.limit:.2f} — tall candle; "
+            f"pullback {side} at {order.limit:.2f} — {order.note}; "
             f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
         )
 

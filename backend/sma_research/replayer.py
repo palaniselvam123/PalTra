@@ -57,6 +57,7 @@ BASELINE_OFF = {
     "turn_alert": False,
     "turn_entry": False,
     "uturn_on": False,
+    "day_extreme_guard": False,
     "vturn_handoff": False,
     "handoff_now": False,
     "pivot_target": "OFF",
