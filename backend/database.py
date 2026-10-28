@@ -152,6 +152,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "uturn_on": "BOOLEAN DEFAULT 0",
             "turn_toward_cross": "BOOLEAN DEFAULT 0",
             "turn_exit_candle": "BOOLEAN DEFAULT 0",
+            "turn_colour_exit": "BOOLEAN DEFAULT 0",
             "uturn_run": "INTEGER DEFAULT 5",
             "uturn_min_pct": "FLOAT DEFAULT 0.005",
             "day_extreme_guard": "BOOLEAN DEFAULT 0",

@@ -181,6 +181,8 @@ export type SmaConfig = {
   /** Turn entry: only turns toward the 9/21 cross open trades; a turn closes a trade on a candle of the other colour only. */
   turn_toward_cross?: boolean;
   turn_exit_candle?: boolean;
+  /** A trade opened by an SMA 9 turn closes on the first candle of the other colour. */
+  turn_colour_exit?: boolean;
   uturn_run?: number;
   uturn_min_pct?: number;
   vturn_move_pct?: number;

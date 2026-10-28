@@ -211,6 +211,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       when: candle,
       code: "SMA9_TURN_AGAINST",
     });
+  if (cfg.turn_entry && cfg.turn_colour_exit) out.push({ name: "Turn trade: first candle of the other colour", when: candle, code: "COLOUR_TURN" });
   if (cfg.slow_sma_exit) out.push({ name: "Close beyond the slow SMA", when: candle, code: "SLOW_SMA_BREACH" });
   if (cfg.recovery_hold && crossExitOn(cfg))
     out.push({ name: "Recovery rules (a losing trade held past the cross)", when: candle, code: "RECOVERY_TARGET_HIT / EMERGENCY_RECOVERY_ABORT" });

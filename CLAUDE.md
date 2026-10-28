@@ -427,7 +427,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reverse). **Close on a candle of the other colour** (`turn_exit_candle`, off; `turn_entry.candle_against`): a turn against an
   open trade read on a candle of the trade's own colour waits in `StrategyEngine._turn_wait`; `_turn_wait_minute` closes it (and
   reverses when allowed) on the first later closed candle of the other colour, and drops the wait when the SMA 9 slope swings
-  back with the trade by `vturn_turn_pct` or the trade closes. A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
+  back with the trade by `vturn_turn_pct` or the trade closes; the same switch holds the SMA 9 slope / V-turn exits
+  (`_watch_slope_exit`) on a candle of the trade's own colour (judged again on the next candle). **Close a turn trade on the
+  other colour** (`turn_colour_exit`, off; `StrategyEngine._watch_turn_colour`, `OpenPosition.entry_why` / `tc_bar`, restored
+  from `TradeLog.entry_reason`): a trade whose entry reason starts `SMA9_TURN` closes (`COLOUR_TURN`, via `_exit_now`, no
+  reverse) on the first candle closed after its entry of the other colour. A trade a turn closes is saved as `SMA9_TURN_AGAINST` (also
   instead of recovery hold's `PROFITABLE_TREND_EXHAUSTION`); the alert says when it waits or points away. Settings → 1. When
   to enter (the V numbers are in 3. When to exit, V-turn). The stock research baseline keeps all of them off.
 - `backend/opening_range.py` – opening-range checks (off by default, per bot and per stock, PAPER and LIVE,
