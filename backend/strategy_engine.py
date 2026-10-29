@@ -291,6 +291,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "exit_candle_minutes",
+    "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
@@ -3699,20 +3700,29 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not slope_exit.watched(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
-        closed_ts = _closed_bar_ts(frame)
-        if closed_ts is None or pos.slope_bar == closed_ts:
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        size = slope_exit.own_size(cfg, minutes)
+        if size:
+            # Slope candle (slope_minutes): closed candles of that size from the 1-minute tape.
+            closed = exit_candle.closed_frame(self._tapes.get(symbol), size, int(cfg.sma_fast), int(cfg.sma_slow))
+            minutes = size
+        else:
+            own = self._frames.get(symbol)
+            closed = own.iloc[:-1] if own is not None and len(own) > 1 else None
+        if closed is None or closed.empty:
+            return
+        closed_ts = int(closed.iloc[-1]["ts"])
+        if pos.slope_bar == closed_ts:
             return
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
         if closed_ts + minutes * 60 <= opened.timestamp():
             # That candle had closed before the entry: its slope is not "since the entry".
             return
         pos.slope_bar = closed_ts
-        value = slope_exit.slope(frame.iloc[:-1], int(cfg.sma_fast), slope_exit.lookback(cfg))
+        value = slope_exit.slope(closed, int(cfg.sma_fast), slope_exit.lookback(cfg))
         if value is None:
             return
         hit = slope_exit.judge(pos.signal_direction, value, pos.slope_state, cfg) if slope_exit.on(cfg) else None
@@ -3723,7 +3733,7 @@ class StrategyEngine:
         if hit is None:
             return
         reason, note = hit
-        if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(frame.iloc[-2], pos.signal_direction):
+        if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(closed.iloc[-1], pos.signal_direction):
             # Wait for a candle of the other colour (turn_exit_candle); the next candle is judged again.
             colour = "red" if pos.signal_direction == "LONG" else "green"
             self._signals[symbol] = f"{symbol} {note} — held until a {colour} candle closes"

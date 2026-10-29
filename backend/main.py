@@ -539,6 +539,7 @@ class ConfigUpdate(BaseModel):
     pattern_tf: Literal[1, 3, 5, 10, 15] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
+    slope_minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
@@ -1143,6 +1144,7 @@ def _gap_dict(row) -> dict:
         "or_spread_pct": opening_range.spread_pct(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         "exit_candle_minutes": exit_candle.minutes(row),
+        "slope_minutes": slope_mod.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),
         "review_gap_pct": review.gap_band(row),
