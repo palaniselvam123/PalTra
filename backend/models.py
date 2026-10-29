@@ -326,6 +326,7 @@ class BotConfig(Base):
     # Mixed candles (exit_candle.py): the SMA cross exit read on candles of this size instead of
     # the bot's own (0 = off). Entries stay on candle_minutes.
     exit_candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    slope_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Join the morning trend (join_trend.py): once a day, join_after_min after 09:15,
     # enter the side a stock is already trending on when its cross was missed.
     join_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

@@ -261,3 +261,42 @@ def test_api_saves_the_vturn_handoff(tmp_path, monkeypatch):
     assert not slope_exit.vturn_handoff_on(_cfg(vturn_exit=False, vturn_handoff=True))
     assert slope_exit.lost("SHORT", 100, 101) and not slope_exit.lost("LONG", 100, 101)
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_a_smaller_slope_candle_sees_the_v_sooner(db):  # noqa: F811
+    # The V's top is at 10:55. On the 15-minute bot's own candle the V-turn exit sees it at 12:00;
+    # read on 1-minute candles (slope_minutes) it closes within minutes of the top. Entries are unchanged.
+    own = await _long_on(db, _peak_frame(1), candle_minutes=15, vturn_exit=True)
+    one = await _long_on(db, _peak_frame(1), candle_minutes=15, vturn_exit=True, slope_minutes=1)
+    assert own["exit_reason"] == one["exit_reason"] == slope_exit.VTURN_EXIT
+    assert one["entry_time"] == own["entry_time"]
+    assert one["exit_time"] < own["exit_time"]
+    assert one["exit_time"] <= dt.datetime(2026, 9, 22, 11, 10)
+
+
+def test_slope_candle_size():
+    assert slope_exit.minutes(_cfg()) == 0 and slope_exit.minutes(_cfg(slope_minutes=7)) == 0
+    assert slope_exit.own_size(_cfg(slope_minutes=1), 15) == 1
+    assert slope_exit.own_size(_cfg(slope_minutes=15), 15) == 0  # same as the bot's own candle
+    assert slope_exit.own_size(_cfg(slope_minutes=0), 15) == 0
+
+
+def test_api_saves_the_slope_candle(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "slope_minutes" in STOCK_FIELDS
+    with TestClient(app) as client:
+        assert client.get("/api/config").json()["slope_minutes"] == 0
+        ok = client.put("/api/config", json={"slope_minutes": 5})
+        assert ok.status_code == 200 and ok.json()["slope_minutes"] == 5
+        assert client.put("/api/config", json={"slope_minutes": 4}).status_code == 422
+    database.reset_engine()

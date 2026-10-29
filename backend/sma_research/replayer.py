@@ -44,6 +44,7 @@ BASELINE_OFF = {
     "entry_mode": "SMA",
     "candle_minutes": 1,
     "exit_candle_minutes": 0,
+    "slope_minutes": 0,
     "review_on": False,
     "counter_exit_count": 0,
     "counter_entry": False,

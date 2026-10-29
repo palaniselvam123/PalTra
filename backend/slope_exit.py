@@ -27,6 +27,12 @@ signed so that positive is with the trade (rising for a buy, falling for a sell)
     With `vturn_handoff` (off), a V-turn exit at a loss moves the stock to Bot 2 like a
     recovery (`recovery.handoff`: flipped, gap mode; in LIVE only once Groww shows no shares).
 
+  * Slope candle (`slope_minutes`, 0 = off: the bot's own candle): read the slope, bend, turn and
+    V-turn on candles of another size built from the stock's 1-minute tape from 09:15, e.g. a 1- or
+    5-minute slope under a 15-minute bot, so a V is seen sooner. Entries stay on the bot's own
+    candle; `slope_lookback` and `vturn_within` then count these candles, and the candle-colour hold
+    (`turn_exit_candle`) reads the colour of the last one.
+
 The steepest slope is kept in memory, so after a restart it is measured again from
 the candles closed after that point. Exits go through `_exit_now`, which cancels a
 LIVE stop first; a LIVE position restored without its stop id is left to that stop.
@@ -50,6 +56,7 @@ DEFAULT_VTURN_MOVE = 0.02
 DEFAULT_VTURN_TURN = 0.015
 DEFAULT_VTURN_WITHIN = 6
 MAX_VTURN_WITHIN = 10
+SLOPE_MINUTES = (0, 1, 2, 3, 5, 10, 15)
 
 
 def on(cfg) -> bool:
@@ -115,6 +122,21 @@ def vturn_within(cfg) -> int:
     except (TypeError, ValueError):
         return DEFAULT_VTURN_WITHIN
     return max(1, min(MAX_VTURN_WITHIN, value))
+
+
+def minutes(cfg) -> int:
+    """The slope candle size in minutes; 0 = the bot's own candle."""
+    try:
+        value = int(getattr(cfg, "slope_minutes", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value in SLOPE_MINUTES else 0
+
+
+def own_size(cfg, entry_minutes: int) -> int:
+    """The slope candle size when it differs from the bot's own candle, else 0."""
+    m = minutes(cfg)
+    return m if m > 0 and m != int(entry_minutes or 1) else 0
 
 
 def watched(cfg) -> bool:

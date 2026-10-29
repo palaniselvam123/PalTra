@@ -171,6 +171,8 @@ export type SmaConfig = {
   day_extreme_candles?: number;
   slope_exit?: boolean;
   slope_lookback?: number;
+  /** Slope candle in minutes (slope_exit.py); 0 = the bot's own candle. */
+  slope_minutes?: number;
   slope_bend_pct?: number;
   slope_turn?: boolean;
   slope_turn_pct?: number;
@@ -1008,6 +1010,8 @@ export type CandleMinutes = 1 | 2 | 3 | 5 | 10 | 15;
 export const CANDLE_MINUTES: CandleMinutes[] = [1, 2, 3, 5, 10, 15];
 /** Exit candle sizes for mixed candles (exit_candle.py); 0 = the entry candle. */
 export const EXIT_CANDLE_MINUTES = [0, 1, 2, 3, 5, 10, 15, 30, 60];
+/** Slope candle sizes for the SMA 9 line exits (slope_exit.py); 0 = the bot's own candle. */
+export const SLOPE_MINUTES = [0, 1, 2, 3, 5, 10, 15];
 
 export type ArmTarget = 1 | 2 | 3 | 4 | "research";
 

@@ -6,7 +6,7 @@ import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
-import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
+import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
 type Props = {
@@ -88,6 +88,7 @@ const LABELS: Record<string, string> = {
   st_exit: "Supertrend exit",
   slope_exit: "SMA 9 slope exit",
   slope_lookback: "slope over (candles)",
+  slope_minutes: "slope candle",
   slope_bend_pct: "bend exit (% off the steepest)",
   slope_turn: "turn exit",
   slope_turn_pct: "turn at (%/candle)",
@@ -331,6 +332,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
     st_exit: Boolean(form.st_exit),
     slope_exit: Boolean(form.slope_exit),
+    slope_minutes: SLOPE_MINUTES.includes(Number(form.slope_minutes ?? 0)) ? Number(form.slope_minutes ?? 0) : 0,
     slope_lookback: Math.min(10, Math.max(1, Math.round(Number(form.slope_lookback ?? 2) || 2))),
     slope_bend_pct: Math.min(100, Math.max(0, Number(form.slope_bend_pct ?? 60) || 0)),
     slope_turn: form.slope_turn !== false,
@@ -1630,6 +1632,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         </div>
         <div className="min-w-0">
           <SectionTitle>SMA 9 line exits</SectionTitle>
+          <div className="mt-3 rounded-md p-2 ring-1 ring-inset ring-white/10">
+            <label htmlFor="sma-slope-candle" className="flex items-center gap-1 text-sm text-slate-300">
+              {isOwn("slope_minutes") && <OwnTag />}
+              <b className="text-slate-100">Read the SMA 9 slope on</b>
+              <InfoTip label="About the slope candle">
+                The slope exits below (bend, turn and V-turn) normally read the bot&apos;s own candle, so on 15-minute candles
+                a V in the SMA 9 line is only seen 15-30 minutes after its bottom. Pick a smaller candle (for example 1 or 5
+                minutes) to read the slope on that size instead, built from the stock&apos;s 1-minute candles: the turn is seen
+                sooner, but the line is also noisier. Entries stay on the bot&apos;s own candle. &quot;Slope over&quot; and the
+                V-turn window then count these smaller candles, and &quot;wait for a candle of the other colour&quot; reads the
+                colour of the smaller candle. To see the same numbers on the chart, set the chart to this candle size.
+              </InfoTip>
+            </label>
+            <select
+              id="sma-slope-candle"
+              value={String(SLOPE_MINUTES.includes(Number(form.slope_minutes ?? 0)) ? Number(form.slope_minutes ?? 0) : 0)}
+              onChange={(e) => set("slope_minutes", e.target.value)}
+              className="mt-1 block h-10 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            >
+              {SLOPE_MINUTES.map((m) => (
+                <option key={m} value={String(m)}>
+                  {m === 0 ? `The bot's own candle (${form.candle_minutes ?? 1} min)` : `${m}-minute candles${m === Number(form.candle_minutes ?? 1) ? " (same as the bot)" : ""}`}
+                </option>
+              ))}
+            </select>
+          </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2458,6 +2486,11 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
+  {
+    const slopeCandle = Number(f.slope_minutes ?? 0);
+    if ((f.slope_exit || f.vturn_exit) && slopeCandle > 0 && slopeCandle !== Number(f.candle_minutes ?? 1))
+      add({ group: "exit", key: "slope_minutes", text: `SMA ${fast} slope read on ${slopeCandle}-min candles`, off: { slope_minutes: "0" } });
+  }
   if (f.vturn_exit && f.vturn_handoff) add({ group: "advanced", key: "vturn_handoff", text: "After a losing V-turn exit, the stock moves to Bot 2", off: { vturn_handoff: false } });
 
   // 4. Gap mode

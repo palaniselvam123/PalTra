@@ -410,7 +410,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   needs the V-turn exit; `slope_exit.vturn_handoff_on` / `lost`): a V-turn exit at a loss (before charges) moves the stock to Bot 2
   like a recovery (`StrategyEngine._hand_to_chop_bot` → `recovery.handoff`: flipped, gap mode; LIVE only once Groww shows no
   shares; a PAPER source never arms a LIVE Bot 2; replays drop the stock from the rest of the run); a winner stays. Same `slope_lookback`; the chart's slope strip
-  shows while either is on (`slope_exit.watched`). Both count as an exit for `strategyChecks.noExitOn`. Settings →
+  shows while either is on (`slope_exit.watched`). **Slope candle** (`slope_minutes`, 0 = the bot's own candle, 1/2/3/5/10/15; per bot and per
+  stock): `_watch_slope_exit` reads the slope, bend, turn and V-turn on closed candles of that size grouped from the 1-minute
+  tape (`_tapes`, `exit_candle.closed_frame`), once per newly closed one, so a V shows sooner under a long bot candle; entries
+  stay on the bot's candle, `slope_lookback` / `vturn_within` count these candles and the `turn_exit_candle` colour hold reads
+  the last one. The research baseline keeps 0. Both count as an exit for `strategyChecks.noExitOn`. Settings →
   Supertrend / exits. The research baseline keeps both off.
 - `backend/turn_entry.py` – SMA 9 turn alert and entry (`turn_alert` / `turn_entry`, off by default, per bot and per stock,
   PAPER and LIVE): act on the fast SMA's V before the 9/21 cross. Read once per closed candle of each armed stock of a

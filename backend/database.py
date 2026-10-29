@@ -113,6 +113,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "cross_exit": "BOOLEAN DEFAULT 1",
             "late_entry_min": "INTEGER DEFAULT 0",
             "exit_candle_minutes": "INTEGER DEFAULT 0",
+            "slope_minutes": "INTEGER DEFAULT 0",
             "join_trend": "BOOLEAN DEFAULT 0",
             "join_after_min": "INTEGER DEFAULT 15",
             "counter_exit_count": "INTEGER DEFAULT 0",
