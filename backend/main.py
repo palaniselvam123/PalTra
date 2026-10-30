@@ -56,6 +56,7 @@ import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
 import entry_candle as entry_candle_mod
 import slope_exit as slope_mod
+import stop_plan as stop_plan_mod
 import recovery as recovery_mod
 import breakout as breakout_mod
 import opening_range
@@ -517,6 +518,9 @@ class ConfigUpdate(BaseModel):
     handoff_now: bool | None = None
     auto_start: bool | None = None
     pivot_target: Literal["OFF", "R1", "R2"] | None = None
+    stop_plan: bool | None = None
+    plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
+    plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -1125,6 +1129,9 @@ def _gap_dict(row) -> dict:
         "handoff_now": recovery_mod.handoff_now_on(row),
         "auto_start": bool(getattr(row, "auto_start", False)),
         "pivot_target": pivots.target_mode(row),
+        "stop_plan": stop_plan_mod.on(row),
+        "plan_be_r": stop_plan_mod.be_r(row),
+        "plan_trail_r": stop_plan_mod.trail_r(row),
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),
@@ -2777,6 +2784,7 @@ async def trades_csv(mode: str = ""):
         "atr_at_entry",
         "sl_trigger_price",
         "entry_reason",
+        "stop_log",
         "exit_time",
         "exit_price",
         "exit_reason",

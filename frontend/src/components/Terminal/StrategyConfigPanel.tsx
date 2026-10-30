@@ -99,6 +99,9 @@ const LABELS: Record<string, string> = {
   vturn_handoff: "V-turn loss → Bot 2",
   handoff_now: "Bot 2 orders at once",
   pivot_target: "pivot target",
+  stop_plan: "staged stop plan",
+  plan_be_r: "breakeven at (R)",
+  plan_trail_r: "Supertrend trail from (R)",
   st_period: "Supertrend ATR length",
   st_mult: "Supertrend factor",
   tall_pullback: "tall-candle pullback",
@@ -344,6 +347,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     vturn_handoff: Boolean(form.vturn_exit) && Boolean(form.vturn_handoff),
     handoff_now: Boolean(form.handoff_now),
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
+    stop_plan: Boolean(form.stop_plan),
+    plan_be_r: Number(form.plan_be_r ?? 1.5) > 0 ? Number(form.plan_be_r ?? 1.5) : 1.5,
+    plan_trail_r: Number(form.plan_trail_r ?? 2) > 0 ? Number(form.plan_trail_r ?? 2) : 2,
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
     st_mult: Math.min(10, Math.max(0.5, Number(form.st_mult ?? 3) || 3)),
     tall_pullback: Boolean(form.tall_pullback),
@@ -1967,6 +1973,34 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="R2">R2 for a buy, S2 for a sell</option>
             </select>
           </label>
+          <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset ring-white/10", (form.stop_type ?? "ATR") !== "ATR" && "opacity-50")}>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.stop_plan)}
+                onChange={(e) => set("stop_plan", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("stop_plan") && <OwnTag />}
+              Staged stop plan: breakeven, then a Supertrend trail
+              <InfoTip label="About the staged stop plan">
+                Needs stop type ATR. R is the trade&apos;s risk: entry minus the ATR stop (ATR × the multiple below, e.g. 2.5).
+                While the best price since entry is under the first level the ATR stop stays. Once it reaches the breakeven
+                level (+1.5R) the stop moves to the entry price plus the round-trip charges, so the trade cannot lose. Once it
+                reaches the trail level (+2R) the stop follows the Supertrend line ({String(form.st_period ?? 10)}, ×
+                {String(form.st_mult ?? 3)}; set under Supertrend in 3. When to exit) on the bot&apos;s own candles, never below
+                breakeven. The stop only ever tightens. Each move is written to the trade (blotter: Stop moves). LIVE moves the
+                Groww stop order the same way as the trailing stop. Off by default; try it on Replay first.
+              </InfoTip>
+            </label>
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <Field label="Breakeven at (R)" value={String(form.plan_be_r ?? 1.5)} onChange={(v) => set("plan_be_r", v)} own={isOwn("plan_be_r")} />
+              <Field label="Supertrend trail from (R)" value={String(form.plan_trail_r ?? 2)} onChange={(v) => set("plan_trail_r", v)} own={isOwn("plan_trail_r")} />
+            </div>
+            {(form.stop_type ?? "ATR") !== "ATR" && form.stop_plan ? (
+              <p className="mt-2 text-xs text-amber-300">The plan only runs with stop type ATR; it does nothing with this stop type.</p>
+            ) : null}
+          </div>
           {form.stop_type !== "TSL" ? (
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
@@ -2520,6 +2554,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
   }
+  if (f.stop_plan && (f.stop_type ?? "ATR") === "ATR")
+    add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
 

@@ -40,6 +40,8 @@ class TradeLog(Base):
     # Why the trade opened (strategy_engine.ENTRY_REASONS), e.g. SMA_CROSS, GAP_MODE,
     # "JOIN_TREND:EXTREME_LIMIT"; NULL on older rows.
     entry_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Staged stop plan moves on this trade, e.g. "11:42 stop → breakeven (+1.5R) at 1672.10"; NULL if none.
+    stop_log: Mapped[str | None] = mapped_column(String, nullable=True)
     # Recovery hold (recovery.py): loss per share at the adverse cross and that candle's start.
     recovery_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovery_bar: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -405,6 +407,10 @@ class BotConfig(Base):
     auto_start: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Book the profit at a daily pivot level: OFF | R1 (R1 / S1, else R2 / S2) | R2 (pivots.py).
     pivot_target: Mapped[str | None] = mapped_column(String(3), nullable=True, default="OFF")
+    # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
+    stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    plan_trail_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
