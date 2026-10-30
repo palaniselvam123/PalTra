@@ -114,7 +114,7 @@ export function NewsEntries() {
           Bot
           <select value={bot} onChange={(e) => setBot(Number(e.target.value))} className={field}>
             <option value={0}>Off</option>
-            {[1, 2, 3, 4].map((n) => {
+            {[1, 2, 3, 4, 5].map((n) => {
               const b = bots.find((x) => x.bot === n);
               return (
                 <option key={n} value={n}>

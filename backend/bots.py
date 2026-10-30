@@ -31,12 +31,12 @@ from models import BotConfig
 from strategy_engine import StrategyEngine, trade_names
 
 #: The extra bots. Bot 1 is the main desk's engine.
-EXTRA_BOTS = (2, 3, 4)
+EXTRA_BOTS = (2, 3, 4, 5)
 ALL_BOTS = (1, *EXTRA_BOTS)
 
 
 def config_id_for(bot: int) -> int:
-    """Settings row of a bot: 1 for the main desk, 3-5 for bots 2-4 (2 is research)."""
+    """Settings row of a bot: 1 for the main desk, 3-6 for bots 2-5 (2 is research)."""
     return 1 if int(bot) == 1 else int(bot) + 1
 
 
@@ -88,7 +88,7 @@ def ensure_bot_config(bot: int) -> None:
 
 
 class BotEngine(StrategyEngine):
-    """One of bots 2-4: the SMA bot with its own settings, book and order client."""
+    """One of bots 2-5: the SMA bot with its own settings, book and order client."""
 
     def __init__(self, bot: int, quotes: GrowwClient):
         if int(bot) not in EXTRA_BOTS:

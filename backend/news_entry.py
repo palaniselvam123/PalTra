@@ -45,7 +45,7 @@ def settings(cfg) -> dict:
     impact = (getattr(cfg, "news_entry_impact", None) or "HIGH").upper()
     scope = (getattr(cfg, "news_entry_scope", None) or "FNO").upper()
     return {
-        "bot": bot if 1 <= bot <= 4 else 0,
+        "bot": bot if 1 <= bot <= 5 else 0,
         "impact": impact if impact in IMPACTS else "HIGH",
         "scope": scope if scope in SCOPES else "FNO",
         "max_age_min": int(getattr(cfg, "news_entry_max_age_min", None) or 15),

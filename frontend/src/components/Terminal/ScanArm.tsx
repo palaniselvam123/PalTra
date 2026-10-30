@@ -22,7 +22,7 @@ const DIRS: { v: ScanArmPreset["direction"]; label: string }[] = [
 
 type Draft = Omit<ScanArmPreset, "id" | "fired" | "last" | "rule"> & { id?: string };
 
-const blank = (bot: 1 | 2 | 3 | 4): Draft => ({
+const blank = (bot: 1 | 2 | 3 | 4 | 5): Draft => ({
   name: "Strong trend",
   bot,
   lists: ["fno"],
@@ -39,7 +39,7 @@ const blank = (bot: 1 | 2 | 3 | 4): Draft => ({
 });
 
 /** Ready-made recipes for "New": the owner's two examples. */
-const TEMPLATES: { label: string; make: (bot: 1 | 2 | 3 | 4) => Draft }[] = [
+const TEMPLATES: { label: string; make: (bot: 1 | 2 | 3 | 4 | 5) => Draft }[] = [
   {
     label: "Strong bullish / bearish at 10:00 and 10:15",
     make: (bot) => ({ ...blank(bot), name: "Strong trend 10:00", times: ["10:00", "10:15"], on: true }),
@@ -175,10 +175,10 @@ function Editor({ draft, onCancel, onSaved }: { draft: Draft; onCancel: () => vo
           Arm on
           <select
             value={d.bot}
-            onChange={(e) => set("bot", Number(e.target.value) as 1 | 2 | 3 | 4)}
+            onChange={(e) => set("bot", Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
             className="h-8 rounded-md border border-border bg-surface px-1.5 text-xs text-slate-200"
           >
-            {[1, 2, 3, 4].map((n) => (
+            {[1, 2, 3, 4, 5].map((n) => (
               <option key={n} value={n}>
                 Bot {n}
               </option>
@@ -257,7 +257,7 @@ function Editor({ draft, onCancel, onSaved }: { draft: Draft; onCancel: () => vo
  * Scan & arm (scan_arm.py): saved recipes that run the Trend quality scan and arm the matching stocks on
  * a bot, now (Run now) or by themselves at set times. Arming only: the bot trades them on its next signal.
  */
-export function ScanArm({ defaultBot, onClose }: { defaultBot: 1 | 2 | 3 | 4; onClose: () => void }) {
+export function ScanArm({ defaultBot, onClose }: { defaultBot: 1 | 2 | 3 | 4 | 5; onClose: () => void }) {
   const [state, setState] = useState<ScanArmState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);

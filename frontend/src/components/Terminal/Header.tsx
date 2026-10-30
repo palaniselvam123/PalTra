@@ -103,7 +103,7 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
   }, []);
   const byNo = new Map(bots.map((b) => [b.bot, b]));
   const options: { id: Desk; label: string; title: string; live: boolean }[] = [
-    ...(["live", "bot2", "bot3", "bot4"] as const).map((id, i) => {
+    ...(["live", "bot2", "bot3", "bot4", "bot5"] as const).map((id, i) => {
       const info = byNo.get(i + 1);
       const name = info?.name ?? (i === 0 ? "Bot 1" : `Bot ${i + 1}`);
       return {
@@ -152,8 +152,8 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
 
 export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay, tabs, tab = "all" }: Props) {
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
-  const deskBot: 1 | 2 | 3 | 4 | null =
-    desk === "live" ? 1 : desk === "bot2" ? 2 : desk === "bot3" ? 3 : desk === "bot4" ? 4 : null;
+  const deskBot: 1 | 2 | 3 | 4 | 5 | null =
+    desk === "live" ? 1 : desk === "bot2" ? 2 : desk === "bot3" ? 3 : desk === "bot4" ? 4 : desk === "bot5" ? 5 : null;
   const [copyBots, setCopyBots] = useState<BotSummary[]>([]);
   // Where the sticky header ends (the nav's 44 px + its own height, which changes with
   // review cards and notices), so a bar further down (the trade blotter's) can pin under it.
@@ -449,7 +449,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
-  const bulkCopyTo = async (toBot: 1 | 2 | 3 | 4, names: string[]) => {
+  const bulkCopyTo = async (toBot: 1 | 2 | 3 | 4 | 5, names: string[]) => {
     if (!deskBot || toBot === deskBot || !names.length) return;
     setBusy(true);
     setError(null);
@@ -811,7 +811,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             </h2>
             {scanArm && (
               <ScanArm
-                defaultBot={desk === "research" ? 3 : ((deskBot ?? 1) as 1 | 2 | 3 | 4)}
+                defaultBot={desk === "research" ? 3 : ((deskBot ?? 1) as 1 | 2 | 3 | 4 | 5)}
                 onClose={() => setScanArm(false)}
               />
             )}
@@ -938,7 +938,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       disabled={busy}
                       value=""
                       onChange={(e) => {
-                        const to = Number(e.target.value) as 1 | 2 | 3 | 4;
+                        const to = Number(e.target.value) as 1 | 2 | 3 | 4 | 5;
                         if (to) bulkCopyTo(to, shownSelected);
                       }}
                       title="Copy the ticked stocks to another bot's Trade list. The source bot keeps them."
@@ -947,7 +947,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       <option value="" className="bg-[#0B0E14]">
                         Copy to…
                       </option>
-                      {([1, 2, 3, 4] as const)
+                      {([1, 2, 3, 4, 5] as const)
                         .filter((n) => n !== deskBot)
                         .map((n) => {
                           const b = copyBots.find((x) => x.bot === n);

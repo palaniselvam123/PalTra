@@ -57,9 +57,9 @@ def test_each_bot_has_its_own_replay_and_the_routes_pick_it(db, monkeypatch):
     from fastapi.testclient import TestClient
     import main
 
-    assert set(main.replays) == {1, 2, 3, 4}
+    assert set(main.replays) == {1, 2, 3, 4, 5}
     assert main.replay is main.replays[1]
-    assert len({id(s) for s in main.replays.values()}) == 4
+    assert len({id(s) for s in main.replays.values()}) == 5
 
     class Eng:
         status = "PAUSED"
@@ -72,7 +72,7 @@ def test_each_bot_has_its_own_replay_and_the_routes_pick_it(db, monkeypatch):
 
     eng3 = Eng()
     with TestClient(main.app) as client:
-        assert set(client.get("/api/replay/all").json()) == {"1", "2", "3", "4"}
+        assert set(client.get("/api/replay/all").json()) == {"1", "2", "3", "4", "5"}
         assert client.get("/api/replay?bot=3").json()["status"] == "IDLE"
         monkeypatch.setattr(main.replays[3], "engine", eng3)
         # Bot 3's replay engine answers bot 3's buttons; bot 1 has none playing.

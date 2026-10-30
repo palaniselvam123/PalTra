@@ -680,7 +680,7 @@ function RunFilterBar({
         Bot
         <select value={filters.bot} onChange={(e) => set("bot", e.target.value)} className={box}>
           <option value="ALL">All</option>
-          {[1, 2, 3, 4].map((n) => (
+          {[1, 2, 3, 4, 5].map((n) => (
             <option key={n} value={String(n)}>
               Bot {n}
             </option>

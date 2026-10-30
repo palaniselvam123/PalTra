@@ -83,7 +83,7 @@ export function FastMoveAlerts() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
             <input type="checkbox" checked={Boolean(form.on)} onChange={(e) => set("on", e.target.checked)} className="accent-[#10B981]" />
-            Armed and held stocks (Bots 1–4), checked every 5 s
+            Armed and held stocks (Bots 1–5), checked every 5 s
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-400">
             Moved at least (%)

@@ -101,7 +101,7 @@ def _bot_path(bot: int, path: str) -> str:
 
 def _bot_arg(args: dict) -> int:
     bot = args.get("bot", 1)
-    if bot not in (1, 2, 3, 4):
+    if bot not in (1, 2, 3, 4, 5):
         raise ToolError("bot must be 1, 2, 3 or 4")
     return int(bot)
 
@@ -297,7 +297,7 @@ def _run_bot(run: dict) -> int:
 
 async def list_backtests(args: dict) -> Any:
     bot = args.get("bot")
-    if bot is not None and bot not in (1, 2, 3, 4):
+    if bot is not None and bot not in (1, 2, 3, 4, 5):
         raise ToolError("bot must be 1, 2, 3 or 4")
     limit = max(1, min(int(args.get("limit") or 20), 50))
     runs = await _call("GET", "/api/replay/runs", params={"limit": 500 if bot is not None else limit})
@@ -506,7 +506,7 @@ async def run_scan_arm(args: dict) -> Any:
     return {**out, "note": "Started in the background (a scan takes a few minutes); see get_scan_arm for the result."}
 
 
-_BOT = {"type": "integer", "enum": [1, 2, 3, 4], "description": "SMA bot: 1 = main desk, 2-4 = bots 2-4. Default 1."}
+_BOT = {"type": "integer", "enum": [1, 2, 3, 4, 5], "description": "SMA bot: 1 = main desk, 2-5 = bots 2-5. Default 1."}
 _STOP_PROPS = {
     "use_stop": {"type": "boolean"},
     "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL"]},
