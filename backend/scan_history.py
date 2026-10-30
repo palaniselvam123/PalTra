@@ -1,4 +1,4 @@
-"""Scan history (scan_history.py): every finished Cross scan and Trend quality pass, kept.
+"""Scan history (scan_history.py): every finished Cross scan, Trend quality and Most active pass, kept.
 
 The Scalp page's tables are replaced on every scan, so what a scan said at 10:42
 was gone by 11:12. Each finished pass is saved here with its time, its choices
@@ -25,8 +25,10 @@ from pathlib import Path
 
 log = logging.getLogger("sma.scanhistory")
 
-KINDS = ("cross", "chop")
-KIND_LABEL = {"cross": "Cross scan", "chop": "Trend quality"}
+KINDS = ("cross", "chop", "active")
+# The terminal's History tab lists these; "active" (the desk's Most active scan) has its own history view.
+SCAN_KINDS = ("cross", "chop")
+KIND_LABEL = {"cross": "Cross scan", "chop": "Trend quality", "active": "Most active"}
 DEFAULT_KEEP_DAYS = 90
 _lock = threading.Lock()
 
@@ -108,7 +110,7 @@ def save(kind: str, snapshot: dict, meta: dict | None = None) -> int | None:
     rows = snapshot.get("rows") or []
     info = {
         k: snapshot.get(k)
-        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open")
+        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open", "universe", "scanned")
         if snapshot.get(k) is not None
     }
     info.update(meta or {})
@@ -165,7 +167,7 @@ def _meta_row(row: sqlite3.Row, checked_at: str | None = None) -> dict:
 
 def days(kind: str | None = None, limit: int = 120) -> list[dict]:
     """The days with saved scans, newest first, with how many runs each."""
-    where, args = ("WHERE kind = ?", [kind]) if kind in KINDS else ("", [])
+    where, args = ("WHERE kind = ?", [kind]) if kind in KINDS else ("WHERE kind IN ('cross', 'chop')", [])
     with _lock, _connect() as con:
         out = con.execute(
             f"SELECT day, COUNT(*) AS runs FROM scan_runs {where} GROUP BY day ORDER BY day DESC LIMIT ?",
@@ -183,6 +185,8 @@ def runs(day: str | None = None, kind: str | None = None, limit: int = 500) -> l
     if kind in KINDS:
         clauses.append("r.kind = ?")
         args.append(kind)
+    else:
+        clauses.append("r.kind IN ('cross', 'chop')")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     order = "r.as_of ASC" if day else "r.as_of DESC"
     with _lock, _connect() as con:

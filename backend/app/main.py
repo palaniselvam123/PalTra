@@ -288,7 +288,10 @@ async def lifespan(app: FastAPI):
     from app.services.groww_funds import groww_client as _groww_session
 
     import server_role
+    from app.api.routes_scalp import keep_active_scan
 
+    # Every finished pass goes to the scan history (the card's History view).
+    active_scanner.on_done = keep_active_scan
     if server_role.is_backtest():
         # Scans run on demand here (Scan now), never as a background loop.
         pass

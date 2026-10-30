@@ -587,9 +587,29 @@ export type ActiveStock = {
   buy_share: number | null;
   range_pct: number | null;
   bias: "LONG" | "SHORT" | "NONE";
+  /** % per minute since the previous scan (signed); null on the first scan or after a long gap. */
+  speed_pct_min?: number | null;
 };
 
-export type ActiveSort = "value" | "rvol" | "change" | "pressure";
+export type ActiveSort = "value" | "rvol" | "change" | "pressure" | "speed" | "vwap";
+
+/** One saved most-active scan (without its rows). */
+export type ActiveHistoryRun = {
+  id: number;
+  day: string;
+  as_of: string;
+  total: number | null;
+  failed: number | null;
+  row_count: number;
+  meta: { universe?: number; scanned?: number };
+};
+
+export type ActiveHistoryResponse = {
+  days: { day: string; runs: number }[];
+  day: string | null;
+  runs: ActiveHistoryRun[];
+  keep_days: number;
+};
 
 export type ActiveStocksResponse = {
   as_of: string | null;
@@ -1309,6 +1329,10 @@ export const api = {
     request<ScalpAlerts>("/api/scalp/alerts", { method: "POST", body: JSON.stringify(body) }),
   scalpActive: (params: { sort?: ActiveSort; top?: number; bias?: "LONG" | "SHORT"; min_value_cr?: number } = {}) =>
     request<ActiveStocksResponse>(`/api/scalp/active${queryString(stringifyParams(params))}`),
+  scalpActiveHistory: (day?: string) =>
+    request<ActiveHistoryResponse>(`/api/scalp/active/history${day ? `?day=${day}` : ""}`),
+  scalpActiveHistoryRun: (id: number) =>
+    request<ActiveHistoryRun & { rows: ActiveStock[] }>(`/api/scalp/active/history/${id}`),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
   /** Pause / resume the desk's Scalp work (monitor scoring + history fill, alerts, most-active scan). */
   scalpPause: (paused: boolean) =>

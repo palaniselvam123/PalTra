@@ -132,3 +132,48 @@ def test_the_api_needs_a_groww_session_to_scan(monkeypatch):
     assert body["connected"] is False and "rows" in body
     assert client.get("/api/scalp/active", params={"sort": "nonsense"}).status_code == 400
     assert client.post("/api/scalp/active/scan").status_code == 428
+
+
+@pytest.mark.asyncio
+async def test_speed_is_the_move_since_the_last_scan_per_minute(monkeypatch):
+    monkeypatch.setattr("app.services.active_stocks.CALL_GAP_SEC", 0)
+    quotes = {"FAST": _quote(100.0, 1_000_000, 100.0, 100.0), "SLOW": _quote(200.0, 1_000_000, 200.0, 200.0)}
+    client = _FakeGroww(quotes)
+    scanner = ActiveScanner()
+    kept = []
+    scanner.on_done = kept.append
+    await scanner.scan(client, symbols=["FAST", "SLOW"], now=NOON)
+    assert all(r["speed_pct_min"] is None for r in scanner.snapshot()["rows"])  # first scan: nothing to compare
+    quotes["FAST"] = _quote(101.0, 1_100_000, 100.5, 100.0)  # +1% in 5 minutes
+    quotes["SLOW"] = _quote(199.0, 1_100_000, 199.5, 200.0)  # -0.5% in 5 minutes
+    await scanner.scan(client, symbols=["FAST", "SLOW"], now=NOON + dt.timedelta(minutes=5))
+    rows = {r["symbol"]: r for r in scanner.snapshot(sort="speed")["rows"]}
+    assert rows["FAST"]["speed_pct_min"] == pytest.approx(0.2)
+    assert rows["SLOW"]["speed_pct_min"] == pytest.approx(-0.1)
+    assert [r["symbol"] for r in scanner.snapshot(sort="speed")["rows"]] == ["FAST", "SLOW"]
+    # Every pass with rows is handed on whole, for the history.
+    assert len(kept) == 2 and len(kept[1]["rows"]) == 2
+    # A gap of over 30 minutes is not a speed.
+    await scanner.scan(client, symbols=["FAST", "SLOW"], now=NOON + dt.timedelta(minutes=50))
+    assert all(r["speed_pct_min"] is None for r in scanner.snapshot()["rows"])
+
+
+def test_most_active_history_is_kept_apart_from_the_terminal_history(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    import scan_history
+    from app.main import app
+
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "scan_history.db"))
+    row = row_from_quote("BIG", _quote(1000.0, 3_000_000, 1000.0, 990.0, buy=1, sell=3), 1_000_000, 0.5)
+    snap = {"as_of": NOON.isoformat(), "universe": 4, "scanned": 1, "failed": 0, "rows": [row.as_dict()]}
+    run_id = scan_history.save("active", {**snap, "total": 4}, {"source": "scan"})
+    other = scan_history.save("cross", {"as_of": NOON.isoformat(), "rows": [{"symbol": "X"}]}, {})
+    # The terminal's History tab never lists the Most active scans.
+    assert [r["id"] for r in scan_history.runs("2026-10-06")] == [other]
+    client = TestClient(app)
+    body = client.get("/api/scalp/active/history").json()
+    assert body["day"] == "2026-10-06" and [r["id"] for r in body["runs"]] == [run_id]
+    run = client.get(f"/api/scalp/active/history/{run_id}").json()
+    assert run["rows"][0]["symbol"] == "BIG" and run["total"] == 4
+    assert client.get(f"/api/scalp/active/history/{other}").status_code == 404

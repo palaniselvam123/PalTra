@@ -3,8 +3,9 @@
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Eye, Flame, Loader2, RefreshCw } from "lucide-react";
-import { api, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, Flame, History, Loader2, RefreshCw } from "lucide-react";
+import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
+import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
@@ -18,10 +19,48 @@ const SORT_LABEL: Record<ActiveSort, string> = {
   rvol: "Volume vs usual",
   change: "Biggest move",
   pressure: "Buyer/seller imbalance",
+  speed: "Fastest move now (speed)",
+  vwap: "Furthest from average price",
 };
-type ColKey = "symbol" | "ltp" | "change" | "value" | "rvol" | "buy" | "vwap" | "bias";
+/** The same ranking as the server's SORTS (active_stocks.py), for a saved scan. */
+const RANK_KEY: Record<ActiveSort, (r: ActiveStock) => number> = {
+  value: (r) => r.value_cr,
+  rvol: (r) => r.rvol ?? 0,
+  change: (r) => Math.abs(r.change_pct ?? 0),
+  pressure: (r) => Math.abs((r.buy_share ?? 0.5) - 0.5),
+  speed: (r) => Math.abs(r.speed_pct_min ?? 0),
+  vwap: (r) => Math.abs(r.vwap_dist_pct ?? 0),
+};
+type ColKey = "symbol" | "ltp" | "change" | "speed" | "value" | "rvol" | "buy" | "vwap" | "bias";
 type Col = "rank" | ColKey | "actions";
-const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "value", "rvol", "buy", "vwap", "bias", "actions"];
+const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "speed", "value", "rvol", "buy", "vwap", "bias", "actions"];
+const TOP = 40;
+
+const clockIst = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+
+const CSV_HEAD = ["Rank", "Stock", "LTP", "Day %", "Speed %/min", "Traded Rs cr", "Vol vs usual", "Buyers %", "Buy qty", "Sell qty", "vs avg %", "Avg price", "Bias"];
+const num = (v: number | null | undefined, d = 2) => (v == null ? "" : v.toFixed(d));
+function activeCsv(rows: ActiveStock[]): string {
+  const lines = rows.map((r, i) =>
+    [
+      i + 1,
+      r.symbol,
+      num(r.ltp),
+      num(r.change_pct),
+      num(r.speed_pct_min, 3),
+      num(r.value_cr, 1),
+      num(r.rvol),
+      r.buy_share == null ? "" : Math.round(r.buy_share * 100),
+      r.buy_qty ?? "",
+      r.sell_qty ?? "",
+      num(r.vwap_dist_pct),
+      num(r.avg_price),
+      r.bias === "NONE" ? "" : r.bias,
+    ].join(",")
+  );
+  return [CSV_HEAD.join(","), ...lines].join("\n");
+}
 
 type Props = {
   /** Stocks already on the desk feed (shown in the monitor below). */
@@ -50,15 +89,23 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [bias, setBias] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minValue, setMinValue] = useState(0);
   const [query, setQuery] = useState("");
+  const [minSpeed, setMinSpeed] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // History: any saved scan (kept on the server for about 90 days), shown in the same table.
+  const [view, setView] = useState<"live" | "history">("live");
+  const [hist, setHist] = useState<ActiveHistoryResponse | null>(null);
+  const [histDay, setHistDay] = useState("");
+  const [runId, setRunId] = useState<number | null>(null);
+  const [saved, setSaved] = useState<{ id: number; as_of: string; total: number | null; failed: number | null; rows: ActiveStock[] } | null>(null);
+  const [histBusy, setHistBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const next = await api.scalpActive({
         sort,
-        top: 40,
+        top: TOP,
         min_value_cr: minValue,
         ...(bias === "ALL" ? {} : { bias }),
       });
@@ -74,6 +121,51 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     const id = setInterval(load, POLL_MS);
     return () => clearInterval(id);
   }, [load]);
+
+  // The saved days and that day's scans; the latest scan of the day opens first.
+  useEffect(() => {
+    if (view !== "history") return;
+    let live = true;
+    setHistBusy(true);
+    api
+      .scalpActiveHistory(histDay || undefined)
+      .then((h) => {
+        if (!live) return;
+        setHist(h);
+        setError(null);
+        if (!histDay && h.day) setHistDay(h.day);
+        setRunId((cur) => (cur != null && h.runs.some((r) => r.id === cur) ? cur : h.runs.length ? h.runs[h.runs.length - 1].id : null));
+      })
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "Could not load the saved scans"))
+      .finally(() => live && setHistBusy(false));
+    return () => {
+      live = false;
+    };
+  }, [view, histDay]);
+
+  useEffect(() => {
+    if (view !== "history" || runId == null) {
+      setSaved(null);
+      return;
+    }
+    let live = true;
+    api
+      .scalpActiveHistoryRun(runId)
+      .then((r) => live && setSaved({ id: r.id, as_of: r.as_of, total: r.total, failed: r.failed, rows: r.rows }))
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "Could not load that scan"));
+    return () => {
+      live = false;
+    };
+  }, [view, runId]);
+
+  const runs = hist?.runs ?? [];
+  const runAt = runs.findIndex((r) => r.id === runId);
+  // A saved scan is filtered and ranked here the way the server ranks the live one.
+  const source = useMemo(() => {
+    if (view === "live") return data?.rows ?? [];
+    const kept = (saved?.rows ?? []).filter((r) => r.value_cr >= minValue && (bias === "ALL" || r.bias === bias));
+    return [...kept].sort((a, b) => RANK_KEY[sort](b) - RANK_KEY[sort](a)).slice(0, TOP);
+  }, [view, data?.rows, saved, minValue, bias, sort]);
 
   // While a scan runs, check back sooner.
   useEffect(() => {
@@ -110,7 +202,13 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     }
   };
 
-  const found = useMemo(() => (data?.rows ?? []).filter((r) => matchesText(query, r.symbol)), [data?.rows, query]);
+  const found = useMemo(
+    () =>
+      source.filter(
+        (r) => matchesText(query, r.symbol) && (minSpeed <= 0 || Math.abs(r.speed_pct_min ?? 0) >= minSpeed)
+      ),
+    [source, query, minSpeed]
+  );
   const { sorted: rows, sort: colSort, onSort } = useSort<ActiveStock, ColKey>(found, (r, k) => {
     switch (k) {
       case "symbol":
@@ -119,6 +217,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         return r.ltp;
       case "change":
         return r.change_pct;
+      case "speed":
+        return r.speed_pct_min ?? null;
       case "value":
         return r.value_cr;
       case "rvol":
@@ -131,9 +231,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         return r.bias;
     }
   });
-  const asOf = data?.as_of
-    ? new Date(data.as_of).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST"
-    : null;
+  const asOf = data?.as_of ? clockIst(data.as_of) + " IST" : null;
 
   useEffect(() => {
     onStatus?.({ when: data?.as_of ?? null, running: !!data?.running });
@@ -146,12 +244,32 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Flame size={15} className="text-amber-400" /> Where traders are now — most active F&amp;O stocks
         </h2>
+        <div className="ml-auto inline-flex overflow-hidden rounded-md ring-1 ring-inset ring-slate-700" role="group" aria-label="Live or saved scans">
+          {(["live", "history"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              aria-pressed={view === v}
+              className={clsx(
+                "inline-flex min-h-9 items-center gap-1.5 px-3 text-xs font-semibold",
+                view === v ? "bg-accentSky/15 text-accentSky" : "text-slate-300 hover:bg-white/5"
+              )}
+            >
+              {v === "live" ? <Flame size={13} /> : <History size={13} />}
+              {v === "live" ? "Live" : "History"}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={scanNow}
           disabled={scanning || data?.running || data?.connected === false || paused}
           title={paused ? "Scans are paused at the top of the page" : undefined}
-          className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
+          className={clsx(
+            "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50",
+            view === "history" && "hidden"
+          )}
         >
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
@@ -159,14 +277,90 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
       <Explain className="mb-3" lead="The most traded F&O stocks, ranked every 5 minutes. Market data only — nothing here places an order.">
         Every 5 minutes while the market is open, one Groww quote for each NSE stock that has futures. Ranked by money
         traded today, volume against its 20-day usual for this time of day, and how many shares buyers vs sellers have
-        waiting. Watch adds a stock to the desk feed so the monitor below scores it for scalping.
+        waiting. Speed is the price change since the previous scan, in % per minute. Every scan is saved: History shows
+        any past scan (same filters, sorting and CSV). Watch adds a stock to the desk feed so the monitor below scores it
+        for scalping.
       </Explain>
+
+      {view === "history" && (
+        <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-surface2/60 p-3 text-xs">
+          <label className="flex flex-col gap-1 text-slate-400">
+            Day
+            <select
+              value={histDay}
+              onChange={(e) => {
+                setHistDay(e.target.value);
+                setRunId(null);
+              }}
+              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+            >
+              {(hist?.days ?? []).map((d) => (
+                <option key={d.day} value={d.day}>
+                  {d.day} ({d.runs} scans)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-slate-400">
+            Scan at
+            <select
+              value={runId ?? ""}
+              onChange={(e) => setRunId(Number(e.target.value))}
+              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+            >
+              {runs.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {clockIst(r.as_of)} IST · {r.row_count} stocks
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => runAt > 0 && setRunId(runs[runAt - 1].id)}
+            disabled={runAt <= 0}
+            title="Earlier scan"
+            aria-label="Earlier scan"
+            className="inline-flex min-h-9 items-center rounded-md px-2 text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-40"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => runAt >= 0 && runAt < runs.length - 1 && setRunId(runs[runAt + 1].id)}
+            disabled={runAt < 0 || runAt >= runs.length - 1}
+            title="Later scan"
+            aria-label="Later scan"
+            className="inline-flex min-h-9 items-center rounded-md px-2 text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-40"
+          >
+            <ChevronRight size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => saved && saveFile(`most-active-${histDay}-${clockIst(saved.as_of).replace(":", "")}.csv`, activeCsv(rows), "text/csv;charset=utf-8")}
+            disabled={!saved || rows.length === 0}
+            className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-40"
+          >
+            <Download size={13} /> CSV
+          </button>
+          {histBusy && <Loader2 size={14} className="animate-spin text-slate-400" />}
+          <p className="w-full text-slate-500">
+            {hist && hist.days.length === 0
+              ? "No saved scans yet. Each scan is saved from now on (one every 5 minutes while the market is open)."
+              : `Saved scans are kept ${hist?.keep_days ?? 90} days. Filters, Rank by, column sorting and Find a stock work on the saved scan.`}
+          </p>
+        </div>
+      )}
 
       <FilterRow
         status={
-          data
-            ? `${asOf ? `Scanned ${asOf} · ${data.scanned} of ${data.universe} stocks` : "No scan yet"}${data.failed ? ` · ${data.failed} failed` : ""}`
-            : null
+          view === "history"
+            ? saved
+              ? `Saved scan ${clockIst(saved.as_of)} IST on ${histDay} · ${saved.rows.length}${saved.total ? ` of ${saved.total}` : ""} stocks${saved.failed ? ` · ${saved.failed} failed` : ""}`
+              : null
+            : data
+              ? `${asOf ? `Scanned ${asOf} · ${data.scanned} of ${data.universe} stocks` : "No scan yet"}${data.failed ? ` · ${data.failed} failed` : ""}`
+              : null
         }
       >
         <SelectFilter
@@ -188,16 +382,21 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           className="w-28"
         />
         <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={500} step={5} prefix="₹" suffix="cr" />
+        <NumberFilter label="Min speed, either way" value={minSpeed} onChange={setMinSpeed} min={0} max={1} step={0.01} suffix="%/m" />
         <TextFilter value={query} onChange={setQuery} />
       </FilterRow>
 
       {note && <p className="mb-2 text-xs text-accentSky">{note}</p>}
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}
-      {data?.connected === false ? (
+      {view === "history" && rows.length === 0 ? (
+        <p className="py-4 text-center text-xs text-slate-500">
+          {histBusy ? "Loading…" : saved ? "No stock in this saved scan matches the filters." : "Pick a day and a scan."}
+        </p>
+      ) : view === "live" && data?.connected === false ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           Groww is not connected. Go to Settings and click Connect Live Data, then Scan now.
         </p>
-      ) : data?.error && rows.length === 0 ? (
+      ) : view === "live" && data?.error && rows.length === 0 ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{data.error}</p>
       ) : rows.length === 0 ? (
         <p className="py-4 text-center text-xs text-slate-500">
@@ -223,6 +422,17 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   symbol: <SortTh label="Stock" k="symbol" sort={colSort} onSort={onSort} text drag={cols.dragProps("symbol")} />,
                   ltp: <SortTh label="LTP" k="ltp" sort={colSort} onSort={onSort} num drag={cols.dragProps("ltp")} />,
                   change: <SortTh label="Day" k="change" sort={colSort} onSort={onSort} num drag={cols.dragProps("change")} />,
+                  speed: (
+                    <SortTh
+                      label="Speed"
+                      k="speed"
+                      sort={colSort}
+                      onSort={onSort}
+                      num
+                      title="Price change since the previous scan, in % per minute (none on the day's first scan)"
+                      drag={cols.dragProps("speed")}
+                    />
+                  ),
                   value: <SortTh label="₹ cr" k="value" sort={colSort} onSort={onSort} num title="Volume × average price today" drag={cols.dragProps("value")} />,
                   rvol: (
                     <SortTh
@@ -326,6 +536,17 @@ function ActiveRowView({
         change: (
           <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.change_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
             {pct(row.change_pct)}
+          </td>
+        ),
+        speed: (
+          <td
+            className={clsx(
+              "py-1.5 pr-2 text-right font-mono",
+              row.speed_pct_min == null ? "text-slate-500" : row.speed_pct_min >= 0 ? "text-profit" : "text-loss",
+              row.speed_pct_min != null && Math.abs(row.speed_pct_min) >= 0.1 && "font-semibold"
+            )}
+          >
+            {row.speed_pct_min == null ? "—" : `${row.speed_pct_min > 0 ? "+" : ""}${row.speed_pct_min.toFixed(3)}%/m`}
           </td>
         ),
         value: (

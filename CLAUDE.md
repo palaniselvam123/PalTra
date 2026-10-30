@@ -772,6 +772,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the scan's call (Cross scan: its side; Trend quality: the fast SMA's side on the scan's candle),
   the move 15 / 30 / 60 minutes later and at the close, the best and worst move, and the next SMA
   cross (crossed as predicted and within double the estimate; how long the trend held).
+  **Most active history**: the desk's Most active scan (`app/services/active_stocks.py`) saves every finished pass
+  (`ActiveScanner.on_done` → `routes_scalp.keep_active_scan`, set in the desk lifespan) into the same file as kind
+  `active`; the terminal's History tab never lists it (`SCAN_KINDS`). Desk `GET /api/scalp/active/history[?day=]`,
+  `GET /api/scalp/active/history/{id}`; the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
+  and column sorting work on the saved scan). Each row also has `speed_pct_min` (`add_speed`: % per minute since the
+  previous scan, signed; none on the day's first scan or after a gap over `SPEED_MAX_GAP_MIN` 30 min), a Speed column,
+  "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". Read-only.
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.
