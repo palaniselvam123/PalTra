@@ -212,6 +212,8 @@ export type SmaConfig = {
   decel_candles?: number;
   decel_confirm?: "OFF" | "CLOSE";
   decel_pierce_atr?: number;
+  /** Where the peak slope is counted from: the entry (default) or the start of the current run. */
+  decel_peak_from?: "ENTRY" | "RUN";
   plan_be_r?: number;
   plan_trail_r?: number;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */

@@ -258,7 +258,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Slow SMA exit", (s) => (s.slow_sma_exit ? "On" : "Off")],
   ["SMA 9 V-turn exit", (s) => (s.vturn_exit ? `On (run ${s.vturn_move_pct ?? 0.02}%, turn ${s.vturn_turn_pct ?? 0.015}%/candle within ${s.vturn_within ?? 6})${s.vturn_handoff ? "; a loss moves the stock to Bot 2" : ""}` : "Off")],
   ["SMA 9 slope exit", (s) => (s.slope_exit ? `On (over ${s.slope_lookback ?? 2} candles, bend ${s.slope_bend_pct ?? 60}%${s.slope_turn === false ? "" : `, turn ${s.slope_turn_pct ?? 0.02}%/candle`})` : "Off")],
-  ["SMA 9 deceleration guard", (s) => (s.decel_exit ? `On (${s.decel_drop_pct ?? 50}% off peak, arms ${s.decel_arm_atr ?? 0.1} ATR, ${s.decel_confirm === "OFF" ? "no close check" : "close through SMA 9"})` : "Off")],
+  ["SMA 9 deceleration guard", (s) => (s.decel_exit ? `On (${s.decel_drop_pct ?? 50}% off peak, arms ${s.decel_arm_atr ?? 0.1} ATR, ${s.decel_confirm === "OFF" ? "no close check" : "close through SMA 9"}${s.decel_peak_from === "RUN" ? ", peak from run start" : ""})` : "Off")],
   ["Staged stop plan", (s) => (s.stop_plan ? `Breakeven at +${s.plan_be_r ?? 1.5}R, Supertrend trail from +${s.plan_trail_r ?? 2}R` : "Off")],
   ["SMA 9 slope candle", (s) => (Number(s.slope_minutes ?? 0) > 0 ? `${s.slope_minutes}-min candles` : "Bot's own candle")],
   ["Recovery hold", (s) => (s.recovery_hold ? `On (target ${s.recovery_tolerance_pct ?? 0.15}%, floor ${s.recovery_emergency_mult ?? 1.5}× / ${s.recovery_atr_mult ?? 2.5}× ATR, ${s.recovery_max_candles ?? 6} candles${s.recovery_handoff === false ? "" : ", hand-off to Bot 2"})` : "Off")],

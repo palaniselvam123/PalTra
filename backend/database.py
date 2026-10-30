@@ -180,6 +180,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "decel_candles": "INTEGER DEFAULT 2",
             "decel_confirm": "VARCHAR(5) DEFAULT 'CLOSE'",
             "decel_pierce_atr": "FLOAT DEFAULT 0",
+            "decel_peak_from": "VARCHAR(5) DEFAULT 'ENTRY'",
             "slow_sma_exit": "BOOLEAN DEFAULT 0",
             "recovery_hold": "BOOLEAN DEFAULT 0",
             "recovery_tolerance_pct": "FLOAT DEFAULT 0.15",
