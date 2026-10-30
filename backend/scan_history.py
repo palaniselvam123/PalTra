@@ -218,3 +218,19 @@ def save_check(run_id: int, result: dict) -> None:
             "INSERT OR REPLACE INTO scan_checks (run_id, checked_at, result) VALUES (?, ?, ?)",
             (run_id, now, _pack(result)),
         )
+
+
+def find(kind: str, as_of: str) -> int | None:
+    """The id of the saved run of `kind` taken at `as_of` (a scan copied from another server), else None."""
+    with _lock, _connect() as con:
+        row = con.execute(
+            "SELECT id FROM scan_runs WHERE kind = ? AND as_of = ? ORDER BY id DESC LIMIT 1", (kind, as_of)
+        ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None:
+    """Save a scan sent from another server once (a resend of the same scan is ignored)."""
+    if kind in KINDS and snapshot.get("as_of") and find(kind, snapshot["as_of"]) is not None:
+        return None
+    return save(kind, snapshot, meta)

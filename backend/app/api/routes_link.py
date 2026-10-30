@@ -150,7 +150,9 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
-    return path in (ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, NEWS_LISTS, NEWS_LISTS_ADD) or path.startswith(
+    return path in (
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, NEWS_LISTS, NEWS_LISTS_ADD
+    ) or path.startswith(
         STOCK_PREFIX
     )
 
@@ -161,6 +163,7 @@ def token_path(path: str) -> bool:
 
 BACKTEST_SETTINGS = "/api/link/backtest/settings"
 BACKTEST_GROWW = "/api/link/backtest/groww"
+BACKTEST_SCANS = "/api/link/backtest/scan-history"
 
 
 def _backtest_authorized(request: Request) -> None:
@@ -185,6 +188,38 @@ async def backtest_settings(request: Request):
     import asyncio
 
     return await asyncio.to_thread(mod.export_bot_settings)
+
+
+@router.post(BACKTEST_SCANS)
+async def backtest_scan_history(request: Request):
+    """A scan finished on the backtest server (Cross scan, Trend quality, Most active) or its accuracy check:
+    kept in the desk's scan history too, so the desk's Scalp page shows it while that server is stopped."""
+    _backtest_authorized(request)
+    import asyncio
+
+    import scan_history
+
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(400, "Expected JSON") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Expected an object")
+    check = body.get("check")
+    if isinstance(check, dict):
+        run_id = await asyncio.to_thread(scan_history.find, str(check.get("kind")), str(check.get("as_of")))
+        if run_id is None:
+            raise HTTPException(404, "That scan is not in the desk's history")
+        if not isinstance(check.get("result"), dict):
+            raise HTTPException(400, "No result")
+        await asyncio.to_thread(scan_history.save_check, run_id, check["result"])
+        return {"saved": run_id}
+    kind, snapshot = body.get("kind"), body.get("snapshot")
+    if kind not in scan_history.KINDS or not isinstance(snapshot, dict) or not snapshot.get("as_of"):
+        raise HTTPException(400, "Expected kind and snapshot")
+    meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
+    run_id = await asyncio.to_thread(scan_history.save_copy, kind, snapshot, meta)
+    return {"saved": run_id}
 
 
 @router.get(BACKTEST_GROWW)

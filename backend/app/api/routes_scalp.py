@@ -254,6 +254,15 @@ def _groww_session():
 _history_tasks: set = set()
 
 
+def _save_active(snap: dict) -> None:
+    """Keep a most-active pass here, and on the backtest server also in the desk's history (worker thread)."""
+    import backtest_server
+    import scan_history
+
+    scan_history.save("active", snap, {"source": "scan"})
+    backtest_server.push_scan("active", snap, {"source": "scan"})
+
+
 def keep_active_scan(snapshot: dict) -> None:
     """Save a finished most-active pass to the scan history, off the event loop. Never raises."""
     import scan_history
@@ -263,7 +272,7 @@ def keep_active_scan(snapshot: dict) -> None:
     except RuntimeError:
         return
     snap = {**snapshot, "total": snapshot.get("universe"), "finished_at": snapshot.get("as_of")}
-    task = loop.create_task(asyncio.to_thread(scan_history.save, "active", snap, {"source": "scan"}))
+    task = loop.create_task(asyncio.to_thread(_save_active, snap))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
 

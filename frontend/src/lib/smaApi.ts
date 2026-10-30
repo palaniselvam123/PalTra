@@ -1526,6 +1526,10 @@ export type BacktestServerStatus = {
   sync_error: string | null;
   /** Stocks the scanner armed here, kept on top of the desk's Trade lists at start-up. */
   scanner_armed?: number;
+  /** Market hours only: after `stop_at` (and on weekends) it stops once nothing is running. */
+  market_hours_only?: boolean;
+  stop_at?: string;
+  after_hours?: boolean;
   up_sec: number;
 };
 
@@ -1534,6 +1538,8 @@ export const smaApi = {
   backtestSync: () => request<BacktestServerStatus>("/api/backtest/sync", { method: "POST" }, 30000, false),
   backtestIdle: (minutes: number) =>
     request<BacktestServerStatus>("/api/backtest/idle", { method: "PUT", body: JSON.stringify({ minutes }) }, 12000, false),
+  backtestHours: (on: boolean, stop_at?: string) =>
+    request<BacktestServerStatus>("/api/backtest/hours", { method: "PUT", body: JSON.stringify({ on, stop_at }) }, 12000, false),
   backtestStop: (force = false) =>
     request<{ stopping: boolean }>(`/api/backtest/stop${force ? "?force=true" : ""}`, { method: "POST" }, 12000, false),
   state: () => request<SmaState>("/api/state"),

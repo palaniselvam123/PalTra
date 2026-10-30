@@ -12,6 +12,7 @@ os.environ.setdefault("SMA_TICK_SIZES", "off")
 os.environ.setdefault("NEWS_WATCH", "off")
 # Likewise the US practice desk loop (us_desk.py).
 os.environ.setdefault("US_DESK", "off")
+os.environ.setdefault("DESK_REPLAY_HOURS", "any")  # CI runs at any hour; the market-hours refusal has its own test
 
 # Importing the research store writes its schema. Keep that off the real
 # research_data/research.db.

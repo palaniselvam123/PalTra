@@ -27,7 +27,9 @@ kill_timeout = '15s'
 # CPU's quota throttles a fast replay until the page cannot reach the engine.
 # Size the machine here: a deploy applies this section and undoes any resize
 # made in the Fly dashboard.
+# Performance CPUs are dedicated (never throttled in busy market hours), which the bots' single event loop
+# needs more than extra shared cores; 4 GB leaves room for five bots and their candle tapes.
 [[vm]]
-  cpu_kind = 'shared'
-  cpus = 4
-  memory_mb = 2048
+  cpu_kind = 'performance'
+  cpus = 2
+  memory_mb = 4096

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import datetime as dt
+import os
 import json
 import csv
 import io
@@ -125,6 +126,22 @@ scan_checker = scan_accuracy.AccuracyChecker()
 open_pnl_recorder = open_pnl_log.OpenPnlRecorder()
 
 
+def _save_scan(kind: str, snapshot: dict, meta: dict) -> None:
+    """Keep a finished pass here, and on the backtest server also in the desk's history (worker thread)."""
+    scan_history.save(kind, snapshot, meta)
+    backtest_server.push_scan(kind, snapshot, meta)
+
+
+def _save_check(run: dict):
+    """Save an accuracy check here, and on the backtest server also on the desk's copy of the scan."""
+
+    def save(run_id: int, result: dict) -> None:
+        scan_history.save_check(run_id, result)
+        backtest_server.push_check(run.get("kind"), run.get("as_of"), result)
+
+    return save
+
+
 def _keep_scan(kind: str):
     """Save each finished pass to the scan history (off the event loop). Never raises."""
 
@@ -133,7 +150,7 @@ def _keep_scan(kind: str):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(asyncio.to_thread(scan_history.save, kind, snapshot, meta))
+        task = loop.create_task(asyncio.to_thread(_save_scan, kind, snapshot, meta))
         _history_tasks.add(task)
         task.add_done_callback(_history_tasks.discard)
 
@@ -1428,6 +1445,28 @@ async def start_bot():
 # ---- Backtest server (backtest_server.py): status, sync, idle time, stop ----
 
 
+DESK_REPLAY_BLOCK = (dt.time(9, 0), dt.time(15, 45))
+
+
+def _refuse_desk_replay_in_market(now: dt.datetime | None = None) -> None:
+    """On the main desk, backtests start only outside market hours (09:00-15:45 IST, Mon-Fri), so a heavy
+    replay never slows the live bots; the backtest server takes them then. `DESK_REPLAY_HOURS=any` lifts it."""
+    if not server_role.is_desk() or os.environ.get("DESK_REPLAY_HOURS", "after").lower() == "any":
+        return
+    now = now or dt.datetime.now(IST)
+    if now.weekday() < 5 and DESK_REPLAY_BLOCK[0] <= now.time() < DESK_REPLAY_BLOCK[1]:
+        raise HTTPException(
+            409,
+            "Backtests run on the main desk only after 15:45 IST (and on weekends), so they never slow the live bots. "
+            "Use the backtest server during market hours.",
+        )
+
+
+class MarketHoursUpdate(BaseModel):
+    on: bool
+    stop_at: str | None = Field(None, pattern=r"^\d{2}:\d{2}$")
+
+
 def _backtest_only() -> None:
     if not server_role.is_backtest():
         raise HTTPException(404, "Not the backtest server")
@@ -1463,6 +1502,17 @@ class IdleUpdate(BaseModel):
 async def backtest_idle(body: IdleUpdate):
     _backtest_only()
     await asyncio.to_thread(backtest_server.set_idle_minutes, body.minutes)
+    return backtest_server.status(replays)
+
+
+@app.put("/api/backtest/hours")
+async def backtest_hours(body: MarketHoursUpdate):
+    """Market hours only: after the stop time (and on weekends) the server stops once nothing is running."""
+    _backtest_only()
+    try:
+        await asyncio.to_thread(backtest_server.set_market_hours, body.on, body.stop_at)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return backtest_server.status(replays)
 
 
@@ -1656,6 +1706,7 @@ async def replay_scalp_picks(body: ScalpPickStart):
     the pick time as the live page would, then let the SMA bot trade only the
     top picks for the rest of that day. Practice money; never sends an order.
     """
+    _refuse_desk_replay_in_market()
     cfg = engine.load_config()
     if (cfg.trading_mode or "PAPER").upper() == "LIVE":
         raise HTTPException(409, "Switch to PAPER before starting a replay.")
@@ -1706,6 +1757,7 @@ async def replay_scalp_picks(body: ScalpPickStart):
 @app.post("/api/replay/start")
 async def replay_start(body: ReplayStart):
     """Practice on a past day's Groww candles with one bot's settings. Never sends an order."""
+    _refuse_desk_replay_in_market()
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
     if eng is None:
         raise HTTPException(404, f"No bot {body.bot}")
@@ -1787,6 +1839,7 @@ async def replay_resumable(bot: int = 1):
 @app.post("/api/replay/resume")
 async def replay_resume(body: ReplayResume, bot: int = 1):
     """Carry on a cut-short run from the first day it had not finished, with its saved settings."""
+    _refuse_desk_replay_in_market()
     runs = {r["id"]: r for r in resumable_runs(None)}
     found = runs.get(body.run_id)
     if found is None:
@@ -2675,7 +2728,7 @@ async def scan_history_check(run_id: int):
         return scan_checker.start(
             run,
             lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
-            save=scan_history.save_check,
+            save=_save_check(run),
             job=_check_job(),
         )
     except ValueError as exc:
