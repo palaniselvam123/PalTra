@@ -38,6 +38,7 @@ export function FastMoverBot() {
             speed: String(v.speed),
             speed_minutes: String(v.speed_minutes),
             max_day: String(v.max_day),
+            min_profit_pct: String(v.min_profit_pct ?? 0.3),
           });
           setSources(v.sources);
         }
@@ -77,6 +78,10 @@ export function FastMoverBot() {
         speed: Math.min(2, Math.max(0.01, num("speed", 0.15))),
         speed_minutes: Math.min(30, Math.max(1, Math.round(num("speed_minutes", 5)))),
         max_day: Math.min(100, Math.max(1, Math.round(num("max_day", 10)))),
+        min_profit_pct: (() => {
+          const n = Number(form.min_profit_pct);
+          return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : 0.3;
+        })(),
         sources,
         confirm_live: confirm,
       });
@@ -110,7 +115,8 @@ export function FastMoverBot() {
       <p className="mt-1 text-xs text-slate-400">
         When a stock one of the ticked bots holds moves fast in that trade&apos;s favour, its trade there is closed and Bot 5
         opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross, VWAP, RSI or other entry
-        check is read. The stock stays on Bot 5 for the rest of the day. Set Bot 5&apos;s quantity in Settings → SMA strategy
+        check is read. Only a trade already in profit by the set % moves: a losing trade stays on its bot, however fast
+        the price bounces. The stock stays on Bot 5 for the rest of the day. Set Bot 5&apos;s quantity in Settings → SMA strategy
         (Bot 5 tab), and press Start on Bot 5. Keep both bots in the same mode: a LIVE Bot 5 never takes a practice
         (PAPER) trade, a LIVE trade is never cut for a PAPER Bot 5, and in LIVE the move waits until Groww shows no shares
         on the old bot. Replays of the ticked bots play it too (Bot 5's size and settings for the rest of that day), so
@@ -167,6 +173,13 @@ export function FastMoverBot() {
           <label className={clsx("flex flex-col gap-1 text-xs text-slate-400", rule === "MOVE" && "opacity-50")}>
             Over the last (minutes)
             <input inputMode="numeric" value={String(form.speed_minutes ?? "")} onChange={(e) => set("speed_minutes", e.target.value)} className={input} />
+          </label>
+          <label
+            className="flex flex-col gap-1 text-xs text-slate-400"
+            title="A trade still in loss, or not yet this far in profit, stays on its bot even when the price is moving fast. 0 = any trade."
+          >
+            Only if the trade is up at least (%)
+            <input inputMode="decimal" value={String(form.min_profit_pct ?? "")} onChange={(e) => set("min_profit_pct", e.target.value)} className={input} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-400">
             At most per day

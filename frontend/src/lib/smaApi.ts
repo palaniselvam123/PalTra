@@ -578,6 +578,8 @@ export type FastBotSettings = {
   speed_minutes: number;
   sources: number[];
   max_day: number;
+  /** Only a trade already this much in profit moves (% of its entry); 0 = any trade. */
+  min_profit_pct?: number;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
   target_status?: string | null;

@@ -22,6 +22,9 @@ What counts as fast (`rule`), on the bots' own last prices (no extra Groww call)
 * `SPEED`: over the last `speed_minutes` the price moved at least `speed` % per minute the trade's way;
 * `EITHER`: whichever comes first.
 
+and only while the trade is already at least `min_profit_pct` (0.3) % in profit from its entry (`in_profit`; 0 =
+any trade), so a losing trade that only bounced off its low is never moved.
+
 At most `max_day` hand-offs per IST day. **Replays too** (`replay_snapshot` / `bot5_overrides`, played by
 `replay.ReplayEngine._fast_replay`): a replay of a source bot with this switch on cuts a held stock that moves
 fast its way (`FAST_MOVE_HANDOFF`) and, in the same run, opens the same side at once with Bot 5's settings
@@ -68,6 +71,8 @@ class Settings:
     speed_minutes: int = 5
     sources: list[int] = field(default_factory=lambda: list(SOURCE_BOTS))
     max_day: int = 10
+    # Only a trade already this much in profit moves (% of its entry price, before charges); 0 = any trade.
+    min_profit_pct: float = 0.3
 
 
 def settings_path() -> Path:
@@ -105,6 +110,7 @@ def clean(raw: dict) -> Settings:
     s.speed = num("speed", float, 0.01, MAX_SPEED)
     s.speed_minutes = num("speed_minutes", int, 1, MAX_MINUTES)
     s.max_day = num("max_day", int, 1, 100)
+    s.min_profit_pct = num("min_profit_pct", float, 0.0, MAX_PCT)
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -175,6 +181,22 @@ def _speed_hit(hist, direction: str, now: float, s: Settings) -> str | None:
     if speed >= s.speed:
         return f"{speed:.3f}%/min its way over {int(round(elapsed / 60))} min"
     return None
+
+
+def profit_pct(direction: str, entry: float | None, price: float) -> float | None:
+    """The open trade's move from its entry, in % of the entry price, signed with the trade (+ = in profit)."""
+    if not entry or entry <= 0 or not price:
+        return None
+    move = (price - entry) / entry * 100
+    return move if direction == "LONG" else -move
+
+
+def in_profit(pos, price: float, s: Settings) -> bool:
+    """The trade is at least `min_profit_pct` in profit (any trade when it is 0). A losing trade never moves."""
+    if s.min_profit_pct <= 0:
+        return True
+    gain = profit_pct(pos.direction, getattr(pos, "entry_price", None), price)
+    return gain is not None and gain >= s.min_profit_pct
 
 
 def fast(hist, direction: str, now: float, s: Settings) -> str | None:
@@ -263,7 +285,7 @@ class FastBot:
                     continue
                 seen.add(name)
                 q = self.note(name, price, now, s)
-                if name in self.busy or name in self.moved_today:
+                if name in self.busy or name in self.moved_today or not in_profit(pos, price, s):
                     continue
                 why = fast(q, pos.direction, now, s)
                 if why:
