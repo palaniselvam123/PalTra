@@ -580,6 +580,9 @@ export type FastBotSettings = {
   max_day: number;
   /** Only a trade already this much in profit moves (% of its entry); 0 = any trade. */
   min_profit_pct?: number;
+  /** Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day. */
+  bot5_trades?: number;
+  on_bot5?: Record<string, { from_bot: number; trades: number }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
   target_status?: string | null;

@@ -917,6 +917,9 @@ class StrategyEngine:
     #: bots.live_conflict once the bots are registered: refuses a LIVE entry on
     #: a stock another LIVE bot owns. None (no check) for a lone engine in tests.
     live_guard = None
+    #: Last check before any entry, gate(engine, symbol) -> why not, or None to go ahead (counts the
+    #: entry). The fast-mover hand-off sets it on Bot 5 and on replays (fast_bot.py `bot5_trades`).
+    entry_gate = None
     # Recovery handoff (recovery.handoff), set by bots.register for the live bots only:
     # replays and the research desk never move a stock between bots.
     handoff = None
@@ -3180,9 +3183,14 @@ class StrategyEngine:
         guard = self.live_guard
         if live and guard is not None:
             # Last check before real money: another LIVE bot may own this stock.
-            why = guard(self.bot_id, [cfg.symbol])
-            if why:
-                raise SlCancelFailed(why)
+            refused = guard(self.bot_id, [cfg.symbol])
+            if refused:
+                raise SlCancelFailed(refused)
+        gate = self.entry_gate
+        if gate is not None:
+            refused = gate(self, cfg.symbol)
+            if refused:
+                raise SlCancelFailed(refused)
         qty = int(cfg.qty)
         # The order goes out at the market price now. cross_price stays the
         # signal candle's close, so entry minus cross is the real fill lag.

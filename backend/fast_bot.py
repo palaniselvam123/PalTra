@@ -13,7 +13,12 @@ started in `boot_engine` on the desk only, every `POLL_SEC` 5 s while NSE is ope
    chip "Handoff from Bot N"; the one-LIVE-bot-per-stock rule applies);
 4. has Bot 5 enter the same side at once (`StrategyEngine.direct_order`, entry reason `FAST_MOVE`):
    no SMA cross, VWAP / RSI or other entry check is read; Bot 5's own quantity, stop and exits run
-   the trade, and the stock stays on Bot 5 for the rest of the day.
+   the trade.
+5. after `bot5_trades` (1) Bot 5 trades on the stock (0 = no limit: it stays on Bot 5 for the day), Bot 5
+   takes no more entries on it (`gate`, `StrategyEngine.entry_gate`) and, once Bot 5 is flat on it, the
+   stock goes back to the bot it came from (`give_back` → `recovery.handoff(5, to_bot=source)`), which trades
+   it on its own settings and waits for its next cross. It is not moved again that day. Memory only: after
+   a restart a moved stock stays on Bot 5.
 
 What counts as fast (`rule`), on the bots' own last prices (no extra Groww call):
 
@@ -28,7 +33,8 @@ any trade), so a losing trade that only bounced off its low is never moved.
 At most `max_day` hand-offs per IST day. **Replays too** (`replay_snapshot` / `bot5_overrides`, played by
 `replay.ReplayEngine._fast_replay`): a replay of a source bot with this switch on cuts a held stock that moves
 fast its way (`FAST_MOVE_HANDOFF`) and, in the same run, opens the same side at once with Bot 5's settings
-(its quantity, stop and exits, for the rest of that replayed day; entry reason `FAST_MOVE`), so the idea can be
+(its quantity, stop and exits, until its `bot5_trades` are done, then the replayed bot's own settings again;
+entry reason `FAST_MOVE`), so the idea can be
 checked on past days. The run keeps a copy of these settings and Bot 5's, so Resume plays the same. Settings in `fast_bot.json` next to the SMA DB
 (`FAST_BOT_FILE`). Bot 5 is never a source. Replays and research never hand off.
 """
@@ -59,6 +65,7 @@ ENTRY_REASON = "FAST_MOVE"
 MAX_PCT = 10.0
 MAX_MINUTES = 30
 MAX_SPEED = 2.0
+MAX_BOT5_TRADES = 20
 
 
 @dataclass
@@ -73,6 +80,8 @@ class Settings:
     max_day: int = 10
     # Only a trade already this much in profit moves (% of its entry price, before charges); 0 = any trade.
     min_profit_pct: float = 0.3
+    # Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day.
+    bot5_trades: int = 1
 
 
 def settings_path() -> Path:
@@ -111,6 +120,7 @@ def clean(raw: dict) -> Settings:
     s.speed_minutes = num("speed_minutes", int, 1, MAX_MINUTES)
     s.max_day = num("max_day", int, 1, 100)
     s.min_profit_pct = num("min_profit_pct", float, 0.0, MAX_PCT)
+    s.bot5_trades = num("bot5_trades", int, 0, MAX_BOT5_TRADES)
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -248,6 +258,8 @@ class FastBot:
         self.day: str | None = None
         self.moved_today: list[str] = []
         self.recent: list[dict] = []
+        # Stocks on Bot 5 by a hand-off: {symbol: {"from": bot, "live": bool, "opened": Bot 5 entries}}.
+        self.handed: dict[str, dict] = {}
         self._task: asyncio.Task | None = None
 
     def _roll(self, now: float) -> None:
@@ -255,6 +267,43 @@ class FastBot:
         if self.day != today:
             self.day = today
             self.moved_today = []
+            for h in self.handed.values():
+                # Yesterday's hand-off ends: the stock goes back at the first pass with Bot 5 flat on it.
+                h["due"] = True
+
+    def gate(self, engine, symbol: str) -> str | None:
+        """Bot 5's last check before an entry (`StrategyEngine.entry_gate`): a moved stock takes at most
+        `bot5_trades` Bot 5 entries; each one let through is counted."""
+        if int(getattr(engine, "bot_id", 0)) != TARGET_BOT:
+            return None
+        h = self.handed.get((symbol or "").upper())
+        if h is None:
+            return None
+        limit = load().bot5_trades
+        if h.get("due") or (limit and h["opened"] >= limit):
+            return f"Bot {TARGET_BOT} has made its {limit} trade(s) on {symbol}: it goes back to Bot {h['from']}"
+        h["opened"] += 1
+        return None
+
+    def give_back(self, target, s: Settings, now: float) -> list[str]:
+        """Moved stocks whose Bot 5 trades are done (and Bot 5 is flat on them) go back to their own bot."""
+        import recovery
+
+        done = []
+        for name, h in list(self.handed.items()):
+            if not (h.get("due") or (s.bot5_trades and h["opened"] >= s.bot5_trades)):
+                continue
+            if target is not None and target.positions.get(name) is not None:
+                continue
+            del self.handed[name]
+            back = recovery.handoff(TARGET_BOT, name, h["live"], to_bot=h["from"], chop=False)
+            result = f"back to Bot {h['from']} after {h['opened']} Bot {TARGET_BOT} trade(s): {back}"
+            self._record(now, symbol=name, from_bot=TARGET_BOT, why="trades done", result=result)
+            if target is not None:
+                target._signals[name] = f"{name} {result}"  # noqa: SLF001
+                target._alert(f"{name} {result}")  # noqa: SLF001
+            done.append(f"{name} {result}")
+        return done
 
     def note(self, symbol: str, price: float, now: float, s: Settings) -> deque:
         keep = max(s.minutes, s.speed_minutes) * 60 + POLL_SEC * 2
@@ -333,7 +382,9 @@ class FastBot:
                     return f"{head}: {result}"
             moved = recovery.handoff(source_bot, symbol, source_live, to_bot=TARGET_BOT)
             self.moved_today.append(symbol)
-            if not moved.startswith("moved"):
+            if moved.startswith("moved"):
+                self.handed[symbol] = {"from": source_bot, "live": source_live, "opened": 0}
+            else:
                 result = f"{closed}; {moved}"
                 self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
                 src._alert(f"{head}: {result}")  # noqa: SLF001
@@ -366,7 +417,9 @@ class FastBot:
             self.hist.clear()
             return []
         target = engines.get(TARGET_BOT)
-        done = []
+        if target is not None and getattr(target, "entry_gate", None) is None:
+            target.entry_gate = self.gate
+        done = self.give_back(target, s, now)
         for src, name, pos, why in self.candidates(engines, s, now):
             done.append(await self.move(src, name, pos, why, target, s, now))
         return done
@@ -394,7 +447,12 @@ class FastBot:
             self._task = None
 
     def snapshot(self) -> dict:
-        return {"day": self.day, "moved_today": list(self.moved_today), "recent": list(self.recent)}
+        return {
+            "day": self.day,
+            "moved_today": list(self.moved_today),
+            "recent": list(self.recent),
+            "on_bot5": {k: {"from_bot": v["from"], "trades": v["opened"]} for k, v in self.handed.items()},
+        }
 
 
 watcher = FastBot()
