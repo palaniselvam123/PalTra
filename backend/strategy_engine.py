@@ -67,6 +67,7 @@ import late_entry
 import tall_pullback
 import extreme_entry
 import entry_candle
+import decel_guard
 import slope_exit
 import stop_plan
 import turn_entry
@@ -305,6 +306,8 @@ SNAPSHOT_FIELDS = (
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "stop_plan", "plan_be_r", "plan_trail_r",
+    "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
+    "decel_confirm", "decel_pierce_atr",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
@@ -3874,13 +3877,17 @@ class StrategyEngine:
             return
         pos.slope_bar = closed_ts
         value = slope_exit.slope(closed, int(cfg.sma_fast), slope_exit.lookback(cfg))
-        if value is None:
-            return
-        hit = slope_exit.judge(pos.signal_direction, value, pos.slope_state, cfg) if slope_exit.on(cfg) else None
-        if slope_exit.vturn_on(cfg):
-            # Read every candle so its history is whole, even when the bend / turn already hit.
-            vturn = slope_exit.judge_vturn(pos.signal_direction, value, pos.slope_state, cfg)
-            hit = hit or vturn
+        hit = None
+        if value is not None:
+            hit = slope_exit.judge(pos.signal_direction, value, pos.slope_state, cfg) if slope_exit.on(cfg) else None
+            if slope_exit.vturn_on(cfg):
+                # Read every candle so its history is whole, even when the bend / turn already hit.
+                vturn = slope_exit.judge_vturn(pos.signal_direction, value, pos.slope_state, cfg)
+                hit = hit or vturn
+        if hit is None and decel_guard.on(cfg):
+            # Deceleration guard: the first candle that closed after the entry starts the peak.
+            after = closed["ts"].astype("int64") + minutes * 60 > opened.timestamp()
+            hit = decel_guard.judge(closed, pos.signal_direction, int(after.values.argmax()), cfg, int(cfg.sma_fast))
         if hit is None:
             return
         reason, note = hit
@@ -4026,6 +4033,7 @@ class StrategyEngine:
                     "SMA9_BEND": "SMA 9 bent — flat",
                     "SMA9_TURN": "SMA 9 turned against the trade — flat",
                     "SMA9_VTURN": "SMA 9 V-turn — flat",
+                    decel_guard.EXIT_REASON: "SMA 9 decelerating — flat",
                     "SMA9_TURN_AGAINST": "SMA 9 turned against the trade — flat",
                     "SLOW_SMA_BREACH": "closed beyond the slow SMA — flat",
                     "RECOVERY_TARGET_HIT": "recovery target hit — flat",
@@ -5405,6 +5413,7 @@ _ALERT_REASON = {
     "SMA9_BEND": "SMA 9 bent",
     "SMA9_TURN": "SMA 9 turned against the trade",
     "SMA9_VTURN": "SMA 9 V-turn",
+    "SMA9_DECEL": "SMA 9 decelerating",
     "GAP_FADE": "SMA gap faded",
     "CANDLE_END": "end of the pattern candle",
     "COLOUR_TURN": "candle turned the other colour",
@@ -5832,7 +5841,7 @@ STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
-    "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST",
+    "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON,
 )

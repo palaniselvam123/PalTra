@@ -57,6 +57,7 @@ import extreme_entry as extreme_mod
 import entry_candle as entry_candle_mod
 import slope_exit as slope_mod
 import stop_plan as stop_plan_mod
+import decel_guard as decel_mod
 import recovery as recovery_mod
 import breakout as breakout_mod
 import opening_range
@@ -521,6 +522,14 @@ class ConfigUpdate(BaseModel):
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
+    decel_exit: bool | None = None
+    decel_lookback: int | None = Field(default=None, ge=1, le=10)
+    decel_arm_atr: float | None = Field(default=None, ge=0, le=5)
+    decel_drop_pct: float | None = Field(default=None, ge=0, le=100)
+    decel_min_atr: float | None = Field(default=None, ge=0, le=5)
+    decel_candles: int | None = Field(default=None, ge=1, le=5)
+    decel_confirm: Literal["OFF", "CLOSE"] | None = None
+    decel_pierce_atr: float | None = Field(default=None, ge=0, le=5)
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)
@@ -1132,6 +1141,8 @@ def _gap_dict(row) -> dict:
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),
+        "decel_exit": decel_mod.on(row),
+        **{f"decel_{key}": value for key, value in decel_mod.settings(row).items()},
         "slow_sma_exit": recovery_mod.slow_exit_on(row),
         "recovery_hold": recovery_mod.on(row),
         "recovery_tolerance_pct": recovery_mod.tolerance_pct(row),

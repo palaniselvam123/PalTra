@@ -100,6 +100,14 @@ const LABELS: Record<string, string> = {
   handoff_now: "Bot 2 orders at once",
   pivot_target: "pivot target",
   stop_plan: "staged stop plan",
+  decel_exit: "SMA 9 deceleration guard",
+  decel_lookback: "deceleration slope over (candles)",
+  decel_arm_atr: "deceleration arms at (ATR/candle)",
+  decel_drop_pct: "deceleration: slope down from peak (%)",
+  decel_min_atr: "deceleration: bend per candle (ATR)",
+  decel_candles: "deceleration: bending candles",
+  decel_confirm: "deceleration: close through SMA 9",
+  decel_pierce_atr: "deceleration: close through by (ATR)",
   plan_be_r: "breakeven at (R)",
   plan_trail_r: "Supertrend trail from (R)",
   st_period: "Supertrend ATR length",
@@ -348,6 +356,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     handoff_now: Boolean(form.handoff_now),
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
     stop_plan: Boolean(form.stop_plan),
+    decel_exit: Boolean(form.decel_exit),
+    decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
+    decel_arm_atr: Math.max(0, Number(form.decel_arm_atr ?? 0.1) || 0),
+    decel_drop_pct: Math.min(100, Math.max(0, Number(form.decel_drop_pct ?? 50) || 0)),
+    decel_min_atr: Math.max(0, Number(form.decel_min_atr ?? 0.02) || 0),
+    decel_candles: Math.min(5, Math.max(1, Math.round(Number(form.decel_candles ?? 2) || 2))),
+    decel_confirm: form.decel_confirm === "OFF" ? "OFF" : "CLOSE",
+    decel_pierce_atr: Math.max(0, Number(form.decel_pierce_atr ?? 0) || 0),
     plan_be_r: Number(form.plan_be_r ?? 1.5) > 0 ? Number(form.plan_be_r ?? 1.5) : 1.5,
     plan_trail_r: Number(form.plan_trail_r ?? 2) > 0 ? Number(form.plan_trail_r ?? 2) : 2,
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
@@ -1774,6 +1790,45 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               rest of the run. Nothing on Bot 2 itself.
             </InfoTip>
           </label>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.decel_exit)}
+              onChange={(e) => set("decel_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("decel_exit") && <OwnTag />}
+            Deceleration guard: close when the SMA {form.sma_fast ?? 9} line bends, before it turns
+            <InfoTip label="About the deceleration guard">
+              The slope is measured in ATR per candle: (SMA now − SMA k candles ago) ÷ (k × ATR 14), so the same numbers fit a
+              cheap and a costly stock, a fast morning and a quiet afternoon. From the entry the bot keeps the steepest slope
+              (the peak). It closes the trade (SMA9_DECEL) on the first closed candle where the peak reached the arm level (a real
+              run), the slope has dropped the % below from that peak (the line flattening), it has kept bending for the
+              candles below (the slope falling by at least the bend each candle), and, with the close check on, the candle closed
+              through the SMA {form.sma_fast ?? 9} against the trade. It does not wait for the slope to turn negative, so it is
+              usually one or two candles before the V-turn and the SMA cross. Reads the same candle as the other SMA 9 exits
+              (&quot;Read the SMA 9 slope on&quot; above). Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className={clsx("mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-3", !form.decel_exit && "opacity-50")}>
+            <Field label="Slope over (candles)" value={String(form.decel_lookback ?? 2)} onChange={(v) => set("decel_lookback", v)} own={isOwn("decel_lookback")} />
+            <Field label="Arms at (ATR/candle)" value={String(form.decel_arm_atr ?? 0.1)} onChange={(v) => set("decel_arm_atr", v)} own={isOwn("decel_arm_atr")} />
+            <Field label="Down from peak" suffix="%" value={String(form.decel_drop_pct ?? 50)} onChange={(v) => set("decel_drop_pct", v)} own={isOwn("decel_drop_pct")} />
+            <Field label="Bend per candle (ATR)" value={String(form.decel_min_atr ?? 0.02)} onChange={(v) => set("decel_min_atr", v)} own={isOwn("decel_min_atr")} />
+            <Field label="Bending candles" value={String(form.decel_candles ?? 2)} onChange={(v) => set("decel_candles", v)} own={isOwn("decel_candles")} />
+            <Field label="Close through by (ATR)" value={String(form.decel_pierce_atr ?? 0)} onChange={(v) => set("decel_pierce_atr", v)} own={isOwn("decel_pierce_atr")} />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.decel_confirm !== "OFF"}
+              disabled={!form.decel_exit}
+              onChange={(e) => set("decel_confirm", e.target.checked ? "CLOSE" : "OFF")}
+              className="accent-[#10B981]"
+            />
+            {isOwn("decel_confirm") && <OwnTag />}
+            Only when the candle also closes through the SMA {form.sma_fast ?? 9} (fewer early exits, a little later)
+          </label>
         </div>
       </FieldGroup>
       <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
@@ -2520,6 +2575,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
+  if (f.decel_exit) add({ group: "exit", key: "decel_exit", text: `Close when the SMA ${fast} line decelerates (${f.decel_drop_pct ?? 50}% off its peak slope${f.decel_confirm === "OFF" ? "" : ", close through the line"})`, off: { decel_exit: false } });
   {
     const slopeCandle = Number(f.slope_minutes ?? 0);
     if ((f.slope_exit || f.vturn_exit) && slopeCandle > 0 && slopeCandle !== Number(f.candle_minutes ?? 1))

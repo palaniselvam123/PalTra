@@ -411,6 +411,15 @@ class BotConfig(Base):
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     plan_trail_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
+    # SMA 9 deceleration guard (decel_guard.py): exit on the bend, slope in ATR per candle.
+    decel_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    decel_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    decel_arm_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.10)
+    decel_drop_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=50.0)
+    decel_min_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.02)
+    decel_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    decel_confirm: Mapped[str | None] = mapped_column(String(5), nullable=True, default="CLOSE")
+    decel_pierce_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

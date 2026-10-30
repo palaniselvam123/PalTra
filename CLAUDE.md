@@ -430,6 +430,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stay on the bot's candle, `slope_lookback` / `vturn_within` count these candles and the `turn_exit_candle` colour hold reads
   the last one. The research baseline keeps 0. Both count as an exit for `strategyChecks.noExitOn`. Settings →
   Supertrend / exits. The research baseline keeps both off.
+- `backend/decel_guard.py` – SMA 9 deceleration guard (`decel_exit`, off by default, per bot and per stock, PAPER and LIVE,
+  replays too): exit on the bend of the fast SMA before its slope turns. Slope in **ATR per candle** (`slopes`: (SMA9 −
+  SMA9 `decel_lookback` (2) candles ago) ÷ (k × Wilder ATR 14), so one set of numbers fits any price and session) and its
+  change `dslope`, both signed with the trade's signal side. From the first candle closed after the entry, `peak` = the
+  steepest signed slope; `early_warning` (vectorised, closed candles only, backward windows only) flags a candle when the
+  peak reached `decel_arm_atr` (0.10), the slope is ≤ peak × (1 − `decel_drop_pct` (50) / 100), the last `decel_candles` (2)
+  dslopes are each ≤ −`decel_min_atr` (0.02), and with `decel_confirm` = `CLOSE` (default; `OFF`) the close is through the SMA 9
+  against the trade by ≥ `decel_pierce_atr` (0) × ATR. `StrategyEngine._watch_slope_exit` (same slope candle as the other SMA
+  9 exits, `slope_minutes`; same colour hold; `slope_exit.watched` includes it) calls `judge` on the closed frame and closes
+  the trade as `SMA9_DECEL` via `_exit_now` (a LIVE stop is cancelled first; a LIVE position restored without its stop id is
+  left to that stop). The V-turn / bend / turn exits are unchanged and can run next to it. Settings → 3. When to exit. The
+  stock research baseline keeps it off.
 - `backend/turn_entry.py` – SMA 9 turn alert and entry (`turn_alert` / `turn_entry`, off by default, per bot and per stock,
   PAPER and LIVE): act on the fast SMA's V before the 9/21 cross. Read once per closed candle of each armed stock of a
   RUNNING bot on its own candles (`StrategyEngine._turn_now`, called in `on_minute`), with the V-turn exit's numbers
