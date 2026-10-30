@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type ServerRole } from "@/lib/api";
 import { smaApi, type BacktestServerStatus } from "@/lib/smaApi";
 
+const STOP_CHOICES = ["15:30", "15:45", "16:00", "16:30", "17:00", "18:00"];
 const IDLE_CHOICES = [10, 15, 30, 60, 120, 240];
 const BTN =
   "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold ring-1 ring-inset disabled:opacity-50";
@@ -100,8 +101,39 @@ export function BacktestServerBar() {
           Groww: {st ? (st.groww ? "desk session in use" : st.groww_error || "no session yet") : "…"}
         </span>
         <span>
-          {st?.busy ? "Backtest running: stays on" : left != null ? `Stops itself in ${left} min if idle` : ""}
+          {st?.busy
+            ? "Backtest running: stays on"
+            : left != null
+              ? st?.after_hours
+                ? `Market hours are over: stops in ${left} min`
+                : `Stops itself in ${left} min if idle`
+              : ""}
         </span>
+        <label
+          className="flex items-center gap-1.5"
+          title="Use this server only in market hours. After the stop time (and on weekends) it stops once no backtest or scan is running, even with this page open. Backtests after hours run on the main desk."
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(st?.market_hours_only)}
+            disabled={!st || busy}
+            onChange={(e) => act(() => smaApi.backtestHours(e.target.checked, st?.stop_at), e.target.checked ? "Market hours only: on." : "Market hours only: off.")}
+            className="accent-violet-400"
+          />
+          Market hours only, stop after
+          <select
+            value={st?.stop_at ?? "15:45"}
+            disabled={!st || busy}
+            onChange={(e) => act(() => smaApi.backtestHours(Boolean(st?.market_hours_only), e.target.value), "Stop time saved.")}
+            className="min-h-8 rounded border border-white/15 bg-black/30 px-1 text-xs text-slate-100"
+          >
+            {STOP_CHOICES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex items-center gap-1">
           Idle stop after
           <select

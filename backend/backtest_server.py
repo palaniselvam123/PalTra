@@ -15,6 +15,14 @@ never slows the bots. Same image; this role:
   token comes from ``GET /api/link/backtest/groww`` every ``TOKEN_EVERY_SEC`` and is kept in
   memory only, never logged or saved. Logging in again with the same API key here could end
   the desk's session, so this server never logs in to Groww itself.
+* **Market hours only** (``market_hours_only``, off by default, saved next to the SMA DB): outside
+  09:00 to ``stop_at`` (default 15:45) IST Mon-Fri, page requests no longer keep it up: once no
+  backtest or scan is running for ``AFTER_HOURS_MIN`` (5) minutes it stops, so it is only billed in
+  market hours. Opening the page after hours starts it for those few minutes only.
+* **Copies its scans to the desk** (``push_scan`` / ``push_check``): every finished Cross scan,
+  Trend quality and Most active pass, and each accuracy check, is sent to the desk's
+  ``POST /api/link/backtest/scan-history`` and kept in the desk's scan history too, so the desk's
+  Scalp page can show them while this server is stopped. A failed copy is only logged.
 * **Stops itself when idle** (``run``): no backtest loading or playing and no page request for
   ``idle_minutes()`` (default 30, 10-240, saved next to the SMA DB) → SIGTERM → the process
   exits → Fly stops the machine (``auto_start_machines`` starts it on the next visit). A stopped
@@ -33,6 +41,7 @@ session).
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import os
@@ -51,6 +60,10 @@ TOKEN_EVERY_SEC = 600
 CHECK_EVERY_SEC = 30
 IDLE_DEFAULT_MIN = 30
 IDLE_MIN, IDLE_MAX = 10, 240
+MARKET_START = dt.time(9, 0)
+DEFAULT_STOP_AT = "15:45"
+AFTER_HOURS_MIN = 5
+SCANS_PATH = "/api/link/backtest/scan-history"
 BUSY_STATUSES = ("LOADING", "PLAYING")
 QUIET_PATHS = ("/api/health", "/api/health/deep", "/api/role")
 
@@ -132,6 +145,49 @@ def set_idle_minutes(minutes: int) -> int:
     return value
 
 
+# ---- market hours only ---------------------------------------------------------
+
+
+def _hhmm(text: str | None) -> dt.time | None:
+    try:
+        hh, mm = str(text or "").strip().split(":")
+        value = dt.time(int(hh), int(mm))
+    except (ValueError, TypeError):
+        return None
+    return value if MARKET_START < value <= dt.time(23, 59) else None
+
+
+def market_hours_only() -> bool:
+    return bool(_read_file().get("market_hours_only", False))
+
+
+def stop_at() -> str:
+    raw = _read_file().get("stop_at")
+    return raw if _hhmm(raw) is not None else DEFAULT_STOP_AT
+
+
+def set_market_hours(on: bool, at: str | None = None) -> None:
+    changes: dict = {"market_hours_only": bool(on)}
+    if at is not None:
+        if _hhmm(at) is None:
+            raise ValueError("stop time must be HH:MM after 09:00")
+        changes["stop_at"] = _hhmm(at).strftime("%H:%M")
+    _write_file(**changes)
+
+
+def in_hours(clock: dt.datetime | None = None) -> bool:
+    """Monday-Friday, 09:00 up to the stop time, IST."""
+    from groww_client import IST
+
+    clock = clock or dt.datetime.now(IST)
+    return clock.weekday() < 5 and MARKET_START <= clock.time() < _hhmm(stop_at())
+
+
+def after_hours(clock: dt.datetime | None = None) -> bool:
+    """Market hours only is on and it is outside them: page requests no longer keep the server up."""
+    return market_hours_only() and not in_hours(clock)
+
+
 # ---- stocks armed here from the scanner ----------------------------------------
 
 
@@ -197,10 +253,14 @@ def busy(replays: dict) -> bool:
     return False
 
 
-def idle_seconds_left(replays: dict, now: float | None = None) -> float:
+def idle_seconds_left(replays: dict, now: float | None = None, clock: dt.datetime | None = None) -> float:
     now = time.monotonic() if now is None else now
     if busy(replays):
         state.last_busy = now
+    if after_hours(clock):
+        # Only running work keeps it up after hours; a page left open does not.
+        last = max(state.started, state.last_busy)
+        return max(0.0, AFTER_HOURS_MIN * 60 - (now - last))
     last = max(state.last_request, state.last_busy)
     return max(0.0, idle_minutes() * 60 - (now - last))
 
@@ -290,6 +350,9 @@ def status(replays: dict) -> dict:
         "link": bool(server_role.backtest_link_token()),
         "idle_min": idle_minutes(),
         "idle_left_sec": round(left),
+        "market_hours_only": market_hours_only(),
+        "stop_at": stop_at(),
+        "after_hours": after_hours(),
         "busy": busy(replays),
         "groww": bool(state.token),
         "groww_error": state.token_error,
@@ -318,5 +381,41 @@ async def run(apply: Callable[[dict], list[str]], replays: Callable[[], dict]) -
             if time.monotonic() - state.token_at >= TOKEN_EVERY_SEC or not state.token:
                 await refresh_token(client)
             if idle_seconds_left(replays()) <= 0:
-                stop_now(f"idle for {idle_minutes()} minutes")
+                stop_now("market hours are over" if after_hours() else f"idle for {idle_minutes()} minutes")
                 return
+
+
+# ---- scans copied to the desk ------------------------------------------------------
+
+
+def _desk_post(path: str, body: dict) -> None:
+    """POST to the desk link from a worker thread. Raises on failure."""
+    token = server_role.backtest_link_token()
+    if not token:
+        raise RuntimeError("BACKTEST_LINK_TOKEN is not set on this server.")
+    with httpx.Client(timeout=20) as client:
+        resp = client.post(
+            f"{server_role.desk_url()}{path}", json=body, headers={"Authorization": f"Bearer {token}"}
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"the desk answered {resp.status_code}")
+
+
+def push_scan(kind: str, snapshot: dict, meta: dict | None = None) -> None:
+    """Send a finished scan to the desk's scan history (backtest server only; run in a thread). Never raises."""
+    if not server_role.is_backtest() or not server_role.backtest_link_token():
+        return
+    try:
+        _desk_post(SCANS_PATH, {"kind": kind, "snapshot": snapshot, "meta": {**(meta or {}), "server": "backtest"}})
+    except Exception as exc:  # noqa: BLE001 - the scan is still kept here
+        log.warning("could not copy the %s scan to the desk: %s", kind, exc)
+
+
+def push_check(kind: str, as_of: str, result: dict) -> None:
+    """Send an accuracy check to the desk, matched there by the scan's kind and time. Never raises."""
+    if not server_role.is_backtest() or not server_role.backtest_link_token():
+        return
+    try:
+        _desk_post(SCANS_PATH, {"check": {"kind": kind, "as_of": as_of, "result": result}})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not copy the accuracy check to the desk: %s", exc)

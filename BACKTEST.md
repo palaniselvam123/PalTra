@@ -110,6 +110,16 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
    Every push to `main` then deploys the backtest server too, after the desk and the
    scanner, with the same market-hours gate.
 
+## Market hours only (optional)
+
+Tick **Market hours only, stop after 15:45** on this server's bar to use it only while NSE is open. After the stop time
+(and on weekends) it stops itself once no backtest or scan has run for 5 minutes, even with the page open, so it is only
+billed in market hours. Opening it after hours wakes it for those few minutes only. Run evening backtests on the main
+desk instead: the desk starts replays only after 15:45 (and at weekends), so they never slow the live bots.
+
+Every Cross scan, Trend quality and Most active scan finished here, and each accuracy check, is also copied to the desk,
+so the desk's Scalp page (History tab, Most active → History) shows them while this server is stopped.
+
 ## Size and cost
 
 `performance-2x`, 4 GB (`fly.backtest.toml`): two dedicated cores, since backtests are

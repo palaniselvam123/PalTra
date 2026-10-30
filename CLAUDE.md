@@ -208,7 +208,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   keeping the finished days, so the run ends as if it never stopped. The replay
   bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
   the Backtests tab has a Resume button.
-  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE.
+  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **On the main desk a replay
+  starts only outside market hours** (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST Mon-Fri, 409; start, resume and
+  Scalp-pick runs), so it never slows the live bots; the backtest server takes them then (`DESK_REPLAY_HOURS=any` lifts
+  it; the test suite sets it).
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
   chart focus, and an optional `interval` (1, 2, 3, 5, 10, 15, 30, 60 or 240
@@ -911,6 +914,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   them (`clear_scanner_armed`). Past candles use the **desk's Groww session**: desk `GET /api/link/backtest/groww` every 10 min, memory only
   (`remote_token`, read by `groww_client.desk_session_token` on this role); it never logs in to Groww itself, so it
   cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
+  **Market hours only** (`backtest_server.market_hours_only` / `stop_at`, off by default, saved in `backtest_server.json`;
+  `PUT /api/backtest/hours`, the bar's "Market hours only, stop after"): outside 09:00 to `stop_at` (15:45) IST Mon-Fri
+  (`after_hours`) page requests no longer keep it up; it stops once no backtest or scan has run for `AFTER_HOURS_MIN` (5)
+  minutes (`idle_seconds_left`). **Scans copied to the desk**: every finished Cross scan / Trend quality / Most active pass
+  and each accuracy check made here is also sent to desk `POST /api/link/backtest/scan-history` (`push_scan` / `push_check`
+  from `main._save_scan` / `_save_check` and `routes_scalp._save_active`, in a worker thread, failures only logged), kept
+  once in the desk's `scan_history.db` (`save_copy`; a check is matched by kind and time, `find`), so the desk's Scalp
+  History tab and Most active History show them while this server is stopped.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
   page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /
@@ -1317,8 +1328,8 @@ No credentials are needed. The desk starts on the simulated feed.
 
 - `fly.toml`: app `paltra`, region `sin`, `internal_port = 3000`, HTTPS
   forced, one machine always running (`auto_stop_machines = 'off'`,
-  `min_machines_running = 1`), four shared CPUs (`shared-cpu-4x`, 4 CPUs,
-  2 GB), and a volume `data` mounted at `/data`. Change the machine size in
+  `min_machines_running = 1`), two dedicated performance CPUs (`performance`,
+  2 CPUs, 4 GB; never throttled in market hours), and a volume `data` mounted at `/data`. Change the machine size in
   `[[vm]]`: every deploy applies it and undoes a resize made in the Fly
   dashboard.
 - `Dockerfile` (`python:3.13-slim-bookworm`): installs
