@@ -1616,8 +1616,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         full ? "fixed inset-0 z-[60] flex flex-col overflow-y-auto" : "rounded-xl border"
       )}
     >
-      <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-        <h2 className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-slate-100">
+      <div className="flex flex-col gap-1.5 px-3 py-2 sm:px-4">
+        <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-semibold text-slate-100">
           {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
           <span className="font-normal text-slate-300">{barWords(bar)}</span>
           <select
@@ -1729,6 +1729,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             onClick={() => setShowLook((v) => !v)}
             aria-pressed={showLook}
             aria-expanded={showLook}
+            aria-haspopup="dialog"
+            data-indicators-toggle=""
             title="Indicators: show or hide SMA, VWAP, EMA, Bollinger, Supertrend, ATR and RSI, and pick their colours, thickness and line pattern"
             className={clsx(
               "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
@@ -1802,13 +1804,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         </ul>
       </div>
       {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
-      {showLook ? (
+      {showLook && chartHidden ? (
+        // The chart is hidden, so there is nothing to float over: a plain block instead.
         <ChartIndicators
           style={look}
           onChange={setLook}
           onReset={resetLook}
           onClose={() => setShowLook(false)}
           stAvailable={Boolean(filters?.st_line)}
+          floating={false}
         />
       ) : null}
       <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
@@ -1843,16 +1847,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           onClose={toggleMeasure}
         />
       ) : null}
-      <RangeBar
-        range={range}
-        past={past}
-        loading={loadingPast}
-        error={pastError}
-        onChange={setRange}
-        onLoad={loadPast}
-        onLive={backToLive}
-      />
       <div ref={plotRef} className={clsx("relative", full && "min-h-[240px] flex-1")}>
+        {showLook && !chartHidden ? (
+          // Floats over the candles (a bottom sheet on phones), so the chart and its dates never move.
+          <ChartIndicators
+            style={look}
+            onChange={setLook}
+            onReset={resetLook}
+            onClose={() => setShowLook(false)}
+            stAvailable={Boolean(filters?.st_line)}
+          />
+        ) : null}
         <div
           ref={rootRef}
           // On a movable board the chart panel's bottom edge sets this height (see Layout/Board).
@@ -1983,6 +1988,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </div>
         )}
       </div>
+      {/* Under the dates, like Groww's range buttons. */}
+      <RangeBar
+        range={range}
+        past={past}
+        loading={loadingPast}
+        error={pastError}
+        onChange={setRange}
+        onLoad={loadPast}
+        onLive={backToLive}
+      />
       </div>
       {showTable ? (
         <ChartDataTable
@@ -2023,74 +2038,86 @@ function RangeBar({
   onLoad: (next: { from: string; to: string }) => void;
   onLive: () => void;
 }) {
+  const [custom, setCustom] = useState(false);
   const max = istInput(new Date());
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onLoad(range);
   };
+  const chip = (active: boolean) =>
+    clsx(
+      "min-h-9 rounded-md px-2.5 text-xs font-semibold ring-1 ring-inset disabled:opacity-50",
+      active ? "bg-sky-400/15 text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+    );
   return (
     <div className="border-t border-white/5 px-3 py-2 sm:px-4">
-      <form onSubmit={submit} aria-label="Past candles" className="flex flex-wrap items-end gap-2">
-        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
-          From (IST)
-          <input
-            type="datetime-local"
-            value={range.from}
-            max={max}
-            onChange={(e) => onChange({ ...range, from: e.target.value })}
-            className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
-          />
-        </label>
-        <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
-          To (IST)
-          <input
-            type="datetime-local"
-            value={range.to}
-            max={max}
-            onChange={(e) => onChange({ ...range, to: e.target.value })}
-            className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={loading}
-          className="flex min-h-9 items-center gap-1.5 rounded-md bg-violet-500/20 px-3 text-sm font-semibold text-violet-100 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/30 disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={14} aria-hidden className="animate-spin" /> : <History size={14} aria-hidden />}
-          {loading ? "Loading…" : "Show candles"}
+      {/* One row under the dates, like Groww's range buttons: live, the quick ranges, and your own dates. */}
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Chart range">
+        <button type="button" onClick={onLive} disabled={!past} aria-pressed={!past} className={chip(!past)} title="Follow the live candles">
+          <span className="flex items-center gap-1">
+            <Radio size={13} aria-hidden />
+            Live
+          </span>
         </button>
-        <div className="flex items-center gap-1" role="group" aria-label="Quick ranges">
-          {PRESETS.map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              disabled={loading}
-              onClick={() => onLoad(presetRange(p.days))}
-              className="min-h-9 rounded-md px-2 text-xs font-semibold text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-50"
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        {past ? (
-          <button
-            type="button"
-            onClick={onLive}
-            className="flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10 sm:ml-auto"
-          >
-            <Radio size={14} aria-hidden />
-            Back to live
+        {PRESETS.map((p) => (
+          <button key={p.label} type="button" disabled={loading} onClick={() => onLoad(presetRange(p.days))} className={chip(false)}>
+            {p.label}
           </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setCustom((v) => !v)}
+          aria-expanded={custom}
+          aria-controls="sma-chart-dates"
+          className={chip(custom)}
+          title="Pick your own from and to dates (IST)"
+        >
+          <span className="flex items-center gap-1">
+            <History size={13} aria-hidden />
+            Dates…
+          </span>
+        </button>
+        {loading ? <Loader2 size={14} aria-hidden className="animate-spin text-slate-400" /> : null}
+        {past ? (
+          <span className="ml-auto text-xs text-slate-400">
+            {past.candles.length.toLocaleString("en-IN")} candles · {rangeLabel(past.from, past.to)} · live paused
+          </span>
         ) : null}
-      </form>
-      {past ? (
-        <p className="mt-1.5 text-xs text-slate-400">
-          {past.candles.length.toLocaleString("en-IN")} candles from Groww · {rangeLabel(past.from, past.to)}. Live
-          updates are paused on the chart until you go back to live.
-        </p>
+      </div>
+      {custom ? (
+        <form id="sma-chart-dates" onSubmit={submit} aria-label="Past candles" className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
+            From (IST)
+            <input
+              type="datetime-local"
+              value={range.from}
+              max={max}
+              onChange={(e) => onChange({ ...range, from: e.target.value })}
+              className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
+            />
+          </label>
+          <label className="flex min-w-0 basis-full flex-col gap-0.5 text-xs font-medium uppercase tracking-wider text-slate-400 sm:basis-auto">
+            To (IST)
+            <input
+              type="datetime-local"
+              value={range.to}
+              max={max}
+              onChange={(e) => onChange({ ...range, to: e.target.value })}
+              className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-sm normal-case tracking-normal text-slate-100 [color-scheme:dark]"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={loading}
+            className="flex min-h-9 items-center gap-1.5 rounded-md bg-violet-500/20 px-3 text-sm font-semibold text-violet-100 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/30 disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={14} aria-hidden className="animate-spin" /> : <History size={14} aria-hidden />}
+            {loading ? "Loading…" : "Show candles"}
+          </button>
+        </form>
       ) : null}
       {error ? (
-        <p role="alert" className={clsx("mt-1.5 text-xs text-rose-300")}>
+        <p role="alert" className="mt-1.5 text-xs text-rose-300">
           {error}
         </p>
       ) : null}
