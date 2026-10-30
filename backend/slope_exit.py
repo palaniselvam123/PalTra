@@ -140,8 +140,8 @@ def own_size(cfg, entry_minutes: int) -> int:
 
 
 def watched(cfg) -> bool:
-    """Is any SMA 9 slope exit on (bend / turn, or the V-turn)?"""
-    return on(cfg) or vturn_on(cfg)
+    """Is any SMA 9 slope exit on (bend / turn, the V-turn, or the deceleration guard)?"""
+    return on(cfg) or vturn_on(cfg) or bool(getattr(cfg, "decel_exit", False))
 
 
 def slope(closed: pd.DataFrame, fast: int, back: int) -> float | None:

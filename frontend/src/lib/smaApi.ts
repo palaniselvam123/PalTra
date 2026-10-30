@@ -203,6 +203,15 @@ export type SmaConfig = {
   pivot_target?: "OFF" | "R1" | "R2";
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
+  /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */
+  decel_exit?: boolean;
+  decel_lookback?: number;
+  decel_arm_atr?: number;
+  decel_drop_pct?: number;
+  decel_min_atr?: number;
+  decel_candles?: number;
+  decel_confirm?: "OFF" | "CLOSE";
+  decel_pierce_atr?: number;
   plan_be_r?: number;
   plan_trail_r?: number;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
