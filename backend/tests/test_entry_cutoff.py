@@ -140,6 +140,8 @@ def test_no_entry_heads_up_after_the_cutoff(eng, monkeypatch):
 
     notes: list[str] = []
     monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    # The heads-up is a signal alert (its own channel): it is scheduled through the kind scheduler.
+    monkeypatch.setattr("strategy_engine._schedule_kind_whatsapp", lambda message, kind: notes.append(message))
     rows = []
     for i, gap in enumerate([-1.5, -1.0, -0.5, -0.5]):
         rows.append({"ts": i, "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1,

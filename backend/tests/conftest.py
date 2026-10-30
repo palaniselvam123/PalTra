@@ -48,4 +48,12 @@ def _no_alert_delivery(monkeypatch):
 
     monkeypatch.setattr(alert_notifier, "send_critical", record_critical)
     monkeypatch.setattr(alert_notifier, "send_quiet", record)
+    monkeypatch.setattr(alert_notifier, "send_news", record)
+    monkeypatch.setattr(alert_notifier, "send_signal", record)
+    monkeypatch.setattr(alert_notifier, "send_fast", record)
+
+    async def record_kind(channel_type: str, message: str):
+        return await record(message)
+
+    monkeypatch.setattr(alert_notifier, "send_to", record_kind)
     return sent

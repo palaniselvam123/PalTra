@@ -191,7 +191,7 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
 async def _fast_move_send(message: str) -> None:
     from app.services.alert_notifier import alert_notifier
 
-    await alert_notifier.send(message)
+    await alert_notifier.send_fast(message)
 
 
 async def _fast_move_call(message: str) -> None:

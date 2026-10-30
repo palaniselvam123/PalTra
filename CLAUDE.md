@@ -1053,12 +1053,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
   LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
   start/stop or panic.
-- Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards):
-  `trade` (fills, closes, warnings; `alert_notifier.send`), `critical` (bot down, app
-  shutting down, no stop; `send_critical`, falls back to trade) `call` (provider
-  `twilio_voice`: a Twilio phone call that reads the alert out) and `quiet` (provider
-  `telegram_quiet`: a second Telegram bot that only gets the Scalp page's quiet-runner alerts,
-  `send_quiet`, falls back to trade; `main._chop_alert`). The engine asks for a call
+- Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards; `alert_notifier.CHANNEL_TYPES`):
+  `trade` (fills, closes, refusals, hand-offs, warnings; `alert_notifier.send`), `critical` (bot down, app
+  shutting down, no stop; `send_critical`), `news` (news alerts, `send_news`), `signal` (heads-ups that are
+  not orders: a cross inside 3 minutes, an SMA 9 turn alert, a 1-minute review; `send_signal`,
+  `StrategyEngine._alert(kind="signal")`), `fast` (fast price moves, `send_fast`), `quiet` (the Scalp page's
+  quiet runners and trend-rank alerts, `send_quiet`; `main._chop_alert`) and `call` (provider `twilio_voice`:
+  a Twilio phone call that reads the alert out). Every kind but `call` falls back to the trade channel
+  when its own is not set (`send_to`). **Each kind has its own Telegram bot** (`DEDICATED_TELEGRAM`:
+  providers `telegram_critical`, `telegram_news`, `telegram_signal`, `telegram_fast`, `telegram_quiet`, one
+  `AlertChannel` row each, saved only in their own slot), so a second BotFather token never overwrites the
+  trade bot (`telegram`), which with `twilio` / `callmebot` can still be assigned to trade or critical. The
+  Settings cards: `components/Terminal/WhatsAppAlerts.tsx` (`OWN_BOTS`); `POST /api/scan/test-alert?channel_type=`
+  sends through that slot only, never the fallback. The engine asks for a call
   (`_alert(critical=True, call=True)`) on HALTED / STOPPED and a position with no stop;
   never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings only 09:00-15:45 IST
   Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test call button ignores

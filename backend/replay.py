@@ -382,7 +382,7 @@ class ReplayEngine(StrategyEngine):
                 self.on_handoff(name)
         return text
 
-    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:  # noqa: ARG002
+    def _alert(self, message: str, critical: bool = False, call: bool = False, kind: str = "trade") -> None:  # noqa: ARG002
         return None
 
     def load_config(self) -> BotConfig:

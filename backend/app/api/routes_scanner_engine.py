@@ -14,13 +14,15 @@ from sqlalchemy import select
 from app.core.encryption import get_vault
 from app.models.database import AlertChannel, ScannerConfig, async_session
 from app.services.alert_notifier import (
-    CALLMEBOT,
-    TELEGRAM,
+    ALL_PROVIDERS,
+    CHANNEL_TYPES,
+    DEDICATED_TELEGRAM,
+    GENERAL_PROVIDERS,
     TWILIO,
-    TELEGRAM_QUIET,
     TWILIO_VOICE,
     TelegramSetupError,
     alert_notifier,
+    is_telegram,
 )
 from app.services import patterns as candle_patterns
 from app.services.candle_store import INTERVALS
@@ -210,18 +212,21 @@ async def channels():
 @router.post("/channels")
 async def save_channel(body: ChannelRequest):
     provider = body.provider.lower()
-    if provider not in (CALLMEBOT, TWILIO, TELEGRAM, TWILIO_VOICE, TELEGRAM_QUIET):
-        raise HTTPException(
-            400, f"provider must be '{CALLMEBOT}', '{TWILIO}', '{TELEGRAM}', '{TWILIO_VOICE}' or '{TELEGRAM_QUIET}'"
-        )
-    channel_type = body.channel_type if body.channel_type in ("trade", "critical", "call", "quiet") else "trade"
+    if provider not in ALL_PROVIDERS:
+        raise HTTPException(400, "provider must be one of " + ", ".join(f"'{p}'" for p in ALL_PROVIDERS))
+    channel_type = body.channel_type if body.channel_type in CHANNEL_TYPES else "trade"
     if (provider == TWILIO_VOICE) != (channel_type == "call"):
         raise HTTPException(400, "Phone calls use provider twilio_voice with channel_type call")
-    if (provider == TELEGRAM_QUIET) != (channel_type == "quiet"):
-        raise HTTPException(400, "Quiet-runner alerts use provider telegram_quiet with channel_type quiet")
+    # A kind's own Telegram bot is saved only in that kind's slot; news / signal / fast / quiet take
+    # only their own bot, while trade and critical also take the general providers.
+    for kind, own in DEDICATED_TELEGRAM.items():
+        if provider == own and channel_type != kind:
+            raise HTTPException(400, f"{own} is the {kind} alerts' own bot: save it with channel_type {kind}")
+    if channel_type not in ("trade", "critical", "call") and provider != DEDICATED_TELEGRAM[channel_type]:
+        raise HTTPException(400, f"{channel_type} alerts use provider {DEDICATED_TELEGRAM[channel_type]} with channel_type {channel_type}")
     target = body.target.strip()
     secret = body.secret.strip()
-    if provider in (TELEGRAM, TELEGRAM_QUIET):
+    if is_telegram(provider):
         if not secret:
             raise HTTPException(400, "Paste the bot token from BotFather")
         if not target:
@@ -282,8 +287,8 @@ async def assign_channel(provider: str, body: AssignRequest):
     channel_type = body.channel_type
     if channel_type not in ("trade", "critical"):
         raise HTTPException(400, "channel_type must be 'trade' or 'critical'")
-    if provider.lower() in (TWILIO_VOICE, TELEGRAM_QUIET):
-        raise HTTPException(400, "The phone-call and quiet-runner channels stay in their own slots")
+    if provider.lower() not in GENERAL_PROVIDERS:
+        raise HTTPException(400, "Only Telegram, Twilio WhatsApp and CallMeBot can be moved; each kind's own bot stays in its slot")
     async with async_session() as session:
         row = (
             await session.execute(select(AlertChannel).where(AlertChannel.provider == provider.lower()))
@@ -336,6 +341,15 @@ async def save_alert_prefs(body: StopPrefsBody):
     return await alert_notifier.save_stop_prefs(call=body.after_hours_stop_call, message=body.after_hours_stop_message)
 
 
+TEST_TEXT = {
+    "critical": "Critical alerts are connected. Only bot-down, app-stopping and no-stop alerts come here.",
+    "news": "News alerts are connected. Only news alerts come here.",
+    "signal": "Signal alerts are connected. SMA cross heads-ups, SMA 9 turns and 1-minute reviews come here.",
+    "fast": "Fast-move alerts are connected. Only fast price moves come here.",
+    "quiet": "Quiet-runner alerts are connected. Only the Scalp page's quiet runners come here.",
+}
+
+
 @router.post("/test-alert")
 async def test_alert(channel_type: str = "trade"):
     """Sends a real message through the enabled channel, so credentials are
@@ -348,18 +362,12 @@ async def test_alert(channel_type: str = "trade"):
         if not result.ok:
             raise HTTPException(400, result.error or result.skipped_reason or "Call failed")
         return {"ok": True, "provider": result.provider}
-    if channel_type == "quiet":
-        channel = await alert_notifier.active_channel("quiet")
+    if channel_type in TEST_TEXT:
+        # Through that slot's own channel only: a test must never "pass" by falling back to trade.
+        channel = await alert_notifier.active_channel(channel_type)
         if channel is None:
-            raise HTTPException(400, "No quiet-runner alert channel is enabled")
-        message = "PalTra test\nQuiet-runner alerts are connected. Only the Scalp page's quiet runners come here."
-        result = await alert_notifier._deliver(channel, message)
-    elif channel_type == "critical":
-        channel = await alert_notifier.active_channel("critical")
-        if channel is None:
-            raise HTTPException(400, "No critical alert channel is enabled")
-        message = "PalTra test\nCritical alerts are connected. Only bot-down and app-hung alerts come here."
-        result = await alert_notifier._deliver(channel, message)
+            raise HTTPException(400, f"No {channel_type} alert channel is enabled")
+        result = await alert_notifier._deliver(channel, f"PalTra test\n{TEST_TEXT[channel_type]}")
     else:
         message = "PalTra test\nAlerts are connected. No order was placed."
         result = await alert_notifier.send(message)
