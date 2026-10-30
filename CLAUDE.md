@@ -1185,6 +1185,14 @@ Real orders reach Groww in only two places:
    (also `square_off_all`, `cancel_order`). Only used when
    `state.manual_live` is true.
 
+**LIVE stop health** (`StrategyEngine._watch_stop` → `_stop_dead`): when Groww reports the exchange stop
+`CANCELLED` / `REJECTED` / `EXPIRED` / `FAILED` (`STOP_DEAD`) and Groww's MIS book still holds the shares, the bot
+sends a critical alert with a call (Groww's remark included), waits `STOP_DEAD_GRACE_SEC` (5 s: Groww's own square-off
+cancels the stop just before it sells) and then closes at the market as `STOP_LOST`; when Groww's book is already flat,
+the trade is booked as `SOLD_ON_GROWW` at Groww's real price and no order is sent. Exits Groww made are booked at
+Groww's price (`_real_exit_price`: the stop's own fill, else `GrowwClient.closed_price`, the day's average closing
+price from the positions book, read-only), never at the stop trigger unless Groww gives no price.
+
 The US practice desk (`app/services/us_desk.py`) has no order path at all: its fills are local rows.
 
 On the scanner server (`PALTRA_ROLE=scanner`) and the backtest server (`PALTRA_ROLE=backtest`)
