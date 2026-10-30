@@ -1332,6 +1332,8 @@ export type ReplayRun = {
   totals: ReplayRunTotals;
   /** Money in open trades at the run's busiest moment, and each day's own peak. */
   capital?: ReplayCapitalPeak & { days: (ReplayCapitalPeak & { date: string })[] };
+  /** The fast-mover hand-off's part (fast_bot.py): trades cut on this bot, and the ones played on with Bot 5's settings. */
+  fast_move?: { cut: number; cut_gross: number; trades: number; gross: number; net: number; wins: number } | null;
   days?: ReplayDayRow[];
   /** Per-stock split, on the run detail only. */
   stocks?: ReplayStockRow[];

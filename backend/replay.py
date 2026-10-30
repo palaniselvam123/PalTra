@@ -34,9 +34,18 @@ from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
 from models import BotConfig, ReplayRun, ReviewLog, TradeLog
 import arm_log
-from strategy_engine import MAX_TRADE_SYMBOLS, StrategyEngine, settings_for, settings_snapshot, trade_names
+from strategy_engine import (
+    MAX_TRADE_SYMBOLS,
+    ForceRefused,
+    StrategyEngine,
+    settings_for,
+    settings_snapshot,
+    stock_settings,
+    trade_names,
+)
 from tick_sizes import round_price
 import all_bots_guard
+import fast_bot
 import open_pnl_log
 import recovery
 from scalp_picks import PickRule, picks_for_day
@@ -250,8 +259,13 @@ class ReplayEngine(StrategyEngine):
         bot: int = 1,
         settings: dict | None = None,
         arm_windows: dict[str, list[tuple[int, int]]] | None = None,
+        fast: dict | None = None,
     ):
         self.feed = feed
+        # Fast-mover hand-off to Bot 5 (fast_bot.replay_snapshot): None = off for this run.
+        self.fast = fast
+        self._fast_watch = None
+        self._fast_moved: dict[str, dict] = {}
         # "Replay as armed" (arm_log.py): each stock trades only while it was armed live that
         # day, {symbol: [(start, end) epoch seconds]}. None = every replayed stock all day.
         self.arm_windows = arm_windows
@@ -290,6 +304,8 @@ class ReplayEngine(StrategyEngine):
                     self._skip_cross_until[name] = None
             self._armed_before = armed
         await super().tick(now)
+        if self.fast and self.status == "RUNNING":
+            await self._fast_replay(now)
         if self.day_guard and self.status != "HALTED":
             await self._check_day_guard(now)
 
@@ -313,6 +329,43 @@ class ReplayEngine(StrategyEngine):
         kind = all_bots_guard.verdict(amount, target, stop, now, at)
         if kind:
             await all_bots_guard.trip([self], kind, amount, target, stop, at)
+
+    async def _fast_replay(self, now: dt.datetime) -> None:
+        """The fast-mover hand-off on a replayed day (fast_bot.py): a held stock moving fast its way is cut
+        (FAST_MOVE_HANDOFF) and opened again the same side at once with Bot 5's settings, which it keeps for
+        the rest of this day (FAST_MOVE). Each stock once a day, at most `max_day` a day."""
+        settings = fast_bot.clean(self.fast.get("settings") or {})
+        if not settings.on or self.bot_id not in settings.sources:
+            return
+        if self._fast_watch is None:
+            self._fast_watch = fast_bot.FastBot()
+        stamp = now.timestamp()
+        for name, pos in list(self.positions.items()):
+            price = self._ltps.get(name)
+            if pos is None or not price or name in self._fast_moved:
+                continue
+            hist = self._fast_watch.note(name, price, stamp, settings)
+            if len(self._fast_moved) >= settings.max_day:
+                continue
+            why = fast_bot.fast(hist, pos.direction, stamp, settings)
+            if why:
+                await self._fast_move(name, pos.direction, why)
+
+    async def _fast_move(self, name: str, direction: str, why: str) -> None:
+        try:
+            await self.close_symbol(name, reason=fast_bot.EXIT_REASON)
+        except ForceRefused as exc:
+            self._signals[name] = f"{name} fast move ({why}): not moved, the trade could not be closed ({exc})"
+            return
+        self._fast_moved[name] = fast_bot.bot5_overrides(self.fast, name)
+        signal = "BULLISH" if direction == "LONG" else "BEARISH"
+        try:
+            opened = await self.direct_order(
+                name, signal, why=fast_bot.ENTRY_REASON, note=f"fast mover to Bot {fast_bot.TARGET_BOT}: {why}"
+            )
+        except ForceRefused as exc:
+            opened = f"not ordered: {exc}"
+        self._signals[name] = f"{name} fast move ({why}): cut; Bot {fast_bot.TARGET_BOT}'s settings {opened}"
 
     def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT) -> str:  # noqa: ARG002
         """Hand-off in a replay: the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).
@@ -341,6 +394,12 @@ class ReplayEngine(StrategyEngine):
                     data[name] = value if isinstance(value, str) else json.dumps(value or {})
                 elif name in data and name not in ("id", "symbol", "trade_symbols", "trading_mode"):
                     data[name] = value
+        if self._fast_moved:
+            # A stock the fast-mover hand-off moved plays the rest of the day on Bot 5's settings.
+            own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
+            for name, fields in self._fast_moved.items():
+                own[name] = {**own.get(name, {}), **fields}
+            data["stock_settings"] = json.dumps(own)
         data["trading_mode"] = "REPLAY"
         data["max_trades_per_day"] = REPLAY_TRADE_CAP
         data["trade_symbols"] = ",".join(self._armed_now())
@@ -566,6 +625,27 @@ def _capital(trades: list[TradeLog]) -> dict:
     return {**best, "days": by_day}
 
 
+def _fast_move_part(trades: list[TradeLog]) -> dict | None:
+    """The fast-mover hand-off's part of a run (fast_bot.py): the trades cut on the source bot and the
+    trades opened at once with Bot 5's settings, closed trades only. None when the run had none."""
+    cut = [t for t in trades if t.exit_reason == fast_bot.EXIT_REASON]
+    opened = [t for t in trades if (t.entry_reason or "").startswith(fast_bot.ENTRY_REASON) and t.exit_time is not None]
+    if not cut and not opened:
+        return None
+
+    def total(rows, key):
+        return round(sum(float(getattr(t, key) or 0) for t in rows), 2)
+
+    return {
+        "cut": len(cut),
+        "cut_gross": total(cut, "gross_pnl"),
+        "trades": len(opened),
+        "gross": total(opened, "gross_pnl"),
+        "net": total(opened, "net_pnl"),
+        "wins": sum(1 for t in opened if (t.gross_pnl or 0) > 0),
+    }
+
+
 def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     day_rows = _day_rows(trades)
     out = {
@@ -581,6 +661,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         "days_done": run.days_done,
         "totals": _totals(day_rows),
         "capital": _capital(trades),
+        "fast_move": _fast_move_part(trades),
     }
     if with_days:
         out["days"] = day_rows
@@ -886,6 +967,11 @@ class ReplaySession:
         self.days = days
         if self.rule is not None:
             settings = {**settings, "scalp_pick": {**self.rule.as_dict(), "universe": len(frames), "picks": {}}}
+        if resume is None:
+            # The fast-mover hand-off to Bot 5 as set now, kept on the run so Resume plays the same.
+            fast = fast_bot.replay_snapshot(self.bot)
+            if fast:
+                settings = {**settings, "fast_bot": fast}
         self._settings = settings
         if resume is not None:
             self.run_id = resume[0]
@@ -913,6 +999,12 @@ class ReplaySession:
         self.error = " ".join(notes)
         snap = SimpleNamespace(**settings)
         bars = {name: frame_bars(settings_for(snap, name)) for name in frames}
+        fast_snap = settings.get("fast_bot") if isinstance(settings.get("fast_bot"), dict) else None
+        if fast_snap:
+            # A moved stock may switch to Bot 5's candle size: hand enough bars for either.
+            for name in frames:
+                moved = SimpleNamespace(**{**vars(settings_for(snap, name)), **fast_bot.bot5_overrides(fast_snap, name)})
+                bars[name] = max(bars[name], frame_bars(moved))
         feed = ReplayFeed(frames, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST), bars)
         bot_paused = False
         saved = settings if resume is not None else None
@@ -949,7 +1041,9 @@ class ReplaySession:
             clock = dt.datetime.combine(day, start, tzinfo=IST)
             feed.clock = clock
             # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows)
+            engine = ReplayEngine(
+                feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap
+            )
             engine.handoff = engine._hand_off
             engine.on_handoff = lambda name: self.handed_off.append(name)
             # A 1-minute review pauses the replay so it can be answered as it

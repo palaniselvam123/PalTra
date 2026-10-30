@@ -2944,7 +2944,10 @@ def export_bot_settings() -> dict:
             row = db.get(BotConfig, config_id)
             if row is not None:
                 rows[str(config_id)] = {c.name: _jsonable(getattr(row, c.name)) for c in BotConfig.__table__.columns}
-    return {"rows": rows}
+    from dataclasses import asdict
+
+    # The fast-mover hand-off settings too, so the backtest server's replays play it the same.
+    return {"rows": rows, "fast_bot": asdict(fast_bot.load())}
 
 
 def _column_value(column, value):

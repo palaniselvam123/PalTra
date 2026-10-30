@@ -111,8 +111,10 @@ export function FastMoverBot() {
         When a stock one of the ticked bots holds moves fast in that trade&apos;s favour, its trade there is closed and Bot 5
         opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross, VWAP, RSI or other entry
         check is read. The stock stays on Bot 5 for the rest of the day. Set Bot 5&apos;s quantity in Settings → SMA strategy
-        (Bot 5 tab), and press Start on Bot 5. A LIVE Bot 5 never takes a practice (PAPER) trade, and in LIVE the move waits
-        until Groww shows no shares on the old bot.
+        (Bot 5 tab), and press Start on Bot 5. Keep both bots in the same mode: a LIVE Bot 5 never takes a practice
+        (PAPER) trade, a LIVE trade is never cut for a PAPER Bot 5, and in LIVE the move waits until Groww shows no shares
+        on the old bot. Replays of the ticked bots play it too (Bot 5's size and settings for the rest of that day), so
+        you can check it on past days.
       </p>
       <div className="mt-3 space-y-3">
         <div className="flex flex-wrap items-end gap-3">

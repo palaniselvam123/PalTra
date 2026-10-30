@@ -7,8 +7,9 @@ never slows the bots. Same image; this role:
 * **Never orders** (``server_role.no_orders``: every Groww order path refuses, the LIVE switch
   answers 403) and runs **no live bots, scans or alerts**: ``main.boot_engine`` only prepares
   the settings rows and the replay players, and the bots' Start answers 409.
-* **Copies the bots' settings from the desk** (``sync``): every ``BotConfig`` row (bots 1-4,
-  research) with its Trade list and per-stock settings, read from the desk's
+* **Copies the bots' settings from the desk** (``sync``): every ``BotConfig`` row (bots 1-5,
+  research) with its Trade list and per-stock settings, and the fast-mover hand-off settings
+  (``fast_bot.json``, so replays here play it as the desk would), read from the desk's
   ``GET /api/link/backtest/settings``, written here with PAPER forced. At boot and on
   "Sync from desk". Nothing is ever written back to the desk.
 * **Uses the desk's Groww session** for past candles (``remote_token``): the desk's access
@@ -335,6 +336,11 @@ async def sync(
         if not isinstance(rows, dict) or not rows:
             raise RuntimeError("the desk sent no settings")
         done = await asyncio.to_thread(apply, rows, keep) if keep else await asyncio.to_thread(apply, rows)
+        if isinstance(body.get("fast_bot"), dict):
+            import fast_bot
+
+            # Its replays play the desk's fast-mover hand-off (fast_bot.replay_snapshot).
+            await asyncio.to_thread(fast_bot.save, body["fast_bot"])
     except Exception as exc:  # noqa: BLE001
         state.sync_error = str(exc)[:200]
         raise
