@@ -494,3 +494,15 @@ async def test_a_replay_plays_bot5s_size_for_its_trades_then_the_bots_own(tmp_pa
         assert later, "the bot trades the stock again on its own settings"
         assert all(r.qty == 10 for r in later)
     database.reset_engine()
+
+
+def test_replay_snapshot_fills_bot5s_unsaved_settings_with_their_defaults(monkeypatch, tmp_path):
+    """A Bot 5 setting never saved (None) plays as its default, not as the replayed bot's own value."""
+    import fast_bot
+
+    monkeypatch.setenv("FAST_BOT_FILE", str(tmp_path / "fast_bot.json"))
+    monkeypatch.setattr(fast_bot, "_bot5_row", lambda: SimpleNamespace(qty=50, pivot_target=None, stop_plan=None, stock_settings=None))
+    fast_bot.save({"on": True, "sources": [4]})
+    snap = fast_bot.replay_snapshot(4)
+    assert snap["bot5"]["qty"] == 50
+    assert snap["bot5"]["pivot_target"] == "OFF" and snap["bot5"]["stop_plan"] is False

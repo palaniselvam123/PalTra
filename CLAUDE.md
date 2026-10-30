@@ -189,7 +189,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   fields and per-stock settings, so Resume plays the same); `ReplayEngine._fast_replay` (after each tick) cuts a held
   stock that moves fast its way (`FAST_MOVE_HANDOFF`, `close_symbol`) and opens the same side at once through
   `direct_order` (`FAST_MOVE`) with Bot 5's settings as that stock's override until its `bot5_trades` are done (`_fast_gate`, then the replayed
-  bot's own settings; a run saved before the setting plays 0 = all day)
+  bot's own settings; a run saved before the setting plays 0 = all day); a Bot 5 setting never saved is carried as its column default (`_column_default`), so the replayed
+  bot's own value never leaks into Bot 5's trade
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
