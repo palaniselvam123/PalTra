@@ -530,6 +530,7 @@ class ConfigUpdate(BaseModel):
     decel_candles: int | None = Field(default=None, ge=1, le=5)
     decel_confirm: Literal["OFF", "CLOSE"] | None = None
     decel_pierce_atr: float | None = Field(default=None, ge=0, le=5)
+    decel_peak_from: Literal["ENTRY", "RUN"] | None = None
     slow_sma_exit: bool | None = None
     recovery_hold: bool | None = None
     recovery_tolerance_pct: float | None = Field(default=None, ge=0, le=5)

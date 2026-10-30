@@ -117,3 +117,45 @@ def test_api_saves_the_guard(tmp_path, monkeypatch):
         assert ok.status_code == 200 and ok.json()["decel_exit"] is True and ok.json()["decel_drop_pct"] == 40
         assert client.put("/api/config", json={"decel_confirm": "WICK"}).status_code == 422
     database.reset_engine()
+
+
+def test_peak_from_the_run_warns_a_late_entry_on_its_first_candle():
+    # Bought while the climb is already slowing: counted from the entry there is no peak to fall from yet.
+    def first(entry, **over):
+        flags = decel_guard.early_warning(_bars(ROLL), "LONG", entry, _cfg(decel_confirm="OFF", **over))["early_warning_exit"]
+        assert not flags.iloc[:entry].any()  # never flags a candle before the entry
+        return int(np.argmax(flags.to_numpy())) if flags.any() else None
+
+    assert first(44, decel_peak_from="RUN") == 44 and first(44) == 45  # one candle sooner
+    assert first(46, decel_peak_from="RUN") == 46 and first(46) is None  # from the entry it never warns at all
+    assert first(30, decel_peak_from="RUN") == first(30)  # an early entry: the same as before
+
+
+def test_run_start_stays_in_the_entry_session():
+    df = _bars(ROLL)
+    signed = decel_guard.slopes(df)["slope_atr"]
+    assert decel_guard.run_start(df, signed, 41) < 41  # the climb started well before the entry
+    day = df.assign(ts=df["ts"] + np.where(np.arange(len(df)) >= 38, 86400, 0))  # rows from 38 on are the next day
+    assert decel_guard.run_start(day, signed, 41) == 38
+    assert decel_guard.settings(_cfg()).get("peak_from") == "ENTRY"
+    assert decel_guard.settings(_cfg(decel_peak_from="nonsense"))["peak_from"] == "ENTRY"
+
+
+def test_api_saves_where_the_peak_is_measured_from(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "decel_peak_from" in STOCK_FIELDS
+    with TestClient(app) as client:
+        assert client.get("/api/config").json()["decel_peak_from"] == "ENTRY"
+        ok = client.put("/api/config", json={"decel_peak_from": "RUN"})
+        assert ok.status_code == 200 and ok.json()["decel_peak_from"] == "RUN"
+        assert client.put("/api/config", json={"decel_peak_from": "DAY"}).status_code == 422
+    database.reset_engine()

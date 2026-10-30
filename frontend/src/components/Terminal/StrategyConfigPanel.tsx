@@ -108,6 +108,7 @@ const LABELS: Record<string, string> = {
   decel_candles: "deceleration: bending candles",
   decel_confirm: "deceleration: close through SMA 9",
   decel_pierce_atr: "deceleration: close through by (ATR)",
+  decel_peak_from: "deceleration: peak measured from",
   plan_be_r: "breakeven at (R)",
   plan_trail_r: "Supertrend trail from (R)",
   st_period: "Supertrend ATR length",
@@ -364,6 +365,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     decel_candles: Math.min(5, Math.max(1, Math.round(Number(form.decel_candles ?? 2) || 2))),
     decel_confirm: form.decel_confirm === "OFF" ? "OFF" : "CLOSE",
     decel_pierce_atr: Math.max(0, Number(form.decel_pierce_atr ?? 0) || 0),
+    decel_peak_from: form.decel_peak_from === "RUN" ? "RUN" : "ENTRY",
     plan_be_r: Number(form.plan_be_r ?? 1.5) > 0 ? Number(form.plan_be_r ?? 1.5) : 1.5,
     plan_trail_r: Number(form.plan_trail_r ?? 2) > 0 ? Number(form.plan_trail_r ?? 2) : 2,
     st_period: Math.min(100, Math.max(1, Math.round(Number(form.st_period ?? 10)))),
@@ -1829,6 +1831,26 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("decel_confirm") && <OwnTag />}
             Only when the candle also closes through the SMA {form.sma_fast ?? 9} (fewer early exits, a little later)
           </label>
+          <label className={clsx("mt-2 block text-sm text-slate-300", !form.decel_exit && "opacity-50")}>
+            <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
+              Measure the peak slope from{isOwn("decel_peak_from") && <OwnTag />}
+              <InfoTip label="About where the peak is measured from">
+                The entry (default): the steepest slope is counted from the first candle that closes after the entry, so the guard
+                needs at least two candles after the entry. The start of the run: it is counted from the first candle of the
+                current stretch where the SMA {form.sma_fast ?? 9} has pointed the trade&apos;s way (back from the entry, same day),
+                so a trade bought late in a run, when the line is already flattening, can be closed on its first candle.
+              </InfoTip>
+            </span>
+            <select
+              value={form.decel_peak_from === "RUN" ? "RUN" : "ENTRY"}
+              disabled={!form.decel_exit}
+              onChange={(e) => set("decel_peak_from", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="ENTRY">The entry (needs two candles after it)</option>
+              <option value="RUN">The start of the current run (can act on the first candle)</option>
+            </select>
+          </label>
         </div>
       </FieldGroup>
       <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
@@ -2575,7 +2597,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
-  if (f.decel_exit) add({ group: "exit", key: "decel_exit", text: `Close when the SMA ${fast} line decelerates (${f.decel_drop_pct ?? 50}% off its peak slope${f.decel_confirm === "OFF" ? "" : ", close through the line"})`, off: { decel_exit: false } });
+  if (f.decel_exit) add({ group: "exit", key: "decel_exit", text: `Close when the SMA ${fast} line decelerates (${f.decel_drop_pct ?? 50}% off its peak slope${f.decel_confirm === "OFF" ? "" : ", close through the line"}${f.decel_peak_from === "RUN" ? ", peak from the run's start" : ""})`, off: { decel_exit: false } });
   {
     const slopeCandle = Number(f.slope_minutes ?? 0);
     if ((f.slope_exit || f.vturn_exit) && slopeCandle > 0 && slopeCandle !== Number(f.candle_minutes ?? 1))

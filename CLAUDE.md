@@ -433,8 +433,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 - `backend/decel_guard.py` – SMA 9 deceleration guard (`decel_exit`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): exit on the bend of the fast SMA before its slope turns. Slope in **ATR per candle** (`slopes`: (SMA9 −
   SMA9 `decel_lookback` (2) candles ago) ÷ (k × Wilder ATR 14), so one set of numbers fits any price and session) and its
-  change `dslope`, both signed with the trade's signal side. From the first candle closed after the entry, `peak` = the
-  steepest signed slope; `early_warning` (vectorised, closed candles only, backward windows only) flags a candle when the
+  change `dslope`, both signed with the trade's signal side. `peak` = the steepest signed slope, counted from the first
+  candle closed after the entry (`decel_peak_from` = `ENTRY`, default) or from the start of the current run (`RUN`:
+  `run_start`, walking back from the entry while the signed slope stays > 0, inside the entry's IST session), so a trade
+  entered late in a run can be warned on its first candle; flags are only raised on candles closed after the entry; `early_warning` (vectorised, closed candles only, backward windows only) flags a candle when the
   peak reached `decel_arm_atr` (0.10), the slope is ≤ peak × (1 − `decel_drop_pct` (50) / 100), the last `decel_candles` (2)
   dslopes are each ≤ −`decel_min_atr` (0.02), and with `decel_confirm` = `CLOSE` (default; `OFF`) the close is through the SMA 9
   against the trade by ≥ `decel_pierce_atr` (0) × ATR. `StrategyEngine._watch_slope_exit` (same slope candle as the other SMA

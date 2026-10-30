@@ -420,6 +420,7 @@ class BotConfig(Base):
     decel_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     decel_confirm: Mapped[str | None] = mapped_column(String(5), nullable=True, default="CLOSE")
     decel_pierce_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    decel_peak_from: Mapped[str | None] = mapped_column(String(5), nullable=True, default="ENTRY")
     # Structural exit, recovery hold and the Bot 2 handoff (recovery.py).
     slow_sma_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     recovery_hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

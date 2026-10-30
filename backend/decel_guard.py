@@ -10,8 +10,12 @@ morning and a quiet afternoon:
     slope[t]  = (SMA9[t] - SMA9[t - k]) / (k x ATR14[t])        ATR per candle, k = `decel_lookback`
     dslope[t] = slope[t] - slope[t - 1]                          the bend (second difference)
 
-both signed with the trade (+ = with it: rising for a long, falling for a short). From the entry on,
-`peak` is the steepest signed slope so far. The trade closes as `SMA9_DECEL` on the first candle where
+both signed with the trade (+ = with it: rising for a long, falling for a short). `peak` is the
+steepest signed slope so far, counted from the first candle closed after the entry (`decel_peak_from`
+= ENTRY, default) or from the start of the current run (RUN: the first candle of the stretch, back from
+the entry and inside the same IST session, on which the slope has pointed the trade's way), so a
+trade entered late in a run can be warned on its first candle. The trade closes as `SMA9_DECEL` on the
+first candle closed after the entry where
 
   1. armed:    peak >= `decel_arm_atr` (the run was a real one, not a drift), and
   2. faded:    slope <= peak x (1 - `decel_drop_pct` / 100) (the line has lost that share of its
@@ -36,6 +40,7 @@ import pandas as pd
 
 EXIT_REASON = "SMA9_DECEL"
 CONFIRMS = ("OFF", "CLOSE")
+PEAK_FROM = ("ENTRY", "RUN")
 
 DEFAULT_LOOKBACK = 2
 DEFAULT_ARM_ATR = 0.10
@@ -44,6 +49,7 @@ DEFAULT_MIN_ATR = 0.02
 DEFAULT_CANDLES = 2
 DEFAULT_CONFIRM = "CLOSE"
 DEFAULT_PIERCE_ATR = 0.0
+DEFAULT_PEAK_FROM = "ENTRY"
 ATR_PERIOD = 14
 
 
@@ -65,6 +71,7 @@ def _num(cfg, name: str, default: float, low: float, high: float) -> float:
 def settings(cfg) -> dict:
     """The guard's numbers, clamped to their allowed ranges."""
     confirm = str(getattr(cfg, "decel_confirm", None) or DEFAULT_CONFIRM).upper()
+    peak_from = str(getattr(cfg, "decel_peak_from", None) or DEFAULT_PEAK_FROM).upper()
     return {
         "lookback": int(_num(cfg, "decel_lookback", DEFAULT_LOOKBACK, 1, 10)),
         "arm_atr": _num(cfg, "decel_arm_atr", DEFAULT_ARM_ATR, 0.0, 5.0),
@@ -73,6 +80,7 @@ def settings(cfg) -> dict:
         "candles": int(_num(cfg, "decel_candles", DEFAULT_CANDLES, 1, 5)),
         "confirm": confirm if confirm in CONFIRMS else DEFAULT_CONFIRM,
         "pierce_atr": _num(cfg, "decel_pierce_atr", DEFAULT_PIERCE_ATR, 0.0, 5.0),
+        "peak_from": peak_from if peak_from in PEAK_FROM else DEFAULT_PEAK_FROM,
     }
 
 
@@ -95,6 +103,22 @@ def slopes(df: pd.DataFrame, fast: int = 9, lookback: int = DEFAULT_LOOKBACK) ->
     return pd.DataFrame({"sma9": sma, "atr": atr, "slope_atr": slope, "dslope_atr": slope.diff()}, index=df.index)
 
 
+def run_start(df: pd.DataFrame, signed: pd.Series, entry_pos: int) -> int:
+    """First row of the run the trade was entered in: walking back from the entry, the rows whose signed
+    slope is still with the trade, inside the entry's IST session. `entry_pos` when there is none."""
+    start = int(entry_pos)
+    days = None
+    if "ts" in df.columns:
+        days = (pd.to_numeric(df["ts"], errors="coerce") + 19800) // 86400  # IST calendar day
+    vals = signed.to_numpy()
+    day = days.iloc[min(start, len(df) - 1)] if days is not None and len(df) else None
+    i = start - 1
+    while i >= 0 and np.isfinite(vals[i]) and vals[i] > 0 and (day is None or days.iloc[i] == day):
+        start = i
+        i -= 1
+    return start
+
+
 def early_warning(df: pd.DataFrame, direction: str, entry_pos: int, cfg=None, fast: int = 9) -> pd.DataFrame:
     """`slopes` plus the signed reads and `early_warning_exit` for a trade entered before row `entry_pos`.
 
@@ -105,8 +129,10 @@ def early_warning(df: pd.DataFrame, direction: str, entry_pos: int, cfg=None, fa
     sign = 1.0 if direction == "LONG" else -1.0
     signed = out["slope_atr"] * sign
     bend = out["dslope_atr"] * sign
-    after = pd.Series(np.arange(len(out)) >= int(entry_pos), index=out.index)
-    peak = signed.where(after).cummax()
+    rows = np.arange(len(out))
+    after = pd.Series(rows >= int(entry_pos), index=out.index)
+    first = run_start(df, signed, int(entry_pos)) if s["peak_from"] == "RUN" else int(entry_pos)
+    peak = signed.where(pd.Series(rows >= first, index=out.index)).cummax()
     armed = peak >= s["arm_atr"]
     faded = signed <= peak * (1.0 - s["drop_pct"] / 100.0)
     braking = bend.rolling(s["candles"]).max() <= -s["min_atr"]
