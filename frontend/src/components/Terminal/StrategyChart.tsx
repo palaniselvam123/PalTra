@@ -22,7 +22,7 @@ import { Skeleton } from "./ui";
 import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
-import { inr, px, smaApi, type Candle, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
+import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { ChartIndicators } from "./ChartIndicators";
 import { StockNewsPanel } from "./StockNewsPanel";
@@ -378,6 +378,129 @@ function slopeAt(rows: ReadonlyArray<{ sma9?: number | null }>, i: number, back:
   if (now == null || then == null || then === 0) return null;
   return ((now - then) / then) * 100 / back;
 }
+/** The slope in plain words against the bot's levels: flat under the turn level, steep at the V-turn's run level. */
+function slopeWords(v: number | null, filters?: ChartFilters): { tag: string; cls: string } {
+  if (v == null) return { tag: "", cls: "text-slate-400" };
+  const turn = filters?.slope_turn_pct ?? 0.02;
+  const steep = filters?.vturn_move_pct ?? 0.02;
+  const a = Math.abs(v);
+  if (a >= steep) return { tag: v > 0 ? "steep ↑" : "steep ↓", cls: v > 0 ? "text-emerald-300" : "text-rose-300" };
+  if (a < turn) return { tag: "flat", cls: "text-slate-400" };
+  return v > 0 ? { tag: "rising", cls: "text-emerald-300" } : { tag: "falling", cls: "text-rose-300" };
+}
+
+/** The slope's arithmetic with this candle's own numbers, for the Slope reading's tooltip. */
+function slopeHelp(rows: Candle[], at: number, back: number, bar: number, filters?: ChartFilters): string {
+  const now = rows[at]?.sma9;
+  const then = rows[at - back]?.sma9;
+  const v = slopeAt(rows, at, back);
+  const turn = filters?.slope_turn_pct ?? 0.02;
+  const steep = filters?.vturn_move_pct ?? 0.02;
+  const turnBack = filters?.vturn_turn_pct ?? 0.015;
+  const within = filters?.vturn_within ?? 6;
+  const minutes = filters?.slope_minutes || 0;
+  const lines = [
+    `SMA 9 slope = (SMA 9 now − SMA 9 ${back} candle${back === 1 ? "" : "s"} ago) ÷ SMA 9 then × 100 ÷ ${back}, in % per candle.`,
+    now != null && then != null && v != null
+      ? `Here: (${px(now)} − ${px(then)}) ÷ ${px(then)} × 100 ÷ ${back} = ${v >= 0 ? "+" : ""}${v.toFixed(3)}% per candle.`
+      : `Not enough candles yet (needs ${back + 1}).`,
+    minutes && minutes !== bar
+      ? `The bot reads it on ${minutes}-minute candles (slope candle); this chart's candle is ${bar} min, so its reading can differ.`
+      : `Read on the bot's own ${bar}-minute candle.`,
+    `Flat: under ±${turn}%. Turn (exit): ${turn}% against the trade. Steep (V-turn): at least ±${steep}% within ${within} candles, then ±${turnBack}% back the other way.`,
+  ];
+  return lines.join("\n");
+}
+
+function hhmmToMinutes(s?: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s ?? "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/**
+ * Why the bot took no trade on this candle, in plain words: in a trade already, a cross the
+ * filters refused (the bot's own reason), a cross outside entry hours, or simply no cross,
+ * with how long the SMAs have been on this side and what the ticked checks would say.
+ */
+function whyNoTrade(p: {
+  rows: Candle[];
+  i: number;
+  forming: boolean;
+  blocked: BlockedCross[];
+  markers: ChartPayload["markers"];
+  filters?: ChartFilters;
+  bar: number;
+}): string {
+  const { rows, i, blocked, markers, filters, bar } = p;
+  const c = rows[i];
+  if (!c) return "";
+  const t = c.time;
+  const end = t + bar * 60;
+  const within = (x: number) => x >= t && x < end;
+  const reasonWords = (r: string | null | undefined) => (r ? REASON_SHORT[r] ?? r.replace(/_/g, " ").toLowerCase() : "");
+  const entryHere = markers.find((m) => m.kind === "ENTRY" && within(m.time));
+  const exitHere = markers.find((m) => m.kind === "EXIT" && within(m.time));
+  if (entryHere || exitHere) {
+    const parts: string[] = [];
+    if (entryHere) parts.push(`Entered ${entryHere.direction === "LONG" ? "a buy" : "a short"} on this candle${entryHere.trade_ref ? ` (${entryHere.trade_ref})` : ""}.`);
+    if (exitHere) parts.push(`Closed here${exitHere.reason ? `: ${reasonWords(exitHere.reason)}` : ""}.`);
+    return parts.join(" ");
+  }
+  const latestEntry = markers.filter((m) => m.kind === "ENTRY" && m.time < t).sort((a, b) => b.time - a.time)[0];
+  if (latestEntry) {
+    const exit = markers.find((m) => m.kind === "EXIT" && m.trade_ref === latestEntry.trade_ref && m.time >= latestEntry.time);
+    if (!exit || exit.time > t) {
+      return `In a ${latestEntry.direction === "LONG" ? "buy" : "short"} trade since ${istClock(latestEntry.time)}${
+        latestEntry.trade_ref ? ` (${latestEntry.trade_ref})` : ""
+      }: no new entry on this stock while one is held.`;
+    }
+  }
+  const refused = blocked.find((b) => within(b.time));
+  if (refused) return `${refused.direction === "LONG" ? "Buy" : "Sell"} cross here, refused: ${refused.reason}.`;
+  if (p.forming) return "This candle is still forming: the bot judges it only when it closes.";
+  const sideOf = (r?: Candle) => (r && r.sma9 != null && r.sma21 != null ? Math.sign(r.sma9 - r.sma21) : 0);
+  const side = sideOf(c);
+  const prevSide = sideOf(rows[i - 1]);
+  const mins = istMinutes(t);
+  const cutoffText = filters?.entry_cutoff_time ?? "15:00";
+  const cutoff = hhmmToMinutes(cutoffText) ?? 15 * 60;
+  const squareOff = hhmmToMinutes(filters?.square_off_time) ?? 15 * 60 + 15;
+  const timing =
+    mins < 9 * 60 + 20
+      ? "before 09:20 the bot takes no entries"
+      : mins >= squareOff
+        ? "it is after the square-off"
+        : mins >= cutoff
+          ? `after the entry cut-off (${cutoffText}) no new trade opens`
+          : null;
+  if (side !== 0 && prevSide !== 0 && side !== prevSide) {
+    const dir = side > 0 ? "buy" : "sell";
+    const next = rows[i + 1];
+    const filledNext = next && markers.some((m) => m.kind === "ENTRY" && m.time >= next.time && m.time < next.time + bar * 60);
+    if (filledNext) return `SMA 9 crossed ${side > 0 ? "above" : "below"} SMA 21 here: a ${dir} signal, filled at the start of the next candle.`;
+    if (timing) return `A ${dir} cross here, but ${timing}.`;
+    if (filters?.entry_mode && filters.entry_mode !== "SMA") {
+      return `A ${dir} cross here, but the entry mode is ${filters.entry_mode === "PATTERN" ? "candle patterns" : "candle colour"}, which does not trade SMA crosses.`;
+    }
+    if (filters?.use_gap_mode) return `A ${dir} cross here. Gap mode is on, so the cross only arms the trade: the order waits for the SMA gap to reach its entry level.`;
+    return `A ${dir} cross here the bot did not take: it was not running, the stock was not armed, or the trade cap / loss limit was already hit.`;
+  }
+  if (side === 0) return "No SMA reading on this candle yet: the averages need more candles.";
+  let since = i;
+  while (since > 0 && sideOf(rows[since - 1]) === side) since -= 1;
+  const n = i - since + 1;
+  const gap = c.sma21 ? ((c.sma9! - c.sma21) / c.sma21) * 100 : 0;
+  const hints: string[] = [];
+  if (filters?.use_vwap && c.vwap != null) hints.push(`price is ${c.close >= c.vwap ? "above" : "below"} VWAP (buys need above, sells below)`);
+  if (filters?.use_rsi && c.rsi14 != null) {
+    hints.push(`RSI ${c.rsi14.toFixed(1)} (buys need ${filters.rsi_long_min}–${filters.rsi_long_max}, sells ${filters.rsi_short_min}–${filters.rsi_short_max})`);
+  }
+  const base = `No signal: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
+    rows[since].time
+  )}), gap ${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%. The bot enters on a fresh cross${filters?.use_gap_mode ? ", then at the gap entry level" : ""}.`;
+  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null].filter(Boolean).join(" ");
+}
+
 const NO_MARKERS: ChartPayload["markers"] = [];
 const BOX_SMALL_KEY = "sma.chart.posbox.small";
 const BOX_POS_KEY = "sma.chart.posbox.pos";
@@ -1114,7 +1237,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           return stamp ? `${stamp} IST` : "";
         },
       },
-      crosshair: { mode: 1 },
+      // Free crosshair, as on Groww: the price label follows the mouse instead of snapping to each candle's close.
+      crosshair: { mode: 0 },
       autoSize: true,
     });
     const candles = instance.addCandlestickSeries({
@@ -1388,12 +1512,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       for (const line of slopeLines.current) series.removePriceLine(line);
       slopeLines.current = [];
       if (showSlopeBars) {
+        // Labelled levels, so the strip reads itself: "turn" is the slope exit's level, "steep" the V-turn's run level.
         const turn = filters?.slope_turn_pct ?? 0.02;
-        const guide = (price: number, color: string) =>
-          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+        const steep = filters?.vturn_exit ? filters.vturn_move_pct ?? 0.02 : 0;
+        const guide = (price: number, color: string, title = "") =>
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title });
         slopeLines.current = [
           guide(0, "rgba(148, 163, 184, 0.5)"),
-          ...(turn > 0 ? [guide(turn, "rgba(52, 211, 153, 0.45)"), guide(-turn, "rgba(251, 113, 133, 0.45)")] : []),
+          ...(turn > 0 ? [guide(turn, "rgba(52, 211, 153, 0.45)", `turn ${turn}`), guide(-turn, "rgba(251, 113, 133, 0.45)", `turn −${turn}`)] : []),
+          ...(steep > 0 && steep !== turn
+            ? [guide(steep, "rgba(52, 211, 153, 0.7)", `steep ${steep}`), guide(-steep, "rgba(251, 113, 133, 0.7)", `steep −${steep}`)]
+            : []),
         ];
       }
     }
@@ -1578,15 +1707,30 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const shownVwap = hoverRow ? hoverRow.vwap ?? null : lastOf("vwap");
   const shownRsi = hoverRow ? hoverRow.rsi14 ?? null : lastOf("rsi14");
   const slopeBack = filters?.slope_lookback ?? 2;
-  const shownSlope = (() => {
-    const at = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
+  const shownIndex = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
+  const slopeRead = (() => {
     // The forming candle has no SMA: read the last closed one.
-    for (let i = at; i >= 0 && i >= at - 1; i -= 1) {
+    for (let i = shownIndex; i >= 0 && i >= shownIndex - 1; i -= 1) {
       const v = slopeAt(rows, i, slopeBack);
-      if (v != null) return v;
+      if (v != null) return { value: v, at: i };
     }
-    return null;
+    return { value: null, at: shownIndex };
   })();
+  const shownSlope = slopeRead.value;
+  const slopeTip = rows.length ? slopeHelp(rows, slopeRead.at, slopeBack, bar, filters) : "";
+  // Why the bot took no trade on the candle under the mouse (or the latest one).
+  const whyLine =
+    shownIndex >= 0 && rows.length
+      ? whyNoTrade({
+          rows,
+          i: shownIndex,
+          forming: !past && shownIndex === rows.length - 1,
+          blocked,
+          markers: view?.markers ?? NO_MARKERS,
+          filters,
+          bar,
+        })
+      : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
@@ -1801,6 +1945,28 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
+          {showSlope || filters?.slope_exit ? (
+            <LegendItem
+              swatch={
+                <span className="flex items-end gap-px" aria-hidden>
+                  <span className="block h-1.5 w-1 bg-emerald-400/80" />
+                  <span className="block h-2.5 w-1 bg-emerald-400/80" />
+                  <span className="block h-1 w-1 bg-rose-400/80" />
+                </span>
+              }
+            >
+              <span
+                className="cursor-help"
+                title={`Each bar is the SMA 9 slope: how far the SMA 9 moved over the last ${filters?.slope_lookback ?? 2} candles, in % per candle (green up, red down). Dashed lines: "turn" ±${filters?.slope_turn_pct ?? 0.02}% is the slope exit's level${
+                  filters?.vturn_exit ? `; "steep" ±${filters.vturn_move_pct ?? 0.02}% is the V-turn's run level` : ""
+                }. Hover the Slope reading above for the arithmetic.`}
+              >
+                SMA 9 slope strip · turn ±{filters?.slope_turn_pct ?? 0.02}%
+                {filters?.vturn_exit ? ` · steep ±${filters.vturn_move_pct ?? 0.02}%` : ""}
+                {filters?.slope_minutes ? ` · bot reads ${filters.slope_minutes}-min candles` : ""}
+              </span>
+            </LegendItem>
+          ) : null}
         </ul>
       </div>
       {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
@@ -1826,8 +1992,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         rsi={shownRsi}
         slope={shownSlope}
         slopeBack={slopeBack}
+        slopeTip={slopeTip}
+        slopeTag={slopeWords(shownSlope, filters)}
         colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color }}
       />
+      {whyLine && ohlc ? (
+        <p className="px-3 pb-1.5 text-xs text-slate-300 sm:px-4" aria-live="off" title="Why the bot took no trade on this candle. Move the mouse over any candle to read it there.">
+          <span className="font-semibold text-slate-200">{hoverOhlc ? `At ${istClock(ohlc.time)}` : "Now"}:</span> {whyLine}
+        </p>
+      ) : null}
       {lastBlocked ? (
         <p className="px-3 pb-2 text-xs text-slate-300 sm:px-4" role="status">
           <span className="font-semibold text-slate-200">
@@ -2253,6 +2426,8 @@ function OhlcLine({
   rsi,
   slope,
   slopeBack,
+  slopeTip,
+  slopeTag,
   colors,
 }: {
   ohlc: Ohlc | null;
@@ -2264,6 +2439,10 @@ function OhlcLine({
   rsi: number | null;
   slope: number | null;
   slopeBack: number;
+  /** The slope's arithmetic with this candle's numbers (tooltip). */
+  slopeTip: string;
+  /** The slope in a word against the bot's levels: flat / rising / falling / steep. */
+  slopeTag: { tag: string; cls: string };
   colors: { sma9: string; sma21: string; vwap: string; rsi: string };
 }) {
   if (!ohlc) return null;
@@ -2313,11 +2492,12 @@ function OhlcLine({
         <span style={{ color: colors.rsi }}>RSI</span>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
-      <span className="whitespace-nowrap" title={`SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle (what the SMA 9 slope exit reads)`}>
+      <span className="cursor-help whitespace-nowrap" title={slopeTip || `SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle`}>
         <span className="text-slate-400">Slope</span>{" "}
         <span className={clsx(slope == null ? "text-slate-400" : slope >= 0 ? "text-emerald-300" : "text-rose-300")}>
           {slope == null ? "—" : `${slope >= 0 ? "+" : ""}${slope.toFixed(3)}%/c`}
         </span>
+        {slopeTag.tag ? <span className={clsx("ml-1 font-sans text-[11px]", slopeTag.cls)}>{slopeTag.tag}</span> : null}
       </span>
     </div>
   );

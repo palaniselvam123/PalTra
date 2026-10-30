@@ -811,6 +811,18 @@ def chart_filters(cfg) -> dict:
         "slope_lookback": slope_exit.lookback(cfg),
         "slope_bend_pct": slope_exit.bend_pct(cfg),
         "slope_turn_pct": slope_exit.turn_pct(cfg),
+        # The V-turn's steep / turn-back levels and the slope candle, so the chart can label the strip
+        # and explain a reading with the bot's own numbers (display only).
+        "vturn_exit": slope_exit.vturn_on(cfg),
+        "vturn_move_pct": slope_exit.vturn_move_pct(cfg),
+        "vturn_turn_pct": slope_exit.vturn_turn_pct(cfg),
+        "vturn_within": slope_exit.vturn_within(cfg),
+        "slope_minutes": slope_exit.minutes(cfg),
+        # What the chart's "why no trade here" line needs: when entries stop, and whether a cross orders at once.
+        "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
+        "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
+        "entry_mode": (getattr(cfg, "entry_mode", None) or "SMA").upper(),
+        "use_gap_mode": bool(getattr(cfg, "use_gap_mode", False)),
     }
 
 

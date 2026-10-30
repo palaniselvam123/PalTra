@@ -111,6 +111,22 @@ def test_chart_filters_say_which_lines_to_draw():
     assert chart_filters(_cfg(use_stop=False))["atr_stop"] is False
 
 
+def test_chart_filters_carry_the_slope_levels_and_entry_times_the_chart_explains():
+    # Defaults: the V-turn numbers from slope_exit, the 15:00 cut-off, a plain SMA cross.
+    got = chart_filters(_cfg())
+    assert got["vturn_exit"] is False
+    assert got["vturn_move_pct"] == 0.02 and got["vturn_turn_pct"] == 0.015 and got["vturn_within"] == 6
+    assert got["slope_minutes"] == 0
+    assert got["entry_cutoff_time"] == "15:00" and got["square_off_time"] == "15:15"
+    assert got["entry_mode"] == "SMA" and got["use_gap_mode"] is False
+    # The bot's own settings come through.
+    got = chart_filters(
+        _cfg(vturn_exit=True, vturn_move_pct=0.03, slope_minutes=5, entry_cutoff_time="14:30", entry_mode="colour", use_gap_mode=True)
+    )
+    assert got["vturn_exit"] is True and got["vturn_move_pct"] == 0.03 and got["slope_minutes"] == 5
+    assert got["entry_cutoff_time"] == "14:30" and got["entry_mode"] == "COLOUR" and got["use_gap_mode"] is True
+
+
 # ---- the chart reuses its work between polls --------------------------------
 
 def _chart_engine(frame, cfg):
