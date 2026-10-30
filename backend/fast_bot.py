@@ -5,7 +5,8 @@ the stocks a source bot holds moves fast **in that trade's favour**, the watcher
 started in `boot_engine` on the desk only, every `POLL_SEC` 5 s while NSE is open):
 
 1. checks Bot 5 can take it (`ready`: RUNNING, market hours, before its entry cut-off and square-off,
-   under its trade cap, not already holding the stock, and a LIVE Bot 5 never takes a practice trade);
+   under its trade cap, not already holding the stock, and both in the same mode: a LIVE Bot 5 never takes
+   a practice trade, and a LIVE trade is never cut for a PAPER Bot 5);
 2. closes the source bot's trade (`close_symbol`, exit reason `FAST_MOVE_HANDOFF`; a LIVE stop is
    cancelled first), and in LIVE waits until Groww shows no shares (`FLAT_WAIT_SEC`);
 3. moves the stock off the source bot's Trade list onto Bot 5's (`recovery.handoff(to_bot=5)`, source
@@ -21,7 +22,11 @@ What counts as fast (`rule`), on the bots' own last prices (no extra Groww call)
 * `SPEED`: over the last `speed_minutes` the price moved at least `speed` % per minute the trade's way;
 * `EITHER`: whichever comes first.
 
-At most `max_day` hand-offs per IST day. Settings in `fast_bot.json` next to the SMA DB
+At most `max_day` hand-offs per IST day. **Replays too** (`replay_snapshot` / `bot5_overrides`, played by
+`replay.ReplayEngine._fast_replay`): a replay of a source bot with this switch on cuts a held stock that moves
+fast its way (`FAST_MOVE_HANDOFF`) and, in the same run, opens the same side at once with Bot 5's settings
+(its quantity, stop and exits, for the rest of that replayed day; entry reason `FAST_MOVE`), so the idea can be
+checked on past days. The run keeps a copy of these settings and Bot 5's, so Resume plays the same. Settings in `fast_bot.json` next to the SMA DB
 (`FAST_BOT_FILE`). Bot 5 is never a source. Replays and research never hand off.
 """
 from __future__ import annotations
@@ -203,8 +208,12 @@ def ready(target, symbol: str, source_live: bool) -> str | None:
         return f"past Bot {TARGET_BOT}'s entry cut-off"
     if target.trades_today >= int(cfg.max_trades_per_day):
         return f"Bot {TARGET_BOT}'s trade cap is reached"
-    if (cfg.trading_mode or "PAPER").upper() == "LIVE" and not source_live:
+    target_live = (cfg.trading_mode or "PAPER").upper() == "LIVE"
+    if target_live and not source_live:
         return f"Bot {TARGET_BOT} is LIVE and this trade was practice money"
+    if source_live and not target_live:
+        # Never close a real trade only to open a practice one in its place.
+        return f"this trade is LIVE and Bot {TARGET_BOT} is PAPER (switch Bot {TARGET_BOT} to LIVE, or the source bot to PAPER)"
     return None
 
 
@@ -367,3 +376,44 @@ class FastBot:
 
 
 watcher = FastBot()
+
+
+# ---- replays ------------------------------------------------------------------------------
+
+
+def _bot5_row():
+    from bots import config_id_for
+    from database import session_factory
+    from models import BotConfig
+
+    with session_factory()() as db:
+        row = db.get(BotConfig, config_id_for(TARGET_BOT))
+        if row is not None:
+            db.expunge(row)
+        return row
+
+
+def replay_snapshot(bot: int) -> dict | None:
+    """What a new replay of `bot` needs to play the hand-off: these settings and Bot 5's strategy
+    settings. None when the switch is off, `bot` is not a source, or Bot 5 has no settings yet."""
+    from strategy_engine import STOCK_FIELDS, stock_settings
+
+    s = load()
+    if not s.on or int(bot) not in s.sources or int(bot) == TARGET_BOT:
+        return None
+    row = _bot5_row()
+    if row is None:
+        return None
+    fields = {name: getattr(row, name) for name in STOCK_FIELDS if getattr(row, name, None) is not None}
+    return {"settings": asdict(s), "bot5": fields, "bot5_stocks": stock_settings(row)}
+
+
+def bot5_overrides(snapshot: dict | None, symbol: str) -> dict:
+    """Bot 5's settings for one stock (its own per-stock settings on top), as a replay's stock override."""
+    from strategy_engine import STOCK_FIELDS
+
+    if not snapshot:
+        return {}
+    name = (symbol or "").upper()
+    merged = {**(snapshot.get("bot5") or {}), **((snapshot.get("bot5_stocks") or {}).get(name) or {})}
+    return {k: v for k, v in merged.items() if k in STOCK_FIELDS and v is not None}

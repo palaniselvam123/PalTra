@@ -275,3 +275,80 @@ async def test_real_bots_paper_trade_moves_to_bot5_at_its_qty(engine, monkeypatc
         rows = db.query(TradeLog).filter(TradeLog.symbol == "ACME").order_by(TradeLog.id).all()
         assert rows[0].exit_reason == "FAST_MOVE_HANDOFF" and rows[0].qty == 1
         assert rows[1].bot == 5 and rows[1].entry_reason == "FAST_MOVE" and rows[1].qty == 50
+
+
+def test_a_live_trade_is_never_cut_for_a_paper_bot5():
+    import fast_bot
+
+    target = _Target(mode="PAPER")
+    assert "Bot 5 is PAPER" in fast_bot.ready(target, "ACME", source_live=True)
+    assert fast_bot.ready(_Target(mode="LIVE"), "ACME", source_live=True) is None
+    assert fast_bot.ready(target, "ACME", source_live=False) is None
+
+
+@pytest.mark.asyncio
+async def test_live_source_and_paper_bot5_cuts_nothing(moved):
+    src, target = _Source(mode="LIVE"), _Target(mode="PAPER")
+    _bot, done = await _run(src, target)
+    assert "not moved" in done[0] and src.closed == [] and target.orders == [] and moved == []
+
+
+def test_replay_snapshot_carries_bot5_settings_only_when_on_and_a_source(monkeypatch, tmp_path):
+    import fast_bot
+
+    monkeypatch.setenv("FAST_BOT_FILE", str(tmp_path / "fast_bot.json"))
+    monkeypatch.setattr(fast_bot, "_bot5_row", lambda: SimpleNamespace(qty=50, use_vwap=True, stock_settings='{"ACME": {"qty": 70}}'))
+    assert fast_bot.replay_snapshot(1) is None  # off
+    fast_bot.save({"on": True, "sources": [1, 2]})
+    snap = fast_bot.replay_snapshot(1)
+    assert snap["settings"]["on"] and snap["bot5"]["qty"] == 50 and snap["bot5"]["use_vwap"] is True
+    assert fast_bot.bot5_overrides(snap, "acme")["qty"] == 70 and fast_bot.bot5_overrides(snap, "TCS")["qty"] == 50
+    assert fast_bot.replay_snapshot(3) is None  # Bot 3 is not a source
+    assert fast_bot.replay_snapshot(5) is None
+
+
+@pytest.mark.asyncio
+async def test_a_replay_cuts_the_fast_mover_and_plays_it_on_with_bot5s_size(tmp_path, monkeypatch):
+    """A replayed day of Bot 1 (qty 10): a held stock moving fast its way is cut and opened again at once
+    with Bot 5's quantity (50), and the run's totals show that part."""
+    import database
+    import fast_bot
+    from models import BotConfig, TradeLog
+    from replay import ReplayEngine, ReplayFeed, _fast_move_part
+    from tests.test_replay import DAY, _frames
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/replay.db")
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", lambda msg: None)
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.symbol, row.trade_symbols, row.qty = "TCS", "TCS", 10
+        s.commit()
+    snap = {
+        "settings": {"on": True, "rule": "MOVE", "pct": 0.1, "minutes": 3, "sources": [1], "max_day": 10},
+        "bot5": {"qty": 50},
+        "bot5_stocks": {},
+    }
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], fast=snap)
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, dt.time(15, 20), tzinfo=IST)
+    while engine.feed.clock < end:
+        engine.feed.clock += dt.timedelta(seconds=10)
+        await engine.tick(engine.feed.clock)
+    with database.session_factory()() as s:
+        rows = s.query(TradeLog).order_by(TradeLog.id).all()
+        cut = [r for r in rows if r.exit_reason == fast_bot.EXIT_REASON]
+        opened = [r for r in rows if (r.entry_reason or "").startswith(fast_bot.ENTRY_REASON)]
+        assert cut and cut[0].qty == 10
+        assert opened and opened[0].qty == 50 and opened[0].direction == cut[0].direction
+        # Each stock moves once a day: after the hand-off it trades on Bot 5's settings.
+        assert len(cut) == 1
+        assert all(r.qty == 50 for r in rows if r.id > opened[0].id)
+        part = _fast_move_part(rows)
+    assert part["cut"] == 1 and part["trades"] >= 1
+    database.reset_engine()

@@ -108,3 +108,26 @@ def test_desk_replays_wait_for_the_market_to_close(monkeypatch):
     main._refuse_desk_replay_in_market(THU + dt.timedelta(days=2))  # Saturday
     monkeypatch.setenv("PALTRA_ROLE", "backtest")
     main._refuse_desk_replay_in_market(THU)  # the backtest server replays any time
+
+
+def test_sync_copies_the_fast_mover_settings_too(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    import fast_bot
+
+    monkeypatch.setenv("PALTRA_ROLE", "backtest")
+    monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
+    monkeypatch.setenv("FAST_BOT_FILE", str(__import__("pathlib").Path(backtest_server._settings_path()).with_name("fast_bot.json")))
+
+    def handler(_request):
+        return httpx.Response(200, json={"rows": {"1": {"qty": 5}}, "fast_bot": {"on": True, "rule": "SPEED", "sources": [4]}})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await backtest_server.sync(lambda rows: ["1"], client)
+
+    assert asyncio.run(go()) == {"synced": ["1"]}
+    saved = fast_bot.load()
+    assert saved.on and saved.rule == "SPEED" and saved.sources == [4]

@@ -819,6 +819,15 @@ function RunDetailBody({
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
       </div>
       {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} /> : null}
+      {run.fast_move ? (
+        <p className="mb-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
+          <span className="font-semibold">Fast movers → Bot 5:</span> {run.fast_move.cut} trade
+          {run.fast_move.cut === 1 ? "" : "s"} cut here ({signed(run.fast_move.cut_gross)}), then {run.fast_move.trades} trade
+          {run.fast_move.trades === 1 ? "" : "s"} with Bot 5&apos;s size and settings: {run.fast_move.wins} won,{" "}
+          <span className={clsx("font-mono font-semibold", pnlTone(run.fast_move.gross))}>{signed(run.fast_move.gross)}</span>{" "}
+          before charges. Both are part of the totals; the blotter shows them as &quot;TO BOT 5&quot; and &quot;Fast mover&quot;.
+        </p>
+      ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
