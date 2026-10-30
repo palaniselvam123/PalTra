@@ -235,6 +235,8 @@ class OpenPosition:
     # Why the trade opened (TradeLog.entry_reason), and the last closed candle the turn-trade colour exit read.
     entry_why: str = ""
     tc_bar: int | None = None
+    # LIVE: when the exchange stop was first seen cancelled / rejected while Groww still held the shares.
+    stop_dead_at: dt.datetime | None = None
 
     @property
     def signal_direction(self) -> str:
@@ -3520,13 +3522,17 @@ class StrategyEngine:
             if net != 0:
                 return
             hit = True
-            fill_price = pos.sl_trigger or self.ltp
+            fill_price = await self._real_exit_price(pos, symbol)
         elif (cfg.trading_mode or "").upper() == "LIVE" and pos.sl_order_id:
             status = (await self.broker.get_order_status(pos.sl_order_id)).upper()
             if status in TERMINAL_FILLED:
                 hit = True
-                # Exchange fill price if the adapter stored one; else the trigger.
-                fill_price = pos.sl_trigger
+                # Groww's own fill price; the trigger only when Groww gives none.
+                fill_price = await self._real_exit_price(pos, symbol)
+            elif status in STOP_DEAD:
+                # Groww cancelled or rejected the stop: it will never sell these shares.
+                await self._stop_dead(cfg, pos, symbol, status)
+                return
             elif status not in IN_FLIGHT:
                 # Groww reports a filled stop as EXECUTED. If that word was
                 # missed, a flat MIS book is the same fact: the shares are gone.
@@ -3536,7 +3542,7 @@ class StrategyEngine:
                 age = (self._now() - opened).total_seconds()
                 if age >= 20 and await self._groww_net(cfg.symbol) == 0:
                     hit = True
-                    fill_price = pos.sl_trigger or self.ltp
+                    fill_price = await self._real_exit_price(pos, symbol)
         elif pos.stop_active:
             if pos.direction == "LONG" and self.ltp <= pos.sl_trigger:
                 hit = True
@@ -3555,6 +3561,76 @@ class StrategyEngine:
         if not hit:
             return
         await self._exit_now(cfg, fill_price, reason)
+
+    async def _real_exit_price(self, pos: OpenPosition, symbol: str) -> float:
+        """The price Groww really closed a LIVE position at: the stop's own fill, else Groww's average
+        closing price for the stock today, else the stop trigger (the last resort it used to be)."""
+        read = getattr(self.broker, "read_order", None)
+        if pos.sl_order_id and read is not None:
+            try:
+                status, price = await read(pos.sl_order_id)
+            except Exception:  # noqa: BLE001
+                status, price = "", None
+            if price and (status or "").upper() in TERMINAL_FILLED:
+                return float(price)
+        closed = getattr(self.broker, "closed_price", None)
+        if closed is not None:
+            try:
+                price = await closed(symbol, pos.direction)
+            except Exception:  # noqa: BLE001
+                price = None
+            if price:
+                return float(price)
+        return float(pos.sl_trigger or self.ltp)
+
+    async def _stop_dead(self, cfg: BotConfig, pos: OpenPosition, symbol: str, status: str) -> None:
+        """LIVE: Groww cancelled or rejected the exchange stop (STOP_DEAD).
+
+        * Groww holds no shares: something other than this stop closed them (Groww's own intraday
+          square-off, or a sell in the Groww app). Book the trade at Groww's real price as
+          SOLD_ON_GROWW. No order is sent: one would open the other side.
+        * Groww still holds them: the position has no stop. Alert with a call at once, wait
+          STOP_DEAD_GRACE_SEC (Groww's square-off cancels the stop just before it sells), then close
+          it at the market as STOP_LOST if Groww still holds it.
+        A failed read of Groww's book does nothing.
+        """
+        net = await self._groww_net(symbol)
+        if net is None:
+            return
+        if net == 0:
+            price = await self._real_exit_price(pos, symbol)
+            pos.sl_order_id = ""
+            self._signals[symbol] = f"{symbol} closed on Groww outside the bot at {price:.2f}; stop was {status}"
+            self._alert(
+                f"{symbol}: Groww shows the position closed, but not by the bot's stop (stop {status}). "
+                f"Booked at Groww's price {price:.2f}."
+            )
+            await self._exit_now(cfg, price, STOP_SOLD_OUTSIDE)
+            return
+        now = self._now()
+        if pos.stop_dead_at is None:
+            pos.stop_dead_at = now
+            remark = ""
+            note = getattr(self.broker, "order_remark", None)
+            if note is not None:
+                try:
+                    remark = await note(pos.sl_order_id)
+                except Exception:  # noqa: BLE001
+                    remark = ""
+            text = (
+                f"{symbol} has NO STOP: Groww {status.lower()} the stop-loss order"
+                f"{f' ({remark})' if remark else ''}. The bot will close the position in "
+                f"{STOP_DEAD_GRACE_SEC} seconds if Groww still holds it."
+            )
+            self._signals[symbol] = text
+            self.last_error = text
+            self._alert(text, critical=True, call=True)
+            return
+        if (now - pos.stop_dead_at).total_seconds() < STOP_DEAD_GRACE_SEC:
+            return
+        pos.sl_order_id = ""
+        self._signals[symbol] = f"{symbol} closed at the market: its Groww stop was {status.lower()}"
+        await self._exit_now(cfg, self.ltp, STOP_LOST)
 
     async def _watch_bollinger(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit on the Bollinger band (bb_exit)."""
@@ -3851,7 +3927,7 @@ class StrategyEngine:
                     except SlCancelFailed:
                         # It filled as we cancelled: the stop closed the trade.
                         reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else "ATR_SL_HIT")
-                        fill_price = self.position.sl_trigger or fill_price
+                        fill_price = await self._real_exit_price(self.position, (cfg.symbol or "").upper())
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
                 await self._close_position(self.position, fill_price, reason, self._now(), cfg)
@@ -3879,6 +3955,8 @@ class StrategyEngine:
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
                     "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
                     "BREAKOUT_STOP": "trend breakout — flat",
+                    STOP_LOST: "Groww dropped the stop — closed at the market",
+                    STOP_SOLD_OUTSIDE: "closed on Groww outside the bot — booked at Groww's price",
                 }.get(reason, "ATR stop hit — flat")
             finally:
                 self.inflight = None
@@ -3948,7 +4026,7 @@ class StrategyEngine:
         px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT"))
+        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", STOP_SOLD_OUTSIDE))
         if send_exit and live:
             net = await self._groww_net(cfg.symbol)
             if net is None:
@@ -3956,6 +4034,14 @@ class StrategyEngine:
                     f"Could not read {cfg.symbol} on Groww, so no exit was sent"
                 )
             if (pos.direction == "LONG" and net <= 0) or (pos.direction == "SHORT" and net >= 0):
+                if net == 0 and reason == STOP_LOST:
+                    # Groww closed it in the moment between the dead stop and this exit
+                    # (its own square-off): book Groww's real price, send nothing.
+                    px = round_price(cfg.symbol, await self._real_exit_price(pos, cfg.symbol))
+                    buy, sell = legs_for(pos.direction, pos.entry_price, px)
+                    costs = calculate_charges(buy, sell, pos.qty)
+                    self._finalize_trade(pos.trade_id, px, STOP_SOLD_OUTSIDE, now, costs, extremes=(pos.high, pos.low))
+                    return
                 if net == 0:
                     self._book_not_on_groww(pos, now)
                     return
@@ -5654,6 +5740,12 @@ def _candle_is_behind(closed_ts: int, now: dt.datetime, minutes: int = 1) -> boo
 # The turn-trade colour exit counts a candle only when the trade opened within this many seconds of its start
 # (an entry at the candle's open, judged a pass or two after the candle before it closed).
 TURN_COLOUR_GRACE_SEC = 60
+
+# LIVE stop health (_stop_dead): Groww's words for a stop that will never fill.
+STOP_DEAD = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED", "FAILED", "FAILURE"})
+STOP_DEAD_GRACE_SEC = 5
+STOP_LOST = "STOP_LOST"
+STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",

@@ -899,6 +899,35 @@ class GrowwClient:
                 return None
         return total
 
+    async def closed_price(self, symbol: str, direction: str) -> float | None:
+        """Groww's average closing price today for a `direction` MIS position (read-only).
+
+        A long is closed by sells (Groww's `credit_price`), a short by buys (`debit_price`).
+        Used to book an exit someone else made (Groww's own square-off, a sell in the app)
+        at its real price. None when the book cannot be read or has no such leg.
+        """
+        if self.mode != "LIVE":
+            return None
+        try:
+            rows = await self.get_positions()
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)[:200]
+            return None
+        want = (symbol or "").upper()
+        keys = ("credit_price", "sell_price", "sell_average_price") if direction == "LONG" else (
+            "debit_price", "buy_price", "buy_average_price")
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("trading_symbol") or row.get("symbol") or "").upper()
+            if sym.split("-")[0] != want and sym != want:
+                continue
+            for key in keys:
+                price = _as_price(row.get(key))
+                if price is not None:
+                    return price
+        return None
+
     async def _live_limit(self, symbol: str, side: str, qty: int, ltp: float, kind: str) -> OrderAck:
         buffer = get_settings().market_protection_pct / 100.0
         if side == "BUY":

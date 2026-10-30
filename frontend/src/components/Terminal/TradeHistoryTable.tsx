@@ -43,6 +43,8 @@ const REASON: Record<string, string> = {
   EOD_SQUARE_OFF: "EOD SQUARE-OFF",
   KILL_SWITCH: "KILL SWITCH",
   NOT_ON_GROWW: "NOT ON GROWW",
+  STOP_LOST: "STOP LOST",
+  SOLD_ON_GROWW: "SOLD ON GROWW",
   SL_REJECTED: "STOP REFUSED",
   MANUAL_CLOSE: "MANUAL CLOSE",
   USER_REVIEW_EXIT: "EXIT ON 1-MIN REVIEW",
@@ -991,6 +993,8 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   MANUAL_CLOSE: "blue",
   USER_REVIEW_EXIT: "violet",
   NOT_ON_GROWW: "slate",
+  STOP_LOST: "red",
+  SOLD_ON_GROWW: "amber",
 };
 
 export const REASON_SHORT: Record<string, string> = {
@@ -1026,6 +1030,8 @@ export const REASON_SHORT: Record<string, string> = {
   MANUAL_CLOSE: "Manual",
   USER_REVIEW_EXIT: "Review",
   NOT_ON_GROWW: "Not on Groww",
+  STOP_LOST: "Groww dropped the stop; closed at the market",
+  SOLD_ON_GROWW: "Closed on Groww outside the bot (its square-off or the app); booked at Groww's price",
 };
 
 function BookSummary({
