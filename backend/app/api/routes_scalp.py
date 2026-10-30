@@ -251,6 +251,45 @@ def _groww_session():
     return groww_client()
 
 
+_history_tasks: set = set()
+
+
+def keep_active_scan(snapshot: dict) -> None:
+    """Save a finished most-active pass to the scan history, off the event loop. Never raises."""
+    import scan_history
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    snap = {**snapshot, "total": snapshot.get("universe"), "finished_at": snapshot.get("as_of")}
+    task = loop.create_task(asyncio.to_thread(scan_history.save, "active", snap, {"source": "scan"}))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+@router.get("/active/history")
+async def most_active_history(day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """The days with saved most-active scans, and one day's scans (the latest day when none is given). Read-only."""
+    import scan_history
+
+    days = await asyncio.to_thread(scan_history.days, "active")
+    pick = day or (days[0]["day"] if days else None)
+    runs = await asyncio.to_thread(scan_history.runs, pick, "active") if pick else []
+    return {"days": days, "day": pick, "runs": runs, "keep_days": scan_history.keep_days()}
+
+
+@router.get("/active/history/{run_id}")
+async def most_active_history_run(run_id: int):
+    """One saved most-active scan with every row as it was ranked then. Read-only."""
+    import scan_history
+
+    run = await asyncio.to_thread(scan_history.get, run_id)
+    if run is None or run.get("kind") != "active":
+        raise HTTPException(404, "No such saved scan.")
+    return run
+
+
 @router.get("/active")
 async def most_active(
     sort: str = Query("value"),

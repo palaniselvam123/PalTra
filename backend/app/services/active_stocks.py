@@ -12,6 +12,11 @@ Groww quote per stock and ranks them by what the crowd is doing:
   the order book. More buyers waiting than sellers leans up, and the reverse.
 * **vs average price** — the day's average traded price is the session VWAP:
   above it, today's buyers are in profit.
+* **Speed** — the price change since the previous scan, in % per minute
+  (signed; none on the day's first scan or after a gap of over 30 minutes).
+
+Every finished pass can be kept (`on_done`, saved to the scan history as kind
+`active` by routes_scalp), so the page can show what any past scan said.
 
 Market data only. Nothing here places, changes or cancels an order.
 """
@@ -33,6 +38,7 @@ CONCURRENCY = 3               # parallel quote calls, gentle on Groww's rate lim
 CALL_GAP_SEC = 0.12
 MAX_UNIVERSE = 250
 AVG_DAYS = 20
+SPEED_MAX_GAP_MIN = 30        # no speed when the previous scan is older than this
 SESSION_OPEN = dt.time(9, 15)
 SESSION_MINUTES = 375         # 09:15–15:30
 
@@ -52,6 +58,7 @@ class ActiveRow:
     buy_share: float | None         # buy_qty / (buy_qty + sell_qty), 0..1
     range_pct: float | None         # today's high-low as % of open
     bias: str                       # LONG / SHORT / NONE
+    speed_pct_min: float | None = None  # % per minute since the previous scan (signed)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -135,7 +142,24 @@ SORTS = {
     "rvol": lambda r: r.rvol or 0.0,
     "change": lambda r: abs(r.change_pct or 0.0),
     "pressure": lambda r: abs((r.buy_share or 0.5) - 0.5),
+    "speed": lambda r: abs(r.speed_pct_min or 0.0),
+    "vwap": lambda r: abs(r.vwap_dist_pct or 0.0),
 }
+
+
+def add_speed(rows: list[ActiveRow], prev: dict[str, float], prev_at: dt.datetime | None, now: dt.datetime) -> None:
+    """Each row's price change since the previous scan, in % per minute. Left None without
+    a previous price, across days, or when the previous scan is under a minute or over
+    SPEED_MAX_GAP_MIN minutes old."""
+    if prev_at is None or prev_at.date() != now.date():
+        return
+    gap = (now - prev_at).total_seconds() / 60
+    if gap < 1 or gap > SPEED_MAX_GAP_MIN:
+        return
+    for row in rows:
+        before = prev.get(row.symbol)
+        if before and before > 0:
+            row.speed_pct_min = (row.ltp - before) / before * 100 / gap
 
 
 class ActiveScanner:
@@ -152,6 +176,11 @@ class ActiveScanner:
         self._avg_day: dt.date | None = None
         self._last_start: dt.datetime | None = None
         self._task: asyncio.Task | None = None
+        # Last scan's prices for the speed column.
+        self._prev: dict[str, float] = {}
+        self._prev_at: dt.datetime | None = None
+        # Called with the full snapshot after each pass with rows (the scan history).
+        self.on_done = None
         self.manual_task: asyncio.Task | None = None
         # Scalp page "Pause scans": no new pass, and a running pass stops asking Groww.
         self.paused = False
@@ -227,11 +256,20 @@ class ActiveScanner:
                         rows.append(row)
 
             await asyncio.gather(*(one(s) for s in names))
+            add_speed(rows, self._prev, self._prev_at, now)
+            if rows:
+                self._prev = {r.symbol: r.ltp for r in rows}
+                self._prev_at = now
             self.rows = sorted(rows, key=SORTS["value"], reverse=True)
             self.universe = len(names)
             self.failed = failed
             self.as_of = now
             self.error = None if rows else (errors[0] if errors else "Groww sent no volume for these stocks yet.")
+            if rows and self.on_done is not None:
+                try:
+                    self.on_done(self.snapshot(top=len(rows)))
+                except Exception:  # noqa: BLE001 — history must never break a scan
+                    log.exception("could not keep the most-active scan")
         finally:
             self.running = False
 
