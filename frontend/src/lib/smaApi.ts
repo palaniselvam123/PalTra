@@ -201,6 +201,10 @@ export type SmaConfig = {
   auto_start?: boolean;
   /** Book the profit at a daily pivot level: R1 (S1 for a short; R2 / S2 when the entry is already past it) or R2. */
   pivot_target?: "OFF" | "R1" | "R2";
+  /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
+  stop_plan?: boolean;
+  plan_be_r?: number;
+  plan_trail_r?: number;
   /** Structural exit, recovery hold and the Bot 2 handoff (recovery.py). */
   slow_sma_exit?: boolean;
   recovery_hold?: boolean;
@@ -1124,6 +1128,8 @@ export type TradeRow = {
   stop_active?: boolean;
   /** Why the trade opened (SMA_CROSS, GAP_MODE, "JOIN_TREND:EXTREME_LIMIT", ...); null on older trades. */
   entry_reason?: string | null;
+  /** Staged stop plan moves, "; " separated (stop_plan.py). */
+  stop_log?: string | null;
   exit_time: string | null;
   exit_price: number | null;
   exit_reason: string | null;

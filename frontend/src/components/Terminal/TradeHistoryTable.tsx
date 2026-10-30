@@ -44,6 +44,8 @@ const REASON: Record<string, string> = {
   KILL_SWITCH: "KILL SWITCH",
   NOT_ON_GROWW: "NOT ON GROWW",
   STOP_LOST: "STOP LOST",
+  PLAN_SL_HIT: "PLAN SL HIT",
+  PLAN_STOP: "PLAN STOP",
   SOLD_ON_GROWW: "SOLD ON GROWW",
   SL_REJECTED: "STOP REFUSED",
   MANUAL_CLOSE: "MANUAL CLOSE",
@@ -576,6 +578,7 @@ export function TradeHistoryTable({
       "entry_time",
       "entry_price",
       "entry_reason",
+      "stop_log",
       "exit_time",
       "exit_price",
       "exit_reason",
@@ -994,6 +997,8 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   USER_REVIEW_EXIT: "violet",
   NOT_ON_GROWW: "slate",
   STOP_LOST: "red",
+  PLAN_SL_HIT: "amber",
+  PLAN_STOP: "amber",
   SOLD_ON_GROWW: "amber",
 };
 
@@ -1031,6 +1036,8 @@ export const REASON_SHORT: Record<string, string> = {
   USER_REVIEW_EXIT: "Review",
   NOT_ON_GROWW: "Not on Groww",
   STOP_LOST: "Groww dropped the stop; closed at the market",
+  PLAN_SL_HIT: "Staged stop plan: the moved stop (breakeven or the Supertrend line) was hit",
+  PLAN_STOP: "Staged stop plan: the price was already back through the new stop, so the bot closed it",
   SOLD_ON_GROWW: "Closed on Groww outside the bot (its square-off or the app); booked at Groww's price",
 };
 
@@ -1559,6 +1566,13 @@ function OrderRowView({
       <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
       <td className="px-3 py-2">
         <ReasonBadge trade={t} />
+        {t.stop_log ? (
+          <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-400" title={`Stop moves: ${t.stop_log}`}>
+            {t.stop_log.split("; ").map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        ) : null}
       </td>
       <td className="max-w-[13rem] px-3 py-2">
         <StrategyCell settings={settingsOf(t, runs)} />

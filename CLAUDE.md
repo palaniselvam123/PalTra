@@ -390,6 +390,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/stop_plan.py` – staged stop plan (`stop_plan`, off by default, per bot and per stock, PAPER and LIVE, replays
+  too; needs stop type ATR with the stop on, else `OpenPosition.plan_r` is None and nothing happens). R = |fill − initial
+  ATR stop| (`atr_multiplier`, e.g. 2.5). `StrategyEngine._trail_stop_plan` (every tick, after the Supertrend stop, before
+  `_watch_stop`) reads the best price since entry (`pos.high` / `pos.low`): at +`plan_be_r` R (1.5) the stop moves to
+  breakeven = fill ± the round-trip charges per share (`stop_plan.breakeven`, `charges.calculate_charges`); at
+  +`plan_trail_r` R (2.0) it follows the Supertrend line (`supertrend.stop_level`, `st_period` / `st_mult`, read once per
+  closed candle, `pos.plan_bar` / `plan_line`), never below breakeven. Tighter only (`tighten`), stages only forward
+  (`pos.plan_stage`), moved through `_move_stop` (LIVE `modify_sl`, 2 s apart, a refused modify keeps the old stop, a LIVE
+  position restored without its stop id stays at its saved stop). A stage whose new stop the price is already through
+  closes at once (`PLAN_STOP`, via `_exit_now`, which cancels a LIVE stop first); a hit of a moved stop is `PLAN_SL_HIT`
+  (LIVE: Groww's stop fills it, no second exit). Each stage change is appended to `TradeLog.stop_log` ("11:42 stop →
+  breakeven (+1.5R) at …"), shown under the exit reason in the blotter and in the CSV. A restart restores R from the ATR
+  stop at entry and stage 1 when the saved stop is at or past the entry. Settings → 5. Stop-loss and target. The stock
+  research baseline keeps it off.
 - `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
   entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
   `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /

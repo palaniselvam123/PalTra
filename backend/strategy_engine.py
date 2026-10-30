@@ -68,6 +68,7 @@ import tall_pullback
 import extreme_entry
 import entry_candle
 import slope_exit
+import stop_plan
 import turn_entry
 import level_check
 import day_extreme
@@ -237,6 +238,12 @@ class OpenPosition:
     tc_bar: int | None = None
     # LIVE: when the exchange stop was first seen cancelled / rejected while Groww still held the shares.
     stop_dead_at: dt.datetime | None = None
+    # Staged stop plan (stop_plan.py): R per share (None = no plan for this trade), the stage reached,
+    # and the Supertrend line of the last closed candle read in stage 2.
+    plan_r: float | None = None
+    plan_stage: int = 0
+    plan_bar: int | None = None
+    plan_line: float | None = None
 
     @property
     def signal_direction(self) -> str:
@@ -248,6 +255,17 @@ class OpenPosition:
             return
         self.high = price if self.high is None else max(self.high, price)
         self.low = price if self.low is None else min(self.low, price)
+
+
+def _plan_r_restored(own, at_entry: dict, stop_active: bool, trailing: bool, tsl_step, entry: float, atr, direction: str) -> float | None:
+    """R of a restored trade on the staged stop plan: the ATR stop it was opened with (ATR x multiplier)."""
+    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own):
+        return None
+    try:
+        mult = float(at_entry.get("atr_multiplier") or getattr(own, "atr_multiplier", 0) or 0)
+        return stop_plan.risk(entry, entry - mult * float(atr or 0)) if mult > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _ist_now() -> dt.datetime:
@@ -286,6 +304,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
+    "stop_plan", "plan_be_r", "plan_trail_r",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
@@ -1166,6 +1185,10 @@ class StrategyEngine:
                 recovery_bar=int(rec_bar) if rec_bar is not None else None,
                 rec_bar=int(rec_bar) if rec_bar is not None else None,
                 entry_why=why,
+                # Staged stop plan: R from the ATR stop it was opened with; stages re-read from the price.
+                plan_r=_plan_r_restored(own, at_entry, stop_active, trailing, tsl_step, entry, atr, direction),
+                # A stop already at or past breakeven was moved by the plan before the restart.
+                plan_stage=1 if (sl is not None and ((direction == "LONG" and sl >= entry) or (direction == "SHORT" and sl <= entry))) else 0,
             )
 
     def _bot_rows(self):
@@ -1354,6 +1377,7 @@ class StrategyEngine:
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
             await self._trail_supertrend(symbol_cfg)
+            await self._trail_stop_plan(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
@@ -3266,6 +3290,8 @@ class StrategyEngine:
             low=fill,
             flipped=flipped,
             entry_why=why or "",
+            # The plan needs the plain ATR stop at entry; R is the distance to it.
+            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop) else None,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -3391,6 +3417,53 @@ class StrategyEngine:
             return
         if await self._move_stop(pos, symbol, moved, "Supertrend stop"):
             pos.st_stop_bar = closed_ts
+
+    async def _trail_stop_plan(self, cfg: BotConfig) -> None:
+        """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
+        +plan_trail_r R. Tighter only; LIVE moves the Groww stop like the trailing stop."""
+        pos = self.position
+        if pos is None or pos.plan_r is None or not pos.stop_active or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if not stop_plan.on(cfg):
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        best = pos.high if pos.direction == "LONG" else pos.low
+        stage = max(pos.plan_stage, stop_plan.stage(pos.direction, pos.entry_price, best, pos.plan_r, cfg))
+        if stage == 0:
+            return
+        want = stop_plan.breakeven(pos.direction, pos.entry_price, pos.qty)
+        if stage >= 2:
+            frame = self._frames.get(symbol)
+            closed_ts = _closed_bar_ts(frame)
+            if closed_ts is not None and closed_ts != pos.plan_bar:
+                pos.plan_bar = closed_ts
+                pos.plan_line = supertrend.stop_level(frame.iloc[:-1], pos.direction, cfg)
+            if pos.plan_line is not None:
+                want = tighten(pos.direction, want, pos.plan_line)
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, want))
+        if moved != pos.sl_trigger and not stop_plan.guards(pos.direction, moved, self.ltp):
+            # The price is already back through the new stop: close now instead of placing it there.
+            self._plan_note(pos, stage, cfg, moved)
+            self._signals[symbol] = f"{symbol} stop plan — price back through {moved:.2f}, closed"
+            await self._exit_now(cfg, self.ltp, stop_plan.EXIT_REASON)
+            return
+        if moved != pos.sl_trigger and not await self._move_stop(pos, symbol, moved, "Stop plan"):
+            return  # LIVE refused or too soon after the last move: the old stop stays; tried again next pass
+        if stage > pos.plan_stage:
+            self._plan_note(pos, stage, cfg, moved)
+
+    def _plan_note(self, pos: OpenPosition, stage: int, cfg: BotConfig, stop: float) -> None:
+        """Record a stop plan stage change on the trade (blotter's Stop moves) and the signal line."""
+        if stage <= pos.plan_stage:
+            return
+        pos.plan_stage = stage
+        text = f"{self._now().strftime('%H:%M')} {stop_plan.note(stage, cfg, stop)}"
+        with session_factory()() as db:
+            row = db.get(TradeLog, pos.trade_id)
+            if row is not None:
+                row.stop_log = f"{row.stop_log}; {text}" if row.stop_log else text
+                db.commit()
+        self.last_signal = text
 
     async def _move_stop(self, pos: OpenPosition, symbol: str, moved: float, label: str) -> bool:
         """Move an open trade's stop to `moved` (already tighter). LIVE modifies the exchange stop first;
@@ -3551,6 +3624,8 @@ class StrategyEngine:
                 hit = True
                 fill_price = self.ltp
         reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else "ATR_SL_HIT"))
+        if pos.plan_stage:
+            reason = stop_plan.HIT_REASON  # the stop the plan moved (breakeven or the Supertrend line)
         if not hit and pos.target is not None and self.ltp > 0:
             if (pos.direction == "LONG" and self.ltp >= pos.target) or (
                 pos.direction == "SHORT" and self.ltp <= pos.target
@@ -3927,6 +4002,8 @@ class StrategyEngine:
                     except SlCancelFailed:
                         # It filled as we cancelled: the stop closed the trade.
                         reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else "ATR_SL_HIT")
+                        if self.position.plan_stage:
+                            reason = stop_plan.HIT_REASON
                         fill_price = await self._real_exit_price(self.position, (cfg.symbol or "").upper())
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
@@ -3956,6 +4033,8 @@ class StrategyEngine:
                     "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
                     "BREAKOUT_STOP": "trend breakout — flat",
                     STOP_LOST: "Groww dropped the stop — closed at the market",
+                    stop_plan.EXIT_REASON: "stop plan level reached — flat",
+                    stop_plan.HIT_REASON: "stop plan stop hit — flat",
                     STOP_SOLD_OUTSIDE: "closed on Groww outside the bot — booked at Groww's price",
                 }.get(reason, "ATR stop hit — flat")
             finally:
@@ -4026,7 +4105,7 @@ class StrategyEngine:
         px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", STOP_SOLD_OUTSIDE))
+        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", stop_plan.HIT_REASON, STOP_SOLD_OUTSIDE))
         if send_exit and live:
             net = await self._groww_net(cfg.symbol)
             if net is None:
@@ -5313,6 +5392,10 @@ _ALERT_REASON = {
     "GAP_SL_HIT": "moving stop (SMA gap)",
     "TSL_HIT": "trailing stop",
     "ST_SL_HIT": "Supertrend stop",
+    "PLAN_SL_HIT": "stop plan stop (breakeven / Supertrend)",
+    "PLAN_STOP": "stop plan level reached",
+    "STOP_LOST": "Groww dropped the stop, closed at the market",
+    "SOLD_ON_GROWW": "closed on Groww outside the bot",
     "TARGET_HIT": "target hit",
     "BB_TARGET": "Bollinger band target",
     "BB_MIDDLE": "Bollinger middle band",
@@ -5751,7 +5834,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP", "PIVOT_TARGET",
+    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON,
 )
 
 
@@ -5956,6 +6039,7 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
         "entry_reason": getattr(row, "entry_reason", None),
+        "stop_log": getattr(row, "stop_log", None),
         "exit_reason": row.exit_reason,
         "gross_pnl": row.gross_pnl,
         "brokerage_and_taxes": row.brokerage_and_taxes,
