@@ -5,7 +5,7 @@ import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -18,6 +18,18 @@ type Props = {
 
 /** "" edits the shared settings; a symbol edits that stock's own. */
 const ALL = "";
+const GROUP_KEY = "sma.settings.group";
+/** The classes a matching field wears while a search is on. */
+const LIT = ["ring-2", "ring-amber-400/80", "rounded-md", "bg-amber-400/10"];
+const GROUP_CHIPS: { id: string; label: string; title: string }[] = [
+  { id: "enter", label: "1 Enter", title: "When to enter" },
+  { id: "check", label: "2 Checks", title: "Checks before entering" },
+  { id: "exit", label: "3 Exit", title: "When to exit" },
+  { id: "gap", label: "4 Gap mode", title: "SMA gap mode" },
+  { id: "stop", label: "5 Stop & target", title: "Stop-loss and target" },
+  { id: "risk", label: "6 Size & limits", title: "Size, daily limits and times" },
+  { id: "advanced", label: "7 Advanced", title: "Moving stocks between bots, asking me" },
+];
 const CHECK_MINUTES_OPTIONS = [1, 2, 3, 5, 10, 15] as const;
 
 function toCheckMinutes(value: unknown): number[] {
@@ -186,6 +198,88 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [unsaved]);
+
+  // One numbered group open at a time (remembered in this browser), so the form is a short page.
+  // "Find a setting" opens every group with a match and highlights the matching fields instead.
+  const rootRef = useRef<HTMLElement>(null);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<{ groups: string[]; count: number }>({ groups: [], count: 0 });
+  const [foundAt, setFoundAt] = useState(0);
+  const lit = useRef<HTMLElement[]>([]);
+  useEffect(() => {
+    try {
+      setOpenGroup(localStorage.getItem(GROUP_KEY));
+    } catch {
+      /* private window */
+    }
+  }, []);
+  const showGroup = (id: string | null, scroll = false) => {
+    setOpenGroup(id);
+    try {
+      if (id) localStorage.setItem(GROUP_KEY, id);
+      else localStorage.removeItem(GROUP_KEY);
+    } catch {
+      /* private window */
+    }
+    if (id && scroll) requestAnimationFrame(() => document.getElementById(`sma-${id}`)?.scrollIntoView({ block: "start" }));
+  };
+  const toggleGroup = (id: string, isOpen: boolean) => {
+    if (query.trim()) return; // while searching the matches decide what is open
+    if (isOpen && openGroup !== id) showGroup(id);
+    else if (!isOpen && openGroup === id) showGroup(null);
+  };
+  // A link to a part of the form (#sma-stop, #sma-candle-interval …) opens the group it sits in.
+  useEffect(() => {
+    const follow = () => {
+      const id = window.location.hash.slice(1);
+      if (!id.startsWith("sma-")) return;
+      const el = document.getElementById(id);
+      const group = el?.closest<HTMLElement>("details[id^='sma-']")?.id.slice(4);
+      if (!group) return;
+      showGroup(group);
+      // The group itself has a scroll margin for the pinned bars; a field inside it is put mid-screen instead.
+      const block = el?.tagName === "DETAILS" ? "start" : "center";
+      requestAnimationFrame(() => requestAnimationFrame(() => el?.scrollIntoView({ block })));
+    };
+    follow();
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The search reads the rendered labels (a closed group's fields are in the page, just folded).
+  useEffect(() => {
+    for (const el of lit.current) el.classList.remove(...LIT);
+    lit.current = [];
+    const q = query.trim().toLowerCase();
+    if (q.length < 2 || !rootRef.current) {
+      setFound({ groups: [], count: 0 });
+      return;
+    }
+    const hits: HTMLElement[] = [];
+    const groups = new Set<string>();
+    rootRef.current.querySelectorAll<HTMLElement>("details[id^='sma-'] label, details[id^='sma-'] [data-setting-title]").forEach((el) => {
+      if (!(el.textContent ?? "").toLowerCase().includes(q)) return;
+      // A label inside a matched label (a tick box in a row) counts once.
+      if (hits.some((h) => h.contains(el))) return;
+      hits.push(el);
+      const g = el.closest<HTMLElement>("details[id^='sma-']")?.id.slice(4);
+      if (g) groups.add(g);
+    });
+    for (const el of hits) el.classList.add(...LIT);
+    lit.current = hits;
+    setFound({ groups: [...groups], count: hits.length });
+    setFoundAt(0);
+    if (hits[0]) requestAnimationFrame(() => hits[0].scrollIntoView({ block: "center" }));
+  }, [query]);
+  const jumpFound = (step: number) => {
+    if (!lit.current.length) return;
+    const next = (foundAt + step + lit.current.length) % lit.current.length;
+    setFoundAt(next);
+    lit.current[next].scrollIntoView({ block: "center" });
+  };
+  const searching = query.trim().length >= 2;
+  const isOpen = (id: string) => (searching ? found.groups.includes(id) : openGroup === id);
 
   const armed = (config?.trade_symbols ?? []).map((s) => s.toUpperCase());
   const withOwn = Object.keys(config?.stock_settings ?? {});
@@ -511,6 +605,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
 
   return (
     <section
+      ref={rootRef}
       className={clsx(
         "rounded-xl border border-white/5 bg-[#151921] p-4",
         wide && "lg:p-6",
@@ -590,7 +685,67 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
       </div>
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
-      <FieldGroup id="enter" title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
+      <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">
+        {GROUP_CHIPS.map((g) => {
+          const on = g.id === "risk" ? 0 : onCount(g.id as RuleGroup);
+          const active = isOpen(g.id);
+          return (
+            <button
+              key={g.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                if (searching) setQuery("");
+                showGroup(active && !searching ? null : g.id, true);
+              }}
+              title={g.title}
+              className={clsx(
+                "flex min-h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset",
+                active ? "bg-sky-400/20 text-sky-100 ring-sky-400/50" : "text-slate-300 ring-white/15 hover:bg-white/5"
+              )}
+            >
+              {g.label}
+              {on ? <span className="rounded-full bg-emerald-500/20 px-1.5 text-[10px] text-emerald-300">{on} on</span> : null}
+            </button>
+          );
+        })}
+        <label className="relative ml-auto flex min-w-[12rem] flex-1 items-center sm:max-w-xs">
+          <Search size={14} aria-hidden className="pointer-events-none absolute left-2 text-slate-400" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                jumpFound(e.shiftKey ? -1 : 1);
+              }
+            }}
+            placeholder="Find a setting… (e.g. trail, RSI, cut-off)"
+            aria-label="Find a setting"
+            className="min-h-9 w-full rounded-md border border-white/15 bg-black/30 pl-7 pr-2 text-xs text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          />
+        </label>
+        {searching ? (
+          <span className="flex items-center gap-1 text-xs text-slate-300" role="status">
+            {found.count ? `${foundAt + 1} of ${found.count}` : "No setting matches"}
+            {found.count > 1 ? (
+              <>
+                <button type="button" onClick={() => jumpFound(-1)} aria-label="Previous match" className="min-h-8 rounded px-1.5 ring-1 ring-inset ring-white/15 hover:bg-white/5">
+                  ‹
+                </button>
+                <button type="button" onClick={() => jumpFound(1)} aria-label="Next match" className="min-h-8 rounded px-1.5 ring-1 ring-inset ring-white/15 hover:bg-white/5">
+                  ›
+                </button>
+              </>
+            ) : null}
+          </span>
+        ) : null}
+      </div>
+      {!searching && !openGroup ? (
+        <p className="mt-2 text-xs text-slate-400">Pick a group above to open its settings, or type what you are looking for.</p>
+      ) : null}
+      <FieldGroup id="enter" open={isOpen("enter")} onToggle={toggleGroup} title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Moving averages</SectionTitle>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
@@ -1100,7 +1255,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
         </div>
       </FieldGroup>
-      <FieldGroup id="check" title="2. Checks before entering" hint="Every ticked check must agree, or the signal is skipped" on={onCount("check")} wide={wide}>
+      <FieldGroup id="check" open={isOpen("check")} onToggle={toggleGroup} title="2. Checks before entering" hint="Every ticked check must agree, or the signal is skipped" on={onCount("check")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle
             info={
@@ -1443,7 +1598,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ))}
         </div>
       </FieldGroup>
-      <FieldGroup id="exit" title="3. When to exit" hint="Whichever ticked exit comes first closes the trade" on={onCount("exit")} wide={wide}>
+      <FieldGroup id="exit" open={isOpen("exit")} onToggle={toggleGroup} title="3. When to exit" hint="Whichever ticked exit comes first closes the trade" on={onCount("exit")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Main exit</SectionTitle>
           <label
@@ -1853,7 +2008,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
       </FieldGroup>
-      <FieldGroup id="gap" title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
+      <FieldGroup id="gap" open={isOpen("gap")} onToggle={toggleGroup} title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
         <div className="min-w-0">
           {form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? (
             <p className="mt-1 text-xs leading-snug text-amber-300">
@@ -1983,7 +2138,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
       </FieldGroup>
-      <FieldGroup id="stop" title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
+      <FieldGroup id="stop" open={isOpen("stop")} onToggle={toggleGroup} title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
         <div className="min-w-0">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -2165,7 +2320,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
         </div>
       </FieldGroup>
-      <FieldGroup id="risk" title="6. Size, daily limits and times" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
+      <FieldGroup id="risk" open={isOpen("risk")} onToggle={toggleGroup} title="6. Size, daily limits and times" hint="Quantity, max daily loss, max trades, cut-off, square-off" wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Size</SectionTitle>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
@@ -2218,7 +2373,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           )}
         </div>
       </FieldGroup>
-      <FieldGroup id="advanced" title="7. Advanced: moving stocks between bots, asking me" hint="Recovery hold, hand-offs to Bot 2 / Bot 3, 1-minute review" on={onCount("advanced")} defaultOpen={onCount("advanced") > 0} wide={wide}>
+      <FieldGroup id="advanced" open={isOpen("advanced")} onToggle={toggleGroup} title="7. Advanced: moving stocks between bots, asking me" hint="Recovery hold, hand-offs to Bot 2 / Bot 3, 1-minute review" on={onCount("advanced")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Recovery hold and hand-offs</SectionTitle>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
@@ -2795,7 +2950,8 @@ function FieldGroup({
   hint,
   wide,
   on,
-  defaultOpen = true,
+  open,
+  onToggle,
   children,
 }: {
   id: string;
@@ -2803,11 +2959,18 @@ function FieldGroup({
   hint: string;
   wide: boolean;
   on?: number;
-  defaultOpen?: boolean;
+  /** One group is open at a time (the group chips); a search opens every group with a match. */
+  open: boolean;
+  onToggle: (id: string, open: boolean) => void;
   children: ReactNode;
 }) {
   return (
-    <details id={`sma-${id}`} open={defaultOpen} className="group/fs mt-4 scroll-mt-24 rounded-lg border border-white/10 bg-white/[0.02]">
+    <details
+      id={`sma-${id}`}
+      open={open}
+      onToggle={(e) => onToggle(id, e.currentTarget.open)}
+      className="group/fs mt-4 scroll-mt-24 rounded-lg border border-white/10 bg-white/[0.02]"
+    >
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 [&::-webkit-details-marker]:hidden">
         <ChevronDown size={16} aria-hidden className="shrink-0 text-slate-400 transition-transform group-[:not([open])]/fs:-rotate-90" />
         {title}
@@ -2885,7 +3048,7 @@ function Field({
 /** A small heading that splits the settings into groups. */
 function SectionTitle({ children, info }: { children: ReactNode; info?: ReactNode }) {
   return (
-    <div className="mt-5 flex items-center gap-1 border-t border-white/10 pt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
+    <div data-setting-title="" className="mt-5 flex items-center gap-1 border-t border-white/10 pt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 first:mt-3">
       {children}
       {info ? <InfoTip label={`About ${typeof children === "string" ? children : "this section"}`}>{info}</InfoTip> : null}
     </div>

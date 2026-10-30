@@ -52,19 +52,20 @@ import { Badge, Button, StatusDot } from "@/components/ui";
  * permanent attention.
  */
 
+// The pages used every day come first (owner's choice).
 export const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/terminal", label: "SMA Terminal", icon: Activity },
+  { href: "/scalp", label: "Scalp", icon: Gauge },
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/news", label: "News", icon: Newspaper },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/chart", label: "Charts", icon: LineChart },
   { href: "/trade", label: "Trade", icon: CandlestickChart },
   { href: "/movers", label: "Movers", icon: Zap },
-  { href: "/scalp", label: "Scalp", icon: Gauge },
-  { href: "/news", label: "News", icon: Newspaper },
   { href: "/options", label: "Options", icon: Layers },
   { href: "/us", label: "US", icon: Globe },
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/reports", label: "Reports", icon: FileBarChart },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const SESSION_TONE: Record<string, "profit" | "warn" | "neutral"> = {

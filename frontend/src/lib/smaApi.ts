@@ -976,6 +976,17 @@ export type ChartFilters = {
   slope_lookback?: number;
   slope_bend_pct?: number;
   slope_turn_pct?: number;
+  /** The V-turn's steep / turn-back levels (%/candle) and window, and the slope candle (0 = the bot's own). */
+  vturn_exit?: boolean;
+  vturn_move_pct?: number;
+  vturn_turn_pct?: number;
+  vturn_within?: number;
+  slope_minutes?: number;
+  /** For the chart's "why no trade here" line. */
+  entry_cutoff_time?: string;
+  square_off_time?: string;
+  entry_mode?: "SMA" | "PATTERN" | "COLOUR";
+  use_gap_mode?: boolean;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */
