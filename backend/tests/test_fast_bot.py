@@ -59,7 +59,7 @@ def test_settings_are_clamped_and_bot5_is_never_a_source():
 class _Source:
     def __init__(self, bot=1, mode="PAPER", direction="LONG", price=100.6):
         self.bot_id = bot
-        self.positions = {"ACME": SimpleNamespace(direction=direction, mode=mode, stop_active=True, sl_order_id="SL1")}
+        self.positions = {"ACME": SimpleNamespace(direction=direction, mode=mode, stop_active=True, sl_order_id="SL1", entry_price=100.0)}
         self._ltps = {"ACME": price}
         self.closed: list[str] = []
         self.alerts: list[str] = []
@@ -140,7 +140,7 @@ async def test_a_fast_long_is_cut_and_bot5_buys_at_once(moved):
     assert "Bot 5 buys at once" in done[0]
     assert bot.moved_today == ["ACME"]
     # The same stock is not moved twice a day.
-    src.positions["ACME"] = SimpleNamespace(direction="LONG", mode="PAPER", stop_active=True, sl_order_id="SL1")
+    src.positions["ACME"] = SimpleNamespace(direction="LONG", mode="PAPER", stop_active=True, sl_order_id="SL1", entry_price=100.0)
     again = await bot.pass_once({2: src, 5: target}, now=NOW + 5)
     assert again == [] and len(target.orders) == 1
 
@@ -351,4 +351,64 @@ async def test_a_replay_cuts_the_fast_mover_and_plays_it_on_with_bot5s_size(tmp_
         assert all(r.qty == 50 for r in rows if r.id > opened[0].id)
         part = _fast_move_part(rows)
     assert part["cut"] == 1 and part["trades"] >= 1
+    database.reset_engine()
+
+
+def test_only_a_trade_already_in_profit_moves():
+    import fast_bot
+
+    s = fast_bot.clean({"on": True, "min_profit_pct": 0.3})
+    long = SimpleNamespace(direction="LONG", entry_price=100.0)
+    short = SimpleNamespace(direction="SHORT", entry_price=100.0)
+    assert fast_bot.in_profit(long, 100.4, s) and not fast_bot.in_profit(long, 100.2, s)
+    assert not fast_bot.in_profit(long, 99.0, s)  # a loser bouncing off its low never moves
+    assert fast_bot.in_profit(short, 99.6, s) and not fast_bot.in_profit(short, 100.5, s)
+    assert fast_bot.in_profit(long, 99.0, fast_bot.clean({"min_profit_pct": 0}))  # 0 = any trade
+    assert fast_bot.Settings().min_profit_pct == 0.3
+
+
+@pytest.mark.asyncio
+async def test_a_losing_trade_that_bounces_fast_stays(moved):
+    """A long bought at 102 that bounced 0.6% off its low (100 → 100.6) is still in loss: it stays on its bot."""
+    src, target = _Source(price=100.6), _Target()
+    src.positions["ACME"].entry_price = 102.0
+    _bot, done = await _run(src, target)
+    assert done == [] and src.closed == [] and target.orders == [] and moved == []
+
+
+@pytest.mark.asyncio
+async def test_a_replay_moves_nothing_until_the_trade_is_far_enough_in_profit(tmp_path, monkeypatch):
+    import database
+    import fast_bot
+    from models import BotConfig, TradeLog
+    from replay import ReplayEngine, ReplayFeed
+    from tests.test_replay import DAY, _frames
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/replay.db")
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", lambda msg: None)
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.symbol, row.trade_symbols, row.qty = "TCS", "TCS", 10
+        s.commit()
+    snap = {
+        "settings": {"on": True, "rule": "MOVE", "pct": 0.1, "minutes": 3, "sources": [1], "min_profit_pct": 5.0},
+        "bot5": {"qty": 50},
+        "bot5_stocks": {},
+    }
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], fast=snap)
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, dt.time(15, 20), tzinfo=IST)
+    while engine.feed.clock < end:
+        engine.feed.clock += dt.timedelta(seconds=10)
+        await engine.tick(engine.feed.clock)
+    with database.session_factory()() as s:
+        rows = s.query(TradeLog).all()
+        assert rows and not any(r.exit_reason == fast_bot.EXIT_REASON for r in rows)
+        assert all(r.qty == 10 for r in rows)
     database.reset_engine()

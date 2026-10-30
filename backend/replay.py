@@ -334,7 +334,10 @@ class ReplayEngine(StrategyEngine):
         """The fast-mover hand-off on a replayed day (fast_bot.py): a held stock moving fast its way is cut
         (FAST_MOVE_HANDOFF) and opened again the same side at once with Bot 5's settings, which it keeps for
         the rest of this day (FAST_MOVE). Each stock once a day, at most `max_day` a day."""
-        settings = fast_bot.clean(self.fast.get("settings") or {})
+        raw = dict(self.fast.get("settings") or {})
+        # A run started before the profit check plays as it did then (Resume keeps the result).
+        raw.setdefault("min_profit_pct", 0.0)
+        settings = fast_bot.clean(raw)
         if not settings.on or self.bot_id not in settings.sources:
             return
         if self._fast_watch is None:
@@ -345,7 +348,7 @@ class ReplayEngine(StrategyEngine):
             if pos is None or not price or name in self._fast_moved:
                 continue
             hist = self._fast_watch.note(name, price, stamp, settings)
-            if len(self._fast_moved) >= settings.max_day:
+            if len(self._fast_moved) >= settings.max_day or not fast_bot.in_profit(pos, price, settings):
                 continue
             why = fast_bot.fast(hist, pos.direction, stamp, settings)
             if why:

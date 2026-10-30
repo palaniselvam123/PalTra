@@ -3400,6 +3400,7 @@ class FastBotSettings(BaseModel):
     speed_minutes: int | None = Field(None, ge=1, le=fast_bot.MAX_MINUTES)
     sources: list[Literal[1, 2, 3, 4]] | None = None
     max_day: int | None = Field(None, ge=1, le=100)
+    min_profit_pct: float | None = Field(None, ge=0, le=fast_bot.MAX_PCT)
     confirm_live: bool = False
 
 

@@ -172,7 +172,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `FastBot.run` (desk only, started in `boot_engine`, not with `server_role.no_orders()`) every `POLL_SEC` 5 s while NSE
   is open reads the bots' own last prices (`_ltps`, no extra Groww call). Fast (`rule`): `MOVE` (≥ `pct` 0.5 % its way
   within `minutes` 3, from the window's low for a long / high for a short), `SPEED` (≥ `speed` 0.15 %/min its way over
-  `speed_minutes` 5) or `EITHER`. `ready` first checks Bot 5 can take it (RUNNING, market hours, before its cut-off /
+  `speed_minutes` 5) or `EITHER`, and only while the trade is already at least `min_profit_pct` (0.3, 0 = any) % in profit
+  from its entry (`in_profit`; a losing trade that bounced off its low never moves; a replay run saved before the check
+  plays with 0). `ready` first checks Bot 5 can take it (RUNNING, market hours, before its cut-off /
   square-off, under its trade cap, not already holding it; same mode only: a LIVE Bot 5 never takes a PAPER trade and
   a LIVE trade is never cut for a PAPER Bot 5; a LIVE position restored without its stop id stays), then the source's `close_symbol` (`FAST_MOVE_HANDOFF`, LIVE stop cancelled first),
   in LIVE a wait until Groww shows no shares (`FLAT_WAIT_SEC`), `recovery.handoff(to_bot=5)` (off the source's Trade list,
