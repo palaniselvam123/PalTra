@@ -39,6 +39,7 @@ export function FastMoverBot() {
             speed_minutes: String(v.speed_minutes),
             max_day: String(v.max_day),
             min_profit_pct: String(v.min_profit_pct ?? 0.3),
+            bot5_trades: String(v.bot5_trades ?? 1),
           });
           setSources(v.sources);
         }
@@ -82,6 +83,10 @@ export function FastMoverBot() {
           const n = Number(form.min_profit_pct);
           return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : 0.3;
         })(),
+        bot5_trades: (() => {
+          const n = Math.round(Number(form.bot5_trades));
+          return Number.isFinite(n) ? Math.min(20, Math.max(0, n)) : 1;
+        })(),
         sources,
         confirm_live: confirm,
       });
@@ -116,7 +121,9 @@ export function FastMoverBot() {
         When a stock one of the ticked bots holds moves fast in that trade&apos;s favour, its trade there is closed and Bot 5
         opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross, VWAP, RSI or other entry
         check is read. Only a trade already in profit by the set % moves: a losing trade stays on its bot, however fast
-        the price bounces. The stock stays on Bot 5 for the rest of the day. Set Bot 5&apos;s quantity in Settings → SMA strategy
+        the price bounces. After the set number of Bot 5 trades on the stock (1 = only the fast-mover trade), the stock
+        goes back to the bot it came from once Bot 5 has closed it, at that bot&apos;s own size; 0 keeps it on Bot 5 all
+        day. A stock moves to Bot 5 once a day. Set Bot 5&apos;s quantity in Settings → SMA strategy
         (Bot 5 tab), and press Start on Bot 5. Keep both bots in the same mode: a LIVE Bot 5 never takes a practice
         (PAPER) trade, a LIVE trade is never cut for a PAPER Bot 5, and in LIVE the move waits until Groww shows no shares
         on the old bot. Replays of the ticked bots play it too (Bot 5's size and settings for the rest of that day), so
@@ -181,6 +188,13 @@ export function FastMoverBot() {
             Only if the trade is up at least (%)
             <input inputMode="decimal" value={String(form.min_profit_pct ?? "")} onChange={(e) => set("min_profit_pct", e.target.value)} className={input} />
           </label>
+          <label
+            className="flex flex-col gap-1 text-xs text-slate-400"
+            title="How many Bot 5 trades a moved stock gets before it goes back to its own bot. 0 = it stays on Bot 5 for the day."
+          >
+            Bot 5 trades per stock, then back (0 = all day)
+            <input inputMode="numeric" value={String(form.bot5_trades ?? "")} onChange={(e) => set("bot5_trades", e.target.value)} className={input} />
+          </label>
           <label className="flex flex-col gap-1 text-xs text-slate-400">
             At most per day
             <input inputMode="numeric" value={String(form.max_day ?? "")} onChange={(e) => set("max_day", e.target.value)} className={input} />
@@ -200,6 +214,11 @@ export function FastMoverBot() {
         <div className="mt-3">
           <h3 className="text-xs font-semibold text-slate-300">
             Today: {view?.moved_today?.length ?? 0} moved
+            {view?.on_bot5 && Object.keys(view.on_bot5).length
+              ? ` · on Bot 5 now: ${Object.entries(view.on_bot5)
+                  .map(([s, h]) => `${s} (from Bot ${h.from_bot}, ${h.trades} trade${h.trades === 1 ? "" : "s"})`)
+                  .join(", ")}`
+              : ""}
           </h3>
           <ul className="mt-1 space-y-0.5 text-xs text-slate-400">
             {recent.slice(0, 10).map((r, i) => (

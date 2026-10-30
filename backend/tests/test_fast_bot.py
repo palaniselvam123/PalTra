@@ -112,7 +112,7 @@ def moved(monkeypatch, tmp_path):
     monkeypatch.setattr(fast_bot, "market_is_open", lambda *_a, **_k: True)
     calls = []
 
-    def handoff(from_bot, symbol, source_live, to_bot=2):
+    def handoff(from_bot, symbol, source_live, to_bot=2, **_kw):
         calls.append((from_bot, symbol, source_live, to_bot))
         return f"moved to Bot {to_bot} — waits for its next cross"
 
@@ -411,4 +411,86 @@ async def test_a_replay_moves_nothing_until_the_trade_is_far_enough_in_profit(tm
         rows = s.query(TradeLog).all()
         assert rows and not any(r.exit_reason == fast_bot.EXIT_REASON for r in rows)
         assert all(r.qty == 10 for r in rows)
+    database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_after_its_bot5_trades_the_stock_goes_back_to_its_own_bot(moved):
+    """bot5_trades 1: the fast-move entry is Bot 5's one trade on the stock; a second entry is refused, and once
+    Bot 5 is flat on it the stock goes back to the bot it came from."""
+    import fast_bot
+
+    src, target = _Source(bot=4), _Target()
+    target.entry_gate = None
+    bot, done = await _run(src, target, bot5_trades=1)
+    assert moved == [(4, "ACME", False, 5)]
+    assert bot.snapshot()["on_bot5"] == {"ACME": {"from_bot": 4, "trades": 0}}
+    target.bot_id = 5
+    assert target.entry_gate == bot.gate
+    assert bot.gate(target, "ACME") is None  # the fast-move entry itself
+    assert "goes back to Bot 4" in bot.gate(target, "ACME")  # a second Bot 5 entry (e.g. a reverse)
+    assert bot.gate(target, "TCS") is None  # stocks Bot 5 got on its own are not limited
+    target.positions["ACME"] = SimpleNamespace(direction="LONG")
+    assert bot.give_back(target, fast_bot.load(), NOW) == []  # still held: waits for the exit
+    target.positions.pop("ACME")
+    back = bot.give_back(target, fast_bot.load(), NOW)
+    assert "back to Bot 4" in back[0] and moved[-1] == (5, "ACME", False, 4)
+    assert bot.gate(target, "ACME") is None and bot.snapshot()["on_bot5"] == {}
+    # Not moved again the same day.
+    src.positions["ACME"] = SimpleNamespace(direction="LONG", mode="PAPER", stop_active=True, sl_order_id="SL1", entry_price=100.0)
+    assert await bot.pass_once({4: src, 5: target}, now=NOW + 5) == []
+
+
+@pytest.mark.asyncio
+async def test_zero_bot5_trades_keeps_the_stock_on_bot5_all_day(moved):
+    import fast_bot
+
+    src, target = _Source(bot=4), _Target()
+    target.entry_gate, target.bot_id = None, 5
+    bot, _done = await _run(src, target, bot5_trades=0)
+    for _ in range(3):
+        assert bot.gate(target, "ACME") is None
+    assert bot.give_back(target, fast_bot.load(), NOW) == [] and len(moved) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_replay_plays_bot5s_size_for_its_trades_then_the_bots_own(tmp_path, monkeypatch):
+    """Replay with bot5_trades 1: one trade at Bot 5's 50, the rest of the day back at the bot's own 10."""
+    import database
+    import fast_bot
+    from models import BotConfig, TradeLog
+    from replay import ReplayEngine, ReplayFeed
+    from tests.test_replay import DAY, _frames
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/replay.db")
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", lambda msg: None)
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.symbol, row.trade_symbols, row.qty = "TCS", "TCS", 10
+        s.commit()
+    snap = {
+        "settings": {"on": True, "rule": "MOVE", "pct": 0.1, "minutes": 3, "sources": [1], "max_day": 10, "bot5_trades": 1},
+        "bot5": {"qty": 50},
+        "bot5_stocks": {},
+    }
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], fast=snap)
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, dt.time(15, 20), tzinfo=IST)
+    while engine.feed.clock < end:
+        engine.feed.clock += dt.timedelta(seconds=10)
+        await engine.tick(engine.feed.clock)
+    with database.session_factory()() as s:
+        rows = s.query(TradeLog).order_by(TradeLog.id).all()
+        cut = [r for r in rows if r.exit_reason == fast_bot.EXIT_REASON]
+        opened = [r for r in rows if (r.entry_reason or "").startswith(fast_bot.ENTRY_REASON)]
+        assert len(cut) == 1 and len(opened) == 1 and opened[0].qty == 50
+        later = [r for r in rows if r.id > opened[0].id]
+        assert later, "the bot trades the stock again on its own settings"
+        assert all(r.qty == 10 for r in later)
     database.reset_engine()

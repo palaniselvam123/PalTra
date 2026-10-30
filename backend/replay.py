@@ -266,6 +266,11 @@ class ReplayEngine(StrategyEngine):
         self.fast = fast
         self._fast_watch = None
         self._fast_moved: dict[str, dict] = {}
+        # Bot 5 entries on each moved stock (`bot5_trades`), and the stocks already sent back to this bot.
+        self._fast_opened: dict[str, int] = {}
+        self._fast_back: set[str] = set()
+        if fast:
+            self.entry_gate = self._fast_gate
         # "Replay as armed" (arm_log.py): each stock trades only while it was armed live that
         # day, {symbol: [(start, end) epoch seconds]}. None = every replayed stock all day.
         self.arm_windows = arm_windows
@@ -337,15 +342,23 @@ class ReplayEngine(StrategyEngine):
         raw = dict(self.fast.get("settings") or {})
         # A run started before the profit check plays as it did then (Resume keeps the result).
         raw.setdefault("min_profit_pct", 0.0)
+        raw.setdefault("bot5_trades", 0)
         settings = fast_bot.clean(raw)
         if not settings.on or self.bot_id not in settings.sources:
             return
         if self._fast_watch is None:
             self._fast_watch = fast_bot.FastBot()
+        limit = settings.bot5_trades
+        for name in list(self._fast_moved):
+            if limit and self._fast_opened.get(name, 0) >= limit and self.positions.get(name) is None:
+                # Bot 5's trades are done: back to this bot's own settings for the rest of the day.
+                self._fast_moved.pop(name)
+                self._fast_back.add(name)
+                self._signals[name] = f"{name}: back to Bot {self.bot_id} after {limit} Bot {fast_bot.TARGET_BOT} trade(s)"
         stamp = now.timestamp()
         for name, pos in list(self.positions.items()):
             price = self._ltps.get(name)
-            if pos is None or not price or name in self._fast_moved:
+            if pos is None or not price or name in self._fast_moved or name in self._fast_back:
                 continue
             hist = self._fast_watch.note(name, price, stamp, settings)
             if len(self._fast_moved) >= settings.max_day or not fast_bot.in_profit(pos, price, settings):
@@ -353,6 +366,19 @@ class ReplayEngine(StrategyEngine):
             why = fast_bot.fast(hist, pos.direction, stamp, settings)
             if why:
                 await self._fast_move(name, pos.direction, why)
+
+    def _fast_gate(self, engine, symbol: str) -> str | None:  # noqa: ARG002
+        """A moved stock takes at most `bot5_trades` entries on Bot 5's settings (StrategyEngine.entry_gate)."""
+        name = (symbol or "").upper()
+        if name not in self._fast_moved:
+            return None
+        raw = dict(self.fast.get("settings") or {})
+        raw.setdefault("bot5_trades", 0)
+        limit = fast_bot.clean(raw).bot5_trades
+        if limit and self._fast_opened.get(name, 0) >= limit:
+            return f"Bot {fast_bot.TARGET_BOT} has made its {limit} trade(s) on {name}: back to Bot {self.bot_id}"
+        self._fast_opened[name] = self._fast_opened.get(name, 0) + 1
+        return None
 
     async def _fast_move(self, name: str, direction: str, why: str) -> None:
         try:

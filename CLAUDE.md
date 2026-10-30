@@ -179,13 +179,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   a LIVE trade is never cut for a PAPER Bot 5; a LIVE position restored without its stop id stays), then the source's `close_symbol` (`FAST_MOVE_HANDOFF`, LIVE stop cancelled first),
   in LIVE a wait until Groww shows no shares (`FLAT_WAIT_SEC`), `recovery.handoff(to_bot=5)` (off the source's Trade list,
   onto Bot 5's; one LIVE bot per stock), and Bot 5's `direct_order` (entry reason `FAST_MOVE`: no SMA cross, VWAP / RSI
-  or other entry check; Bot 5's stop and exits run it). The stock stays on Bot 5 for the day; each stock once a day, at
-  most `max_day` (10) a day. `GET/PUT /api/bots/fast-mover` (turning it on while Bot 5 is LIVE needs `confirm_live`,
+  or other entry check; Bot 5's stop and exits run it). After `bot5_trades` (1, 0 = all day) Bot 5 entries on the stock
+  (`FastBot.gate`, set as Bot 5's `StrategyEngine.entry_gate`, checked in `_open` before every entry; a reverse past it is
+  refused) and once Bot 5 is flat on it, `give_back` returns it to its source bot (`recovery.handoff(5, to_bot=source,
+  chop=False)`: that bot's own settings, waits for its next cross; memory only, a restart leaves it on Bot 5). Each stock
+  once a day, at most `max_day` (10) a day. `GET/PUT /api/bots/fast-mover` (turning it on while Bot 5 is LIVE needs `confirm_live`,
   409 without); Settings → "Fast movers → Bot 5" (`components/Settings/FastMoverBot.tsx`). **Replays too**: a new run
   of a source bot keeps `fast_bot.replay_snapshot` in its settings (`fast_bot`: these settings plus Bot 5's strategy
   fields and per-stock settings, so Resume plays the same); `ReplayEngine._fast_replay` (after each tick) cuts a held
   stock that moves fast its way (`FAST_MOVE_HANDOFF`, `close_symbol`) and opens the same side at once through
-  `direct_order` (`FAST_MOVE`) with Bot 5's settings as that stock's override for the rest of the replayed day
+  `direct_order` (`FAST_MOVE`) with Bot 5's settings as that stock's override until its `bot5_trades` are done (`_fast_gate`, then the replayed
+  bot's own settings; a run saved before the setting plays 0 = all day)
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).

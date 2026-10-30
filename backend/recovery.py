@@ -201,12 +201,13 @@ def judge(
     return "hold", f"loss {loss:.2f}, {candles_held} of {max_candles(cfg)} candles"
 
 
-def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT) -> str:
+def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT, chop: bool | None = None) -> str:
     """Move `symbol` from `from_bot` to `to_bot`. Returns what happened.
 
     To Bot 2 (`HANDOFF_BOT`) the stock gets the chop settings; to another bot (the
     breakout handoff back to Bot 3, breakout.py) it trades on that bot's own settings.
     The target is armed to wait for its next cross (no order now). Never raises.
+    `chop=False` keeps Bot 2's own settings (a stock the fast-mover hand-off sends back, fast_bot.py).
     """
     from database import session_factory
     from models import BotConfig
@@ -215,6 +216,7 @@ def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF
 
     name = (symbol or "").upper()
     to_bot = int(to_bot)
+    chop = to_bot == HANDOFF_BOT if chop is None else bool(chop) and to_bot == HANDOFF_BOT
     if int(from_bot) == to_bot:
         return f"already on Bot {to_bot}: no handoff"
     try:
@@ -238,7 +240,7 @@ def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF
                 why = bots.live_conflict(to_bot, [name])
                 if why:
                     return f"no handoff: {why}"
-            if to_bot == HANDOFF_BOT:
+            if chop:
                 everything = stock_settings(target)
                 everything[name] = {**everything.get(name, {}), **HANDOFF_SETTINGS}
                 target.stock_settings = json.dumps(everything)
@@ -254,6 +256,6 @@ def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF
     if engine is not None:
         # The cross already on the tape is not traded: Bot 2 waits for its next one.
         engine.hold_for_next_cross([name])
-    if to_bot == HANDOFF_BOT:
+    if chop:
         return "moved to Bot 2 (flipped, gap mode) — waits for its next cross"
     return f"moved to Bot {to_bot} — waits for its next cross"
