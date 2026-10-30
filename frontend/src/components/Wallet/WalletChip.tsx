@@ -5,8 +5,15 @@ import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { Landmark, Loader2, Wallet as WalletIcon, X } from "lucide-react";
 import { inr, smaApi, type Wallet, type WalletEntry, type WalletLoan } from "@/lib/smaApi";
+import { api, type DeskAccount } from "@/lib/api";
+import { istNow, nseSessionNow } from "@/lib/format";
 
 const POLL_MS = 10_000;
+// The real Groww balance, read through the desk (cached 30 s there) while NSE is open.
+const GROWW_POLL_MS = 30_000;
+
+/** The Groww figures the chip shows, read while the market is open; null outside the session. */
+type GrowwFunds = { account: DeskAccount; at: string };
 const SEEN_KEY = "wallet.loanSeen";
 const QUICK = [1_000, 10_000, 1_00_000, 10_00_000, 1_00_00_000];
 const MAX = 1_000_000_000;
@@ -74,6 +81,33 @@ export function WalletChip({ className }: { className?: string }) {
     return () => clearInterval(id);
   }, [load]);
 
+  // The real Groww balance during market hours only; outside them the chip shows practice money alone.
+  const [groww, setGroww] = useState<GrowwFunds | null>(null);
+  useEffect(() => {
+    let stop = false;
+    const read = () => {
+      if (!nseSessionNow()) {
+        setGroww(null);
+        return;
+      }
+      if (typeof document !== "undefined" && document.hidden) return;
+      api
+        .deskAccount()
+        .then((account) => {
+          if (!stop) setGroww({ account, at: istNow() });
+        })
+        .catch(() => {
+          /* the desk is not answering; keep the last figures */
+        });
+    };
+    read();
+    const id = setInterval(read, GROWW_POLL_MS);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
+
   const dismissLoan = () => {
     if (loanPopup) {
       try {
@@ -86,12 +120,17 @@ export function WalletChip({ className }: { className?: string }) {
   };
 
   const active = w?.active ?? false;
+  // Real money read from Groww this session (a failed read is never shown as zero).
+  const growwCash = groww?.account.funds_source === "groww" ? groww.account.clear_cash ?? null : null;
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={active ? "Practice wallet of the PAPER bots: free balance and loan" : "Load practice money for the PAPER bots"}
+        title={
+          (active ? "Practice wallet of the PAPER bots: free balance and loan" : "Load practice money for the PAPER bots") +
+          (growwCash != null ? `. Groww: real cash balance, read at ${groww?.at}` : "")
+        }
         className={clsx(
           "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-left leading-tight ring-1 ring-inset hover:bg-white/5",
           active && (w?.loan ?? 0) > 0 ? "ring-amber-400/60" : "ring-white/15",
@@ -101,17 +140,25 @@ export function WalletChip({ className }: { className?: string }) {
         <WalletIcon size={14} aria-hidden className="text-sky-400" />
         {active && w ? (
           <span>
-            <span className="block text-[9px] uppercase tracking-[0.08em] text-slate-500">Balance</span>
+            <span className="block text-[9px] uppercase tracking-[0.08em] text-slate-500">
+              Balance{growwCash != null ? " · Groww" : ""}
+            </span>
             <span className="block font-mono text-xs font-semibold tabular-nums text-slate-100">
               {short(w.available)}
               {w.loan > 0 ? <span className="ml-1 text-amber-300">· loan {short(w.loan)}</span> : null}
+              {growwCash != null ? <span className="ml-1 text-emerald-300">· {short(growwCash)}</span> : null}
             </span>
+          </span>
+        ) : growwCash != null ? (
+          <span>
+            <span className="block text-[9px] uppercase tracking-[0.08em] text-slate-500">Groww</span>
+            <span className="block font-mono text-xs font-semibold tabular-nums text-emerald-300">{short(growwCash)}</span>
           </span>
         ) : (
           <span className="text-xs font-semibold text-sky-300">Add money</span>
         )}
       </button>
-      {open ? <WalletDialog wallet={w} onChange={setW} onClose={() => setOpen(false)} /> : null}
+      {open ? <WalletDialog wallet={w} groww={groww} onChange={setW} onClose={() => setOpen(false)} /> : null}
       {loanPopup && !open ? <LoanPopup loan={loanPopup} onClose={dismissLoan} onOpenWallet={() => { dismissLoan(); setOpen(true); }} /> : null}
     </>
   );
@@ -193,7 +240,59 @@ function LoanPopup({ loan, onClose, onOpenWallet }: { loan: WalletLoan; onClose:
   );
 }
 
-function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; onChange: (w: Wallet) => void; onClose: () => void }) {
+/** The real Groww account during market hours: cash, what an intraday order can use, and when it was read. */
+function GrowwAccount({ groww }: { groww: GrowwFunds | null }) {
+  if (!nseSessionNow()) {
+    return (
+      <p className="mb-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-400">
+        <b className="text-slate-300">Groww account:</b> the real balance shows here during market hours (09:15–15:30 IST, Mon–Fri).
+      </p>
+    );
+  }
+  const a = groww?.account;
+  if (!a) return <p className="mb-3 text-xs text-slate-400">Reading the Groww balance…</p>;
+  if (!a.groww_connected) {
+    return (
+      <p className="mb-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-400">
+        <b className="text-slate-300">Groww account:</b> no Groww session. Log in from Settings → Account → Broker keys.
+      </p>
+    );
+  }
+  if (a.funds_source !== "groww" || a.clear_cash == null) {
+    return (
+      <p role="alert" className="mb-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+        <b>Groww account:</b> {a.funds_error ?? "the balance could not be read."} This is not a zero balance.
+      </p>
+    );
+  }
+  return (
+    <section aria-label="Groww account" className="mb-3 rounded-md border border-emerald-400/30 bg-emerald-500/[0.06] px-3 py-2">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <b className="text-emerald-200">Groww account (real money)</b>
+        <span className="text-slate-400">read {groww?.at}</span>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+        <dt className="text-slate-400">Cash balance</dt>
+        <dd className="text-right font-mono font-semibold text-slate-100">{inr(a.clear_cash)}</dd>
+        <dt className="text-slate-400">Intraday (MIS) margin available</dt>
+        <dd className="text-right font-mono text-slate-200">{a.mis_balance_available == null ? "—" : inr(a.mis_balance_available)}</dd>
+      </dl>
+      <p className="mt-1 text-[11px] text-slate-500">What Groww reports for your account; LIVE bots and Groww-execution orders use this. The practice figures below are separate.</p>
+    </section>
+  );
+}
+
+function WalletDialog({
+  wallet,
+  groww,
+  onChange,
+  onClose,
+}: {
+  wallet: Wallet | null;
+  groww: GrowwFunds | null;
+  onChange: (w: Wallet) => void;
+  onClose: () => void;
+}) {
   const [amount, setAmount] = useState("");
   const [margin, setMargin] = useState(String(wallet?.margin_pct ?? 20));
   const [busy, setBusy] = useState<string | null>(null);
@@ -249,6 +348,7 @@ function WalletDialog({ wallet, onChange, onClose }: { wallet: Wallet | null; on
       </div>
       {tab === "loans" ? <LoanRecords /> : tab === "statement" ? <Statement /> : (
       <>
+      <GrowwAccount groww={groww} />
       {w?.active ? (
         <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1">
           <dt className="text-slate-400">Free balance</dt>
