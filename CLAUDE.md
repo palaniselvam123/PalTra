@@ -149,9 +149,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `/api/research/*` (state, chart, history, config, trade-symbols, bot); there is
   no research mode switch. UI: the terminal's Live desk / Research switch,
   remembered per browser or set with `/terminal/?desk=research`.
-- `backend/bots.py` – Bots 2-4: more SMA bots next to the main desk (bot 1),
+- `backend/bots.py` – Bots 2-5: more SMA bots next to the main desk (bot 1),
   each a `BotEngine` (subclass of `StrategyEngine`) that can trade LIVE. Own
-  settings row (`BotConfig` id 3-5 via `config_id_for`; id 2 is research),
+  settings row (`BotConfig` id 3-6 via `config_id_for`; id 2 is research),
   first copied from bot 1 with an empty Trade list and PAPER, and its own
   `bot_name`. Own book: every trade row carries `TradeLog.bot` (1 = main
   desk, NULL on older rows), and the engine's queries filter by it
@@ -164,8 +164,23 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   a stock is armed on a LIVE bot, when a bot is switched to LIVE, and in
   `StrategyEngine._open` just before every LIVE entry (`live_guard`).
   API: `/api/bots` (list), `/api/bots/kill-all`, and the terminal routes under
-  `/api/bots/{2-4}/` (state, chart, history, config, trade-symbols, mode,
-  bot/*). UI: the terminal's bot switch (`?desk=bot2`…), Settings picks the bot.
+  `/api/bots/{2-5}/` (state, chart, history, config, trade-symbols, mode,
+  bot/*). UI: the terminal's bot switch (`?desk=bot2`…`bot5`), Settings picks the bot.
+- `backend/fast_bot.py` – fast-mover hand-off to **Bot 5** (`on`, off by default, PAPER and LIVE; `fast_bot.json` next to
+  the SMA DB, `FAST_BOT_FILE`): Bots 1-4 trade many stocks small; a stock a source bot (`sources`, default 1-4) **holds**
+  that moves fast **in that trade's favour** is cut there and Bot 5 opens the same side at once with its own quantity.
+  `FastBot.run` (desk only, started in `boot_engine`, not with `server_role.no_orders()`) every `POLL_SEC` 5 s while NSE
+  is open reads the bots' own last prices (`_ltps`, no extra Groww call). Fast (`rule`): `MOVE` (≥ `pct` 0.5 % its way
+  within `minutes` 3, from the window's low for a long / high for a short), `SPEED` (≥ `speed` 0.15 %/min its way over
+  `speed_minutes` 5) or `EITHER`. `ready` first checks Bot 5 can take it (RUNNING, market hours, before its cut-off /
+  square-off, under its trade cap, not already holding it; a LIVE Bot 5 never takes a PAPER trade; a LIVE position
+  restored without its stop id stays), then the source's `close_symbol` (`FAST_MOVE_HANDOFF`, LIVE stop cancelled first),
+  in LIVE a wait until Groww shows no shares (`FLAT_WAIT_SEC`), `recovery.handoff(to_bot=5)` (off the source's Trade list,
+  onto Bot 5's; one LIVE bot per stock), and Bot 5's `direct_order` (entry reason `FAST_MOVE`: no SMA cross, VWAP / RSI
+  or other entry check; Bot 5's stop and exits run it). The stock stays on Bot 5 for the day; each stock once a day, at
+  most `max_day` (10) a day. `GET/PUT /api/bots/fast-mover` (turning it on while Bot 5 is LIVE needs `confirm_live`,
+  409 without); Settings → "Fast movers → Bot 5" (`components/Settings/FastMoverBot.tsx`). Replays and research never
+  hand off.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -1211,7 +1226,8 @@ Real orders reach Groww in only two places:
    In PAPER these return local `PAPER…` ids and never touch the SDK.
    Called from `strategy_engine.py` (`_open`, `_close_position`,
    `_cancel_sl_verified`); a news entry on a LIVE bot (`news_order`,
-   `news_entry.py`) goes through the same `_open`. Bots 2-4 send theirs through their own
+   `news_entry.py`) and a fast-mover hand-off to a LIVE Bot 5 (`fast_bot.py`, `direct_order`) go
+   through the same `_open`. Bots 2-5 send theirs through their own
    `bots.BotGrowwClient` (a `GrowwClient` with its own mode), never through
    the main desk's client.
 2. **ORB Desk manual desk, "groww" execution** –

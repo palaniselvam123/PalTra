@@ -35,6 +35,7 @@ import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
+import fast_bot
 import fast_move
 import level_check
 import news_entry
@@ -198,7 +199,7 @@ async def _fast_move_scan(snapshot: dict) -> None:
 
 
 def _fast_move_prices() -> dict[str, float]:
-    """Last prices of every stock armed or held on bots 1-4 (the bots' own quotes; no extra Groww call)."""
+    """Last prices of every stock armed or held on bots 1-5 (the bots' own quotes; no extra Groww call)."""
     out: dict[str, float] = {}
     for eng in _all_bots():
         cfg = getattr(eng, "_cfg_cache", None)
@@ -214,14 +215,14 @@ def _fast_move_prices() -> dict[str, float]:
 chop_scanner.on_done = _chop_done
 #: One replay player per SMA bot (1-4), so all four bots can replay at once
 #: (meant for after market hours; the machine has 4 CPUs). Bot 1's is `replay`.
-replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, 2, 3, 4)}
+replays: dict[int, ReplaySession] = {n: ReplaySession() for n in (1, *EXTRA_BOTS)}
 replay = replays[1]
 
 
 def _replay_for(bot: int) -> ReplaySession:
     session = replays.get(int(bot))
     if session is None:
-        raise HTTPException(422, "bot must be 1 to 4")
+        raise HTTPException(422, f"bot must be 1 to {EXTRA_BOTS[-1]}")
     return session
 # Paper-only second bot on the same live quotes (research.py). It reads quotes
 # through the live client's refresh and nothing else.
@@ -299,6 +300,8 @@ def boot_engine() -> asyncio.Task | None:
     # Fast-move alerts on armed / held stocks (fast_move.py): off until turned on; alerts only.
     if not server_role.no_orders():
         fast_move.watcher.start(_fast_move_prices, _fast_move_send, _fast_move_call)
+        # Fast-mover hand-off (fast_bot.py): a held stock running its trade's way moves to Bot 5.
+        fast_bot.watcher.start(_bots_by_number)
     # Auto-start (auto_start.py): presses Start for a STOPPED PAPER bot with it on while NSE is open.
     global _auto_start_task
     if not server_role.no_orders():
@@ -344,6 +347,11 @@ def _auto_scans_due(now: dt.datetime | None = None) -> bool:
     return any(p.on and p.times for p in scan_arm.load())
 
 
+def _bots_by_number() -> dict[int, StrategyEngine]:
+    """Every SMA bot by its number (1 = the main desk)."""
+    return {1: engine, **bot_engines}
+
+
 def _all_bots() -> list[StrategyEngine]:
     """Bots 1-4, the ones the all-bots target / stop loss adds up and stops (not research)."""
     return [engine, *bot_engines.values()]
@@ -360,6 +368,7 @@ def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
     fast_move.watcher.stop()
+    fast_bot.watcher.stop()
     scan_arm_runner.stop()
     open_pnl_recorder.stop()
     scan_checker.stop("Stopped: the app is shutting down.")
@@ -746,8 +755,8 @@ class TradeSymbolUpdate(BaseModel):
 class TradeSymbolCopy(BaseModel):
     """Copy stocks from one bot's Trade list onto another bot's. The source bot keeps them."""
 
-    from_bot: Literal[1, 2, 3, 4]
-    to_bot: Literal[1, 2, 3, 4]
+    from_bot: Literal[1, 2, 3, 4, 5]
+    to_bot: Literal[1, 2, 3, 4, 5]
     symbols: list[str] = Field(default_factory=list, max_length=MAX_TRADE_SYMBOLS)
     source: str | None = Field(default=None, max_length=40)
 
@@ -896,8 +905,8 @@ async def copy_trade_symbols(body: TradeSymbolCopy):
 class SettingsCopy(BaseModel):
     """Copy one bot's strategy settings onto another bot (or the research desk)."""
 
-    from_desk: Literal["1", "2", "3", "4", "research"]
-    to_desk: Literal["1", "2", "3", "4", "research"]
+    from_desk: Literal["1", "2", "3", "4", "5", "research"]
+    to_desk: Literal["1", "2", "3", "4", "5", "research"]
     # Also replace the destination's own per-stock settings with the source's.
     stock_settings: bool = False
     # The destination trades real money: the page asked first.
@@ -1598,7 +1607,7 @@ class ReplayStart(BaseModel):
     symbols: list[str] | None = None
     #: The SMA bot whose settings and armed stocks to replay: 1 (main desk, the
     #: default) or 2-4. Practice money whichever bot; never sends an order.
-    bot: int = Field(default=1, ge=1, le=4)
+    bot: int = Field(default=1, ge=1, le=5)
     #: Replay as armed (arm_log.py): the stocks this bot had armed on those days, each traded
     #: only while it was armed live, from 09:15. `symbols` is ignored then.
     as_armed: bool = False
@@ -2252,7 +2261,7 @@ async def _scan_arm_bots() -> dict[int, dict]:
             raise RuntimeError(body["error"])
     else:
         body = await asyncio.to_thread(armed_lists)
-    return {int(b["bot"]): b for b in body.get("bots", []) if b.get("bot") in (1, 2, 3, 4)}
+    return {int(b["bot"]): b for b in body.get("bots", []) if b.get("bot") in (1, *EXTRA_BOTS)}
 
 
 async def _scan_arm_arm(bot: int, symbol: str, source: str, confirm_live: bool) -> str | None:
@@ -2342,7 +2351,7 @@ def _scan_arm_scheduled(p: scan_arm.Preset, at: str) -> None:
 class ScanArmPresetBody(BaseModel):
     id: str | None = Field(default=None, max_length=16)
     name: str | None = Field(default=None, max_length=40)
-    bot: Literal[1, 2, 3, 4] | None = None
+    bot: Literal[1, 2, 3, 4, 5] | None = None
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
     minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     sizes: list[Literal[1, 2, 3, 5, 10, 15]] | None = Field(default=None, max_length=6)
@@ -2514,7 +2523,7 @@ async def morning_scan_status():
 
 # ---- open P&L log: each desk's "Open" figure, minute by minute (open_pnl_log.py)
 
-OPEN_PNL_DESKS = ("1", "2", "3", "4", "research")
+OPEN_PNL_DESKS = ("1", "2", "3", "4", "5", "research")
 
 
 def _open_pnl_desks() -> list[tuple[str, object]]:
@@ -2551,7 +2560,7 @@ def _closed_by_stock(day: str, desk: str | None = None, modes: set[str] | None =
 
 @app.get("/api/open-pnl")
 async def open_pnl(
-    desk: Literal["1", "2", "3", "4", "research"] = "1",
+    desk: Literal["1", "2", "3", "4", "5", "research"] = "1",
     day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ):
     """One desk's open P&L through a day, one point a minute (the latest day when none is given). Read-only."""
@@ -2574,7 +2583,7 @@ async def open_pnl(
 
 @app.get("/api/arm-log")
 async def arm_log_day(
-    desk: Literal["1", "2", "3", "4", "research"] = "1",
+    desk: Literal["1", "2", "3", "4", "5", "research"] = "1",
     day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ):
     """When each stock was armed on / taken off a desk's Trade list on one IST day (today when none). Read-only."""
@@ -2594,7 +2603,7 @@ async def arm_log_day(
 
 
 @app.get("/api/open-pnl/replays")
-async def open_pnl_replays(bot: int = Query(1, ge=1, le=4)):
+async def open_pnl_replays(bot: int = Query(1, ge=1, le=5)):
     """A bot's replay runs that have an open P&L log (newest first). Read-only."""
     return {"bot": bot, "runs": await asyncio.to_thread(open_pnl_log.replay_runs, bot)}
 
@@ -2745,7 +2754,7 @@ async def trades_book(mode: str = "PAPER", limit: int = BOOK_LIMIT, bot: int | N
     if book not in BOOKS:
         raise HTTPException(status_code=422, detail=f"mode must be one of {', '.join(BOOKS)}")
     if bot is not None and bot not in (1, *EXTRA_BOTS):
-        raise HTTPException(status_code=422, detail="bot must be 1 to 4")
+        raise HTTPException(status_code=422, detail=f"bot must be 1 to {EXTRA_BOTS[-1]}")
     # Open research trades are priced and ranged by the research desk.
     src = research_engine if book == "RESEARCH" else bot_engines.get(bot or 1, engine)
     ltps = dict(src._ltps)
@@ -2865,7 +2874,7 @@ def _bot_summary(eng: StrategyEngine) -> dict:
 # ---- Backtest server link (backtest_server.py) ---------------------------------------------
 
 #: Settings rows copied to the backtest server: bot 1, research, bots 2-4.
-BACKTEST_CONFIG_IDS = (1, 2, 3, 4, 5)
+BACKTEST_CONFIG_IDS = (1, 2, 3, 4, 5, 6)
 
 
 def _jsonable(value):
@@ -3062,7 +3071,7 @@ async def news_candles(symbols: list[str], day: dt.date) -> dict[str, dict]:
 
 
 def news_watch_list() -> dict:
-    """Armed and held stocks of bots 1-4, for the desk's news alerts (read-only).
+    """Armed and held stocks of bots 1-5, for the desk's news alerts (read-only).
 
     symbol -> {"armed": [bot names], "held": [{bot, name, mode, side, qty}]}, held stocks first.
     """
@@ -3266,7 +3275,7 @@ async def pnl_alerts_test():
 
 
 class NewsEntrySettings(BaseModel):
-    bot: int = Field(ge=0, le=4)  # 0 = off
+    bot: int = Field(ge=0, le=5)  # 0 = off
     impact: Literal["LOW", "MEDIUM", "HIGH"] = "HIGH"
     scope: Literal["FNO", "ARMED"] = "FNO"
     max_age_min: int = Field(default=15, ge=1, le=news_entry.MAX_AGE_MIN)
@@ -3324,6 +3333,56 @@ async def news_entry_consider(symbol: str, item: dict, now) -> str | None:
         return None
     eng = _bot_engine_for(conf["bot"]) if conf["bot"] == 1 or conf["bot"] in bot_engines else None
     return await news_entry.consider(symbol, item, engine.load_config(), eng, now)
+
+
+class FastBotSettings(BaseModel):
+    on: bool | None = None
+    rule: Literal["MOVE", "SPEED", "EITHER"] | None = None
+    pct: float | None = Field(None, ge=0.05, le=fast_bot.MAX_PCT)
+    minutes: int | None = Field(None, ge=1, le=fast_bot.MAX_MINUTES)
+    speed: float | None = Field(None, ge=0.01, le=fast_bot.MAX_SPEED)
+    speed_minutes: int | None = Field(None, ge=1, le=fast_bot.MAX_MINUTES)
+    sources: list[Literal[1, 2, 3, 4]] | None = None
+    max_day: int | None = Field(None, ge=1, le=100)
+    confirm_live: bool = False
+
+
+def _fast_bot_view() -> dict:
+    from dataclasses import asdict
+
+    target = bot_engines.get(fast_bot.TARGET_BOT)
+    cfg = target.load_config() if target is not None else None
+    return {
+        **asdict(fast_bot.load()),
+        "target_bot": fast_bot.TARGET_BOT,
+        "target_mode": (getattr(cfg, "trading_mode", None) or "PAPER").upper(),
+        "target_status": getattr(target, "status", None),
+        "target_qty": int(getattr(cfg, "qty", 0) or 0),
+        **fast_bot.watcher.snapshot(),
+    }
+
+
+@app.get("/api/bots/fast-mover")
+async def fast_bot_get():
+    """Fast-mover hand-off to Bot 5: settings, Bot 5's mode and today's hand-offs (fast_bot.py)."""
+    return _fast_bot_view()
+
+
+@app.put("/api/bots/fast-mover")
+async def fast_bot_put(body: FastBotSettings):
+    """Save the fast-mover hand-off settings. Turning it on while Bot 5 is LIVE needs `confirm_live`.
+
+    No order is placed here; hand-offs happen in the watcher while NSE is open."""
+    if body.on:
+        ensure_bot_config(fast_bot.TARGET_BOT)
+        target = bot_engines[fast_bot.TARGET_BOT].load_config()
+        if (target.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(
+                409,
+                f"Bot {fast_bot.TARGET_BOT} is LIVE: fast movers would place real Groww orders at its size. Confirm first.",
+            )
+    fast_bot.save(body.model_dump(exclude={"confirm_live"}, exclude_none=True))
+    return _fast_bot_view()
 
 
 @app.post("/api/bots/kill-all")

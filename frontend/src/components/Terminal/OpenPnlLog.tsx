@@ -274,7 +274,7 @@ export function OpenPnlLog({
   startOnReplay?: boolean;
 }) {
   // Bots 1-4 replay; the research desk does not.
-  const bot = /^[1-4]$/.test(desk) ? Number(desk) : null;
+  const bot = /^[1-5]$/.test(desk) ? Number(desk) : null;
   const [source, setSource] = useState<"live" | "replay">(startOnReplay && bot ? "replay" : "live");
   const [runs, setRuns] = useState<OpenPnlReplayRun[]>([]);
   const [runId, setRunId] = useState<number | undefined>(undefined);

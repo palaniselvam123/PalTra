@@ -13,6 +13,7 @@ const ENTRY_SHORT: Record<string, string> = {
   NEWS: "News",
   HANDOFF: "Hand-off",
   SMA9_TURN: "SMA 9 turn",
+  FAST_MOVE: "Fast mover",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -29,6 +30,7 @@ const ENTRY_LONG: Record<string, string> = {
   NEWS: "News entry: a strong, fresh headline (good news buys, bad news shorts), no SMA cross or pattern read",
   HANDOFF: "Handed over from another bot: ordered at once, the opposite of that bot's closed trade",
   SMA9_TURN: "SMA 9 turn: the fast SMA made a sharp V (or a rounded U), ordered before the cross",
+  FAST_MOVE: "Fast mover: moved from another bot while running its way, ordered at once at this bot's size",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

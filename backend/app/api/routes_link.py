@@ -203,7 +203,7 @@ async def backtest_groww(request: Request):
 def _target(raw: str) -> int | str:
     if raw == "research":
         return "research"
-    if raw in ("1", "2", "3", "4"):
+    if raw in ("1", "2", "3", "4", "5"):
         return int(raw)
     raise HTTPException(400, "Target is a bot 1-4 or research.")
 

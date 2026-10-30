@@ -41,7 +41,7 @@ def _sources(row: BotConfig) -> dict[str, str]:
 
 
 def desk_of(config_id: int) -> str:
-    """'1'-'4' or 'research' for a BotConfig row id."""
+    """'1'-'5' or 'research' for a BotConfig row id."""
     cid = int(config_id)
     if cid == 2:
         return "research"
@@ -54,8 +54,8 @@ def config_id_of(desk: str | int) -> int:
     if text == "research":
         return 2
     bot = int(text)
-    if bot not in (1, 2, 3, 4):
-        raise ValueError("desk must be 1-4 or research")
+    if bot not in (1, 2, 3, 4, 5):
+        raise ValueError("desk must be 1-5 or research")
     return 1 if bot == 1 else bot + 1
 
 

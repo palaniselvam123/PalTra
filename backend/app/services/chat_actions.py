@@ -30,7 +30,7 @@ def _symbols(values: list[str] | None) -> list[str]:
 
 
 class TradeListProposal(BaseModel):
-    bot: Literal[1, 2, 3, 4] = 1
+    bot: Literal[1, 2, 3, 4, 5] = 1
     arm: list[str] = Field(default_factory=list, max_length=MAX_SYMBOLS)
     unarm: list[str] = Field(default_factory=list, max_length=MAX_SYMBOLS)
     reason: str = Field(default="", max_length=500)
@@ -43,7 +43,7 @@ class TradeListProposal(BaseModel):
 
 # Same bounds as the terminal's ConfigUpdate, so a card never offers a value the save would refuse.
 class StopProposal(BaseModel):
-    bot: Literal[1, 2, 3, 4] = 1
+    bot: Literal[1, 2, 3, 4, 5] = 1
     symbol: str | None = None
     use_stop: bool | None = None
     stop_type: Literal["ATR", "SMA_GAP", "TSL"] | None = None
@@ -70,7 +70,7 @@ class StopProposal(BaseModel):
 
 STOP_FIELDS = [name for name in StopProposal.model_fields if name not in ("bot", "symbol", "reason")]
 
-_BOT = {"type": "integer", "enum": [1, 2, 3, 4], "description": "Which SMA bot: 1 = main desk, 2-4 = bots 2-4."}
+_BOT = {"type": "integer", "enum": [1, 2, 3, 4, 5], "description": "Which SMA bot: 1 = main desk, 2-5 = bots 2-5."}
 _REASON = {"type": "string", "description": "One short line on why, quoting the facts used."}
 
 TOOLS = [

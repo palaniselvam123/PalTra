@@ -143,6 +143,7 @@ ENTRY_REASONS = (
     "NEWS",
     "HANDOFF",
     "SMA9_TURN",
+    "FAST_MOVE",
 )
 
 

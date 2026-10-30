@@ -97,7 +97,7 @@ def test_terminal_endpoint_answers_and_says_what_it_sees():
     assert r.status_code in (200, 503)
     body = r.json()
     assert {"ok", "reasons", "bots", "loop", "market_open"} <= set(body)
-    assert [b["bot"] for b in body["bots"]] == [1, 2, 3, 4]
+    assert [b["bot"] for b in body["bots"]] == [1, 2, 3, 4, 5]
     assert "mode" not in body
 
 

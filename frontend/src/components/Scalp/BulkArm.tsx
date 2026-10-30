@@ -187,7 +187,7 @@ export function BulkArm({
 
   const backtest = async () => {
     if (!desk || desk.target === "research" || !armedOk.length) return;
-    const bot = desk.target as 1 | 2 | 3 | 4;
+    const bot = desk.target as 1 | 2 | 3 | 4 | 5;
     const days = lastClosedWeekdays(btDays);
     setBtBusy(true);
     setBtNote(null);

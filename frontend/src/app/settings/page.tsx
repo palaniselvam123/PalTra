@@ -8,6 +8,7 @@ import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnosti
 import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
 import { FastMoveAlerts } from "@/components/Settings/FastMoveAlerts";
+import { FastMoverBot } from "@/components/Settings/FastMoverBot";
 import { NewsEntries } from "@/components/Settings/NewsEntries";
 import { NewsAlerts } from "@/components/Settings/NewsAlerts";
 import { NewsByDay } from "@/components/Settings/NewsByDay";
@@ -20,6 +21,7 @@ const SECTIONS: [string, string][] = [
   ["all-bots-guard", "All-bots target"],
   ["pnl-alerts", "P&L alerts"],
   ["fast-moves", "Fast moves"],
+  ["fast-mover-bot", "Fast movers → Bot 5"],
   ["news-entries", "News entries"],
   ["news-alerts", "News alerts"],
   ["sma-strategy", "SMA strategy"],
@@ -51,6 +53,7 @@ export default function SettingsPage() {
         <AllBotsGuard />
         <PnlAlerts />
         <FastMoveAlerts />
+        <FastMoverBot />
         <NewsEntries />
         <NewsAlerts />
         <NewsByDay />

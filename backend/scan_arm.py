@@ -88,7 +88,7 @@ def clean(raw: dict, base: Preset | None = None) -> Preset:
         p.id = re.sub(r"[^a-z0-9]", "", str(raw["id"]).lower())[:16]
     if raw.get("name") is not None:
         p.name = (str(raw["name"]).strip() or p.name)[:40]
-    if raw.get("bot") is not None and int(raw["bot"]) in (1, 2, 3, 4):
+    if raw.get("bot") is not None and int(raw["bot"]) in (1, 2, 3, 4, 5):
         p.bot = int(raw["bot"])
     if raw.get("lists") is not None:
         lists = [k for k in dict.fromkeys(str(x).lower() for x in raw["lists"]) if k in SCAN_LISTS]

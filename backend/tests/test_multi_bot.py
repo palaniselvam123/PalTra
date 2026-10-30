@@ -200,7 +200,7 @@ def test_bots_api(tmp_path, monkeypatch):
 
     with TestClient(app) as client:
         listed = client.get("/api/bots").json()
-        assert [b["bot"] for b in listed] == [1, 2, 3, 4] and all(b["mode"] == "PAPER" for b in listed)
+        assert [b["bot"] for b in listed] == [1, 2, 3, 4, 5] and all(b["mode"] == "PAPER" for b in listed)
         assert client.get("/api/bots/2/state").json()["bot"] == 2
         assert client.get("/api/bots/9/state").status_code == 404
         named = client.put("/api/bots/2/config", json={"bot_name": "Scalper"})

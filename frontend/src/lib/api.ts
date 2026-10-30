@@ -233,8 +233,8 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 /** A change the assistant proposed. Nothing is saved until the person taps Apply. */
 export type ChatProposal =
-  | { kind: "trade_list"; bot: 1 | 2 | 3 | 4; arm: string[]; unarm: string[]; reason: string }
-  | { kind: "stop"; bot: 1 | 2 | 3 | 4; symbol: string | null; changes: Record<string, string | number | boolean>; reason: string };
+  | { kind: "trade_list"; bot: 1 | 2 | 3 | 4 | 5; arm: string[]; unarm: string[]; reason: string }
+  | { kind: "stop"; bot: 1 | 2 | 3 | 4 | 5; symbol: string | null; changes: Record<string, string | number | boolean>; reason: string };
 
 
 export type ChartCandle = {

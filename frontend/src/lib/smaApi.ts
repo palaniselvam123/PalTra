@@ -450,7 +450,7 @@ export type TrendAlerts = {
 export type ScanArmPreset = {
   id: string;
   name: string;
-  bot: 1 | 2 | 3 | 4;
+  bot: 1 | 2 | 3 | 4 | 5;
   lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
   minutes: number;
   sizes: number[];
@@ -566,6 +566,25 @@ export type FastMoveSettings = {
   }[];
   watches_armed?: boolean;
   scans_enabled?: boolean;
+};
+/** Fast-mover hand-off to Bot 5 (fast_bot.py). */
+export type FastBotRule = "MOVE" | "SPEED" | "EITHER";
+export type FastBotSettings = {
+  on: boolean;
+  rule: FastBotRule;
+  pct: number;
+  minutes: number;
+  speed: number;
+  speed_minutes: number;
+  sources: number[];
+  max_day: number;
+  target_bot?: number;
+  target_mode?: "PAPER" | "LIVE";
+  target_status?: string | null;
+  target_qty?: number;
+  day?: string | null;
+  moved_today?: string[];
+  recent?: { at: string; symbol: string; from_bot: number; why: string; side?: "LONG" | "SHORT"; result: string }[];
 };
 export type OpenPnlStockPoint = { t: string; closed: number; open: number; total: number; side: "LONG" | "SHORT" | null };
 
@@ -1028,7 +1047,7 @@ export const EXIT_CANDLE_MINUTES = [0, 1, 2, 3, 5, 10, 15, 30, 60];
 /** Slope candle sizes for the SMA 9 line exits (slope_exit.py); 0 = the bot's own candle. */
 export const SLOPE_MINUTES = [0, 1, 2, 3, 5, 10, 15];
 
-export type ArmTarget = 1 | 2 | 3 | 4 | "research";
+export type ArmTarget = 1 | 2 | 3 | 4 | 5 | "research";
 
 /** The all-bots day target / stop loss (all_bots_guard.py). */
 export interface AllBotsGuard {
@@ -1342,12 +1361,12 @@ export function setReplayRouting(on: boolean): void {
   replayRouting = on;
 }
 /**
- * Which bot this page drives: "live" is the main desk (bot 1), "bot2"…"bot4"
+ * Which bot this page drives: "live" is the main desk (bot 1), "bot2"…"bot5"
  * the extra bots (each PAPER or LIVE, own settings and book), "research" the
  * paper-only research desk.
  */
-export type Desk = "live" | "bot2" | "bot3" | "bot4" | "research";
-export const DESKS: Desk[] = ["live", "bot2", "bot3", "bot4", "research"];
+export type Desk = "live" | "bot2" | "bot3" | "bot4" | "bot5" | "research";
+export const DESKS: Desk[] = ["live", "bot2", "bot3", "bot4", "bot5", "research"];
 const DESK_KEY = "sma.desk";
 let desk: Desk = "live";
 
@@ -1586,7 +1605,7 @@ export const smaApi = {
       false
     ),
   /** Copy stocks onto another bot's Trade list. The source bot keeps them. */
-  copyTradeSymbols: (fromBot: 1 | 2 | 3 | 4, toBot: 1 | 2 | 3 | 4, symbols: string[], source?: string | null) =>
+  copyTradeSymbols: (fromBot: 1 | 2 | 3 | 4 | 5, toBot: 1 | 2 | 3 | 4 | 5, symbols: string[], source?: string | null) =>
     request<{ added: string[]; skipped: { symbol: string; why: string }[]; config: SmaConfig }>(
       "/api/trade-symbols/copy",
       {
@@ -1597,9 +1616,9 @@ export const smaApi = {
       false
     ),
   /** A chosen bot's settings, whatever desk this page is on. */
-  configOn: (bot: 1 | 2 | 3 | 4) =>
+  configOn: (bot: 1 | 2 | 3 | 4 | 5) =>
     request<SmaConfig>(bot === 1 ? "/api/config" : `/api/bots/${bot}/config`, undefined, undefined, false),
-  saveConfigOn: (bot: 1 | 2 | 3 | 4, body: Partial<SmaConfig>) =>
+  saveConfigOn: (bot: 1 | 2 | 3 | 4 | 5, body: Partial<SmaConfig>) =>
     request<SmaConfig>(
       bot === 1 ? "/api/config" : `/api/bots/${bot}/config`,
       { method: "PUT", body: JSON.stringify(body) },
@@ -1715,6 +1734,9 @@ export const smaApi = {
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
   pnlAlerts: () => request<PnlAlertSettings>("/api/bots/pnl-alerts"),
   /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
+  fastBot: () => request<FastBotSettings>("/api/bots/fast-mover"),
+  saveFastBot: (body: Partial<Omit<FastBotSettings, "recent" | "moved_today" | "day">> & { confirm_live?: boolean }) =>
+    request<FastBotSettings>("/api/bots/fast-mover", { method: "PUT", body: JSON.stringify(body) }),
   fastMoves: () => request<FastMoveSettings>("/api/fast-moves"),
   saveFastMoves: (body: Omit<FastMoveSettings, "recent" | "watches_armed" | "scans_enabled">) =>
     request<FastMoveSettings>("/api/fast-moves", { method: "PUT", body: JSON.stringify(body) }),
