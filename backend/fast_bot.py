@@ -473,6 +473,15 @@ def _bot5_row():
         return row
 
 
+def _column_default(name: str):
+    from models import BotConfig
+
+    column = BotConfig.__table__.columns.get(name)
+    default = getattr(column, "default", None) if column is not None else None
+    arg = getattr(default, "arg", None)
+    return None if callable(arg) else arg
+
+
 def replay_snapshot(bot: int) -> dict | None:
     """What a new replay of `bot` needs to play the hand-off: these settings and Bot 5's strategy
     settings. None when the switch is off, `bot` is not a source, or Bot 5 has no settings yet."""
@@ -484,7 +493,15 @@ def replay_snapshot(bot: int) -> dict | None:
     row = _bot5_row()
     if row is None:
         return None
-    fields = {name: getattr(row, name) for name in STOCK_FIELDS if getattr(row, name, None) is not None}
+    fields = {}
+    for name in STOCK_FIELDS:
+        value = getattr(row, name, None)
+        if value is None:
+            # A setting Bot 5 never saved reads as its default live; carry that default, so the replayed bot's
+            # own value (say its pivot target) never leaks into Bot 5's trade.
+            value = _column_default(name)
+        if value is not None:
+            fields[name] = value
     return {"settings": asdict(s), "bot5": fields, "bot5_stocks": stock_settings(row)}
 
 
