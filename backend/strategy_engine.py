@@ -1038,12 +1038,18 @@ class StrategyEngine:
         """The engine's clock. A replay engine runs on the replayed day instead."""
         return _ist_now()
 
-    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:
-        """Telegram/WhatsApp alert, and a phone call with `call`. A replay engine sends none."""
+    def _alert(self, message: str, critical: bool = False, call: bool = False, kind: str = "trade") -> None:
+        """Telegram/WhatsApp alert, and a phone call with `call`. A replay engine sends none.
+
+        `kind` picks the channel: "trade" (fills, closes, refusals, hand-offs) or "signal" (a cross
+        coming, an SMA 9 turn, a 1-minute review); each falls back to the trade channel when unset.
+        """
         if critical:
             _schedule_critical_whatsapp(message, call=call)
-        else:
+        elif kind == "trade":
             _schedule_whatsapp(message)
+        else:
+            _schedule_kind_whatsapp(message, kind)
 
     def _view_frame(self, view: str, frame: pd.DataFrame, cfg: BotConfig) -> tuple[pd.DataFrame, bool]:
         """The chart stock's enriched candles, and whether they were recomputed.
@@ -1696,7 +1702,8 @@ class StrategyEngine:
                     self._alert(
                         turn_entry.alert_text(
                             bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg), held=held, away=away, waits=waits
-                        )
+                        ),
+                        kind="signal",
                     )
         hit = self._turn_hit.get(symbol)
         return hit if hit is not None and hit[0] == ts else None
@@ -4417,7 +4424,7 @@ class StrategyEngine:
             if key in self._warned:
                 return
             self._warned.add(key)
-            self._alert(message)
+            self._alert(message, kind="signal")
             return
         if minutes is None or minutes > _WARN_CLEAR_MINUTES:
             self._warned.discard(key)
@@ -5038,7 +5045,7 @@ class StrategyEngine:
         self._signals[symbol] = note
         self.last_signal = note
         if default == "PROMPT":
-            self._alert(text)
+            self._alert(text, kind="signal")
             callback = self.on_review
             if callback is not None:
                 try:
@@ -5768,6 +5775,24 @@ def upcoming_square_off_alert(*, symbol: str, direction: str, minutes: float, cl
         f"Closes at {clock} IST\n"
         f"No close yet"
     )
+
+
+def _schedule_kind_whatsapp(message: str, kind: str) -> None:
+    """A heads-up that is not an order ("signal", …): that kind's own channel, else the trade one."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send_to(kind, message)
+        except Exception:  # noqa: BLE001
+            return
+
+    loop.create_task(_send())
 
 
 def _schedule_whatsapp(message: str) -> None:

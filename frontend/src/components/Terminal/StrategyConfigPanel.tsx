@@ -3,6 +3,7 @@
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
+import { SlopeEditor } from "@/components/Settings/SlopeEditor";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown, Search } from "lucide-react";
@@ -1086,6 +1087,15 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
+          {form.turn_entry || form.turn_alert ? (
+            <p className="mt-2 text-xs text-slate-400">
+              The V and U shapes these read are drawn, with their angles, in the{" "}
+              <a href="#sma-slope-editor" className="text-sky-300 underline-offset-2 hover:underline">
+                slope editor (step 3)
+              </a>
+              .
+            </p>
+          ) : null}
           <SectionTitle>How the entry order is placed</SectionTitle>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -1929,6 +1939,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               These V-turn numbers also drive the SMA {form.sma_fast ?? 9} turn {form.turn_entry ? "entry" : "alert"} in step 1.
             </p>
           ) : null}
+          <SlopeEditor form={form} set={set} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"

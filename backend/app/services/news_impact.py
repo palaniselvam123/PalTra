@@ -983,7 +983,7 @@ class NewsWatcher:
             try:
                 from app.services.alert_notifier import alert_notifier
 
-                await alert_notifier.send(text)
+                await alert_notifier.send_news(text)
             except Exception as exc:  # noqa: BLE001 - the pop-up row is saved either way
                 self.status.fno_error = f"alert delivery: {exc}"[:200]
         return row
@@ -995,7 +995,7 @@ class NewsWatcher:
             if critical and cfg.call_critical:
                 await alert_notifier.send_critical(text, call=True)
             elif cfg.telegram or critical:
-                await alert_notifier.send(text)
+                await alert_notifier.send_news(text)
         except Exception as exc:  # noqa: BLE001 - the pop-up row is saved either way
             self.status.last_error = f"alert delivery: {exc}"[:200]
 

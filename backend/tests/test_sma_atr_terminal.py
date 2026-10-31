@@ -150,6 +150,8 @@ async def test_heads_up_fires_once_before_an_order_and_before_a_close(engine, mo
 
     notes: list[str] = []
     monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    # Heads-ups are signal alerts (their own channel): scheduled through the kind scheduler.
+    monkeypatch.setattr("strategy_engine._schedule_kind_whatsapp", lambda message, kind: notes.append(message))
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
     engine.status = "RUNNING"
     engine.data_source = "GROWW"
@@ -260,6 +262,8 @@ async def test_a_bearish_heads_up_does_not_order_before_the_cross(engine, monkey
 
     notes: list[str] = []
     monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    # Heads-ups are signal alerts (their own channel): scheduled through the kind scheduler.
+    monkeypatch.setattr("strategy_engine._schedule_kind_whatsapp", lambda message, kind: notes.append(message))
     monkeypatch.setattr("strategy_engine.market_is_open", lambda now=None: True)
     engine.status = "RUNNING"
     engine.data_source = "GROWW"
@@ -519,6 +523,8 @@ async def test_reverse_cancels_sl_before_new_entry(engine):
 async def test_a_fill_is_queued_for_whatsapp(engine, monkeypatch):
     notes: list[str] = []
     monkeypatch.setattr("strategy_engine._schedule_whatsapp", notes.append)
+    # Heads-ups are signal alerts (their own channel): scheduled through the kind scheduler.
+    monkeypatch.setattr("strategy_engine._schedule_kind_whatsapp", lambda message, kind: notes.append(message))
     cfg = engine.load_config()
     cfg.symbol = "SHIPROCKET"
     cfg.use_adx_filter = False
