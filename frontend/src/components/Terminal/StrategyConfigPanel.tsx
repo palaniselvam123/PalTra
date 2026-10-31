@@ -4,6 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { SlopeEditor } from "@/components/Settings/SlopeEditor";
+import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown, Search } from "lucide-react";
@@ -49,7 +50,7 @@ function toCheckMinutes(value: unknown): number[] {
   return kept.length ? kept : [1];
 }
 
-const LABELS: Record<string, string> = {
+export const LABELS: Record<string, string> = {
   qty: "qty",
   sma_fast: "fast MA",
   sma_medium: "medium MA",
@@ -339,6 +340,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   };
 
   // The "What's switched on" list and the "N on" count on each group.
+  // Saved strategies & history: reload the list after each Save; Load puts a copy's numbers into the form.
+  const [savedCount, setSavedCount] = useState(0);
+  const loadPreset = (settings: Partial<SmaConfig>, note: string) => {
+    markDirty(true);
+    setForm((prev) => (prev ? { ...prev, ...settings } : prev));
+    setMsg(`Loaded "${note}" — press Save to keep it.`);
+  };
   const rules = activeRules(form);
   const onCount = (group: RuleGroup) => rules.filter((r) => r.group === group).length;
   const turnOff = (values: Partial<Record<keyof SmaConfig, string | boolean>>) => {
@@ -596,6 +604,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       });
       markDirty(false);
       setMsg("Saved. Press Start bot. Open positions stay open.");
+      setSavedCount((n) => n + 1);
       onChanged();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -686,6 +695,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
       </div>
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
+      {!stockScope ? <StrategyPresets current={strategyBody()} labels={LABELS} refreshKey={savedCount} onLoad={loadPreset} /> : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">
         {GROUP_CHIPS.map((g) => {
           const on = g.id === "risk" ? 0 : onCount(g.id as RuleGroup);

@@ -9,6 +9,7 @@ import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { ArmLog } from "@/components/Terminal/ArmLog";
 import { ScanArm } from "@/components/Terminal/ScanArm";
 import { useTheme } from "@/hooks/useTheme";
+import { useTitle } from "@/lib/useTitle";
 import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
@@ -151,6 +152,26 @@ function DeskSwitch({ desk, onChange }: { desk: Desk; onChange: (desk: Desk) => 
 }
 
 export function Header({ state, config, connected, loadNote, onChanged, notice, desk = "live", onDeskChange, replay, onReplay, tabs, tab = "all" }: Props) {
+  // The browser tab names the desk: "Bot 3 · SMA Terminal · PalTra".
+  const deskName = desk === "research" ? "Research" : state?.bot_name || (desk === "live" ? "Bot 1" : `Bot ${desk.slice(3)}`);
+  useTitle(`${deskName} · SMA Terminal · PalTra`);
+  // The stock list shows the armed (and held) stocks only, unless switched off; kept per browser.
+  const [armedOnly, setArmedOnly] = useState(true);
+  useEffect(() => {
+    try {
+      setArmedOnly(localStorage.getItem("sma.watch.armedOnly") !== "0");
+    } catch {
+      /* private window */
+    }
+  }, []);
+  const chooseArmedOnly = (on: boolean) => {
+    setArmedOnly(on);
+    try {
+      localStorage.setItem("sma.watch.armedOnly", on ? "1" : "0");
+    } catch {
+      /* private window */
+    }
+  };
   const armLimit = desk === "research" ? RESEARCH_ARM_LIMIT : ARM_LIMIT;
   const deskBot: 1 | 2 | 3 | 4 | 5 | null =
     desk === "live" ? 1 : desk === "bot2" ? 2 : desk === "bot3" ? 3 : desk === "bot4" ? 4 : desk === "bot5" ? 5 : null;
@@ -326,7 +347,9 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     ])
   )
     .slice(0, 24)
-    .sort((a, b) => Number(armed.has(b)) - Number(armed.has(a)) || a.localeCompare(b));
+    .sort((a, b) => Number(armed.has(b)) - Number(armed.has(a)) || a.localeCompare(b))
+    // "Armed only": the Trade list and anything still held; the chart's stock and the saved extras stay off.
+    .filter((s) => !armedOnly || armed.has(s) || (bookBySymbol.get(s)?.direction ?? "FLAT") !== "FLAT");
 
   /** Put a stock on the chart. From the search box (`askArm`), a stock not yet armed then asks to arm it. */
   const applySymbol = async (next: string, askArm = false) => {
@@ -969,12 +992,19 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   </button>
                 </>
               )}
+              <label
+                className="ml-auto flex min-h-9 items-center gap-1.5 text-slate-300"
+                title="On: only the stocks on the Trade list (and any still held). Off: also the chart's stock and the stocks you looked up."
+              >
+                <input type="checkbox" checked={armedOnly} onChange={(e) => chooseArmedOnly(e.target.checked)} className="accent-emerald-400" />
+                Armed only
+              </label>
               <button
                 type="button"
                 disabled={busy || armedList.length === 0}
                 onClick={() => bulkUnarm(armedList)}
                 title="Stop new orders on every stock. Open positions stay open until their stop, a cross or square-off."
-                className="ml-auto min-h-9 rounded-md px-2.5 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10 disabled:opacity-40"
+                className="min-h-9 rounded-md px-2.5 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10 disabled:opacity-40"
               >
                 Unarm all{armedList.length ? ` (${armedList.length})` : ""}
               </button>

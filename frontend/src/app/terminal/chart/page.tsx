@@ -1,6 +1,7 @@
 "use client";
 
 import { usePinned } from "@/lib/usePinned";
+import { useTitle } from "@/lib/useTitle";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
@@ -23,9 +24,10 @@ import {
 type Pin = { seq: number; date: string | null; runId: number | null; symbol: string | null };
 
 function routedFor(info: ReplayInfo | null, runId: number | null, pastDay = false): boolean {
-  // A page opened on a replay day follows it only while it plays (or is paused). A finished
-  // run has no live replay chart any more: its day is drawn from Groww with the run's trades.
-  const live = pastDay ? ["PLAYING", "PAUSED"] : ["PLAYING", "PAUSED", "FINISHED"];
+  // A page opened on a replay day follows it while it loads, plays or is paused: while it loads the
+  // chart stays blank rather than showing the whole day from Groww before the replay has started. A
+  // finished run has no live replay chart any more: its day is drawn from Groww with the run's trades.
+  const live = pastDay ? ["LOADING", "PLAYING", "PAUSED"] : ["LOADING", "PLAYING", "PAUSED", "FINISHED"];
   if (!info || !live.includes(info.status)) return false;
   return runId == null || info.run_id == null || info.run_id === runId;
 }
@@ -51,7 +53,10 @@ export default function StockChartPage() {
     null
   );
   const [desk, setDeskName] = useState<Desk>("live");
+  useTitle(symbol ? `${symbol} · SMA chart · PalTra` : "SMA chart · PalTra");
   const following = useRef(false);
+  // The replay this page follows is still loading its candles (its chart answers 409 until it starts).
+  const loadingRef = useRef(false);
   const bars = useRef(400);
   // A candle size the bot's own candle cannot make (from the chart's candle-size menu); null = the bot's own.
   const barInterval = useRef<number | null>(null);
@@ -72,7 +77,6 @@ export default function StockChartPage() {
     setDeskName(p.desk);
     setSymbol(name);
     setResearch(p.research);
-    document.title = name ? `${name} · SMA chart` : "SMA chart";
     // A past replay day shows at once; it switches to following if that run is still playing.
     if (p.date) setPin({ seq: 1, date: p.date, runId: p.runId, symbol: name });
   }, []);
@@ -86,6 +90,7 @@ export default function StockChartPage() {
       try {
         const info = await smaApi.replayInfo();
         setReplay(info);
+        loadingRef.current = info.status === "LOADING";
         const routed = routedFor(info, p.runId, Boolean(p.date));
         if (p.date) follow = routed;
         else follow = !routed; // a live chart while no replay is on
@@ -110,6 +115,12 @@ export default function StockChartPage() {
         setChart(nextChart);
         setNote(null);
       } catch (err: unknown) {
+        if (p.date && loadingRef.current) {
+          // Still loading the replay's candles: no chart yet. Showing the whole day now would be wrong.
+          setChart(null);
+          setNote("Loading the replay…");
+          return;
+        }
         if (p.date) {
           // The replay's live chart is gone (ended, stopped or the server restarted): show its day instead of a blank chart.
           following.current = false;

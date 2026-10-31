@@ -150,6 +150,8 @@ export default function ScalpPage() {
 
   // "Backtest these": replay the ticked stocks over past days with the bot.
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // "Show ticked only": the table keeps just the ticked stocks (a hand-picked watch list of the monitor).
+  const [pickedOnly, setPickedOnly] = useState(false);
   const [btDays, setBtDays] = useState(10);
   const [btBusy, setBtBusy] = useState(false);
   const [btNote, setBtNote] = useState<{ ok: boolean; text: string } | null>(null);
@@ -222,6 +224,7 @@ export default function ScalpPage() {
     let list = data?.rows ?? [];
     if (readyOnly) list = list.filter((r) => r.ready);
     if (query.trim()) list = list.filter((r) => matchesText(query, r.symbol));
+    if (pickedOnly && picked.size > 0) list = list.filter((r) => picked.has(r.symbol));
     if (minScore > 0) list = list.filter((r) => r.score >= minScore);
     if (bias !== "ALL") list = list.filter((r) => r.bias === bias);
     const lo = ltpMin.trim() === "" ? null : Number(ltpMin);
@@ -245,7 +248,7 @@ export default function ScalpPage() {
       if (bv == null) return -1;
       return dir * (av - bv);
     });
-  }, [data, readyOnly, bias, sort, ltpMin, ltpMax, query, minScore]);
+  }, [data, readyOnly, bias, sort, ltpMin, ltpMax, query, minScore, pickedOnly, picked]);
 
   const rows = useMemo(() => {
     if (!holdOrder || order.current.length === 0) return sorted;
@@ -557,6 +560,12 @@ export default function ScalpPage() {
                 <button type="button" onClick={() => setPicked(new Set())} className="text-slate-400 hover:text-slate-200">
                   Clear
                 </button>
+              )}
+              {picked.size > 0 && (
+                <label className="flex items-center gap-1 text-slate-300" title="Keep only the ticked stocks in the table (the other filters still apply)">
+                  <input type="checkbox" checked={pickedOnly} onChange={(e) => setPickedOnly(e.target.checked)} className="accent-emerald-400" />
+                  Show ticked only
+                </label>
               )}
               <label className="ml-auto flex items-center gap-1.5 text-slate-400">
                 over the last

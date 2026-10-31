@@ -1025,6 +1025,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   trade. Each headline is acted on once (`_taken`, memory); `recent` keeps the last 50 decisions. `GET/PUT /api/bots/news-entry`
   (a LIVE bot needs `confirm_live`, 409 without), Settings → "News entries" (`components/Settings/NewsEntries.tsx`, asks before a
   LIVE bot). Never copied by Copy settings (`COPY_SKIP`). Replays and research never see news.
+- `backend/strategy_presets.py` – saved strategies and a history of saves (`strategy_presets.json` next to the SMA DB,
+  `STRATEGY_PRESETS_FILE`). **Presets**: a named copy of a desk's strategy fields (`strategy_only`: the `ConfigUpdate`
+  fields minus `COPY_SKIP`, so never the Trade list, mode, name, per-stock or all-bots rows), at most 50, the same name
+  on the same desk replaced in place. **History**: `main._put_config` keeps every Save's strategy fields per desk
+  (`remember`, last 30, an unchanged save not repeated). `GET /api/config/presets?desk=1-5|research` (every preset and
+  that desk's history, newest first), `POST /api/config/presets` (`name`, `desk`, `settings`), `DELETE
+  /api/config/presets/{id}`. Settings → Strategy, "Saved strategies & history" (`components/Settings/StrategyPresets.tsx`,
+  shared settings only): Save as…, each entry's fields that differ from the form now (old → new), Load (into the form;
+  the usual Save then applies it with every check), Delete. No order is placed.
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,
