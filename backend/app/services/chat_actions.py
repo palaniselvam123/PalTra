@@ -5,6 +5,13 @@ checks every proposal here and hands it to the page as a card; nothing is
 saved until the person taps Apply, and the page then saves it through the same
 terminal routes the Settings page uses. There is no tool for orders, closing a
 position, the LIVE switch or the kill switch, so a reply cannot reach them.
+
+`propose_settings_change` covers any strategy setting in plain words ("turn
+on the VWAP check on bot 3", "5-minute candles for SBIN"): the field names come
+from the terminal's own `ConfigUpdate` (the facts carry a catalog of them), the
+values are checked by that model when the terminal runs in this process, and
+the bookkeeping fields (Trade list, PAPER / LIVE, name, the all-bots rows) can
+never be sent through it.
 """
 from __future__ import annotations
 
@@ -70,6 +77,79 @@ class StopProposal(BaseModel):
 
 STOP_FIELDS = [name for name in StopProposal.model_fields if name not in ("bot", "symbol", "reason")]
 
+# Never through the chat, whatever the model sends: the row's identity, its Trade list, its PAPER / LIVE
+# switch, its name, the desk-wide rows kept on bot 1, and the auto-start.
+SETTINGS_NEVER = frozenset({
+    "id", "symbol", "exchange", "trade_symbols", "trade_sources", "trading_mode", "bot_name", "stock_settings",
+    "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped", "auto_start",
+    "confirm_live",
+})
+SETTINGS_NEVER_PREFIX = ("all_bots_", "pnl_alert_", "news_entry_")
+MAX_SETTINGS_CHANGES = 40
+_FIELD = re.compile(r"^[a-z][a-z0-9_]{0,60}$")
+
+
+def settings_allowed(name: str) -> bool:
+    return bool(_FIELD.match(name)) and name not in SETTINGS_NEVER and not name.startswith(SETTINGS_NEVER_PREFIX)
+
+
+def _terminal_model():
+    """The terminal's own ConfigUpdate when it runs in this process, else None."""
+    try:
+        from app.sma_host import load_terminal
+
+        mod = load_terminal()
+        return getattr(mod, "ConfigUpdate", None) if mod is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def check_settings(changes: dict) -> dict:
+    """The changes a settings proposal may carry, in the terminal's own types; raises ValueError."""
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("no settings were given")
+    if len(changes) > MAX_SETTINGS_CHANGES:
+        raise ValueError(f"more than {MAX_SETTINGS_CHANGES} settings in one change")
+    clean: dict = {}
+    for raw_key, value in changes.items():
+        key = str(raw_key).strip()
+        if not settings_allowed(key):
+            raise ValueError(f"'{key}' cannot be changed from the chat")
+        if isinstance(value, (list, tuple)):
+            value = [v for v in value if isinstance(v, (bool, int, float, str))][:20]
+        elif not isinstance(value, (bool, int, float, str)) and value is not None:
+            raise ValueError(f"'{key}' has a value of the wrong kind")
+        if isinstance(value, str) and len(value) > 60:
+            raise ValueError(f"'{key}' has a value that is too long")
+        clean[key] = value
+    model = _terminal_model()
+    if model is not None:
+        unknown = [k for k in clean if k not in model.model_fields]
+        if unknown:
+            raise ValueError(f"unknown setting '{unknown[0]}'")
+        checked = model.model_validate(clean)
+        out = {k: getattr(checked, k) for k in clean}
+    else:
+        out = clean
+    if "sma_fast" in out and "sma_slow" in out and out["sma_fast"] is not None and out["sma_slow"] is not None:
+        if int(out["sma_fast"]) >= int(out["sma_slow"]):
+            raise ValueError("the fast SMA must be shorter than the slow one")
+    return out
+
+
+class SettingsProposal(BaseModel):
+    bot: Literal[1, 2, 3, 4, 5] = 1
+    symbol: str | None = None
+    changes: dict = Field(default_factory=dict)
+    reason: str = Field(default="", max_length=500)
+
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def _clean_symbol(cls, value):
+        if value in (None, "", "ALL", "all"):
+            return None
+        return _symbols([value])[0]
+
 _BOT = {"type": "integer", "enum": [1, 2, 3, 4, 5], "description": "Which SMA bot: 1 = main desk, 2-5 = bots 2-5."}
 _REASON = {"type": "string", "description": "One short line on why, quoting the facts used."}
 
@@ -130,6 +210,35 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "type": "function",
+        "name": "propose_settings_change",
+        "description": (
+            "Propose any strategy setting change on an SMA bot, for all stocks (symbol omitted) or one stock, "
+            "from the user's plain words: entry checks (use_vwap, use_rsi, use_adx_filter ...), candle size "
+            "(candle_minutes), exits (cross_exit, bb_exit, slope_exit, vturn_exit, counter_exit_count ...), gap "
+            "mode, join trend, size and times (qty, max_trades_per_day, max_trades_per_stock, entry_cutoff_time, "
+            "square_off_time, max_daily_loss), stops too. `changes` maps field name -> new value, using only the "
+            "field names and value kinds listed in the facts' sma_terminal.settings_catalog, and only the fields "
+            "the user asked to change. The user sees old -> new values and must tap Apply; nothing changes before "
+            "that. It can never change the Trade list, PAPER / LIVE, the bot's name or the all-bots rows."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "bot": _BOT,
+                "symbol": {"type": "string", "description": "One stock, or omit for all stocks."},
+                "changes": {
+                    "type": "object",
+                    "description": "Field name -> new value (number, true/false, or a choice from the catalog).",
+                    "additionalProperties": {"type": ["number", "string", "boolean"]},
+                },
+                "reason": _REASON,
+            },
+            "required": ["bot", "changes"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -152,6 +261,10 @@ def parse_proposal(name: str, arguments: str) -> tuple[dict | None, str | None]:
             if not changes:
                 return None, "The stop change had no settings in it."
             return {"kind": "stop", "bot": p.bot, "symbol": p.symbol, "changes": changes, "reason": p.reason}, None
+        if name == "propose_settings_change":
+            p = SettingsProposal.model_validate(args)
+            changes = check_settings(p.changes)
+            return {"kind": "settings", "bot": p.bot, "symbol": p.symbol, "changes": changes, "reason": p.reason}, None
     except (ValueError, ValidationError) as exc:
         first = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
         return None, f"A proposed change was not valid ({first})."

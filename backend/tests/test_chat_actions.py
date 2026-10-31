@@ -15,7 +15,7 @@ def _call(name: str, **args) -> dict:
 
 def test_only_trade_list_and_stop_tools_exist():
     names = {tool["name"] for tool in TOOLS}
-    assert names == {"propose_trade_list_change", "propose_stop_change"}
+    assert names == {"propose_trade_list_change", "propose_stop_change", "propose_settings_change"}
     blob = json.dumps(TOOLS).lower()
     for forbidden in ("confirm_live", "place_order", "kill", "panic", "trading_mode", "force"):
         assert forbidden not in blob
@@ -122,7 +122,7 @@ async def test_answer_returns_proposals_and_saves_nothing(monkeypatch):
     assert res["proposals"] == [{"kind": "trade_list", "bot": 2, "arm": ["SBIN"], "unarm": [], "reason": "you asked"}]
     assert "Apply" in res["reply"]
     assert posts == ["https://api.openai.com/v1/responses"]
-    assert {t["name"] for t in sent["body"]["tools"]} == {"propose_trade_list_change", "propose_stop_change"}
+    assert {t["name"] for t in sent["body"]["tools"]} == {"propose_trade_list_change", "propose_stop_change", "propose_settings_change"}
 
 
 def test_reply_names_every_proposed_change():
@@ -146,3 +146,38 @@ def test_a_fixed_target_cannot_be_overtaken_by_the_trail():
     stop, target = tsl_entry_levels("LONG", 100.0, 11.0, 18.0)
     assert (stop, target) == (89.0, 118.0)
     assert tsl_stop("LONG", 100.0, 11.0, 18.0, best=117.9) == 89.0
+
+
+def test_settings_change_takes_any_strategy_field_but_never_the_bookkeeping_ones(monkeypatch):
+    from app.services import chat_actions
+
+    monkeypatch.setattr(chat_actions, "_terminal_model", lambda: None)  # local dev: no terminal in this process
+    p, why = parse_proposal(
+        "propose_settings_change",
+        json.dumps({"bot": 3, "symbol": "sbin", "changes": {"use_vwap": True, "candle_minutes": 5, "bb_exit": "BAND"}, "reason": "asked"}),
+    )
+    assert why is None
+    assert p == {"kind": "settings", "bot": 3, "symbol": "SBIN", "changes": {"use_vwap": True, "candle_minutes": 5, "bb_exit": "BAND"}, "reason": "asked"}
+    for key in ("trading_mode", "trade_symbols", "bot_name", "all_bots_stop", "news_entry_bot", "confirm_live", "auto_start"):
+        p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 1, "changes": {key: 1}}))
+        assert p is None and "cannot be changed" in why, key
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 1, "changes": {}}))
+    assert p is None and "no settings" in why
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 1, "changes": {"sma_fast": 30, "sma_slow": 9}}))
+    assert p is None and "shorter" in why
+
+
+def test_settings_change_is_checked_by_the_terminals_own_model(monkeypatch):
+    """With the terminal in the process, every value goes through its ConfigUpdate bounds and choices."""
+    import main as sma_main
+    from app.services import chat_actions
+
+    monkeypatch.setattr(chat_actions, "_terminal_model", lambda: sma_main.ConfigUpdate)
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 2, "changes": {"atr_multiplier": "2.5", "max_trades_per_stock": 2}}))
+    assert why is None and p["changes"] == {"atr_multiplier": 2.5, "max_trades_per_stock": 2}
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 2, "changes": {"atr_multiplier": 99}}))
+    assert p is None and "not valid" in why
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 2, "changes": {"no_such_field": 1}}))
+    assert p is None and "unknown setting" in why
+    p, why = parse_proposal("propose_settings_change", json.dumps({"bot": 2, "changes": {"stop_type": "MAGIC"}}))
+    assert p is None
