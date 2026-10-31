@@ -72,10 +72,14 @@ export type SmaConfig = {
   tsl_trail_points?: number;
   tsl_target_points?: number;
   /** Units for the TSL settings: POINTS (₹) or PERCENT (of entry price). Defaults to POINTS. */
-  tsl_mode?: "POINTS" | "PERCENT";
+  tsl_mode?: "POINTS" | "PERCENT" | "ATR";
   tsl_sl_pct?: number;
   tsl_trail_pct?: number;
   tsl_target_pct?: number;
+  /** ATR multiples, read when tsl_mode is "ATR": the stop / trail / target sized from the stock's own ATR at entry. */
+  tsl_sl_atr?: number;
+  tsl_trail_atr?: number;
+  tsl_target_atr?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -593,7 +597,9 @@ export type FastBotSettings = {
   bot5_trades?: number;
   /** Bot 5's own ticked entry checks (VWAP, RSI, ADX, …) are read before the hand-off; a refusal leaves the trade. */
   entry_checks?: boolean;
-  on_bot5?: Record<string, { from_bot: number; trades: number }>;
+  /** Keep the trade on its bot; Bot 5 opens its own order next to it and the stock is armed on both. */
+  keep_trade?: boolean;
+  on_bot5?: Record<string, { from_bot: number; trades: number; kept?: boolean }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
   target_status?: string | null;
@@ -860,7 +866,7 @@ export type SmaState = {
   stop_type?: StopType;
   /** The chart stock's own stop numbers (its overrides over the shared settings). */
   stop_points?: {
-    tsl_mode?: "POINTS" | "PERCENT";
+    tsl_mode?: "POINTS" | "PERCENT" | "ATR";
     tsl_sl_points: number;
     tsl_trail_points: number;
     tsl_target_points: number;
@@ -1241,12 +1247,39 @@ export type TradeBook = { total: number; rows: TradeRow[] };
 
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
 
+/** One candle size's read from the trailing stop calculator (tsl_calc.py). */
+export type TslCalcRow = {
+  minutes: number;
+  candles: number;
+  atr: number | null;
+  avg_range: number | null;
+  atr_pct?: number;
+  stop?: number | null;
+  trail?: number | null;
+  target?: number | null;
+  stop_pct?: number | null;
+  trail_pct?: number | null;
+  target_pct?: number | null;
+};
+export type TslCalcResult = {
+  symbol: string;
+  price: number | null;
+  as_of?: string | null;
+  atr_period?: number;
+  multiples?: { stop: number; trail: number; target: number };
+  sizes: TslCalcRow[];
+  source?: "bot tape" | "groww";
+  error?: string;
+};
+
 export type ReplayInfo = {
   status: ReplayStatus;
   date: string | null;
   start: string;
   /** ISO time on the replayed day. */
   clock: string | null;
+  /** Where a seek is heading (ISO), while the replay fast-forwards or replays the day to it; else null. */
+  seeking?: string | null;
   speed: number;
   effective_speed: number;
   speeds: number[];
@@ -1615,6 +1648,21 @@ export const smaApi = {
       70000
     ),
   config: () => request<SmaConfig>("/api/config"),
+  /** Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py). Read-only. */
+  tslCalc: (symbol: string, sizes: number[], atrPeriod = 14, stopMult = 1.5, trailMult = 0.5, targetMult = 3) =>
+    request<TslCalcResult>(
+      `/api/tsl-calc?${new URLSearchParams({
+        symbol,
+        sizes: sizes.join(","),
+        atr_period: String(atrPeriod),
+        stop_mult: String(stopMult),
+        trail_mult: String(trailMult),
+        target_mult: String(targetMult),
+      }).toString()}`,
+      undefined,
+      60000,
+      false
+    ),
   strategyPresets: () => request<StrategyPresets>(`/api/config/presets?desk=${presetDesk()}`, undefined, 12000, false),
   saveStrategyPreset: (name: string, settings: Partial<SmaConfig>) =>
     request<StrategyPresets>("/api/config/presets", { method: "POST", body: JSON.stringify({ name, desk: presetDesk(), settings }) }, 12000, false),
@@ -1952,8 +2000,9 @@ export const smaApi = {
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
-  replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
-    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
+  /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */
+  replayControl: (action: "play" | "pause" | "stop" | "speed" | "seek", speed?: number, at?: string) =>
+    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed, at }) }, 20000),
   csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",

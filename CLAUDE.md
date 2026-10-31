@@ -121,6 +121,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reports both sets of numbers plus `tsl_mode`.
   The Scalp page's Arm prompt and Arm ticked (`ArmPrompt`, `BulkArm`) have a ₹ / % switch that saves
   `tsl_mode` with the matching numbers as the stock's own (the scanner link's `StockChange` takes them too).
+  **ATR multiples** (`tsl_mode = "ATR"`, `tsl_sl_atr` 1.5 / `tsl_trail_atr` 0.5 / `tsl_target_atr` 3.0 (0 = none), per bot
+  and per stock, PAPER and LIVE, replays too; `tsl.tsl_atrs`): `tsl_settings(cfg, entry_price=fill, atr=atr)` turns the
+  multiples into ₹ at entry from the stock's own ATR on the bot's candle (`OpenPosition.atr_at_entry`; a restart reads
+  the saved one), so one setting fits every stock a bot is handed (meant for Bot 5's fast movers); without a formed ATR
+  the ₹ points are used, so a trade is never left without a stop. Settings → 5. Stop-loss and target, stop type
+  Trailing, units "ATR multiples": `StrategyConfigPanel.TslAtrSliders` (sliders plus boxes). `stop_points` carries the
+  three multiples.
+  **Sized from the candle** (`backend/tsl_calc.py`, `GET /api/tsl-calc?symbol=&sizes=1,3,5,15&atr_period=&stop_mult=&
+  trail_mult=&target_mult=`; read-only, no order): the stock's 1-minute tape (the bots' `_tapes` for an armed stock, else
+  one `fetch_frame` on the scans' session) grouped into each candle size (`candles.resample`, forming candle dropped),
+  the Wilder ATR of that size (`indicators.enrich`) and the average range of the last 20 candles, and the multiples
+  (defaults 1.5 / 0.5 / 3 × ATR) as a stop distance, trail step and target in ₹ (`tick_sizes.round_price`) and in % of
+  the price. Settings → 5. Stop-loss and target, with stop type TSL: `components/Settings/TslCalculator.tsx` (stock,
+  multiples, ATR period, sizes, Calculate; a row's "Use ₹" / "Use %" fills the TSL fields of the form, optionally the
+  candle size too, and the normal Save applies them to the bot or the scoped stock).
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and
@@ -194,7 +209,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
-  Research never hands off. **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
+  Research never hands off. **Keep the trade** (`keep_trade`, off by default; Settings card tick box): the source
+  trade is not cut; `recovery.handoff(..., keep_source=True)` arms the stock on Bot 5 while it stays on the source
+  bot's Trade list ("armed on Bot 5 too"), Bot 5's `direct_order` opens its own order on the same side next to it,
+  and both bots keep trading it; `handed[..]["keep"]` (snapshot `on_bot5[..].kept`), and `give_back` then only takes
+  it off Bot 5 (`recovery.unarm`). A LIVE source trade is left alone in this mode (two LIVE bots never hold one
+  stock). Replays play one bot, so in keep mode `ReplayEngine._fast_move` keeps the trade and only notes the move in
+  the signal line (no Bot 5 order, no `fast_move` totals). **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
   `fast_bot.entry_refusal` reads Bot 5's own settings for the stock (`_target_cfg` → `_cfg_for`) on the source bot's
   enriched frame exactly as a cross would (the ADX gate, then `strategy_engine._entry_block`: VWAP, volume, density,
   RSI, EMA, Supertrend, level, opening range, gap, candle direction; never the cross, patterns, pullback or candle waits);
@@ -239,6 +260,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   keeping the finished days, so the run ends as if it never stopped. The replay
   bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
   the Backtests tab has a Resume button.
+  **Rewind / fast-forward** (`ReplaySession.seek`, `POST /api/replay/control {action: "seek", at: "HH:MM"}`; only
+  while PLAYING or PAUSED, the pause state kept; `info().seeking` while it moves): forward sets `_seek` and
+  `_fast_forward` ticks the same 10-second grid as fast as its CPU share allows up to the target (same trades, only
+  real time skipped; a target past 15:30 is clamped to the last grid step before it, and the day finishes as usual);
+  back sets `_rewind`, the day loop drops that day's trades, reviews and P&L points (`_drop_unfinished_days`,
+  `open_pnl_log.delete_replay_day`), builds a fresh engine from the day's first candle and fast-forwards to the target
+  (a stock handed off earlier that day stays handed off). UI: `ReplayScrub` in `components/Terminal/ReplayBar.tsx`
+  (slider 09:15-15:30 plus ± 5 / 15-minute buttons, in the replay bar and on the chart page header while it follows a
+  replay; the top strip's `ReplayChip` has ± 5).
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **On the main desk a replay
   starts only outside market hours** (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST Mon-Fri, 409; start, resume and
   Scalp-pick runs), so it never slows the live bots; the backtest server takes them then (`DESK_REPLAY_HOURS=any` lifts
@@ -259,6 +289,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
   strategy does not use is worked out in the browser (`emaValues`). Display only.
+  **Movable columns**: the blotter (every book, Replay included; `TradeHistoryTable` `OrderTable`, key `blotter.cols`)
+  and the Backtests tables (runs `backtests.cols.runs`, day-wise `backtests.cols.days`, per-stock `backtests.cols.stocks`)
+  use `components/ui/columnOrder.tsx` (`useColumnOrder`, `inOrder`, `ColumnHint`) like the Scalp tables: drag a header
+  onto another to move the column, kept per browser, "Reset columns" to undo; the blotter's Trade ID / Stock columns
+  stay pinned only while they are the first two. Display only.
   Every bar that sticks to the top (desk menu bar, terminal header, blotter bar, Settings section links, Settings bot tabs
   (`settings-bot-tabs`, under the section links) and Save bar, chart page header) has a freeze / unfreeze pin (`components/ui/PinToggle.tsx`, `lib/usePinned.ts`, kept per browser).
   The terminal's Strategy card (`StrategySummary`) switches each part of the

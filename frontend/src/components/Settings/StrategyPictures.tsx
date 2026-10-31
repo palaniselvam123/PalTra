@@ -6,7 +6,7 @@ import type { SmaConfig } from "@/lib/smaApi";
 
 /**
  * The strategy's candle numbers as pictures, like the SMA 9 slope editor: the ATR stop, the ADX trend
- * check, the candle size, and the candle rules (direction check, counter candles, tall candle).
+ * check, the candle size, the candle rules (direction check, counter candles, tall candle) and SMA gap mode.
  *
  * Each picture is drawn on a fixed, made-up run of candles so the shapes never change; only the setting
  * being edited moves. The sliders write the same fields the number boxes edit. Display only: the numbers
@@ -568,6 +568,190 @@ export function CandleRulesPicture({ form, set, parts }: Props & { parts: RulePa
       <p className="mt-2 text-[11px] text-slate-500">
         The candles are drawn from your numbers (an example ATR of {ATR_EX}): move a slider and they redraw. Press Save to keep a change.
       </p>
+    </section>
+  );
+}
+
+
+/* ------------------------------------------------------------------ SMA gap mode */
+
+// A made-up gap % line (SMA fast − SMA slow, in % of the price) over 26 one-minute candles: below the slow
+// SMA, a cross, the gap widens to a peak, then it fades back and crosses the other way. Drawn for a buy;
+// a short is the mirror image.
+const GAP_LINE = [
+  -0.06, -0.045, -0.03, -0.015, -0.004, 0.008, 0.02, 0.034, 0.048, 0.062, 0.076, 0.088, 0.097, 0.103, 0.106, 0.104,
+  0.097, 0.086, 0.072, 0.058, 0.044, 0.03, 0.018, 0.008, -0.004, -0.016,
+];
+// The slow SMA's own gentle drift (price units on a ₹1,000 stock), so the top strip looks like a chart.
+const SLOW_LINE = GAP_LINE.map((_, i) => 1000 + Math.sin(i / 6) * 0.6 + i * 0.05);
+
+type GapPlay = { cross: number; entry: number | null; exit: number | null; peak: number; why: string; exitWhy: string };
+
+/** Where the bot would enter and exit on the example, with the settings as the bot reads them (gap_mode.py). */
+function playGap(gap: number[], entryLevel: number, exitLevel: number, giveback: number, delay: number, window: number, fadeCandles: number): GapPlay {
+  const cross = gap.findIndex((g, i) => i > 0 && gap[i - 1] <= 0 && g > 0);
+  let entry: number | null = null;
+  let why = "";
+  for (let i = cross; i >= 0 && i < gap.length; i += 1) {
+    if (window > 0 && i - cross > window) {
+      why = `given up: ${window} min after the cross with no entry`;
+      break;
+    }
+    if (gap[i] >= entryLevel) {
+      const at = i + delay;
+      if (at >= gap.length) break;
+      if (gap[at] >= entryLevel) {
+        entry = at;
+        why = delay ? `gap reached ${clean(entryLevel, 3)}% at candle ${i + 1}, still there after the ${delay}-min wait` : `first closed candle with the gap ≥ ${clean(entryLevel, 3)}%`;
+        break;
+      }
+    }
+  }
+  if (entry === null && !why) why = `the gap never reached ${clean(entryLevel, 3)}% before it crossed back`;
+  let exit: number | null = null;
+  let exitWhy = "";
+  let peak = entry === null ? 0 : gap[entry];
+  if (entry !== null) {
+    const lockIn = exitLevel > entryLevel; // an exit beyond the entry arms only once the gap has been that wide
+    let armed = !lockIn;
+    for (let i = entry + 1; i < gap.length; i += 1) {
+      peak = Math.max(peak, gap[i]);
+      if (!armed && gap[i] >= exitLevel) armed = true;
+      const narrowing = fadeCandles > 0 ? Array.from({ length: fadeCandles }, (_, k) => i - k).every((j) => j > entry && gap[j] < gap[j - 1]) : true;
+      if (armed && gap[i] <= exitLevel && narrowing) {
+        exit = i;
+        exitWhy = `faded back to ${clean(exitLevel, 3)}%${fadeCandles ? ` after ${fadeCandles} narrowing candles` : ""}`;
+        break;
+      }
+      if (giveback > 0 && peak > 0 && gap[i] <= peak * (1 - giveback / 100) && narrowing) {
+        exit = i;
+        exitWhy = `gave back ${giveback}% of its widest (${clean(peak, 3)}%)`;
+        break;
+      }
+      if (gap[i] <= 0) {
+        exit = i;
+        exitWhy = "opposite cross: closed at once";
+        break;
+      }
+    }
+    if (exit === null) exitWhy = "still held at the end of the example";
+  }
+  return { cross, entry, exit, peak, why, exitWhy };
+}
+
+/** SMA gap mode: enter when the gap between the SMAs widens past a level, exit when it fades back. */
+export function GapModePicture({ form, set }: Props) {
+  const [side, setSide] = useSide();
+  const on = Boolean(form.use_gap_mode);
+  const long = side === "LONG";
+  const entryKey = long ? "gap_entry_long" : "gap_entry_short";
+  const exitKey = long ? "gap_exit_long" : "gap_exit_short";
+  // Buy levels are positive, sell levels negative; the picture works in the trade's own direction (+).
+  const entryLevel = Math.abs(num(form, entryKey, long ? 0.05 : -0.05));
+  const exitLevel = Math.abs(num(form, exitKey, long ? 0.02 : -0.02));
+  const giveback = Math.max(0, num(form, "gap_giveback_pct", 0));
+  const delay = Math.max(0, Math.round(num(form, "gap_entry_delay_min", 0)));
+  const window = Math.max(0, Math.round(num(form, "gap_entry_window_min", 0)));
+  const fadeCandles = Math.max(0, Math.round(num(form, "gap_fade_min_candles", 0)));
+  const gap = GAP_LINE;
+  const play = playGap(gap, entryLevel, exitLevel, giveback, delay, window, fadeCandles);
+  const sign = long ? 1 : -1;
+  const W = 560;
+  const topH = 90;
+  const H = 300;
+  const x0 = 16;
+  const cw = (W - 40) / gap.length;
+  const x = (i: number) => x0 + i * cw + cw / 2;
+  // Top strip: the two SMAs in price (the fast one = slow + gap % of the price).
+  const fast = SLOW_LINE.map((p, i) => p * (1 + (sign * gap[i]) / 100));
+  const pLo = Math.min(...SLOW_LINE, ...fast) - 0.2;
+  const pHi = Math.max(...SLOW_LINE, ...fast) + 0.2;
+  const yp = (p: number) => 10 + ((pHi - p) / (pHi - pLo)) * (topH - 16);
+  // Bottom: the signed gap in %.
+  const gLo = -0.12;
+  const gHi = 0.14;
+  const yg = (g: number) => topH + 18 + ((gHi - g) / (gHi - gLo)) * (H - topH - 44);
+  const path = (ys: number[]) => ys.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${v.toFixed(1)}`).join(" ");
+  const giveLevel = play.entry !== null && giveback > 0 ? play.peak * (1 - giveback / 100) : null;
+  const levelText = (v: number) => `${sign * v > 0 ? "+" : ""}${clean(sign * v, 3)}%`;
+  return (
+    <section className="mt-3 rounded-lg border border-sky-400/20 bg-sky-500/[0.04] p-3" aria-label="SMA gap mode picture">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-100">SMA gap mode, as a picture</h4>
+        <SideSwitch side={side} onChange={setSide} />
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        The gap is how far SMA {form.sma_fast ?? 9} sits from SMA {form.sma_slow ?? 21}, in % of the price (bottom line). A cross only
+        arms the trade; the order goes on the first closed candle whose gap reaches the <span className="text-emerald-300">entry level</span>
+        {delay ? `, and is still there ${delay} min later` : ""}. The trade is held while the gap widens and closes when it fades back to the{" "}
+        <span className="text-rose-300">exit level</span>
+        {giveback ? `, or gives back ${giveback}% of its widest` : ""}
+        {fadeCandles ? `, once it has narrowed ${fadeCandles} candles in a row` : ""}. An opposite cross closes at once.
+      </p>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+        <Rule on={on} text="SMA gap mode" when={on ? "Entries wait for the gap level; exits on the fade." : "Off: a cross orders at once and the gap levels are not read."} toggle={(next) => set("use_gap_mode", next)} />
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full select-none rounded-md bg-black/30" role="img" aria-label={`SMA gap mode example: ${play.entry !== null ? `enters at candle ${play.entry + 1}` : "no entry"}; ${play.exitWhy}`}>
+        {/* top strip: the SMAs */}
+        <path d={path(SLOW_LINE.map(yp))} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
+        <path d={path(fast.map(yp))} fill="none" stroke="#38bdf8" strokeWidth={1.5} />
+        <text x={x0} y={12} fill="#38bdf8" fontSize={10} fontFamily={MONO}>SMA {form.sma_fast ?? 9}</text>
+        <text x={x0 + 52} y={12} fill="#f59e0b" fontSize={10} fontFamily={MONO}>SMA {form.sma_slow ?? 21}</text>
+        <line x1={x0} x2={W - 8} y1={topH + 6} y2={topH + 6} stroke="rgba(255,255,255,0.1)" />
+        {/* bottom: the gap in % */}
+        <text x={x0} y={topH + 16} fill="#94a3b8" fontSize={10} fontFamily={MONO}>gap % = (SMA {form.sma_fast ?? 9} − SMA {form.sma_slow ?? 21}) ÷ SMA {form.sma_slow ?? 21}{long ? "" : " (a short reads it the other way up)"}</text>
+        <line x1={x0} x2={W - 8} y1={yg(0)} y2={yg(0)} stroke="rgba(226,232,240,0.35)" />
+        <text x={W - 10} y={yg(0) - 3} fill="#94a3b8" fontSize={10} fontFamily={MONO} textAnchor="end">0 (cross)</text>
+        {/* the zone the trade is held in */}
+        {play.entry !== null ? (
+          <rect x={x(play.entry) - cw / 2} y={10} width={x(play.exit ?? gap.length - 1) - x(play.entry) + (play.exit === null ? cw / 2 : 0)} height={H - 24} fill={long ? "rgba(16,185,129,0.07)" : "rgba(244,63,94,0.07)"} />
+        ) : null}
+        <path d={path(gap.map(yg))} fill="none" stroke="#e2e8f0" strokeWidth={2} />
+        {/* levels */}
+        <line x1={x0} x2={W - 8} y1={yg(entryLevel)} y2={yg(entryLevel)} stroke="#10B981" strokeWidth={1.5} strokeDasharray="6 4" />
+        <text x={x0} y={yg(entryLevel) - 4} fill="#10B981" fontSize={11} fontFamily={MONO}>enter at gap {long ? "≥" : "≤"} {levelText(entryLevel)}</text>
+        <line x1={x0} x2={W - 8} y1={yg(exitLevel)} y2={yg(exitLevel)} stroke="#F43F5E" strokeWidth={1.5} strokeDasharray="6 4" />
+        <text x={x0} y={yg(exitLevel) + 12} fill="#F43F5E" fontSize={11} fontFamily={MONO}>exit at gap {long ? "≤" : "≥"} {levelText(exitLevel)}{exitLevel > entryLevel ? " (lock-in: arms once the gap has been this wide)" : ""}</text>
+        {giveLevel !== null ? (
+          <>
+            <line x1={x(play.entry!)} x2={W - 8} y1={yg(giveLevel)} y2={yg(giveLevel)} stroke="#fb923c" strokeWidth={1} strokeDasharray="2 3" />
+            <text x={W - 10} y={yg(giveLevel) + 12} fill="#fb923c" fontSize={10} fontFamily={MONO} textAnchor="end">give-back {giveback}% of the widest {clean(play.peak, 3)}% → {clean(giveLevel, 3)}%</text>
+          </>
+        ) : null}
+        {/* the cross, entry and exit candles */}
+        <line x1={x(play.cross)} x2={x(play.cross)} y1={10} y2={H - 14} stroke="rgba(226,232,240,0.3)" strokeDasharray="2 3" />
+        <text x={x(play.cross) + 3} y={H - 4} fill="#94a3b8" fontSize={10} fontFamily={MONO}>cross</text>
+        {window > 0 ? (
+          <>
+            <line x1={x(play.cross + window)} x2={x(play.cross + window)} y1={10} y2={H - 14} stroke="rgba(251,146,60,0.5)" strokeDasharray="2 3" />
+            <text x={x(play.cross + window) + 3} y={H - 4} fill="#fb923c" fontSize={10} fontFamily={MONO}>give up ({window} min)</text>
+          </>
+        ) : null}
+        {play.entry !== null ? (
+          <>
+            <circle cx={x(play.entry)} cy={yg(gap[play.entry])} r={5} fill={long ? "#10B981" : "#F43F5E"} />
+            <text x={x(play.entry) + 7} y={yg(gap[play.entry]) - 6} fill={long ? "#10B981" : "#F43F5E"} fontSize={11} fontFamily={MONO}>{long ? "BUY" : "SELL"}</text>
+          </>
+        ) : null}
+        {play.exit !== null ? (
+          <>
+            <circle cx={x(play.exit)} cy={yg(gap[play.exit])} r={5} fill="#F43F5E" stroke="#fff" strokeWidth={1} />
+            <text x={x(play.exit) + 7} y={yg(gap[play.exit]) - 7} fill="#F43F5E" fontSize={11} fontFamily={MONO}>exit</text>
+          </>
+        ) : null}
+      </svg>
+      <p className="mt-1 text-xs text-slate-300">
+        <span className="font-semibold">On this example:</span> {play.entry !== null ? `enters at candle ${play.entry + 1} (${play.why}); ${play.exitWhy}${play.exit !== null ? ` at candle ${play.exit + 1}` : ""}.` : `no entry: ${play.why}.`}
+      </p>
+      <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        <Slider text={`${long ? "Buy" : "Sell"}: enter at gap ${long ? "≥" : "≤"}`} value={entryLevel} min={0.005} max={0.5} step={0.005} onChange={(v) => set(entryKey, clean(sign * v, 3))} fmt={(v) => levelText(v)} dim={!on} />
+        <Slider text={`${long ? "Buy" : "Sell"}: exit at gap ${long ? "≤" : "≥"}`} value={exitLevel} min={0} max={0.5} step={0.005} onChange={(v) => set(exitKey, clean(sign * v, 3))} fmt={(v) => levelText(v)} dim={!on} />
+        <Slider text="Also exit after giving back % of the widest gap (0 = off)" value={giveback} min={0} max={90} step={5} onChange={(v) => set("gap_giveback_pct", String(Math.round(v)))} fmt={(v) => (v ? `${v}%` : "off")} dim={!on} />
+        <Slider text="Wait after the level is met" value={delay} min={0} max={15} step={1} onChange={(v) => set("gap_entry_delay_min", String(Math.round(v)))} fmt={(v) => (v ? `${v} min` : "no wait")} dim={!on} />
+        <Slider text="Give up after the cross (0 = never)" value={window} min={0} max={60} step={1} onChange={(v) => set("gap_entry_window_min", String(Math.round(v)))} fmt={(v) => (v ? `${v} min` : "never")} dim={!on} />
+        <Slider text="Fade exit: gap narrowing N candles in a row (0 = off)" value={fadeCandles} min={0} max={10} step={1} onChange={(v) => set("gap_fade_min_candles", String(Math.round(v)))} fmt={(v) => (v ? `${v} candles` : "off")} dim={!on} />
+      </div>
+      <p className="mt-2 text-[11px] text-slate-500">Press Save to keep a change. The gap line is a made-up example on a 1-minute candle; the bot reads each stock&apos;s own SMAs. The sliders edit the same numbers as the boxes above ({long ? "buy" : "sell"} side).</p>
     </section>
   );
 }

@@ -37,6 +37,7 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_bot
+import tsl_calc as tsl_calc_mod
 import strategy_presets
 import fast_move
 import level_check
@@ -449,10 +450,14 @@ class ConfigUpdate(BaseModel):
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_target_points: float | None = Field(default=None, ge=0, le=100000)
-    tsl_mode: Literal["POINTS", "PERCENT"] | None = None
+    tsl_mode: Literal["POINTS", "PERCENT", "ATR"] | None = None
     tsl_sl_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_trail_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_target_pct: float | None = Field(default=None, ge=0, le=100)
+    # ATR multiples (tsl_mode ATR): sized from the stock's own ATR at entry, so one setting fits every stock.
+    tsl_sl_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_trail_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_target_atr: float | None = Field(default=None, ge=0, le=50)
     gap_sl_mult: float | None = Field(default=None, gt=0, le=10)
     gap_tp_mult: float | None = Field(default=None, gt=0, le=20)
     gap_min_pct: float | None = Field(default=None, ge=0.01, le=5)
@@ -641,6 +646,9 @@ def _config_dict(row: BotConfig) -> dict:
         "tsl_sl_pct": float(getattr(row, "tsl_sl_pct", 1.0) or 1.0),
         "tsl_trail_pct": float(getattr(row, "tsl_trail_pct", 0.5) or 0.5),
         "tsl_target_pct": float(getattr(row, "tsl_target_pct", 0.0) or 0.0),
+        "tsl_sl_atr": float(getattr(row, "tsl_sl_atr", 1.5) or 1.5),
+        "tsl_trail_atr": float(getattr(row, "tsl_trail_atr", 0.5) or 0.5),
+        "tsl_target_atr": 3.0 if getattr(row, "tsl_target_atr", None) is None else float(row.tsl_target_atr),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),
@@ -1819,8 +1827,10 @@ class ScalpPickStart(BaseModel):
 
 
 class ReplayControl(BaseModel):
-    action: Literal["play", "pause", "stop", "speed"]
+    action: Literal["play", "pause", "stop", "speed", "seek"]
     speed: int | None = None
+    # seek: the replayed day's time to move to, IST HH:MM (forward = fast-forward, back = the day replays to there).
+    at: str | None = Field(default=None, max_length=5)
 
 
 def _replay_engine(bot: int = 1):
@@ -2051,7 +2061,7 @@ async def replay_control(body: ReplayControl, bot: int = 1):
         await session.stop()
         return session.info()
     try:
-        session.control(body.action, body.speed)
+        session.control(body.action, body.speed, body.at)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return session.info()
@@ -3250,6 +3260,57 @@ def _day_rows(frame, day: dt.date) -> tuple[list[list[float]], float | None]:
     return rows, prev
 
 
+@app.get("/api/tsl-calc")
+async def tsl_calc(
+    symbol: str,
+    sizes: str = "1,3,5,15",
+    atr_period: int = 14,
+    stop_mult: float = tsl_calc_mod.DEFAULT_STOP,
+    trail_mult: float = tsl_calc_mod.DEFAULT_TRAIL,
+    target_mult: float = tsl_calc_mod.DEFAULT_TARGET,
+):
+    """Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py).
+
+    Today's armed stocks are read from the bots' 1-minute tapes (no Groww call); any other stock is downloaded
+    once on the scans' session. Read-only: nothing is saved and no order is placed."""
+    name = _chart_symbol(symbol)
+    if name is None:
+        raise HTTPException(400, "Give a stock symbol.")
+    picked = []
+    for part in str(sizes).split(","):
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if n in tsl_calc_mod.SIZES and n not in picked:
+            picked.append(n)
+    if not picked:
+        picked = [1, 3, 5, 15]
+    if not 2 <= int(atr_period) <= 100:
+        raise HTTPException(400, "atr_period must be 2 to 100.")
+    for value in (stop_mult, trail_mult, target_mult):
+        if not 0 <= float(value) <= 20:
+            raise HTTPException(400, "Multiples must be 0 to 20.")
+    tape = _tape_for(name)
+    source = "bot tape"
+    if tape is None:
+        now = dt.datetime.now(IST)
+        start = dt.datetime.combine(now.date() - dt.timedelta(days=7), dt.time(9, 15), tzinfo=IST)
+        try:
+            await groww_pressure.wait_for_bots()
+            tape = await fetch_frame(_scan_broker(), name, start, now)
+        except HistoryError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not download {name}'s candles: {exc}") from exc
+        source = "groww"
+    out = await asyncio.to_thread(
+        tsl_calc_mod.suggest, name, tape, picked, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult)
+    )
+    out["source"] = source
+    return out
+
+
 def _tape_for(symbol: str):
     for eng in [engine, *bot_engines.values(), research_engine]:
         tape = getattr(eng, "_tapes", {}).get(symbol)
@@ -3562,6 +3623,8 @@ class FastBotSettings(BaseModel):
     bot5_trades: int | None = Field(None, ge=0, le=fast_bot.MAX_BOT5_TRADES)
     # Bot 5's own entry checks (VWAP, volume, density, RSI, ADX, EMA, …) are read before the hand-off.
     entry_checks: bool | None = None
+    # Keep the source trade and let Bot 5 open its own order next to it (the stock is armed on both bots).
+    keep_trade: bool | None = None
     confirm_live: bool = False
 
 

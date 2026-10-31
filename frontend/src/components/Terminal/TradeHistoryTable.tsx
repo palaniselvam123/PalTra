@@ -12,6 +12,7 @@ import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type S
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
 import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
+import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -981,6 +982,8 @@ export function TradeHistoryTable({
 }
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
+type ColKey = Col["key"];
+const COLUMN_KEYS: ColKey[] = ["id", "stock", "side", "entry_time", "entry", "entry_reason", "exit_time", "exit", "high", "low", "points", "reason", "strategy", "charges", "net", "action"];
 const COLUMNS: Col[] = [
   { key: "id", label: "Trade ID" },
   { key: "stock", label: "Stock" },
@@ -1319,6 +1322,7 @@ function OrderTable({
   /** Changes when the book, filters or sort change: back to page 1. */
   resetKey: string;
 }) {
+  const cols = useColumnOrder<ColKey>("blotter.cols", COLUMN_KEYS);
   // Thousands of rows are drawn a page at a time; totals still cover them all.
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
@@ -1377,14 +1381,20 @@ function OrderTable({
       </ul>
 
       {/* Tablet and desktop: a table with a sticky header. */}
+      <div className="hidden md:block">
+        <ColumnHint moved={cols.moved} onReset={cols.reset} />
+      </div>
       <div className="hidden max-h-[70vh] overflow-auto md:block">
         <table className="w-full text-left text-sm tabular-nums">
           <thead className="sticky top-0 z-20 bg-[#1b2130] text-xs uppercase tracking-wider text-slate-300 shadow-[0_1px_0_rgba(255,255,255,0.1)]">
             <tr>
-              {COLUMNS.map((col) => {
-                if (col.key === "action") return <th key={col.key} scope="col" className="px-3 py-2" />;
-                // Trade ID and Stock stay in view while the table scrolls sideways.
-                const pin = col.key === "id" ? "blotter-sticky left-0 w-24 min-w-24" : col.key === "stock" ? "blotter-sticky blotter-sticky-edge left-24" : null;
+              {cols.order.map((orderKey) => {
+                const col = COLUMNS.find((c) => c.key === orderKey)!;
+                const drag = cols.dragProps(col.key);
+                if (col.key === "action") return <th key={col.key} scope="col" {...drag} className={clsx("px-3 py-2", drag.className)} />;
+                // Trade ID and Stock stay in view while the table scrolls sideways (only while they are the first two columns).
+                const first = cols.order[0] === "id" && cols.order[1] === "stock";
+                const pin = first && col.key === "id" ? "blotter-sticky left-0 w-24 min-w-24" : first && col.key === "stock" ? "blotter-sticky blotter-sticky-edge left-24" : null;
                 const key = col.key;
                 const on = sort?.key === key;
                 const Icon = !on ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
@@ -1393,7 +1403,8 @@ function OrderTable({
                     key={key}
                     scope="col"
                     aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right", pin)}
+                    {...drag}
+                    className={clsx("whitespace-nowrap px-1.5 py-1 font-medium", col.num && "text-right", pin, drag.className)}
                   >
                     <button
                       type="button"
@@ -1431,6 +1442,8 @@ function OrderTable({
                     state={state}
                     closing={closingSymbol === trade.symbol.toUpperCase()}
                     onClose={onClose}
+                    order={cols.order}
+                    pinned={cols.order[0] === "id" && cols.order[1] === "stock"}
                   />
                 ))}
                 {showSubtotals && <DaySubtotal group={group} as="row" />}
@@ -1519,12 +1532,17 @@ function DaySubtotal({ group, as }: { group: DayGroup; as: "row" | "card" }) {
   }
   return (
     <tr className="border-y border-white/15 bg-white/[0.06] font-semibold">
-      <td colSpan={12} className="px-3 py-2 text-slate-200">
-        Subtotal · {label}
+      <td colSpan={COLUMNS.length} className="px-3 py-2 text-slate-200">
+        <span className="flex flex-wrap items-center justify-between gap-x-4">
+          <span>Subtotal · {label}</span>
+          <span className="font-mono">
+            <span className="text-slate-400">charges </span>
+            <span className="text-amber-300">{inr(group.charges)}</span>
+            <span className="ml-3 text-slate-400">P&amp;L </span>
+            <span className={pnlTone(group.net)}>{signedInr(group.net)}</span>
+          </span>
+        </span>
       </td>
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">{inr(group.charges)}</td>
-      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(group.net))}>{signedInr(group.net)}</td>
-      <td />
     </tr>
   );
 }
@@ -1561,11 +1579,14 @@ type RowProps = {
   state: SmaState | null;
   closing: boolean;
   onClose: (trade: TradeRow) => void;
+
+  order?: ColKey[];
+  pinned?: boolean;
 };
 
 /** A closed row only changes with its own data; the page passes it no live state. */
 function sameRow(a: RowProps, b: RowProps): boolean {
-  return a.trade === b.trade && a.runs === b.runs && a.state === b.state && a.closing === b.closing;
+  return a.trade === b.trade && a.runs === b.runs && a.state === b.state && a.closing === b.closing && a.order === b.order && a.pinned === b.pinned;
 }
 
 function OrderRowView({
@@ -1574,39 +1595,46 @@ function OrderRowView({
   state,
   closing,
   onClose,
+  order,
+  pinned,
 }: {
   trade: TradeRow;
   runs: RunSettings;
   state: SmaState | null;
   closing: boolean;
   onClose: (trade: TradeRow) => void;
+  /** The column order the table shows (columnOrder.tsx). */
+  order: ColKey[];
+  /** Trade ID and Stock are the first two columns, so they stay pinned while scrolling sideways. */
+  pinned: boolean;
 }) {
   const { open, market, points, net } = rowFigures(t, state);
   return (
     <tr className="border-b border-white/5 text-slate-200 odd:bg-white/[0.025] hover:bg-white/[0.05]">
-      <td className="blotter-sticky left-0 w-24 min-w-24 whitespace-nowrap px-3 py-2 font-mono text-slate-400" title={`Row #${t.id}`}>{tradeId(t)}</td>
-      <td className="blotter-sticky blotter-sticky-edge left-24 whitespace-nowrap px-3 py-2 font-semibold text-amber-300">{t.symbol}</td>
-      <td className="whitespace-nowrap px-3 py-2">
+{inOrder(order ?? COLUMN_KEYS, {
+id: <td className={clsx(pinned && "blotter-sticky left-0 w-24 min-w-24", "whitespace-nowrap px-3 py-2 font-mono text-slate-400")} title={`Row #${t.id}`}>{tradeId(t)}</td>,
+stock: <td className={clsx(pinned && "blotter-sticky blotter-sticky-edge left-24", "whitespace-nowrap px-3 py-2 font-semibold text-amber-300")}>{t.symbol}</td>,
+side: <td className="whitespace-nowrap px-3 py-2">
         <ResultSideBadge trade={t} net={net} />
         <span className="ml-1.5 font-mono text-xs text-slate-400">{t.qty}</span>
-      </td>
-      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>
-      <td className="px-3 py-2">
+      </td>,
+entry_time: <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{istStamp(t.entry_time)}</td>,
+entry: <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>,
+entry_reason: <td className="px-3 py-2">
         <EntryReasonBadge trade={t} />
-      </td>
-      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
+      </td>,
+exit_time: <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>,
+exit: <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
         {open ? <span className="text-slate-400" title="Live price">{market == null ? "—" : `${px(market)}`}</span> : px(t.exit_price)}
-      </td>
-      <td className="px-3 py-2 text-right">
+      </td>,
+high: <td className="px-3 py-2 text-right">
         <Extreme trade={t} which="high" />
-      </td>
-      <td className="px-3 py-2 text-right">
+      </td>,
+low: <td className="px-3 py-2 text-right">
         <Extreme trade={t} which="low" />
-      </td>
-      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>
-      <td className="px-3 py-2">
+      </td>,
+points: <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>,
+reason: <td className="px-3 py-2">
         <ReasonBadge trade={t} />
         {t.stop_log ? (
           <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-400" title={`Stop moves: ${t.stop_log}`}>
@@ -1615,18 +1643,19 @@ function OrderRowView({
             ))}
           </div>
         ) : null}
-      </td>
-      <td className="max-w-[13rem] px-3 py-2">
+      </td>,
+strategy: <td className="max-w-[13rem] px-3 py-2">
         <StrategyCell settings={settingsOf(t, runs)} />
-      </td>
-      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">
+      </td>,
+charges: <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-amber-300">
         {t.brokerage_and_taxes == null ? "—" : inr(t.brokerage_and_taxes)}
-      </td>
-      <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
+      </td>,
+net: <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono font-semibold", pnlTone(net))} title={open ? "Open: marked at the live price, before charges" : undefined}>
         {signedInr(net)}
-      </td>
-      <td className="px-3 py-1.5 text-right">{open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}</td>
-    </tr>
+      </td>,
+action: <td className="px-3 py-1.5 text-right">{open ? <CloseButton trade={t} closing={closing} onClose={onClose} /> : null}</td>
+})}
+</tr>
   );
 }
 

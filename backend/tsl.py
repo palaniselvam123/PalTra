@@ -22,6 +22,13 @@ import math
 
 POINTS = "POINTS"
 PERCENT = "PERCENT"
+#: Sized from the stock's own ATR at entry: stop / trail / target = multiples of the ATR on the bot's candle
+#: (tsl_sl_atr / tsl_trail_atr / tsl_target_atr). Meant for a bot that trades whatever stock is handed to it
+#: (Bot 5's fast movers): a ₹ or % number cannot fit a ₹100 stock and a ₹3,000 one, an ATR multiple does.
+ATR = "ATR"
+DEFAULT_SL_ATR = 1.5
+DEFAULT_TRAIL_ATR = 0.5
+DEFAULT_TARGET_ATR = 3.0
 
 
 def uses_tsl(cfg) -> bool:
@@ -33,7 +40,16 @@ def uses_tsl(cfg) -> bool:
 
 def tsl_mode(cfg) -> str:
     raw = str(getattr(cfg, "tsl_mode", POINTS) or POINTS).upper()
-    return raw if raw in (POINTS, PERCENT) else POINTS
+    return raw if raw in (POINTS, PERCENT, ATR) else POINTS
+
+
+def tsl_atrs(cfg) -> tuple[float, float, float]:
+    """(stop × ATR, trail step × ATR, target × ATR or 0) as the owner set them."""
+    sl = float(getattr(cfg, "tsl_sl_atr", DEFAULT_SL_ATR) or DEFAULT_SL_ATR)
+    step = float(getattr(cfg, "tsl_trail_atr", DEFAULT_TRAIL_ATR) or DEFAULT_TRAIL_ATR)
+    target = getattr(cfg, "tsl_target_atr", DEFAULT_TARGET_ATR)
+    target = DEFAULT_TARGET_ATR if target is None else float(target)
+    return abs(sl), abs(step), max(0.0, target)
 
 
 def tsl_pcts(cfg) -> tuple[float, float, float]:
@@ -44,15 +60,20 @@ def tsl_pcts(cfg) -> tuple[float, float, float]:
     return abs(sl_pct), abs(step_pct), max(0.0, target_pct)
 
 
-def tsl_settings(cfg, entry_price: float | None = None) -> tuple[float, float, float]:
+def tsl_settings(cfg, entry_price: float | None = None, atr: float | None = None) -> tuple[float, float, float]:
     """(stop ₹ from entry, trail step ₹, target ₹ or 0).
 
     When `tsl_mode` is `PERCENT`, the % settings are turned into points using
-    `entry_price`. Callers inside the engine always have the fill price (so the
+    `entry_price`. When it is `ATR`, the multiples are turned into points using `atr` (the stock's ATR on
+    the bot's candle at entry, `OpenPosition.atr_at_entry`); without a usable ATR the trade falls back to
+    the ₹ points, so a stop is always placed. Callers inside the engine always have the fill price (so the
     conversion is exact per trade). Without `entry_price`, the raw point values
     are returned so the frontend has something to show on the config screens;
     this is only safe for display and never for an order.
     """
+    if tsl_mode(cfg) == ATR and atr is not None and atr > 0:
+        sl_atr, step_atr, target_atr = tsl_atrs(cfg)
+        return (atr * sl_atr, atr * step_atr, atr * target_atr if target_atr > 0 else 0.0)
     if tsl_mode(cfg) == PERCENT and entry_price is not None and entry_price > 0:
         sl_pct, step_pct, target_pct = tsl_pcts(cfg)
         return (

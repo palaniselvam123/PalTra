@@ -3,7 +3,10 @@
  * Settings page, the "Ask the bot" proposal cards and anywhere else a field name is shown to a person.
  */
 export const SETTING_LABELS: Record<string, string> = {
-  tsl_mode: "trailing units (₹ / %)",
+  tsl_mode: "trailing units (₹ / % / ATR)",
+  tsl_sl_atr: "trailing stop (× ATR)",
+  tsl_trail_atr: "trail step (× ATR)",
+  tsl_target_atr: "target (× ATR, 0 = none)",
   tsl_sl_points: "trailing stop distance (₹)",
   tsl_trail_points: "trail step (₹)",
   tsl_target_points: "target (₹, 0 = none)",
