@@ -497,7 +497,7 @@ export function StrategySummary({
               </p>
             ) : null}
             {stopOn
-              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP", "SUPERTREND"], STOP_LABEL, (v) =>
+              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP", "SUPERTREND", "VWAP"], STOP_LABEL, (v) =>
                   save({ stop_type: v }, `Stop type ${STOP_LABEL[v]}`)
                 )
               : null}
