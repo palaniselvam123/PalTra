@@ -262,7 +262,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
     use_stop: form.use_stop !== false,
-    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR",
+    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR",
+    vwap_stop_atr: Number(form.vwap_stop_atr ?? 0.5),
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
@@ -2105,7 +2106,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 ? "Trailing stop-loss on new entries"
                 : form.stop_type === "SUPERTREND"
                   ? "Stop-loss on the Supertrend line (moves each candle)"
-                  : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+                  : form.stop_type === "VWAP"
+                    ? `Stop-loss at VWAP ∓ ${String(form.vwap_stop_atr ?? 0.5)}× ATR (moves each candle)`
+                    : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
             <InfoTip label="About the stop-loss">
               Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
               and the square-off close them.
@@ -2116,7 +2119,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Stop type{isOwn("stop_type") && <OwnTag />}
             </span>
             <select
-              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR"}
+              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR"}
               onChange={(e) => set("stop_type", e.target.value)}
               className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
@@ -2124,8 +2127,40 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="SMA_GAP">SMA gap — moving stop + target</option>
               <option value="TSL">Trailing stop (TSL) — ₹ or % steps, like Groww</option>
               <option value="SUPERTREND">Supertrend — stop on the Supertrend line, moves each candle</option>
+              <option value="VWAP">VWAP + ATR buffer — stop at VWAP − k × ATR (buy) / VWAP + k × ATR (sell), moves each candle</option>
             </select>
           </label>
+          {form.stop_type === "VWAP" ? (
+            <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
+              <div className="grid grid-cols-2 items-end gap-2">
+                <Field label="Buffer below / above VWAP" suffix="× ATR" value={String(form.vwap_stop_atr ?? 0.5)} onChange={(v) => set("vwap_stop_atr", v)} own={isOwn("vwap_stop_atr")} />
+                <label className="block text-xs text-slate-300">
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Buffer slider</span>
+                    <span className="font-mono text-slate-100">{String(form.vwap_stop_atr ?? 0.5)} × ATR</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={3}
+                    step={0.05}
+                    value={Math.min(3, Math.max(0, Number(form.vwap_stop_atr ?? 0.5) || 0))}
+                    onChange={(e) => set("vwap_stop_atr", String(Number(e.target.value)))}
+                    className="mt-1 w-full accent-sky-400"
+                    aria-label="VWAP stop buffer in ATR multiples"
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Stop = VWAP − {String(form.vwap_stop_atr ?? 0.5)} × ATR for a buy, VWAP + {String(form.vwap_stop_atr ?? 0.5)} × ATR for a sell. VWAP is
+                where the day&apos;s money has traded on average (institutional fair value); the ATR buffer keeps a wick through it from
+                closing the trade. Read on each closed candle and only ever tightened (a buy&apos;s stop rises with VWAP, never falls). If the
+                level is on the wrong side when the trade opens, the ATR stop ({String(form.atr_multiplier)}× ATR) guards it until the
+                level comes under a buy or above a sell. A price at or past it closes the trade (VWAP SL). LIVE moves the Groww stop order the
+                same way.
+              </p>
+            </div>
+          ) : null}
           {form.stop_type === "SUPERTREND" ? (
             <p className="mt-2 text-xs text-slate-400">
               The stop sits on the Supertrend line ({String(form.st_period ?? 10)} candles, ×{String(form.st_mult ?? 3)}; set them under
@@ -2796,6 +2831,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "use_stop", text: `Moving stop and target from the SMA gap (PAPER only; LIVE uses ${f.atr_multiplier}× ATR)` });
   } else if (f.stop_type === "SUPERTREND") {
     add({ group: "stop", key: "use_stop", text: `Stop on the Supertrend line (${n(f.st_period, 10)}, ×${n(f.st_mult, 3)}), moved each candle, tighter only` });
+  } else if (f.stop_type === "VWAP") {
+    add({ group: "stop", key: "use_stop", text: `Stop at VWAP ∓ ${n(f.vwap_stop_atr, 0.5)}× ATR, moved each candle, tighter only` });
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
   }

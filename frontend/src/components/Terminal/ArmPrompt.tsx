@@ -25,6 +25,7 @@ function stopInUse(c: StockConfig): string {
   if (c.use_stop === false) return "Stop is OFF";
   if (c.stop_type === "TSL") return c.tsl_mode === "PERCENT" ? "Trailing stop (%)" : "Trailing stop (₹)";
   if (c.stop_type === "SUPERTREND") return `Supertrend stop (${c.st_period ?? 10}, ×${c.st_mult ?? 3})`;
+  if (c.stop_type === "VWAP") return `VWAP ∓ ${c.vwap_stop_atr ?? 0.5}× ATR stop`;
   if (c.stop_type === "SMA_GAP") return `SMA gap stop (×${c.gap_sl_mult ?? 1})`;
   return `ATR stop (${c.atr_multiplier ?? 1.5}× ATR)`;
 }

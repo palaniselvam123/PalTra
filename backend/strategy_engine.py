@@ -61,6 +61,7 @@ import counter_candles
 import ema_filter
 import exit_candle
 import small_candles
+import vwap_stop
 import supertrend
 import opening_range
 import join_trend
@@ -203,6 +204,10 @@ class OpenPosition:
     # st_stop_bar is the last closed candle read.
     st_stop: bool = False
     st_stop_bar: int | None = None
+    # VWAP + ATR buffer stop (vwap_stop.py, stop_type VWAP): the stop follows VWAP ∓ k × ATR, tighter only;
+    # vwap_stop_bar is the last closed candle read.
+    vwap_stop: bool = False
+    vwap_stop_bar: int | None = None
     # Bollinger exit: the last closed candle read, and whether a close has
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
@@ -265,7 +270,7 @@ class OpenPosition:
 
 def _plan_r_restored(own, at_entry: dict, stop_active: bool, trailing: bool, tsl_step, entry: float, atr, direction: str) -> float | None:
     """R of a restored trade on the staged stop plan: the ATR stop it was opened with (ATR x multiplier)."""
-    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own):
+    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own) or vwap_stop.stop_on(own):
         return None
     try:
         mult = float(at_entry.get("atr_multiplier") or getattr(own, "atr_multiplier", 0) or 0)
@@ -293,7 +298,7 @@ SNAPSHOT_FIELDS = (
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
-    "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr",
+    "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -1219,6 +1224,8 @@ class StrategyEngine:
                 tsl_best=entry if tsl_step else None,
                 # Supertrend stop: resumes from the saved stop, tighter only.
                 st_stop=bool(stop_active and own is not None and not trailing and not tsl_step and supertrend.stop_on(own)),
+                # VWAP stop: resumes from the saved stop, tighter only.
+                vwap_stop=bool(stop_active and own is not None and not trailing and not tsl_step and vwap_stop.stop_on(own)),
                 # Ticks before a restart are not kept; the range restarts at entry.
                 high=entry,
                 low=entry,
@@ -1420,6 +1427,7 @@ class StrategyEngine:
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
             await self._trail_supertrend(symbol_cfg)
+            await self._trail_vwap_stop(symbol_cfg)
             await self._trail_stop_plan(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
@@ -3288,6 +3296,16 @@ class StrategyEngine:
             if line is not None and ((direction == "LONG" and line < fill) or (direction == "SHORT" and line > fill)):
                 sl = round_price(cfg.symbol, line)
             st_bar = _closed_bar_ts(frame)
+        vw_stop = vwap_stop.stop_on(cfg)
+        vw_bar = None
+        if vw_stop:
+            frame = self._frames.get((cfg.symbol or "").upper())
+            closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
+            # VWAP ∓ buffer × ATR, only when it is on the safe side of the fill; else the ATR stop until it is.
+            line = vwap_stop.stop_level(closed, direction, cfg, price=fill, atr=atr)
+            if line is not None:
+                sl = round_price(cfg.symbol, line)
+            vw_bar = _closed_bar_ts(frame)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -3346,12 +3364,14 @@ class StrategyEngine:
             tsl_best=fill if tsl_step else None,
             st_stop=st_stop,
             st_stop_bar=st_bar,
+            vwap_stop=vw_stop,
+            vwap_stop_bar=vw_bar,
             high=fill,
             low=fill,
             flipped=flipped,
             entry_why=why or "",
             # The plan needs the plain ATR stop at entry; R is the distance to it.
-            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop) else None,
+            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop and not vw_stop) else None,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -3477,6 +3497,31 @@ class StrategyEngine:
             return
         if await self._move_stop(pos, symbol, moved, "Supertrend stop"):
             pos.st_stop_bar = closed_ts
+
+    async def _trail_vwap_stop(self, cfg: BotConfig) -> None:
+        """Once per newly closed candle: move a VWAP stop to VWAP ∓ buffer × ATR (tighter only).
+
+        Read on the bot's own closed candles (vwap_stop.py); it only counts while it guards the real
+        position. LIVE moves the exchange stop like the trailing stop.
+        """
+        pos = self.position
+        if pos is None or not pos.vwap_stop or not pos.stop_active:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or closed_ts == pos.vwap_stop_bar:
+            return
+        line = vwap_stop.stop_level(frame.iloc[:-1], pos.direction, cfg)
+        if line is None:
+            pos.vwap_stop_bar = closed_ts
+            return
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, line))
+        if moved == pos.sl_trigger:
+            pos.vwap_stop_bar = closed_ts
+            return
+        if await self._move_stop(pos, symbol, moved, "VWAP stop"):
+            pos.vwap_stop_bar = closed_ts
 
     async def _trail_stop_plan(self, cfg: BotConfig) -> None:
         """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
@@ -3683,7 +3728,7 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
-        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else "ATR_SL_HIT"))
+        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else (vwap_stop.HIT_REASON if pos.vwap_stop else "ATR_SL_HIT")))
         if pos.plan_stage:
             reason = stop_plan.HIT_REASON  # the stop the plan moved (breakeven or the Supertrend line)
         if not hit and pos.target is not None and self.ltp > 0:
@@ -4103,7 +4148,7 @@ class StrategyEngine:
                         await self._cancel_sl_verified(self.position)
                     except SlCancelFailed:
                         # It filled as we cancelled: the stop closed the trade.
-                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else "ATR_SL_HIT")
+                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else (vwap_stop.HIT_REASON if self.position.vwap_stop else "ATR_SL_HIT"))
                         if self.position.plan_stage:
                             reason = stop_plan.HIT_REASON
                         fill_price = await self._real_exit_price(self.position, (cfg.symbol or "").upper())
@@ -5523,6 +5568,7 @@ _ALERT_REASON = {
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
     "SUPERTREND": "Supertrend turned against the trade",
+    "VWAP_SL_HIT": "VWAP stop hit",
     "SMA9_BEND": "SMA 9 bent",
     "SMA9_TURN": "SMA 9 turned against the trade",
     "SMA9_VTURN": "SMA 9 V-turn",
@@ -5573,6 +5619,7 @@ def _stop_points(cfg) -> dict | None:
         "tsl_target_atr": target_atr,
         "gap_sl_mult": float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
         "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
+        "vwap_stop_atr": vwap_stop.buffer(cfg),
     }
 
 

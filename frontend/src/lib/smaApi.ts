@@ -22,7 +22,7 @@ function resolveSmaApi(): string {
 
 export const SMA_API = resolveSmaApi();
 
-export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND";
+export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND" | "VWAP";
 
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
@@ -80,6 +80,8 @@ export type SmaConfig = {
   tsl_sl_atr?: number;
   tsl_trail_atr?: number;
   tsl_target_atr?: number;
+  /** VWAP + ATR buffer stop (stop_type "VWAP"): stop = VWAP ∓ this × ATR, tighter only each candle. */
+  vwap_stop_atr?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -875,6 +877,7 @@ export type SmaState = {
     tsl_target_pct?: number;
     gap_sl_mult: number;
     gap_tp_mult: number;
+    vwap_stop_atr?: number;
   } | null;
   exchange: string;
   ltp: number;

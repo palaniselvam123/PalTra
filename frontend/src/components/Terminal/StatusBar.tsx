@@ -63,6 +63,10 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
     if (stopType === "SUPERTREND") {
       return pos ? `Supertrend SL ${rupees(pos.sl_trigger)} · Target none` : "Supertrend line · Target none";
     }
+    if (stopType === "VWAP") {
+      const k = points?.vwap_stop_atr ?? config?.vwap_stop_atr ?? 0.5;
+      return pos ? `VWAP SL ${rupees(pos.sl_trigger)} · Target none` : `VWAP ∓ ${k}× ATR · Target none`;
+    }
     if (stopType === "TSL" && (points?.tsl_mode ?? config?.tsl_mode) === "PERCENT") {
       const sl = points?.tsl_sl_pct ?? config?.tsl_sl_pct ?? 1;
       const trail = points?.tsl_trail_pct ?? config?.tsl_trail_pct ?? 0.5;

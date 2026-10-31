@@ -252,6 +252,6 @@ def test_every_bot_and_todays_cross_timeline_reach_the_assistant(tmp_path, monke
     assert facts["strategies_used"]["S1"]["stop_type"] == "TSL"
     # The catalog names the fields the chat may change, with their bounds, never the bookkeeping ones.
     cat = facts["settings_catalog"]
-    assert cat["atr_multiplier"]["le"] == 10 and cat["stop_type"]["choices"] == ["ATR", "SMA_GAP", "TSL", "SUPERTREND"]
+    assert cat["atr_multiplier"]["le"] == 10 and cat["stop_type"]["choices"] == ["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"]
     assert "trading_mode" not in cat and "trade_symbols" not in cat and "help" in cat["use_vwap"]
     json.dumps(facts, default=str)
