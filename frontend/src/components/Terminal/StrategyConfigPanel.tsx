@@ -4,7 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { SlopeEditor } from "@/components/Settings/SlopeEditor";
-import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture } from "@/components/Settings/StrategyPictures";
+import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
@@ -2003,6 +2003,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("gap_fade_min_candles")}
             />
           </div>
+          <GapModePicture form={form} set={set} />
           {gapNotes.length ? (
             <ul aria-label="Setting notes" className="mt-2 space-y-1.5">
               {gapNotes.map((note) => (
