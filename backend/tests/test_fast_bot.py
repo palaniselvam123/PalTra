@@ -424,7 +424,7 @@ async def test_after_its_bot5_trades_the_stock_goes_back_to_its_own_bot(moved):
     target.entry_gate = None
     bot, done = await _run(src, target, bot5_trades=1)
     assert moved == [(4, "ACME", False, 5)]
-    assert bot.snapshot()["on_bot5"] == {"ACME": {"from_bot": 4, "trades": 0}}
+    assert bot.snapshot()["on_bot5"] == {"ACME": {"from_bot": 4, "trades": 0, "kept": False}}
     target.bot_id = 5
     assert target.entry_gate == bot.gate
     assert bot.gate(target, "ACME") is None  # the fast-move entry itself
@@ -546,3 +546,66 @@ def test_the_adx_gate_is_read_by_the_entry_check():
     assert fast_bot.entry_refusal(frame, cfg, "LONG") == "ADX 12.0 below 20"
     assert fast_bot.entry_refusal(None, cfg, "LONG") is None
     assert fast_bot.clean({}).entry_checks is True and fast_bot.clean({"entry_checks": False}).entry_checks is False
+
+
+@pytest.mark.asyncio
+async def test_keep_mode_leaves_the_trade_and_bot5_orders_next_to_it(moved):
+    """keep_trade: the source trade is not cut; Bot 5 is armed too and buys at once; both keep the stock."""
+    src, target = _Source(), _Target()
+    bot, done = await _run(src, target, keep_trade=True)
+    assert src.closed == [] and "ACME" in src.positions
+    assert moved == [(1, "ACME", False, 5)]
+    assert target.orders == [("ACME", "BULLISH", "FAST_MOVE")]
+    assert bot.handed["ACME"]["keep"] is True and bot.snapshot()["on_bot5"]["ACME"]["kept"] is True
+    assert "trade kept" in done[0] and "Bot 5 buys at once" in done[0]
+
+
+@pytest.mark.asyncio
+async def test_keep_mode_never_touches_a_live_pair(moved):
+    src, target = _Source(mode="LIVE"), _Target(mode="LIVE")
+    bot, done = await _run(src, target, keep_trade=True)
+    assert src.closed == [] and moved == [] and target.orders == []
+    assert "not moved" in done[0] and "LIVE" in done[0]
+
+
+@pytest.mark.asyncio
+async def test_keep_mode_give_back_only_unarms_bot5(moved, monkeypatch):
+    import fast_bot
+    import recovery
+
+    unarmed = []
+    monkeypatch.setattr(recovery, "unarm", lambda bot, symbol: unarmed.append((bot, symbol)) or "off Bot 5's Trade list")
+    src, target = _Source(), _Target()
+    bot, _ = await _run(src, target, keep_trade=True, bot5_trades=1)
+    assert bot.gate(SimpleNamespace(bot_id=5), "ACME") is None  # Bot 5's one trade
+    done = bot.give_back(target, fast_bot.load(), NOW + 60)
+    assert unarmed == [(5, "ACME")] and moved == [(1, "ACME", False, 5)]  # no hand-off back: Bot 1 kept it
+    assert done and "Bot 1 kept it" in done[0] and "ACME" not in bot.handed
+
+
+def test_handoff_keep_source_arms_both_and_unarm_drops_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/keep.db")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    import bots
+    import recovery
+    from models import BotConfig
+    from strategy_engine import trade_names
+
+    bots.ensure_bot_config(5)
+    with database.session_factory()() as s:
+        s.get(BotConfig, 1).trade_symbols = "ACME,TCS"
+        s.commit()
+    monkeypatch.setattr(bots, "engines", lambda: {})
+    out = recovery.handoff(1, "ACME", False, to_bot=5, keep_source=True)
+    assert out.startswith("armed on Bot 5 too")
+    with database.session_factory()() as s:
+        assert trade_names(s.get(BotConfig, 1)) == ["ACME", "TCS"]
+        assert trade_names(s.get(BotConfig, bots.config_id_for(5))) == ["ACME"]
+    assert recovery.unarm(5, "ACME") == "off Bot 5's Trade list"
+    with database.session_factory()() as s:
+        assert trade_names(s.get(BotConfig, bots.config_id_for(5))) == []
+        assert trade_names(s.get(BotConfig, 1)) == ["ACME", "TCS"]
+    database.reset_engine()

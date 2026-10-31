@@ -3562,6 +3562,8 @@ class FastBotSettings(BaseModel):
     bot5_trades: int | None = Field(None, ge=0, le=fast_bot.MAX_BOT5_TRADES)
     # Bot 5's own entry checks (VWAP, volume, density, RSI, ADX, EMA, …) are read before the hand-off.
     entry_checks: bool | None = None
+    # Keep the source trade and let Bot 5 open its own order next to it (the stock is armed on both bots).
+    keep_trade: bool | None = None
     confirm_live: bool = False
 
 

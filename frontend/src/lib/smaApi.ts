@@ -593,7 +593,9 @@ export type FastBotSettings = {
   bot5_trades?: number;
   /** Bot 5's own ticked entry checks (VWAP, RSI, ADX, …) are read before the hand-off; a refusal leaves the trade. */
   entry_checks?: boolean;
-  on_bot5?: Record<string, { from_bot: number; trades: number }>;
+  /** Keep the trade on its bot; Bot 5 opens its own order next to it and the stock is armed on both. */
+  keep_trade?: boolean;
+  on_bot5?: Record<string, { from_bot: number; trades: number; kept?: boolean }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
   target_status?: string | null;

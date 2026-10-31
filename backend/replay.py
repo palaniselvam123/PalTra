@@ -395,6 +395,14 @@ class ReplayEngine(StrategyEngine):
             if refused:
                 self._signals[name] = f"{name} fast move ({why}): not moved, Bot {fast_bot.TARGET_BOT}'s entry check says no: {refused}"
                 return
+        if fast_bot.clean(raw).keep_trade:
+            # Keep mode: the trade stays; a replay plays one bot, so Bot 5's order next to it cannot be
+            # played here (the run shows the move in the signal line only).
+            self._fast_back.add(name)
+            self._signals[name] = (
+                f"{name} fast move ({why}): trade kept (keep mode); Bot {fast_bot.TARGET_BOT}'s own order is not played in a replay"
+            )
+            return
         try:
             await self.close_symbol(name, reason=fast_bot.EXIT_REASON)
         except ForceRefused as exc:

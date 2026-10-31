@@ -194,7 +194,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
-  Research never hands off. **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
+  Research never hands off. **Keep the trade** (`keep_trade`, off by default; Settings card tick box): the source
+  trade is not cut; `recovery.handoff(..., keep_source=True)` arms the stock on Bot 5 while it stays on the source
+  bot's Trade list ("armed on Bot 5 too"), Bot 5's `direct_order` opens its own order on the same side next to it,
+  and both bots keep trading it; `handed[..]["keep"]` (snapshot `on_bot5[..].kept`), and `give_back` then only takes
+  it off Bot 5 (`recovery.unarm`). A LIVE source trade is left alone in this mode (two LIVE bots never hold one
+  stock). Replays play one bot, so in keep mode `ReplayEngine._fast_move` keeps the trade and only notes the move in
+  the signal line (no Bot 5 order, no `fast_move` totals). **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
   `fast_bot.entry_refusal` reads Bot 5's own settings for the stock (`_target_cfg` → `_cfg_for`) on the source bot's
   enriched frame exactly as a cross would (the ADX gate, then `strategy_engine._entry_block`: VWAP, volume, density,
   RSI, EMA, Supertrend, level, opening range, gap, candle direction; never the cross, patterns, pullback or candle waits);
