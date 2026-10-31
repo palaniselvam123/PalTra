@@ -15,7 +15,22 @@ import type { SmaConfig } from "@/lib/smaApi";
 const DEG45_KEY = "sma.slope.deg45";
 const DEG45_DEFAULT = 0.05;
 
-type Num = "slope_turn_pct" | "vturn_move_pct" | "vturn_turn_pct" | "vturn_within" | "uturn_run" | "uturn_min_pct";
+type Num =
+  | "slope_turn_pct"
+  | "vturn_move_pct"
+  | "vturn_turn_pct"
+  | "vturn_within"
+  | "uturn_run"
+  | "uturn_min_pct"
+  | "slope_lookback"
+  | "slope_bend_pct"
+  | "decel_lookback"
+  | "decel_arm_atr"
+  | "decel_drop_pct"
+  | "decel_min_atr"
+  | "decel_candles";
+
+const SLOPE_CANDLES = [0, 1, 2, 3, 5, 10, 15] as const;
 
 export function slopeAngle(pctPerCandle: number, deg45: number): number {
   if (!deg45) return 0;
@@ -89,6 +104,21 @@ export function SlopeEditor({
   const uRun = Math.min(30, Math.max(2, Math.round(num("uturn_run", 5))));
   const uMin = num("uturn_min_pct", 0.005);
   const fast = form.sma_fast ?? 9;
+  const lookback = Math.min(10, Math.max(1, Math.round(num("slope_lookback", 2))));
+  const bend = Math.min(100, Math.max(0, num("slope_bend_pct", 60)));
+  const slopeMinutes = Number(form.slope_minutes ?? 0) || 0;
+  const dLook = Math.min(10, Math.max(1, Math.round(num("decel_lookback", 2))));
+  const dArm = num("decel_arm_atr", 0.1);
+  const dDrop = Math.min(100, Math.max(0, num("decel_drop_pct", 50)));
+  const dMin = num("decel_min_atr", 0.02);
+  const dCandles = Math.min(5, Math.max(1, Math.round(num("decel_candles", 2))));
+  // Which rules read these numbers (the bot ignores a rule's numbers while its tick box is off).
+  const turnExitOn = Boolean(form.slope_exit) && form.slope_turn !== false;
+  const bendOn = Boolean(form.slope_exit) && bend > 0;
+  const vturnOn = Boolean(form.vturn_exit);
+  const decelOn = Boolean(form.decel_exit);
+  const turnEntryOn = Boolean(form.turn_entry);
+  const uOn = Boolean(form.uturn_on) && (turnEntryOn || Boolean(form.turn_alert));
 
   // Geometry: one candle = CW px wide; a slope of deg45 % per candle rises CW px per candle (45°).
   const W = 560;
@@ -104,6 +134,9 @@ export function SlopeEditor({
   const endY = Math.min(H - 20, peakY + rise(turn) * within);
   // Turn-exit level: a dashed leg at that slope from the peak, as "this is the angle that counts as a turn".
   const texY = Math.min(H - 20, peakY + rise(turnExit) * 3);
+  // Bend exit: the run eased to (100 − bend)% of its steepest; drawn as a flatter leg on from the peak.
+  const bendSlope = move * (1 - bend / 100);
+  const bendY = Math.max(10, peakY - rise(bendSlope) * 3);
   // U-turn, on the right: down uRun candles (capped on screen) at uMin, a flat rounding, up again.
   const uCandles = Math.min(8, uRun);
   const ux0 = endX + 70;
@@ -154,20 +187,13 @@ export function SlopeEditor({
     for (const [k, v] of Object.entries(p.apply(deg45))) set(k as keyof SmaConfig, v as string | boolean);
   };
 
-  const slider = (
-    key: Num,
-    text: string,
-    value: number,
-    min: number,
-    max: number,
-    step: number,
-    angle = true
-  ) => (
-    <label className="block text-xs text-slate-300">
+  type Show = "angle" | "count" | "pct" | "atr";
+  const slider = (key: Num, text: string, value: number, min: number, max: number, step: number, show: Show = "angle", dim = false) => (
+    <label className={clsx("block text-xs text-slate-300", dim && "opacity-60")}>
       <span className="flex items-center justify-between gap-2">
         <span>{text}</span>
         <span className="font-mono text-slate-100">
-          {angle ? `${clean(value)}%/c · ${deg(value)}` : String(value)}
+          {show === "angle" ? `${clean(value)}%/c · ${deg(value)}` : show === "pct" ? `${clean(value)}%` : show === "atr" ? `${clean(value)} ATR/c` : String(value)}
         </span>
       </span>
       <input
@@ -176,12 +202,43 @@ export function SlopeEditor({
         max={max}
         step={step}
         value={Math.min(max, Math.max(min, value))}
-        onChange={(e) => set(key, angle ? clean(Number(e.target.value)) : String(Math.round(Number(e.target.value))))}
+        onChange={(e) => set(key, show === "count" ? String(Math.round(Number(e.target.value))) : clean(Number(e.target.value)))}
         className="mt-1 w-full accent-sky-400"
         aria-label={text}
       />
     </label>
   );
+  // The rule strip: each rule's tick box, so the picture says which numbers the bot reads.
+  const rule = (on: boolean, text: string, when: string, toggle: (next: boolean) => void, disabled = false) => (
+    <label
+      className={clsx(
+        "flex min-h-9 items-center gap-2 rounded-md px-2 py-1 text-xs ring-1 ring-inset",
+        on ? "bg-emerald-500/10 text-slate-100 ring-emerald-400/40" : "text-slate-400 ring-white/10",
+        disabled && "opacity-50"
+      )}
+      title={when}
+    >
+      <input type="checkbox" checked={on} disabled={disabled} onChange={(e) => toggle(e.target.checked)} className="accent-emerald-400" />
+      <span className="font-semibold">{text}</span>
+      <span className={clsx("ml-auto font-mono", on ? "text-emerald-300" : "text-slate-500")}>{on ? "ON" : "off"}</span>
+    </label>
+  );
+  // Deceleration guard picture: a run at the arm slope, then `dCandles` legs each a bend flatter, down to the drop level.
+  const D = { w: 300, h: 120, cw: 26, base: 95, x0: 16 };
+  const dRise = (atr: number) => atr * 220; // picture only: 0.1 ATR/candle rises 22 px per candle
+  const dPeakX = D.x0 + 4 * D.cw;
+  const dPeakY = D.base - Math.min(70, dRise(dArm) * 4);
+  const dLegs: string[] = [`${D.x0},${D.base}`, `${dPeakX},${dPeakY}`];
+  let dx = dPeakX;
+  let dy = dPeakY;
+  let dSlope = dArm;
+  for (let k = 0; k < dCandles; k += 1) {
+    dSlope = Math.max(dArm * (1 - dDrop / 100), dSlope - dMin);
+    dx += D.cw;
+    dy -= dRise(dSlope);
+    dLegs.push(`${dx},${dy}`);
+  }
+  const dEndSlope = dArm * (1 - dDrop / 100);
 
   return (
     <section id="sma-slope-editor" aria-label="Slope editor" className="mt-3 scroll-mt-24 rounded-lg border border-sky-400/20 bg-sky-500/[0.04] p-3">
@@ -210,8 +267,31 @@ export function SlopeEditor({
       </div>
       <p className="mt-1 text-xs text-slate-400">
         Drag the two handles, move the sliders, or type in the boxes above: all of them change the same settings. Each leg shows
-        its % per candle and its angle; the angle follows the convention at the bottom right.
+        its % per candle and its angle; the angle follows the convention at the bottom right.{" "}
+        <span className="text-slate-300">Every level is a minimum, not an exact value</span>: &quot;turn back ≥ 0.015%/c&quot; fires on
+        the first closed candle whose slope is at least that against the trade. The chart shades where that is in price
+        (&quot;Exit zone&quot; / &quot;Buy zone&quot;): the next candle&apos;s close at which the slope reaches the level.
       </p>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Which slope rules are on">
+        {rule(turnExitOn, "Turn exit", "Closes when the SMA 9 slope is at least the turn level against the trade (SMA9_TURN).", (on) => {
+          set("slope_turn", on);
+          if (on) set("slope_exit", true);
+        })}
+        {rule(bendOn, "Bend exit", "Closes when the slope has eased by the bend % from its steepest since the entry (SMA9_BEND). 0% = off.", (on) => {
+          if (on) {
+            set("slope_exit", true);
+            if (bend <= 0) set("slope_bend_pct", "60");
+          } else set("slope_bend_pct", "0");
+        })}
+        {rule(vturnOn, "V-turn exit", "Closes on a steep run then a steep turn back within the window (SMA9_VTURN).", (on) => set("vturn_exit", on))}
+        {rule(decelOn, "Deceleration guard", "Closes when the line is still bending flatter, before it turns (SMA9_DECEL); read in ATR per candle.", (on) =>
+          set("decel_exit", on)
+        )}
+        {rule(turnEntryOn, "Turn entry (reverse on the V)", "Opens a trade on the V (the same steep run / turn back numbers): a short's V-turn up buys. Without it a slope exit only closes.", (on) =>
+          set("turn_entry", on)
+        )}
+        {rule(uOn, "U-turn (turn entry / alert)", "The turn entry and alert also fire on a rounded U: a run one way, then the first candle the other way.", (on) => set("uturn_on", on), !turnEntryOn && !Boolean(form.turn_alert))}
+      </div>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -232,6 +312,14 @@ export function SlopeEditor({
         <polyline points={`${vx0},${base} ${peakX},${peakY}`} fill="none" stroke="#34d399" strokeWidth={3} strokeLinecap="round" />
         <polyline points={`${peakX},${peakY} ${endX},${endY}`} fill="none" stroke="#fb7185" strokeWidth={3} strokeLinecap="round" />
         <line x1={peakX} y1={peakY} x2={peakX + 3 * CW} y2={texY} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="5 4" />
+        {bendOn ? (
+          <>
+            <line x1={peakX} y1={peakY} x2={peakX + 3 * CW} y2={bendY} stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="2 3" />
+            <text x={vx0} y={Math.max(12, peakY - 24)} fill="#38bdf8" fontSize={11} fontFamily="monospace">
+              bend exit ≤ {label(bendSlope)} ({bend}% off the steepest)
+            </text>
+          </>
+        ) : null}
         <text x={vx0} y={peakY - 10} fill="#34d399" fontSize={11} fontFamily="monospace">
           steep run ≥ {label(move)}
         </text>
@@ -261,10 +349,30 @@ export function SlopeEditor({
       <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
         {slider("vturn_move_pct", "Steep run (with the trade)", move, 0, 0.2, 0.001)}
         {slider("vturn_turn_pct", "Turn back (against the trade)", turn, 0, 0.2, 0.001)}
-        {slider("vturn_within", "Turn back within (candles)", within, 1, 10, 1, false)}
+        {slider("vturn_within", "Turn back within (candles)", within, 1, 10, 1, "count")}
         {slider("slope_turn_pct", "Turn exit at (against the trade)", turnExit, 0, 0.2, 0.001)}
-        {slider("uturn_run", "U-turn: run before (candles)", uRun, 2, 30, 1, false)}
-        {slider("uturn_min_pct", "U-turn: slope at least", uMin, 0, 0.05, 0.0005)}
+        {slider("uturn_run", "U-turn: run before (candles)", uRun, 2, 30, 1, "count", !uOn)}
+        {slider("uturn_min_pct", "U-turn: slope at least", uMin, 0, 0.05, 0.0005, "angle", !uOn)}
+        {slider("slope_lookback", "Slope over (candles): SMA 9 now vs this many candles ago", lookback, 1, 10, 1, "count")}
+        {slider("slope_bend_pct", "Bend exit: % off the steepest slope since the entry (0 = off)", bend, 0, 100, 5, "pct", !bendOn)}
+        <label className="block text-xs text-slate-300">
+          <span className="flex items-center justify-between gap-2">
+            <span>Slope candle: read the slope on</span>
+            <span className="font-mono text-slate-100">{slopeMinutes ? `${slopeMinutes} min` : `the bot's ${form.candle_minutes ?? 1}-min candle`}</span>
+          </span>
+          <select
+            value={String(SLOPE_CANDLES.includes(slopeMinutes as (typeof SLOPE_CANDLES)[number]) ? slopeMinutes : 0)}
+            onChange={(e) => set("slope_minutes", e.target.value)}
+            aria-label="Slope candle"
+            className="mt-1 block h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-xs text-slate-100"
+          >
+            {SLOPE_CANDLES.map((m) => (
+              <option key={m} value={String(m)}>
+                {m === 0 ? `The bot's own candle (${form.candle_minutes ?? 1} min)` : `${m}-minute candles (a V shows ${m < Number(form.candle_minutes ?? 1) ? "sooner" : "later"})`}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="block text-xs text-slate-300 sm:col-span-2">
           <span className="flex items-center justify-between gap-2">
             <span>
@@ -284,6 +392,35 @@ export function SlopeEditor({
             aria-label="Angle convention: % per candle that counts as 45 degrees"
           />
         </label>
+      </div>
+      <div className={clsx("mt-3 rounded-md border border-white/10 p-2", !decelOn && "opacity-60")}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h5 className="text-xs font-semibold text-slate-200">Deceleration guard, as a picture {decelOn ? "" : "(off)"}</h5>
+          <span className="text-[11px] text-slate-500">In ATR per candle, so one set of numbers fits every stock; no angle</span>
+        </div>
+        <div className="mt-2 grid gap-3">
+          <svg viewBox={`0 0 ${D.w} ${D.h}`} className="w-full max-w-[420px] rounded-md bg-black/30" role="img" aria-label={`Deceleration: run at ${clean(dArm)} ATR per candle, then ${dCandles} candles each ${clean(dMin)} ATR flatter, exit once ${dDrop}% off the peak`}>
+            <line x1={0} x2={D.w} y1={D.base} y2={D.base} stroke="rgba(148,163,184,0.25)" strokeDasharray="4 4" />
+            <polyline points={dLegs.slice(0, 2).join(" ")} fill="none" stroke="#34d399" strokeWidth={3} strokeLinecap="round" />
+            <polyline points={dLegs.slice(1).join(" ")} fill="none" stroke="#f59e0b" strokeWidth={3} strokeLinecap="round" />
+            <text x={D.x0} y={dPeakY - 8} fill="#34d399" fontSize={10} fontFamily="monospace">
+              arms at ≥ {clean(dArm)} ATR/c
+            </text>
+            <text x={Math.min(dx + 4, D.w - 150)} y={Math.max(12, dy - 6)} fill="#f59e0b" fontSize={10} fontFamily="monospace">
+              {dCandles} bending candle{dCandles === 1 ? "" : "s"} → exit
+            </text>
+            <text x={D.x0} y={D.h - 6} fill="#94a3b8" fontSize={10} fontFamily="monospace">
+              exit once slope ≤ {clean(dEndSlope)} ATR/c ({dDrop}% off the peak)
+            </text>
+          </svg>
+          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+            {slider("decel_lookback", "Slope over (candles)", dLook, 1, 10, 1, "count", !decelOn)}
+            {slider("decel_arm_atr", "Arms at (the run was real)", dArm, 0, 1, 0.01, "atr", !decelOn)}
+            {slider("decel_drop_pct", "Down from the peak slope", dDrop, 0, 100, 5, "pct", !decelOn)}
+            {slider("decel_min_atr", "Bend per candle", dMin, 0, 0.2, 0.005, "atr", !decelOn)}
+            {slider("decel_candles", "Bending candles in a row", dCandles, 1, 5, 1, "count", !decelOn)}
+          </div>
+        </div>
       </div>
       <p className="mt-2 text-[11px] text-slate-500">
         The bot reads slopes in % per candle over {form.slope_lookback ?? 2} candle{Number(form.slope_lookback ?? 2) === 1 ? "" : "s"}

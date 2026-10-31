@@ -987,6 +987,13 @@ export type ChartFilters = {
   vturn_turn_pct?: number;
   vturn_within?: number;
   slope_minutes?: number;
+  /** Which slope rules are on and the fast SMA length, for the chart's exit / entry zones (slopeZone.ts). */
+  sma_fast?: number;
+  slope_rules?: boolean;
+  slope_turn?: boolean;
+  decel_exit?: boolean;
+  turn_entry?: boolean;
+  turn_toward_cross?: boolean;
   /** For the chart's "why no trade here" line. */
   entry_cutoff_time?: string;
   square_off_time?: string;
