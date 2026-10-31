@@ -4,6 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { SlopeEditor } from "@/components/Settings/SlopeEditor";
+import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
@@ -816,6 +817,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </label>
+          <CandleSizePicture form={form} set={set} />
           <SectionTitle>How a trade opens</SectionTitle>
           <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <div className="flex items-center gap-1 text-sm text-slate-300">
@@ -1141,6 +1143,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("tall_expiry_candles")}
             />
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["tall"]} />
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1301,6 +1304,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
           </label>
           <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+          <AdxPicture form={form} set={set} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1472,6 +1476,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["direction"]} />
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             EMA lines (check here; the exit is in step 3)
             <InfoTip label="About the EMA cross">
@@ -1779,6 +1784,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               trade do not count. 0.5 = half an ATR.
             </p>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["counter"]} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2257,10 +2263,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             ) : null}
           </div>
           {form.stop_type !== "TSL" ? (
-            <div className="mt-2 grid grid-cols-2 items-end gap-2">
-              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-            </div>
+            <>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+                <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+              </div>
+              <AtrPicture form={form} set={set} />
+            </>
           ) : null}
           {form.stop_type === "SMA_GAP" ? (
             <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
