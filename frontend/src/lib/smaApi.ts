@@ -1249,6 +1249,8 @@ export type ReplayInfo = {
   start: string;
   /** ISO time on the replayed day. */
   clock: string | null;
+  /** Where a seek is heading (ISO), while the replay fast-forwards or replays the day to it; else null. */
+  seeking?: string | null;
   speed: number;
   effective_speed: number;
   speeds: number[];
@@ -1954,8 +1956,9 @@ export const smaApi = {
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
-  replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
-    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
+  /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */
+  replayControl: (action: "play" | "pause" | "stop" | "speed" | "seek", speed?: number, at?: string) =>
+    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed, at }) }, 20000),
   csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",

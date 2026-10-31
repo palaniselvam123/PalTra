@@ -1819,8 +1819,10 @@ class ScalpPickStart(BaseModel):
 
 
 class ReplayControl(BaseModel):
-    action: Literal["play", "pause", "stop", "speed"]
+    action: Literal["play", "pause", "stop", "speed", "seek"]
     speed: int | None = None
+    # seek: the replayed day's time to move to, IST HH:MM (forward = fast-forward, back = the day replays to there).
+    at: str | None = Field(default=None, max_length=5)
 
 
 def _replay_engine(bot: int = 1):
@@ -2051,7 +2053,7 @@ async def replay_control(body: ReplayControl, bot: int = 1):
         await session.stop()
         return session.info()
     try:
-        session.control(body.action, body.speed)
+        session.control(body.action, body.speed, body.at)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return session.info()

@@ -863,6 +863,10 @@ class ReplaySession:
     _task: asyncio.Task | None = None
     _stop: bool = False
     _want: int = 0
+    #: Fast-forward target on the current day (the loop ticks the grid as fast as it can up to it).
+    _seek: dt.datetime | None = None
+    #: Rewind target: the day restarts from its first candle and fast-forwards to it (its trades so far are dropped).
+    _rewind: dt.datetime | None = None
 
     @property
     def active(self) -> bool:
@@ -898,6 +902,8 @@ class ReplaySession:
             "handed_off": self.handed_off,
             "pick_rule": self.rule.as_dict() if self.rule is not None else None,
             "picks": self.picks,
+            # Where a seek is heading (fast-forward or, after a rewind, the restarted day catching up), else None.
+            "seeking": (self._rewind or self._seek).isoformat() if (self._rewind or self._seek) else None,
         }
 
     async def begin(
@@ -1089,30 +1095,42 @@ class ReplaySession:
                 self._mark_run(days_done=index + 1)
                 continue
             self.symbols = symbols
-            clock = dt.datetime.combine(day, start, tzinfo=IST)
-            feed.clock = clock
-            # A fresh engine per day: its own trade count, loss limit and P&L.
-            engine = ReplayEngine(
-                feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap
-            )
-            engine.handoff = engine._hand_off
-            engine.on_handoff = lambda name: self.handed_off.append(name)
-            # A 1-minute review pauses the replay so it can be answered as it
-            # would have been live. Play again without answering = no answer.
-            engine.on_review = lambda _item: self.control("pause")
-            engine.load_config()
-            await engine.tick(clock)
-            engine.hold_for_next_cross(symbols)
-            engine.status = "PAUSED" if bot_paused else "RUNNING"
-            self.engine = engine
-            # The Open P&L log of this run, one point per replayed minute (read-only).
-            self._pnl_log = open_pnl_log.ReplayRecorder(self.run_id, self.bot)
-            if self.status not in ("PLAYING", "PAUSED"):
-                self.status = "PLAYING"
-            await self._play()
-            if self._stop:
-                return
-            bot_paused = engine.status == "PAUSED"
+            while True:
+                clock = dt.datetime.combine(day, start, tzinfo=IST)
+                feed.clock = clock
+                # A fresh engine per day: its own trade count, loss limit and P&L.
+                engine = ReplayEngine(
+                    feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap
+                )
+                engine.handoff = engine._hand_off
+                engine.on_handoff = lambda name: self.handed_off.append(name)
+                # A 1-minute review pauses the replay so it can be answered as it
+                # would have been live. Play again without answering = no answer.
+                engine.on_review = lambda _item: self.control("pause")
+                engine.load_config()
+                await engine.tick(clock)
+                engine.hold_for_next_cross(symbols)
+                engine.status = "PAUSED" if bot_paused else "RUNNING"
+                self.engine = engine
+                # The Open P&L log of this run, one point per replayed minute (read-only).
+                self._pnl_log = open_pnl_log.ReplayRecorder(self.run_id, self.bot)
+                if self.status not in ("PLAYING", "PAUSED"):
+                    self.status = "PLAYING"
+                await self._play()
+                if self._stop:
+                    return
+                bot_paused = engine.status == "PAUSED"
+                if self._rewind is not None:
+                    # Rewind: the day plays again from its first candle up to the target (same grid, same
+                    # settings, so the same trades up to there); what it had booked after the day's start goes.
+                    target, self._rewind = self._rewind, None
+                    if self.run_id is not None:
+                        _drop_unfinished_days(self.run_id, [day.isoformat()])
+                        open_pnl_log.delete_replay_day(self.run_id, day)
+                    self._pnl_log = None
+                    self._seek = target
+                    continue
+                break
             self._mark_run(days_done=index + 1)
         self._mark_run(status="FINISHED")
         self.status = "FINISHED"
@@ -1169,8 +1187,45 @@ class ReplaySession:
         finally:
             _PLAYING.discard(id(self))
 
+    async def _fast_forward(self, eng, end: dt.datetime) -> bool:
+        """Tick the grid as fast as the CPU share allows up to `_seek`. True when the day finished on the way.
+
+        The same 10-second grid as normal play, so the trades are the ones the day would give at any speed;
+        only real time is skipped. Works while PAUSED too (the replay stays paused at the target)."""
+        _PLAYING.add(id(self))
+        began = time.monotonic()
+        try:
+            while not self._stop and self._seek is not None and eng.feed.clock < self._seek:
+                gap = _to_next_grid(eng.feed.clock)
+                eng.feed.clock = min(end, eng.feed.clock + dt.timedelta(seconds=gap))
+                try:
+                    await eng.tick(eng.feed.clock)
+                except Exception as exc:  # noqa: BLE001
+                    eng.last_error = str(exc)
+                self._note_pnl(eng)
+                if eng.feed.clock >= end:
+                    self._seek = None
+                    await self._finish_day()
+                    return True
+                if time.monotonic() - began > CPU_SHARE / max(1, len(_PLAYING)):
+                    # Give the live engine and the API their share between bursts.
+                    await asyncio.sleep(LOOP_SECONDS)
+                    began = time.monotonic()
+                else:
+                    await asyncio.sleep(0)
+        finally:
+            self._seek = None
+        return False
+
     async def _play_loop(self, eng, end: dt.datetime, last: float, owed: float) -> None:
         while not self._stop:
+            if self._rewind is not None:
+                return  # the day loop restarts this day and fast-forwards to the target
+            if self._seek is not None:
+                if await self._fast_forward(eng, end):
+                    return
+                last, owed = time.monotonic(), 0.0
+                continue
             await asyncio.sleep(LOOP_SECONDS)
             now_m = time.monotonic()
             real = now_m - last
@@ -1228,7 +1283,7 @@ class ReplaySession:
             eng.status = "DAY_COMPLETED" if keep == "RUNNING" else keep
             eng.halt_reason = "Replay day finished at 15:30"
 
-    def control(self, action: str, speed: int | None = None) -> None:
+    def control(self, action: str, speed: int | None = None, at: str | None = None) -> None:
         if speed is not None:
             if speed not in SPEEDS:
                 raise ValueError(f"Speed must be one of {', '.join(f'{s}×' for s in SPEEDS)}")
@@ -1237,6 +1292,35 @@ class ReplaySession:
             self.status = "PAUSED"
         elif action == "play" and self.status == "PAUSED":
             self.status = "PLAYING"
+        elif action == "seek":
+            self.seek(at or "")
+
+    def seek(self, at: str) -> dt.datetime:
+        """Move the replayed day's clock to `at` (IST HH:MM): forward = fast-forward on the same grid; back =
+        the day restarts from its first candle and fast-forwards to there (its trades after that go). Returns
+        the target. Only while playing or paused; the pause state is kept."""
+        eng = self.engine
+        if eng is None or self.day is None or self.status not in ("PLAYING", "PAUSED"):
+            raise ValueError("Nothing is playing to move.")
+        try:
+            hh, mm = str(at).strip().split(":")
+            when = dt.time(int(hh), int(mm))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Give the time as HH:MM (IST).") from exc
+        first = self.start if self.day_index == 0 else SESSION_OPEN
+        if self.rule is not None:
+            first = max(first, self.rule.pick_time)
+        lo = dt.datetime.combine(self.day, first, tzinfo=IST)
+        hi = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST) - dt.timedelta(seconds=STEP_SECONDS)
+        target = min(hi, max(lo, dt.datetime.combine(self.day, when, tzinfo=IST)))
+        clock = eng.feed.clock
+        if target > clock:
+            self._rewind = None
+            self._seek = target
+        elif target < clock:
+            self._seek = None
+            self._rewind = target
+        return target
 
     async def stop(self, reason: str = "REPLAY_STOPPED") -> None:
         """End the replay. Its open practice positions close at the replay price."""

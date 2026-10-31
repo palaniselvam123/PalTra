@@ -245,6 +245,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   keeping the finished days, so the run ends as if it never stopped. The replay
   bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
   the Backtests tab has a Resume button.
+  **Rewind / fast-forward** (`ReplaySession.seek`, `POST /api/replay/control {action: "seek", at: "HH:MM"}`; only
+  while PLAYING or PAUSED, the pause state kept; `info().seeking` while it moves): forward sets `_seek` and
+  `_fast_forward` ticks the same 10-second grid as fast as its CPU share allows up to the target (same trades, only
+  real time skipped; a target past 15:30 is clamped to the last grid step before it, and the day finishes as usual);
+  back sets `_rewind`, the day loop drops that day's trades, reviews and P&L points (`_drop_unfinished_days`,
+  `open_pnl_log.delete_replay_day`), builds a fresh engine from the day's first candle and fast-forwards to the target
+  (a stock handed off earlier that day stays handed off). UI: `ReplayScrub` in `components/Terminal/ReplayBar.tsx`
+  (slider 09:15-15:30 plus ± 5 / 15-minute buttons, in the replay bar and on the chart page header while it follows a
+  replay; the top strip's `ReplayChip` has ± 5).
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **On the main desk a replay
   starts only outside market hours** (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST Mon-Fri, 409; start, resume and
   Scalp-pick runs), so it never slows the live bots; the backtest server takes them then (`DESK_REPLAY_HOURS=any` lifts

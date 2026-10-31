@@ -2,6 +2,7 @@
 
 import { usePinned } from "@/lib/usePinned";
 import { useTitle } from "@/lib/useTitle";
+import { ReplayScrub } from "@/components/Terminal/ReplayBar";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
@@ -190,6 +191,11 @@ export default function StockChartPage() {
                 : (state?.mode ?? "PAPER")}
           </span>
         </div>
+        {p?.date && following.current && replayRun && (replayRun.status === "PLAYING" || replayRun.status === "PAUSED") ? (
+          <div className="order-last flex w-full items-center gap-2 rounded-md bg-violet-500/10 px-2 py-1 ring-1 ring-inset ring-violet-400/30 lg:order-none lg:w-auto lg:min-w-[380px]">
+            <ReplayScrub info={replayRun} onChanged={setReplay} />
+          </div>
+        ) : null}
         <ThemeToggle />
       </header>
       <main className="mx-auto w-full min-w-0 space-y-3 px-3 py-3 sm:px-4">
