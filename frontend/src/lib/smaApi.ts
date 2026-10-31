@@ -72,10 +72,14 @@ export type SmaConfig = {
   tsl_trail_points?: number;
   tsl_target_points?: number;
   /** Units for the TSL settings: POINTS (₹) or PERCENT (of entry price). Defaults to POINTS. */
-  tsl_mode?: "POINTS" | "PERCENT";
+  tsl_mode?: "POINTS" | "PERCENT" | "ATR";
   tsl_sl_pct?: number;
   tsl_trail_pct?: number;
   tsl_target_pct?: number;
+  /** ATR multiples, read when tsl_mode is "ATR": the stop / trail / target sized from the stock's own ATR at entry. */
+  tsl_sl_atr?: number;
+  tsl_trail_atr?: number;
+  tsl_target_atr?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -862,7 +866,7 @@ export type SmaState = {
   stop_type?: StopType;
   /** The chart stock's own stop numbers (its overrides over the shared settings). */
   stop_points?: {
-    tsl_mode?: "POINTS" | "PERCENT";
+    tsl_mode?: "POINTS" | "PERCENT" | "ATR";
     tsl_sl_points: number;
     tsl_trail_points: number;
     tsl_target_points: number;

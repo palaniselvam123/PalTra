@@ -121,6 +121,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reports both sets of numbers plus `tsl_mode`.
   The Scalp page's Arm prompt and Arm ticked (`ArmPrompt`, `BulkArm`) have a ₹ / % switch that saves
   `tsl_mode` with the matching numbers as the stock's own (the scanner link's `StockChange` takes them too).
+  **ATR multiples** (`tsl_mode = "ATR"`, `tsl_sl_atr` 1.5 / `tsl_trail_atr` 0.5 / `tsl_target_atr` 3.0 (0 = none), per bot
+  and per stock, PAPER and LIVE, replays too; `tsl.tsl_atrs`): `tsl_settings(cfg, entry_price=fill, atr=atr)` turns the
+  multiples into ₹ at entry from the stock's own ATR on the bot's candle (`OpenPosition.atr_at_entry`; a restart reads
+  the saved one), so one setting fits every stock a bot is handed (meant for Bot 5's fast movers); without a formed ATR
+  the ₹ points are used, so a trade is never left without a stop. Settings → 5. Stop-loss and target, stop type
+  Trailing, units "ATR multiples": `StrategyConfigPanel.TslAtrSliders` (sliders plus boxes). `stop_points` carries the
+  three multiples.
   **Sized from the candle** (`backend/tsl_calc.py`, `GET /api/tsl-calc?symbol=&sizes=1,3,5,15&atr_period=&stop_mult=&
   trail_mult=&target_mult=`; read-only, no order): the stock's 1-minute tape (the bots' `_tapes` for an armed stock, else
   one `fetch_frame` on the scans' session) grouped into each candle size (`candles.resample`, forming candle dropped),
@@ -282,6 +289,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
   strategy does not use is worked out in the browser (`emaValues`). Display only.
+  **Movable columns**: the blotter (every book, Replay included; `TradeHistoryTable` `OrderTable`, key `blotter.cols`)
+  and the Backtests tables (runs `backtests.cols.runs`, day-wise `backtests.cols.days`, per-stock `backtests.cols.stocks`)
+  use `components/ui/columnOrder.tsx` (`useColumnOrder`, `inOrder`, `ColumnHint`) like the Scalp tables: drag a header
+  onto another to move the column, kept per browser, "Reset columns" to undo; the blotter's Trade ID / Stock columns
+  stay pinned only while they are the first two. Display only.
   Every bar that sticks to the top (desk menu bar, terminal header, blotter bar, Settings section links, Settings bot tabs
   (`settings-bot-tabs`, under the section links) and Save bar, chart page header) has a freeze / unfreeze pin (`components/ui/PinToggle.tsx`, `lib/usePinned.ts`, kept per browser).
   The terminal's Strategy card (`StrategySummary`) switches each part of the

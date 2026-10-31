@@ -266,10 +266,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
-    tsl_mode: String(form.tsl_mode ?? "POINTS") as "POINTS" | "PERCENT",
+    tsl_mode: String(form.tsl_mode ?? "POINTS") as "POINTS" | "PERCENT" | "ATR",
     tsl_sl_pct: Number(form.tsl_sl_pct ?? 1.0),
     tsl_trail_pct: Number(form.tsl_trail_pct ?? 0.5),
     tsl_target_pct: Number(form.tsl_target_pct ?? 0),
+    tsl_sl_atr: Number(form.tsl_sl_atr ?? 1.5),
+    tsl_trail_atr: Number(form.tsl_trail_atr ?? 0.5),
+    tsl_target_atr: Number(form.tsl_target_atr ?? 3),
     gap_sl_mult: Number(form.gap_sl_mult ?? 1),
     gap_tp_mult: Number(form.gap_tp_mult ?? 2),
     gap_min_pct: Number(form.gap_min_pct ?? 0.2),
@@ -2229,11 +2232,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   />
                   Percent (%)
                 </label>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="tsl_mode"
+                    checked={form.tsl_mode === "ATR"}
+                    onChange={() => set("tsl_mode", "ATR")}
+                    className="accent-sky-400"
+                  />
+                  ATR multiples (auto-sized per stock)
+                </label>
                 <span className="text-[11px] text-slate-500">
-                  % scales with the stock price — 1% is ₹1 on a ₹100 stock and ₹10 on a ₹1,000 stock.
+                  % scales with the stock price; ATR multiples scale with how far each stock moves per candle, worked out at
+                  entry from that stock&apos;s own ATR, so one setting fits every stock a bot is handed.
                 </span>
               </div>
-              {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+              {form.tsl_mode === "ATR" ? (
+                <TslAtrSliders form={form} set={set} isOwn={isOwn} />
+              ) : (form.tsl_mode ?? "POINTS") === "PERCENT" ? (
                 <div className="grid grid-cols-3 items-end gap-2">
                   <Field label="Stop" suffix="%" value={String(form.tsl_sl_pct ?? 1)} onChange={(v) => set("tsl_sl_pct", v)} own={isOwn("tsl_sl_pct")} />
                   <Field label="Trail every" suffix="%" value={String(form.tsl_trail_pct ?? 0.5)} onChange={(v) => set("tsl_trail_pct", v)} own={isOwn("tsl_trail_pct")} />
@@ -2248,7 +2264,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               )}
               <TslCalculator form={form} set={set} symbol={stockScope ? scope : null} armed={armed} />
               <Hint label="About the trailing stop">
-                {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+                {form.tsl_mode === "ATR" ? (
+                  <>
+                    <b>ATR mode:</b> at entry the bot reads the stock&apos;s ATR on its own candle and places the stop{" "}
+                    {String(form.tsl_sl_atr ?? 1.5)} × ATR away, moves it every {String(form.tsl_trail_atr ?? 0.5)} × ATR the price
+                    gains past its best (never back), and books {Number(form.tsl_target_atr ?? 3) > 0 ? `${String(form.tsl_target_atr ?? 3)} × ATR` : "no"} target. A
+                    stock that moves ₹2 a candle gets a ₹{(2 * Number(form.tsl_sl_atr ?? 1.5)).toLocaleString("en-IN")} stop, one that moves
+                    ₹0.40 a candle a ₹{(0.4 * Number(form.tsl_sl_atr ?? 1.5)).toLocaleString("en-IN")} stop. Without a formed ATR the ₹ points
+                    below the sliders are used, so a trade is never left without a stop.
+                  </>
+                ) : (form.tsl_mode ?? "POINTS") === "PERCENT" ? (
                   <>
                     <b>Percent mode:</b> Stop % is the distance from entry; Target % 0 means no target. A buy at ₹1,000 with stop
                     {" "}{String(form.tsl_sl_pct ?? 1)}% starts its stop at ₹
@@ -3124,6 +3149,60 @@ function SmallCandlesCard({
         <Field label="Only when under water by (%, 0 = always)" value={String(form.small_exit_loss_pct ?? 0)} onChange={(v) => set("small_exit_loss_pct", v)} own={isOwn("small_exit_loss_pct")} />
         <Field label="Sizes that must agree (1 = any)" value={String(form.small_exit_agree ?? 1)} onChange={(v) => set("small_exit_agree", v)} own={isOwn("small_exit_agree")} />
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * ATR-multiple trailing stop (tsl_mode ATR): sliders and boxes for the stop, trail step and target as multiples of the
+ * stock's own ATR at entry. Made for Bot 5, which trades whatever fast mover it is handed: the numbers size themselves
+ * to each stock. The calculator below shows what the multiples give in ₹ and % on a chosen stock per candle size.
+ */
+function TslAtrSliders({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const rows: { key: keyof SmaConfig; label: string; min: number; max: number; step: number; fallback: number; note: string }[] = [
+    { key: "tsl_sl_atr", label: "Stop", min: 0.25, max: 6, step: 0.05, fallback: 1.5, note: "under 1 × is hit by noise; 1.5 × leaves one wild candle" },
+    { key: "tsl_trail_atr", label: "Trail every", min: 0.1, max: 4, step: 0.05, fallback: 0.5, note: "the stop follows in steps this big; ½ ATR = half a candle" },
+    { key: "tsl_target_atr", label: "Target (0 = none)", min: 0, max: 12, step: 0.25, fallback: 3, note: "3 × is two-to-one on a 1.5 × stop; 0 lets the trail or the cross close it" },
+  ];
+  return (
+    <div className="space-y-2">
+      {rows.map((r) => {
+        const value = Number(form[r.key] ?? r.fallback);
+        return (
+          <div key={r.key} className="grid grid-cols-[1fr_6rem] items-end gap-3">
+            <label className="block text-xs text-slate-300">
+              <span className="flex items-center justify-between gap-2">
+                <span>
+                  {r.label} <span className="text-slate-500">(× ATR)</span>
+                  {isOwn(r.key) ? <OwnTag /> : null}
+                </span>
+                <span className="font-mono text-slate-100">{Number.isFinite(value) ? `${value} × ATR` : "—"}</span>
+              </span>
+              <input
+                type="range"
+                min={r.min}
+                max={r.max}
+                step={r.step}
+                value={Math.min(r.max, Math.max(r.min, Number.isFinite(value) ? value : r.fallback))}
+                onChange={(e) => set(r.key, String(Number(e.target.value)))}
+                className="mt-1 w-full accent-sky-400"
+                aria-label={`${r.label} in ATR multiples`}
+              />
+              <span className="block text-[11px] text-slate-500">{r.note}</span>
+            </label>
+            <Field label="" suffix="× ATR" value={String(form[r.key] ?? r.fallback)} onChange={(v) => set(r.key, v)} own={isOwn(r.key)} />
+          </div>
+        );
+      })}
     </div>
   );
 }

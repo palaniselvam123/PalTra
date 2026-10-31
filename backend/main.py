@@ -450,10 +450,14 @@ class ConfigUpdate(BaseModel):
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_target_points: float | None = Field(default=None, ge=0, le=100000)
-    tsl_mode: Literal["POINTS", "PERCENT"] | None = None
+    tsl_mode: Literal["POINTS", "PERCENT", "ATR"] | None = None
     tsl_sl_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_trail_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_target_pct: float | None = Field(default=None, ge=0, le=100)
+    # ATR multiples (tsl_mode ATR): sized from the stock's own ATR at entry, so one setting fits every stock.
+    tsl_sl_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_trail_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_target_atr: float | None = Field(default=None, ge=0, le=50)
     gap_sl_mult: float | None = Field(default=None, gt=0, le=10)
     gap_tp_mult: float | None = Field(default=None, gt=0, le=20)
     gap_min_pct: float | None = Field(default=None, ge=0.01, le=5)
@@ -642,6 +646,9 @@ def _config_dict(row: BotConfig) -> dict:
         "tsl_sl_pct": float(getattr(row, "tsl_sl_pct", 1.0) or 1.0),
         "tsl_trail_pct": float(getattr(row, "tsl_trail_pct", 0.5) or 0.5),
         "tsl_target_pct": float(getattr(row, "tsl_target_pct", 0.0) or 0.0),
+        "tsl_sl_atr": float(getattr(row, "tsl_sl_atr", 1.5) or 1.5),
+        "tsl_trail_atr": float(getattr(row, "tsl_trail_atr", 0.5) or 0.5),
+        "tsl_target_atr": 3.0 if getattr(row, "tsl_target_atr", None) is None else float(row.tsl_target_atr),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),
