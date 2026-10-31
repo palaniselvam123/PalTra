@@ -259,7 +259,7 @@ async def test_real_bots_paper_trade_moves_to_bot5_at_its_qty(engine, monkeypatc
     bot5._ltps["ACME"] = 102.6
     bot5.status = "RUNNING"
 
-    fast_bot.save({"on": True, "rule": "MOVE", "pct": 0.5, "minutes": 3, "sources": [1]})
+    fast_bot.save({"entry_checks": False, "on": True, "rule": "MOVE", "pct": 0.5, "minutes": 3, "sources": [1]})  # Bot 5's own VWAP / RSI checks are off here: this test is about the size
     watcher = fast_bot.FastBot()
     watcher.note("ACME", 102.0, NOW - 120, fast_bot.load())
     engine._ltps["ACME"] = 102.6
@@ -506,3 +506,43 @@ def test_replay_snapshot_fills_bot5s_unsaved_settings_with_their_defaults(monkey
     snap = fast_bot.replay_snapshot(4)
     assert snap["bot5"]["qty"] == 50
     assert snap["bot5"]["pivot_target"] == "OFF" and snap["bot5"]["stop_plan"] is False
+
+
+@pytest.mark.asyncio
+async def test_bot5s_entry_checks_can_refuse_the_handoff(moved, monkeypatch):
+    """With `entry_checks` on, Bot 5's ticked filters are read on the stock's candles first: a refusal
+    leaves the trade on its bot; a pass hands it over as before."""
+    import pandas as pd
+    import strategy_engine
+
+    src, target = _Source(bot=2), _Target()
+    src._frames = {"ACME": pd.DataFrame({"close": [100.0, 100.3, 100.6], "adx_14": [30.0, 30.0, 30.0]})}
+    seen = []
+
+    def block(frame, direction, cfg, price=None, only=None):
+        seen.append((direction, cfg.symbol, price))
+        return "VWAP: 100.6 is below 101.0"
+
+    monkeypatch.setattr(strategy_engine, "_entry_block", block)
+    bot, done = await _run(src, target, entry_checks=True)
+    assert src.closed == [] and target.orders == [] and moved == []
+    assert seen == [("LONG", "ACME", 100.6)]
+    assert "entry check says no: VWAP: 100.6 is below 101.0" in done[0]
+    # The same with the checks off: handed over regardless.
+    seen.clear()
+    src, target = _Source(bot=2), _Target()
+    src._frames = {"ACME": pd.DataFrame({"close": [100.0, 100.3, 100.6]})}
+    bot, done = await _run(src, target, entry_checks=False)
+    assert seen == [] and target.orders == [("ACME", "BULLISH", "FAST_MOVE")]
+
+
+def test_the_adx_gate_is_read_by_the_entry_check():
+    import pandas as pd
+    from types import SimpleNamespace
+    import fast_bot
+
+    frame = pd.DataFrame({"close": [1.0, 1.0, 1.0], "adx_14": [12.0, 12.0, 12.0]})
+    cfg = SimpleNamespace(symbol="ACME", use_adx_filter=True, adx_threshold=20)
+    assert fast_bot.entry_refusal(frame, cfg, "LONG") == "ADX 12.0 below 20"
+    assert fast_bot.entry_refusal(None, cfg, "LONG") is None
+    assert fast_bot.clean({}).entry_checks is True and fast_bot.clean({"entry_checks": False}).entry_checks is False

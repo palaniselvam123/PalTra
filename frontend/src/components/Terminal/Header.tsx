@@ -527,20 +527,24 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     }
   };
 
-  const forceOrder = async () => {
-    // The ControlBar dialog has already named the stock and, in LIVE, had CONFIRM typed.
-    const target = (symbol || config?.symbol || "").trim().toUpperCase();
-    if (!target) return;
+  const forceOrder = async (symbols: string[]) => {
+    // The ControlBar dialog has already named the stocks and, in LIVE, had CONFIRM typed.
+    const targets = symbols.map((s) => s.trim().toUpperCase()).filter(Boolean);
+    if (!targets.length) return;
     setBusy(true);
     setError(null);
-    try {
-      await smaApi.forceOrder(target);
-      onChanged();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Force order failed");
-    } finally {
-      setBusy(false);
+    const failed: string[] = [];
+    for (const target of targets) {
+      // One after the other: each order gets the bot's own checks and its own answer.
+      try {
+        await smaApi.forceOrder(target);
+      } catch (e: unknown) {
+        failed.push(`${target}: ${e instanceof Error ? e.message : "Force order failed"}`);
+      }
     }
+    onChanged();
+    if (failed.length) setError(failed.join(" · "));
+    setBusy(false);
   };
 
   const toggleBot = async () => {
@@ -718,6 +722,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             busy={busy}
             symbol={(symbol || config?.symbol || "").toUpperCase()}
             symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+            armedSymbols={armedList}
             onToggleBot={toggleBot}
             onForce={forceOrder}
             onPanic={panic}
@@ -749,6 +754,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
           busy={busy}
           symbol={(symbol || config?.symbol || "").toUpperCase()}
           symbolArmed={armed.has((symbol || config?.symbol || "").toUpperCase())}
+          armedSymbols={armedList}
           onToggleBot={toggleBot}
           onForce={forceOrder}
           onPanic={panic}

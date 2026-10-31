@@ -5,6 +5,7 @@ import { istToday, useChatScreen } from "@/lib/chatScreen";
 import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
 import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
+import { OpenPositionsCard } from "@/components/Terminal/OpenPositionsCard";
 import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
@@ -590,6 +591,13 @@ export default function TerminalPage() {
               collapsible: true,
               out: !inTab(shownTab, "live"),
               node: <LivePositionCard state={viewState} pending={Boolean(loadNote)} />,
+            },
+            {
+              id: "open",
+              title: "Open positions",
+              collapsible: true,
+              out: !inTab(shownTab, "live"),
+              node: <OpenPositionsCard state={state} closing={closingSymbol} onClose={closePosition} />,
             },
             {
               id: "strategy",

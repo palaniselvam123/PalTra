@@ -4,6 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
 import { SlopeEditor } from "@/components/Settings/SlopeEditor";
+import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
@@ -83,6 +84,7 @@ export const LABELS: Record<string, string> = {
   counter_min_body: "counter-candle min body",
   counter_reenter: "re-enter after counter candles",
   counter_reenter_max: "counter re-entries per run",
+  max_trades_per_stock: "trades per stock per day",
   counter_entry: "early reversal entry",
   turn_alert: "SMA 9 turn alert",
   turn_entry: "SMA 9 turn entry",
@@ -506,6 +508,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_volume_ratio: Math.min(20, Math.max(0, Number(form.or_volume_ratio ?? 2) || 0)),
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
+    max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
     entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
     pattern_tf: ([1, 3, 5, 10, 15].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15,
     pattern_trend: Boolean(form.pattern_trend),
@@ -814,6 +817,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </label>
+          <CandleSizePicture form={form} set={set} />
           <SectionTitle>How a trade opens</SectionTitle>
           <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <div className="flex items-center gap-1 text-sm text-slate-300">
@@ -1139,6 +1143,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("tall_expiry_candles")}
             />
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["tall"]} />
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1299,6 +1304,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
           </label>
           <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+          <AdxPicture form={form} set={set} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1470,6 +1476,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["direction"]} />
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             EMA lines (check here; the exit is in step 3)
             <InfoTip label="About the EMA cross">
@@ -1777,6 +1784,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               trade do not count. 0.5 = half an ATR.
             </p>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["counter"]} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2255,10 +2263,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             ) : null}
           </div>
           {form.stop_type !== "TSL" ? (
-            <div className="mt-2 grid grid-cols-2 items-end gap-2">
-              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-            </div>
+            <>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+                <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+              </div>
+              <AtrPicture form={form} set={set} />
+            </>
           ) : null}
           {form.stop_type === "SMA_GAP" ? (
             <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
@@ -2362,6 +2373,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <div className="mt-2 grid grid-cols-2 items-end gap-2">
                 <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
                 <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+                <Field
+                  label="Max trades per stock / day (0 = no cap)"
+                  value={String(form.max_trades_per_stock ?? 0)}
+                  onChange={(v) => set("max_trades_per_stock", v)}
+                  own={isOwn("max_trades_per_stock")}
+                />
                 <Field
                   label="No new entries after"
                   value={form.entry_cutoff_time || "15:00"}

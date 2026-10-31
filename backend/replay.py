@@ -343,6 +343,7 @@ class ReplayEngine(StrategyEngine):
         # A run started before the profit check plays as it did then (Resume keeps the result).
         raw.setdefault("min_profit_pct", 0.0)
         raw.setdefault("bot5_trades", 0)
+        raw.setdefault("entry_checks", False)  # a run saved before the check plays without it
         settings = fast_bot.clean(raw)
         if not settings.on or self.bot_id not in settings.sources:
             return
@@ -381,6 +382,19 @@ class ReplayEngine(StrategyEngine):
         return None
 
     async def _fast_move(self, name: str, direction: str, why: str) -> None:
+        raw = dict(self.fast.get("settings") or {})
+        raw.setdefault("entry_checks", False)
+        if fast_bot.clean(raw).entry_checks:
+            # Bot 5's own entry checks, with its settings for this stock, before the trade is cut.
+            from strategy_engine import _cfg_for
+
+            cfg = _cfg_for(self.load_config(), name)
+            for key, value in fast_bot.bot5_overrides(self.fast, name).items():
+                setattr(cfg, key, value)
+            refused = fast_bot.entry_refusal(self._frames.get(name), cfg, direction, self._ltps.get(name))
+            if refused:
+                self._signals[name] = f"{name} fast move ({why}): not moved, Bot {fast_bot.TARGET_BOT}'s entry check says no: {refused}"
+                return
         try:
             await self.close_symbol(name, reason=fast_bot.EXIT_REASON)
         except ForceRefused as exc:

@@ -284,6 +284,7 @@ MAX_TRADE_SYMBOLS = 24
 # The settings that decide a trade. Each trade keeps a copy of them from its
 # entry (TradeLog.strategy), and each replay run keeps one for the whole run.
 SNAPSHOT_FIELDS = (
+    "max_trades_per_stock",
     "qty", "sma_fast", "sma_medium", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
@@ -1021,6 +1022,8 @@ class StrategyEngine:
         self.realized_net = 0.0
         self.realized_gross = 0.0  # today's closed P&L before charges (the P&L log reads it)
         self.trades_today = 0
+        # Entries per stock today (per-stock cap, max_trades_per_stock); counted with trades_today.
+        self._stock_trades: dict[str, int] = {}
         self._session_date = self._now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
@@ -1252,6 +1255,7 @@ class StrategyEngine:
             self.realized_gross = 0.0
             self._realized_mode = None
             self.trades_today = 0
+            self._stock_trades.clear()
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
@@ -2450,6 +2454,8 @@ class StrategyEngine:
             if self.trades_today >= int(cfg.max_trades_per_day):
                 self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
+            if (stock_cap := self._stock_cap_hit(cfg)) is not None:
+                return f"closed on {signal} — {stock_cap}"
             if (cfg.symbol or "").upper() in self._recovery_blocked:
                 return "closed on cross — no new trade in this stock today (emergency recovery exit)"
             if pullback is not None:
@@ -2467,6 +2473,8 @@ class StrategyEngine:
         if self.trades_today >= int(cfg.max_trades_per_day):
             self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
+        if (stock_cap := self._stock_cap_hit(cfg)) is not None:
+            return f"{signal} ignored — {stock_cap}"
         if (cfg.symbol or "").upper() in self._recovery_blocked:
             return "entry blocked — no new trade in this stock today (emergency recovery exit)"
         if pullback is not None:
@@ -2741,6 +2749,8 @@ class StrategyEngine:
                 )
             elif self.trades_today >= int(symbol_cfg.max_trades_per_day):
                 why = "trade cap reached"
+            elif (stock_cap := self._stock_cap_hit(symbol_cfg)) is not None:
+                why = stock_cap
             if why:
                 self._pullback.pop(symbol, None)
                 label = "entry-candle" if order.confirm else "limit" if order.invalid_at is not None else "pullback"
@@ -3135,10 +3145,13 @@ class StrategyEngine:
         with session_factory()() as db:
             row = db.get(TradeLog, trade_id)
             day = row.date if row is not None else None
+            sym = (row.symbol or "").upper() if row is not None else ""
         if trade_id <= self._count_floor():
             return  # already left out of the count by a reset
         if day == self._session_date and self.trades_today > 0:
             self.trades_today -= 1
+            if self._stock_trades.get(sym, 0) > 0:
+                self._stock_trades[sym] -= 1
 
     async def _drop_positions_groww_does_not_hold(self, cfg: BotConfig) -> None:
         """A local open row whose Groww book is flat is not a live position.
@@ -3292,6 +3305,7 @@ class StrategyEngine:
             entry_reason=why,
         )
         self.trades_today += 1
+        self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
         self._rejects.pop((cfg.symbol or "").upper(), None)
         self._alert(
             fill_alert(
@@ -4540,6 +4554,20 @@ class StrategyEngine:
         self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
         return True
 
+    def _stock_cap_hit(self, cfg) -> str | None:
+        """The per-stock daily cap (max_trades_per_stock, 0 = off): why this stock takes no more entries today."""
+        try:
+            cap = int(getattr(cfg, "max_trades_per_stock", 0) or 0)
+        except (TypeError, ValueError):
+            cap = 0
+        if cap <= 0:
+            return None
+        name = (getattr(cfg, "symbol", "") or "").upper()
+        done = self._stock_trades.get(name, 0)
+        if done >= cap:
+            return f"{name} has had its {cap} trade(s) today (per-stock cap)"
+        return None
+
     def _count_floor(self) -> int:
         """Trades up to this id do not count today: the user reset the count."""
         cfg = self._cfg_cache
@@ -4567,6 +4595,7 @@ class StrategyEngine:
         self.load_config()
         before = self.trades_today
         self.trades_today = 0
+        self._stock_trades.clear()
         if self.status == "HALTED" and (self.halt_reason or "").startswith("max_trades_per_day"):
             self.status = "STOPPED"
             self.halt_reason = ""
@@ -4585,16 +4614,17 @@ class StrategyEngine:
         floor = self._count_floor()
         with session_factory()() as db:
             rows = (
-                db.query(TradeLog.mode, TradeLog.exit_reason)
+                db.query(TradeLog.mode, TradeLog.exit_reason, TradeLog.symbol)
                 .filter(TradeLog.date == day, TradeLog.id > floor, self._bot_rows())
                 .all()
             )
         # A row Groww never held was not a trade, so it does not use the cap.
-        self.trades_today = sum(
-            1
-            for row_mode, reason in rows
-            if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"
-        )
+        counted = [sym for row_mode, reason, sym in rows if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"]
+        self.trades_today = len(counted)
+        self._stock_trades = {}
+        for sym in counted:
+            key = (sym or "").upper()
+            self._stock_trades[key] = self._stock_trades.get(key, 0) + 1
         # A restart must not forget today's realized P&L either.
         self._refresh_realized(mode)
         return self.trades_today
@@ -4614,6 +4644,7 @@ class StrategyEngine:
         self.status = "STOPPED"
         self.halt_reason = ""
         self.trades_today = 0
+        self._stock_trades.clear()
         return True
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:

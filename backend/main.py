@@ -595,6 +595,8 @@ class ConfigUpdate(BaseModel):
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
+    # Entries one stock may take per day on this bot (0 = no cap); also a per-stock override.
+    max_trades_per_stock: int | None = Field(default=None, ge=0, le=100)
     square_off_time: str | None = None
     entry_cutoff_time: str | None = None
 
@@ -652,6 +654,7 @@ def _config_dict(row: BotConfig) -> dict:
         "candle_dir_rule": (getattr(row, "candle_dir_rule", None) or "CLOSES").upper(),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
+        "max_trades_per_stock": int(getattr(row, "max_trades_per_stock", 0) or 0),
         "square_off_time": row.square_off_time,
         "entry_cutoff_time": row.entry_cutoff_time or "15:00",
         "trading_mode": row.trading_mode,
@@ -3444,6 +3447,8 @@ class FastBotSettings(BaseModel):
     max_day: int | None = Field(None, ge=1, le=100)
     min_profit_pct: float | None = Field(None, ge=0, le=fast_bot.MAX_PCT)
     bot5_trades: int | None = Field(None, ge=0, le=fast_bot.MAX_BOT5_TRADES)
+    # Bot 5's own entry checks (VWAP, volume, density, RSI, ADX, EMA, …) are read before the hand-off.
+    entry_checks: bool | None = None
     confirm_live: bool = False
 
 

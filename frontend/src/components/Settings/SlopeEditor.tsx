@@ -13,6 +13,7 @@ import type { SmaConfig } from "@/lib/smaApi";
  * numbers saved are the ones the bot reads.
  */
 const DEG45_KEY = "sma.slope.deg45";
+const SIDE_KEY = "sma.slope.side";
 const DEG45_DEFAULT = 0.05;
 
 type Num =
@@ -75,14 +76,26 @@ export function SlopeEditor({
   set: (key: keyof SmaConfig, value: string | boolean) => void;
 }) {
   const [deg45, setDeg45] = useState(DEG45_DEFAULT);
+  // Which trade the picture is drawn for: a buy (the V points up then down) or a short (its mirror image).
+  // The bot reads the same numbers for both; it handles the sign.
+  const [side, setSide] = useState<"LONG" | "SHORT">("LONG");
   useEffect(() => {
     try {
       const v = Number(localStorage.getItem(DEG45_KEY));
       if (v > 0) setDeg45(v);
+      if (localStorage.getItem(SIDE_KEY) === "SHORT") setSide("SHORT");
     } catch {
       /* private window */
     }
   }, []);
+  const chooseSide = (next: "LONG" | "SHORT") => {
+    setSide(next);
+    try {
+      localStorage.setItem(SIDE_KEY, next);
+    } catch {
+      /* private window */
+    }
+  };
   const saveDeg45 = (v: number) => {
     const next = Math.min(1, Math.max(0.005, v));
     setDeg45(next);
@@ -146,6 +159,13 @@ export function SlopeEditor({
     ux0 + uCandles * CW + 3 * CW
   } ${uTop + uDrop} L ${ux0 + 2 * uCandles * CW + 3 * CW} ${uTop}`;
   const ref45 = { x: W - 150, y: H - 24, len: 36 };
+  // The picture is worked out for a buy; a short is its mirror image (flipped top to bottom).
+  const my = (y: number) => (side === "SHORT" ? H - y : y);
+  /** A label's baseline: `off` px from the point in the buy picture (negative = above), flipped for a short. */
+  const ty = (y: number, off: number) => (side === "SHORT" ? H - y - off + (off < 0 ? 8 : -4) : y + off);
+  const mirrorPath = (d: string) => (side === "SHORT" ? d.replace(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g, (_m, x, y) => `${x} ${H - Number(y)}`) : d);
+  const up = side === "LONG" ? "up" : "down";
+  const down = side === "LONG" ? "down" : "up";
 
   // Dragging the peak sets the steep run; dragging the turn-back end sets the turn back and the window.
   const svgRef = useRef<SVGSVGElement>(null);
@@ -158,7 +178,8 @@ export function SlopeEditor({
   };
   const onMove = (e: ReactPointerEvent) => {
     if (!drag.current) return;
-    const p = toSvg(e);
+    const raw = toSvg(e);
+    const p = { x: raw.x, y: my(raw.y) };
     if (drag.current === "peak") {
       const dy = Math.max(0, base - p.y);
       set("vturn_move_pct", clean(Math.min(5, ((dy / RUN) * deg45) / CW)));
@@ -192,8 +213,30 @@ export function SlopeEditor({
     <label className={clsx("block text-xs text-slate-300", dim && "opacity-60")}>
       <span className="flex items-center justify-between gap-2">
         <span>{text}</span>
-        <span className="font-mono text-slate-100">
-          {show === "angle" ? `${clean(value)}%/c · ${deg(value)}` : show === "pct" ? `${clean(value)}%` : show === "atr" ? `${clean(value)} ATR/c` : String(value)}
+        <span className="flex items-center gap-1.5 font-mono text-slate-100">
+          {show === "angle" ? (
+            <>
+              {clean(value)}%/c ·
+              <input
+                type="number"
+                min={0}
+                max={85}
+                step={1}
+                value={Math.round(slopeAngle(value, deg45))}
+                onChange={(e) => set(key, clean(Math.min(5, slopeFromAngle(Math.min(85, Math.max(0, Number(e.target.value) || 0)), deg45))))}
+                aria-label={`${text}, in degrees`}
+                title="Type any angle; it is turned into % per candle with the picture scale below"
+                className="h-6 w-12 rounded border border-white/15 bg-black/30 px-1 text-right text-xs text-slate-100"
+              />
+              °
+            </>
+          ) : show === "pct" ? (
+            `${clean(value)}%`
+          ) : show === "atr" ? (
+            `${clean(value)} ATR/c`
+          ) : (
+            String(value)
+          )}
         </span>
       </span>
       <input
@@ -268,6 +311,7 @@ export function SlopeEditor({
       <p className="mt-1 text-xs text-slate-400">
         Drag the two handles, move the sliders, or type in the boxes above: all of them change the same settings. Each leg shows
         its % per candle and its angle; the angle follows the convention at the bottom right.{" "}
+        The picture is drawn for a buy or a short (switch below): a short is the mirror image with the same numbers.{" "}
         <span className="text-slate-300">Every level is a minimum, not an exact value</span>: &quot;turn back ≥ 0.015%/c&quot; fires on
         the first closed candle whose slope is at least that against the trade. The chart shades where that is in price
         (&quot;Exit zone&quot; / &quot;Buy zone&quot;): the next candle&apos;s close at which the slope reaches the level.
@@ -292,6 +336,16 @@ export function SlopeEditor({
         )}
         {rule(uOn, "U-turn (turn entry / alert)", "The turn entry and alert also fire on a rounded U: a run one way, then the first candle the other way.", (on) => set("uturn_on", on), !turnEntryOn && !Boolean(form.turn_alert))}
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300" role="radiogroup" aria-label="Draw the picture for">
+        <span className="text-slate-400">Draw it for:</span>
+        {(["LONG", "SHORT"] as const).map((s) => (
+          <label key={s} className={clsx("flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 ring-1 ring-inset", side === s ? "bg-sky-400/15 text-sky-100 ring-sky-400/50" : "ring-white/15 hover:bg-white/5")}>
+            <input type="radio" name="slope-side" value={s} checked={side === s} onChange={() => chooseSide(s)} className="accent-sky-400" />
+            {s === "LONG" ? "a buy (bullish): SMA 9 rises, then turns down" : "a short (bearish): SMA 9 falls, then turns up"}
+          </label>
+        ))}
+        <span className="text-slate-500">Same numbers both ways; the bot flips the sign for a short.</span>
+      </div>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -301,43 +355,43 @@ export function SlopeEditor({
         onPointerCancel={stop}
         onPointerLeave={stop}
         role="img"
-        aria-label={`SMA ${fast} slope picture: steep run ${label(move)}, turn back ${label(turn)} within ${within} candles, turn exit at ${label(turnExit)}, U-turn ${uRun} candles at ${label(uMin)}`}
+        aria-label={`SMA ${fast} slope picture for a ${side === "LONG" ? "buy" : "short"}: steep run ${label(move)}, turn back ${label(turn)} within ${within} candles, turn exit at ${label(turnExit)}, U-turn ${uRun} candles at ${label(uMin)}`}
       >
         {/* candle grid */}
         {Array.from({ length: Math.floor(W / CW) }, (_, i) => (
           <line key={i} x1={i * CW} x2={i * CW} y1={0} y2={H} stroke="rgba(148,163,184,0.08)" />
         ))}
-        <line x1={0} x2={W} y1={base} y2={base} stroke="rgba(148,163,184,0.25)" strokeDasharray="4 4" />
-        {/* V-turn */}
-        <polyline points={`${vx0},${base} ${peakX},${peakY}`} fill="none" stroke="#34d399" strokeWidth={3} strokeLinecap="round" />
-        <polyline points={`${peakX},${peakY} ${endX},${endY}`} fill="none" stroke="#fb7185" strokeWidth={3} strokeLinecap="round" />
-        <line x1={peakX} y1={peakY} x2={peakX + 3 * CW} y2={texY} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="5 4" />
+        <line x1={0} x2={W} y1={my(base)} y2={my(base)} stroke="rgba(148,163,184,0.25)" strokeDasharray="4 4" />
+        {/* V-turn: the run with the trade (green), the turn back against it (red); a short is the mirror image */}
+        <polyline points={`${vx0},${my(base)} ${peakX},${my(peakY)}`} fill="none" stroke="#34d399" strokeWidth={3} strokeLinecap="round" />
+        <polyline points={`${peakX},${my(peakY)} ${endX},${my(endY)}`} fill="none" stroke="#fb7185" strokeWidth={3} strokeLinecap="round" />
+        <line x1={peakX} y1={my(peakY)} x2={peakX + 3 * CW} y2={my(texY)} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="5 4" />
         {bendOn ? (
           <>
-            <line x1={peakX} y1={peakY} x2={peakX + 3 * CW} y2={bendY} stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="2 3" />
-            <text x={vx0} y={Math.max(12, peakY - 24)} fill="#38bdf8" fontSize={11} fontFamily="monospace">
+            <line x1={peakX} y1={my(peakY)} x2={peakX + 3 * CW} y2={my(bendY)} stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="2 3" />
+            <text x={vx0} y={side === "LONG" ? Math.max(12, peakY - 24) : Math.min(H - 4, H - peakY + 32)} fill="#38bdf8" fontSize={11} fontFamily="monospace">
               bend exit ≤ {label(bendSlope)} ({bend}% off the steepest)
             </text>
           </>
         ) : null}
-        <text x={vx0} y={peakY - 10} fill="#34d399" fontSize={11} fontFamily="monospace">
-          steep run ≥ {label(move)}
+        <text x={vx0} y={ty(peakY, -10)} fill="#34d399" fontSize={11} fontFamily="monospace">
+          steep {side === "LONG" ? "rise" : "fall"} ≥ {label(move)} (with the {side === "LONG" ? "buy" : "short"})
         </text>
-        <text x={peakX + 6} y={endY + 16} fill="#fb7185" fontSize={11} fontFamily="monospace">
-          turn back ≥ {label(turn)} within {within} candle{within === 1 ? "" : "s"}
+        <text x={peakX + 6} y={ty(endY, 16)} fill="#fb7185" fontSize={11} fontFamily="monospace">
+          turn back {down} ≥ {label(turn)} within {within} candle{within === 1 ? "" : "s"} → exit{turnEntryOn ? ` + ${side === "LONG" ? "sell" : "buy"}` : ""}
         </text>
-        <text x={peakX + 3 * CW + 6} y={Math.min(texY, endY) - 8} fill="#f59e0b" fontSize={11} fontFamily="monospace">
-          turn exit at {label(turnExit)}
+        <text x={peakX + 3 * CW + 6} y={ty(Math.min(texY, endY), -8)} fill="#f59e0b" fontSize={11} fontFamily="monospace">
+          turn exit at {label(turnExit)} {down}
         </text>
-        <circle cx={peakX} cy={peakY} r={8} fill="#0f172a" stroke="#34d399" strokeWidth={2} className="cursor-ns-resize" onPointerDown={start("peak")} />
-        <circle cx={endX} cy={endY} r={8} fill="#0f172a" stroke="#fb7185" strokeWidth={2} className="cursor-move" onPointerDown={start("end")} />
-        <text x={vx0} y={H - 10} fill="#94a3b8" fontSize={10} fontFamily="monospace">
-          V-turn · {RUN} candles up, {within} back · one grid column = one candle
+        <circle cx={peakX} cy={my(peakY)} r={8} fill="#0f172a" stroke="#34d399" strokeWidth={2} className="cursor-ns-resize" onPointerDown={start("peak")} />
+        <circle cx={endX} cy={my(endY)} r={8} fill="#0f172a" stroke="#fb7185" strokeWidth={2} className="cursor-move" onPointerDown={start("end")} />
+        <text x={vx0} y={side === "LONG" ? H - 10 : 14} fill="#94a3b8" fontSize={10} fontFamily="monospace">
+          {side === "LONG" ? "Buy" : "Short"} · V-turn · {RUN} candles {up}, {within} back {down} · one grid column = one candle
         </text>
         {/* U-turn */}
-        <path d={uPath} fill="none" stroke={form.uturn_on ? "#a78bfa" : "rgba(167,139,250,0.35)"} strokeWidth={3} strokeLinecap="round" />
-        <text x={ux0} y={uTop - 10} fill={form.uturn_on ? "#a78bfa" : "rgba(167,139,250,0.5)"} fontSize={11} fontFamily="monospace">
-          U-turn · {uRun} candles ≥ {label(uMin)}{form.uturn_on ? "" : " (off)"}
+        <path d={mirrorPath(uPath)} fill="none" stroke={form.uturn_on ? "#a78bfa" : "rgba(167,139,250,0.35)"} strokeWidth={3} strokeLinecap="round" />
+        <text x={ux0} y={ty(uTop, -10)} fill={form.uturn_on ? "#a78bfa" : "rgba(167,139,250,0.5)"} fontSize={11} fontFamily="monospace">
+          U-turn · {uRun} candles {down} ≥ {label(uMin)}, then {up}{form.uturn_on ? "" : " (off)"}
         </text>
         {/* 45° reference */}
         <line x1={ref45.x} y1={ref45.y} x2={ref45.x + ref45.len} y2={ref45.y - ref45.len} stroke="#e2e8f0" strokeWidth={1.5} />
@@ -376,8 +430,11 @@ export function SlopeEditor({
         <label className="block text-xs text-slate-300 sm:col-span-2">
           <span className="flex items-center justify-between gap-2">
             <span>
-              Angle convention: what counts as 45°{" "}
-              <span className="text-slate-500">(a chart&apos;s angle depends on its zoom; this fixes the degrees shown here)</span>
+              Picture scale: 45° on this picture = this many % per candle{" "}
+              <span className="text-slate-500">
+                (any angle can be typed in the ° boxes; this only sets how steep the same numbers are drawn, because a chart&apos;s angle
+                depends on its zoom. The bot reads only % per candle.)
+              </span>
             </span>
             <span className="font-mono text-slate-100">{clean(deg45)}%/candle = 45°</span>
           </span>

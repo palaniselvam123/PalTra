@@ -473,6 +473,8 @@ class BotConfig(Base):
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
+    # Entries one stock may take per IST day on this bot (0 = no cap); per bot and per stock (stock_settings).
+    max_trades_per_stock: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # 1 after the one-time raise from the old default of 15. A later edit to
     # 15 is kept.
     max_trades_bumped: Mapped[int] = mapped_column(Integer, default=1)
