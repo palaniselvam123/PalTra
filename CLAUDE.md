@@ -220,7 +220,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   A run covers one day or a range up to 45 calendar days, about 30 trading days (`parse_replay_range`, `MAX_RANGE_DAYS`), one
   fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
   settings it used, and its trades carry `run_id` (day-wise P&L in
-  `get_run`, shown in the blotter's Backtests tab).
+  `get_run`, shown in the blotter's Backtests tab). The run detail and its PDF
+  (`BacktestRuns.bot5Rows`, `lib/backtestPdf.ts`) list, after the strategy
+  settings, the fast-mover hand-off settings and Bot 5's own strategy fields
+  from the run's `fast_bot` snapshot when the run played with it.
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only
@@ -1076,7 +1079,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   that desk's history, newest first), `POST /api/config/presets` (`name`, `desk`, `settings`), `DELETE
   /api/config/presets/{id}`. Settings → Strategy, "Saved strategies & history" (`components/Settings/StrategyPresets.tsx`,
   shared settings only): Save as…, each entry's fields that differ from the form now (old → new), Load (into the form;
-  the usual Save then applies it with every check), Delete. No order is placed.
+  the usual Save then applies it with every check), Delete. **Reset to defaults** (`POST /api/config/reset`, the
+  research and `/api/bots/{n}/config/reset` forms; `main.strategy_defaults` = every `ConfigUpdate` field minus
+  `COPY_SKIP` at its `BotConfig` column default, `GET /api/config/defaults`): sets them on the row like Copy settings
+  (same checks; an open position still blocks a quantity change; a LIVE bot needs `confirm_live`, 409 without;
+  `stock_settings: true` also clears every stock's own settings) and keeps a history entry. The Trade list, mode, name
+  and the all-bots rows stay. Settings Save bar "Reset to defaults" (asks first; LIVE asks again). No order is placed.
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,

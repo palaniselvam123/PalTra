@@ -557,6 +557,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     }
   };
 
+  /** Reset to defaults: every shared strategy field back to its default. Trade list, mode and name stay. */
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetDefaults = async (withStocks: boolean) => {
+    setConfirmReset(false);
+    setBusy(true);
+    setMsg(null);
+    try {
+      const live = String(form?.trading_mode ?? "").toUpperCase() === "LIVE";
+      if (live && !window.confirm("This bot is LIVE. Reset its strategy settings to the defaults anyway?")) return;
+      const out = await smaApi.resetConfig(live, withStocks);
+      markDirty(false);
+      setForm(out.config);
+      setMsg(
+        out.changed.length
+          ? `Reset to defaults: ${out.changed.length} setting${out.changed.length === 1 ? "" : "s"} changed${withStocks ? ", every stock's own settings cleared" : ""}. Press Start bot.`
+          : "Already at the defaults."
+      );
+      setSavedCount((n) => n + 1);
+      onChanged();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resetStock = async () => {
     setBusy(true);
     setMsg(null);
@@ -2689,6 +2715,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
             Unsaved changes
           </span>
+        ) : null}
+        {!stockScope ? (
+          confirmReset ? (
+            <span className="inline-flex flex-wrap items-center gap-2 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-100 ring-1 ring-inset ring-rose-400/30">
+              Put every shared setting back to its default? The Trade list, PAPER / LIVE and the bot name stay.
+              <button type="button" disabled={busy} onClick={() => resetDefaults(false)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset
+              </button>
+              <button type="button" disabled={busy} onClick={() => resetDefaults(true)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset + clear stocks&apos; own settings
+              </button>
+              <button type="button" onClick={() => setConfirmReset(false)} className="rounded px-2 py-0.5 ring-1 ring-inset ring-white/20 hover:bg-white/5">
+                Keep
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmReset(true)}
+              title="Every shared strategy setting back to its default (what a new bot starts with)"
+              className="inline-flex h-11 items-center rounded-md px-4 text-sm text-slate-200 ring-1 ring-inset ring-white/15 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 sm:h-9"
+            >
+              Reset to defaults
+            </button>
+          )
         ) : null}
         {stockScope && Object.keys(own).length > 0 && (
           <button

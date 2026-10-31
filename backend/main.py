@@ -1109,6 +1109,83 @@ async def delete_preset(pid: int, desk: str = "1"):
     return strategy_presets.delete_preset(pid, desk)
 
 
+class ResetBody(BaseModel):
+    # The bot trades real money: the page asked first.
+    confirm_live: bool = False
+    # Also drop every stock's own settings, so each follows the defaults too.
+    stock_settings: bool = False
+
+
+def strategy_defaults() -> dict:
+    """Every strategy field (the update fields minus COPY_SKIP) at its BotConfig column default."""
+    out: dict = {}
+    for name in ConfigUpdate.model_fields:
+        if name in COPY_SKIP:
+            continue
+        column = BotConfig.__table__.columns.get(name)
+        if column is None:
+            continue
+        arg = getattr(column.default, "arg", None)
+        out[name] = None if column.default is None or callable(arg) else arg
+    return out
+
+
+async def _reset_config(eng: StrategyEngine, body: ResetBody) -> dict:
+    """Put the desk's strategy settings back to the defaults, the way Copy settings replaces them.
+
+    The Trade list, mode, name, per-stock settings (unless asked) and the all-bots rows stay.
+    """
+    defaults = strategy_defaults()
+    with session_factory()() as db:
+        row = db.get(BotConfig, eng.config_id)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        if (row.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(409, "That bot is LIVE: confirm before resetting its settings")
+        own = {} if body.stock_settings else stock_settings(row)
+        held = {symbol: pos.qty for symbol, pos in eng.positions.items() if pos is not None}
+        if any(int(qty) != int(defaults["qty"]) for symbol, qty in held.items() if "qty" not in own.get(symbol, {})):
+            raise HTTPException(409, "Close the open position before changing quantity")
+        changed = sorted(name for name, value in defaults.items() if getattr(row, name) != value)
+        for name, value in defaults.items():
+            setattr(row, name, value)
+        if body.stock_settings:
+            row.stock_settings = "{}"
+            changed.append("stock_settings")
+        _check_settings(row)
+        for symbol in own:
+            _check_settings(_cfg_for(row, symbol), symbol)
+        db.commit()
+        db.refresh(row)
+        payload = _config_dict(row)
+        cap = int(row.max_trades_per_day)
+        db.expunge(row)
+    _reload(eng, payload)
+    if "max_trades_per_day" in changed:
+        eng.release_trade_cap(cap)
+    try:
+        strategy_presets.remember(_preset_desk(eng), _strategy_fields(payload))
+    except Exception:  # noqa: BLE001 - bookkeeping only
+        logging.getLogger("sma.presets").exception("strategy history not written")
+    return {"changed": changed, "config": payload}
+
+
+@app.get("/api/config/defaults")
+async def get_config_defaults():
+    """The default value of every strategy field, as "Reset to defaults" sets them."""
+    return strategy_defaults()
+
+
+@app.post("/api/config/reset")
+async def reset_config(body: ResetBody):
+    return await _reset_config(engine, body)
+
+
+@app.post("/api/research/config/reset")
+async def research_reset_config(body: ResetBody):
+    return await _reset_config(_research(), body)
+
+
 @app.put("/api/config")
 async def put_config(body: ConfigUpdate):
     return await _put_config(engine, body)
@@ -3558,6 +3635,11 @@ async def bot_get_config(bot: int):
 @app.put("/api/bots/{bot}/config")
 async def bot_put_config(bot: int, body: ConfigUpdate):
     return await _put_config(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/config/reset")
+async def bot_reset_config(bot: int, body: ResetBody):
+    return await _reset_config(_bot(bot), body)
 
 
 @app.get("/api/bots/{bot}/config/stock/{symbol}")

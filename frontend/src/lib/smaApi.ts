@@ -1622,6 +1622,12 @@ export const smaApi = {
     request<StrategyPresets>(`/api/config/presets/${id}?desk=${presetDesk()}`, { method: "DELETE" }, 12000, false),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
+  /** Put this desk's strategy settings back to the defaults (Trade list, mode and name stay). */
+  resetConfig: (confirmLive = false, withStocks = false) =>
+    request<{ changed: string[]; config: SmaConfig }>("/api/config/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm_live: confirmLive, stock_settings: withStocks }),
+    }),
   stockConfig: (symbol: string) => request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`),
   saveStockConfig: (symbol: string, body: Partial<SmaConfig>) =>
     request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, {
