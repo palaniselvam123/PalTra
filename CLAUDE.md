@@ -368,6 +368,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   bot's own candle's SMAs are against it too (a trade entered against the exit candle's trend is not held once its own cross
   turns). No reverse. Stops, targets, the other exits and the square-off are unchanged. A LIVE position restored without its
   stop id is left to that stop. Settings → 3. When to exit ("Read the cross exit on"). The stock research baseline keeps it off.
+- `backend/small_candles.py` – watch smaller candles while in a trade (`small_exit_minutes`, CSV of sizes 1/2/3/5/10, "" =
+  off by default; per bot and per stock, PAPER and LIVE, replays too; Settings → 3. When to exit, "Watch smaller candles
+  while in a trade"): a 15-minute bot only sees a turn when its candle closes, so `StrategyEngine._watch_small_candles` (in
+  the held-stock loop after `_watch_exit_candle`) groups the 1-minute tape (`_tapes`) into each ticked size smaller than the
+  bot's own candle (`watched`; `exit_candle.closed_frame`) and, once per newly closed candle of that size (`pos.small_bars`),
+  reads `verdict`: `small_exit_cross` (on; `exit_candle.crossed_against`, or SMAs already against on the first candle read
+  after the entry), `small_exit_slope` (on; `slope_exit.slope` on that size ≥ `slope_turn_pct` against), `small_exit_counter`
+  (N, 0 = off; `indicators._direction_reason` colour rule). Each size's verdict sits in `pos.small_state`; `decide` closes the
+  trade (`SMALL_CANDLE_EXIT`, via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is
+  left to that stop) once `small_exit_agree` (1) sizes say so and, with `small_exit_loss_pct` > 0, only while the trade is at
+  least that % under water (`losing_pct`). No reverse; entries unchanged. Counts as an exit for `strategyChecks.noExitOn`.
+  The stock research baseline keeps it off.
 - `backend/late_entry.py` – late entry (`late_entry_min`, 0 = off by default, per bot and
   per stock, PAPER and LIVE): a fresh cross refused only by a ticked entry filter or ADX
   (`late_entry.refused_by_filter`: `… ignored — …` / `closed on … — …`, never the cut-off or

@@ -60,6 +60,7 @@ from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
 import ema_filter
 import exit_candle
+import small_candles
 import supertrend
 import opening_range
 import join_trend
@@ -212,6 +213,9 @@ class OpenPosition:
     ema_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
+    # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
+    small_bars: dict = field(default_factory=dict)
+    small_state: dict = field(default_factory=dict)
     # Supertrend exit (supertrend.py): the last closed candle read.
     st_bar: int | None = None
     # SMA 9 slope exit (slope_exit.py): the last closed candle read and the steepest slope.
@@ -317,6 +321,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "exit_candle_minutes",
+    "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -1420,6 +1425,7 @@ class StrategyEngine:
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
             await self._watch_exit_candle(symbol_cfg)
+            await self._watch_small_candles(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_slope_exit(symbol_cfg)
             await self._watch_turn_colour(symbol_cfg)
@@ -3898,6 +3904,44 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} {size}-minute exit candle — {note}"
         await self._exit_now(cfg, self.ltp, exit_candle.REASON)
 
+    async def _watch_small_candles(self, cfg: BotConfig) -> None:
+        """Watch smaller candles while in a trade (small_candles.py): once per newly closed candle of each ticked
+        size, read the cross / slope / counter candles on it; exit once enough sizes say so (and the loss gate allows)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        own_minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        watched = small_candles.watched(cfg, own_minutes)
+        if not watched:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other candle exits).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        tape = self._tapes.get(symbol)
+        changed = False
+        for size in watched:
+            frame = exit_candle.closed_frame(tape, size, int(cfg.sma_fast), int(cfg.sma_slow))
+            if frame is None or frame.empty:
+                continue
+            closed_ts = int(frame.iloc[-1]["ts"])
+            if pos.small_bars.get(size) == closed_ts:
+                continue
+            if closed_ts + size * 60 <= opened.timestamp():
+                continue  # that candle had closed before the entry
+            first = size not in pos.small_bars
+            pos.small_bars[size] = closed_ts
+            pos.small_state[size] = small_candles.verdict(frame, pos.signal_direction, cfg, first)
+            changed = True
+        if not changed:
+            return
+        hit, note = small_candles.decide(pos.small_state, cfg, pos.direction, pos.entry_price, self.ltp)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
+        await self._exit_now(cfg, self.ltp, small_candles.REASON)
+
     async def _watch_slope_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the SMA 9 bends or turns against the trade (slope_exit.py)."""
         pos = self.position
@@ -4090,6 +4134,7 @@ class StrategyEngine:
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
                     "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
                     "BREAKOUT_STOP": "trend breakout — flat",
+                    small_candles.REASON: "smaller candles turned against the trade — flat",
                     STOP_LOST: "Groww dropped the stop — closed at the market",
                     stop_plan.EXIT_REASON: "stop plan level reached — flat",
                     stop_plan.HIT_REASON: "stop plan stop hit — flat",
@@ -5928,7 +5973,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON,
+    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
 )
 
 

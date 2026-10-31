@@ -68,6 +68,7 @@ import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
 import exit_candle
+import small_candles
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -580,6 +581,13 @@ class ConfigUpdate(BaseModel):
     pattern_tf: Literal[1, 3, 5, 10, 15] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
+    # Watch smaller candles while in a trade (small_candles.py): CSV of sizes, "" = off.
+    small_exit_minutes: str | None = Field(default=None, max_length=32)
+    small_exit_cross: bool | None = None
+    small_exit_slope: bool | None = None
+    small_exit_counter: int | None = Field(default=None, ge=0, le=small_candles.MAX_COUNTER)
+    small_exit_loss_pct: float | None = Field(default=None, ge=0, le=50)
+    small_exit_agree: int | None = Field(default=None, ge=1, le=small_candles.MAX_AGREE)
     slope_minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
@@ -1027,6 +1035,8 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             _validate_hhmm(data["entry_cutoff_time"], "entry_cutoff_time")
         if "review_check_minutes" in data:
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
+        if "small_exit_minutes" in data:
+            data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -1234,6 +1244,12 @@ def _gap_dict(row) -> dict:
         "or_spread_pct": opening_range.spread_pct(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         "exit_candle_minutes": exit_candle.minutes(row),
+        "small_exit_minutes": ",".join(str(s) for s in small_candles.sizes(row)),
+        "small_exit_cross": small_candles.cross_on(row),
+        "small_exit_slope": small_candles.slope_on(row),
+        "small_exit_counter": small_candles.counter(row),
+        "small_exit_loss_pct": small_candles.loss_pct(row),
+        "small_exit_agree": small_candles.agree(row),
         "slope_minutes": slope_mod.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),
@@ -1301,6 +1317,8 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
         own = dict(everything.get(name, {}))
         if "review_check_minutes" in data:
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
+        if "small_exit_minutes" in data:
+            data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
         for key, value in data.items():
             if value == getattr(row, key):
                 own.pop(key, None)
