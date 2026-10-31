@@ -18,6 +18,14 @@ type Candle = { o: number; h: number; l: number; c: number };
 
 // A made-up but steady run of candles (price units): a pull-back, a climb, a wide bar, a quiet stretch.
 const BARS: Candle[] = [
+  { o: 99.2, h: 99.9, l: 98.9, c: 99.6 },
+  { o: 99.6, h: 100.2, l: 99.3, c: 99.4 },
+  { o: 99.4, h: 99.8, l: 98.8, c: 99.1 },
+  { o: 99.1, h: 99.7, l: 98.9, c: 99.5 },
+  { o: 99.5, h: 100.4, l: 99.3, c: 100.2 },
+  { o: 100.2, h: 100.5, l: 99.7, c: 99.9 },
+  { o: 99.9, h: 100.3, l: 99.5, c: 100.1 },
+  { o: 100.1, h: 100.4, l: 99.8, c: 100.0 },
   { o: 100.0, h: 100.8, l: 99.6, c: 100.5 },
   { o: 100.5, h: 100.9, l: 100.0, c: 100.2 },
   { o: 100.2, h: 100.6, l: 99.4, c: 99.6 },
@@ -119,6 +127,7 @@ function Candles({
   y,
   colourOf,
   faded = false,
+  opacityOf,
 }: {
   bars: Candle[];
   x0: number;
@@ -126,6 +135,8 @@ function Candles({
   y: (p: number) => number;
   colourOf?: (bar: Candle, i: number) => string;
   faded?: boolean;
+  /** Per-candle opacity (1 = normal); overrides `faded`. */
+  opacityOf?: (bar: Candle, i: number) => number;
 }) {
   return (
     <>
@@ -136,7 +147,7 @@ function Candles({
         const top = y(Math.max(b.o, b.c));
         const bottom = y(Math.min(b.o, b.c));
         return (
-          <g key={i} opacity={faded ? 0.35 : 1}>
+          <g key={i} opacity={opacityOf ? opacityOf(b, i) : faded ? 0.35 : 1}>
             <line x1={x} x2={x} y1={y(b.h)} y2={y(b.l)} stroke={colour} strokeWidth={1.5} />
             <rect x={x - cw * 0.3} y={top} width={cw * 0.6} height={Math.max(1.5, bottom - top)} fill={colour} />
           </g>
@@ -194,12 +205,13 @@ export function AtrPicture({ form, set }: Props) {
   const type = (form.stop_type as string | undefined) ?? "ATR";
   const [side, setSide] = useSide();
   const bars = BARS;
-  const atr = atrOf(bars, period);
+  const used = Math.min(period, bars.length); // the candles the average reads (drawn bright; the rest dim)
+  const atr = atrOf(bars, used);
   const fill = bars[bars.length - 1].c;
   const stop = side === "LONG" ? fill - mult * atr : fill + mult * atr;
   const W = 560;
   const H = 230;
-  const cw = 26;
+  const cw = 20;
   const x0 = 16;
   const lo = Math.min(...bars.map((b) => b.l), stop) - 0.3;
   const hi = Math.max(...bars.map((b) => b.h), stop) + 0.3;
@@ -224,11 +236,15 @@ export function AtrPicture({ form, set }: Props) {
         <Rule on={active} text="ATR stop" when={stopOn ? (type === "ATR" ? "The stop is this far from the fill." : `The stop type is ${type}; the ATR numbers are not used for the stop.`) : "The stop is off."} toggle={type === "ATR" ? (on) => set("use_stop", on) : undefined} />
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full select-none rounded-md bg-black/30" role="img" aria-label={`ATR over ${period} candles is ${clean(atr)}; the stop sits ${clean(mult)} ATR ${side === "LONG" ? "below" : "above"} the fill`}>
-        <Candles bars={bars} x0={x0} cw={cw} y={y} />
+        <Candles bars={bars} x0={x0} cw={cw} y={y} opacityOf={(_b, i) => (i >= bars.length - used ? 1 : 0.22)} />
+        <rect x={x0 + (bars.length - used) * cw} y={8} width={used * cw} height={H - 24} fill="rgba(250,204,21,0.06)" stroke="rgba(250,204,21,0.35)" strokeDasharray="3 3" />
+        <text x={x0 + (bars.length - used) * cw + 4} y={H - 8} fill="#FACC15" fontSize={10} fontFamily={MONO}>
+          last {used} candle{used === 1 ? "" : "s"} averaged{period > bars.length ? ` (${period} set, ${bars.length} drawn)` : ""}
+        </text>
         {/* one ATR, next to the last candle */}
         <line x1={atrX} x2={atrX} y1={y(last.c)} y2={y(last.c + atr)} stroke="#FACC15" strokeWidth={3} strokeLinecap="round" />
         <text x={atrX + 6} y={y(last.c + atr / 2) + 4} fill="#FACC15" fontSize={11} fontFamily={MONO}>
-          1 ATR = {clean(atr)} ({period} candles)
+          1 ATR = {clean(atr)}
         </text>
         {/* the fill and the stop */}
         <line x1={x0} x2={W - 8} y1={y(fill)} y2={y(fill)} stroke="rgba(226,232,240,0.5)" strokeDasharray="4 3" />
@@ -398,21 +414,29 @@ export function CandleSizePicture({ form, set }: Props) {
 
 type RulePart = "direction" | "counter" | "tall";
 
-// Candles used by the rule pictures: a run up, then three candles against it, then one tall bar.
-const RULE_BARS: Candle[] = [
-  { o: 100.0, h: 100.5, l: 99.8, c: 100.4 },
-  { o: 100.4, h: 100.9, l: 100.2, c: 100.8 },
-  { o: 100.8, h: 101.3, l: 100.6, c: 101.2 },
-  { o: 101.2, h: 101.5, l: 100.9, c: 101.0 },
-  { o: 101.0, h: 101.2, l: 100.5, c: 100.6 },
-  { o: 100.6, h: 100.8, l: 100.1, c: 100.2 },
-  { o: 100.2, h: 101.9, l: 100.1, c: 101.8 },
-];
+const ATR_EX = 0.5; // the example's ATR in price units, so bodies and heights read in ATR
+
+/** One candle whose body is `body` (price units, signed: + = up) with small wicks. */
+function bar(open: number, body: number, wick = 0.06): Candle {
+  const close = open + body;
+  return { o: open, c: close, h: Math.max(open, close) + wick, l: Math.min(open, close) - wick };
+}
+
+/** A run of `n` candles each moving `body` (signed), one after the other. */
+function run(start: number, n: number, body: number, wick?: number): Candle[] {
+  const out: Candle[] = [];
+  let price = start;
+  for (let i = 0; i < n; i += 1) {
+    out.push(bar(price, body, wick));
+    price += body;
+  }
+  return out;
+}
 
 /**
- * Candle rules: the direction check before an entry (N candles the trade's way), counter candles against an
- * open trade (N candles against it, each with a body of at least x ATR), and the tall candle (a signal candle
- * taller than x ATR waits for a pull-back instead of ordering at once).
+ * Candle rules, drawn from the settings: the direction check before an entry (exactly N candles the trade's way),
+ * counter candles against an open trade (exactly N candles against it, each body the chosen size in ATR), and the
+ * tall candle (a signal candle exactly the chosen height in ATR). Every slider redraws the candles.
  */
 export function CandleRulesPicture({ form, set, parts }: Props & { parts: RulePart[] }) {
   const [side, setSide] = useSide();
@@ -424,28 +448,62 @@ export function CandleRulesPicture({ form, set, parts }: Props & { parts: RulePa
   const minBody = Math.min(5, Math.max(0, num(form, "counter_min_body", 0)));
   const tallOn = Boolean(form.tall_pullback);
   const tallMult = Math.min(5, Math.max(0.5, num(form, "tall_atr_mult", 1.5)));
-  const atr = 0.5; // the example's ATR, so bodies and heights read in ATR
-  const W = 560;
-  const H = 210;
-  const cw = 30;
-  const x0 = 16;
-  // A short is the mirror image: flip the candles around the middle price.
-  const mid = 101.0;
-  const flip = (b: Candle): Candle => (side === "LONG" ? b : { o: 2 * mid - b.o, c: 2 * mid - b.c, h: 2 * mid - b.l, l: 2 * mid - b.h });
-  const bars = RULE_BARS.map(flip);
-  const lo = Math.min(...bars.map((b) => b.l)) - 0.2;
-  const hi = Math.max(...bars.map((b) => b.h)) + 0.2;
-  const y = (p: number) => 18 + ((hi - p) / (hi - lo)) * (H - 46);
-  const withTrade = (b: Candle) => (side === "LONG" ? b.c > b.o : b.c < b.o);
-  const bodyAtr = (b: Candle) => Math.abs(b.c - b.o) / atr;
-  const label = (i: number, text: string, colour: string, above = true) => (
-    <text key={`t${i}`} x={x0 + i * cw + cw / 2} y={above ? y(bars[i].h) - 6 : y(bars[i].l) + 14} fill={colour} fontSize={10} fontFamily={MONO} textAnchor="middle">
-      {text}
-    </text>
-  );
-  const dirText = dirRule === "COLOUR" ? "green candles" : dirRule === "BOTH" ? "green candles, each closing higher" : "each close higher than the last";
-  const counterText = counterRule === "CLOSES" ? "each close lower than the last" : counterRule === "BOTH" ? "red candles, each closing lower" : "red candles";
+  const dir = side === "LONG" ? 1 : -1; // + = the trade's way
   const want = side === "LONG" ? "buy" : "short";
+  const W = 560;
+  const H = 230;
+  const x0 = 16;
+
+  // ---- build the candles for the part shown
+  let bars: Candle[] = [];
+  let caption = "";
+  let labels: { i: number; text: string; colour: string; above: boolean; right?: boolean }[] = [];
+  let extras: { kind: "tall"; i: number; height: number; pull: number } | null = null;
+  if (parts.includes("direction")) {
+    // two mixed candles, then exactly dirN candles the trade's way (each close beyond the last)
+    const lead = [bar(100, -0.15 * dir), bar(100 - 0.15 * dir, 0.1 * dir)];
+    const last = lead[lead.length - 1].c;
+    const good = run(last, dirN, 0.22 * dir, 0.05);
+    bars = [...lead, ...good];
+    labels = good.map((_b, k) => ({ i: lead.length + k, text: "✓", colour: "#34d399", above: dir > 0 }));
+    const words = dirRule === "COLOUR" ? `${dir > 0 ? "green" : "red"} candles` : dirRule === "BOTH" ? `${dir > 0 ? "green" : "red"} candles, each closing ${dir > 0 ? "higher" : "lower"}` : `each close ${dir > 0 ? "higher" : "lower"} than the last`;
+    caption = `${dirOn ? "entry allowed" : "with the check on, an entry would need"}: the last ${dirN} closed candle${dirN === 1 ? "" : "s"} ${words}${dirOn ? "" : " (check off)"}`;
+  } else if (parts.includes("counter")) {
+    // three candles with the trade, then exactly N against it with bodies of max(minBody, 0.3) ATR
+    const withTrade = run(100, 3, 0.3 * dir, 0.05);
+    const n = counterN || 3;
+    const bodyAtr = Math.max(minBody, 0.3);
+    const against = run(withTrade[withTrade.length - 1].c, n, -bodyAtr * ATR_EX * dir, 0.05);
+    bars = [...withTrade, ...against];
+    labels = against.map((_b, k) => ({ i: withTrade.length + k, text: `${clean(bodyAtr, 1)} ATR`, colour: counterN ? "#fb7185" : "#64748b", above: dir < 0 }));
+    const last = withTrade.length + n - 1;
+    labels.push({ i: last, text: counterN ? "← exit here" : "← (off)", colour: counterN ? "#fb7185" : "#64748b", above: dir > 0, right: true });
+    const words = counterRule === "CLOSES" ? `each close ${dir > 0 ? "lower" : "higher"} than the last` : counterRule === "BOTH" ? `${dir > 0 ? "red" : "green"} candles, each closing ${dir > 0 ? "lower" : "higher"}` : `${dir > 0 ? "red" : "green"} candles`;
+    caption = counterN
+      ? `exit after ${counterN} candle${counterN === 1 ? "" : "s"} against the ${want} (${words})${minBody ? `, each body ≥ ${clean(minBody, 1)} ATR` : ", any body size"}`
+      : "counter exit off (N = 0): the candles against the trade are ignored";
+  } else {
+    // four normal candles (0.8 ATR tall), then the signal candle exactly tallMult ATR tall the trade's way
+    const normal: Candle[] = [];
+    let price = 100;
+    for (let i = 0; i < 4; i += 1) {
+      const body = (i % 2 ? -0.25 : 0.35) * dir;
+      normal.push({ o: price, c: price + body, h: Math.max(price, price + body) + (0.8 * ATR_EX - Math.abs(body)) / 2, l: Math.min(price, price + body) - (0.8 * ATR_EX - Math.abs(body)) / 2 });
+      price += body;
+    }
+    const height = tallMult * ATR_EX;
+    const tall: Candle = dir > 0 ? { o: price, c: price + height * 0.85, h: price + height, l: price } : { o: price, c: price - height * 0.85, h: price, l: price - height };
+    bars = [...normal, tall];
+    const pull = dir > 0 ? tall.l + height / 2 : tall.h - height / 2;
+    extras = { kind: "tall", i: normal.length, height: tallMult, pull };
+    caption = tallOn ? `a signal candle ≥ ${clean(tallMult, 1)} ATR tall does not order at once: the entry waits for the pull-back` : `with the rule on, a candle ≥ ${clean(tallMult, 1)} ATR tall would wait for a pull-back (rule off: orders at once)`;
+  }
+  const cw = Math.min(30, Math.floor((W - x0 - 150) / Math.max(bars.length, 1)));
+  const lo = Math.min(...bars.map((b) => b.l)) - 0.15;
+  const hi = Math.max(...bars.map((b) => b.h)) + 0.15;
+  const y = (p: number) => 18 + ((hi - p) / (hi - lo)) * (H - 46);
+  const dim = parts.includes("direction") ? !dirOn : parts.includes("counter") ? counterN === 0 : !tallOn;
+
   return (
     <section className="mt-3 rounded-lg border border-sky-400/20 bg-sky-500/[0.04] p-3" aria-label="Candle rules picture">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -455,69 +513,51 @@ export function CandleRulesPicture({ form, set, parts }: Props & { parts: RulePa
         <SideSwitch side={side} onChange={setSide} />
       </div>
       <div className="mt-2 grid gap-1.5 sm:grid-cols-3">
-        {parts.includes("direction") ? <Rule on={dirOn} text="Direction check (entry)" when={`A ${want} needs the last ${dirN} closed candles to go its way: ${dirText}.`} toggle={(next) => set("use_candle_dir", next)} /> : null}
-        {parts.includes("counter") ? <Rule on={counterN > 0} text="Counter candles (exit)" when={`Closes the trade once ${counterN || "N"} closed candles in a row go against it (${counterText}).`} toggle={(next) => set("counter_exit_count", next ? "3" : "0")} /> : null}
+        {parts.includes("direction") ? <Rule on={dirOn} text="Direction check (entry)" when={`A ${want} needs the last ${dirN} closed candles to go its way.`} toggle={(next) => set("use_candle_dir", next)} /> : null}
+        {parts.includes("counter") ? <Rule on={counterN > 0} text="Counter candles (exit)" when={`Closes the trade once ${counterN || "N"} closed candles in a row go against it.`} toggle={(next) => set("counter_exit_count", next ? "3" : "0")} /> : null}
         {parts.includes("tall") ? <Rule on={tallOn} text="Tall candle (wait for a pull-back)" when={`A signal candle taller than ${clean(tallMult, 1)} ATR does not order at once; the entry waits at half its height or the fast SMA.`} toggle={(next) => set("tall_pullback", next)} /> : null}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full select-none rounded-md bg-black/30" role="img" aria-label="Candle rules picture">
-        <Candles bars={bars} x0={x0} cw={cw} y={y} />
-        {/* direction: the first dirN candles go the trade's way */}
-        {parts.includes("direction")
-          ? bars.slice(0, Math.min(3, dirN)).map((b, i) => label(i, withTrade(b) ? "✓ with" : "✗", withTrade(b) ? "#34d399" : "#fb7185"))
-          : null}
-        {parts.includes("direction") ? (
-          <text x={x0} y={H - 6} fill="#94a3b8" fontSize={10} fontFamily={MONO}>
-            direction check: the last {dirN} closed candle{dirN === 1 ? "" : "s"} before a {want} must be {dirText}
-            {dirN > 3 ? ` (${dirN} needed; 3 drawn)` : ""}
-          </text>
-        ) : null}
-        {/* counter: candles 3..5 go against the trade; their bodies in ATR */}
-        {parts.includes("counter")
-          ? bars.slice(3, 6).map((b, k) => {
-              const i = k + 3;
-              const big = bodyAtr(b) >= minBody;
-              const counts = k < (counterN || 3) && !withTrade(b) && big;
-              return label(i, `${counts ? "✓" : "·"} ${clean(bodyAtr(b), 1)} ATR`, counts ? "#fb7185" : "#64748b", false);
-            })
-          : null}
-        {parts.includes("counter") ? (
-          <text x={x0} y={H - 6} fill="#94a3b8" fontSize={10} fontFamily={MONO}>
-            {counterN ? `exit after ${counterN} candle${counterN === 1 ? "" : "s"} against the ${want}` : "counter exit off (N = 0)"}
-            {minBody ? `, each body ≥ ${clean(minBody, 1)} ATR` : ", any body size"} · {counterText}
-          </text>
-        ) : null}
-        {/* tall: the last bar vs tall_atr_mult × ATR */}
-        {parts.includes("tall") ? (
-          <>
-            {(() => {
-              const b = bars[6];
-              const height = (b.h - b.l) / atr;
-              const tall = height >= tallMult;
-              const x = x0 + 6 * cw + cw / 2;
-              const xr = x0 + 7 * cw + 10; // the room to the right of the tall candle
-              const pull = side === "LONG" ? b.l + (b.h - b.l) / 2 : b.h - (b.h - b.l) / 2;
-              return (
-                <>
-                  <line x1={xr} x2={xr} y1={y(b.h)} y2={y(b.l)} stroke="#FACC15" strokeWidth={3} />
-                  <text x={xr + 8} y={y(side === "LONG" ? b.h : b.l) + (side === "LONG" ? 10 : -4)} fill="#FACC15" fontSize={10} fontFamily={MONO}>
-                    height {clean(height, 1)} ATR {tall ? `≥ ${clean(tallMult, 1)}: tall` : `< ${clean(tallMult, 1)}: normal`}
-                  </text>
-                  {tall && tallOn ? (
-                    <>
-                      <line x1={x - cw} x2={W - 8} y1={y(pull)} y2={y(pull)} stroke="#f59e0b" strokeDasharray="5 4" strokeWidth={1.5} />
-                      <text x={xr + 8} y={y(pull) - 5} fill="#f59e0b" fontSize={10} fontFamily={MONO}>
-                        ← entry waits here (half-way back, or the fast SMA)
-                      </text>
-                    </>
-                  ) : null}
-                </>
-              );
-            })()}
-            <text x={x0} y={H - 6} fill="#94a3b8" fontSize={10} fontFamily={MONO}>
-              a signal candle this tall usually snaps back: {tallOn ? "the order waits for the pull-back" : "with the rule off it orders at once"}
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full select-none rounded-md bg-black/30" role="img" aria-label={caption}>
+        <Candles bars={bars} x0={x0} cw={cw} y={y} opacityOf={(_b, i) => (dim && i >= (parts.includes("tall") ? 4 : parts.includes("direction") ? 2 : 3) ? 0.45 : 1)} />
+        {labels.map((l, k) =>
+          l.right ? (
+            <text key={k} x={x0 + (l.i + 1) * cw + 4} y={y(bars[l.i].c) + 4} fill={l.colour} fontSize={11} fontFamily={MONO}>
+              {l.text}
             </text>
-          </>
+          ) : (
+            <text key={k} x={x0 + l.i * cw + cw / 2} y={l.above ? y(bars[l.i].h) - 6 : y(bars[l.i].l) + 14} fill={l.colour} fontSize={10} fontFamily={MONO} textAnchor="middle">
+              {l.text}
+            </text>
+          )
+        )}
+        {extras ? (
+          (() => {
+            const b = bars[extras.i];
+            const xr = x0 + (extras.i + 1) * cw + 10;
+            return (
+              <>
+                <line x1={xr} x2={xr} y1={y(b.h)} y2={y(b.l)} stroke="#FACC15" strokeWidth={3} />
+                <text x={xr + 8} y={y(dir > 0 ? b.h : b.l) + (dir > 0 ? 10 : -4)} fill="#FACC15" fontSize={10} fontFamily={MONO}>
+                  height = {clean(extras.height, 1)} ATR (your setting)
+                </text>
+                <text x={x0} y={y(dir > 0 ? bars[0].l : bars[0].h) + (dir > 0 ? 14 : -6)} fill="#94a3b8" fontSize={10} fontFamily={MONO}>
+                  normal candles ≈ 0.8 ATR
+                </text>
+                {tallOn ? (
+                  <>
+                    <line x1={x0 + (extras.i - 1) * cw} x2={W - 8} y1={y(extras.pull)} y2={y(extras.pull)} stroke="#f59e0b" strokeDasharray="5 4" strokeWidth={1.5} />
+                    <text x={xr + 8} y={y(extras.pull) - 5} fill="#f59e0b" fontSize={10} fontFamily={MONO}>
+                      ← entry waits here (half-way back, or the fast SMA)
+                    </text>
+                  </>
+                ) : null}
+              </>
+            );
+          })()
         ) : null}
+        <text x={x0} y={H - 6} fill="#94a3b8" fontSize={10} fontFamily={MONO}>
+          {caption}
+        </text>
       </svg>
       <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
         {parts.includes("direction") ? <Slider text="Direction: last candles to check" value={dirN} min={1} max={10} step={1} onChange={(v) => set("candle_dir_count", String(Math.round(v)))} fmt={(v) => `${v} candle${v === 1 ? "" : "s"}`} dim={!dirOn} /> : null}
@@ -525,7 +565,9 @@ export function CandleRulesPicture({ form, set, parts }: Props & { parts: RulePa
         {parts.includes("counter") ? <Slider text="Each counter candle's body at least (× ATR)" value={minBody} min={0} max={5} step={0.1} onChange={(v) => set("counter_min_body", clean(v, 1))} fmt={(v) => (v ? `${clean(v, 1)} ATR` : "any size")} dim={counterN === 0} /> : null}
         {parts.includes("tall") ? <Slider text="Tall when the candle's height is at least (× ATR)" value={tallMult} min={0.5} max={5} step={0.1} onChange={(v) => set("tall_atr_mult", clean(v, 1))} fmt={(v) => `${clean(v, 1)} ATR`} dim={!tallOn} /> : null}
       </div>
-      <p className="mt-2 text-[11px] text-slate-500">Press Save to keep a change. The candles are a made-up example with an ATR of {atr}; the bot reads each stock&apos;s own.</p>
+      <p className="mt-2 text-[11px] text-slate-500">
+        The candles are drawn from your numbers (an example ATR of {ATR_EX}): move a slider and they redraw. Press Save to keep a change.
+      </p>
     </section>
   );
 }
