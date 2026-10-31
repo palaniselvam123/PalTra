@@ -26,6 +26,8 @@ import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, typ
 import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
+import { PinToggle } from "@/components/ui/PinToggle";
+import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 
 type Props = {
@@ -370,6 +372,7 @@ const PROFILE_KEY = "sma.chart.profile";
 const CHART_HIDDEN_KEY = "sma.chart.hidden";
 const TABLE_KEY = "sma.chart.table";
 const SLOPE_KEY = "sma.chart.slope";
+const DETAILS_KEY = "sma.chart.details";
 
 /** SMA 9 slope in % per candle over `back` candles: the number the SMA 9 slope exit reads (slope_exit.py). */
 function slopeAt(rows: ReadonlyArray<{ sma9?: number | null }>, i: number, back: number): number | null {
@@ -945,6 +948,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [showTable, setShowTable] = useState(false);
   // The SMA 9 slope strip under the candles (always on while the slope exit is).
   const [showSlope, setShowSlope] = useState(false);
+  // The legend and the reading lines (OHLC, "why no trade", last skipped cross) can be hidden to save room,
+  // and the chart's head (toolbar, legend, readings) can be frozen at the top while the page scrolls.
+  const [detailsHidden, setDetailsHidden] = useState(false);
+  const [headPinned, setHeadPinned] = usePinned("chart-head", false);
   // Which lines show and how they look (Groww-style indicator settings), kept in this browser.
   const [look, setLook, resetLook] = useChartStyle();
   const [showLook, setShowLook] = useState(false);
@@ -959,6 +966,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       if (localStorage.getItem(CHART_HIDDEN_KEY) === "1") setChartHidden(true);
       if (localStorage.getItem(TABLE_KEY) === "1") setShowTable(true);
       if (localStorage.getItem(SLOPE_KEY) === "1") setShowSlope(true);
+      if (localStorage.getItem(DETAILS_KEY) === "0") setDetailsHidden(true);
       const small = localStorage.getItem(BOX_SMALL_KEY);
       // Phones start with the compact box so it does not cover the candles.
       setBoxSmall(small == null ? window.matchMedia("(max-width: 639px)").matches : small === "1");
@@ -978,6 +986,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const toggleChart = () => {
     setChartHidden((on) => {
       remember(CHART_HIDDEN_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  const toggleDetails = () => {
+    setDetailsHidden((on) => {
+      remember(DETAILS_KEY, on ? "1" : "0");
       return !on;
     });
   };
@@ -1866,8 +1880,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         full ? "fixed inset-0 z-[60] flex flex-col overflow-y-auto" : "rounded-xl border"
       )}
     >
-      <div className="flex flex-col gap-1.5 px-3 py-2 sm:px-4">
+      <div className={clsx("flex flex-col gap-1.5 px-3 py-2 sm:px-4", headPinned && !full && "sticky top-0 z-20 bg-[#151921]")}>
         <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-semibold text-slate-100">
+          <PinToggle pinned={headPinned} onChange={setHeadPinned} what="the chart's toolbar and readings" />
           {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
           <span className="font-normal text-slate-300">{barWords(bar)}</span>
           <select
@@ -1950,6 +1965,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </button>
           <button
             type="button"
+            onClick={toggleDetails}
+            aria-pressed={detailsHidden}
+            title={detailsHidden ? "Show the legend and the reading lines (OHLC, why no trade, last skipped cross)" : "Hide the legend and the reading lines under the toolbar to save room"}
+            className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+          >
+            {detailsHidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
+            {detailsHidden ? "Show readings" : "Hide readings"}
+          </button>
+          <button
+            type="button"
             onClick={toggleTable}
             aria-pressed={showTable}
             title={showTable ? "Hide the data table" : "Show these candles as a table: prices, SMA gap, VWAP, RSI, candle names and trade P&L"}
@@ -2011,7 +2036,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </span>
           ) : null}
         </h2>
-        <ul aria-label="Chart legend" className={clsx("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300", chartHidden && "hidden")}>
+        <ul aria-label="Chart legend" className={clsx("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300", (chartHidden || detailsHidden) && "hidden")}>
           {showProfile ? (
             profile ? (
               <>
@@ -2088,20 +2113,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </LegendItem>
           ) : null}
         </ul>
-      </div>
-      {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
-      {showLook && chartHidden ? (
-        // The chart is hidden, so there is nothing to float over: a plain block instead.
-        <ChartIndicators
-          style={look}
-          onChange={setLook}
-          onReset={resetLook}
-          onClose={() => setShowLook(false)}
-          stAvailable={Boolean(filters?.st_line)}
-          floating={false}
-        />
-      ) : null}
-      <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
+      {detailsHidden ? null : (
+      <div className="-mx-3 sm:-mx-4">
       <OhlcLine
         ohlc={ohlc}
         hovering={hoverOhlc != null}
@@ -2129,6 +2142,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           {lastBlocked.reason}
         </p>
       ) : null}
+      </div>
+      )}
+      </div>
+      {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
+      {showLook && chartHidden ? (
+        // The chart is hidden, so there is nothing to float over: a plain block instead.
+        <ChartIndicators
+          style={look}
+          onChange={setLook}
+          onReset={resetLook}
+          onClose={() => setShowLook(false)}
+          stAvailable={Boolean(filters?.st_line)}
+          floating={false}
+        />
+      ) : null}
+      <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
       {measuring ? (
         <MeasureBar
           measure={measure}
