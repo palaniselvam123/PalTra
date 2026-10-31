@@ -1183,7 +1183,8 @@ async def reset_config(body: ResetBody):
 
 @app.post("/api/research/config/reset")
 async def research_reset_config(body: ResetBody):
-    return await _reset_config(_research(), body)
+    # Like Copy settings: the research row (id 2) is created first if the desk has not been opened yet.
+    return await _reset_config(_desk_engine("research"), body)
 
 
 @app.put("/api/config")
