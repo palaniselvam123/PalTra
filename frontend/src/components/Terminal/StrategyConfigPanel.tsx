@@ -83,6 +83,7 @@ export const LABELS: Record<string, string> = {
   counter_min_body: "counter-candle min body",
   counter_reenter: "re-enter after counter candles",
   counter_reenter_max: "counter re-entries per run",
+  max_trades_per_stock: "trades per stock per day",
   counter_entry: "early reversal entry",
   turn_alert: "SMA 9 turn alert",
   turn_entry: "SMA 9 turn entry",
@@ -506,6 +507,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_volume_ratio: Math.min(20, Math.max(0, Number(form.or_volume_ratio ?? 2) || 0)),
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
+    max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
     entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
     pattern_tf: ([1, 3, 5, 10, 15].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15,
     pattern_trend: Boolean(form.pattern_trend),
@@ -2362,6 +2364,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <div className="mt-2 grid grid-cols-2 items-end gap-2">
                 <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
                 <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+                <Field
+                  label="Max trades per stock / day (0 = no cap)"
+                  value={String(form.max_trades_per_stock ?? 0)}
+                  onChange={(v) => set("max_trades_per_stock", v)}
+                  own={isOwn("max_trades_per_stock")}
+                />
                 <Field
                   label="No new entries after"
                   value={form.entry_cutoff_time || "15:00"}

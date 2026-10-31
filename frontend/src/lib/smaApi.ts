@@ -252,6 +252,8 @@ export type SmaConfig = {
   gap_entry_window_min?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
+  /** Entries one stock may take per day on this bot (0 = no cap); also a per-stock override. */
+  max_trades_per_stock?: number;
   square_off_time: string;
   /** HH:MM. No new entries from this time. */
   entry_cutoff_time?: string;
@@ -582,6 +584,8 @@ export type FastBotSettings = {
   min_profit_pct?: number;
   /** Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day. */
   bot5_trades?: number;
+  /** Bot 5's own ticked entry checks (VWAP, RSI, ADX, …) are read before the hand-off; a refusal leaves the trade. */
+  entry_checks?: boolean;
   on_bot5?: Record<string, { from_bot: number; trades: number }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";

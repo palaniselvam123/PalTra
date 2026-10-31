@@ -194,7 +194,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
-  Research never hands off.
+  Research never hands off. **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
+  `fast_bot.entry_refusal` reads Bot 5's own settings for the stock (`_target_cfg` → `_cfg_for`) on the source bot's
+  enriched frame exactly as a cross would (the ADX gate, then `strategy_engine._entry_block`: VWAP, volume, density,
+  RSI, EMA, Supertrend, level, opening range, gap, candle direction; never the cross, patterns, pullback or candle waits);
+  a refusal leaves the trade on its bot ("not moved — Bot 5's entry check says no: …", listed in `recent`). No candles
+  = nothing to refuse on. Replays read the same with the run's snapshot of Bot 5's settings (`ReplayEngine._fast_move`;
+  a run saved before the setting plays with it off). Off = Bot 5 enters whatever the checks say (the old behaviour).
+- **Per-stock daily trade cap** (`max_trades_per_stock`, 0 = off by default; per bot and per stock, PAPER and LIVE,
+  replays too; Settings → 6. Size, daily limits and times, next to "Max trades / day"): `StrategyEngine._stock_trades`
+  counts today's entries per stock next to `trades_today` (incremented in `_open`, restored per stock by
+  `restore_trades_today` from today's rows, cleared with the day roll / Reset / a paper halt release, uncounted with
+  `_uncount_trade`). `_stock_cap_hit(cfg)` refuses the next entry on that stock in `_apply_locked` (a reverse closes flat:
+  "closed on … — X has had its N trade(s) today (per-stock cap)"; flat: "… ignored — …") and cancels a waiting pullback;
+  every entry path (cross, gap mode, turn, news, hand-offs, force) goes through it. The day cap still halts the bot; this
+  one only stops that stock.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills

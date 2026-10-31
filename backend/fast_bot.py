@@ -82,6 +82,10 @@ class Settings:
     min_profit_pct: float = 0.3
     # Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day.
     bot5_trades: int = 1
+    # Bot 5's own entry checks (the ticked filters in its strategy settings: VWAP, volume, density, RSI, ADX,
+    # EMA, Supertrend, level, opening range, gap, candle direction) are read on the stock's candles before the
+    # source trade is cut; a refusal leaves the trade where it is. Off = Bot 5 enters whatever they say.
+    entry_checks: bool = True
 
 
 def settings_path() -> Path:
@@ -121,6 +125,7 @@ def clean(raw: dict) -> Settings:
     s.max_day = num("max_day", int, 1, 100)
     s.min_profit_pct = num("min_profit_pct", float, 0.0, MAX_PCT)
     s.bot5_trades = num("bot5_trades", int, 0, MAX_BOT5_TRADES)
+    s.entry_checks = bool(raw.get("entry_checks", s.entry_checks))
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -220,6 +225,44 @@ def fast(hist, direction: str, now: float, s: Settings) -> str | None:
     if s.rule in ("SPEED", "EITHER"):
         return _speed_hit(hist, direction, now, s)
     return None
+
+
+def entry_refusal(frame, cfg, direction: str, price: float | None = None) -> str | None:
+    """What Bot 5's ticked entry checks say about entering `direction` on this stock now, else None.
+
+    `frame` is the stock's enriched candle frame (the last row forming, as apply_signal reads it) and
+    `cfg` Bot 5's settings for the stock. The ADX gate and the checked entry filters are read exactly as
+    a cross would read them; nothing else (no cross, pattern, pullback or candle wait).
+    """
+    import strategy_engine
+
+    if frame is None or getattr(frame, "empty", True) or len(frame) < 2:
+        return None  # no candles to read: nothing to refuse on
+    curr = frame.iloc[-2]
+    if bool(getattr(cfg, "use_adx_filter", False)):
+        adx = strategy_engine._finite(curr.get("adx_14"))  # noqa: SLF001
+        threshold = float(getattr(cfg, "adx_threshold", 0) or 0)
+        if adx is None or adx < threshold:
+            return f"ADX {adx:.1f} below {threshold:g}" if adx is not None else f"ADX not formed (needs {threshold:g})"
+    return strategy_engine._entry_block(frame, direction, cfg, price=price)  # noqa: SLF001
+
+
+def _target_cfg(target, symbol: str):
+    """Bot 5's settings for this stock (its shared row with the stock's own overrides on top)."""
+    import copy
+
+    cfg = target.load_config()
+    try:
+        from strategy_engine import _cfg_for
+
+        return _cfg_for(cfg, symbol)
+    except Exception:  # noqa: BLE001 - a plain settings object (tests): read it as it is
+        own = copy.copy(cfg)
+        try:
+            own.symbol = symbol
+        except Exception:  # noqa: BLE001
+            pass
+        return own
 
 
 def ready(target, symbol: str, source_live: bool) -> str | None:
@@ -357,6 +400,20 @@ class FastBot:
             reason = f"{s.max_day} hand-offs today already"
         if reason is None and source_live and pos.stop_active and not pos.sl_order_id:
             reason = "the LIVE position was restored without its stop id; left to that stop"
+        if reason is None and s.entry_checks:
+            # Bot 5's own entry checks on the stock's candles, before the source trade is touched.
+            try:
+                refused = entry_refusal(
+                    getattr(src, "_frames", {}).get(symbol),
+                    _target_cfg(target, symbol),
+                    direction,
+                    getattr(src, "_ltps", {}).get(symbol),
+                )
+            except Exception as exc:  # noqa: BLE001 - a broken check must not cut the trade
+                log.exception("fast-mover entry check failed for %s", symbol)
+                refused = f"entry check failed ({exc})"
+            if refused:
+                reason = f"Bot {TARGET_BOT}'s entry check says no: {refused}"
         if reason is not None:
             self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=f"not moved: {reason}")
             return f"{head}: not moved — {reason}"
