@@ -49,6 +49,7 @@ import groww_pressure
 import open_pnl_log
 import scan_accuracy
 import scan_history
+import scan_sync
 import scan_worker
 import backtest_server
 import server_role
@@ -2776,6 +2777,22 @@ def _check_job():
         return await scan_worker.run(_scan_broker(), scan_worker.check_job, symbol, start, end, *args)
 
     return job
+
+
+@app.post("/api/scan-history/pull")
+async def scan_history_pull(days: int = Query(14, ge=1, le=scan_sync.MAX_DAYS)):
+    """Desk only: copy the backtest server's saved scans of the last `days` days that this desk lacks
+    (scan_sync.py: BACKTEST_URL + BACKTEST_LINK_TOKEN). Read-only on both sides."""
+    if not server_role.is_desk():
+        raise HTTPException(409, "Only the main desk pulls scans from the backtest server.")
+    if not server_role.backtest_url():
+        raise HTTPException(409, "BACKTEST_URL is not set on this desk, so it cannot reach the backtest server.")
+    if not server_role.backtest_link_token():
+        raise HTTPException(409, "BACKTEST_LINK_TOKEN is not set on this desk.")
+    try:
+        return await asyncio.to_thread(scan_sync.pull, scan_sync.http_fetch, days)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/api/scan-history/{run_id}/check")

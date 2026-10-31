@@ -1758,6 +1758,9 @@ export const smaApi = {
     return request<ScanHistory>(`/api/scan-history${qs ? `?${qs}` : ""}`, undefined, undefined, false);
   },
   scanHistoryRun: (id: number) => request<ScanRunDetail>(`/api/scan-history/${id}`, undefined, 20000, false),
+  /** Desk only: copy the backtest server's saved scans this desk lacks (scan_sync.py). */
+  scanHistoryPull: (days = 14) =>
+    request<{ copied: number; checks: number; already: number; errors: string[] }>(`/api/scan-history/pull?days=${days}`, { method: "POST" }, 120000, false),
   /** Check how a saved scan turned out (after its day closed). Returns at once; poll scanHistoryRun. */
   scanHistoryCheck: (id: number) =>
     request<ScanCheckStatus>(`/api/scan-history/${id}/check`, { method: "POST" }, undefined, false),

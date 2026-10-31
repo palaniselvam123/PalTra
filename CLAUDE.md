@@ -970,7 +970,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   and each accuracy check made here is also sent to desk `POST /api/link/backtest/scan-history` (`push_scan` / `push_check`
   from `main._save_scan` / `_save_check` and `routes_scalp._save_active`, in a worker thread, failures only logged), kept
   once in the desk's `scan_history.db` (`save_copy`; a check is matched by kind and time, `find`), so the desk's Scalp
-  History tab and Most active History show them while this server is stopped.
+  History tab and Most active History show them while this server is stopped. **Pull** (`backend/scan_sync.py`): scans
+  made before the link was set, or while the desk was down, never arrived, so the desk can ask for them: the backtest
+  server answers `GET /api/link/backtest/scan-export?days=` (its saved scans' ids, kind, time; `scan_sync.export_runs`)
+  and `GET /api/link/backtest/scan-export/{id}` (one scan with rows and check), both behind `BACKTEST_LINK_TOKEN` and
+  only on the backtest role (`routes_link._backtest_export_authorized`, lock-exempt via `token_path`); the desk's
+  `POST /api/scan-history/pull?days=` (desk only; needs `BACKTEST_URL` and the token on the desk) runs `scan_sync.pull`,
+  which copies each run the desk lacks (`find` by kind and time) with `save_copy` + `save_check`, meta `server:
+  backtest`. The Scalp History tab's "Pull from backtest server" button (shown on the desk when `/api/role` has
+  `backtest_url` and `backtest_link`) calls it for the last 30 days and reloads the list.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
   page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /
