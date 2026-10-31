@@ -36,6 +36,13 @@ export type SmaConfig = {
   candle_minutes?: CandleMinutes;
   /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */
   exit_candle_minutes?: number;
+  /** Watch smaller candles while in a trade (small_candles.py): CSV of sizes ("1,3,5"; "" = off) and its rules. */
+  small_exit_minutes?: string;
+  small_exit_cross?: boolean;
+  small_exit_slope?: boolean;
+  small_exit_counter?: number;
+  small_exit_loss_pct?: number;
+  small_exit_agree?: number;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";

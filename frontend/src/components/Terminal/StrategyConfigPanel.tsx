@@ -58,6 +58,12 @@ export const LABELS: Record<string, string> = {
   sma_slow: "slow MA",
   candle_minutes: "candle",
   exit_candle_minutes: "exit candle",
+  small_exit_minutes: "watch smaller candles",
+  small_exit_cross: "small candles: SMA cross",
+  small_exit_slope: "small candles: SMA 9 slope",
+  small_exit_counter: "small candles: candles against",
+  small_exit_loss_pct: "small candles: only when under water (%)",
+  small_exit_agree: "small candles: sizes that must agree",
   atr_period: "ATR period",
   atr_multiplier: "ATR ×",
   use_stop: "stop on/off",
@@ -367,6 +373,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     exit_candle_minutes: EXIT_CANDLE_MINUTES.includes(Number(form.exit_candle_minutes ?? 0))
       ? Number(form.exit_candle_minutes ?? 0)
       : 0,
+    small_exit_minutes: String(form.small_exit_minutes ?? ""),
+    small_exit_cross: form.small_exit_cross !== false,
+    small_exit_slope: form.small_exit_slope !== false,
+    small_exit_counter: Math.min(10, Math.max(0, Math.round(Number(form.small_exit_counter ?? 0)) || 0)),
+    small_exit_loss_pct: Math.min(50, Math.max(0, Number(form.small_exit_loss_pct ?? 0) || 0)),
+    small_exit_agree: Math.min(5, Math.max(1, Math.round(Number(form.small_exit_agree ?? 1)) || 1)),
     atr_period: Number(form.atr_period),
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
@@ -1678,6 +1690,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </div>
+          <SmallCandlesCard form={form} set={set} isOwn={isOwn} />
           {noExitOn(form) ? (
             <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
               No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
@@ -2784,6 +2797,9 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.bb_exit && f.bb_exit !== "OFF")
     add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
   if (f.slow_sma_exit) add({ group: "exit", key: "slow_sma_exit", text: `Close when a candle closes beyond SMA ${slow} against the trade`, off: { slow_sma_exit: false } });
+  const smallSizes = String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
+  if (smallSizes.length)
+    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}`, off: { small_exit_minutes: "" } });
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
@@ -3099,6 +3115,82 @@ function Hint({ children, label }: { children: ReactNode; label: string }) {
     <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
       <InfoTip label={label}>{children}</InfoTip>
       How it works
+    </div>
+  );
+}
+
+
+const SMALL_SIZES = [1, 2, 3, 5, 10] as const;
+
+/** Watch smaller candles while in a trade (small_candles.py): exit on a 1 / 3 / 5-minute turn before the bot's own candle can. */
+function SmallCandlesCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = Number(form.candle_minutes ?? 1) || 1;
+  const picked = String(form.small_exit_minutes ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => (SMALL_SIZES as readonly number[]).includes(n));
+  const watched = picked.filter((n) => n < own);
+  const on = watched.length > 0;
+  const toggle = (m: number, next: boolean) => {
+    const list = next ? Array.from(new Set([...picked, m])) : picked.filter((n) => n !== m);
+    set("small_exit_minutes", list.sort((a, b) => a - b).join(","));
+  };
+  const counter = Number(form.small_exit_counter ?? 0) || 0;
+  return (
+    <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
+      <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
+        {isOwn("small_exit_minutes") && <OwnTag />}
+        <b className="text-slate-100">Watch smaller candles while in a trade</b>
+        <span className={clsx("ml-auto font-mono text-xs", on ? "text-emerald-300" : "text-slate-500")}>{on ? `ON · ${watched.join(" / ")} min` : "off"}</span>
+        <InfoTip label="About watching smaller candles">
+          A bot on {own}-minute candles only learns a trade has turned when a {own}-minute candle closes. Tick smaller sizes
+          here and the bot also reads them, built from the stock&apos;s 1-minute candles, while it holds a trade: the SMA 9/21
+          cross against the trade, the SMA 9 slope turning against it (the turn level from the slope exit), or N candles in a
+          row against it. One size saying so closes the trade (SMALL_CANDLE_EXIT), or set how many sizes must agree. &quot;Only
+          when under water&quot; keeps a winning trade with the bot&apos;s own exits and lets the small candles cut only a losing
+          one. No reverse: the next entry waits for the bot&apos;s own signal. Entries are unchanged. Sizes at or above the
+          bot&apos;s candle are ignored.
+        </InfoTip>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Smaller candle sizes to watch">
+        <span className="text-slate-400">Read the trade on:</span>
+        {SMALL_SIZES.map((m) => (
+          <label
+            key={m}
+            className={clsx(
+              "flex items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset",
+              m >= own ? "opacity-40" : picked.includes(m) ? "bg-emerald-500/15 text-slate-100 ring-emerald-400/50" : "ring-white/15 hover:bg-white/5"
+            )}
+            title={m >= own ? `Not smaller than the bot's ${own}-minute candle` : undefined}
+          >
+            <input type="checkbox" checked={picked.includes(m)} disabled={m >= own} onChange={(e) => toggle(m, e.target.checked)} className="accent-emerald-400" aria-label={`Watch ${m}-minute candles`} />
+            {m} min
+          </label>
+        ))}
+      </div>
+      <div className={clsx("mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-3", !on && "opacity-50")}>
+        <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={form.small_exit_cross !== false} onChange={(e) => set("small_exit_cross", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_cross") && <OwnTag />}
+          SMA cross against the trade
+        </label>
+        <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={form.small_exit_slope !== false} onChange={(e) => set("small_exit_slope", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_slope") && <OwnTag />}
+          SMA 9 slope turns against it
+        </label>
+        <Field label="Candles in a row against (0 = off)" value={String(counter)} onChange={(v) => set("small_exit_counter", v)} own={isOwn("small_exit_counter")} />
+        <Field label="Only when under water by (%, 0 = always)" value={String(form.small_exit_loss_pct ?? 0)} onChange={(v) => set("small_exit_loss_pct", v)} own={isOwn("small_exit_loss_pct")} />
+        <Field label="Sizes that must agree (1 = any)" value={String(form.small_exit_agree ?? 1)} onChange={(v) => set("small_exit_agree", v)} own={isOwn("small_exit_agree")} />
+      </div>
     </div>
   );
 }

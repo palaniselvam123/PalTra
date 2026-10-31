@@ -203,6 +203,8 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   const ownCandle = num(cfg.candle_minutes, 1);
   const mixed = crossExitOn(cfg) && exitCandle > 0 && exitCandle !== ownCandle;
   if (mixed) out.push({ name: `SMA cross on the ${exitCandle}-minute candle`, when: candle, code: "EXIT_CANDLE_CROSS" });
+  const small = String(cfg.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < ownCandle);
+  if (small.length) out.push({ name: `Smaller candles turned (${small.join(" / ")}-min)`, when: candle, code: "SMALL_CANDLE_EXIT" });
   if (cfg.st_exit) out.push({ name: "Supertrend flip (candle closes beyond it)", when: candle, code: "SUPERTREND" });
   if (cfg.slope_exit) out.push({ name: "SMA 9 slope turn / bend", when: candle, code: "SMA9_TURN / SMA9_BEND" });
   if (cfg.vturn_exit) out.push({ name: "SMA 9 V-turn", when: candle, code: "SMA9_VTURN" });
