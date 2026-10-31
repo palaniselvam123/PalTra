@@ -63,6 +63,10 @@ STRATEGY_GUIDE = {
             "Groww-style trailing stop: tsl_sl_points rupees from the entry, moved tsl_trail_points rupees for "
             "every full step the price gains; optional tsl_target_points rupee target."
         ),
+        "VWAP": (
+            "Stop at the session VWAP minus vwap_stop_atr x ATR for a buy (plus for a sell), read on each closed "
+            "candle and only ever tightened; the ATR stop guards the trade until the level is on the safe side."
+        ),
         "use_stop_off": "No stop order; the opposite cross, square-off or Bollinger exit close the trade.",
     },
     "entry_filters": {
@@ -159,7 +163,8 @@ FIELD_HELP = {
     "small_exit_agree": "small candles: how many sizes must agree",
     "entry_mode": "SMA (cross) | PATTERN (candle patterns) | COLOUR (candle colour)",
     "use_stop": "stop-loss on / off",
-    "stop_type": "ATR | TSL (trailing) | SMA_GAP (paper only) | SUPERTREND",
+    "stop_type": "ATR | TSL (trailing) | SMA_GAP (paper only) | SUPERTREND | VWAP (VWAP ∓ vwap_stop_atr × ATR, tighter each candle)",
+    "vwap_stop_atr": "VWAP stop: buffer below / above VWAP in ATRs (0.5)",
     "atr_period": "ATR period", "atr_multiplier": "stop at this x ATR",
     "tsl_mode": "POINTS (rupees) | PERCENT (% of entry) for the trailing stop",
     "tsl_sl_points": "trailing stop distance in rupees", "tsl_trail_points": "trail step in rupees",

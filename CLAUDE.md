@@ -486,6 +486,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/vwap_stop.py` – VWAP + ATR buffer stop (`stop_type = "VWAP"`, with the stop on; `vwap_stop_atr` buffer 0.5, 0-5;
+  per bot and per stock, PAPER and LIVE, replays too; Settings → 5. Stop-loss and target, stop type "VWAP + ATR buffer", a
+  slider plus box): the stop sits at the session VWAP (`indicators._session_vwap` on the bot's closed candles) − k × ATR 14
+  under a long, or VWAP + k × ATR over a short (`level`); `stop_level` gives it only while it guards the real position
+  (beyond the fill), else the ATR stop until it does. `StrategyEngine._trail_vwap_stop`, once per newly closed candle
+  (`pos.vwap_stop_bar`), moves it to the new level, tighter only (`tighten`), through `_move_stop` (shared with the TSL /
+  Supertrend stops: LIVE `modify_sl` 2 s apart, a refused modify keeps the old live stop, a LIVE position restored without
+  its stop id stays at its saved stop; saved on `TradeLog.sl_trigger_price`). Hit on the price like any stop
+  (`VWAP_SL_HIT`; in LIVE the exchange stop fills it, no second exit). A restart resumes it from the saved stop. Frames
+  without `atr_14` (the stock research replayer) get a Wilder ATR worked out on the spot (`_atr`). `stop_points` carries
+  `vwap_stop_atr`. The stock research baseline keeps the ATR stop.
 - `backend/stop_plan.py` – staged stop plan (`stop_plan`, off by default, per bot and per stock, PAPER and LIVE, replays
   too; needs stop type ATR with the stop on, else `OpenPosition.plan_r` is None and nothing happens). R = |fill − initial
   ATR stop| (`atr_multiplier`, e.g. 2.5). `StrategyEngine._trail_stop_plan` (every tick, after the Supertrend stop, before

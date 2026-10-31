@@ -446,7 +446,9 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
+    # VWAP + ATR buffer stop: stop = VWAP − this × ATR for a buy (+ for a sell), tighter only each candle.
+    vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_target_points: float | None = Field(default=None, ge=0, le=100000)
@@ -649,6 +651,7 @@ def _config_dict(row: BotConfig) -> dict:
         "tsl_sl_atr": float(getattr(row, "tsl_sl_atr", 1.5) or 1.5),
         "tsl_trail_atr": float(getattr(row, "tsl_trail_atr", 0.5) or 0.5),
         "tsl_target_atr": 3.0 if getattr(row, "tsl_target_atr", None) is None else float(row.tsl_target_atr),
+        "vwap_stop_atr": 0.5 if getattr(row, "vwap_stop_atr", None) is None else float(row.vwap_stop_atr),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),

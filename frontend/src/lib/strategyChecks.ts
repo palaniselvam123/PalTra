@@ -189,6 +189,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (stopOn) {
     if (type === "TSL") out.push({ name: `Trailing stop (${pct ? "%" : "₹"})`, when: price, code: "TSL_HIT" });
     else if (type === "SUPERTREND") out.push({ name: "Supertrend stop (moves each candle)", when: price, code: "ST_SL_HIT" });
+    else if (type === "VWAP") out.push({ name: `VWAP ∓ ${num(cfg.vwap_stop_atr, 0.5)}× ATR stop (moves each candle)`, when: price, code: "VWAP_SL_HIT" });
     else if (type === "SMA_GAP") out.push({ name: "SMA-gap moving stop (PAPER; LIVE uses ATR)", when: price, code: "GAP_SL_HIT" });
     else out.push({ name: `ATR stop (${cfg.atr_multiplier ?? 1.5}× ATR)`, when: price, code: "ATR_SL_HIT" });
     const tslTarget = type === "TSL" && num(pct ? cfg.tsl_target_pct : cfg.tsl_target_points, 0) > 0;

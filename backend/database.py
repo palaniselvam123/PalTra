@@ -235,6 +235,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "tsl_sl_atr": "FLOAT DEFAULT 1.5",
             "tsl_trail_atr": "FLOAT DEFAULT 0.5",
             "tsl_target_atr": "FLOAT DEFAULT 3.0",
+            "vwap_stop_atr": "FLOAT DEFAULT 0.5",
             "stock_settings": "TEXT DEFAULT '{}'",
             "trade_sources": "TEXT DEFAULT '{}'",
             "sma_medium": "INTEGER DEFAULT NULL",

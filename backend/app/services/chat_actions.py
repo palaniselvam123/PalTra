@@ -53,8 +53,9 @@ class StopProposal(BaseModel):
     bot: Literal[1, 2, 3, 4, 5] = 1
     symbol: str | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
+    vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     tsl_mode: Literal["POINTS", "PERCENT"] | None = None
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
@@ -192,8 +193,9 @@ TOOLS = [
                 "bot": _BOT,
                 "symbol": {"type": "string", "description": "One stock, or omit for all stocks."},
                 "use_stop": {"type": "boolean"},
-                "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL"]},
+                "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"]},
                 "atr_multiplier": {"type": "number"},
+                "vwap_stop_atr": {"type": "number"},
                 "tsl_mode": {"type": "string", "enum": ["POINTS", "PERCENT"]},
                 "tsl_sl_points": {"type": "number"},
                 "tsl_trail_points": {"type": "number"},

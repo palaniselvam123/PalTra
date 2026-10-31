@@ -109,6 +109,7 @@ export function strategyLabel(s: Settings): string {
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
   else if (s.stop_type === "TSL") parts.push(tslText(s));
   else if (s.stop_type === "SUPERTREND") parts.push(`Supertrend stop (${s.st_period ?? 10}, ×${s.st_mult ?? 3})`);
+  else if (s.stop_type === "VWAP") parts.push(`VWAP ∓ ${s.vwap_stop_atr ?? 0.5}× ATR stop`);
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
   if (gapModeText(s)) parts.push(`Gap mode ${gapModeText(s)}`);
@@ -149,6 +150,7 @@ export function stopShort(s: Settings): string {
     return `TSL ₹${s.tsl_sl_points ?? 20} / ₹${s.tsl_trail_points ?? 10}${target}`;
   }
   if (s.stop_type === "SUPERTREND") return `Supertrend ${s.st_period ?? 10}/×${s.st_mult ?? 3}`;
+  if (s.stop_type === "VWAP") return `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} ATR`;
   return `${s.atr_multiplier ?? 1.5}× ATR`;
 }
 
@@ -243,6 +245,8 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
             ? `Trailing: ${tslText(s)}`
           : s.stop_type === "SUPERTREND"
             ? `Supertrend line (${s.st_period ?? 10} candles, ×${s.st_mult ?? 3}), moved each candle`
+          : s.stop_type === "VWAP"
+            ? `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} × ATR, moved each candle (tighter only)`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   [
