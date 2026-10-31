@@ -151,9 +151,9 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, NEWS_LISTS, NEWS_LISTS_ADD
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
-        STOCK_PREFIX
+        (STOCK_PREFIX, BACKTEST_EXPORT + "/")
     )
 
 
@@ -164,6 +164,7 @@ def token_path(path: str) -> bool:
 BACKTEST_SETTINGS = "/api/link/backtest/settings"
 BACKTEST_GROWW = "/api/link/backtest/groww"
 BACKTEST_SCANS = "/api/link/backtest/scan-history"
+BACKTEST_EXPORT = "/api/link/backtest/scan-export"
 
 
 def _backtest_authorized(request: Request) -> None:
@@ -220,6 +221,43 @@ async def backtest_scan_history(request: Request):
     meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
     run_id = await asyncio.to_thread(scan_history.save_copy, kind, snapshot, meta)
     return {"saved": run_id}
+
+
+def _backtest_export_authorized(request: Request) -> None:
+    """The backtest server's side of the link: the same secret, answered only there."""
+    expected = server_role.backtest_link_token()
+    if not server_role.is_backtest() or not expected:
+        raise HTTPException(404, "Not found")
+    header = request.headers.get("authorization", "")
+    given = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    if not given or not hmac.compare_digest(given.encode(), expected.encode()):
+        raise HTTPException(401, "Bad link token")
+
+
+@router.get(BACKTEST_EXPORT)
+async def backtest_scan_export(request: Request, days: int = 14):
+    """Backtest server: its saved scans of the last `days` days (ids, kind, time), for the desk to pull
+    (scan_sync.py). Read-only."""
+    _backtest_export_authorized(request)
+    import asyncio
+
+    import scan_sync
+
+    return {"runs": await asyncio.to_thread(scan_sync.export_runs, days)}
+
+
+@router.get(BACKTEST_EXPORT + "/{run_id}")
+async def backtest_scan_export_run(request: Request, run_id: int):
+    """Backtest server: one saved scan with its rows and accuracy check, for the desk's copy. Read-only."""
+    _backtest_export_authorized(request)
+    import asyncio
+
+    import scan_history
+
+    run = await asyncio.to_thread(scan_history.get, run_id)
+    if run is None:
+        raise HTTPException(404, "No such saved scan.")
+    return run
 
 
 @router.get(BACKTEST_GROWW)
