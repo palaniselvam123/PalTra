@@ -15,8 +15,11 @@ type Props = {
   /** The chart stock, which Force order acts on. */
   symbol: string;
   symbolArmed: boolean;
+  /** Every armed stock on this desk: Force order can tick several at once. */
+  armedSymbols?: string[];
   onToggleBot: () => void;
-  onForce: () => void;
+  /** Force an order on each of these stocks, one after the other. */
+  onForce: (symbols: string[]) => void;
   onPanic: () => void;
   /** Panic on every SMA bot at once. Left out on the research desk. */
   onPanicAll?: () => void;
@@ -38,6 +41,7 @@ export function ControlBar({
   busy,
   symbol,
   symbolArmed,
+  armedSymbols = [],
   onToggleBot,
   onForce,
   onPanic,
@@ -48,8 +52,16 @@ export function ControlBar({
   const pinned = part !== "rest";
   const rest = part !== "pinned";
   const [ask, setAsk] = useState<"force" | "panic" | "panic-all" | null>(null);
+  // The stocks ticked in the Force order dialog (the chart stock to start with).
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const open = (state?.books ?? []).filter((b) => b.direction === "LONG" || b.direction === "SHORT");
-  const forceBlocked = !symbol || !symbolArmed;
+  const forceChoices = Array.from(new Set([...(symbol && symbolArmed ? [symbol] : []), ...armedSymbols.map((s) => s.toUpperCase())]));
+  const forceBlocked = forceChoices.length === 0;
+  const forceList = forceChoices.filter((s) => picked.has(s));
+  const openForce = () => {
+    setPicked(new Set(symbol && symbolArmed ? [symbol] : forceChoices.slice(0, 1)));
+    setAsk("force");
+  };
   const sideNow =
     state && state.symbol?.toUpperCase() === symbol && state.sma9 != null && state.sma21 != null && state.sma9 !== state.sma21
       ? state.sma9 > state.sma21
@@ -80,11 +92,12 @@ export function ControlBar({
           disabled={busy || !state}
           onClick={onToggleBot}
           className={clsx(
-            "flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:px-4",
+            "flex items-center justify-center gap-1.5 rounded-lg font-semibold disabled:cursor-not-allowed disabled:opacity-50",
+            part === "pinned" ? "min-h-9 px-2.5 text-xs" : "min-h-11 px-3 text-sm sm:px-4",
             running ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-emerald-500 text-[#04140d] hover:bg-emerald-400"
           )}
         >
-          {running ? <Pause size={16} aria-hidden /> : <Play size={16} aria-hidden />}
+          {running ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
           {running ? "Pause bot" : "Start bot"}
         </button>
         ) : null}
@@ -93,10 +106,10 @@ export function ControlBar({
         <button
           type="button"
           disabled={busy || forceBlocked}
-          onClick={() => setAsk("force")}
+          onClick={openForce}
           title={
             forceBlocked
-              ? `${symbol || "The chart stock"} is not armed. Switch it on in the stock list first.`
+              ? "No stock is armed. Switch one on in the stock list first."
               : busy
                 ? "Wait for the last action to finish."
                 : undefined
@@ -116,11 +129,12 @@ export function ControlBar({
           disabled={busy}
           onClick={() => setAsk("panic")}
           className={clsx(
-            "flex min-h-11 items-center justify-center gap-2 rounded-lg bg-rose-600 px-3 text-sm font-bold tracking-wide text-white shadow-[0_0_20px_rgba(225,29,72,0.35)] hover:bg-rose-500 sm:ml-auto sm:px-4",
+            "flex items-center justify-center gap-1.5 rounded-lg bg-rose-600 font-bold tracking-wide text-white shadow-[0_0_20px_rgba(225,29,72,0.35)] hover:bg-rose-500 sm:ml-auto",
+            part === "pinned" ? "min-h-9 px-2.5 text-xs" : "min-h-11 px-3 text-sm sm:px-4",
             part === "all" && "col-span-2"
           )}
         >
-          <Siren size={16} aria-hidden />
+          <Siren size={14} aria-hidden />
           {part === "pinned" ? (
             <>
               <span className="sm:hidden">Panic</span>
@@ -137,7 +151,8 @@ export function ControlBar({
             onClick={() => setAsk("panic-all")}
             title="Square off and halt every bot (all four), not only this one"
             className={clsx(
-              "flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-300 ring-1 ring-inset ring-rose-500/60 hover:bg-rose-500/15 sm:px-3",
+              "flex items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-300 ring-1 ring-inset ring-rose-500/60 hover:bg-rose-500/15",
+              part === "pinned" ? "min-h-9" : "min-h-11 sm:px-3",
               part === "all" && "col-span-2 sm:col-span-1"
             )}
           >
@@ -158,27 +173,68 @@ export function ControlBar({
 
       <ConfirmDialog
         open={ask === "force"}
-        title={`Force a ${money} order on ${symbol}?`}
-        confirmLabel={`Force ${symbol}`}
+        title={forceList.length > 1 ? `Force ${money} orders on ${forceList.length} stocks?` : `Force a ${money} order on ${forceList[0] ?? symbol}?`}
+        confirmLabel={forceList.length > 1 ? `Force ${forceList.length} stocks` : `Force ${forceList[0] ?? symbol}`}
         requireTyping={live}
         danger={live}
         busy={busy}
+        confirmDisabled={forceList.length === 0}
         onCancel={() => setAsk(null)}
         onConfirm={() => {
           setAsk(null);
-          onForce();
+          onForce(forceList);
         }}
       >
-        <p>
-          Stock affected: <span className="font-semibold text-amber-300">{symbol}</span>
-          {sideNow ? (
-            <>
-              {" "}
-              — SMA 9 is {sideNow === "BUY" ? "above" : "below"} SMA 21 now, so this would be a{" "}
-              <span className="font-semibold">{sideNow}</span>.
-            </>
-          ) : null}
-        </p>
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-400">
+            <span>Tick the stocks to order (armed stocks only). Each one goes from its own SMA side, one after the other.</span>
+            {forceChoices.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setPicked((prev) => (prev.size === forceChoices.length ? new Set() : new Set(forceChoices)))}
+                className="shrink-0 text-sky-300 hover:underline"
+              >
+                {picked.size === forceChoices.length ? "Untick all" : "Tick all"}
+              </button>
+            ) : null}
+          </div>
+          <ul className="max-h-48 divide-y divide-white/10 overflow-y-auto rounded-md bg-black/30 ring-1 ring-inset ring-white/10">
+            {forceChoices.map((s) => {
+              const held = open.find((b) => b.symbol.toUpperCase() === s);
+              return (
+                <li key={s}>
+                  <label className="flex min-h-9 cursor-pointer items-center gap-2 px-3 py-1 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={picked.has(s)}
+                      onChange={(e) =>
+                        setPicked((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(s);
+                          else next.delete(s);
+                          return next;
+                        })
+                      }
+                      className="accent-amber-400"
+                      aria-label={`Force ${s}`}
+                    />
+                    <span className="font-semibold text-amber-300">{s}</span>
+                    {s === symbol && sideNow ? (
+                      <span className="text-xs text-slate-400">
+                        SMA 9 {sideNow === "BUY" ? "above" : "below"} SMA 21 → <span className="font-semibold text-slate-200">{sideNow}</span>
+                      </span>
+                    ) : null}
+                    {held ? (
+                      <span className="ml-auto flex items-center gap-1 text-xs text-slate-400">
+                        held <SideBadge side={held.direction} /> {held.qty}
+                      </span>
+                    ) : null}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
         <p>
           It does not wait for a cross and skips the VWAP, volume, density, RSI and ADX filters. Market hours,
           the entry cut-off, the Trade list, the trade cap and the loss limit still apply. The bot will start.

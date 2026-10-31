@@ -94,6 +94,10 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
   const nearCap = used != null && cap != null && cap > 0 && used / cap >= 0.9;
   // Before charges (the screens' basis); charges are on the P&L row.
   const net = state ? state.kpis?.actual_gross ?? state.realized_net_pnl ?? 0 : null;
+  // Open P&L and size of every held stock (before charges), so it is in reach from every tab.
+  const held = (state?.books ?? []).filter((b) => b.direction === "LONG" || b.direction === "SHORT");
+  const openPnl = state ? state.open_gross_total ?? state.open_net_total ?? held.reduce((sum, b) => sum + (b.open_gross ?? b.open_net ?? 0), 0) : null;
+  const heldValue = held.reduce((sum, b) => sum + (b.ltp ?? b.entry_price ?? 0) * b.qty, 0);
 
   return (
     <div
@@ -143,6 +147,19 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
           <span className={clsx("font-mono font-semibold", pnlTone(net))} title="Closed trades today, before charges">
             {net > 0 ? "+" : ""}
             {inr(net)}
+          </span>
+        )}
+      </Cell>
+      <Cell label="Open" title={held.length ? `${held.length} held, ${inr(heldValue)} in the market: open P&L before charges` : "Nothing held"}>
+        {openPnl == null ? (
+          <Skeleton className="h-4 w-16" />
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <span className={clsx("font-mono font-semibold", held.length ? pnlTone(openPnl) : "text-slate-400")}>
+              {openPnl > 0 ? "+" : ""}
+              {inr(openPnl)}
+            </span>
+            <span className="text-[11px] text-slate-400">{held.length ? `${held.length} held · ${inr(heldValue)}` : "flat"}</span>
           </span>
         )}
       </Cell>

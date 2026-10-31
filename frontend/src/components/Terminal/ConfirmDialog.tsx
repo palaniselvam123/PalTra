@@ -15,6 +15,8 @@ type Props = {
   requireTyping: boolean;
   danger?: boolean;
   busy?: boolean;
+  /** Nothing to confirm yet (e.g. no stock ticked): the button stays off. */
+  confirmDisabled?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -27,6 +29,7 @@ export function ConfirmDialog({
   requireTyping,
   danger = true,
   busy = false,
+  confirmDisabled = false,
   onCancel,
   onConfirm,
 }: Props) {
@@ -108,7 +111,7 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            disabled={!ready || busy}
+            disabled={!ready || busy || confirmDisabled}
             onClick={onConfirm}
             className={clsx(
               "min-h-11 rounded-md px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40",
