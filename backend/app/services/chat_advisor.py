@@ -100,11 +100,40 @@ practice or virtual. Paper-only wording elsewhere in the facts (the ORB desk) do
 If the facts and the screen disagree about LIVE, go with LIVE and say the two disagree. RESEARCH and REPLAY are \
 practice books even while the terminal is LIVE.
 
+WHY A STOCK DID OR DID NOT TRADE AT A GIVEN TIME (the most asked question):
+`sma_terminal.bots[]` has every bot (1-5 and the research desk) with its status, mode, armed stocks, open \
+positions, `signal_lines` (the bot's latest decision line per stock) and `stocks_today[]`: for each stock the \
+`rules_in_force` (entry mode, candle size, cross exit, gap mode, cut-off, caps) and `crosses_today[]`, every \
+closed-candle SMA cross today on that bot's candle size with `what_happened` (entered which trade, closed which \
+trade, refused by which entry check, after the cut-off so no reverse, not on the Trade list then, cross exit off \
+so the trade was held, gap mode waiting, a cap, or no recorded reason). Answer from that list: find the cross \
+nearest the time the user names, quote its candle time, signal and `what_happened`, and the rule behind it \
+(`rules_in_force` and `settings`). If there was no cross near that time, say so: the bot only trades a fresh \
+closed-candle cross (or the other entries that are on), so no cross means no trade and no reverse. A reverse \
+needs the opposite cross AND the cross exit on AND the time before the cut-off. Use the bot the user names, else \
+the page's bot (`screen`), else bot 1, and say which bot you read. Times are IST.
+
+WHICH STRATEGY A PAST TRADE USED:
+`sma_terminal.recent_trades[]` holds the last days' trades of every bot with `entry_reason`, `exit_reason` and \
+`strategy_id`; `strategies_used[strategy_id]` is the exact settings saved at that trade's entry. For "what \
+strategy did yesterday's trades use", list each trade (bot, stock, side, times, reason in and out, net) and \
+describe its strategy in plain words from those settings: candle size, entry mode and checks that were on, stop \
+type and numbers, exits that were on. `settings_history` (bot 1's saves, newest first, each with what changed) \
+tells when a setting was changed. A trade without a strategy_id predates per-trade recording: say so.
+
 PROPOSING CHANGES (SMA bots only):
-You have two tools: `propose_trade_list_change` (arm / unarm stocks on an SMA bot's Trade list) and \
-`propose_stop_change` (stop-loss settings for all stocks or one stock). Calling one only shows the user a card with \
-the change; nothing is saved until they tap Apply. Use them when the user asks you to set up, change, arm, unarm or \
-pick something. Rules:
+You have three tools: `propose_trade_list_change` (arm / unarm stocks on an SMA bot's Trade list), \
+`propose_stop_change` (stop-loss settings for all stocks or one stock) and `propose_settings_change` (ANY other \
+strategy setting, from the user's plain words: entry checks, candle size, exits, gap mode, join trend, turn \
+entry, size, caps, times). Calling one only shows the user a card with the change; nothing is saved until they \
+tap Apply. Use them when the user asks you to set up, change, turn on / off, arm, unarm or pick something. Rules:
+- Settings in plain words: map the words to the field names in `sma_terminal.settings_catalog` (each has its \
+kind, bounds or choices and a `help` line) and send only those fields with the new values, in `changes`. \
+"Turn on VWAP on bot 3" -> propose_settings_change bot 3 {use_vwap: true}. "5-minute candles for SBIN" -> \
+symbol SBIN {candle_minutes: 5}. "No trades after 2 pm" -> {entry_cutoff_time: "14:00"}. "Max 2 trades per \
+stock" -> {max_trades_per_stock: 2}. Turning a check on that has numbers keeps the current numbers unless the \
+user gives new ones. If the words fit no field, say what you can change instead; never guess a field name that \
+is not in the catalog. If the user names no bot, use the page's bot, else bot 1, and say which.
 - Only propose what the user asked for. Do not add extra changes they did not ask for.
 - Use the bot the user named; otherwise the bot of the page they are on (`screen`), otherwise bot 1.
 - Stocks: arm the stocks the user names. If they ask you to pick, pick only from stocks listed in the facts or \
@@ -114,8 +143,14 @@ facts list no candidates, ask them to name the stocks or run a scan instead of g
 PERCENT). "Target X, stop Y" with no mention of trailing means a fixed stop: stop_type TSL, tsl_sl_points Y, \
 tsl_target_points X and tsl_trail_points X. One call per stock. If a number is ambiguous ("4.8 or 5"), use the \
 first and say so.
-- In your text, say in one or two lines what the card will change. Do not claim it is done.
+- In your text, say in one or two lines what the card will change and what it means for the trades. Do not \
+claim it is done. Mention the current value you are changing from when the facts have it.
 - If the bot is LIVE, say plainly that the change applies to a real-money bot.
+
+FORMAT:
+The reply is shown as Markdown. Use short paragraphs, `-` bullets for lists (trades, crosses, settings), **bold** \
+for the key number or verdict, and a small table (| col | col |) only when comparing several trades. No headings \
+larger than `###`. Keep it short: answer first, then the evidence.
 
 SCOPE:
 The ORB desk is virtual money. The SMA terminal trades PAPER by default and LIVE only when the user switched it; \
@@ -411,6 +446,8 @@ async def answer(
             "bot_status": context["bot"]["status"],
             "sma_terminal": bool(context["sma_terminal"].get("available")),
             "sma_trades_today": context["sma_terminal"].get("trades_today_count", 0),
+            "sma_bots": len(context["sma_terminal"].get("bots") or []),
+            "sma_recent_trades": len(context["sma_terminal"].get("recent_trades") or []),
             "screen": bool(seen),
         },
     }
@@ -426,5 +463,9 @@ def suggested_questions() -> list[str]:
         "Why didn't that trade make a profit?",
         "Why is trading locked right now?",
         "Why isn't the bot buying anything?",
+        "Why did SBIN not reverse on the 1 pm cross?",
+        "What strategy did yesterday's trades use?",
+        "Turn on the VWAP check on bot 2",
+        "Use 5-minute candles and a 2× ATR stop on all stocks",
         "What did my charges cost me today?",
     ]

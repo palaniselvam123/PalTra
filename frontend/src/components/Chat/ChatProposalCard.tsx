@@ -5,8 +5,9 @@ import clsx from "clsx";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import type { ChatProposal } from "@/lib/api";
 import { smaApi, type BotSummary, type SmaConfig } from "@/lib/smaApi";
+import { SETTING_LABELS } from "@/lib/settingLabels";
 
-const LABELS: Record<string, string> = {
+const STOP_LABELS: Record<string, string> = {
   use_stop: "Stop on",
   stop_type: "Stop type",
   atr_multiplier: "ATR multiple",
@@ -21,6 +22,8 @@ const LABELS: Record<string, string> = {
   gap_tp_mult: "Gap target multiple",
   gap_min_pct: "Gap floor (%)",
 };
+/** Stop fields keep their fuller names; every other setting uses the Settings page's own name. */
+const LABELS: Record<string, string> = { ...SETTING_LABELS, ...STOP_LABELS };
 
 function show(value: unknown): string {
   if (value === undefined || value === null || value === "") return "—";
@@ -44,7 +47,7 @@ export function ChatProposalCard({ proposal }: { proposal: ChatProposal }) {
       .bots()
       .then((rows) => live && setBot(rows.find((r) => r.bot === proposal.bot) ?? null))
       .catch((e: Error) => live && setLoadError(e.message));
-    if (proposal.kind === "stop") {
+    if (proposal.kind === "stop" || proposal.kind === "settings") {
       const read = proposal.symbol ? smaApi.stockConfigOn(proposal.bot, proposal.symbol) : smaApi.configOn(proposal.bot);
       read.then((cfg) => live && setCurrent(cfg)).catch((e: Error) => live && setLoadError(e.message));
     }
@@ -55,7 +58,8 @@ export function ChatProposalCard({ proposal }: { proposal: ChatProposal }) {
 
   const isLive = bot?.mode === "LIVE";
   const botName = bot?.name || `Bot ${proposal.bot}`;
-  const stopOff = proposal.kind === "stop" && proposal.changes.use_stop === false;
+  const stopOff = proposal.kind !== "trade_list" && proposal.changes.use_stop === false;
+  const changeCount = proposal.kind === "trade_list" ? proposal.arm.length + proposal.unarm.length : Object.keys(proposal.changes).length;
   const armedNow = new Set(bot?.armed ?? []);
 
   const apply = async () => {
@@ -101,8 +105,8 @@ export function ChatProposalCard({ proposal }: { proposal: ChatProposal }) {
     >
       <div className="flex items-center gap-2">
         <span className="font-semibold text-slate-200">
-          {proposal.kind === "trade_list" ? "Trade list" : "Stop-loss"} · {botName}
-          {proposal.kind === "stop" && ` · ${proposal.symbol ?? "all stocks"}`}
+          {proposal.kind === "trade_list" ? "Trade list" : proposal.kind === "stop" ? "Stop-loss" : `Settings (${changeCount})`} · {botName}
+          {proposal.kind !== "trade_list" && ` · ${proposal.symbol ?? "all stocks"}`}
         </span>
         <span
           className={clsx(

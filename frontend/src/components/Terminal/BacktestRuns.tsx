@@ -299,6 +299,46 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Square-off", (s) => String(s.square_off_time ?? "15:15")],
 ];
 
+/** The fast-mover hand-off's snapshot a run keeps (replay.py `fast_bot`): its settings and Bot 5's strategy fields. */
+type FastBotSnapshot = { settings?: Record<string, unknown>; bot5?: Record<string, unknown> };
+
+function fastBotOf(settings: Settings): FastBotSnapshot | null {
+  const raw = (settings as Record<string, unknown>).fast_bot;
+  return raw && typeof raw === "object" ? (raw as FastBotSnapshot) : null;
+}
+
+/**
+ * Bot 5's part of a run's settings, for the run detail and the PDF: how a stock is handed to Bot 5
+ * and the strategy Bot 5 then trades it with. Empty when the run played without the hand-off.
+ */
+export function bot5Rows(settings: Settings): [string, string][] {
+  const snap = fastBotOf(settings);
+  if (!snap) return [];
+  const fb = snap.settings ?? {};
+  const rule = String(fb.rule ?? "MOVE");
+  const move = `${fb.pct ?? 0.5}% within ${fb.minutes ?? 3} min`;
+  const speed = `${fb.speed ?? 0.15}%/min over ${fb.speed_minutes ?? 5} min`;
+  const rows: [string, string][] = [
+    ["Fast movers → Bot 5", fb.on === false ? "Off" : `On (from Bot${Array.isArray(fb.sources) && fb.sources.length > 1 ? "s" : ""} ${Array.isArray(fb.sources) ? fb.sources.join(", ") : "1-4"})`],
+    ["Bot 5 · fast move", rule === "EITHER" ? `${move} or ${speed}` : rule === "SPEED" ? speed : move],
+    ["Bot 5 · only in profit", Number(fb.min_profit_pct ?? 0) > 0 ? `≥ ${fb.min_profit_pct}% from entry` : "Any trade"],
+    ["Bot 5 · trades per stock", Number(fb.bot5_trades ?? 1) > 0 ? `${fb.bot5_trades ?? 1}, then back to its bot` : "All day"],
+    ["Bot 5 · entry checks first", fb.entry_checks === false ? "Off (enters whatever they say)" : "On"],
+    ["Bot 5 · hand-offs per day", String(fb.max_day ?? 10)],
+  ];
+  if (snap.bot5 && typeof snap.bot5 === "object") {
+    const b5 = snap.bot5 as Settings;
+    for (const [label, fmt] of SETTING_ROWS) {
+      try {
+        rows.push([`Bot 5 · ${label}`, fmt(b5)]);
+      } catch {
+        // A field the snapshot lacks: skip the row rather than fail the PDF.
+      }
+    }
+  }
+  return rows;
+}
+
 /** Replay runs side by side, and one run's day-wise P&L. */
 export function BacktestRuns() {
   const [runs, setRuns] = useState<ReplayRun[] | null>(null);
@@ -339,7 +379,7 @@ export function BacktestRuns() {
         run: full,
         trades: book.rows.filter((trade) => trade.run_id === run.id),
         strategy: strategyLabel(full.settings),
-        settings: SETTING_ROWS.map(([label, value]) => [label, value(full.settings)]),
+        settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
         reasons: REASON_SHORT,
       });
       setError(null);
@@ -938,7 +978,7 @@ function RunDetailBody({
       <div className="mt-3 px-2">
         <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">{settingsTitle}</div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
-          {(settingsRows ?? SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string])).map(
+          {(settingsRows ?? [...SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string]), ...bot5Rows(run.settings)]).map(
             ([label, value]) => (
               <div key={label} className="flex justify-between gap-3 border-b border-white/5 py-1">
                 <dt className="text-slate-400">{label}</dt>

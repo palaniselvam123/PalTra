@@ -220,7 +220,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   A run covers one day or a range up to 45 calendar days, about 30 trading days (`parse_replay_range`, `MAX_RANGE_DAYS`), one
   fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
   settings it used, and its trades carry `run_id` (day-wise P&L in
-  `get_run`, shown in the blotter's Backtests tab).
+  `get_run`, shown in the blotter's Backtests tab). The run detail and its PDF
+  (`BacktestRuns.bot5Rows`, `lib/backtestPdf.ts`) list, after the strategy
+  settings, the fast-mover hand-off settings and Bot 5's own strategy fields
+  from the run's `fast_bot` snapshot when the run played with it.
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only
@@ -1076,7 +1079,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   that desk's history, newest first), `POST /api/config/presets` (`name`, `desk`, `settings`), `DELETE
   /api/config/presets/{id}`. Settings → Strategy, "Saved strategies & history" (`components/Settings/StrategyPresets.tsx`,
   shared settings only): Save as…, each entry's fields that differ from the form now (old → new), Load (into the form;
-  the usual Save then applies it with every check), Delete. No order is placed.
+  the usual Save then applies it with every check), Delete. **Reset to defaults** (`POST /api/config/reset`, the
+  research and `/api/bots/{n}/config/reset` forms; `main.strategy_defaults` = every `ConfigUpdate` field minus
+  `COPY_SKIP` at its `BotConfig` column default, `GET /api/config/defaults`): sets them on the row like Copy settings
+  (same checks; an open position still blocks a quantity change; a LIVE bot needs `confirm_live`, 409 without;
+  `stock_settings: true` also clears every stock's own settings) and keeps a history entry. The Trade list, mode, name
+  and the all-bots rows stay. Settings Save bar "Reset to defaults" (asks first; LIVE asks again). No order is placed.
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,
@@ -1111,7 +1119,23 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `ChatProposalCard` (old → new values, PAPER/LIVE badge) and saves only on Apply,
   through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
   LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
-  start/stop or panic.
+  start/stop or panic. A third tool, `propose_settings_change` (`chat_actions.check_settings`), takes any
+  strategy setting from plain words ("turn on VWAP on bot 3", "5-minute candles for SBIN"): field names and
+  values are checked by the terminal's own `ConfigUpdate` when it runs in the process (bounds, choices,
+  unknown names refused), never the bookkeeping fields (`SETTINGS_NEVER`: Trade list, PAPER/LIVE, name,
+  auto-start, the all-bots / P&L-alert / news-entry rows); the card (`kind: "settings"`, labels from
+  `lib/settingLabels.ts`, shared with the Settings page) applies through `saveConfigOn` / `saveStockConfigOn`.
+  **What the assistant reads** (`app/services/sma_context.sma_facts`): besides bot 1's settings and today's
+  trades, `bots[]` for every bot 1-5 and the research desk (status, mode, armed stocks, open positions, the
+  per-stock `signal_lines`, settings differing from the defaults, and `stocks_today[]`: `cross_timeline` =
+  every closed-candle SMA cross today on the bot's own candle size from `engine._frames`, with
+  `what_happened`: entered / closed which trade, refused by which entry check (`filter_blocks`), after the
+  cut-off, not on the Trade list then (`arm_log.windows`), already holding, cross exit off, gap mode, per-stock
+  cap, or no recorded reason), `recent_trades[]` of the last 7 days (every bot) with `entry_reason` and a
+  `strategy_id` into `strategies_used` (the settings saved at the trade's entry, deduped), `settings_catalog`
+  (every changeable field: kind, bounds, choices, `FIELD_HELP`) and `settings_history` (bot 1's saves with
+  what changed). The reply is Markdown, rendered by `components/Chat/ChatMarkdown.tsx` (no HTML from the
+  model); the widget has a wide mode, copy, a "Read: …" facts line and follow-up chips.
 - Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards; `alert_notifier.CHANNEL_TYPES`):
   `trade` (fills, closes, refusals, hand-offs, warnings; `alert_notifier.send`), `critical` (bot down, app
   shutting down, no stop; `send_critical`), `news` (news alerts, `send_news`), `signal` (heads-ups that are

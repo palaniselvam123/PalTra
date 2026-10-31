@@ -9,6 +9,7 @@ import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown, Search } from "lucide-react";
+import { SETTING_LABELS } from "@/lib/settingLabels";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -51,130 +52,7 @@ function toCheckMinutes(value: unknown): number[] {
   return kept.length ? kept : [1];
 }
 
-export const LABELS: Record<string, string> = {
-  qty: "qty",
-  sma_fast: "fast MA",
-  sma_medium: "medium MA",
-  sma_slow: "slow MA",
-  candle_minutes: "candle",
-  exit_candle_minutes: "exit candle",
-  small_exit_minutes: "watch smaller candles",
-  small_exit_cross: "small candles: SMA cross",
-  small_exit_slope: "small candles: SMA 9 slope",
-  small_exit_counter: "small candles: candles against",
-  small_exit_loss_pct: "small candles: only when under water (%)",
-  small_exit_agree: "small candles: sizes that must agree",
-  atr_period: "ATR period",
-  atr_multiplier: "ATR ×",
-  use_stop: "stop on/off",
-  stop_type: "stop type",
-  use_adx_filter: "ADX",
-  adx_threshold: "ADX threshold",
-  use_vwap: "VWAP",
-  use_volume: "volume",
-  use_density: "density",
-  use_rsi: "RSI",
-  use_bollinger: "Bollinger",
-  bb_exit: "Bollinger exit",
-  use_gap_long: "SMA gap (buy)",
-  use_gap_short: "SMA gap (sell)",
-  use_gap_mode: "Gap mode",
-  use_candle_dir: "candle direction",
-  cross_exit: "cross exit",
-  late_entry_min: "late entry",
-  join_trend: "join morning trend",
-  join_after_min: "join after",
-  counter_exit_count: "counter-candle exit",
-  counter_rule: "counter-candle rule",
-  counter_need_fast: "counter-candle fast SMA",
-  counter_min_body: "counter-candle min body",
-  counter_reenter: "re-enter after counter candles",
-  counter_reenter_max: "counter re-entries per run",
-  max_trades_per_stock: "trades per stock per day",
-  counter_entry: "early reversal entry",
-  turn_alert: "SMA 9 turn alert",
-  turn_entry: "SMA 9 turn entry",
-  uturn_on: "rounded U turns",
-  turn_toward_cross: "turns only toward the 9/21 cross",
-  turn_exit_candle: "SMA 9 turns and exits close on a candle of the other colour",
-  turn_colour_exit: "turn trades close on the first candle of the other colour",
-  uturn_run: "U: run before (candles)",
-  uturn_min_pct: "U: slope at least",
-  use_ema: "EMA entry",
-  ema_exit: "EMA exit",
-  ema_fast: "fast EMA",
-  ema_slow: "slow EMA",
-  use_supertrend: "Supertrend entry",
-  use_level: "price level entry check",
-  level_line: "price level line",
-  st_exit: "Supertrend exit",
-  slope_exit: "SMA 9 slope exit",
-  slope_lookback: "slope over (candles)",
-  slope_minutes: "slope candle",
-  slope_bend_pct: "bend exit (% off the steepest)",
-  slope_turn: "turn exit",
-  slope_turn_pct: "turn at (%/candle)",
-  vturn_exit: "V-turn exit",
-  vturn_move_pct: "V-turn steep run",
-  vturn_turn_pct: "V-turn turn back",
-  vturn_within: "V-turn within",
-  vturn_handoff: "V-turn loss → Bot 2",
-  handoff_now: "Bot 2 orders at once",
-  pivot_target: "pivot target",
-  stop_plan: "staged stop plan",
-  decel_exit: "SMA 9 deceleration guard",
-  decel_lookback: "deceleration slope over (candles)",
-  decel_arm_atr: "deceleration arms at (ATR/candle)",
-  decel_drop_pct: "deceleration: slope down from peak (%)",
-  decel_min_atr: "deceleration: bend per candle (ATR)",
-  decel_candles: "deceleration: bending candles",
-  decel_confirm: "deceleration: close through SMA 9",
-  decel_pierce_atr: "deceleration: close through by (ATR)",
-  decel_peak_from: "deceleration: peak measured from",
-  plan_be_r: "breakeven at (R)",
-  plan_trail_r: "Supertrend trail from (R)",
-  st_period: "Supertrend ATR length",
-  st_mult: "Supertrend factor",
-  tall_pullback: "tall-candle pullback",
-  tall_atr_mult: "tall candle × ATR",
-  tall_expiry_candles: "pullback wait (candles)",
-  extreme_entry: "candle-extreme limit entry",
-  extreme_anchor: "limit at",
-  extreme_invalid_pct: "cancel beyond (%)",
-  extreme_expiry_candles: "limit wait (candles)",
-  extreme_cancel_on_cross: "cancel on an SMA cross against",
-  entry_candle_confirm: "entry candle must go the trade's way",
-  entry_candle_pct: "entry candle margin",
-  entry_candle_max: "entry candle wait",
-  day_extreme_guard: "don't buy at the day's high / short at the day's low",
-  day_extreme_pct: "day high/low distance",
-  day_extreme_pull_pct: "day high/low pullback",
-  day_extreme_candles: "day high/low wait",
-  slow_sma_exit: "slow SMA exit",
-  recovery_hold: "recovery hold",
-  recovery_tolerance_pct: "recovery target %",
-  recovery_emergency_mult: "recovery loss floor ×",
-  recovery_atr_mult: "recovery ATR floor ×",
-  recovery_max_candles: "recovery candles",
-  recovery_handoff: "hand off to Bot 2",
-  breakout_handoff: "breakout hand-off to Bot 3",
-  breakout_atr_mult: "breakout candle × ATR",
-  breakout_gap_pct: "breakout SMA gap %",
-  breakout_volume_mult: "breakout volume ×",
-  use_or_volume: "opening volume check",
-  use_or_vwap: "opening VWAP check",
-  use_or_spread: "opening SMA spread check",
-  use_or_break: "opening break check",
-  or_volume_ratio: "opening volume ratio",
-  or_spread_pct: "opening SMA spread %",
-  flip_orders: "flip",
-  review_on: "1-min review",
-  review_gap_pct: "review band",
-  review_cooldown_min: "review cooldown",
-  review_check_minutes: "review check candle",
-  review_check_mode: "review check mode",
-  review_default_answer: "review default",
-};
+export const LABELS = SETTING_LABELS;
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
   const keys = Object.keys(own ?? {});
@@ -552,6 +430,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       onChanged();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Reset to defaults: every shared strategy field back to its default. Trade list, mode and name stay. */
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetDefaults = async (withStocks: boolean) => {
+    setConfirmReset(false);
+    setBusy(true);
+    setMsg(null);
+    try {
+      const live = String(form?.trading_mode ?? "").toUpperCase() === "LIVE";
+      if (live && !window.confirm("This bot is LIVE. Reset its strategy settings to the defaults anyway?")) return;
+      const out = await smaApi.resetConfig(live, withStocks);
+      markDirty(false);
+      setForm(out.config);
+      setMsg(
+        out.changed.length
+          ? `Reset to defaults: ${out.changed.length} setting${out.changed.length === 1 ? "" : "s"} changed${withStocks ? ", every stock's own settings cleared" : ""}. Press Start bot.`
+          : "Already at the defaults."
+      );
+      setSavedCount((n) => n + 1);
+      onChanged();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Reset failed");
     } finally {
       setBusy(false);
     }
@@ -2689,6 +2593,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/30">
             Unsaved changes
           </span>
+        ) : null}
+        {!stockScope ? (
+          confirmReset ? (
+            <span className="inline-flex flex-wrap items-center gap-2 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-100 ring-1 ring-inset ring-rose-400/30">
+              Put every shared setting back to its default? The Trade list, PAPER / LIVE and the bot name stay.
+              <button type="button" disabled={busy} onClick={() => resetDefaults(false)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset
+              </button>
+              <button type="button" disabled={busy} onClick={() => resetDefaults(true)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset + clear stocks&apos; own settings
+              </button>
+              <button type="button" onClick={() => setConfirmReset(false)} className="rounded px-2 py-0.5 ring-1 ring-inset ring-white/20 hover:bg-white/5">
+                Keep
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmReset(true)}
+              title="Every shared strategy setting back to its default (what a new bot starts with)"
+              className="inline-flex h-11 items-center rounded-md px-4 text-sm text-slate-200 ring-1 ring-inset ring-white/15 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 sm:h-9"
+            >
+              Reset to defaults
+            </button>
+          )
         ) : null}
         {stockScope && Object.keys(own).length > 0 && (
           <button
