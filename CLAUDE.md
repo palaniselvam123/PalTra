@@ -461,7 +461,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   tape (`_tapes`, `exit_candle.closed_frame`), once per newly closed one, so a V shows sooner under a long bot candle; entries
   stay on the bot's candle, `slope_lookback` / `vturn_within` count these candles and the `turn_exit_candle` colour hold reads
   the last one. The research baseline keeps 0. Both count as an exit for `strategyChecks.noExitOn`. Settings →
-  Supertrend / exits. The research baseline keeps both off.
+  Supertrend / exits. The research baseline keeps both off. **Slope zones on the chart** (display only,
+  `frontend/src/lib/slopeZone.ts`, `ZoneBands` in `StrategyChart.tsx`): from the last closed candle's SMA 9 and the close
+  that drops out of its window, the chart works out the next candle's close at which each rule that is on fires (turn,
+  bend, V-turn once its steep run is in; the deceleration guard has no single price) and shades the zone beyond it
+  ("Exit zone · next close ≥ …", amber; while flat with the turn entry on, "Buy zone" / "Sell zone"); the same words go on
+  the hover "why" line for any in-trade candle. `chart_filters` carries `sma_fast`, `slope_rules`, `slope_turn`,
+  `decel_exit`, `turn_entry`, `turn_toward_cross` for it. Every level is a minimum ("at least"). The Settings slope editor
+  (`components/Settings/SlopeEditor.tsx`) shows each slope rule's on/off tick (turn, bend, V-turn, deceleration guard,
+  turn entry, U-turn), sliders for every number (lookback, bend, slope candle, the deceleration guard with its own
+  picture in ATR per candle) and the bend leg on the V picture.
 - `backend/decel_guard.py` – SMA 9 deceleration guard (`decel_exit`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): exit on the bend of the fast SMA before its slope turns. Slope in **ATR per candle** (`slopes`: (SMA9 −
   SMA9 `decel_lookback` (2) candles ago) ÷ (k × Wilder ATR 14), so one set of numbers fits any price and session) and its

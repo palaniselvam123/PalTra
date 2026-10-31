@@ -24,6 +24,7 @@ import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { StockNewsPanel } from "./StockNewsPanel";
 
@@ -430,8 +431,10 @@ function whyNoTrade(p: {
   markers: ChartPayload["markers"];
   filters?: ChartFilters;
   bar: number;
+  /** The bot's own candle size (the turn entry reads it). */
+  botBar: number;
 }): string {
-  const { rows, i, blocked, markers, filters, bar } = p;
+  const { rows, i, blocked, markers, filters, bar, botBar } = p;
   const c = rows[i];
   if (!c) return "";
   const t = c.time;
@@ -450,9 +453,13 @@ function whyNoTrade(p: {
   if (latestEntry) {
     const exit = markers.find((m) => m.kind === "EXIT" && m.trade_ref === latestEntry.trade_ref && m.time >= latestEntry.time);
     if (!exit || exit.time > t) {
+      // Where the slope exits would fire on the next candle, with this candle's numbers (the last closed one
+      // while this candle is still forming: a forming candle has no SMA yet).
+      const at = p.forming && i > 0 ? i - 1 : i;
+      const zone = zoneWords(slopeZones({ rows, i: at, filters, bar, botBar, held: { direction: latestEntry.direction, entryTime: latestEntry.time } }), px);
       return `In a ${latestEntry.direction === "LONG" ? "buy" : "short"} trade since ${istClock(latestEntry.time)}${
         latestEntry.trade_ref ? ` (${latestEntry.trade_ref})` : ""
-      }: no new entry on this stock while one is held.`;
+      }: no new entry on this stock while one is held.${zone ? ` Slope exit: ${zone}.` : ""}`;
     }
   }
   const refused = blocked.find((b) => within(b.time));
@@ -498,7 +505,10 @@ function whyNoTrade(p: {
   const base = `No signal: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
     rows[since].time
   )}), gap ${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%. The bot enters on a fresh cross${filters?.use_gap_mode ? ", then at the gap entry level" : ""}.`;
-  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null].filter(Boolean).join(" ");
+  const turnZone = filters?.turn_entry && !timing ? zoneWords(slopeZones({ rows, i: p.forming && i > 0 ? i - 1 : i, filters, bar, botBar, held: null }), px) : "";
+  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null, turnZone ? `Turn entry: ${turnZone}.` : null]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const NO_MARKERS: ChartPayload["markers"] = [];
@@ -562,6 +572,78 @@ class VolumeProfileBars implements ISeriesPrimitive<Time> {
             : "rgba(148, 163, 184, 0.16)";
         ctx.fillRect(right - width, top, width, height);
       }
+    });
+  }
+}
+
+/** Shaded zones where the next candle's close would fire an SMA 9 slope exit (amber) or a turn
+ * entry (green = buys, red = sells): a band from the level to the pane's edge, a dashed line at the
+ * level and a label. The nearest exit zone is filled; the others only get their line. */
+class ZoneBands implements ISeriesPrimitive<Time> {
+  private zones: Zone[] = [];
+  private lastClose: number | null = null;
+  private host: SeriesAttachedParameter<Time> | null = null;
+  private readonly views: ISeriesPrimitivePaneView[];
+
+  constructor() {
+    this.views = [{ zOrder: () => "bottom", renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>): void {
+    this.host = param;
+  }
+
+  detached(): void {
+    this.host = null;
+  }
+
+  paneViews(): readonly ISeriesPrimitivePaneView[] {
+    return this.views;
+  }
+
+  set(zones: Zone[], lastClose: number | null): void {
+    this.zones = zones;
+    this.lastClose = lastClose;
+    this.host?.requestUpdate();
+  }
+
+  private draw(target: CanvasRenderingTarget2D): void {
+    const host = this.host;
+    if (!host || this.zones.length === 0) return;
+    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      let filledExit = false;
+      this.zones.forEach((z) => {
+        const y = host.series.priceToCoordinate(z.level);
+        if (y == null) return;
+        const yb = Math.round(y * vr);
+        const rgb = z.rule === "entry" ? (z.direction === "LONG" ? "16, 185, 129" : "244, 63, 94") : "245, 158, 11";
+        const fill = z.rule === "entry" || !filledExit;
+        if (z.rule !== "entry") filledExit = true;
+        if (fill) {
+          ctx.fillStyle = `rgba(${rgb}, 0.09)`;
+          if (z.above) ctx.fillRect(0, 0, bitmapSize.width, Math.max(0, yb));
+          else ctx.fillRect(0, yb, bitmapSize.width, Math.max(0, bitmapSize.height - yb));
+        }
+        ctx.strokeStyle = `rgba(${rgb}, ${fill ? 0.9 : 0.45})`;
+        ctx.lineWidth = Math.max(1, Math.round(vr));
+        ctx.setLineDash([6 * hr, 4 * hr]);
+        ctx.beginPath();
+        ctx.moveTo(0, yb + 0.5);
+        ctx.lineTo(bitmapSize.width, yb + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const head = z.rule === "entry" ? (z.direction === "LONG" ? "Buy zone" : "Sell zone") : "Exit zone";
+        const inside = this.lastClose != null && (z.above ? this.lastClose >= z.level : this.lastClose <= z.level);
+        const text = `${head}${inside ? " (price already inside)" : ""} · next close ${z.above ? "≥" : "≤"} ${z.level.toFixed(2)} · ${z.text}`;
+        ctx.font = `${Math.round(11 * hr)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textBaseline = "alphabetic";
+        const ty = z.above ? yb - 5 * vr : yb + 14 * vr;
+        const w = ctx.measureText(text).width;
+        ctx.fillStyle = `rgba(${rgb}, ${fill ? 0.92 : 0.6})`;
+        ctx.fillRect(6 * hr, ty - 11 * vr, w + 8 * hr, 15 * vr);
+        ctx.fillStyle = "#111827";
+        ctx.fillText(text, 10 * hr, ty);
+      });
     });
   }
 }
@@ -818,6 +900,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const profileBarsRef = useRef<VolumeProfileBars | null>(null);
+  const zoneBandsRef = useRef<ZoneBands | null>(null);
   const tradeBoxesRef = useRef<TradeBoxes | null>(null);
   const theme = usePageTheme();
   useEffect(() => {
@@ -1256,6 +1339,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const boxes = new TradeBoxes();
     candles.attachPrimitive(boxes);
     tradeBoxesRef.current = boxes;
+    const bands = new ZoneBands();
+    candles.attachPrimitive(bands);
+    zoneBandsRef.current = bands;
     // Stretch the price scale so the open position's entry, stop and target
     // lines stay on screen instead of being cut off above or below the candles.
     candles.applyOptions({
@@ -1698,6 +1784,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const latest = latestSma(rows);
   const filters = view?.filters;
   const blocked = view?.blocked ?? [];
+  // The exit zone of the trade held now (or the turn entry's buy / sell zones while flat), read on the
+  // last closed candle: where the next close would fire the SMA 9 slope rules (slopeZone.ts). Not on a
+  // past day: the bands say what the next candle would do, and a finished day has none.
+  const zoneRead = useMemo(() => {
+    if (past || rows.length < 2) return { zones: [] as Zone[], note: null as string | null };
+    const markers = view?.markers ?? NO_MARKERS;
+    const open = markers.filter((m) => m.kind === "ENTRY" && m.open).sort((a, b) => b.time - a.time)[0] ?? null;
+    const pos = state?.position;
+    const held = open
+      ? { direction: open.direction, entryTime: open.time }
+      : pos && (pos.direction === "LONG" || pos.direction === "SHORT") && (state?.symbol ?? "").toUpperCase() === (chart?.symbol ?? "").toUpperCase()
+        ? { direction: pos.direction, entryTime: 0 }
+        : null;
+    return slopeZones({ rows, i: rows.length - 2, filters, bar, botBar: botCandle, held });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, filters, view?.markers, state?.position?.direction, state?.symbol, chart?.symbol, bar, botCandle, past]);
+  useEffect(() => {
+    zoneBandsRef.current?.set(zoneRead.zones, rows.length ? rows[rows.length - 1].close : null);
+  }, [zoneRead, rows]);
   const lastBlocked = blocked.length ? blocked[blocked.length - 1] : null;
   const hoverRow = hoverOhlc ? rows.find((c) => c.time === hoverOhlc.time) ?? null : null;
   const lastOf = (key: "vwap" | "rsi14") => {
@@ -1729,6 +1834,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           markers: view?.markers ?? NO_MARKERS,
           filters,
           bar,
+          botBar: botCandle,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
@@ -1943,6 +2049,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           {shown(look.bb, Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF") ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed" style={{ borderColor: look.bb.color }} />}>
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
+            </LegendItem>
+          ) : null}
+          {zoneRead.zones.length || zoneRead.note ? (
+            <LegendItem swatch={<span className="block h-2.5 w-4 rounded-sm bg-amber-400/40 ring-1 ring-inset ring-amber-400/70" />}>
+              <span
+                className="cursor-help"
+                title={`${zoneWords(zoneRead, px) || "No zone"}. Each level is where the NEXT candle's close would make the SMA 9 slope reach the bot's level (every setting is a minimum, "at least"), worked out from this candle's SMA 9 and the close that drops out of its window. The bot's own reading decides.`}
+              >
+                {zoneRead.zones.length
+                  ? zoneRead.zones[0].rule === "entry"
+                    ? "Turn entry zones"
+                    : `Exit zone · next close ${zoneRead.zones[0].above ? "≥" : "≤"} ${px(zoneRead.zones[0].level)}`
+                  : "Slope zone"}
+              </span>
             </LegendItem>
           ) : null}
           {showSlope || filters?.slope_exit ? (

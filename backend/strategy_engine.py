@@ -818,6 +818,14 @@ def chart_filters(cfg) -> dict:
         "vturn_turn_pct": slope_exit.vturn_turn_pct(cfg),
         "vturn_within": slope_exit.vturn_within(cfg),
         "slope_minutes": slope_exit.minutes(cfg),
+        # Which SMA 9 slope rules are on, and the fast SMA length, so the chart can shade where the next
+        # candle's close would fire an exit (or a turn entry) and say so on hover (display only).
+        "sma_fast": int(getattr(cfg, "sma_fast", 9) or 9),
+        "slope_rules": slope_exit.on(cfg),
+        "slope_turn": slope_exit.on(cfg) and slope_exit.turn_on(cfg),
+        "decel_exit": decel_guard.on(cfg),
+        "turn_entry": turn_entry.entry_on(cfg),
+        "turn_toward_cross": turn_entry.entry_on(cfg) and turn_entry.toward_on(cfg),
         # What the chart's "why no trade here" line needs: when entries stop, and whether a cross orders at once.
         "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
