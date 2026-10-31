@@ -37,6 +37,7 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_bot
+import strategy_presets
 import fast_move
 import level_check
 import news_entry
@@ -1050,7 +1051,48 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
         session = replays.get(getattr(eng, "bot_id", 0)) if eng is not research_engine else None
         if session is not None and session.engine is not None:
             session.engine.release_trade_cap(cap)
+    # "What was it before?": every Save keeps the strategy fields in the desk's history (strategy_presets.py).
+    try:
+        strategy_presets.remember(_preset_desk(eng), _strategy_fields(payload))
+    except Exception:  # noqa: BLE001 - bookkeeping only; a failed snapshot never fails the save
+        logging.getLogger("sma.presets").exception("strategy history not written")
     return payload
+
+
+def _preset_desk(eng: StrategyEngine) -> str:
+    return "research" if eng is research_engine else str(getattr(eng, "bot_id", 1) or 1)
+
+
+def _strategy_fields(settings: dict) -> dict:
+    return strategy_presets.strategy_only(settings, set(ConfigUpdate.model_fields), COPY_SKIP)
+
+
+class PresetBody(BaseModel):
+    name: str
+    desk: str = "1"
+    settings: dict
+
+
+@app.get("/api/config/presets")
+async def get_presets(desk: str = "1"):
+    """Saved strategies (every desk) and this desk's history of saves, newest first."""
+    return strategy_presets.listing(desk)
+
+
+@app.post("/api/config/presets")
+async def post_preset(body: PresetBody):
+    """Save the strategy fields sent as a named preset. Loading one is done in the form; Save then applies it."""
+    settings = _strategy_fields(body.settings)
+    if not settings:
+        raise HTTPException(400, "Nothing to save: send the strategy settings")
+    if not body.name.strip():
+        raise HTTPException(400, "Give the preset a name")
+    return strategy_presets.save_preset(body.name, body.desk, settings)
+
+
+@app.delete("/api/config/presets/{pid}")
+async def delete_preset(pid: int, desk: str = "1"):
+    return strategy_presets.delete_preset(pid, desk)
 
 
 @app.put("/api/config")

@@ -1551,6 +1551,17 @@ export type BacktestServerStatus = {
   up_sec: number;
 };
 
+/** A named copy of a desk's strategy settings, or one automatic snapshot of a Save (strategy_presets.py). */
+export type StrategyPreset = { id: number; name: string; desk: string; saved_at: string; settings: Partial<SmaConfig> };
+export type StrategySnapshot = { saved_at: string; settings: Partial<SmaConfig> };
+export type StrategyPresets = { desk: string; presets: StrategyPreset[]; history: StrategySnapshot[] };
+
+/** The presets routes live on the main desk only and take the desk as a query, so they are not desk-routed. */
+function presetDesk(): string {
+  const bot = deskBot();
+  return bot == null ? "research" : String(bot);
+}
+
 export const smaApi = {
   backtestStatus: () => request<BacktestServerStatus>("/api/backtest/status", undefined, 12000, false),
   backtestSync: () => request<BacktestServerStatus>("/api/backtest/sync", { method: "POST" }, 30000, false),
@@ -1586,6 +1597,11 @@ export const smaApi = {
       70000
     ),
   config: () => request<SmaConfig>("/api/config"),
+  strategyPresets: () => request<StrategyPresets>(`/api/config/presets?desk=${presetDesk()}`, undefined, 12000, false),
+  saveStrategyPreset: (name: string, settings: Partial<SmaConfig>) =>
+    request<StrategyPresets>("/api/config/presets", { method: "POST", body: JSON.stringify({ name, desk: presetDesk(), settings }) }, 12000, false),
+  deleteStrategyPreset: (id: number) =>
+    request<StrategyPresets>(`/api/config/presets/${id}?desk=${presetDesk()}`, { method: "DELETE" }, 12000, false),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
   stockConfig: (symbol: string) => request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`),
