@@ -135,16 +135,18 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
     }),
     [all]
   );
+  const ticks = useTicks();
   const filtered = useMemo(
     () =>
       all.filter((r) => {
-        if (!matchesText(query, r.symbol)) return false;
+        if (!matchesText(query, r.symbol) || !ticks.shows(r.symbol)) return false;
         if (show === "RUNNERS" && !(r.ready && r.runner)) return false;
         if (show === "READY" && !r.ready) return false;
         if (side !== "ALL" && r.side !== side) return false;
         return true;
       }),
-    [all, query, show, side]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [all, query, show, side, ticks.only, ticks.ticked]
   );
   const { sorted: rows, sort, onSort } = useSort<MorningScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
@@ -167,7 +169,6 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
     }
   });
   const paged = usePaged(rows, "scalp.morning.pageSize");
-  const ticks = useTicks();
   const sma = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA 9/21";
 
   return (

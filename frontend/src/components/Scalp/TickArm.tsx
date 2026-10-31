@@ -9,6 +9,8 @@ import { WatchNewsDialog } from "@/components/News/WatchNewsDialog";
 /** Ticked stocks in a scan table, for "Arm ticked" (several stocks on one bot at once). */
 export function useTicks() {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
+  // "Show ticked only": the table keeps just the ticked stocks (a hand-picked watch list of the scan).
+  const [only, setOnly] = useState(false);
   const toggle = (symbol: string, on: boolean) =>
     setTicked((prev) => {
       const next = new Set(prev);
@@ -16,7 +18,9 @@ export function useTicks() {
       else next.delete(symbol);
       return next;
     });
-  return { ticked, setTicked, toggle };
+  /** Whether a row passes the "ticked only" switch (off, or the stock is ticked). */
+  const shows = (symbol: string) => !only || ticked.size === 0 || ticked.has(symbol);
+  return { ticked, setTicked, toggle, only, setOnly, shows };
 }
 
 type Ticks = ReturnType<typeof useTicks>;
@@ -33,6 +37,12 @@ export function TickBar({ ticks, onArm }: { ticks: Ticks; onArm: (symbols: strin
         <button type="button" onClick={() => ticks.setTicked(new Set())} className="text-slate-400 hover:text-slate-200">
           Clear
         </button>
+      )}
+      {n > 0 && (
+        <label className="flex items-center gap-1 text-slate-300" title="Keep only the ticked stocks in the table (the other filters still apply)">
+          <input type="checkbox" checked={ticks.only} onChange={(e) => ticks.setOnly(e.target.checked)} className="accent-emerald-400" />
+          Show ticked only
+        </label>
       )}
       <button
         type="button"

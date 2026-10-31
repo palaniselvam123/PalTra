@@ -238,7 +238,7 @@ export function TextFilter({
   value,
   onChange,
   label = "Find a stock",
-  placeholder = "Symbol or name",
+  placeholder = "Symbol or name · A, B for several",
   className = "w-44",
 }: {
   value: string;
@@ -280,9 +280,16 @@ export function TextFilter({
 }
 
 /** True when every word typed appears in one of the fields (case-insensitive). Blank matches all. */
+/**
+ * "tata motors" matches a row with every word; "TCS, INFY, HDFC" (commas) matches a row with any of
+ * the names, so several stocks can be picked in one box.
+ */
 export function matchesText(query: string, ...fields: (string | null | undefined)[]): boolean {
-  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return true;
+  const groups = query
+    .split(",")
+    .map((part) => part.trim().toLowerCase().split(/\s+/).filter(Boolean))
+    .filter((words) => words.length > 0);
+  if (groups.length === 0) return true;
   const hay = fields.filter(Boolean).join(" ").toLowerCase();
-  return words.every((w) => hay.includes(w));
+  return groups.some((words) => words.every((w) => hay.includes(w)));
 }

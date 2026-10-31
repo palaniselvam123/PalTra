@@ -11,6 +11,7 @@ import { Badge, Skeleton, pnlTone } from "./ui";
 import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
 import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
+import { TextFilter, matchesText } from "@/components/ui/tableTools";
 
 const REASON: Record<string, string> = {
   MA_CROSS: "MA CROSS",
@@ -352,7 +353,9 @@ export function TradeHistoryTable({
   // The Backtests tab shows replay runs instead of a trade book.
   const [backtests, setBacktests] = useState(false);
   const [picked, setPicked] = useState(false);
-  const [stock, setStock] = useState("ALL");
+  // Stock search (comma = several) and the stocks picked from the dropdown (several at once).
+  const [query, setQuery] = useState("");
+  const [stocks, setStocks] = useState<Set<string>>(new Set());
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [pnlSide, setPnlSide] = useState<PnlSide>("all");
@@ -412,13 +415,15 @@ export function TradeHistoryTable({
       ),
     };
   }, [inBook, runs]);
-  const stockFilter = symbols.includes(stock) ? stock : "ALL";
+  const stockFilter = Array.from(stocks).filter((name) => symbols.includes(name)).sort().join(",");
+  const pickedList = stockFilter ? stockFilter.split(",") : [];
   const reasonFilter = reasons.includes(reason) ? reason : "ALL";
   const strategyFilter = strategies.includes(strategy) ? strategy : "ALL";
   const min = minPnl.trim() === "" ? null : Number(minPnl);
   const max = maxPnl.trim() === "" ? null : Number(maxPnl);
   const keep = (trade: TradeRow, pnl: number | null): boolean => {
-    if (stockFilter !== "ALL" && trade.symbol.toUpperCase() !== stockFilter) return false;
+    if (pickedList.length && !pickedList.includes(trade.symbol.toUpperCase())) return false;
+    if (!matchesText(query, trade.symbol)) return false;
     if (side !== "ALL" && trade.direction !== side) return false;
     if (reasonFilter !== "ALL" && (trade.exit_price == null || (trade.exit_reason || "") !== reasonFilter)) return false;
     if (strategyFilter !== "ALL" && (strategyOf(trade, runs) ?? NOT_RECORDED) !== strategyFilter) return false;
@@ -438,7 +443,7 @@ export function TradeHistoryTable({
     () => sortRows(closedInBook.filter((trade) => keep(trade, trade.gross_pnl)), sort, null, runs),
     // `keep` reads exactly these values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [closedInBook, runs, sort, stockFilter, side, reasonFilter, strategyFilter, from, to, pnlSide, min, max]
+    [closedInBook, runs, sort, stockFilter, query, side, reasonFilter, strategyFilter, from, to, pnlSide, min, max]
   );
   // Open trades are few and are marked at the live price on every tick.
   const openRows = sortRows(
@@ -489,7 +494,8 @@ export function TradeHistoryTable({
     { wins: 0, losses: 0, flat: 0, profit: 0, loss: 0, charges: 0, net: 0 }
   ), [completedRows]);
   const filtersOn =
-    stockFilter !== "ALL" ||
+    stockFilter !== "" ||
+    query.trim() !== "" ||
     side !== "ALL" ||
     reasonFilter !== "ALL" ||
     strategyFilter !== "ALL" ||
@@ -499,11 +505,12 @@ export function TradeHistoryTable({
     minPnl !== "" ||
     maxPnl !== "";
   const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
-  const resetKey = [book, stockFilter, side, reasonFilter, strategyFilter, from, to, pnlSide, minPnl, maxPnl, sort?.key, sort?.dir].join("|");
+  const resetKey = [book, stockFilter, query, side, reasonFilter, strategyFilter, from, to, pnlSide, minPnl, maxPnl, sort?.key, sort?.dir].join("|");
   const simulation = book === "PAPER";
 
   const clearFilters = () => {
-    setStock("ALL");
+    setStocks(new Set());
+    setQuery("");
     setSide("ALL");
     setReason("ALL");
     setStrategy("ALL");
@@ -525,7 +532,8 @@ export function TradeHistoryTable({
   );
   const filterWords = (): string => {
     const words: string[] = [];
-    if (stockFilter !== "ALL") words.push(stockFilter);
+    if (pickedList.length) words.push(pickedList.join(", "));
+    if (query.trim()) words.push(`search "${query.trim()}"`);
     if (side !== "ALL") words.push(side === "LONG" ? "long only" : "short only");
     if (reasonFilter !== "ALL") words.push(`exit: ${REASON_SHORT[reasonFilter] ?? reasonFilter}`);
     if (strategyFilter !== "ALL") words.push(`strategy: ${strategyFilter}`);
@@ -726,20 +734,46 @@ export function TradeHistoryTable({
         <BacktestRuns />
       ) : (
       <>
+      {pickedList.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 text-xs">
+          <span className="text-slate-400">Showing</span>
+          {pickedList.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setStocks((prev) => { const next = new Set(prev); next.delete(name); return next; })}
+              title={`Remove ${name} from the filter`}
+              className="rounded-full bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/25"
+            >
+              {name} ×
+            </button>
+          ))}
+          <button type="button" onClick={() => setStocks(new Set())} className="text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline">
+            all stocks
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap items-end gap-2 px-4 pb-3">
+        <TextFilter value={query} onChange={setQuery} label="Find a stock" placeholder="Symbol · A, B for several" className="w-44 text-slate-400" />
         <label className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
-          Stock
+          Stocks
           <select
-            value={stockFilter}
-            onChange={(e) => setStock(e.target.value)}
+            value=""
+            aria-label="Add a stock to the filter"
+            onChange={(e) => {
+              const name = e.target.value;
+              if (name) setStocks((prev) => new Set(prev).add(name));
+            }}
             className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9"
           >
-            <option value="ALL">All stocks</option>
-            {symbols.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
+            <option value="">{pickedList.length ? `${pickedList.length} picked · add…` : "All stocks · pick…"}</option>
+            {symbols
+              .filter((name) => !stocks.has(name))
+              .map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
           </select>
         </label>
         <label className="flex min-w-[6.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
