@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown, Search } from "lucide-react";
 import { SETTING_LABELS } from "@/lib/settingLabels";
+import { TslCalculator } from "@/components/Settings/TslCalculator";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -2245,6 +2246,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <Field label="Target" suffix="₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
                 </div>
               )}
+              <TslCalculator form={form} set={set} symbol={stockScope ? scope : null} armed={armed} />
               <Hint label="About the trailing stop">
                 {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
                   <>

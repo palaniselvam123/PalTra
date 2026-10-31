@@ -37,6 +37,7 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_bot
+import tsl_calc as tsl_calc_mod
 import strategy_presets
 import fast_move
 import level_check
@@ -3250,6 +3251,57 @@ def _day_rows(frame, day: dt.date) -> tuple[list[list[float]], float | None]:
     prev = float(before["close"].iloc[-1]) if not before.empty else None
     rows = [[int(r.ts), float(r.open), float(r.high), float(r.low), float(r.close)] for r in today.itertuples()]
     return rows, prev
+
+
+@app.get("/api/tsl-calc")
+async def tsl_calc(
+    symbol: str,
+    sizes: str = "1,3,5,15",
+    atr_period: int = 14,
+    stop_mult: float = tsl_calc_mod.DEFAULT_STOP,
+    trail_mult: float = tsl_calc_mod.DEFAULT_TRAIL,
+    target_mult: float = tsl_calc_mod.DEFAULT_TARGET,
+):
+    """Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py).
+
+    Today's armed stocks are read from the bots' 1-minute tapes (no Groww call); any other stock is downloaded
+    once on the scans' session. Read-only: nothing is saved and no order is placed."""
+    name = _chart_symbol(symbol)
+    if name is None:
+        raise HTTPException(400, "Give a stock symbol.")
+    picked = []
+    for part in str(sizes).split(","):
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if n in tsl_calc_mod.SIZES and n not in picked:
+            picked.append(n)
+    if not picked:
+        picked = [1, 3, 5, 15]
+    if not 2 <= int(atr_period) <= 100:
+        raise HTTPException(400, "atr_period must be 2 to 100.")
+    for value in (stop_mult, trail_mult, target_mult):
+        if not 0 <= float(value) <= 20:
+            raise HTTPException(400, "Multiples must be 0 to 20.")
+    tape = _tape_for(name)
+    source = "bot tape"
+    if tape is None:
+        now = dt.datetime.now(IST)
+        start = dt.datetime.combine(now.date() - dt.timedelta(days=7), dt.time(9, 15), tzinfo=IST)
+        try:
+            await groww_pressure.wait_for_bots()
+            tape = await fetch_frame(_scan_broker(), name, start, now)
+        except HistoryError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not download {name}'s candles: {exc}") from exc
+        source = "groww"
+    out = await asyncio.to_thread(
+        tsl_calc_mod.suggest, name, tape, picked, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult)
+    )
+    out["source"] = source
+    return out
 
 
 def _tape_for(symbol: str):

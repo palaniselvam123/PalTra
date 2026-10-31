@@ -121,6 +121,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reports both sets of numbers plus `tsl_mode`.
   The Scalp page's Arm prompt and Arm ticked (`ArmPrompt`, `BulkArm`) have a ₹ / % switch that saves
   `tsl_mode` with the matching numbers as the stock's own (the scanner link's `StockChange` takes them too).
+  **Sized from the candle** (`backend/tsl_calc.py`, `GET /api/tsl-calc?symbol=&sizes=1,3,5,15&atr_period=&stop_mult=&
+  trail_mult=&target_mult=`; read-only, no order): the stock's 1-minute tape (the bots' `_tapes` for an armed stock, else
+  one `fetch_frame` on the scans' session) grouped into each candle size (`candles.resample`, forming candle dropped),
+  the Wilder ATR of that size (`indicators.enrich`) and the average range of the last 20 candles, and the multiples
+  (defaults 1.5 / 0.5 / 3 × ATR) as a stop distance, trail step and target in ₹ (`tick_sizes.round_price`) and in % of
+  the price. Settings → 5. Stop-loss and target, with stop type TSL: `components/Settings/TslCalculator.tsx` (stock,
+  multiples, ATR period, sizes, Calculate; a row's "Use ₹" / "Use %" fills the TSL fields of the form, optionally the
+  candle size too, and the normal Save applies them to the bot or the scoped stock).
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and

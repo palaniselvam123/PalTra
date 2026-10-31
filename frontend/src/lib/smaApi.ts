@@ -1243,6 +1243,31 @@ export type TradeBook = { total: number; rows: TradeRow[] };
 
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
 
+/** One candle size's read from the trailing stop calculator (tsl_calc.py). */
+export type TslCalcRow = {
+  minutes: number;
+  candles: number;
+  atr: number | null;
+  avg_range: number | null;
+  atr_pct?: number;
+  stop?: number | null;
+  trail?: number | null;
+  target?: number | null;
+  stop_pct?: number | null;
+  trail_pct?: number | null;
+  target_pct?: number | null;
+};
+export type TslCalcResult = {
+  symbol: string;
+  price: number | null;
+  as_of?: string | null;
+  atr_period?: number;
+  multiples?: { stop: number; trail: number; target: number };
+  sizes: TslCalcRow[];
+  source?: "bot tape" | "groww";
+  error?: string;
+};
+
 export type ReplayInfo = {
   status: ReplayStatus;
   date: string | null;
@@ -1619,6 +1644,21 @@ export const smaApi = {
       70000
     ),
   config: () => request<SmaConfig>("/api/config"),
+  /** Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py). Read-only. */
+  tslCalc: (symbol: string, sizes: number[], atrPeriod = 14, stopMult = 1.5, trailMult = 0.5, targetMult = 3) =>
+    request<TslCalcResult>(
+      `/api/tsl-calc?${new URLSearchParams({
+        symbol,
+        sizes: sizes.join(","),
+        atr_period: String(atrPeriod),
+        stop_mult: String(stopMult),
+        trail_mult: String(trailMult),
+        target_mult: String(targetMult),
+      }).toString()}`,
+      undefined,
+      60000,
+      false
+    ),
   strategyPresets: () => request<StrategyPresets>(`/api/config/presets?desk=${presetDesk()}`, undefined, 12000, false),
   saveStrategyPreset: (name: string, settings: Partial<SmaConfig>) =>
     request<StrategyPresets>("/api/config/presets", { method: "POST", body: JSON.stringify({ name, desk: presetDesk(), settings }) }, 12000, false),
