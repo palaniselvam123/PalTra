@@ -307,5 +307,5 @@ async def test_alert():
         s.add(row)
         await s.commit()
         await s.refresh(row)
-    sent = await alert_notifier.send(text)
+    sent = await alert_notifier.send_news(text)
     return {"alert": news_impact.alert_out(row), "telegram": getattr(sent, "ok", None), "skipped": getattr(sent, "skipped_reason", None)}

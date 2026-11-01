@@ -312,6 +312,107 @@ class TestQuietRunnerChannel:
         assert err.value.status_code == 400
 
 
+class TestOwnBotPerKind(TestChannelRouting):
+    """News, signal (heads-ups, SMA 9 turns, reviews) and fast-move alerts each take their own Telegram
+    bot, and critical alerts can have one too, so a second token never overwrites the trade bot."""
+
+    ALL = {
+        "trade": "telegram",
+        "critical": "telegram_critical",
+        "news": "telegram_news",
+        "signal": "telegram_signal",
+        "fast": "telegram_fast",
+        "quiet": "telegram_quiet",
+    }
+
+    def test_each_kind_goes_to_its_own_bot(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, self.ALL)
+        asyncio.run(AlertNotifier.send_news(notifier, "news"))
+        asyncio.run(AlertNotifier.send_signal(notifier, "turn"))
+        asyncio.run(AlertNotifier.send_fast(notifier, "fast"))
+        asyncio.run(AlertNotifier.send_critical(notifier, "down"))
+        asyncio.run(AlertNotifier.send(notifier, "fill"))
+        assert delivered == [
+            ("telegram_news", "news"),
+            ("telegram_signal", "turn"),
+            ("telegram_fast", "fast"),
+            ("telegram_critical", "down"),
+            ("telegram", "fill"),
+        ]
+
+    def test_a_kind_without_its_own_bot_falls_back_to_trade(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {"trade": "telegram"})
+        asyncio.run(AlertNotifier.send_news(notifier, "news"))
+        asyncio.run(AlertNotifier.send_signal(notifier, "turn"))
+        asyncio.run(AlertNotifier.send_fast(notifier, "fast"))
+        assert delivered == [("telegram", "news"), ("telegram", "turn"), ("telegram", "fast")]
+
+    def test_trade_alerts_never_reach_the_other_bots(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, self.ALL)
+        asyncio.run(AlertNotifier.send(notifier, "fill"))
+        assert delivered == [("telegram", "fill")]
+
+    def test_send_to_an_unknown_kind_with_nothing_set_is_skipped_not_raised(self, monkeypatch):
+        notifier, delivered = self._notifier(monkeypatch, {})
+        result = asyncio.run(AlertNotifier.send_to(notifier, "news", "news"))
+        assert not result.ok and delivered == []
+
+    @pytest.mark.parametrize("provider", ["telegram_critical", "telegram_news", "telegram_signal", "telegram_fast"])
+    def test_each_own_bot_is_sent_through_telegram(self, monkeypatch, provider):
+        notifier = AlertNotifier()
+        seen: list[tuple[str, str, str]] = []
+
+        async def telegram(chat_id, token, message):
+            seen.append((chat_id, token, message))
+            return DeliveryResult(True, provider, classification=ACCEPTED)
+
+        class Vault:
+            def decrypt(self, value):
+                return value
+
+        monkeypatch.setattr(notifier, "_send_telegram", telegram)
+        monkeypatch.setattr("app.services.alert_notifier.get_vault", lambda: Vault())
+        row = type("Row", (), {"provider": provider, "target_encrypted": "42", "secret_encrypted": "1:TEST", "extra_encrypted": ""})()
+        result = asyncio.run(notifier._deliver(row, "hi"))
+        assert result.ok and seen == [("42", "1:TEST", "hi")]
+
+    @pytest.mark.parametrize(
+        "provider,channel_type",
+        [
+            ("telegram_news", "trade"),
+            ("telegram_signal", "news"),
+            ("telegram_fast", "critical"),
+            ("telegram_critical", "trade"),
+            ("telegram", "news"),
+            ("telegram", "signal"),
+            ("twilio", "fast"),
+        ],
+    )
+    def test_each_own_bot_stays_in_its_own_slot(self, provider, channel_type):
+        from fastapi import HTTPException
+
+        from app.api.routes_scanner_engine import ChannelRequest, save_channel
+
+        body = ChannelRequest(provider=provider, channel_type=channel_type, secret="1:TEST", target="42", extra="x")
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(save_channel(body))
+        assert err.value.status_code == 400
+
+    @pytest.mark.parametrize("kind", ["critical", "news", "signal", "fast", "quiet"])
+    def test_a_test_message_never_falls_back_to_the_trade_bot(self, monkeypatch, kind):
+        from fastapi import HTTPException
+
+        from app.api.routes_scanner_engine import test_alert
+
+        async def active_channel(channel_type="trade"):
+            return type("Row", (), {"provider": "telegram"})() if channel_type == "trade" else None
+
+        monkeypatch.setattr("app.api.routes_scanner_engine.alert_notifier.active_channel", active_channel)
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(test_alert(channel_type=kind))
+        assert err.value.status_code == 400 and kind in err.value.detail
+
+
 class TestTwilioReplies:
     def test_a_queued_twilio_reply_is_accepted_despite_error_code_null(self):
         body = '{"sid": "CA123", "status": "queued", "error_code": null, "error_message": null}'

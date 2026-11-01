@@ -4,8 +4,10 @@ import { ChatWidget } from "@/components/Chat/ChatWidget";
 import { NotificationProvider } from "@/components/Notifications/NotificationProvider";
 
 export const metadata: Metadata = {
-  title: "ORB Intraday Bot",
-  description: "Intraday algorithmic trading dashboard — Paper Trading by default.",
+  // Each route's layout names the page ("Scalp · PalTra"); the dashboard is plain "PalTra". The terminal's
+  // Header and the stock chart page refine it in the browser (desk name, stock).
+  title: { default: "PalTra", template: "%s · PalTra" },
+  description: "NSE intraday trading desk — paper trading by default.",
 };
 
 /** Applies the stored theme before first paint.

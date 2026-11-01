@@ -201,13 +201,17 @@ def judge(
     return "hold", f"loss {loss:.2f}, {candles_held} of {max_candles(cfg)} candles"
 
 
-def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT, chop: bool | None = None) -> str:
+def handoff(
+    from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT, chop: bool | None = None, keep_source: bool = False
+) -> str:
     """Move `symbol` from `from_bot` to `to_bot`. Returns what happened.
 
     To Bot 2 (`HANDOFF_BOT`) the stock gets the chop settings; to another bot (the
     breakout handoff back to Bot 3, breakout.py) it trades on that bot's own settings.
     The target is armed to wait for its next cross (no order now). Never raises.
     `chop=False` keeps Bot 2's own settings (a stock the fast-mover hand-off sends back, fast_bot.py).
+    `keep_source=True` leaves the stock on the source bot's Trade list too (the fast-mover "keep the
+    trade" mode): it is then armed on both bots; the one-LIVE-bot-per-stock rule still applies.
     """
     from database import session_factory
     from models import BotConfig
@@ -231,11 +235,12 @@ def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF
             names = trade_names(target)
             if name not in names and len(names) >= MAX_TRADE_SYMBOLS:
                 return f"no handoff: Bot {to_bot}'s Trade list is full ({MAX_TRADE_SYMBOLS})"
-            # Off the source bot first, so the one-LIVE-bot-per-stock rule sees it gone.
-            left = [n for n in trade_names(source) if n != name]
-            source.trade_symbols = ",".join(left)
-            source.trade_sources = apply_trade_sources(source, {name: None}, left)
-            db.commit()
+            if not keep_source:
+                # Off the source bot first, so the one-LIVE-bot-per-stock rule sees it gone.
+                left = [n for n in trade_names(source) if n != name]
+                source.trade_symbols = ",".join(left)
+                source.trade_sources = apply_trade_sources(source, {name: None}, left)
+                db.commit()
             if target_live:
                 why = bots.live_conflict(to_bot, [name])
                 if why:
@@ -258,4 +263,29 @@ def handoff(from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF
         engine.hold_for_next_cross([name])
     if chop:
         return "moved to Bot 2 (flipped, gap mode) — waits for its next cross"
+    if keep_source:
+        return f"armed on Bot {to_bot} too (Bot {from_bot} keeps it) — waits for its next cross"
     return f"moved to Bot {to_bot} — waits for its next cross"
+
+
+def unarm(bot: int, symbol: str) -> str:
+    """Take `symbol` off `bot`'s Trade list only (a kept stock Bot 5 is done with, fast_bot.py). Never raises."""
+    from database import session_factory
+    from models import BotConfig
+    import bots
+    from strategy_engine import apply_trade_sources, trade_names
+
+    name = (symbol or "").upper()
+    try:
+        with session_factory()() as db:
+            row = db.get(BotConfig, bots.config_id_for(int(bot)))
+            if row is None:
+                return f"Bot {bot} is not set up"
+            left = [n for n in trade_names(row) if n != name]
+            row.trade_symbols = ",".join(left)
+            row.trade_sources = apply_trade_sources(row, {name: None}, left)
+            db.commit()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("unarm failed for %s", name)
+        return f"not unarmed: {exc}"
+    return f"off Bot {bot}'s Trade list"

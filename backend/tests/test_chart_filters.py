@@ -127,6 +127,17 @@ def test_chart_filters_carry_the_slope_levels_and_entry_times_the_chart_explains
     assert got["entry_cutoff_time"] == "14:30" and got["entry_mode"] == "COLOUR" and got["use_gap_mode"] is True
 
 
+def test_chart_filters_say_which_slope_rules_are_on_for_the_exit_zone():
+    got = chart_filters(_cfg())
+    assert got["sma_fast"] == 9
+    assert got["slope_rules"] is False and got["slope_turn"] is False
+    assert got["decel_exit"] is False and got["turn_entry"] is False and got["turn_toward_cross"] is False
+    got = chart_filters(_cfg(slope_exit=True, slope_turn=False, turn_entry=True, turn_toward_cross=True, decel_exit=True))
+    assert got["slope_rules"] is True and got["slope_turn"] is False
+    assert got["decel_exit"] is True and got["turn_entry"] is True and got["turn_toward_cross"] is True
+    assert chart_filters(_cfg(slope_exit=True))["slope_turn"] is True
+
+
 # ---- the chart reuses its work between polls --------------------------------
 
 def _chart_engine(frame, cfg):

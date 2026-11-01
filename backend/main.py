@@ -37,17 +37,21 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_bot
+import tsl_calc as tsl_calc_mod
+import strategy_presets
 import fast_move
 import level_check
 import news_entry
 import arm_log
 import chop_auto
 import chop_scan
+import high52
 import morning_scan
 import groww_pressure
 import open_pnl_log
 import scan_accuracy
 import scan_history
+import scan_sync
 import scan_worker
 import backtest_server
 import server_role
@@ -69,6 +73,7 @@ import join_trend
 from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
 import exit_candle
+import small_candles
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -120,6 +125,8 @@ cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
 # The Scalp page's 09:30 Morning tab: five opening checks per stock (morning_scan.py).
 morning_scanner = morning_scan.MorningScanner()
+# The Scalp page's 52-week high tab: each stock's distance from its 52-week high / low (high52.py).
+high52_scanner = high52.High52Scanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 # Scan & arm presets: a Trend quality pass, then arm the matches on a bot, now or at set times (scan_arm.py).
@@ -193,7 +200,7 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
 async def _fast_move_send(message: str) -> None:
     from app.services.alert_notifier import alert_notifier
 
-    await alert_notifier.send(message)
+    await alert_notifier.send_fast(message)
 
 
 async def _fast_move_call(message: str) -> None:
@@ -343,7 +350,7 @@ def _boot_backtest_server() -> asyncio.Task:
     engine.broker.set_mode("PAPER")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
-        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner))
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
@@ -444,14 +451,20 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
+    # VWAP + ATR buffer stop: stop = VWAP − this × ATR for a buy (+ for a sell), tighter only each candle.
+    vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_target_points: float | None = Field(default=None, ge=0, le=100000)
-    tsl_mode: Literal["POINTS", "PERCENT"] | None = None
+    tsl_mode: Literal["POINTS", "PERCENT", "ATR"] | None = None
     tsl_sl_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_trail_pct: float | None = Field(default=None, gt=0, le=50)
     tsl_target_pct: float | None = Field(default=None, ge=0, le=100)
+    # ATR multiples (tsl_mode ATR): sized from the stock's own ATR at entry, so one setting fits every stock.
+    tsl_sl_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_trail_atr: float | None = Field(default=None, gt=0, le=20)
+    tsl_target_atr: float | None = Field(default=None, ge=0, le=50)
     gap_sl_mult: float | None = Field(default=None, gt=0, le=10)
     gap_tp_mult: float | None = Field(default=None, gt=0, le=20)
     gap_min_pct: float | None = Field(default=None, ge=0.01, le=5)
@@ -514,6 +527,9 @@ class ConfigUpdate(BaseModel):
     use_supertrend: bool | None = None
     use_level: bool | None = None
     level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
+    use_high52: bool | None = None
+    high52_side: str | None = Field(default=None, pattern="^(LONG|SHORT|BOTH)$")
+    high52_pct: float | None = Field(default=None, ge=0, le=high52.MAX_PCT)
     st_exit: bool | None = None
     st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
     st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
@@ -587,6 +603,13 @@ class ConfigUpdate(BaseModel):
     pattern_tf: Literal[1, 3, 5, 10, 15] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
+    # Watch smaller candles while in a trade (small_candles.py): CSV of sizes, "" = off.
+    small_exit_minutes: str | None = Field(default=None, max_length=32)
+    small_exit_cross: bool | None = None
+    small_exit_slope: bool | None = None
+    small_exit_counter: int | None = Field(default=None, ge=0, le=small_candles.MAX_COUNTER)
+    small_exit_loss_pct: float | None = Field(default=None, ge=0, le=50)
+    small_exit_agree: int | None = Field(default=None, ge=1, le=small_candles.MAX_AGREE)
     slope_minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
@@ -602,6 +625,8 @@ class ConfigUpdate(BaseModel):
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
     max_daily_loss: float | None = Field(default=None, gt=0)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
+    # Entries one stock may take per day on this bot (0 = no cap); also a per-stock override.
+    max_trades_per_stock: int | None = Field(default=None, ge=0, le=100)
     square_off_time: str | None = None
     entry_cutoff_time: str | None = None
 
@@ -637,6 +662,10 @@ def _config_dict(row: BotConfig) -> dict:
         "tsl_sl_pct": float(getattr(row, "tsl_sl_pct", 1.0) or 1.0),
         "tsl_trail_pct": float(getattr(row, "tsl_trail_pct", 0.5) or 0.5),
         "tsl_target_pct": float(getattr(row, "tsl_target_pct", 0.0) or 0.0),
+        "tsl_sl_atr": float(getattr(row, "tsl_sl_atr", 1.5) or 1.5),
+        "tsl_trail_atr": float(getattr(row, "tsl_trail_atr", 0.5) or 0.5),
+        "tsl_target_atr": 3.0 if getattr(row, "tsl_target_atr", None) is None else float(row.tsl_target_atr),
+        "vwap_stop_atr": 0.5 if getattr(row, "vwap_stop_atr", None) is None else float(row.vwap_stop_atr),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
         "use_volume": bool(getattr(row, "use_volume", False)),
@@ -659,6 +688,7 @@ def _config_dict(row: BotConfig) -> dict:
         "candle_dir_rule": (getattr(row, "candle_dir_rule", None) or "CLOSES").upper(),
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
+        "max_trades_per_stock": int(getattr(row, "max_trades_per_stock", 0) or 0),
         "square_off_time": row.square_off_time,
         "entry_cutoff_time": row.entry_cutoff_time or "15:00",
         "trading_mode": row.trading_mode,
@@ -1031,6 +1061,8 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             _validate_hhmm(data["entry_cutoff_time"], "entry_cutoff_time")
         if "review_check_minutes" in data:
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
+        if "small_exit_minutes" in data:
+            data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -1058,7 +1090,126 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
         session = replays.get(getattr(eng, "bot_id", 0)) if eng is not research_engine else None
         if session is not None and session.engine is not None:
             session.engine.release_trade_cap(cap)
+    # "What was it before?": every Save keeps the strategy fields in the desk's history (strategy_presets.py).
+    try:
+        strategy_presets.remember(_preset_desk(eng), _strategy_fields(payload))
+    except Exception:  # noqa: BLE001 - bookkeeping only; a failed snapshot never fails the save
+        logging.getLogger("sma.presets").exception("strategy history not written")
     return payload
+
+
+def _preset_desk(eng: StrategyEngine) -> str:
+    return "research" if eng is research_engine else str(getattr(eng, "bot_id", 1) or 1)
+
+
+def _strategy_fields(settings: dict) -> dict:
+    return strategy_presets.strategy_only(settings, set(ConfigUpdate.model_fields), COPY_SKIP)
+
+
+class PresetBody(BaseModel):
+    name: str
+    desk: str = "1"
+    settings: dict
+
+
+@app.get("/api/config/presets")
+async def get_presets(desk: str = "1"):
+    """Saved strategies (every desk) and this desk's history of saves, newest first."""
+    return strategy_presets.listing(desk)
+
+
+@app.post("/api/config/presets")
+async def post_preset(body: PresetBody):
+    """Save the strategy fields sent as a named preset. Loading one is done in the form; Save then applies it."""
+    settings = _strategy_fields(body.settings)
+    if not settings:
+        raise HTTPException(400, "Nothing to save: send the strategy settings")
+    if not body.name.strip():
+        raise HTTPException(400, "Give the preset a name")
+    return strategy_presets.save_preset(body.name, body.desk, settings)
+
+
+@app.delete("/api/config/presets/{pid}")
+async def delete_preset(pid: int, desk: str = "1"):
+    return strategy_presets.delete_preset(pid, desk)
+
+
+class ResetBody(BaseModel):
+    # The bot trades real money: the page asked first.
+    confirm_live: bool = False
+    # Also drop every stock's own settings, so each follows the defaults too.
+    stock_settings: bool = False
+
+
+def strategy_defaults() -> dict:
+    """Every strategy field (the update fields minus COPY_SKIP) at its BotConfig column default."""
+    out: dict = {}
+    for name in ConfigUpdate.model_fields:
+        if name in COPY_SKIP:
+            continue
+        column = BotConfig.__table__.columns.get(name)
+        if column is None:
+            continue
+        arg = getattr(column.default, "arg", None)
+        out[name] = None if column.default is None or callable(arg) else arg
+    return out
+
+
+async def _reset_config(eng: StrategyEngine, body: ResetBody) -> dict:
+    """Put the desk's strategy settings back to the defaults, the way Copy settings replaces them.
+
+    The Trade list, mode, name, per-stock settings (unless asked) and the all-bots rows stay.
+    """
+    defaults = strategy_defaults()
+    with session_factory()() as db:
+        row = db.get(BotConfig, eng.config_id)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        if (row.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(409, "That bot is LIVE: confirm before resetting its settings")
+        own = {} if body.stock_settings else stock_settings(row)
+        held = {symbol: pos.qty for symbol, pos in eng.positions.items() if pos is not None}
+        if any(int(qty) != int(defaults["qty"]) for symbol, qty in held.items() if "qty" not in own.get(symbol, {})):
+            raise HTTPException(409, "Close the open position before changing quantity")
+        changed = sorted(name for name, value in defaults.items() if getattr(row, name) != value)
+        for name, value in defaults.items():
+            setattr(row, name, value)
+        if body.stock_settings:
+            row.stock_settings = "{}"
+            changed.append("stock_settings")
+        _check_settings(row)
+        for symbol in own:
+            _check_settings(_cfg_for(row, symbol), symbol)
+        db.commit()
+        db.refresh(row)
+        payload = _config_dict(row)
+        cap = int(row.max_trades_per_day)
+        db.expunge(row)
+    _reload(eng, payload)
+    if "max_trades_per_day" in changed:
+        eng.release_trade_cap(cap)
+    try:
+        strategy_presets.remember(_preset_desk(eng), _strategy_fields(payload))
+    except Exception:  # noqa: BLE001 - bookkeeping only
+        logging.getLogger("sma.presets").exception("strategy history not written")
+    return {"changed": changed, "config": payload}
+
+
+@app.get("/api/config/defaults")
+async def get_config_defaults():
+    """The default value of every strategy field, as "Reset to defaults" sets them."""
+    return strategy_defaults()
+
+
+@app.post("/api/config/reset")
+async def reset_config(body: ResetBody):
+    return await _reset_config(engine, body)
+
+
+@app.post("/api/research/config/reset")
+async def research_reset_config(body: ResetBody):
+    # Like Copy settings: the research row (id 2) is created first if the desk has not been opened yet.
+    return await _reset_config(_desk_engine("research"), body)
 
 
 @app.put("/api/config")
@@ -1139,6 +1290,9 @@ def _gap_dict(row) -> dict:
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
+        "use_high52": high52.on(row),
+        "high52_side": high52.side_of(row),
+        "high52_pct": high52.pct_of(row),
         "level_line": level_check.line_of(row),
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
@@ -1203,6 +1357,12 @@ def _gap_dict(row) -> dict:
         "or_spread_pct": opening_range.spread_pct(row),
         "candle_minutes": int(getattr(row, "candle_minutes", None) or 1),
         "exit_candle_minutes": exit_candle.minutes(row),
+        "small_exit_minutes": ",".join(str(s) for s in small_candles.sizes(row)),
+        "small_exit_cross": small_candles.cross_on(row),
+        "small_exit_slope": small_candles.slope_on(row),
+        "small_exit_counter": small_candles.counter(row),
+        "small_exit_loss_pct": small_candles.loss_pct(row),
+        "small_exit_agree": small_candles.agree(row),
         "slope_minutes": slope_mod.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         "review_on": review.review_on(row),
@@ -1270,6 +1430,8 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
         own = dict(everything.get(name, {}))
         if "review_check_minutes" in data:
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
+        if "small_exit_minutes" in data:
+            data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
         for key, value in data.items():
             if value == getattr(row, key):
                 own.pop(key, None)
@@ -1691,8 +1853,10 @@ class ScalpPickStart(BaseModel):
 
 
 class ReplayControl(BaseModel):
-    action: Literal["play", "pause", "stop", "speed"]
+    action: Literal["play", "pause", "stop", "speed", "seek"]
     speed: int | None = None
+    # seek: the replayed day's time to move to, IST HH:MM (forward = fast-forward, back = the day replays to there).
+    at: str | None = Field(default=None, max_length=5)
 
 
 def _replay_engine(bot: int = 1):
@@ -1923,7 +2087,7 @@ async def replay_control(body: ReplayControl, bot: int = 1):
         await session.stop()
         return session.info()
     try:
-        session.control(body.action, body.speed)
+        session.control(body.action, body.speed, body.at)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return session.info()
@@ -2052,6 +2216,7 @@ async def scans_pause(body: ScanPause):
         cross_scanner.stop("Stopped: scans are paused.")
         chop_scanner.stop("Stopped: scans are paused.")
         morning_scanner.stop("Stopped: scans are paused.")
+        high52_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -2588,6 +2753,35 @@ async def morning_scan_status():
     return {**morning_scanner.snapshot(), "paused": _scans_paused}
 
 
+class High52ScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    force: bool = False
+
+
+@app.post("/api/high52-scan/start")
+async def high52_scan_start(body: High52ScanStart):
+    """Start the 52-week high scan (read-only: Groww daily candles, no order). Poll GET /api/high52-scan.
+
+    Each stock's distance from its 52-week high and low, whether it broke the high today, the day's and the
+    year's move (high52.py). No bot setting is read or changed.
+    """
+    _refuse_when_paused()
+    try:
+        return high52_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: high52.fetch_daily(_scan_broker(), symbol, start, end),
+            force=body.force,
+            job=_scan_job(scan_worker.high52_job, 0, 0, high52.DAILY_MINUTES),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/high52-scan")
+async def high52_scan_status():
+    return {**high52_scanner.snapshot(), "paused": _scans_paused}
+
+
 # ---- open P&L log: each desk's "Open" figure, minute by minute (open_pnl_log.py)
 
 OPEN_PNL_DESKS = ("1", "2", "3", "4", "5", "research")
@@ -2727,6 +2921,22 @@ def _check_job():
         return await scan_worker.run(_scan_broker(), scan_worker.check_job, symbol, start, end, *args)
 
     return job
+
+
+@app.post("/api/scan-history/pull")
+async def scan_history_pull(days: int = Query(14, ge=1, le=scan_sync.MAX_DAYS)):
+    """Desk only: copy the backtest server's saved scans of the last `days` days that this desk lacks
+    (scan_sync.py: BACKTEST_URL + BACKTEST_LINK_TOKEN). Read-only on both sides."""
+    if not server_role.is_desk():
+        raise HTTPException(409, "Only the main desk pulls scans from the backtest server.")
+    if not server_role.backtest_url():
+        raise HTTPException(409, "BACKTEST_URL is not set on this desk, so it cannot reach the backtest server.")
+    if not server_role.backtest_link_token():
+        raise HTTPException(409, "BACKTEST_LINK_TOKEN is not set on this desk.")
+    try:
+        return await asyncio.to_thread(scan_sync.pull, scan_sync.http_fetch, days)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/api/scan-history/{run_id}/check")
@@ -3106,6 +3316,57 @@ def _day_rows(frame, day: dt.date) -> tuple[list[list[float]], float | None]:
     return rows, prev
 
 
+@app.get("/api/tsl-calc")
+async def tsl_calc(
+    symbol: str,
+    sizes: str = "1,3,5,15",
+    atr_period: int = 14,
+    stop_mult: float = tsl_calc_mod.DEFAULT_STOP,
+    trail_mult: float = tsl_calc_mod.DEFAULT_TRAIL,
+    target_mult: float = tsl_calc_mod.DEFAULT_TARGET,
+):
+    """Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py).
+
+    Today's armed stocks are read from the bots' 1-minute tapes (no Groww call); any other stock is downloaded
+    once on the scans' session. Read-only: nothing is saved and no order is placed."""
+    name = _chart_symbol(symbol)
+    if name is None:
+        raise HTTPException(400, "Give a stock symbol.")
+    picked = []
+    for part in str(sizes).split(","):
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if n in tsl_calc_mod.SIZES and n not in picked:
+            picked.append(n)
+    if not picked:
+        picked = [1, 3, 5, 15]
+    if not 2 <= int(atr_period) <= 100:
+        raise HTTPException(400, "atr_period must be 2 to 100.")
+    for value in (stop_mult, trail_mult, target_mult):
+        if not 0 <= float(value) <= 20:
+            raise HTTPException(400, "Multiples must be 0 to 20.")
+    tape = _tape_for(name)
+    source = "bot tape"
+    if tape is None:
+        now = dt.datetime.now(IST)
+        start = dt.datetime.combine(now.date() - dt.timedelta(days=7), dt.time(9, 15), tzinfo=IST)
+        try:
+            await groww_pressure.wait_for_bots()
+            tape = await fetch_frame(_scan_broker(), name, start, now)
+        except HistoryError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not download {name}'s candles: {exc}") from exc
+        source = "groww"
+    out = await asyncio.to_thread(
+        tsl_calc_mod.suggest, name, tape, picked, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult)
+    )
+    out["source"] = source
+    return out
+
+
 def _tape_for(symbol: str):
     for eng in [engine, *bot_engines.values(), research_engine]:
         tape = getattr(eng, "_tapes", {}).get(symbol)
@@ -3416,6 +3677,10 @@ class FastBotSettings(BaseModel):
     max_day: int | None = Field(None, ge=1, le=100)
     min_profit_pct: float | None = Field(None, ge=0, le=fast_bot.MAX_PCT)
     bot5_trades: int | None = Field(None, ge=0, le=fast_bot.MAX_BOT5_TRADES)
+    # Bot 5's own entry checks (VWAP, volume, density, RSI, ADX, EMA, …) are read before the hand-off.
+    entry_checks: bool | None = None
+    # Keep the source trade and let Bot 5 open its own order next to it (the stock is armed on both bots).
+    keep_trade: bool | None = None
     confirm_live: bool = False
 
 
@@ -3490,6 +3755,11 @@ async def bot_get_config(bot: int):
 @app.put("/api/bots/{bot}/config")
 async def bot_put_config(bot: int, body: ConfigUpdate):
     return await _put_config(_bot(bot), body)
+
+
+@app.post("/api/bots/{bot}/config/reset")
+async def bot_reset_config(bot: int, body: ResetBody):
+    return await _reset_config(_bot(bot), body)
 
 
 @app.get("/api/bots/{bot}/config/stock/{symbol}")

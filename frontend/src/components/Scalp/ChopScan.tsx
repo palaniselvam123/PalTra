@@ -425,7 +425,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
-  const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
+  const ticks = useTicks();
+  const filtered = useMemo(
+    () => shownRows.filter((r) => matchesText(query, r.symbol) && ticks.shows(r.symbol) && passes(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRows, query, passes, ticks.only, ticks.ticked]
+  );
   // Trend age, gap and rank (1 = fresh and wide) among the stocks that pass every filter but the stock search.
   const ranks = useMemo(() => {
     if (trendOn.length === 0) return new Map<string, RankedTrend>();
@@ -484,7 +489,6 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.trend.pageSize");
-  const ticks = useTicks();
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">

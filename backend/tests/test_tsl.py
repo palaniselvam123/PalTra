@@ -432,3 +432,41 @@ async def test_practice_supertrend_stop_is_hit_as_st_sl_hit(eng):
     with database.session_factory()() as db:
         row = db.get(TradeLog, pos.trade_id)
     assert row.exit_reason == "ST_SL_HIT"
+
+
+def test_atr_mode_sizes_the_stop_from_the_stocks_own_atr():
+    """tsl_mode ATR: stop / trail / target are multiples of the ATR at entry, so one setting fits any stock."""
+    from tsl import tsl_atrs, tsl_settings
+
+    cfg = SimpleNamespace(tsl_mode="ATR", tsl_sl_atr=1.5, tsl_trail_atr=0.5, tsl_target_atr=3.0, tsl_sl_points=20, tsl_trail_points=10, tsl_target_points=0)
+    assert tsl_atrs(cfg) == (1.5, 0.5, 3.0)
+    assert tsl_settings(cfg, entry_price=1000.0, atr=2.0) == (3.0, 1.0, 6.0)
+    assert tsl_settings(cfg, entry_price=100.0, atr=0.4) == pytest.approx((0.6, 0.2, 1.2))
+    # No usable ATR yet: the rupee points keep a stop on the trade.
+    assert tsl_settings(cfg, entry_price=1000.0, atr=None) == (20.0, 10.0, 0.0)
+    assert tsl_settings(cfg, entry_price=1000.0, atr=0.0) == (20.0, 10.0, 0.0)
+    cfg.tsl_target_atr = 0
+    assert tsl_settings(cfg, entry_price=1000.0, atr=2.0) == (3.0, 1.0, 0.0)
+    # The other modes are untouched.
+    assert tsl_settings(SimpleNamespace(tsl_mode="PERCENT", tsl_sl_pct=1, tsl_trail_pct=0.5, tsl_target_pct=0), entry_price=1000.0, atr=2.0) == (10.0, 5.0, 0.0)
+
+
+def test_atr_mode_round_trip_through_the_settings_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/atr.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    with TestClient(main.app) as client:
+        res = client.put("/api/config", json={"stop_type": "TSL", "tsl_mode": "ATR", "tsl_sl_atr": 2, "tsl_trail_atr": 0.75, "tsl_target_atr": 0})
+        assert res.status_code == 200, res.text
+        got = client.get("/api/config").json()
+        assert (got["tsl_mode"], got["tsl_sl_atr"], got["tsl_trail_atr"], got["tsl_target_atr"]) == ("ATR", 2.0, 0.75, 0.0)
+        assert client.put("/api/config", json={"tsl_sl_atr": 99}).status_code == 422
+        state = client.get("/api/state").json()
+        assert state["stop_points"]["tsl_mode"] == "ATR" and state["stop_points"]["tsl_sl_atr"] == 2.0
+    database.reset_engine()

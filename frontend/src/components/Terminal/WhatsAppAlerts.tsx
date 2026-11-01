@@ -33,6 +33,10 @@ async function desk<T>(path: string, init?: RequestInit): Promise<T> {
 function providerLabel(name: string): string {
   if (name === "twilio_voice") return "Twilio phone call";
   if (name === "telegram_quiet") return "Quiet-runner Telegram";
+  if (name === "telegram_critical") return "Critical-alerts Telegram";
+  if (name === "telegram_news") return "News Telegram";
+  if (name === "telegram_signal") return "Signal Telegram";
+  if (name === "telegram_fast") return "Fast-moves Telegram";
   return name === "telegram" ? "Telegram" : name === "twilio" ? "Twilio WhatsApp" : "CallMeBot";
 }
 
@@ -68,7 +72,8 @@ function ChannelForm({
       const saved = await desk<Channel[]>("/api/scan/channels", {
         method: "POST",
         body: JSON.stringify({
-          provider,
+          // A Telegram token typed for critical alerts is its own bot: it must not replace the trade bot.
+          provider: provider === "telegram" && channelType === "critical" ? "telegram_critical" : provider,
           channel_type: channelType,
           enabled: true,
           target: phone.trim(),
@@ -125,7 +130,7 @@ function ChannelForm({
 
   const reusable = channels.filter(
     (r) =>
-      r.configured && r.provider !== active?.provider && r.provider !== "twilio_voice" && r.provider !== "telegram_quiet"
+      r.configured && r.provider !== active?.provider && r.provider !== "twilio_voice" && !r.provider.startsWith("telegram_")
   );
 
   const canSave =
@@ -433,13 +438,60 @@ function CallForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Ch
   );
 }
 
-/** Its own Telegram bot for the Scalp page's quiet-runner alerts, so they are not lost among trade alerts. */
-function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: Channel[]) => void }) {
+/** One kind of alert's own Telegram bot (its own BotFather token and chat), so it is not lost among trade alerts. */
+export const OWN_BOTS: {
+  kind: "critical" | "news" | "signal" | "fast" | "quiet";
+  provider: string;
+  title: string;
+  blurb: string;
+  testNote: string;
+}[] = [
+  {
+    kind: "critical",
+    provider: "telegram_critical",
+    title: "Critical alerts (own Telegram bot)",
+    blurb:
+      "Bot stopped, the application stopping or crashing, a live position with no stop. Until this bot is set, critical alerts go through the critical channel above, or the trade channel.",
+    testNote: "Test sent. Check the critical-alerts bot.",
+  },
+  {
+    kind: "news",
+    provider: "telegram_news",
+    title: "News alerts",
+    blurb: "Headlines on armed / held stocks and the F&O feed (Settings → News alerts). Until this bot is set, they go to the trade alert channel.",
+    testNote: "Test sent. Check the news bot.",
+  },
+  {
+    kind: "signal",
+    provider: "telegram_signal",
+    title: "Signal alerts",
+    blurb:
+      "Heads-ups that are not orders: an SMA cross coming inside 3 minutes, an SMA 9 turn (turn alert), a 1-minute review. Until this bot is set, they go to the trade alert channel.",
+    testNote: "Test sent. Check the signal bot.",
+  },
+  {
+    kind: "fast",
+    provider: "telegram_fast",
+    title: "Fast-move alerts",
+    blurb: "Fast price changes on armed / held stocks and in the Trend quality scan (Settings → Fast-move alerts). Until this bot is set, they go to the trade alert channel.",
+    testNote: "Test sent. Check the fast-moves bot.",
+  },
+  {
+    kind: "quiet",
+    provider: "telegram_quiet",
+    title: "Quiet-runner alerts (Scalp page)",
+    blurb: "The Trend quality scan's 🔔 quiet runners. Until this bot is set, they go to the trade alert channel as before.",
+    testNote: "Test sent. Check the quiet-runner bot.",
+  },
+];
+
+function OwnBotForm({ bot, channels, onSaved }: { bot: (typeof OWN_BOTS)[number]; channels: Channel[]; onSaved: (ch: Channel[]) => void }) {
   const [secret, setSecret] = useState("");
   const [chat, setChat] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const active = channels.find((r) => r.channel_type === "quiet" && r.enabled && r.configured);
+  const active = channels.find((r) => r.channel_type === bot.kind && r.enabled && r.configured);
+  const ownActive = active?.provider === bot.provider;
 
   const run = async (path: string, init: RequestInit, done: (res: unknown) => string) => {
     setBusy(true);
@@ -456,17 +508,14 @@ function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: C
   return (
     <section className="rounded-xl border border-white/5 bg-[#151921] p-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Quiet-runner alerts (Scalp page)</div>
-        <span className={active ? "text-xs font-semibold text-[#10B981]" : "text-xs text-slate-400"}>
-          {active ? "telegram live" : "not connected · sent with trade alerts"}
+        <div className="text-xs uppercase tracking-[0.14em] text-slate-400">{bot.title}</div>
+        <span className={ownActive ? "text-xs font-semibold text-[#10B981]" : "text-xs text-slate-400"}>
+          {ownActive ? "own bot live" : active ? `via ${providerLabel(active.provider)}` : "not connected · sent with trade alerts"}
         </span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-slate-400">
-        The Trend quality scan&apos;s 🔔 quiet runners go to this Telegram bot on their own, so they are not lost among
-        trade alerts. Until it is set, they go to the trade alert channel as before.
-      </p>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">{bot.blurb}</p>
       <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-400">
-        <li>In Telegram, open @BotFather, send /newbot and copy the token.</li>
+        <li>In Telegram, open @BotFather, send /newbot and copy the token (a new bot for each kind of alert).</li>
         <li>Open the new bot and send it any message (e.g. /start).</li>
         <li>Paste the token below and tap Save. The chat is picked up from that message.</li>
       </ol>
@@ -484,7 +533,7 @@ function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: C
         <span className="text-xs uppercase tracking-wider text-slate-400">Chat id, if you already have it</span>
         <input value={chat} onChange={(e) => setChat(e.target.value)} placeholder="Leave blank to detect it" className={inputCls} />
       </label>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           disabled={busy || !secret.trim()}
@@ -494,8 +543,8 @@ function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: C
               {
                 method: "POST",
                 body: JSON.stringify({
-                  provider: "telegram_quiet",
-                  channel_type: "quiet",
+                  provider: bot.provider,
+                  channel_type: bot.kind,
                   enabled: true,
                   target: chat.trim(),
                   secret: secret.trim(),
@@ -504,7 +553,7 @@ function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: C
               (res) => {
                 onSaved(res as Channel[]);
                 setSecret("");
-                return "Quiet-runner alerts now go to this bot.";
+                return `${bot.title} now go to this bot.`;
               }
             )
           }
@@ -515,13 +564,26 @@ function QuietForm({ channels, onSaved }: { channels: Channel[]; onSaved: (ch: C
         <button
           type="button"
           disabled={busy || !active}
-          onClick={() =>
-            run("/api/scan/test-alert?channel_type=quiet", { method: "POST" }, () => "Test sent. Check the quiet-runner bot.")
-          }
+          onClick={() => run(`/api/scan/test-alert?channel_type=${bot.kind}`, { method: "POST" }, () => bot.testNote)}
           className="inline-flex h-11 items-center rounded-md border border-white/15 px-4 text-sm text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           Send test
         </button>
+        {ownActive ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              run(`/api/scan/channels/${bot.provider}`, { method: "DELETE" }, (res) => {
+                onSaved(res as Channel[]);
+                return "Removed. These alerts go with the trade alerts again.";
+              })
+            }
+            className="inline-flex h-11 items-center rounded-md px-3 text-sm text-rose-300 hover:bg-rose-500/10 sm:h-9"
+          >
+            Remove this bot
+          </button>
+        ) : null}
       </div>
       {note && <p className="mt-2 text-xs text-slate-400">{note}</p>}
     </section>
@@ -553,7 +615,10 @@ export function WhatsAppAlerts() {
         channels={channels}
         onSaved={setChannels}
       />
-      <QuietForm channels={channels} onSaved={setChannels} />
+      {/* Each kind of alert with its own Telegram bot: critical, news, signals, fast moves, quiet runners. */}
+      {OWN_BOTS.map((bot) => (
+        <OwnBotForm key={bot.kind} bot={bot} channels={channels} onSaved={setChannels} />
+      ))}
       <CallForm channels={channels} onSaved={setChannels} />
     </div>
   );

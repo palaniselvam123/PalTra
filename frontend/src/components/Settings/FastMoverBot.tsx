@@ -40,6 +40,8 @@ export function FastMoverBot() {
             max_day: String(v.max_day),
             min_profit_pct: String(v.min_profit_pct ?? 0.3),
             bot5_trades: String(v.bot5_trades ?? 1),
+            entry_checks: v.entry_checks !== false,
+            keep_trade: Boolean(v.keep_trade),
           });
           setSources(v.sources);
         }
@@ -65,7 +67,7 @@ export function FastMoverBot() {
     let confirm = false;
     if (on && live) {
       confirm = window.confirm(
-        `Bot 5 is LIVE. Fast movers will be cut on their bot and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"}), without the entry checks. Turn it on?`
+        `Bot 5 is LIVE. Fast movers will be ${form.keep_trade ? "kept on their bot (a LIVE pair is left alone)" : "cut on their bot"} and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"}). Turn it on?`
       );
       if (!confirm) return;
     }
@@ -87,6 +89,8 @@ export function FastMoverBot() {
           const n = Math.round(Number(form.bot5_trades));
           return Number.isFinite(n) ? Math.min(20, Math.max(0, n)) : 1;
         })(),
+        entry_checks: Boolean(form.entry_checks),
+        keep_trade: Boolean(form.keep_trade),
         sources,
         confirm_live: confirm,
       });
@@ -119,8 +123,9 @@ export function FastMoverBot() {
       </h2>
       <p className="mt-1 text-xs text-slate-400">
         When a stock one of the ticked bots holds moves fast in that trade&apos;s favour, its trade there is closed and Bot 5
-        opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross, VWAP, RSI or other entry
-        check is read. Only a trade already in profit by the set % moves: a losing trade stays on its bot, however fast
+        opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross is waited for; with the
+        tick box below on, Bot 5&apos;s own entry checks (VWAP, RSI, ADX and the rest ticked in its strategy settings) are
+        read first and a refusal leaves the trade where it is. Only a trade already in profit by the set % moves: a losing trade stays on its bot, however fast
         the price bounces. After the set number of Bot 5 trades on the stock (1 = only the fast-mover trade), the stock
         goes back to the bot it came from once Bot 5 has closed it, at that bot&apos;s own size; 0 keeps it on Bot 5 all
         day. A stock moves to Bot 5 once a day. Set Bot 5&apos;s quantity in Settings → SMA strategy
@@ -199,6 +204,20 @@ export function FastMoverBot() {
             At most per day
             <input inputMode="numeric" value={String(form.max_day ?? "")} onChange={(e) => set("max_day", e.target.value)} className={input} />
           </label>
+          <label
+            className="flex basis-full items-center gap-2 text-xs text-slate-300"
+            title="On: before a trade is cut, Bot 5's own ticked entry checks (VWAP, volume, density, RSI, ADX, EMA, Supertrend, level, opening range, gap, candle direction, as set in Settings → SMA strategy on the Bot 5 tab) are read on the stock's candles; a refusal leaves the trade on its bot and is listed below. Off: Bot 5 enters whatever they say. The SMA cross, candle patterns and pullback waits are never read here."
+          >
+            <input type="checkbox" checked={Boolean(form.entry_checks)} onChange={(e) => set("entry_checks", e.target.checked)} className="accent-[#10B981]" />
+            Read Bot 5&apos;s own entry checks first (VWAP, RSI, ADX and the rest ticked in its strategy settings); a refusal leaves the trade where it is
+          </label>
+          <label
+            className="flex basis-full items-center gap-2 text-xs text-slate-300"
+            title="On: the trade stays open on its own bot and keeps that bot's stop and exits; Bot 5 opens a new order on the same side at its own size, and the stock is armed on both bots (both keep trading it). When Bot 5 is done with it (trades per stock), it only lets go of the stock. Two LIVE bots cannot hold one stock, so a LIVE trade is left alone in this mode. Replays cannot play Bot 5's second order (one bot per run); they note the move. Off: the trade is cut on its bot and moved to Bot 5 (the old behaviour)."
+          >
+            <input type="checkbox" checked={Boolean(form.keep_trade)} onChange={(e) => set("keep_trade", e.target.checked)} className="accent-[#10B981]" />
+            Keep the trade on its bot: don&apos;t cut it, Bot 5 opens its own order next to it (the stock is armed on both bots)
+          </label>
           <button
             type="button"
             disabled={busy}
@@ -216,7 +235,7 @@ export function FastMoverBot() {
             Today: {view?.moved_today?.length ?? 0} moved
             {view?.on_bot5 && Object.keys(view.on_bot5).length
               ? ` · on Bot 5 now: ${Object.entries(view.on_bot5)
-                  .map(([s, h]) => `${s} (from Bot ${h.from_bot}, ${h.trades} trade${h.trades === 1 ? "" : "s"})`)
+                  .map(([s, h]) => `${s} (${h.kept ? "with" : "from"} Bot ${h.from_bot}, ${h.trades} trade${h.trades === 1 ? "" : "s"})`)
                   .join(", ")}`
               : ""}
           </h3>

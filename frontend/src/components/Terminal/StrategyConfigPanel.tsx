@@ -3,9 +3,14 @@
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { InfoTip } from "@/components/ui/InfoTip";
+import { SlopeEditor } from "@/components/Settings/SlopeEditor";
+import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
+import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ChevronDown, Search } from "lucide-react";
+import { SETTING_LABELS } from "@/lib/settingLabels";
+import { TslCalculator } from "@/components/Settings/TslCalculator";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -48,129 +53,7 @@ function toCheckMinutes(value: unknown): number[] {
   return kept.length ? kept : [1];
 }
 
-const LABELS: Record<string, string> = {
-  qty: "qty",
-  sma_fast: "fast MA",
-  sma_medium: "medium MA",
-  sma_slow: "slow MA",
-  candle_minutes: "candle",
-  exit_candle_minutes: "exit candle",
-  atr_period: "ATR period",
-  atr_multiplier: "ATR ×",
-  use_stop: "stop on/off",
-  stop_type: "stop type",
-  use_adx_filter: "ADX",
-  adx_threshold: "ADX threshold",
-  use_vwap: "VWAP",
-  use_volume: "volume",
-  use_density: "density",
-  use_rsi: "RSI",
-  use_bollinger: "Bollinger",
-  bb_exit: "Bollinger exit",
-  use_gap_long: "SMA gap (buy)",
-  use_gap_short: "SMA gap (sell)",
-  use_gap_mode: "Gap mode",
-  use_candle_dir: "candle direction",
-  cross_exit: "cross exit",
-  late_entry_min: "late entry",
-  join_trend: "join morning trend",
-  join_after_min: "join after",
-  counter_exit_count: "counter-candle exit",
-  counter_rule: "counter-candle rule",
-  counter_need_fast: "counter-candle fast SMA",
-  counter_min_body: "counter-candle min body",
-  counter_reenter: "re-enter after counter candles",
-  counter_reenter_max: "counter re-entries per run",
-  counter_entry: "early reversal entry",
-  turn_alert: "SMA 9 turn alert",
-  turn_entry: "SMA 9 turn entry",
-  uturn_on: "rounded U turns",
-  turn_toward_cross: "turns only toward the 9/21 cross",
-  turn_exit_candle: "SMA 9 turns and exits close on a candle of the other colour",
-  turn_colour_exit: "turn trades close on the first candle of the other colour",
-  uturn_run: "U: run before (candles)",
-  uturn_min_pct: "U: slope at least",
-  use_ema: "EMA entry",
-  ema_exit: "EMA exit",
-  ema_fast: "fast EMA",
-  ema_slow: "slow EMA",
-  use_macd: "MACD entry",
-  macd_exit: "MACD exit",
-  macd_fast: "MACD fast",
-  macd_slow: "MACD slow",
-  macd_signal: "MACD signal",
-  ha_colours: "Heikin Ashi colours",
-  use_supertrend: "Supertrend entry",
-  use_level: "price level entry check",
-  level_line: "price level line",
-  st_exit: "Supertrend exit",
-  slope_exit: "SMA 9 slope exit",
-  slope_lookback: "slope over (candles)",
-  slope_minutes: "slope candle",
-  slope_bend_pct: "bend exit (% off the steepest)",
-  slope_turn: "turn exit",
-  slope_turn_pct: "turn at (%/candle)",
-  vturn_exit: "V-turn exit",
-  vturn_move_pct: "V-turn steep run",
-  vturn_turn_pct: "V-turn turn back",
-  vturn_within: "V-turn within",
-  vturn_handoff: "V-turn loss → Bot 2",
-  handoff_now: "Bot 2 orders at once",
-  pivot_target: "pivot target",
-  stop_plan: "staged stop plan",
-  decel_exit: "SMA 9 deceleration guard",
-  decel_lookback: "deceleration slope over (candles)",
-  decel_arm_atr: "deceleration arms at (ATR/candle)",
-  decel_drop_pct: "deceleration: slope down from peak (%)",
-  decel_min_atr: "deceleration: bend per candle (ATR)",
-  decel_candles: "deceleration: bending candles",
-  decel_confirm: "deceleration: close through SMA 9",
-  decel_pierce_atr: "deceleration: close through by (ATR)",
-  decel_peak_from: "deceleration: peak measured from",
-  plan_be_r: "breakeven at (R)",
-  plan_trail_r: "Supertrend trail from (R)",
-  st_period: "Supertrend ATR length",
-  st_mult: "Supertrend factor",
-  tall_pullback: "tall-candle pullback",
-  tall_atr_mult: "tall candle × ATR",
-  tall_expiry_candles: "pullback wait (candles)",
-  extreme_entry: "candle-extreme limit entry",
-  extreme_anchor: "limit at",
-  extreme_invalid_pct: "cancel beyond (%)",
-  extreme_expiry_candles: "limit wait (candles)",
-  extreme_cancel_on_cross: "cancel on an SMA cross against",
-  entry_candle_confirm: "entry candle must go the trade's way",
-  entry_candle_pct: "entry candle margin",
-  entry_candle_max: "entry candle wait",
-  day_extreme_guard: "don't buy at the day's high / short at the day's low",
-  day_extreme_pct: "day high/low distance",
-  day_extreme_pull_pct: "day high/low pullback",
-  day_extreme_candles: "day high/low wait",
-  slow_sma_exit: "slow SMA exit",
-  recovery_hold: "recovery hold",
-  recovery_tolerance_pct: "recovery target %",
-  recovery_emergency_mult: "recovery loss floor ×",
-  recovery_atr_mult: "recovery ATR floor ×",
-  recovery_max_candles: "recovery candles",
-  recovery_handoff: "hand off to Bot 2",
-  breakout_handoff: "breakout hand-off to Bot 3",
-  breakout_atr_mult: "breakout candle × ATR",
-  breakout_gap_pct: "breakout SMA gap %",
-  breakout_volume_mult: "breakout volume ×",
-  use_or_volume: "opening volume check",
-  use_or_vwap: "opening VWAP check",
-  use_or_spread: "opening SMA spread check",
-  use_or_break: "opening break check",
-  or_volume_ratio: "opening volume ratio",
-  or_spread_pct: "opening SMA spread %",
-  flip_orders: "flip",
-  review_on: "1-min review",
-  review_gap_pct: "review band",
-  review_cooldown_min: "review cooldown",
-  review_check_minutes: "review check candle",
-  review_check_mode: "review check mode",
-  review_default_answer: "review default",
-};
+export const LABELS = SETTING_LABELS;
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
   const keys = Object.keys(own ?? {});
@@ -344,6 +227,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   };
 
   // The "What's switched on" list and the "N on" count on each group.
+  // Saved strategies & history: reload the list after each Save; Load puts a copy's numbers into the form.
+  const [savedCount, setSavedCount] = useState(0);
+  const loadPreset = (settings: Partial<SmaConfig>, note: string) => {
+    markDirty(true);
+    setForm((prev) => (prev ? { ...prev, ...settings } : prev));
+    setMsg(`Loaded "${note}" — press Save to keep it.`);
+  };
   const rules = activeRules(form);
   const onCount = (group: RuleGroup) => rules.filter((r) => r.group === group).length;
   const turnOff = (values: Partial<Record<keyof SmaConfig, string | boolean>>) => {
@@ -362,18 +252,28 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     exit_candle_minutes: EXIT_CANDLE_MINUTES.includes(Number(form.exit_candle_minutes ?? 0))
       ? Number(form.exit_candle_minutes ?? 0)
       : 0,
+    small_exit_minutes: String(form.small_exit_minutes ?? ""),
+    small_exit_cross: form.small_exit_cross !== false,
+    small_exit_slope: form.small_exit_slope !== false,
+    small_exit_counter: Math.min(10, Math.max(0, Math.round(Number(form.small_exit_counter ?? 0)) || 0)),
+    small_exit_loss_pct: Math.min(50, Math.max(0, Number(form.small_exit_loss_pct ?? 0) || 0)),
+    small_exit_agree: Math.min(5, Math.max(1, Math.round(Number(form.small_exit_agree ?? 1)) || 1)),
     atr_period: Number(form.atr_period),
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
     use_stop: form.use_stop !== false,
-    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR",
+    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR",
+    vwap_stop_atr: Number(form.vwap_stop_atr ?? 0.5),
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
-    tsl_mode: String(form.tsl_mode ?? "POINTS") as "POINTS" | "PERCENT",
+    tsl_mode: String(form.tsl_mode ?? "POINTS") as "POINTS" | "PERCENT" | "ATR",
     tsl_sl_pct: Number(form.tsl_sl_pct ?? 1.0),
     tsl_trail_pct: Number(form.tsl_trail_pct ?? 0.5),
     tsl_target_pct: Number(form.tsl_target_pct ?? 0),
+    tsl_sl_atr: Number(form.tsl_sl_atr ?? 1.5),
+    tsl_trail_atr: Number(form.tsl_trail_atr ?? 0.5),
+    tsl_target_atr: Number(form.tsl_target_atr ?? 3),
     gap_sl_mult: Number(form.gap_sl_mult ?? 1),
     gap_tp_mult: Number(form.gap_tp_mult ?? 2),
     gap_min_pct: Number(form.gap_min_pct ?? 0.2),
@@ -447,6 +347,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
+    use_high52: Boolean(form.use_high52),
+    high52_side: ["LONG", "SHORT", "BOTH"].includes(String(form.high52_side)) ? (String(form.high52_side) as SmaConfig["high52_side"]) : "LONG",
+    high52_pct: Math.min(20, Math.max(0, Number(form.high52_pct ?? 0) || 0)),
     level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
     st_exit: Boolean(form.st_exit),
     slope_exit: Boolean(form.slope_exit),
@@ -509,6 +412,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_volume_ratio: Math.min(20, Math.max(0, Number(form.or_volume_ratio ?? 2) || 0)),
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
+    max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
     entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
     pattern_tf: ([1, 3, 5, 10, 15].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15,
     pattern_trend: Boolean(form.pattern_trend),
@@ -540,6 +444,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       onChanged();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Reset to defaults: every shared strategy field back to its default. Trade list, mode and name stay. */
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetDefaults = async (withStocks: boolean) => {
+    setConfirmReset(false);
+    setBusy(true);
+    setMsg(null);
+    try {
+      const live = String(form?.trading_mode ?? "").toUpperCase() === "LIVE";
+      if (live && !window.confirm("This bot is LIVE. Reset its strategy settings to the defaults anyway?")) return;
+      const out = await smaApi.resetConfig(live, withStocks);
+      markDirty(false);
+      setForm(out.config);
+      setMsg(
+        out.changed.length
+          ? `Reset to defaults: ${out.changed.length} setting${out.changed.length === 1 ? "" : "s"} changed${withStocks ? ", every stock's own settings cleared" : ""}. Press Start bot.`
+          : "Already at the defaults."
+      );
+      setSavedCount((n) => n + 1);
+      onChanged();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Reset failed");
     } finally {
       setBusy(false);
     }
@@ -607,6 +537,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       });
       markDirty(false);
       setMsg("Saved. Press Start bot. Open positions stay open.");
+      setSavedCount((n) => n + 1);
       onChanged();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -697,6 +628,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
       </div>
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
+      {!stockScope ? <StrategyPresets current={strategyBody()} labels={LABELS} refreshKey={savedCount} onLoad={loadPreset} /> : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">
         {GROUP_CHIPS.map((g) => {
           const on = g.id === "risk" ? 0 : onCount(g.id as RuleGroup);
@@ -815,6 +747,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </label>
+          <CandleSizePicture form={form} set={set} />
           <SectionTitle>How a trade opens</SectionTitle>
           <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <div className="flex items-center gap-1 text-sm text-slate-300">
@@ -1098,6 +1031,15 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
+          {form.turn_entry || form.turn_alert ? (
+            <p className="mt-2 text-xs text-slate-400">
+              The V and U shapes these read are drawn, with their angles, in the{" "}
+              <a href="#sma-slope-editor" className="text-sky-300 underline-offset-2 hover:underline">
+                slope editor (step 3)
+              </a>
+              .
+            </p>
+          ) : null}
           <SectionTitle>How the entry order is placed</SectionTitle>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -1131,6 +1073,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("tall_expiry_candles")}
             />
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["tall"]} />
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1291,6 +1234,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <InfoTip label="About the ADX filter">Blocks entries while ADX (trend strength) is below the threshold.</InfoTip>
           </label>
           <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
+          <AdxPicture form={form} set={set} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1462,6 +1406,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["direction"]} />
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             EMA lines (check here; the exit is in step 3)
             <InfoTip label="About the EMA cross">
@@ -1611,6 +1556,48 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </select>
             </label>
           ) : null}
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_high52)}
+              onChange={(e) => set("use_high52", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_high52") && <OwnTag />}
+            Enter only at the 52-week high
+            <InfoTip label="About the 52-week high check">
+              A breakout check. The signal candle must close at the stock&apos;s 52-week high (the highest daily high of the last 52
+              weeks before that day, from Groww&apos;s daily candles): a buy at or above it, with &quot;Buys only&quot; a sell is refused.
+              &quot;Sells only&quot; is the mirror at the 52-week low; &quot;Both&quot; judges each side on its own level. The band lets a
+              close a little under the high count too (2 = within 2% of it). The levels load once a day in the background; until
+              they have loaded the entry is refused, like the other checks when a line is not ready. The Scalp page&apos;s 52-week
+              high tab lists the stocks near their high to arm.
+            </InfoTip>
+          </label>
+          {form.use_high52 ? (
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                {isOwn("high52_side") && <OwnTag />}
+                Which side
+                <select
+                  value={String(form.high52_side ?? "LONG")}
+                  onChange={(e) => set("high52_side", e.target.value)}
+                  className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+                >
+                  <option value="LONG">Buys only, at the 52-week high (sells refused)</option>
+                  <option value="SHORT">Sells only, at the 52-week low (buys refused)</option>
+                  <option value="BOTH">Both: buys at the high, sells at the low</option>
+                </select>
+              </label>
+              <Field
+                label="Band under the high (0 = must reach it)"
+                suffix="%"
+                value={String(form.high52_pct ?? 0)}
+                onChange={(v) => set("high52_pct", v)}
+                own={isOwn("high52_pct")}
+              />
+            </div>
+          ) : null}
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
             <InfoTip label="About the opening range">
@@ -1707,6 +1694,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </div>
+          <SmallCandlesCard form={form} set={set} isOwn={isOwn} />
           {noExitOn(form) ? (
             <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
               No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
@@ -1813,6 +1801,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               trade do not count. 0.5 = half an ATR.
             </p>
           </div>
+          <CandleRulesPicture form={form} set={set} parts={["counter"]} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1995,6 +1984,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               These V-turn numbers also drive the SMA {form.sma_fast ?? 9} turn {form.turn_entry ? "entry" : "alert"} in step 1.
             </p>
           ) : null}
+          <SlopeEditor form={form} set={set} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2123,6 +2113,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("gap_fade_min_candles")}
             />
           </div>
+          <GapModePicture form={form} set={set} />
           {gapNotes.length ? (
             <ul aria-label="Setting notes" className="mt-2 space-y-1.5">
               {gapNotes.map((note) => (
@@ -2220,7 +2211,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 ? "Trailing stop-loss on new entries"
                 : form.stop_type === "SUPERTREND"
                   ? "Stop-loss on the Supertrend line (moves each candle)"
-                  : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+                  : form.stop_type === "VWAP"
+                    ? `Stop-loss at VWAP ∓ ${String(form.vwap_stop_atr ?? 0.5)}× ATR (moves each candle)`
+                    : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
             <InfoTip label="About the stop-loss">
               Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
               and the square-off close them.
@@ -2231,7 +2224,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Stop type{isOwn("stop_type") && <OwnTag />}
             </span>
             <select
-              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" ? form.stop_type : "ATR"}
+              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR"}
               onChange={(e) => set("stop_type", e.target.value)}
               className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
@@ -2239,8 +2232,40 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="SMA_GAP">SMA gap — moving stop + target</option>
               <option value="TSL">Trailing stop (TSL) — ₹ or % steps, like Groww</option>
               <option value="SUPERTREND">Supertrend — stop on the Supertrend line, moves each candle</option>
+              <option value="VWAP">VWAP + ATR buffer — stop at VWAP − k × ATR (buy) / VWAP + k × ATR (sell), moves each candle</option>
             </select>
           </label>
+          {form.stop_type === "VWAP" ? (
+            <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
+              <div className="grid grid-cols-2 items-end gap-2">
+                <Field label="Buffer below / above VWAP" suffix="× ATR" value={String(form.vwap_stop_atr ?? 0.5)} onChange={(v) => set("vwap_stop_atr", v)} own={isOwn("vwap_stop_atr")} />
+                <label className="block text-xs text-slate-300">
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Buffer slider</span>
+                    <span className="font-mono text-slate-100">{String(form.vwap_stop_atr ?? 0.5)} × ATR</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={3}
+                    step={0.05}
+                    value={Math.min(3, Math.max(0, Number(form.vwap_stop_atr ?? 0.5) || 0))}
+                    onChange={(e) => set("vwap_stop_atr", String(Number(e.target.value)))}
+                    className="mt-1 w-full accent-sky-400"
+                    aria-label="VWAP stop buffer in ATR multiples"
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Stop = VWAP − {String(form.vwap_stop_atr ?? 0.5)} × ATR for a buy, VWAP + {String(form.vwap_stop_atr ?? 0.5)} × ATR for a sell. VWAP is
+                where the day&apos;s money has traded on average (institutional fair value); the ATR buffer keeps a wick through it from
+                closing the trade. Read on each closed candle and only ever tightened (a buy&apos;s stop rises with VWAP, never falls). If the
+                level is on the wrong side when the trade opens, the ATR stop ({String(form.atr_multiplier)}× ATR) guards it until the
+                level comes under a buy or above a sell. A price at or past it closes the trade (VWAP SL). LIVE moves the Groww stop order the
+                same way.
+              </p>
+            </div>
+          ) : null}
           {form.stop_type === "SUPERTREND" ? (
             <p className="mt-2 text-xs text-slate-400">
               The stop sits on the Supertrend line ({String(form.st_period ?? 10)} candles, ×{String(form.st_mult ?? 3)}; set them under
@@ -2300,10 +2325,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             ) : null}
           </div>
           {form.stop_type !== "TSL" ? (
-            <div className="mt-2 grid grid-cols-2 items-end gap-2">
-              <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
-              <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
-            </div>
+            <>
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
+                <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
+              </div>
+              <AtrPicture form={form} set={set} />
+            </>
           ) : null}
           {form.stop_type === "SMA_GAP" ? (
             <div className="mt-2 rounded-md border border-sky-400/20 bg-sky-400/[0.04] p-2">
@@ -2344,11 +2372,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   />
                   Percent (%)
                 </label>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="tsl_mode"
+                    checked={form.tsl_mode === "ATR"}
+                    onChange={() => set("tsl_mode", "ATR")}
+                    className="accent-sky-400"
+                  />
+                  ATR multiples (auto-sized per stock)
+                </label>
                 <span className="text-[11px] text-slate-500">
-                  % scales with the stock price — 1% is ₹1 on a ₹100 stock and ₹10 on a ₹1,000 stock.
+                  % scales with the stock price; ATR multiples scale with how far each stock moves per candle, worked out at
+                  entry from that stock&apos;s own ATR, so one setting fits every stock a bot is handed.
                 </span>
               </div>
-              {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+              {form.tsl_mode === "ATR" ? (
+                <TslAtrSliders form={form} set={set} isOwn={isOwn} />
+              ) : (form.tsl_mode ?? "POINTS") === "PERCENT" ? (
                 <div className="grid grid-cols-3 items-end gap-2">
                   <Field label="Stop" suffix="%" value={String(form.tsl_sl_pct ?? 1)} onChange={(v) => set("tsl_sl_pct", v)} own={isOwn("tsl_sl_pct")} />
                   <Field label="Trail every" suffix="%" value={String(form.tsl_trail_pct ?? 0.5)} onChange={(v) => set("tsl_trail_pct", v)} own={isOwn("tsl_trail_pct")} />
@@ -2361,8 +2402,18 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <Field label="Target" suffix="₹" value={String(form.tsl_target_points ?? 0)} onChange={(v) => set("tsl_target_points", v)} own={isOwn("tsl_target_points")} />
                 </div>
               )}
+              <TslCalculator form={form} set={set} symbol={stockScope ? scope : null} armed={armed} />
               <Hint label="About the trailing stop">
-                {(form.tsl_mode ?? "POINTS") === "PERCENT" ? (
+                {form.tsl_mode === "ATR" ? (
+                  <>
+                    <b>ATR mode:</b> at entry the bot reads the stock&apos;s ATR on its own candle and places the stop{" "}
+                    {String(form.tsl_sl_atr ?? 1.5)} × ATR away, moves it every {String(form.tsl_trail_atr ?? 0.5)} × ATR the price
+                    gains past its best (never back), and books {Number(form.tsl_target_atr ?? 3) > 0 ? `${String(form.tsl_target_atr ?? 3)} × ATR` : "no"} target. A
+                    stock that moves ₹2 a candle gets a ₹{(2 * Number(form.tsl_sl_atr ?? 1.5)).toLocaleString("en-IN")} stop, one that moves
+                    ₹0.40 a candle a ₹{(0.4 * Number(form.tsl_sl_atr ?? 1.5)).toLocaleString("en-IN")} stop. Without a formed ATR the ₹ points
+                    below the sliders are used, so a trade is never left without a stop.
+                  </>
+                ) : (form.tsl_mode ?? "POINTS") === "PERCENT" ? (
                   <>
                     <b>Percent mode:</b> Stop % is the distance from entry; Target % 0 means no target. A buy at ₹1,000 with stop
                     {" "}{String(form.tsl_sl_pct ?? 1)}% starts its stop at ₹
@@ -2407,6 +2458,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <div className="mt-2 grid grid-cols-2 items-end gap-2">
                 <Field label="Max daily loss" suffix="₹" value={String(form.max_daily_loss)} onChange={(v) => set("max_daily_loss", v)} />
                 <Field label="Max trades / day (1–100)" value={String(form.max_trades_per_day)} onChange={(v) => set("max_trades_per_day", v)} />
+                <Field
+                  label="Max trades per stock / day (0 = no cap)"
+                  value={String(form.max_trades_per_stock ?? 0)}
+                  onChange={(v) => set("max_trades_per_stock", v)}
+                  own={isOwn("max_trades_per_stock")}
+                />
                 <Field
                   label="No new entries after"
                   value={form.entry_cutoff_time || "15:00"}
@@ -2705,6 +2762,32 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Unsaved changes
           </span>
         ) : null}
+        {!stockScope ? (
+          confirmReset ? (
+            <span className="inline-flex flex-wrap items-center gap-2 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-100 ring-1 ring-inset ring-rose-400/30">
+              Put every shared setting back to its default? The Trade list, PAPER / LIVE and the bot name stay.
+              <button type="button" disabled={busy} onClick={() => resetDefaults(false)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset
+              </button>
+              <button type="button" disabled={busy} onClick={() => resetDefaults(true)} className="rounded bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-500">
+                Reset + clear stocks&apos; own settings
+              </button>
+              <button type="button" onClick={() => setConfirmReset(false)} className="rounded px-2 py-0.5 ring-1 ring-inset ring-white/20 hover:bg-white/5">
+                Keep
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmReset(true)}
+              title="Every shared strategy setting back to its default (what a new bot starts with)"
+              className="inline-flex h-11 items-center rounded-md px-4 text-sm text-slate-200 ring-1 ring-inset ring-white/15 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 sm:h-9"
+            >
+              Reset to defaults
+            </button>
+          )
+        ) : null}
         {stockScope && Object.keys(own).length > 0 && (
           <button
             disabled={busy}
@@ -2799,6 +2882,11 @@ export function activeRules(f: SmaConfig): Rule[] {
       PIVOT_R1: "Price beyond R1 / S1 (buy above R1, sell below S1)",
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
+  check(
+    "use_high52",
+    f.use_high52,
+    `${{ LONG: "Buy only at the 52-week high", SHORT: "Sell only at the 52-week low", BOTH: "Buy at the 52-week high, sell at the 52-week low" }[String(f.high52_side ?? "LONG")] ?? "52-week high check"}${n(f.high52_pct, 0) > 0 ? ` (within ${n(f.high52_pct, 0)}%)` : ""}`
+  );
   check("use_or_volume", f.use_or_volume, "Opening 15 min: volume check");
   check("use_or_vwap", f.use_or_vwap, "Opening 15 min: VWAP check");
   check("use_or_spread", f.use_or_spread, "Opening 15 min: SMA spread check");
@@ -2813,6 +2901,9 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.bb_exit && f.bb_exit !== "OFF")
     add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
   if (f.slow_sma_exit) add({ group: "exit", key: "slow_sma_exit", text: `Close when a candle closes beyond SMA ${slow} against the trade`, off: { slow_sma_exit: false } });
+  const smallSizes = String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
+  if (smallSizes.length)
+    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}`, off: { small_exit_minutes: "" } });
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
@@ -2853,6 +2944,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "use_stop", text: `Moving stop and target from the SMA gap (PAPER only; LIVE uses ${f.atr_multiplier}× ATR)` });
   } else if (f.stop_type === "SUPERTREND") {
     add({ group: "stop", key: "use_stop", text: `Stop on the Supertrend line (${n(f.st_period, 10)}, ×${n(f.st_mult, 3)}), moved each candle, tighter only` });
+  } else if (f.stop_type === "VWAP") {
+    add({ group: "stop", key: "use_stop", text: `Stop at VWAP ∓ ${n(f.vwap_stop_atr, 0.5)}× ATR, moved each candle, tighter only` });
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
   }
@@ -3130,6 +3223,136 @@ function Hint({ children, label }: { children: ReactNode; label: string }) {
     <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
       <InfoTip label={label}>{children}</InfoTip>
       How it works
+    </div>
+  );
+}
+
+
+const SMALL_SIZES = [1, 2, 3, 5, 10] as const;
+
+/** Watch smaller candles while in a trade (small_candles.py): exit on a 1 / 3 / 5-minute turn before the bot's own candle can. */
+function SmallCandlesCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = Number(form.candle_minutes ?? 1) || 1;
+  const picked = String(form.small_exit_minutes ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => (SMALL_SIZES as readonly number[]).includes(n));
+  const watched = picked.filter((n) => n < own);
+  const on = watched.length > 0;
+  const toggle = (m: number, next: boolean) => {
+    const list = next ? Array.from(new Set([...picked, m])) : picked.filter((n) => n !== m);
+    set("small_exit_minutes", list.sort((a, b) => a - b).join(","));
+  };
+  const counter = Number(form.small_exit_counter ?? 0) || 0;
+  return (
+    <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
+      <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
+        {isOwn("small_exit_minutes") && <OwnTag />}
+        <b className="text-slate-100">Watch smaller candles while in a trade</b>
+        <span className={clsx("ml-auto font-mono text-xs", on ? "text-emerald-300" : "text-slate-500")}>{on ? `ON · ${watched.join(" / ")} min` : "off"}</span>
+        <InfoTip label="About watching smaller candles">
+          A bot on {own}-minute candles only learns a trade has turned when a {own}-minute candle closes. Tick smaller sizes
+          here and the bot also reads them, built from the stock&apos;s 1-minute candles, while it holds a trade: the SMA 9/21
+          cross against the trade, the SMA 9 slope turning against it (the turn level from the slope exit), or N candles in a
+          row against it. One size saying so closes the trade (SMALL_CANDLE_EXIT), or set how many sizes must agree. &quot;Only
+          when under water&quot; keeps a winning trade with the bot&apos;s own exits and lets the small candles cut only a losing
+          one. No reverse: the next entry waits for the bot&apos;s own signal. Entries are unchanged. Sizes at or above the
+          bot&apos;s candle are ignored.
+        </InfoTip>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Smaller candle sizes to watch">
+        <span className="text-slate-400">Read the trade on:</span>
+        {SMALL_SIZES.map((m) => (
+          <label
+            key={m}
+            className={clsx(
+              "flex items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset",
+              m >= own ? "opacity-40" : picked.includes(m) ? "bg-emerald-500/15 text-slate-100 ring-emerald-400/50" : "ring-white/15 hover:bg-white/5"
+            )}
+            title={m >= own ? `Not smaller than the bot's ${own}-minute candle` : undefined}
+          >
+            <input type="checkbox" checked={picked.includes(m)} disabled={m >= own} onChange={(e) => toggle(m, e.target.checked)} className="accent-emerald-400" aria-label={`Watch ${m}-minute candles`} />
+            {m} min
+          </label>
+        ))}
+      </div>
+      <div className={clsx("mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-3", !on && "opacity-50")}>
+        <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={form.small_exit_cross !== false} onChange={(e) => set("small_exit_cross", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_cross") && <OwnTag />}
+          SMA cross against the trade
+        </label>
+        <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={form.small_exit_slope !== false} onChange={(e) => set("small_exit_slope", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_slope") && <OwnTag />}
+          SMA 9 slope turns against it
+        </label>
+        <Field label="Candles in a row against (0 = off)" value={String(counter)} onChange={(v) => set("small_exit_counter", v)} own={isOwn("small_exit_counter")} />
+        <Field label="Only when under water by (%, 0 = always)" value={String(form.small_exit_loss_pct ?? 0)} onChange={(v) => set("small_exit_loss_pct", v)} own={isOwn("small_exit_loss_pct")} />
+        <Field label="Sizes that must agree (1 = any)" value={String(form.small_exit_agree ?? 1)} onChange={(v) => set("small_exit_agree", v)} own={isOwn("small_exit_agree")} />
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * ATR-multiple trailing stop (tsl_mode ATR): sliders and boxes for the stop, trail step and target as multiples of the
+ * stock's own ATR at entry. Made for Bot 5, which trades whatever fast mover it is handed: the numbers size themselves
+ * to each stock. The calculator below shows what the multiples give in ₹ and % on a chosen stock per candle size.
+ */
+function TslAtrSliders({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const rows: { key: keyof SmaConfig; label: string; min: number; max: number; step: number; fallback: number; note: string }[] = [
+    { key: "tsl_sl_atr", label: "Stop", min: 0.25, max: 6, step: 0.05, fallback: 1.5, note: "under 1 × is hit by noise; 1.5 × leaves one wild candle" },
+    { key: "tsl_trail_atr", label: "Trail every", min: 0.1, max: 4, step: 0.05, fallback: 0.5, note: "the stop follows in steps this big; ½ ATR = half a candle" },
+    { key: "tsl_target_atr", label: "Target (0 = none)", min: 0, max: 12, step: 0.25, fallback: 3, note: "3 × is two-to-one on a 1.5 × stop; 0 lets the trail or the cross close it" },
+  ];
+  return (
+    <div className="space-y-2">
+      {rows.map((r) => {
+        const value = Number(form[r.key] ?? r.fallback);
+        return (
+          <div key={r.key} className="grid grid-cols-[1fr_6rem] items-end gap-3">
+            <label className="block text-xs text-slate-300">
+              <span className="flex items-center justify-between gap-2">
+                <span>
+                  {r.label} <span className="text-slate-500">(× ATR)</span>
+                  {isOwn(r.key) ? <OwnTag /> : null}
+                </span>
+                <span className="font-mono text-slate-100">{Number.isFinite(value) ? `${value} × ATR` : "—"}</span>
+              </span>
+              <input
+                type="range"
+                min={r.min}
+                max={r.max}
+                step={r.step}
+                value={Math.min(r.max, Math.max(r.min, Number.isFinite(value) ? value : r.fallback))}
+                onChange={(e) => set(r.key, String(Number(e.target.value)))}
+                className="mt-1 w-full accent-sky-400"
+                aria-label={`${r.label} in ATR multiples`}
+              />
+              <span className="block text-[11px] text-slate-500">{r.note}</span>
+            </label>
+            <Field label="" suffix="× ATR" value={String(form[r.key] ?? r.fallback)} onChange={(v) => set(r.key, v)} own={isOwn(r.key)} />
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -62,6 +62,8 @@ import ema_filter
 import heikin_ashi
 import macd
 import exit_candle
+import small_candles
+import vwap_stop
 import supertrend
 import opening_range
 import join_trend
@@ -73,6 +75,7 @@ import decel_guard
 import slope_exit
 import stop_plan
 import turn_entry
+import high52
 import level_check
 import day_extreme
 import recovery
@@ -204,6 +207,10 @@ class OpenPosition:
     # st_stop_bar is the last closed candle read.
     st_stop: bool = False
     st_stop_bar: int | None = None
+    # VWAP + ATR buffer stop (vwap_stop.py, stop_type VWAP): the stop follows VWAP ∓ k × ATR, tighter only;
+    # vwap_stop_bar is the last closed candle read.
+    vwap_stop: bool = False
+    vwap_stop_bar: int | None = None
     # Bollinger exit: the last closed candle read, and whether a close has
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
@@ -216,6 +223,9 @@ class OpenPosition:
     macd_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
+    # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
+    small_bars: dict = field(default_factory=dict)
+    small_state: dict = field(default_factory=dict)
     # Supertrend exit (supertrend.py): the last closed candle read.
     st_bar: int | None = None
     # SMA 9 slope exit (slope_exit.py): the last closed candle read and the steepest slope.
@@ -265,7 +275,7 @@ class OpenPosition:
 
 def _plan_r_restored(own, at_entry: dict, stop_active: bool, trailing: bool, tsl_step, entry: float, atr, direction: str) -> float | None:
     """R of a restored trade on the staged stop plan: the ATR stop it was opened with (ATR x multiplier)."""
-    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own):
+    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own) or vwap_stop.stop_on(own):
         return None
     try:
         mult = float(at_entry.get("atr_multiplier") or getattr(own, "atr_multiplier", 0) or 0)
@@ -288,10 +298,12 @@ MAX_TRADE_SYMBOLS = 24
 # The settings that decide a trade. Each trade keeps a copy of them from its
 # entry (TradeLog.strategy), and each replay run keeps one for the whole run.
 SNAPSHOT_FIELDS = (
+    "max_trades_per_stock",
     "qty", "sma_fast", "sma_medium", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
+    "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -305,6 +317,7 @@ SNAPSHOT_FIELDS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
+    "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
@@ -321,6 +334,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "candle_minutes",
     "exit_candle_minutes",
+    "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -537,6 +551,10 @@ def _entry_block(
         lvl = level_check.entry_reason(frame, direction, cfg)
         if lvl:
             reason = f"{reason}; {lvl}" if reason else lvl
+    if on("high52"):
+        h52 = high52.entry_reason(frame, direction, cfg)
+        if h52:
+            reason = f"{reason}; {h52}" if reason else h52
     if any(on(name) for name in opening_range.CHECKS):
         opening = opening_range.entry_reason(frame, direction, cfg, only=only)
         if opening:
@@ -706,6 +724,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
     ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("supertrend", "Supertrend"), ("level", "Price level"),
+    ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
 
@@ -759,6 +778,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return supertrend.passed_text(frame, direction, cfg)
         if name == "level":
             return level_check.passed_text(frame, direction, cfg)
+        if name == "high52":
+            return high52.passed_text(frame, direction, cfg)
         if name in opening_range.CHECKS:
             return opening_range.passed_text(frame, direction, cfg, name)
         if name == "density":
@@ -834,6 +855,14 @@ def chart_filters(cfg) -> dict:
         "vturn_turn_pct": slope_exit.vturn_turn_pct(cfg),
         "vturn_within": slope_exit.vturn_within(cfg),
         "slope_minutes": slope_exit.minutes(cfg),
+        # Which SMA 9 slope rules are on, and the fast SMA length, so the chart can shade where the next
+        # candle's close would fire an exit (or a turn entry) and say so on hover (display only).
+        "sma_fast": int(getattr(cfg, "sma_fast", 9) or 9),
+        "slope_rules": slope_exit.on(cfg),
+        "slope_turn": slope_exit.on(cfg) and slope_exit.turn_on(cfg),
+        "decel_exit": decel_guard.on(cfg),
+        "turn_entry": turn_entry.entry_on(cfg),
+        "turn_toward_cross": turn_entry.entry_on(cfg) and turn_entry.toward_on(cfg),
         # What the chart's "why no trade here" line needs: when entries stop, and whether a cross orders at once.
         "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
@@ -1030,6 +1059,8 @@ class StrategyEngine:
         self.realized_net = 0.0
         self.realized_gross = 0.0  # today's closed P&L before charges (the P&L log reads it)
         self.trades_today = 0
+        # Entries per stock today (per-stock cap, max_trades_per_stock); counted with trades_today.
+        self._stock_trades: dict[str, int] = {}
         self._session_date = self._now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
@@ -1055,12 +1086,18 @@ class StrategyEngine:
         """The engine's clock. A replay engine runs on the replayed day instead."""
         return _ist_now()
 
-    def _alert(self, message: str, critical: bool = False, call: bool = False) -> None:
-        """Telegram/WhatsApp alert, and a phone call with `call`. A replay engine sends none."""
+    def _alert(self, message: str, critical: bool = False, call: bool = False, kind: str = "trade") -> None:
+        """Telegram/WhatsApp alert, and a phone call with `call`. A replay engine sends none.
+
+        `kind` picks the channel: "trade" (fills, closes, refusals, hand-offs) or "signal" (a cross
+        coming, an SMA 9 turn, a 1-minute review); each falls back to the trade channel when unset.
+        """
         if critical:
             _schedule_critical_whatsapp(message, call=call)
-        else:
+        elif kind == "trade":
             _schedule_whatsapp(message)
+        else:
+            _schedule_kind_whatsapp(message, kind)
 
     def _view_frame(self, view: str, frame: pd.DataFrame, cfg: BotConfig) -> tuple[pd.DataFrame, bool]:
         """The chart stock's enriched candles, and whether they were recomputed.
@@ -1189,7 +1226,7 @@ class StrategyEngine:
             if stop_active and own is not None and not trailing and uses_tsl(own):
                 # The trailed stop was saved on each move. It never loosens,
                 # so trailing resumes from it with the best price reset to entry.
-                tsl_points, tsl_step, tgt_points = tsl_settings(own, entry_price=entry)
+                tsl_points, tsl_step, tgt_points = tsl_settings(own, entry_price=entry, atr=atr)
                 _sl, target = tsl_entry_levels(direction, entry, tsl_points, tgt_points)
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
@@ -1213,6 +1250,8 @@ class StrategyEngine:
                 tsl_best=entry if tsl_step else None,
                 # Supertrend stop: resumes from the saved stop, tighter only.
                 st_stop=bool(stop_active and own is not None and not trailing and not tsl_step and supertrend.stop_on(own)),
+                # VWAP stop: resumes from the saved stop, tighter only.
+                vwap_stop=bool(stop_active and own is not None and not trailing and not tsl_step and vwap_stop.stop_on(own)),
                 # Ticks before a restart are not kept; the range restarts at entry.
                 high=entry,
                 low=entry,
@@ -1255,6 +1294,7 @@ class StrategyEngine:
             self.realized_gross = 0.0
             self._realized_mode = None
             self.trades_today = 0
+            self._stock_trades.clear()
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
@@ -1310,6 +1350,8 @@ class StrategyEngine:
         self.broker.set_mode(cfg.trading_mode)
         view = (cfg.symbol or "").upper()
         armed = trade_names(cfg)
+        # The 52-week levels of the stocks whose entry check reads them, loaded in the background once a day.
+        high52.ensure(self.broker, [s for s in armed if high52.on(_cfg_for(cfg, s))], now.date())
         # Armed names come first so a chart symbol cannot crowd one of them
         # out of the quote loop. Open books stay watched after they are disarmed.
         watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
@@ -1413,6 +1455,7 @@ class StrategyEngine:
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
             await self._trail_supertrend(symbol_cfg)
+            await self._trail_vwap_stop(symbol_cfg)
             await self._trail_stop_plan(symbol_cfg)
             await self._watch_stop(symbol_cfg)
             await self._watch_bollinger(symbol_cfg)
@@ -1420,6 +1463,7 @@ class StrategyEngine:
             await self._watch_ema_exit(symbol_cfg)
             await self._watch_macd_exit(symbol_cfg)
             await self._watch_exit_candle(symbol_cfg)
+            await self._watch_small_candles(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
             await self._watch_slope_exit(symbol_cfg)
             await self._watch_turn_colour(symbol_cfg)
@@ -1714,7 +1758,8 @@ class StrategyEngine:
                     self._alert(
                         turn_entry.alert_text(
                             bot, symbol, found[0], found[1], price, turn_entry.entry_on(cfg), held=held, away=away, waits=waits
-                        )
+                        ),
+                        kind="signal",
                     )
         hit = self._turn_hit.get(symbol)
         return hit if hit is not None and hit[0] == ts else None
@@ -2459,6 +2504,8 @@ class StrategyEngine:
             if self.trades_today >= int(cfg.max_trades_per_day):
                 self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
                 return "closed on cross — trade cap locks the day"
+            if (stock_cap := self._stock_cap_hit(cfg)) is not None:
+                return f"closed on {signal} — {stock_cap}"
             if (cfg.symbol or "").upper() in self._recovery_blocked:
                 return "closed on cross — no new trade in this stock today (emergency recovery exit)"
             if pullback is not None:
@@ -2476,6 +2523,8 @@ class StrategyEngine:
         if self.trades_today >= int(cfg.max_trades_per_day):
             self._cap_the_day(f"max_trades_per_day ({cfg.max_trades_per_day}) reached")
             return "entry blocked — trade cap"
+        if (stock_cap := self._stock_cap_hit(cfg)) is not None:
+            return f"{signal} ignored — {stock_cap}"
         if (cfg.symbol or "").upper() in self._recovery_blocked:
             return "entry blocked — no new trade in this stock today (emergency recovery exit)"
         if pullback is not None:
@@ -2750,6 +2799,8 @@ class StrategyEngine:
                 )
             elif self.trades_today >= int(symbol_cfg.max_trades_per_day):
                 why = "trade cap reached"
+            elif (stock_cap := self._stock_cap_hit(symbol_cfg)) is not None:
+                why = stock_cap
             if why:
                 self._pullback.pop(symbol, None)
                 label = "entry-candle" if order.confirm else "limit" if order.invalid_at is not None else "pullback"
@@ -3144,10 +3195,13 @@ class StrategyEngine:
         with session_factory()() as db:
             row = db.get(TradeLog, trade_id)
             day = row.date if row is not None else None
+            sym = (row.symbol or "").upper() if row is not None else ""
         if trade_id <= self._count_floor():
             return  # already left out of the count by a reset
         if day == self._session_date and self.trades_today > 0:
             self.trades_today -= 1
+            if self._stock_trades.get(sym, 0) > 0:
+                self._stock_trades[sym] -= 1
 
     async def _drop_positions_groww_does_not_hold(self, cfg: BotConfig) -> None:
         """A local open row whose Groww book is flat is not a live position.
@@ -3263,7 +3317,7 @@ class StrategyEngine:
             target = round_price(cfg.symbol, tp_gap)
         tsl_points = tsl_step = None
         if uses_tsl(cfg):
-            tsl_points, tsl_step, tgt_points = tsl_settings(cfg, entry_price=fill)
+            tsl_points, tsl_step, tgt_points = tsl_settings(cfg, entry_price=fill, atr=atr)
             sl_tsl, tp_tsl = tsl_entry_levels(direction, fill, tsl_points, tgt_points)
             sl = round_price(cfg.symbol, sl_tsl)
             target = round_price(cfg.symbol, tp_tsl) if tp_tsl is not None else None
@@ -3277,6 +3331,16 @@ class StrategyEngine:
             if line is not None and ((direction == "LONG" and line < fill) or (direction == "SHORT" and line > fill)):
                 sl = round_price(cfg.symbol, line)
             st_bar = _closed_bar_ts(frame)
+        vw_stop = vwap_stop.stop_on(cfg)
+        vw_bar = None
+        if vw_stop:
+            frame = self._frames.get((cfg.symbol or "").upper())
+            closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
+            # VWAP ∓ buffer × ATR, only when it is on the safe side of the fill; else the ATR stop until it is.
+            line = vwap_stop.stop_level(closed, direction, cfg, price=fill, atr=atr)
+            if line is not None:
+                sl = round_price(cfg.symbol, line)
+            vw_bar = _closed_bar_ts(frame)
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -3301,6 +3365,7 @@ class StrategyEngine:
             entry_reason=why,
         )
         self.trades_today += 1
+        self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
         self._rejects.pop((cfg.symbol or "").upper(), None)
         self._alert(
             fill_alert(
@@ -3334,12 +3399,14 @@ class StrategyEngine:
             tsl_best=fill if tsl_step else None,
             st_stop=st_stop,
             st_stop_bar=st_bar,
+            vwap_stop=vw_stop,
+            vwap_stop_bar=vw_bar,
             high=fill,
             low=fill,
             flipped=flipped,
             entry_why=why or "",
             # The plan needs the plain ATR stop at entry; R is the distance to it.
-            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop) else None,
+            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop and not vw_stop) else None,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -3465,6 +3532,31 @@ class StrategyEngine:
             return
         if await self._move_stop(pos, symbol, moved, "Supertrend stop"):
             pos.st_stop_bar = closed_ts
+
+    async def _trail_vwap_stop(self, cfg: BotConfig) -> None:
+        """Once per newly closed candle: move a VWAP stop to VWAP ∓ buffer × ATR (tighter only).
+
+        Read on the bot's own closed candles (vwap_stop.py); it only counts while it guards the real
+        position. LIVE moves the exchange stop like the trailing stop.
+        """
+        pos = self.position
+        if pos is None or not pos.vwap_stop or not pos.stop_active:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or closed_ts == pos.vwap_stop_bar:
+            return
+        line = vwap_stop.stop_level(frame.iloc[:-1], pos.direction, cfg)
+        if line is None:
+            pos.vwap_stop_bar = closed_ts
+            return
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, line))
+        if moved == pos.sl_trigger:
+            pos.vwap_stop_bar = closed_ts
+            return
+        if await self._move_stop(pos, symbol, moved, "VWAP stop"):
+            pos.vwap_stop_bar = closed_ts
 
     async def _trail_stop_plan(self, cfg: BotConfig) -> None:
         """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
@@ -3671,7 +3763,7 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
-        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else "ATR_SL_HIT"))
+        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else (vwap_stop.HIT_REASON if pos.vwap_stop else "ATR_SL_HIT")))
         if pos.plan_stage:
             reason = stop_plan.HIT_REASON  # the stop the plan moved (breakeven or the Supertrend line)
         if not hit and pos.target is not None and self.ltp > 0:
@@ -3918,6 +4010,44 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} {size}-minute exit candle — {note}"
         await self._exit_now(cfg, self.ltp, exit_candle.REASON)
 
+    async def _watch_small_candles(self, cfg: BotConfig) -> None:
+        """Watch smaller candles while in a trade (small_candles.py): once per newly closed candle of each ticked
+        size, read the cross / slope / counter candles on it; exit once enough sizes say so (and the loss gate allows)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        own_minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        watched = small_candles.watched(cfg, own_minutes)
+        if not watched:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other candle exits).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        tape = self._tapes.get(symbol)
+        changed = False
+        for size in watched:
+            frame = exit_candle.closed_frame(tape, size, int(cfg.sma_fast), int(cfg.sma_slow))
+            if frame is None or frame.empty:
+                continue
+            closed_ts = int(frame.iloc[-1]["ts"])
+            if pos.small_bars.get(size) == closed_ts:
+                continue
+            if closed_ts + size * 60 <= opened.timestamp():
+                continue  # that candle had closed before the entry
+            first = size not in pos.small_bars
+            pos.small_bars[size] = closed_ts
+            pos.small_state[size] = small_candles.verdict(frame, pos.signal_direction, cfg, first)
+            changed = True
+        if not changed:
+            return
+        hit, note = small_candles.decide(pos.small_state, cfg, pos.direction, pos.entry_price, self.ltp)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
+        await self._exit_now(cfg, self.ltp, small_candles.REASON)
+
     async def _watch_slope_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the SMA 9 bends or turns against the trade (slope_exit.py)."""
         pos = self.position
@@ -4080,7 +4210,7 @@ class StrategyEngine:
                         await self._cancel_sl_verified(self.position)
                     except SlCancelFailed:
                         # It filled as we cancelled: the stop closed the trade.
-                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else "ATR_SL_HIT")
+                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else (vwap_stop.HIT_REASON if self.position.vwap_stop else "ATR_SL_HIT"))
                         if self.position.plan_stage:
                             reason = stop_plan.HIT_REASON
                         fill_price = await self._real_exit_price(self.position, (cfg.symbol or "").upper())
@@ -4113,6 +4243,7 @@ class StrategyEngine:
                     "EMERGENCY_RECOVERY_ABORT": "emergency recovery exit — flat",
                     "SQUARE_OFF_CUTOFF": "recovery hold closed at the cut-off — flat",
                     "BREAKOUT_STOP": "trend breakout — flat",
+                    small_candles.REASON: "smaller candles turned against the trade — flat",
                     STOP_LOST: "Groww dropped the stop — closed at the market",
                     stop_plan.EXIT_REASON: "stop plan level reached — flat",
                     stop_plan.HIT_REASON: "stop plan stop hit — flat",
@@ -4469,7 +4600,7 @@ class StrategyEngine:
             if key in self._warned:
                 return
             self._warned.add(key)
-            self._alert(message)
+            self._alert(message, kind="signal")
             return
         if minutes is None or minutes > _WARN_CLEAR_MINUTES:
             self._warned.discard(key)
@@ -4577,6 +4708,20 @@ class StrategyEngine:
         self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
         return True
 
+    def _stock_cap_hit(self, cfg) -> str | None:
+        """The per-stock daily cap (max_trades_per_stock, 0 = off): why this stock takes no more entries today."""
+        try:
+            cap = int(getattr(cfg, "max_trades_per_stock", 0) or 0)
+        except (TypeError, ValueError):
+            cap = 0
+        if cap <= 0:
+            return None
+        name = (getattr(cfg, "symbol", "") or "").upper()
+        done = self._stock_trades.get(name, 0)
+        if done >= cap:
+            return f"{name} has had its {cap} trade(s) today (per-stock cap)"
+        return None
+
     def _count_floor(self) -> int:
         """Trades up to this id do not count today: the user reset the count."""
         cfg = self._cfg_cache
@@ -4604,6 +4749,7 @@ class StrategyEngine:
         self.load_config()
         before = self.trades_today
         self.trades_today = 0
+        self._stock_trades.clear()
         if self.status == "HALTED" and (self.halt_reason or "").startswith("max_trades_per_day"):
             self.status = "STOPPED"
             self.halt_reason = ""
@@ -4622,16 +4768,17 @@ class StrategyEngine:
         floor = self._count_floor()
         with session_factory()() as db:
             rows = (
-                db.query(TradeLog.mode, TradeLog.exit_reason)
+                db.query(TradeLog.mode, TradeLog.exit_reason, TradeLog.symbol)
                 .filter(TradeLog.date == day, TradeLog.id > floor, self._bot_rows())
                 .all()
             )
         # A row Groww never held was not a trade, so it does not use the cap.
-        self.trades_today = sum(
-            1
-            for row_mode, reason in rows
-            if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"
-        )
+        counted = [sym for row_mode, reason, sym in rows if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"]
+        self.trades_today = len(counted)
+        self._stock_trades = {}
+        for sym in counted:
+            key = (sym or "").upper()
+            self._stock_trades[key] = self._stock_trades.get(key, 0) + 1
         # A restart must not forget today's realized P&L either.
         self._refresh_realized(mode)
         return self.trades_today
@@ -4651,6 +4798,7 @@ class StrategyEngine:
         self.status = "STOPPED"
         self.halt_reason = ""
         self.trades_today = 0
+        self._stock_trades.clear()
         return True
 
     def _past_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
@@ -5090,7 +5238,7 @@ class StrategyEngine:
         self._signals[symbol] = note
         self.last_signal = note
         if default == "PROMPT":
-            self._alert(text)
+            self._alert(text, kind="signal")
             callback = self.on_review
             if callback is not None:
                 try:
@@ -5484,6 +5632,7 @@ _ALERT_REASON = {
     "EMA_CROSS": "EMA cross against the trade",
     "MACD_CROSS": "MACD cross against the trade",
     "SUPERTREND": "Supertrend turned against the trade",
+    "VWAP_SL_HIT": "VWAP stop hit",
     "SMA9_BEND": "SMA 9 bent",
     "SMA9_TURN": "SMA 9 turned against the trade",
     "SMA9_VTURN": "SMA 9 V-turn",
@@ -5520,6 +5669,7 @@ def _stop_points(cfg) -> dict | None:
     import tsl as _tsl
 
     sl_pct, step_pct, target_pct = _tsl.tsl_pcts(cfg)
+    sl_atr, step_atr, target_atr = _tsl.tsl_atrs(cfg)
     return {
         "tsl_mode": _tsl.tsl_mode(cfg),
         "tsl_sl_points": float(getattr(cfg, "tsl_sl_points", 20.0) or 20.0),
@@ -5528,8 +5678,12 @@ def _stop_points(cfg) -> dict | None:
         "tsl_sl_pct": sl_pct,
         "tsl_trail_pct": step_pct,
         "tsl_target_pct": target_pct,
+        "tsl_sl_atr": sl_atr,
+        "tsl_trail_atr": step_atr,
+        "tsl_target_atr": target_atr,
         "gap_sl_mult": float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
         "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
+        "vwap_stop_atr": vwap_stop.buffer(cfg),
     }
 
 
@@ -5823,6 +5977,24 @@ def upcoming_square_off_alert(*, symbol: str, direction: str, minutes: float, cl
     )
 
 
+def _schedule_kind_whatsapp(message: str, kind: str) -> None:
+    """A heads-up that is not an order ("signal", …): that kind's own channel, else the trade one."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        try:
+            from app.services.alert_notifier import alert_notifier
+
+            await alert_notifier.send_to(kind, message)
+        except Exception:  # noqa: BLE001
+            return
+
+    loop.create_task(_send())
+
+
 def _schedule_whatsapp(message: str) -> None:
     """Send after the order is booked. A failed alert must not change the fill."""
     try:
@@ -5917,7 +6089,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON,
+    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
 )
 
 
@@ -5946,6 +6118,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("Supertrend")
     if bool(getattr(cfg, "use_level", False)):
         checked.append("price level")
+    if high52.on(cfg):
+        checked.append("52-week high")
     if opening_range.any_on(cfg):
         checked.append("opening range")
     if bool(getattr(cfg, "use_adx_filter", False)):

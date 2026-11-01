@@ -190,6 +190,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (stopOn) {
     if (type === "TSL") out.push({ name: `Trailing stop (${pct ? "%" : "₹"})`, when: price, code: "TSL_HIT" });
     else if (type === "SUPERTREND") out.push({ name: "Supertrend stop (moves each candle)", when: price, code: "ST_SL_HIT" });
+    else if (type === "VWAP") out.push({ name: `VWAP ∓ ${num(cfg.vwap_stop_atr, 0.5)}× ATR stop (moves each candle)`, when: price, code: "VWAP_SL_HIT" });
     else if (type === "SMA_GAP") out.push({ name: "SMA-gap moving stop (PAPER; LIVE uses ATR)", when: price, code: "GAP_SL_HIT" });
     else out.push({ name: `ATR stop (${cfg.atr_multiplier ?? 1.5}× ATR)`, when: price, code: "ATR_SL_HIT" });
     const tslTarget = type === "TSL" && num(pct ? cfg.tsl_target_pct : cfg.tsl_target_points, 0) > 0;
@@ -205,6 +206,8 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   const ownCandle = num(cfg.candle_minutes, 1);
   const mixed = crossExitOn(cfg) && exitCandle > 0 && exitCandle !== ownCandle;
   if (mixed) out.push({ name: `SMA cross on the ${exitCandle}-minute candle`, when: candle, code: "EXIT_CANDLE_CROSS" });
+  const small = String(cfg.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < ownCandle);
+  if (small.length) out.push({ name: `Smaller candles turned (${small.join(" / ")}-min)`, when: candle, code: "SMALL_CANDLE_EXIT" });
   if (cfg.st_exit) out.push({ name: "Supertrend flip (candle closes beyond it)", when: candle, code: "SUPERTREND" });
   if (cfg.slope_exit) out.push({ name: "SMA 9 slope turn / bend", when: candle, code: "SMA9_TURN / SMA9_BEND" });
   if (cfg.vturn_exit) out.push({ name: "SMA 9 V-turn", when: candle, code: "SMA9_VTURN" });

@@ -30,6 +30,7 @@ from app.core.market_clock import IST, ist_now, session_state
 from app.models.database import AiAnalysis, StrategyLog, Trade, async_session
 from app.services.ai_advisor import AiUnavailable, ai_advisor, supports_reasoning
 from app.services.chat_actions import TOOLS, proposals_from, summary
+from app.services.chat_scope import Scope, classify
 from app.services.market_data import market_data
 from app.services.paper_engine import (
     BROKERAGE_PCT,
@@ -100,11 +101,40 @@ practice or virtual. Paper-only wording elsewhere in the facts (the ORB desk) do
 If the facts and the screen disagree about LIVE, go with LIVE and say the two disagree. RESEARCH and REPLAY are \
 practice books even while the terminal is LIVE.
 
+WHY A STOCK DID OR DID NOT TRADE AT A GIVEN TIME (the most asked question):
+`sma_terminal.bots[]` has every bot (1-5 and the research desk) with its status, mode, armed stocks, open \
+positions, `signal_lines` (the bot's latest decision line per stock) and `stocks_today[]`: for each stock the \
+`rules_in_force` (entry mode, candle size, cross exit, gap mode, cut-off, caps) and `crosses_today[]`, every \
+closed-candle SMA cross today on that bot's candle size with `what_happened` (entered which trade, closed which \
+trade, refused by which entry check, after the cut-off so no reverse, not on the Trade list then, cross exit off \
+so the trade was held, gap mode waiting, a cap, or no recorded reason). Answer from that list: find the cross \
+nearest the time the user names, quote its candle time, signal and `what_happened`, and the rule behind it \
+(`rules_in_force` and `settings`). If there was no cross near that time, say so: the bot only trades a fresh \
+closed-candle cross (or the other entries that are on), so no cross means no trade and no reverse. A reverse \
+needs the opposite cross AND the cross exit on AND the time before the cut-off. Use the bot the user names, else \
+the page's bot (`screen`), else bot 1, and say which bot you read. Times are IST.
+
+WHICH STRATEGY A PAST TRADE USED:
+`sma_terminal.recent_trades[]` holds the last days' trades of every bot with `entry_reason`, `exit_reason` and \
+`strategy_id`; `strategies_used[strategy_id]` is the exact settings saved at that trade's entry. For "what \
+strategy did yesterday's trades use", list each trade (bot, stock, side, times, reason in and out, net) and \
+describe its strategy in plain words from those settings: candle size, entry mode and checks that were on, stop \
+type and numbers, exits that were on. `settings_history` (bot 1's saves, newest first, each with what changed) \
+tells when a setting was changed. A trade without a strategy_id predates per-trade recording: say so.
+
 PROPOSING CHANGES (SMA bots only):
-You have two tools: `propose_trade_list_change` (arm / unarm stocks on an SMA bot's Trade list) and \
-`propose_stop_change` (stop-loss settings for all stocks or one stock). Calling one only shows the user a card with \
-the change; nothing is saved until they tap Apply. Use them when the user asks you to set up, change, arm, unarm or \
-pick something. Rules:
+You have three tools: `propose_trade_list_change` (arm / unarm stocks on an SMA bot's Trade list), \
+`propose_stop_change` (stop-loss settings for all stocks or one stock) and `propose_settings_change` (ANY other \
+strategy setting, from the user's plain words: entry checks, candle size, exits, gap mode, join trend, turn \
+entry, size, caps, times). Calling one only shows the user a card with the change; nothing is saved until they \
+tap Apply. Use them when the user asks you to set up, change, turn on / off, arm, unarm or pick something. Rules:
+- Settings in plain words: map the words to the field names in `sma_terminal.settings_catalog` (each has its \
+kind, bounds or choices and a `help` line) and send only those fields with the new values, in `changes`. \
+"Turn on VWAP on bot 3" -> propose_settings_change bot 3 {use_vwap: true}. "5-minute candles for SBIN" -> \
+symbol SBIN {candle_minutes: 5}. "No trades after 2 pm" -> {entry_cutoff_time: "14:00"}. "Max 2 trades per \
+stock" -> {max_trades_per_stock: 2}. Turning a check on that has numbers keeps the current numbers unless the \
+user gives new ones. If the words fit no field, say what you can change instead; never guess a field name that \
+is not in the catalog. If the user names no bot, use the page's bot, else bot 1, and say which.
 - Only propose what the user asked for. Do not add extra changes they did not ask for.
 - Use the bot the user named; otherwise the bot of the page they are on (`screen`), otherwise bot 1.
 - Stocks: arm the stocks the user names. If they ask you to pick, pick only from stocks listed in the facts or \
@@ -114,8 +144,14 @@ facts list no candidates, ask them to name the stocks or run a scan instead of g
 PERCENT). "Target X, stop Y" with no mention of trailing means a fixed stop: stop_type TSL, tsl_sl_points Y, \
 tsl_target_points X and tsl_trail_points X. One call per stock. If a number is ambiguous ("4.8 or 5"), use the \
 first and say so.
-- In your text, say in one or two lines what the card will change. Do not claim it is done.
+- In your text, say in one or two lines what the card will change and what it means for the trades. Do not \
+claim it is done. Mention the current value you are changing from when the facts have it.
 - If the bot is LIVE, say plainly that the change applies to a real-money bot.
+
+FORMAT:
+The reply is shown as Markdown. Use short paragraphs, `-` bullets for lists (trades, crosses, settings), **bold** \
+for the key number or verdict, and a small table (| col | col |) only when comparing several trades. No headings \
+larger than `###`. Keep it short: answer first, then the evidence.
 
 SCOPE:
 The ORB desk is virtual money. The SMA terminal trades PAPER by default and LIVE only when the user switched it; \
@@ -187,10 +223,28 @@ def _mechanics() -> dict:
     }
 
 
-async def build_context() -> dict:
-    """Everything the assistant is allowed to know, as plain JSON."""
+async def build_context(scope: Scope | None = None) -> dict:
+    """Everything the assistant is allowed to know about the ORB desk, as plain JSON. With a trimmed `scope` that is
+    not about the ORB desk, only the clock, the mode and the data feed go in (the rest is the desk's own trades,
+    logs and mechanics, which a question about the SMA terminal never needs)."""
     snapshot = strategy_runner.snapshot()
     risk = state.risk_manager
+    now = ist_now()
+    health = market_data.health()
+    if scope is not None and not scope.orb:
+        return {
+            "now_ist": now.isoformat(),
+            "market_session": session_state(now),
+            "mode": state.mode,
+            "kill_switch_active": state.kill_switch_active,
+            "data_feed": {"source": health.source, "connected": health.connected, "stale": health.stale, "market_open": health.market_open},
+            "orb_desk": "left out: this question is about the SMA terminal (ask about the ORB desk, its opening range, "
+            "manual desk or console to read them)",
+            "open_positions": [],
+            "trades": [],
+            "console_log_newest_first": [],
+            "bot": {"status": snapshot.status},
+        }
 
     async with async_session() as session:
         trades = (
@@ -204,8 +258,6 @@ async def build_context() -> dict:
         ).scalars().all()
 
     account = await get_account_summary()
-    health = market_data.health()
-    now = ist_now()
 
     return {
         "now_ist": now.isoformat(),
@@ -320,14 +372,16 @@ async def answer(
     history: list[dict] | None = None,
     page: str | None = None,
     screen: dict | None = None,
+    full: bool = False,
 ) -> dict:
-    """Answers one question against the current factual snapshot."""
+    """Answers one question against the facts it needs (`chat_scope.classify`), or against everything with `full`."""
     cfg = await ai_advisor.config()
     key = await ai_advisor._api_key()  # raises AiUnavailable with a clear message
 
-    context = await build_context()
-    context["sma_terminal"] = await asyncio.to_thread(sma_facts)
-    seen = screen_facts(page, screen)
+    scope = classify(message, page, screen, full=full, history=history)
+    context = await build_context(scope)
+    context["sma_terminal"] = await asyncio.to_thread(sma_facts, scope)
+    seen = screen_facts(page, screen, scope)
     if seen is not None:
         context["screen"] = seen
 
@@ -347,11 +401,11 @@ async def answer(
         if role in ("user", "assistant") and content:
             conversation.append({"role": role, "content": content})
 
+    facts_json = json.dumps(context, default=str)
     conversation.append(
         {
             "role": "user",
-            "content": f"FACTS (the only information you have):\n{json.dumps(context, default=str)}\n\n"
-            f"Question: {message.strip()}",
+            "content": f"FACTS (the only information you have):\n{facts_json}\n\nQuestion: {message.strip()}",
         }
     )
 
@@ -362,8 +416,10 @@ async def answer(
         # Generous because reasoning models bill their internal reasoning
         # against this cap before writing a word. It is a ceiling, not a spend.
         "max_output_tokens": 12000,
-        "tools": TOOLS,
     }
+    if scope.tools:
+        # The tool schemas are sent only when the question asks for a change (they cost tokens on every call).
+        payload["tools"] = TOOLS
     if supports_reasoning(cfg.model):
         # These are lookup-and-explain questions over facts already assembled
         # for the model, not problems needing deep deliberation.
@@ -400,18 +456,32 @@ async def answer(
     if not text:
         raise AiUnavailable("OpenAI returned an empty response.", 502)
 
+    usage = data.get("usage") or {}
+    sma = context["sma_terminal"]
     return {
         "reply": text,
         "proposals": proposals,
         "model": cfg.model,
         "facts_summary": {
-            "trades_in_context": len(context["trades"]),
-            "log_lines_in_context": len(context["console_log_newest_first"]),
-            "open_positions": len(context["open_positions"]),
-            "bot_status": context["bot"]["status"],
-            "sma_terminal": bool(context["sma_terminal"].get("available")),
-            "sma_trades_today": context["sma_terminal"].get("trades_today_count", 0),
+            "trades_in_context": len(context.get("trades") or []),
+            "log_lines_in_context": len(context.get("console_log_newest_first") or []),
+            "open_positions": len(context.get("open_positions") or []),
+            "bot_status": (context.get("bot") or {}).get("status"),
+            "sma_terminal": bool(sma.get("available")),
+            "sma_trades_today": sma.get("trades_today_count", 0),
+            "sma_bots": len(sma.get("bots") or []),
+            "sma_recent_trades": len(sma.get("recent_trades") or []),
             "screen": bool(seen),
+            # What was read for this question and what it cost in tokens.
+            "scope": scope.describe(),
+            "sections": list(sma.get("sections") or []) + (["ORB desk"] if scope.orb else []),
+            "stocks": sma.get("stocks_asked_about") or [],
+            "facts_chars": len(facts_json),
+            "usage": {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+            },
         },
     }
 
@@ -426,5 +496,9 @@ def suggested_questions() -> list[str]:
         "Why didn't that trade make a profit?",
         "Why is trading locked right now?",
         "Why isn't the bot buying anything?",
+        "Why did SBIN not reverse on the 1 pm cross?",
+        "What strategy did yesterday's trades use?",
+        "Turn on the VWAP check on bot 2",
+        "Use 5-minute candles and a 2× ATR stop on all stocks",
         "What did my charges cost me today?",
     ]

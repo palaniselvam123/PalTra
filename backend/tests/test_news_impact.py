@@ -309,7 +309,7 @@ async def test_watcher_alerts_once_and_rings_only_for_critical(db, monkeypatch):
         "HELD": {"armed": ["Bot 1"], "held": [{"bot": 1, "name": "Bot 1", "mode": "PAPER", "side": "LONG", "qty": 10}]},
         "ARMED": {"armed": ["Bot 2"], "held": []},
     })
-    monkeypatch.setattr(alert_notifier, "send", send)
+    monkeypatch.setattr(alert_notifier, "send_news", send)
     monkeypatch.setattr(alert_notifier, "send_critical", send_critical)
 
     watcher = ni.NewsWatcher()
@@ -379,7 +379,7 @@ async def test_all_fno_pass_pops_up_high_news_on_other_stocks_without_telegram(d
     monkeypatch.setattr(stock_news, "stock_news", fake_news)
     monkeypatch.setattr(ni, "_fno_set", lambda: {"OTHER", "HELD", "OLD"})
     monkeypatch.setattr(ni, "watch_list", lambda extra=None, lists=None: {"HELD": {"armed": [], "held": []}})
-    monkeypatch.setattr(alert_notifier, "send", send)
+    monkeypatch.setattr(alert_notifier, "send_news", send)
 
     watcher = ni.NewsWatcher()
     cfg = NewsWatchSettings(id=1, enabled=True, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,

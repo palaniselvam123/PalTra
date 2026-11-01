@@ -141,7 +141,12 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
     [side, fastOnly, minSpeed, speedOf, showCrossed, within]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
-  const filtered = useMemo(() => shownRows.filter((r) => matchesText(query, r.symbol) && passes(r)), [shownRows, query, passes]);
+  const ticks = useTicks();
+  const filtered = useMemo(
+    () => shownRows.filter((r) => matchesText(query, r.symbol) && ticks.shows(r.symbol) && passes(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRows, query, passes, ticks.only, ticks.ticked]
+  );
   // When each stock first showed up in this list (these filters) in today's saved Cross scans.
   const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "cross");
   const { sorted: rows, sort, onSort } = useSort<CrossScanRow, SortKey>(filtered, (r, k) => {
@@ -176,7 +181,6 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
   }, [saved, onStatus, data?.finished_at, data?.as_of, data?.running]);
 
   const paged = usePaged(rows, "scalp.cross.pageSize");
-  const ticks = useTicks();
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">

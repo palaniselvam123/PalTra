@@ -18,6 +18,7 @@ import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { MorningScan } from "@/components/Scalp/MorningScan";
+import { High52Scan } from "@/components/Scalp/High52Scan";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -66,6 +67,7 @@ const TABS = [
   { id: "cross", label: "Cross scan" },
   { id: "morning", label: "09:30 Morning" },
   { id: "trend", label: "Trend quality" },
+  { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
   { id: "history", label: "History" },
@@ -106,10 +108,12 @@ export default function ScalpPage() {
   const [crossStatus, setCrossStatus] = useState<ScanStatus | null>(null);
   const [trendStatus, setTrendStatus] = useState<ScanStatus | null>(null);
   const [morningStatus, setMorningStatus] = useState<ScanStatus | null>(null);
+  const [high52Status, setHigh52Status] = useState<ScanStatus | null>(null);
   const [activeStatus, setActiveStatus] = useState<ScanStatus | null>(null);
   const onCrossStatus = useCallback((st: ScanStatus) => setCrossStatus(st), []);
   const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
   const onMorningStatus = useCallback((st: ScanStatus) => setMorningStatus(st), []);
+  const onHigh52Status = useCallback((st: ScanStatus) => setHigh52Status(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +154,8 @@ export default function ScalpPage() {
 
   // "Backtest these": replay the ticked stocks over past days with the bot.
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // "Show ticked only": the table keeps just the ticked stocks (a hand-picked watch list of the monitor).
+  const [pickedOnly, setPickedOnly] = useState(false);
   const [btDays, setBtDays] = useState(10);
   const [btBusy, setBtBusy] = useState(false);
   const [btNote, setBtNote] = useState<{ ok: boolean; text: string } | null>(null);
@@ -222,6 +228,7 @@ export default function ScalpPage() {
     let list = data?.rows ?? [];
     if (readyOnly) list = list.filter((r) => r.ready);
     if (query.trim()) list = list.filter((r) => matchesText(query, r.symbol));
+    if (pickedOnly && picked.size > 0) list = list.filter((r) => picked.has(r.symbol));
     if (minScore > 0) list = list.filter((r) => r.score >= minScore);
     if (bias !== "ALL") list = list.filter((r) => r.bias === bias);
     const lo = ltpMin.trim() === "" ? null : Number(ltpMin);
@@ -245,7 +252,7 @@ export default function ScalpPage() {
       if (bv == null) return -1;
       return dir * (av - bv);
     });
-  }, [data, readyOnly, bias, sort, ltpMin, ltpMax, query, minScore]);
+  }, [data, readyOnly, bias, sort, ltpMin, ltpMax, query, minScore, pickedOnly, picked]);
 
   const rows = useMemo(() => {
     if (!holdOrder || order.current.length === 0) return sorted;
@@ -342,6 +349,7 @@ export default function ScalpPage() {
     cross: crossStatus,
     morning: morningStatus,
     trend: trendStatus,
+    high52: high52Status,
     active: activeStatus,
     backtest: null,
     history: null,
@@ -558,6 +566,12 @@ export default function ScalpPage() {
                   Clear
                 </button>
               )}
+              {picked.size > 0 && (
+                <label className="flex items-center gap-1 text-slate-300" title="Keep only the ticked stocks in the table (the other filters still apply)">
+                  <input type="checkbox" checked={pickedOnly} onChange={(e) => setPickedOnly(e.target.checked)} className="accent-emerald-400" />
+                  Show ticked only
+                </label>
+              )}
               <label className="ml-auto flex items-center gap-1.5 text-slate-400">
                 over the last
                 <select
@@ -699,6 +713,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "trend"}>
           <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} onArmMany={(list) => armSeveral(list, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
+        </div>
+        <div hidden={tab !== "high52"}>
+          <High52Scan armed={armed} arming={arming} onArm={(s) => arm(s, "52-week high")} onArmMany={(list) => armSeveral(list, "52-week high")} paused={paused} onStatus={onHigh52Status} />
         </div>
         <div hidden={tab !== "active"}>
           <MostActive

@@ -85,7 +85,7 @@ async def test_lists_crud_and_a_list_stock_is_alerted_with_its_price(db, monkeyp
     monkeypatch.setattr(stock_news, "stock_news", fake_news)
     monkeypatch.setattr(ni, "_openai_key", no_key)
     monkeypatch.setattr(news_lists, "prices", prices)
-    monkeypatch.setattr(alert_notifier, "send", send)
+    monkeypatch.setattr(alert_notifier, "send_news", send)
     from app.models.database import NewsWatchSettings
 
     cfg = NewsWatchSettings(id=1, enabled=True, every_min=15, min_impact="MEDIUM", use_ai=False, popup=True,

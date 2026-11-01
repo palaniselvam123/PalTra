@@ -22,7 +22,7 @@ function resolveSmaApi(): string {
 
 export const SMA_API = resolveSmaApi();
 
-export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND";
+export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND" | "VWAP";
 
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
@@ -36,6 +36,13 @@ export type SmaConfig = {
   candle_minutes?: CandleMinutes;
   /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */
   exit_candle_minutes?: number;
+  /** Watch smaller candles while in a trade (small_candles.py): CSV of sizes ("1,3,5"; "" = off) and its rules. */
+  small_exit_minutes?: string;
+  small_exit_cross?: boolean;
+  small_exit_slope?: boolean;
+  small_exit_counter?: number;
+  small_exit_loss_pct?: number;
+  small_exit_agree?: number;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";
@@ -65,10 +72,16 @@ export type SmaConfig = {
   tsl_trail_points?: number;
   tsl_target_points?: number;
   /** Units for the TSL settings: POINTS (₹) or PERCENT (of entry price). Defaults to POINTS. */
-  tsl_mode?: "POINTS" | "PERCENT";
+  tsl_mode?: "POINTS" | "PERCENT" | "ATR";
   tsl_sl_pct?: number;
   tsl_trail_pct?: number;
   tsl_target_pct?: number;
+  /** ATR multiples, read when tsl_mode is "ATR": the stop / trail / target sized from the stock's own ATR at entry. */
+  tsl_sl_atr?: number;
+  tsl_trail_atr?: number;
+  tsl_target_atr?: number;
+  /** VWAP + ATR buffer stop (stop_type "VWAP"): stop = VWAP ∓ this × ATR, tighter only each candle. */
+  vwap_stop_atr?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -156,6 +169,11 @@ export type SmaConfig = {
   /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */
   use_level?: boolean;
   level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1";
+  /** 52-week high check (high52.py): a buy only on a close at the 52-week high (a sell at the low), from Groww daily candles. */
+  use_high52?: boolean;
+  high52_side?: "LONG" | "SHORT" | "BOTH";
+  /** 0 = the close must reach the level; N = within N % of it counts. */
+  high52_pct?: number;
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;
@@ -260,6 +278,8 @@ export type SmaConfig = {
   gap_entry_window_min?: number;
   max_daily_loss: number;
   max_trades_per_day: number;
+  /** Entries one stock may take per day on this bot (0 = no cap); also a per-stock override. */
+  max_trades_per_stock?: number;
   square_off_time: string;
   /** HH:MM. No new entries from this time. */
   entry_cutoff_time?: string;
@@ -374,6 +394,39 @@ export type MorningScan = {
   market_open: boolean;
   rules?: { rvol_min: number; gap_min_pct: number; runner_min: number; sessions: number };
   rows: MorningScanRow[];
+  paused?: boolean;
+};
+
+/** The 52-week high scan (high52.py): each stock's distance from its 52-week high / low — information only. */
+export type High52ScanRow = {
+  symbol: string;
+  ltp: number | null;
+  high52: number | null;
+  high52_date: string | null;
+  low52: number | null;
+  low52_date: string | null;
+  /** How far under the 52-week high, % (0 = at it, negative = above it today). */
+  dist_high_pct: number | null;
+  dist_low_pct: number | null;
+  broke_high: boolean;
+  broke_low: boolean;
+  days_since_high: number | null;
+  day_move_pct: number | null;
+  year_move_pct: number | null;
+  sessions: number;
+  ts: number | null;
+};
+export type High52Scan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  weeks: number;
+  as_of: string | null;
+  finished_at?: string | null;
+  market_open: boolean;
+  rows: High52ScanRow[];
   paused?: boolean;
 };
 
@@ -590,7 +643,11 @@ export type FastBotSettings = {
   min_profit_pct?: number;
   /** Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day. */
   bot5_trades?: number;
-  on_bot5?: Record<string, { from_bot: number; trades: number }>;
+  /** Bot 5's own ticked entry checks (VWAP, RSI, ADX, …) are read before the hand-off; a refusal leaves the trade. */
+  entry_checks?: boolean;
+  /** Keep the trade on its bot; Bot 5 opens its own order next to it and the stock is armed on both. */
+  keep_trade?: boolean;
+  on_bot5?: Record<string, { from_bot: number; trades: number; kept?: boolean }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
   target_status?: string | null;
@@ -857,7 +914,7 @@ export type SmaState = {
   stop_type?: StopType;
   /** The chart stock's own stop numbers (its overrides over the shared settings). */
   stop_points?: {
-    tsl_mode?: "POINTS" | "PERCENT";
+    tsl_mode?: "POINTS" | "PERCENT" | "ATR";
     tsl_sl_points: number;
     tsl_trail_points: number;
     tsl_target_points: number;
@@ -866,6 +923,7 @@ export type SmaState = {
     tsl_target_pct?: number;
     gap_sl_mult: number;
     gap_tp_mult: number;
+    vwap_stop_atr?: number;
   } | null;
   exchange: string;
   ltp: number;
@@ -995,6 +1053,13 @@ export type ChartFilters = {
   vturn_turn_pct?: number;
   vturn_within?: number;
   slope_minutes?: number;
+  /** Which slope rules are on and the fast SMA length, for the chart's exit / entry zones (slopeZone.ts). */
+  sma_fast?: number;
+  slope_rules?: boolean;
+  slope_turn?: boolean;
+  decel_exit?: boolean;
+  turn_entry?: boolean;
+  turn_toward_cross?: boolean;
   /** For the chart's "why no trade here" line. */
   entry_cutoff_time?: string;
   square_off_time?: string;
@@ -1231,12 +1296,39 @@ export type TradeBook = { total: number; rows: TradeRow[] };
 
 export type ReplayStatus = "IDLE" | "LOADING" | "PLAYING" | "PAUSED" | "FINISHED" | "ERROR";
 
+/** One candle size's read from the trailing stop calculator (tsl_calc.py). */
+export type TslCalcRow = {
+  minutes: number;
+  candles: number;
+  atr: number | null;
+  avg_range: number | null;
+  atr_pct?: number;
+  stop?: number | null;
+  trail?: number | null;
+  target?: number | null;
+  stop_pct?: number | null;
+  trail_pct?: number | null;
+  target_pct?: number | null;
+};
+export type TslCalcResult = {
+  symbol: string;
+  price: number | null;
+  as_of?: string | null;
+  atr_period?: number;
+  multiples?: { stop: number; trail: number; target: number };
+  sizes: TslCalcRow[];
+  source?: "bot tape" | "groww";
+  error?: string;
+};
+
 export type ReplayInfo = {
   status: ReplayStatus;
   date: string | null;
   start: string;
   /** ISO time on the replayed day. */
   clock: string | null;
+  /** Where a seek is heading (ISO), while the replay fast-forwards or replays the day to it; else null. */
+  seeking?: string | null;
   speed: number;
   effective_speed: number;
   speeds: number[];
@@ -1559,6 +1651,17 @@ export type BacktestServerStatus = {
   up_sec: number;
 };
 
+/** A named copy of a desk's strategy settings, or one automatic snapshot of a Save (strategy_presets.py). */
+export type StrategyPreset = { id: number; name: string; desk: string; saved_at: string; settings: Partial<SmaConfig> };
+export type StrategySnapshot = { saved_at: string; settings: Partial<SmaConfig> };
+export type StrategyPresets = { desk: string; presets: StrategyPreset[]; history: StrategySnapshot[] };
+
+/** The presets routes live on the main desk only and take the desk as a query, so they are not desk-routed. */
+function presetDesk(): string {
+  const bot = deskBot();
+  return bot == null ? "research" : String(bot);
+}
+
 export const smaApi = {
   backtestStatus: () => request<BacktestServerStatus>("/api/backtest/status", undefined, 12000, false),
   backtestSync: () => request<BacktestServerStatus>("/api/backtest/sync", { method: "POST" }, 30000, false),
@@ -1594,8 +1697,34 @@ export const smaApi = {
       70000
     ),
   config: () => request<SmaConfig>("/api/config"),
+  /** Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py). Read-only. */
+  tslCalc: (symbol: string, sizes: number[], atrPeriod = 14, stopMult = 1.5, trailMult = 0.5, targetMult = 3) =>
+    request<TslCalcResult>(
+      `/api/tsl-calc?${new URLSearchParams({
+        symbol,
+        sizes: sizes.join(","),
+        atr_period: String(atrPeriod),
+        stop_mult: String(stopMult),
+        trail_mult: String(trailMult),
+        target_mult: String(targetMult),
+      }).toString()}`,
+      undefined,
+      60000,
+      false
+    ),
+  strategyPresets: () => request<StrategyPresets>(`/api/config/presets?desk=${presetDesk()}`, undefined, 12000, false),
+  saveStrategyPreset: (name: string, settings: Partial<SmaConfig>) =>
+    request<StrategyPresets>("/api/config/presets", { method: "POST", body: JSON.stringify({ name, desk: presetDesk(), settings }) }, 12000, false),
+  deleteStrategyPreset: (id: number) =>
+    request<StrategyPresets>(`/api/config/presets/${id}?desk=${presetDesk()}`, { method: "DELETE" }, 12000, false),
   saveConfig: (body: Partial<SmaConfig>) =>
     request<SmaConfig>("/api/config", { method: "PUT", body: JSON.stringify(body) }),
+  /** Put this desk's strategy settings back to the defaults (Trade list, mode and name stay). */
+  resetConfig: (confirmLive = false, withStocks = false) =>
+    request<{ changed: string[]; config: SmaConfig }>("/api/config/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm_live: confirmLive, stock_settings: withStocks }),
+    }),
   stockConfig: (symbol: string) => request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`),
   saveStockConfig: (symbol: string, body: Partial<SmaConfig>) =>
     request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, {
@@ -1715,6 +1844,10 @@ export const smaApi = {
   morningScanStart: (symbols: string[], force = false) =>
     request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
+  /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
+  high52ScanStart: (symbols: string[], force = false) =>
+    request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
+  high52Scan: () => request<High52Scan>("/api/high52-scan", undefined, undefined, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>
@@ -1732,6 +1865,9 @@ export const smaApi = {
     return request<ScanHistory>(`/api/scan-history${qs ? `?${qs}` : ""}`, undefined, undefined, false);
   },
   scanHistoryRun: (id: number) => request<ScanRunDetail>(`/api/scan-history/${id}`, undefined, 20000, false),
+  /** Desk only: copy the backtest server's saved scans this desk lacks (scan_sync.py). */
+  scanHistoryPull: (days = 14) =>
+    request<{ copied: number; checks: number; already: number; errors: string[] }>(`/api/scan-history/pull?days=${days}`, { method: "POST" }, 120000, false),
   /** Check how a saved scan turned out (after its day closed). Returns at once; poll scanHistoryRun. */
   scanHistoryCheck: (id: number) =>
     request<ScanCheckStatus>(`/api/scan-history/${id}/check`, { method: "POST" }, undefined, false),
@@ -1917,8 +2053,9 @@ export const smaApi = {
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
-  replayControl: (action: "play" | "pause" | "stop" | "speed", speed?: number) =>
-    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed }) }, 20000),
+  /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */
+  replayControl: (action: "play" | "pause" | "stop" | "speed" | "seek", speed?: number, at?: string) =>
+    request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed, at }) }, 20000),
   csvUrl: (mode?: "PAPER" | "LIVE" | "REPLAY" | "RESEARCH") =>
     `${SMA_API}/api/trades.csv${mode ? `?mode=${mode}` : ""}`,
   streamUrl: () => SMA_API.replace(/^http/, "ws") + "/ws/stream",

@@ -121,6 +121,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reports both sets of numbers plus `tsl_mode`.
   The Scalp page's Arm prompt and Arm ticked (`ArmPrompt`, `BulkArm`) have a ₹ / % switch that saves
   `tsl_mode` with the matching numbers as the stock's own (the scanner link's `StockChange` takes them too).
+  **ATR multiples** (`tsl_mode = "ATR"`, `tsl_sl_atr` 1.5 / `tsl_trail_atr` 0.5 / `tsl_target_atr` 3.0 (0 = none), per bot
+  and per stock, PAPER and LIVE, replays too; `tsl.tsl_atrs`): `tsl_settings(cfg, entry_price=fill, atr=atr)` turns the
+  multiples into ₹ at entry from the stock's own ATR on the bot's candle (`OpenPosition.atr_at_entry`; a restart reads
+  the saved one), so one setting fits every stock a bot is handed (meant for Bot 5's fast movers); without a formed ATR
+  the ₹ points are used, so a trade is never left without a stop. Settings → 5. Stop-loss and target, stop type
+  Trailing, units "ATR multiples": `StrategyConfigPanel.TslAtrSliders` (sliders plus boxes). `stop_points` carries the
+  three multiples.
+  **Sized from the candle** (`backend/tsl_calc.py`, `GET /api/tsl-calc?symbol=&sizes=1,3,5,15&atr_period=&stop_mult=&
+  trail_mult=&target_mult=`; read-only, no order): the stock's 1-minute tape (the bots' `_tapes` for an armed stock, else
+  one `fetch_frame` on the scans' session) grouped into each candle size (`candles.resample`, forming candle dropped),
+  the Wilder ATR of that size (`indicators.enrich`) and the average range of the last 20 candles, and the multiples
+  (defaults 1.5 / 0.5 / 3 × ATR) as a stop distance, trail step and target in ₹ (`tick_sizes.round_price`) and in % of
+  the price. Settings → 5. Stop-loss and target, with stop type TSL: `components/Settings/TslCalculator.tsx` (stock,
+  multiples, ATR period, sizes, Calculate; a row's "Use ₹" / "Use %" fills the TSL fields of the form, optionally the
+  candle size too, and the normal Save applies them to the bot or the scoped stock).
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and
@@ -194,7 +209,27 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
   replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
-  Research never hands off.
+  Research never hands off. **Keep the trade** (`keep_trade`, off by default; Settings card tick box): the source
+  trade is not cut; `recovery.handoff(..., keep_source=True)` arms the stock on Bot 5 while it stays on the source
+  bot's Trade list ("armed on Bot 5 too"), Bot 5's `direct_order` opens its own order on the same side next to it,
+  and both bots keep trading it; `handed[..]["keep"]` (snapshot `on_bot5[..].kept`), and `give_back` then only takes
+  it off Bot 5 (`recovery.unarm`). A LIVE source trade is left alone in this mode (two LIVE bots never hold one
+  stock). Replays play one bot, so in keep mode `ReplayEngine._fast_move` keeps the trade and only notes the move in
+  the signal line (no Bot 5 order, no `fast_move` totals). **Bot 5's entry checks** (`entry_checks`, on by default): before the source trade is cut,
+  `fast_bot.entry_refusal` reads Bot 5's own settings for the stock (`_target_cfg` → `_cfg_for`) on the source bot's
+  enriched frame exactly as a cross would (the ADX gate, then `strategy_engine._entry_block`: VWAP, volume, density,
+  RSI, EMA, Supertrend, level, opening range, gap, candle direction; never the cross, patterns, pullback or candle waits);
+  a refusal leaves the trade on its bot ("not moved — Bot 5's entry check says no: …", listed in `recent`). No candles
+  = nothing to refuse on. Replays read the same with the run's snapshot of Bot 5's settings (`ReplayEngine._fast_move`;
+  a run saved before the setting plays with it off). Off = Bot 5 enters whatever the checks say (the old behaviour).
+- **Per-stock daily trade cap** (`max_trades_per_stock`, 0 = off by default; per bot and per stock, PAPER and LIVE,
+  replays too; Settings → 6. Size, daily limits and times, next to "Max trades / day"): `StrategyEngine._stock_trades`
+  counts today's entries per stock next to `trades_today` (incremented in `_open`, restored per stock by
+  `restore_trades_today` from today's rows, cleared with the day roll / Reset / a paper halt release, uncounted with
+  `_uncount_trade`). `_stock_cap_hit(cfg)` refuses the next entry on that stock in `_apply_locked` (a reverse closes flat:
+  "closed on … — X has had its N trade(s) today (per-stock cap)"; flat: "… ignored — …") and cancels a waiting pullback;
+  every entry path (cross, gap mode, turn, news, hand-offs, force) goes through it. The day cap still halts the bot; this
+  one only stops that stock.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -206,7 +241,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   A run covers one day or a range up to 45 calendar days, about 30 trading days (`parse_replay_range`, `MAX_RANGE_DAYS`), one
   fresh engine per day; each run is a `ReplayRun` row with a snapshot of the
   settings it used, and its trades carry `run_id` (day-wise P&L in
-  `get_run`, shown in the blotter's Backtests tab).
+  `get_run`, shown in the blotter's Backtests tab). The run detail and its PDF
+  (`BacktestRuns.bot5Rows`, `lib/backtestPdf.ts`) list, after the strategy
+  settings, the fast-mover hand-off settings and Bot 5's own strategy fields
+  from the run's `fast_bot` snapshot when the run played with it. The PDF's trade table also carries each trade's
+  **full value** (qty × entry price, what it would cost bought outright) and the **intraday margin** actually blocked
+  (the practice wallet's `margin_pct`, 20 % = 5× by default; `backtestPdf.tradeValue`), and the Result table shows the
+  largest trade's full value and margin and the most margin blocked at once (`backtestPdf.peakMargin`: overlapping
+  trades add up). The blotter's summary PDF shows the same.
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only
@@ -222,6 +264,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   keeping the finished days, so the run ends as if it never stopped. The replay
   bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
   the Backtests tab has a Resume button.
+  **Rewind / fast-forward** (`ReplaySession.seek`, `POST /api/replay/control {action: "seek", at: "HH:MM"}`; only
+  while PLAYING or PAUSED, the pause state kept; `info().seeking` while it moves): forward sets `_seek` and
+  `_fast_forward` ticks the same 10-second grid as fast as its CPU share allows up to the target (same trades, only
+  real time skipped; a target past 15:30 is clamped to the last grid step before it, and the day finishes as usual);
+  back sets `_rewind`, the day loop drops that day's trades, reviews and P&L points (`_drop_unfinished_days`,
+  `open_pnl_log.delete_replay_day`), builds a fresh engine from the day's first candle and fast-forwards to the target
+  (a stock handed off earlier that day stays handed off). UI: `ReplayScrub` in `components/Terminal/ReplayBar.tsx`
+  (slider 09:15-15:30 plus ± 5 / 15-minute buttons, in the replay bar and on the chart page header while it follows a
+  replay; the top strip's `ReplayChip` has ± 5).
   API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **On the main desk a replay
   starts only outside market hours** (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST Mon-Fri, 409; start, resume and
   Scalp-pick runs), so it never slows the live bots; the backtest server takes them then (`DESK_REPLAY_HOURS=any` lifts
@@ -242,6 +293,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
   strategy does not use is worked out in the browser (`emaValues`). Display only.
+  **Movable columns**: the blotter (every book, Replay included; `TradeHistoryTable` `OrderTable`, key `blotter.cols`)
+  and the Backtests tables (runs `backtests.cols.runs`, day-wise `backtests.cols.days`, per-stock `backtests.cols.stocks`)
+  use `components/ui/columnOrder.tsx` (`useColumnOrder`, `inOrder`, `ColumnHint`) like the Scalp tables: drag a header
+  onto another to move the column, kept per browser, "Reset columns" to undo; the blotter's Trade ID / Stock columns
+  stay pinned only while they are the first two. Display only.
   Every bar that sticks to the top (desk menu bar, terminal header, blotter bar, Settings section links, Settings bot tabs
   (`settings-bot-tabs`, under the section links) and Save bar, chart page header) has a freeze / unfreeze pin (`components/ui/PinToggle.tsx`, `lib/usePinned.ts`, kept per browser).
   The terminal's Strategy card (`StrategySummary`) switches each part of the
@@ -354,6 +410,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   bot's own candle's SMAs are against it too (a trade entered against the exit candle's trend is not held once its own cross
   turns). No reverse. Stops, targets, the other exits and the square-off are unchanged. A LIVE position restored without its
   stop id is left to that stop. Settings → 3. When to exit ("Read the cross exit on"). The stock research baseline keeps it off.
+- `backend/small_candles.py` – watch smaller candles while in a trade (`small_exit_minutes`, CSV of sizes 1/2/3/5/10, "" =
+  off by default; per bot and per stock, PAPER and LIVE, replays too; Settings → 3. When to exit, "Watch smaller candles
+  while in a trade"): a 15-minute bot only sees a turn when its candle closes, so `StrategyEngine._watch_small_candles` (in
+  the held-stock loop after `_watch_exit_candle`) groups the 1-minute tape (`_tapes`) into each ticked size smaller than the
+  bot's own candle (`watched`; `exit_candle.closed_frame`) and, once per newly closed candle of that size (`pos.small_bars`),
+  reads `verdict`: `small_exit_cross` (on; `exit_candle.crossed_against`, or SMAs already against on the first candle read
+  after the entry), `small_exit_slope` (on; `slope_exit.slope` on that size ≥ `slope_turn_pct` against), `small_exit_counter`
+  (N, 0 = off; `indicators._direction_reason` colour rule). Each size's verdict sits in `pos.small_state`; `decide` closes the
+  trade (`SMALL_CANDLE_EXIT`, via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is
+  left to that stop) once `small_exit_agree` (1) sizes say so and, with `small_exit_loss_pct` > 0, only while the trade is at
+  least that % under water (`losing_pct`). No reverse; entries unchanged. Counts as an exit for `strategyChecks.noExitOn`.
+  The stock research baseline keeps it off.
 - `backend/late_entry.py` – late entry (`late_entry_min`, 0 = off by default, per bot and
   per stock, PAPER and LIVE): a fresh cross refused only by a ticked entry filter or ADX
   (`late_entry.refused_by_filter`: `… ignored — …` / `closed on … — …`, never the cut-off or
@@ -438,6 +506,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/vwap_stop.py` – VWAP + ATR buffer stop (`stop_type = "VWAP"`, with the stop on; `vwap_stop_atr` buffer 0.5, 0-5;
+  per bot and per stock, PAPER and LIVE, replays too; Settings → 5. Stop-loss and target, stop type "VWAP + ATR buffer", a
+  slider plus box): the stop sits at the session VWAP (`indicators._session_vwap` on the bot's closed candles) − k × ATR 14
+  under a long, or VWAP + k × ATR over a short (`level`); `stop_level` gives it only while it guards the real position
+  (beyond the fill), else the ATR stop until it does. `StrategyEngine._trail_vwap_stop`, once per newly closed candle
+  (`pos.vwap_stop_bar`), moves it to the new level, tighter only (`tighten`), through `_move_stop` (shared with the TSL /
+  Supertrend stops: LIVE `modify_sl` 2 s apart, a refused modify keeps the old live stop, a LIVE position restored without
+  its stop id stays at its saved stop; saved on `TradeLog.sl_trigger_price`). Hit on the price like any stop
+  (`VWAP_SL_HIT`; in LIVE the exchange stop fills it, no second exit). A restart resumes it from the saved stop. Frames
+  without `atr_14` (the stock research replayer) get a Wilder ATR worked out on the spot (`_atr`). `stop_points` carries
+  `vwap_stop_atr`. The stock research baseline keeps the ATR stop.
 - `backend/stop_plan.py` – staged stop plan (`stop_plan`, off by default, per bot and per stock, PAPER and LIVE, replays
   too; needs stop type ATR with the stop on, else `OpenPosition.plan_r` is None and nothing happens). R = |fill − initial
   ATR stop| (`atr_multiplier`, e.g. 2.5). `StrategyEngine._trail_stop_plan` (every tick, after the Supertrend stop, before
@@ -452,6 +531,24 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   breakeven (+1.5R) at …"), shown under the exit reason in the blotter and in the CSV. A restart restores R from the ATR
   stop at entry and stage 1 when the saved stop is at or past the entry. Settings → 5. Stop-loss and target. The stock
   research baseline keeps it off.
+- `backend/high52.py` – 52-week high (two read-only readers of Groww's daily candles, `interval_in_minutes` 1440; no
+  order path). **Entry check** (`use_high52`, off by default; per bot and per stock, PAPER and LIVE, replays too; entries
+  only; wired through `_entry_block`, check name `high52`, chart ✕ "52w high"): the closed signal candle must close at the
+  stock's 52-week high, the highest daily high of the 52 weeks *before* that day (`levels_from`; today's own breakout
+  counts). `high52_side` `LONG` (default: a buy needs the high, a sell is refused) | `SHORT` (the mirror at the 52-week low)
+  | `BOTH`; `high52_pct` (0, 0-20): 0 = the close must reach the level, N = within N % of it counts. Levels are read once per
+  stock and day: the live engine loads them in the background from `tick` (`ensure` → `_load_live` on the bots' Groww
+  threads via `groww_pressure.run_bot_call`; a failure is retried after `RETRY_SEC`), a replay preloads them for its days
+  (`ReplaySession._load_and_play` → `preload`, one download per stock, `_wants_high52`), kept in `_CACHE` (memory). Until
+  loaded (or on a broker without a Groww session: research, replay brokers) the entry is refused ("52-week high not loaded
+  yet"), like the other checks. Settings → 2. Checks before entering. The stock research baseline keeps it off.
+  **Scan** (`High52Scanner`, mirrors `MorningScanner`: one pass at a time, the scanner process via
+  `scan_worker.high52_job`, stopped by Pause scans; `POST /api/high52-scan/start` (symbols, force), `GET /api/high52-scan`):
+  each stock's `analyze` row: last price, 52-week high / low and their dates, `dist_high_pct` / `dist_low_pct`,
+  `broke_high` / `broke_low` (today's high / low reached the level), sessions since the high, day and year move; breakouts
+  first, then nearest the high (`sort_key`). The Scalp page's "52-week high" tab (`components/Scalp/High52Scan.tsx`: scan
+  lists, Show new high / within the band of the high or low / all, band %, tick boxes, Arm / Arm ticked). Nothing in the
+  strategy reads the scan.
 - `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
   entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
   `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /
@@ -477,7 +574,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   tape (`_tapes`, `exit_candle.closed_frame`), once per newly closed one, so a V shows sooner under a long bot candle; entries
   stay on the bot's candle, `slope_lookback` / `vturn_within` count these candles and the `turn_exit_candle` colour hold reads
   the last one. The research baseline keeps 0. Both count as an exit for `strategyChecks.noExitOn`. Settings →
-  Supertrend / exits. The research baseline keeps both off.
+  Supertrend / exits. The research baseline keeps both off. **Slope zones on the chart** (display only,
+  `frontend/src/lib/slopeZone.ts`, `ZoneBands` in `StrategyChart.tsx`): from the last closed candle's SMA 9 and the close
+  that drops out of its window, the chart works out the next candle's close at which each rule that is on fires (turn,
+  bend, V-turn once its steep run is in; the deceleration guard has no single price) and shades the zone beyond it
+  ("Exit zone · next close ≥ …", amber; while flat with the turn entry on, "Buy zone" / "Sell zone"); the same words go on
+  the hover "why" line for any in-trade candle. `chart_filters` carries `sma_fast`, `slope_rules`, `slope_turn`,
+  `decel_exit`, `turn_entry`, `turn_toward_cross` for it. Every level is a minimum ("at least"). The Settings slope editor
+  (`components/Settings/SlopeEditor.tsx`) shows each slope rule's on/off tick (turn, bend, V-turn, deceleration guard,
+  turn entry, U-turn), sliders for every number (lookback, bend, slope candle, the deceleration guard with its own
+  picture in ATR per candle) and the bend leg on the V picture.
 - `backend/decel_guard.py` – SMA 9 deceleration guard (`decel_exit`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): exit on the bend of the fast SMA before its slope turns. Slope in **ATR per candle** (`slopes`: (SMA9 −
   SMA9 `decel_lookback` (2) candles ago) ÷ (k × Wilder ATR 14), so one set of numbers fits any price and session) and its
@@ -951,7 +1057,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   and each accuracy check made here is also sent to desk `POST /api/link/backtest/scan-history` (`push_scan` / `push_check`
   from `main._save_scan` / `_save_check` and `routes_scalp._save_active`, in a worker thread, failures only logged), kept
   once in the desk's `scan_history.db` (`save_copy`; a check is matched by kind and time, `find`), so the desk's Scalp
-  History tab and Most active History show them while this server is stopped.
+  History tab and Most active History show them while this server is stopped. **Pull** (`backend/scan_sync.py`): scans
+  made before the link was set, or while the desk was down, never arrived, so the desk can ask for them: the backtest
+  server answers `GET /api/link/backtest/scan-export?days=` (its saved scans' ids, kind, time; `scan_sync.export_runs`)
+  and `GET /api/link/backtest/scan-export/{id}` (one scan with rows and check), both behind `BACKTEST_LINK_TOKEN` and
+  only on the backtest role (`routes_link._backtest_export_authorized`, lock-exempt via `token_path`); the desk's
+  `POST /api/scan-history/pull?days=` (desk only; needs `BACKTEST_URL` and the token on the desk) runs `scan_sync.pull`,
+  which copies each run the desk lacks (`find` by kind and time) with `save_copy` + `save_check`, meta `server:
+  backtest`. The Scalp History tab's "Pull from backtest server" button (shown on the desk when `/api/role` has
+  `backtest_url` and `backtest_link`) calls it for the last 30 days and reloads the list.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
   page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /
@@ -1041,6 +1155,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   trade. Each headline is acted on once (`_taken`, memory); `recent` keeps the last 50 decisions. `GET/PUT /api/bots/news-entry`
   (a LIVE bot needs `confirm_live`, 409 without), Settings → "News entries" (`components/Settings/NewsEntries.tsx`, asks before a
   LIVE bot). Never copied by Copy settings (`COPY_SKIP`). Replays and research never see news.
+- `backend/strategy_presets.py` – saved strategies and a history of saves (`strategy_presets.json` next to the SMA DB,
+  `STRATEGY_PRESETS_FILE`). **Presets**: a named copy of a desk's strategy fields (`strategy_only`: the `ConfigUpdate`
+  fields minus `COPY_SKIP`, so never the Trade list, mode, name, per-stock or all-bots rows), at most 50, the same name
+  on the same desk replaced in place. **History**: `main._put_config` keeps every Save's strategy fields per desk
+  (`remember`, last 30, an unchanged save not repeated). `GET /api/config/presets?desk=1-5|research` (every preset and
+  that desk's history, newest first), `POST /api/config/presets` (`name`, `desk`, `settings`), `DELETE
+  /api/config/presets/{id}`. Settings → Strategy, "Saved strategies & history" (`components/Settings/StrategyPresets.tsx`,
+  shared settings only): Save as…, each entry's fields that differ from the form now (old → new), Load (into the form;
+  the usual Save then applies it with every check), Delete. **Reset to defaults** (`POST /api/config/reset`, the
+  research and `/api/bots/{n}/config/reset` forms; `main.strategy_defaults` = every `ConfigUpdate` field minus
+  `COPY_SKIP` at its `BotConfig` column default, `GET /api/config/defaults`): sets them on the row like Copy settings
+  (same checks; an open position still blocks a quantity change; a LIVE bot needs `confirm_live`, 409 without;
+  `stock_settings: true` also clears every stock's own settings) and keeps a history entry. The Trade list, mode, name
+  and the all-bots rows stay. Settings Save bar "Reset to defaults" (asks first; LIVE asks again). No order is placed.
 - Copy bot settings (`POST /api/bots/copy-settings` in `backend/main.py`: `from_desk` / `to_desk` "1"-"4" or
   "research", `stock_settings`, `confirm_live`): replaces the destination's strategy settings (every `BotConfig`
   column but `COPY_SKIP`: id, chart symbol, Trade list and sources, PAPER/LIVE, name, per-stock settings, the 1s feed,
@@ -1075,13 +1203,49 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `ChatProposalCard` (old → new values, PAPER/LIVE badge) and saves only on Apply,
   through the same terminal routes as Settings; a LIVE bot needs a second "Confirm on
   LIVE" tap. There is no tool for orders, closing positions, the PAPER/LIVE switch,
-  start/stop or panic.
-- Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards):
-  `trade` (fills, closes, warnings; `alert_notifier.send`), `critical` (bot down, app
-  shutting down, no stop; `send_critical`, falls back to trade) `call` (provider
-  `twilio_voice`: a Twilio phone call that reads the alert out) and `quiet` (provider
-  `telegram_quiet`: a second Telegram bot that only gets the Scalp page's quiet-runner alerts,
-  `send_quiet`, falls back to trade; `main._chop_alert`). The engine asks for a call
+  start/stop or panic. A third tool, `propose_settings_change` (`chat_actions.check_settings`), takes any
+  strategy setting from plain words ("turn on VWAP on bot 3", "5-minute candles for SBIN"): field names and
+  values are checked by the terminal's own `ConfigUpdate` when it runs in the process (bounds, choices,
+  unknown names refused), never the bookkeeping fields (`SETTINGS_NEVER`: Trade list, PAPER/LIVE, name,
+  auto-start, the all-bots / P&L-alert / news-entry rows); the card (`kind: "settings"`, labels from
+  `lib/settingLabels.ts`, shared with the Settings page) applies through `saveConfigOn` / `saveStockConfigOn`.
+  **What the assistant reads** (`app/services/sma_context.sma_facts`): besides bot 1's settings and today's
+  trades, `bots[]` for every bot 1-5 and the research desk (status, mode, armed stocks, open positions, the
+  per-stock `signal_lines`, settings differing from the defaults, and `stocks_today[]`: `cross_timeline` =
+  every closed-candle SMA cross today on the bot's own candle size from `engine._frames`, with
+  `what_happened`: entered / closed which trade, refused by which entry check (`filter_blocks`), after the
+  cut-off, not on the Trade list then (`arm_log.windows`), already holding, cross exit off, gap mode, per-stock
+  cap, or no recorded reason), `recent_trades[]` of the last 7 days (every bot) with `entry_reason` and a
+  `strategy_id` into `strategies_used` (the settings saved at the trade's entry, deduped), `settings_catalog`
+  (every changeable field: kind, bounds, choices, `FIELD_HELP`) and `settings_history` (bot 1's saves with
+  what changed). **Only what the question needs is sent** (`app/services/chat_scope.py`, `classify`): the question
+  (plus the user's previous turn, so a follow-up keeps its subject) is matched to topics (today, past, settings, howto,
+  change, crosses, backtests, orb), the bots it names and the stock names in it, and `sma_facts(scope)`,
+  `build_context(scope)` and `screen_facts(..., scope)` include only those sections: the strategy guide and bot 1's full
+  settings for settings / how-to / change questions, today's trades and KPIs for today / crosses, the cross timelines
+  (`stocks_today`) only for the bots asked about (named, else the bots holding the stocks named, else the page's bot,
+  `screen.bot`) and only the stocks named (every armed stock with `MAX_CROSSES_BROAD` crosses when none is named), past
+  trades and their strategies for yesterday / last-week questions (that stock's only when one is named), the settings
+  catalog and the tool schemas only for a change, the ORB desk's trades / logs / mechanics only for an ORB question or a
+  desk page, and the page's `settings` block only for a settings question. A question nothing matches reads today's
+  trades and the page bot's crosses. `full: true` on `POST /api/chat/ask` (the widget's "Read everything" tick box,
+  kept per browser) sends everything as before. `facts_summary` carries `scope`, `sections`, `stocks`, `facts_chars`
+  and OpenAI's `usage` (input / output tokens), shown in the widget's "Read: …" line under each answer. The reply is
+  Markdown, rendered by `components/Chat/ChatMarkdown.tsx` (no HTML from the model); the widget has a wide mode, copy
+  and follow-up chips.
+- Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards; `alert_notifier.CHANNEL_TYPES`):
+  `trade` (fills, closes, refusals, hand-offs, warnings; `alert_notifier.send`), `critical` (bot down, app
+  shutting down, no stop; `send_critical`), `news` (news alerts, `send_news`), `signal` (heads-ups that are
+  not orders: a cross inside 3 minutes, an SMA 9 turn alert, a 1-minute review; `send_signal`,
+  `StrategyEngine._alert(kind="signal")`), `fast` (fast price moves, `send_fast`), `quiet` (the Scalp page's
+  quiet runners and trend-rank alerts, `send_quiet`; `main._chop_alert`) and `call` (provider `twilio_voice`:
+  a Twilio phone call that reads the alert out). Every kind but `call` falls back to the trade channel
+  when its own is not set (`send_to`). **Each kind has its own Telegram bot** (`DEDICATED_TELEGRAM`:
+  providers `telegram_critical`, `telegram_news`, `telegram_signal`, `telegram_fast`, `telegram_quiet`, one
+  `AlertChannel` row each, saved only in their own slot), so a second BotFather token never overwrites the
+  trade bot (`telegram`), which with `twilio` / `callmebot` can still be assigned to trade or critical. The
+  Settings cards: `components/Terminal/WhatsAppAlerts.tsx` (`OWN_BOTS`); `POST /api/scan/test-alert?channel_type=`
+  sends through that slot only, never the fallback. The engine asks for a call
   (`_alert(critical=True, call=True)`) on HALTED / STOPPED and a position with no stop;
   never on DAY_COMPLETED or a `Manual…` panic. `place_call` rings only 09:00-15:45 IST
   Mon-Fri and at most once per 5 minutes (`CALL_COOLDOWN`); the Test call button ignores

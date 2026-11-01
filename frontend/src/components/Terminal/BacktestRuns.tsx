@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCc
 import clsx from "clsx";
 import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
+import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
@@ -90,6 +91,7 @@ export function strategyLabel(s: Settings): string {
     if (s.macd_exit) parts.push(`MACD ${s.macd_fast ?? 12}/${s.macd_slow ?? 26}/${s.macd_signal ?? 9} exit`);
     if (s.ha_colours) parts.push("Heikin Ashi colours");
     if (s.use_level) parts.push(`level ${s.level_line ?? "BB_MIDDLE"}`);
+    if (s.use_high52) parts.push(`52w high ${s.high52_side ?? "LONG"}${Number(s.high52_pct ?? 0) > 0 ? ` ±${s.high52_pct}%` : ""}`);
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
     if (s.slope_exit) parts.push(`SMA 9 slope exit (bend ${s.slope_bend_pct ?? 60}%, over ${s.slope_lookback ?? 2})`);
@@ -111,6 +113,7 @@ export function strategyLabel(s: Settings): string {
   else if (s.stop_type === "SMA_GAP") parts.push(`SMA-gap stop ×${s.gap_sl_mult} · target ×${s.gap_tp_mult} · min ${s.gap_min_pct}%`);
   else if (s.stop_type === "TSL") parts.push(tslText(s));
   else if (s.stop_type === "SUPERTREND") parts.push(`Supertrend stop (${s.st_period ?? 10}, ×${s.st_mult ?? 3})`);
+  else if (s.stop_type === "VWAP") parts.push(`VWAP ∓ ${s.vwap_stop_atr ?? 0.5}× ATR stop`);
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
   if (gapModeText(s)) parts.push(`Gap mode ${gapModeText(s)}`);
@@ -151,6 +154,7 @@ export function stopShort(s: Settings): string {
     return `TSL ₹${s.tsl_sl_points ?? 20} / ₹${s.tsl_trail_points ?? 10}${target}`;
   }
   if (s.stop_type === "SUPERTREND") return `Supertrend ${s.st_period ?? 10}/×${s.st_mult ?? 3}`;
+  if (s.stop_type === "VWAP") return `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} ATR`;
   return `${s.atr_multiplier ?? 1.5}× ATR`;
 }
 
@@ -224,6 +228,14 @@ export function filtersShort(s: Settings): string {
   return on.length ? on.join(", ") : "no filters";
 }
 
+// Column keys of the three Backtests tables; their order is dragged and kept per browser (columnOrder.tsx).
+type RunColKey = "run" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd" | "actions";
+const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "profit", "loss", "net", "dd", "actions"];
+type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
+const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative"];
+type StockColKey = "symbol" | "trades" | "wl" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
+const STOCK_COLS: StockColKey[] = ["symbol", "trades", "wl", "win", "profit", "loss", "gross", "charges", "net", "dd"];
+
 export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["SMA", (s) => `${s.sma_fast} / ${s.sma_slow}`],
   [
@@ -237,6 +249,8 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
             ? `Trailing: ${tslText(s)}`
           : s.stop_type === "SUPERTREND"
             ? `Supertrend line (${s.st_period ?? 10} candles, ×${s.st_mult ?? 3}), moved each candle`
+          : s.stop_type === "VWAP"
+            ? `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} × ATR, moved each candle (tighter only)`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   [
@@ -259,6 +273,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["MACD cross exit", (s) => (s.macd_exit ? `On (${s.macd_fast ?? 12}/${s.macd_slow ?? 26}/${s.macd_signal ?? 9})` : "Off")],
   ["Heikin Ashi colours", (s) => (s.ha_colours ? "On" : "Off")],
   ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
+  ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Slow SMA exit", (s) => (s.slow_sma_exit ? "On" : "Off")],
@@ -305,6 +320,46 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Square-off", (s) => String(s.square_off_time ?? "15:15")],
 ];
 
+/** The fast-mover hand-off's snapshot a run keeps (replay.py `fast_bot`): its settings and Bot 5's strategy fields. */
+type FastBotSnapshot = { settings?: Record<string, unknown>; bot5?: Record<string, unknown> };
+
+function fastBotOf(settings: Settings): FastBotSnapshot | null {
+  const raw = (settings as Record<string, unknown>).fast_bot;
+  return raw && typeof raw === "object" ? (raw as FastBotSnapshot) : null;
+}
+
+/**
+ * Bot 5's part of a run's settings, for the run detail and the PDF: how a stock is handed to Bot 5
+ * and the strategy Bot 5 then trades it with. Empty when the run played without the hand-off.
+ */
+export function bot5Rows(settings: Settings): [string, string][] {
+  const snap = fastBotOf(settings);
+  if (!snap) return [];
+  const fb = snap.settings ?? {};
+  const rule = String(fb.rule ?? "MOVE");
+  const move = `${fb.pct ?? 0.5}% within ${fb.minutes ?? 3} min`;
+  const speed = `${fb.speed ?? 0.15}%/min over ${fb.speed_minutes ?? 5} min`;
+  const rows: [string, string][] = [
+    ["Fast movers → Bot 5", fb.on === false ? "Off" : `On (from Bot${Array.isArray(fb.sources) && fb.sources.length > 1 ? "s" : ""} ${Array.isArray(fb.sources) ? fb.sources.join(", ") : "1-4"})`],
+    ["Bot 5 · fast move", rule === "EITHER" ? `${move} or ${speed}` : rule === "SPEED" ? speed : move],
+    ["Bot 5 · only in profit", Number(fb.min_profit_pct ?? 0) > 0 ? `≥ ${fb.min_profit_pct}% from entry` : "Any trade"],
+    ["Bot 5 · trades per stock", Number(fb.bot5_trades ?? 1) > 0 ? `${fb.bot5_trades ?? 1}, then back to its bot` : "All day"],
+    ["Bot 5 · entry checks first", fb.entry_checks === false ? "Off (enters whatever they say)" : "On"],
+    ["Bot 5 · hand-offs per day", String(fb.max_day ?? 10)],
+  ];
+  if (snap.bot5 && typeof snap.bot5 === "object") {
+    const b5 = snap.bot5 as Settings;
+    for (const [label, fmt] of SETTING_ROWS) {
+      try {
+        rows.push([`Bot 5 · ${label}`, fmt(b5)]);
+      } catch {
+        // A field the snapshot lacks: skip the row rather than fail the PDF.
+      }
+    }
+  }
+  return rows;
+}
+
 /** Replay runs side by side, and one run's day-wise P&L. */
 export function BacktestRuns() {
   const [runs, setRuns] = useState<ReplayRun[] | null>(null);
@@ -339,13 +394,15 @@ export function BacktestRuns() {
   const downloadPdf = useCallback(async (run: ReplayRun) => {
     setPrinting(run.id);
     try {
-      const [full, book] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY")]);
+      // The practice wallet's margin share (20% = 5x) sizes the "margin" amounts; without a wallet 20% is assumed.
+      const [full, book, wallet] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY"), smaApi.wallet().catch(() => null)]);
       const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
       await downloadBacktestPdf({
         run: full,
         trades: book.rows.filter((trade) => trade.run_id === run.id),
+        marginPct: wallet?.margin_pct ?? 20,
         strategy: strategyLabel(full.settings),
-        settings: SETTING_ROWS.map(([label, value]) => [label, value(full.settings)]),
+        settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
         reasons: REASON_SHORT,
       });
       setError(null);
@@ -404,6 +461,7 @@ export function BacktestRuns() {
   type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
   const shownRuns = useMemo(() => (runs ?? []).filter((run) => runMatches(run, filters)), [runs, filters]);
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
+  const runCols = useColumnOrder<RunColKey>("backtests.cols.runs", RUN_COLS);
   const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(shownRuns, (r, k) =>
     k === "id"
       ? r.id
@@ -474,19 +532,22 @@ export function BacktestRuns() {
           <p className="px-4 py-4 text-sm text-slate-400">No runs match these filters.</p>
         ) : null}
         <div className="overflow-x-auto px-2 py-3 sm:px-4">
+          <ColumnHint moved={runCols.moved} onReset={runCols.reset} />
           <table className="w-full min-w-[860px] whitespace-nowrap text-left text-xs">
             <thead className="text-xs uppercase tracking-wider text-slate-400">
               <tr>
-                <SortTh label="Run" k="id" sort={runSort} onSort={onRunSort} />
-                <SortTh label="Days" k="days" text sort={runSort} onSort={onRunSort} />
-                <SortTh label="Strategy" k="strategy" text sort={runSort} onSort={onRunSort} />
-                <SortTh label="Trades" k="trades" num sort={runSort} onSort={onRunSort} />
-                <SortTh label="Win %" k="win" num sort={runSort} onSort={onRunSort} />
-                <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} />
-                <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} />
-                <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={runSort} onSort={onRunSort} />
-                <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} />
-                <th className="px-2 py-2" />
+                {inOrder(runCols.order, {
+                  run: <SortTh label="Run" k="id" sort={runSort} onSort={onRunSort} drag={runCols.dragProps("run")} />,
+                  days: <SortTh label="Days" k="days" text sort={runSort} onSort={onRunSort} drag={runCols.dragProps("days")} />,
+                  strategy: <SortTh label="Strategy" k="strategy" text sort={runSort} onSort={onRunSort} drag={runCols.dragProps("strategy")} />,
+                  trades: <SortTh label="Trades" k="trades" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("trades")} />,
+                  win: <SortTh label="Win %" k="win" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("win")} />,
+                  profit: <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("profit")} />,
+                  loss: <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("loss")} />,
+                  net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
+                  dd: <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("dd")} />,
+                  actions: <th {...runCols.dragProps("actions")} className={clsx("px-2 py-2", runCols.dragProps("actions").className)} />,
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -499,7 +560,8 @@ export function BacktestRuns() {
                       className={clsx("cursor-pointer hover:bg-white/[0.03]", on && "bg-sky-500/[0.07]")}
                       onClick={() => setOpenId(on ? null : run.id)}
                     >
-                      <td className="px-2 py-2 align-top">
+{inOrder(runCols.order, {
+run: <td className="px-2 py-2 align-top">
                         <div className="flex items-center gap-1.5 font-semibold text-slate-100">
                           #{run.id}
                           {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
@@ -524,30 +586,30 @@ export function BacktestRuns() {
                           {on ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
                           Day-wise P&amp;L
                         </button>
-                      </td>
-                      <td className="px-2 py-2 align-top font-mono text-slate-200">
+                      </td>,
+days: <td className="px-2 py-2 align-top font-mono text-slate-200">
                         {run.days_done}/{run.days_total}
                         <div className="font-sans text-xs text-slate-400">
                           {t.green_days}↑ {t.red_days}↓
                         </div>
-                      </td>
-                      <td className="max-w-[22rem] px-2 py-2 align-top text-slate-300">
+                      </td>,
+strategy: <td className="max-w-[22rem] px-2 py-2 align-top text-slate-300">
                         <div className="truncate" title={strategyLabel(run.settings)}>
                           {strategyLabel(run.settings)}
                         </div>
                         <div className="truncate text-xs text-slate-400" title={run.symbols.join(", ")}>
                           {run.symbols.join(", ")}
                         </div>
-                      </td>
-                      <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.trades}</td>
-                      <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.win_rate.toFixed(1)}%</td>
-                      <td className="px-2 py-2 text-right align-top font-mono text-emerald-300">{signed(t.profit)}</td>
-                      <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.loss)}</td>
-                      <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
+                      </td>,
+trades: <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.trades}</td>,
+win: <td className="px-2 py-2 text-right align-top font-mono text-slate-200">{t.win_rate.toFixed(1)}%</td>,
+profit: <td className="px-2 py-2 text-right align-top font-mono text-emerald-300">{signed(t.profit)}</td>,
+loss: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.loss)}</td>,
+net: <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
                         {signed(t.net)}
-                      </td>
-                      <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>
-                      <td className="px-2 py-2 text-right align-top">
+                      </td>,
+dd: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>,
+actions: <td className="px-2 py-2 text-right align-top">
                         {(run.status === "INTERRUPTED" || run.status === "STOPPED") &&
                         run.days_done < run.days_total &&
                         !scalpPickOf(run.settings) ? (
@@ -621,7 +683,8 @@ export function BacktestRuns() {
                           <Trash2 size={14} aria-hidden />
                         </button>
                       </td>
-                    </tr>
+})}
+</tr>
                     {on ? (
                       <tr id={`run-${run.id}-days`} className="hidden bg-white/[0.015] sm:table-row">
                         <td colSpan={10} className="p-0 whitespace-normal">
@@ -809,6 +872,7 @@ function RunDetailBody({
   const [openDay, setOpenDay] = useState<string | null>(null);
   const stocks = run.stocks ?? [];
   type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
+  const dayCols = useColumnOrder<DayColKey>("backtests.cols.days", DAY_COLS);
   const { sorted: sortedDays, sort: daySort, onSort: onDaySort } = useSort<ReplayDayRow, DayKey>(days, (d, k) => d[k]);
   return (
     <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
@@ -836,18 +900,21 @@ function RunDetailBody({
       ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       <div className="overflow-x-auto">
+        <ColumnHint moved={dayCols.moved} onReset={dayCols.reset} />
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">
           <thead className="text-xs uppercase tracking-wider text-slate-400">
             <tr>
-              <SortTh label="Day" k="date" text sort={daySort} onSort={onDaySort} />
-              <SortTh label="Trades" k="trades" num sort={daySort} onSort={onDaySort} />
-              <SortTh label="W / L" k="wins" num title="Sort by wins" sort={daySort} onSort={onDaySort} />
-              <SortTh label="Profit" k="profit" num sort={daySort} onSort={onDaySort} />
-              <SortTh label="Loss" k="loss" num sort={daySort} onSort={onDaySort} />
-              <SortTh label="Gross" k="gross" num sort={daySort} onSort={onDaySort} />
-              <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} />
-              <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} />
-              <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} />
+              {inOrder(dayCols.order, {
+                date: <SortTh label="Day" k="date" text sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("date")} />,
+                trades: <SortTh label="Trades" k="trades" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("trades")} />,
+                wl: <SortTh label="W / L" k="wins" num title="Sort by wins" sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("wl")} />,
+                profit: <SortTh label="Profit" k="profit" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("profit")} />,
+                loss: <SortTh label="Loss" k="loss" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("loss")} />,
+                gross: <SortTh label="Gross" k="gross" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("gross")} />,
+                charges: <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("charges")} />,
+                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
+                cumulative: <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("cumulative")} />,
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
@@ -864,7 +931,8 @@ function RunDetailBody({
                 return (
                 <Fragment key={d.date}>
                 <tr>
-                  <td className="px-2 py-1.5 font-sans text-slate-200">
+{inOrder(dayCols.order, {
+date: <td className="px-2 py-1.5 font-sans text-slate-200">
                     {perStock.length ? (
                       <button
                         type="button"
@@ -883,38 +951,41 @@ function RunDetailBody({
                     {!heading && run.id > 0 && run.symbols.length === 1 ? (
                       <RunChartLink run={run} symbol={run.symbols[0]} date={d.date} />
                     ) : null}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-slate-200">{d.trades}</td>
-                  <td className="px-2 py-1.5 text-right text-slate-300">
+                  </td>,
+trades: <td className="px-2 py-1.5 text-right text-slate-200">{d.trades}</td>,
+wl: <td className="px-2 py-1.5 text-right text-slate-300">
                     {d.wins} / {d.losses}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-emerald-300">{signed(d.profit)}</td>
-                  <td className="px-2 py-1.5 text-right text-rose-300">{signed(d.loss)}</td>
-                  <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>
-                  <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>
-                  <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>
-                  <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
-                </tr>
+                  </td>,
+profit: <td className="px-2 py-1.5 text-right text-emerald-300">{signed(d.profit)}</td>,
+loss: <td className="px-2 py-1.5 text-right text-rose-300">{signed(d.loss)}</td>,
+gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>,
+charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>,
+net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>,
+cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
+})}
+</tr>
                 {isOpen
                   ? perStock.map(({ symbol, day: sd }) => (
                       <tr key={`${d.date}-${symbol}`} className="bg-white/[0.02] text-slate-300">
-                        <td className="px-2 py-1 pl-8 font-sans font-semibold text-amber-300">
+{inOrder(dayCols.order, {
+date: <td className="px-2 py-1 pl-8 font-sans font-semibold text-amber-300">
                           {symbol}
                           {!heading && run.id > 0 ? <RunChartLink run={run} symbol={symbol} date={d.date} /> : null}
-                        </td>
-                        <td className="px-2 py-1 text-right">{sd.trades}</td>
-                        <td className="px-2 py-1 text-right">
+                        </td>,
+trades: <td className="px-2 py-1 text-right">{sd.trades}</td>,
+wl: <td className="px-2 py-1 text-right">
                           {sd.wins} / {sd.losses}
-                        </td>
-                        <td className="px-2 py-1 text-right text-emerald-300">{signed(sd.profit)}</td>
-                        <td className="px-2 py-1 text-right text-rose-300">{signed(sd.loss)}</td>
-                        <td className={clsx("px-2 py-1 text-right", pnlTone(sd.gross))}>{signed(sd.gross)}</td>
-                        <td className="px-2 py-1 text-right text-amber-300">{inr(sd.charges)}</td>
-                        <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.net)}</td>
-                        <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
+                        </td>,
+profit: <td className="px-2 py-1 text-right text-emerald-300">{signed(sd.profit)}</td>,
+loss: <td className="px-2 py-1 text-right text-rose-300">{signed(sd.loss)}</td>,
+gross: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.gross))}>{signed(sd.gross)}</td>,
+charges: <td className="px-2 py-1 text-right text-amber-300">{inr(sd.charges)}</td>,
+net: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.net)}</td>,
+cumulative: <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
                           {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
                         </td>
-                      </tr>
+})}
+</tr>
                     ))
                   : null}
                 </Fragment>
@@ -925,18 +996,20 @@ function RunDetailBody({
           {days.length > 0 ? (
             <tfoot className="border-t border-white/15 font-mono text-slate-100">
               <tr>
-                <td className="px-2 py-2 font-sans font-semibold">Total · {days.length} days</td>
-                <td className="px-2 py-2 text-right">{t.trades}</td>
-                <td className="px-2 py-2 text-right">
+{inOrder(dayCols.order, {
+date: <td className="px-2 py-2 font-sans font-semibold">Total · {days.length} days</td>,
+trades: <td className="px-2 py-2 text-right">{t.trades}</td>,
+wl: <td className="px-2 py-2 text-right">
                   {t.wins} / {t.losses}
-                </td>
-                <td className="px-2 py-2 text-right text-emerald-300">{signed(t.profit)}</td>
-                <td className="px-2 py-2 text-right text-rose-300">{signed(t.loss)}</td>
-                <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>
-                <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>
-                <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>
-                <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
-              </tr>
+                </td>,
+profit: <td className="px-2 py-2 text-right text-emerald-300">{signed(t.profit)}</td>,
+loss: <td className="px-2 py-2 text-right text-rose-300">{signed(t.loss)}</td>,
+gross: <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>,
+charges: <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>,
+net: <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
+cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
+})}
+</tr>
             </tfoot>
           ) : null}
         </table>
@@ -944,7 +1017,7 @@ function RunDetailBody({
       <div className="mt-3 px-2">
         <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">{settingsTitle}</div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
-          {(settingsRows ?? SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string])).map(
+          {(settingsRows ?? [...SETTING_ROWS.map(([label, fmt]) => [label, fmt(run.settings)] as [string, string]), ...bot5Rows(run.settings)]).map(
             ([label, value]) => (
               <div key={label} className="flex justify-between gap-3 border-b border-white/5 py-1">
                 <dt className="text-slate-400">{label}</dt>
@@ -967,6 +1040,7 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
   const [open, setOpen] = useState<string | null>(null);
   const base = strategyLabel(settings);
   type StockKey = "symbol" | "trades" | "wins" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
+  const stockCols = useColumnOrder<StockColKey>("backtests.cols.stocks", STOCK_COLS);
   const { sorted, sort, onSort } = useSort<ReplayStockRow, StockKey>(stocks, (r, k) =>
     k === "symbol"
       ? r.symbol
@@ -985,16 +1059,18 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
         <table className="w-full min-w-[760px] whitespace-nowrap text-left text-xs">
           <thead className="text-xs uppercase tracking-wider text-slate-400">
             <tr>
-              <SortTh label="Stock" k="symbol" text sort={sort} onSort={onSort} />
-              <SortTh label="Trades" k="trades" num sort={sort} onSort={onSort} />
-              <SortTh label="W / L" k="wins" num title="Sort by wins" sort={sort} onSort={onSort} />
-              <SortTh label="Win %" k="win" num sort={sort} onSort={onSort} />
-              <SortTh label="Profit" k="profit" num sort={sort} onSort={onSort} />
-              <SortTh label="Loss" k="loss" num sort={sort} onSort={onSort} />
-              <SortTh label="Gross" k="gross" num sort={sort} onSort={onSort} />
-              <SortTh label="Charges" k="charges" num sort={sort} onSort={onSort} />
-              <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={sort} onSort={onSort} />
-              <SortTh label="Max DD" k="dd" num sort={sort} onSort={onSort} />
+              {inOrder(stockCols.order, {
+                symbol: <SortTh label="Stock" k="symbol" text sort={sort} onSort={onSort} drag={stockCols.dragProps("symbol")} />,
+                trades: <SortTh label="Trades" k="trades" num sort={sort} onSort={onSort} drag={stockCols.dragProps("trades")} />,
+                wl: <SortTh label="W / L" k="wins" num title="Sort by wins" sort={sort} onSort={onSort} drag={stockCols.dragProps("wl")} />,
+                win: <SortTh label="Win %" k="win" num sort={sort} onSort={onSort} drag={stockCols.dragProps("win")} />,
+                profit: <SortTh label="Profit" k="profit" num sort={sort} onSort={onSort} drag={stockCols.dragProps("profit")} />,
+                loss: <SortTh label="Loss" k="loss" num sort={sort} onSort={onSort} drag={stockCols.dragProps("loss")} />,
+                gross: <SortTh label="Gross" k="gross" num sort={sort} onSort={onSort} drag={stockCols.dragProps("gross")} />,
+                charges: <SortTh label="Charges" k="charges" num sort={sort} onSort={onSort} drag={stockCols.dragProps("charges")} />,
+                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={sort} onSort={onSort} drag={stockCols.dragProps("net")} />,
+                dd: <SortTh label="Max DD" k="dd" num sort={sort} onSort={onSort} drag={stockCols.dragProps("dd")} />,
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
@@ -1005,7 +1081,8 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
               return (
                 <Fragment key={s.symbol}>
                   <tr>
-                    <td className="px-2 py-1.5 font-sans">
+{inOrder(stockCols.order, {
+symbol: <td className="px-2 py-1.5 font-sans">
                       <button
                         type="button"
                         disabled={s.days.length === 0}
@@ -1029,37 +1106,40 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
                           Own
                         </span>
                       ) : null}
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-slate-200">{t.trades}</td>
-                    <td className="px-2 py-1.5 text-right text-slate-300">
+                    </td>,
+trades: <td className="px-2 py-1.5 text-right text-slate-200">{t.trades}</td>,
+wl: <td className="px-2 py-1.5 text-right text-slate-300">
                       {t.wins} / {t.losses}
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-slate-300">{t.trades ? `${t.win_rate.toFixed(1)}%` : "—"}</td>
-                    <td className="px-2 py-1.5 text-right text-emerald-300">{signed(t.profit)}</td>
-                    <td className="px-2 py-1.5 text-right text-rose-300">{signed(t.loss)}</td>
-                    <td className={clsx("px-2 py-1.5 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>
-                    <td className="px-2 py-1.5 text-right text-amber-300">{inr(t.charges)}</td>
-                    <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>
-                    <td className="px-2 py-1.5 text-right text-slate-400">{signed(t.max_drawdown)}</td>
-                  </tr>
+                    </td>,
+win: <td className="px-2 py-1.5 text-right text-slate-300">{t.trades ? `${t.win_rate.toFixed(1)}%` : "—"}</td>,
+profit: <td className="px-2 py-1.5 text-right text-emerald-300">{signed(t.profit)}</td>,
+loss: <td className="px-2 py-1.5 text-right text-rose-300">{signed(t.loss)}</td>,
+gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>,
+charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(t.charges)}</td>,
+net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
+dd: <td className="px-2 py-1.5 text-right text-slate-400">{signed(t.max_drawdown)}</td>
+})}
+</tr>
                   {isOpen
                     ? s.days.map((d) => (
                         <tr key={`${s.symbol}-${d.date}`} className="bg-white/[0.02] text-slate-300">
-                          <td className="px-2 py-1 pl-8 font-sans text-slate-400">{dayLabel(d.date)}</td>
-                          <td className="px-2 py-1 text-right">{d.trades}</td>
-                          <td className="px-2 py-1 text-right">
+{inOrder(stockCols.order, {
+symbol: <td className="px-2 py-1 pl-8 font-sans text-slate-400">{dayLabel(d.date)}</td>,
+trades: <td className="px-2 py-1 text-right">{d.trades}</td>,
+wl: <td className="px-2 py-1 text-right">
                             {d.wins} / {d.losses}
-                          </td>
-                          <td className="px-2 py-1 text-right">—</td>
-                          <td className="px-2 py-1 text-right text-emerald-300">{signed(d.profit)}</td>
-                          <td className="px-2 py-1 text-right text-rose-300">{signed(d.loss)}</td>
-                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>
-                          <td className="px-2 py-1 text-right text-amber-300">{inr(d.charges)}</td>
-                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.net))}>{signed(d.net)}</td>
-                          <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="Running total for this stock">
+                          </td>,
+win: <td className="px-2 py-1 text-right">—</td>,
+profit: <td className="px-2 py-1 text-right text-emerald-300">{signed(d.profit)}</td>,
+loss: <td className="px-2 py-1 text-right text-rose-300">{signed(d.loss)}</td>,
+gross: <td className={clsx("px-2 py-1 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>,
+charges: <td className="px-2 py-1 text-right text-amber-300">{inr(d.charges)}</td>,
+net: <td className={clsx("px-2 py-1 text-right", pnlTone(d.net))}>{signed(d.net)}</td>,
+dd: <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="Running total for this stock">
                             {signed(d.cumulative)}
                           </td>
-                        </tr>
+})}
+</tr>
                       ))
                     : null}
                 </Fragment>

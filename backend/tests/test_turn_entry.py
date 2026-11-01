@@ -107,7 +107,7 @@ def test_engine_alerts_once_per_turn_and_not_an_old_one(db):  # noqa: F811
 
     eng = StrategyEngine()
     sent: list[str] = []
-    eng._alert = lambda message, critical=False, call=False: sent.append(message)
+    eng._alert = lambda message, critical=False, call=False, kind="trade": sent.append(message)
     cfg = SimpleNamespace(turn_alert=True, turn_entry=False, sma_fast=9, bot_name="Bot 3")
     up = [100 + i * 0.1 for i in range(30)]
     down = [up[-1] - (i + 1) * 0.4 for i in range(6)]
@@ -122,7 +122,7 @@ def test_engine_alerts_once_per_turn_and_not_an_old_one(db):  # noqa: F811
     assert sum(1 for h in seen if h) == 1
     # A stock first read on the turn candle itself is not alerted (it may be an old turn).
     fresh = StrategyEngine()
-    fresh._alert = lambda message, critical=False, call=False: sent.append(message)
+    fresh._alert = lambda message, critical=False, call=False, kind="trade": sent.append(message)
     turn_at = next(n for n in range(25, len(closes) + 1) if turn_entry.detect(pd.DataFrame({"close": closes[:n]}), 9, cfg))
     assert fresh._turn_now("ASHOKLEY", frame(turn_at), cfg) is None and len(sent) == 1
 
@@ -181,7 +181,7 @@ def test_a_u_then_its_v_alerts_once(db):  # noqa: F811
 
     eng = StrategyEngine()
     sent: list[str] = []
-    eng._alert = lambda message, critical=False, call=False: sent.append(message)
+    eng._alert = lambda message, critical=False, call=False, kind="trade": sent.append(message)
     cfg = SimpleNamespace(turn_alert=True, turn_entry=False, sma_fast=9, bot_name="Bot 3", uturn_on=True)
     frame = lambda n: pd.DataFrame({"ts": [60 * i for i in range(n + 1)], "close": WAVE[:n] + [WAVE[n - 1]]})  # noqa: E731
     for n in range(40, len(WAVE) + 1):

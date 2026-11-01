@@ -48,6 +48,31 @@ TWILIO_VOICE = "twilio_voice"
 # A second Telegram bot that only gets the Scalp page's quiet-runner alerts, so
 # they are not lost among trade alerts. Its own row: providers are one row each.
 TELEGRAM_QUIET = "telegram_quiet"
+# Each kind of alert can have its own Telegram bot (its own BotFather token and chat). Providers are
+# one row each, so a bot for one kind never overwrites the bot of another: that is what happened
+# when a second token was typed in as plain "telegram" for the critical slot.
+TELEGRAM_CRITICAL = "telegram_critical"
+TELEGRAM_NEWS = "telegram_news"
+TELEGRAM_SIGNAL = "telegram_signal"
+TELEGRAM_FAST = "telegram_fast"
+
+#: What each alert channel carries. "trade" is the fallback for every message kind but calls.
+CHANNEL_TYPES = ("trade", "critical", "news", "signal", "fast", "quiet", "call")
+#: The Telegram bot that belongs to a channel type alone (saved only in that slot). "trade" and
+#: "critical" also take the general providers (telegram, twilio, callmebot).
+DEDICATED_TELEGRAM = {
+    "critical": TELEGRAM_CRITICAL,
+    "news": TELEGRAM_NEWS,
+    "signal": TELEGRAM_SIGNAL,
+    "fast": TELEGRAM_FAST,
+    "quiet": TELEGRAM_QUIET,
+}
+GENERAL_PROVIDERS = (CALLMEBOT, TWILIO, TELEGRAM)
+ALL_PROVIDERS = (*GENERAL_PROVIDERS, TWILIO_VOICE, *DEDICATED_TELEGRAM.values())
+
+
+def is_telegram(provider: str) -> bool:
+    return provider == TELEGRAM or provider.startswith("telegram_")
 
 # Phone calls ring only in market hours, at most once per cooldown: four bots
 # stopping together is one call, and nobody is woken by an evening deploy.
@@ -290,6 +315,15 @@ class AlertNotifier:
             return DeliveryResult(False, None, skipped_reason="No trade alert channel is enabled")
         return await self._deliver(channel, message)
 
+    async def send_to(self, channel_type: str, message: str) -> DeliveryResult:
+        """Send to that kind's own channel, else to the 'trade' channel, so nothing is silently dropped."""
+        channel = await self.active_channel(channel_type)
+        if channel is None:
+            channel = await self.active_channel("trade")
+        if channel is None:
+            return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
+        return await self._deliver(channel, message)
+
     async def send_critical(self, message: str, call: bool = False, call_any_time: bool = False) -> DeliveryResult:
         """Send a critical alert (bot down, app hung) to the 'critical' channel.
 
@@ -303,24 +337,23 @@ class AlertNotifier:
                 await self.place_call(message, any_time=call_any_time)
             except Exception:  # noqa: BLE001
                 log.exception("alert.call failed")
-        channel = await self.active_channel("critical")
-        if channel is None:
-            channel = await self.active_channel("trade")
-        if channel is None:
-            return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
-        return await self._deliver(channel, message)
+        return await self.send_to("critical", message)
 
     async def send_quiet(self, message: str) -> DeliveryResult:
-        """Send a quiet-runner alert to the 'quiet' channel (its own Telegram bot).
+        """The Scalp page's quiet-runner alerts: the 'quiet' channel (its own Telegram bot), else trade."""
+        return await self.send_to("quiet", message)
 
-        Falls back to the 'trade' channel when none is set, as before it existed.
-        """
-        channel = await self.active_channel("quiet")
-        if channel is None:
-            channel = await self.active_channel("trade")
-        if channel is None:
-            return DeliveryResult(False, None, skipped_reason="No alert channel is enabled")
-        return await self._deliver(channel, message)
+    async def send_news(self, message: str) -> DeliveryResult:
+        """News alerts (news_impact): the 'news' channel, else trade."""
+        return await self.send_to("news", message)
+
+    async def send_signal(self, message: str) -> DeliveryResult:
+        """Signal heads-ups (an SMA cross coming, an SMA 9 turn, a 1-minute review): the 'signal' channel, else trade."""
+        return await self.send_to("signal", message)
+
+    async def send_fast(self, message: str) -> DeliveryResult:
+        """Fast price moves (fast_move): the 'fast' channel, else trade."""
+        return await self.send_to("fast", message)
 
     async def stop_prefs(self) -> dict:
         """The after-hours app-stop switches. Both on when never saved (ring and message, as before)."""
@@ -398,7 +431,7 @@ class AlertNotifier:
             return await self._send_callmebot(target, secret, message)
         if channel.provider == TWILIO:
             return await self._send_twilio(target, secret, extra, message)
-        if channel.provider in (TELEGRAM, TELEGRAM_QUIET):
+        if is_telegram(channel.provider):
             return await self._send_telegram(target, secret, message)
         if channel.provider == TWILIO_VOICE:
             return await self._call_twilio(target, secret, extra, message)

@@ -234,7 +234,9 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 /** A change the assistant proposed. Nothing is saved until the person taps Apply. */
 export type ChatProposal =
   | { kind: "trade_list"; bot: 1 | 2 | 3 | 4 | 5; arm: string[]; unarm: string[]; reason: string }
-  | { kind: "stop"; bot: 1 | 2 | 3 | 4 | 5; symbol: string | null; changes: Record<string, string | number | boolean>; reason: string };
+  | { kind: "stop"; bot: 1 | 2 | 3 | 4 | 5; symbol: string | null; changes: Record<string, string | number | boolean>; reason: string }
+  /** Any strategy setting, from plain words ("turn on VWAP on bot 3"); saved through the same Settings routes. */
+  | { kind: "settings"; bot: 1 | 2 | 3 | 4 | 5; symbol: string | null; changes: Record<string, string | number | boolean | null>; reason: string };
 
 
 export type ChartCandle = {
@@ -1560,10 +1562,10 @@ export const api = {
 
   getChatStatus: () =>
     request<{ configured: boolean; model: string; suggestions: string[] }>("/api/chat/status"),
-  askChat: (message: string, history: ChatTurn[], page?: string, screen?: Record<string, unknown> | null) =>
+  askChat: (message: string, history: ChatTurn[], page?: string, screen?: Record<string, unknown> | null, full = false) =>
     request<{ reply: string; model: string; proposals?: ChatProposal[]; facts_summary: Record<string, unknown> }>("/api/chat/ask", {
       method: "POST",
-      body: JSON.stringify({ message, history, page, screen: screen ?? undefined }),
+      body: JSON.stringify({ message, history, page, screen: screen ?? undefined, full }),
     }),
 
   getAiAnalyses: (symbol?: string, limit = 25) =>

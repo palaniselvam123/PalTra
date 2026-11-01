@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { History, Loader2, Pause, Play, RotateCcw, Square } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, History, Loader2, Pause, Play, RotateCcw, Square } from "lucide-react";
 import clsx from "clsx";
 import { smaApi, replayActive, type ReplayInfo, type ResumableRun } from "@/lib/smaApi";
 
@@ -75,6 +75,76 @@ export function replayProgress(info: ReplayInfo | null): number {
   return daysTotal > 1 ? Math.min(1, ((info.day_index ?? 0) + dayProgress) / daysTotal) : dayProgress;
 }
 
+const hhmm = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+
+/**
+ * Rewind / fast-forward on the replayed day: a slider from 09:15 to 15:30 plus ± 5 / 15 minute buttons. Forward
+ * fast-forwards on the same 10-second grid (same trades, only real time skipped); back replays the day from its
+ * first candle up to there (its trades after that point go). The pause state is kept.
+ */
+export function ReplayScrub({ info, onChanged, compact = false }: { info: ReplayInfo; onChanged?: (info: ReplayInfo) => void; compact?: boolean }) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const clock = clockParts(info.clock ?? null);
+  const now = clock ? Math.round(clock.minute) : SESSION_START;
+  const seeking = info.seeking ? clockParts(info.seeking) : null;
+  const can = (info.status === "PLAYING" || info.status === "PAUSED") && !info.seeking;
+  const value = drag ?? now;
+  const seek = async (minute: number) => {
+    const target = Math.min(SESSION_END - 1, Math.max(SESSION_START, Math.round(minute)));
+    setDrag(null);
+    if (target === now || !can) return;
+    setBusy(true);
+    try {
+      const next = await smaApi.replayControl("seek", undefined, hhmm(target));
+      onChanged?.(next);
+    } catch {
+      /* the replay bar shows the error on its next poll */
+    } finally {
+      setBusy(false);
+    }
+  };
+  const jump = (delta: number) => void seek(now + delta);
+  const btn = "grid h-7 min-w-7 shrink-0 place-items-center rounded-md px-1 font-mono text-[10px] text-violet-100 ring-1 ring-inset ring-violet-300/40 hover:bg-violet-400/15 disabled:opacity-40";
+  return (
+    <span className={clsx("flex min-w-0 items-center gap-1", compact ? "w-full" : "w-full sm:w-auto sm:min-w-[260px] sm:flex-1")} role="group" aria-label="Rewind or fast-forward the replay">
+      <button type="button" disabled={!can || busy} onClick={() => jump(-15)} className={btn} title="Back 15 minutes (the day replays to there)" aria-label="Back 15 minutes">
+        <ChevronsLeft size={11} aria-hidden />15
+      </button>
+      <button type="button" disabled={!can || busy} onClick={() => jump(-5)} className={btn} title="Back 5 minutes" aria-label="Back 5 minutes">
+        <ChevronsLeft size={11} aria-hidden />5
+      </button>
+      <input
+        type="range"
+        min={SESSION_START}
+        max={SESSION_END - 1}
+        step={1}
+        value={value}
+        disabled={!can || busy}
+        onChange={(e) => setDrag(Number(e.target.value))}
+        onMouseUp={(e) => void seek(Number((e.target as HTMLInputElement).value))}
+        onTouchEnd={(e) => void seek(Number((e.target as HTMLInputElement).value))}
+        onKeyUp={(e) => {
+          if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(e.key)) void seek(Number((e.target as HTMLInputElement).value));
+        }}
+        aria-label="Replay time"
+        aria-valuetext={`${hhmm(value)} IST`}
+        title={seeking ? `Moving to ${hhmm(Math.round(seeking.minute))}…` : `${hhmm(value)} IST — drag left to rewind, right to fast-forward`}
+        className="h-1.5 min-w-0 flex-1 cursor-pointer accent-violet-400 disabled:cursor-default"
+      />
+      <span className={clsx("w-11 shrink-0 text-center font-mono text-[11px]", seeking ? "text-amber-300" : "text-violet-100")} aria-live="off">
+        {seeking ? `→${hhmm(Math.round(seeking.minute))}` : hhmm(value)}
+      </span>
+      <button type="button" disabled={!can || busy} onClick={() => jump(5)} className={btn} title="Forward 5 minutes (fast-forward)" aria-label="Forward 5 minutes">
+        5<ChevronsRight size={11} aria-hidden />
+      </button>
+      <button type="button" disabled={!can || busy} onClick={() => jump(15)} className={btn} title="Forward 15 minutes (fast-forward)" aria-label="Forward 15 minutes">
+        15<ChevronsRight size={11} aria-hidden />
+      </button>
+    </span>
+  );
+}
+
 /** The replay in the terminal's top strip: replayed time, day, progress, pause and stop. */
 export function ReplayChip({ info, onChanged }: { info: ReplayInfo; onChanged?: (info: ReplayInfo) => void }) {
   const [busy, setBusy] = useState(false);
@@ -115,6 +185,32 @@ export function ReplayChip({ info, onChanged }: { info: ReplayInfo; onChanged?: 
         >
           {playing ? <Pause size={12} aria-hidden /> : <Play size={12} aria-hidden />}
         </button>
+      ) : null}
+      {info.status === "PLAYING" || info.status === "PAUSED" ? (
+        <span className="hidden items-center gap-0.5 md:flex" role="group" aria-label="Replay back or forward">
+          {[-5, 5].map((delta) => (
+            <button
+              key={delta}
+              type="button"
+              disabled={busy || Boolean(info.seeking)}
+              onClick={() => {
+                const minute = clock ? Math.round(clock.minute) + delta : null;
+                if (minute == null) return;
+                setBusy(true);
+                smaApi
+                  .replayControl("seek", undefined, hhmm(Math.min(SESSION_END - 1, Math.max(SESSION_START, minute))))
+                  .then((next) => onChanged?.(next))
+                  .catch(() => undefined)
+                  .finally(() => setBusy(false));
+              }}
+              title={delta < 0 ? "Back 5 minutes (the day replays to there)" : "Forward 5 minutes (fast-forward)"}
+              aria-label={delta < 0 ? "Back 5 minutes" : "Forward 5 minutes"}
+              className="grid h-7 min-w-7 shrink-0 place-items-center rounded-md px-1 font-mono text-[10px] text-violet-100 ring-1 ring-inset ring-violet-300/40 hover:bg-violet-400/15 disabled:opacity-40"
+            >
+              {delta < 0 ? <ChevronsLeft size={11} aria-hidden /> : null}5{delta > 0 ? <ChevronsRight size={11} aria-hidden /> : null}
+            </button>
+          ))}
+        </span>
       ) : null}
       <button
         type="button"
@@ -437,6 +533,11 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
       <div className={clsx("overflow-hidden rounded-full bg-black/40", compact ? "mt-1 h-1" : "mt-2 h-1.5")} aria-hidden>
         <div className="h-full rounded-full bg-violet-400 transition-[width]" style={{ width: `${progress * 100}%` }} />
       </div>
+      {info && (info.status === "PLAYING" || info.status === "PAUSED") ? (
+        <div className="mt-1 flex items-center gap-2">
+          <ReplayScrub info={info} onChanged={onChanged} compact={compact} />
+        </div>
+      ) : null}
       <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact ? "hidden" : "flex")}>
         <span>
           {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww

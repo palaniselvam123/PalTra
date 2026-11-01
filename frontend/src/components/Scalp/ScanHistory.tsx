@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { Download, FileText, History, Loader2, RefreshCw, Target } from "lucide-react";
+import { CloudDownload, Download, FileText, History, Loader2, RefreshCw, Target } from "lucide-react";
+import { api as deskApi, type ServerRole } from "@/lib/api";
 import {
   smaApi,
   type ChopScan as ChopScanData,
@@ -222,6 +223,14 @@ export function ScanHistory({
   const [show, setShow] = useState<"all" | "quiet" | "strong" | "approaching">("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Desk only: pull the backtest server's saved scans this desk lacks (BACKTEST_URL + the link token).
+  const [role, setRole] = useState<ServerRole | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pullNote, setPullNote] = useState<string | null>(null);
+  useEffect(() => {
+    deskApi.serverRole().then(setRole).catch(() => setRole(null));
+  }, []);
+  const canPull = role?.role === "desk" && Boolean(role.backtest_url) && Boolean(role.backtest_link);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -375,6 +384,33 @@ export function ScanHistory({
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
+        {canPull ? (
+          <button
+            type="button"
+            disabled={pulling}
+            title="Copy the scans saved on the backtest server (last 30 days) that this desk does not have yet, with their accuracy checks. Scans the backtest server makes from now on arrive on their own."
+            onClick={async () => {
+              setPulling(true);
+              setPullNote(null);
+              try {
+                const r = await smaApi.scanHistoryPull(30);
+                setPullNote(
+                  `Copied ${r.copied} scan${r.copied === 1 ? "" : "s"}${r.checks ? ` (${r.checks} with a check)` : ""}; ${r.already} already here${r.errors.length ? `; ${r.errors.length} failed: ${r.errors[0]}` : ""}.`
+                );
+                setDay("");
+                await loadList();
+              } catch (e) {
+                setPullNote(e instanceof Error ? e.message : String(e));
+              } finally {
+                setPulling(false);
+              }
+            }}
+            className="flex min-h-8 items-center gap-1 rounded-md px-2.5 text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+          >
+            {pulling ? <Loader2 size={13} className="animate-spin" /> : <CloudDownload size={13} />} Pull from backtest server
+          </button>
+        ) : null}
+        {pullNote ? <span className="text-xs text-slate-400">{pullNote}</span> : null}
       </div>
 
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}

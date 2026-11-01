@@ -243,6 +243,12 @@ class BotConfig(Base):
     tsl_sl_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
     tsl_trail_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
     tsl_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # ATR multiples, read when tsl_mode is ATR: the stop / trail / target sized from the stock's own ATR at entry.
+    tsl_sl_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    tsl_trail_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    tsl_target_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
+    # VWAP + ATR buffer stop (stop_type VWAP, vwap_stop.py): stop = VWAP ∓ this × ATR, moved each closed candle.
+    vwap_stop_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
     # When false, entries are sent without an exchange stop. Square-off, the
     # panic button, and an opposite crossover still close the position.
@@ -328,6 +334,14 @@ class BotConfig(Base):
     # Mixed candles (exit_candle.py): the SMA cross exit read on candles of this size instead of
     # the bot's own (0 = off). Entries stay on candle_minutes.
     exit_candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # Watch smaller candles while in a trade (small_candles.py): CSV of sizes ("1,3,5"; "" = off), which conditions
+    # count (cross / slope / N counter candles), only when the trade is this % under water (0 = any), sizes that must agree.
+    small_exit_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    small_exit_cross: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    small_exit_slope: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    small_exit_counter: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    small_exit_loss_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    small_exit_agree: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     slope_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Join the morning trend (join_trend.py): once a day, join_after_min after 09:15,
     # enter the side a stock is already trending on when its cross was missed.
@@ -362,6 +376,10 @@ class BotConfig(Base):
     use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level.
     use_level: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # 52-week high entry check (high52.py): side LONG / SHORT / BOTH, and how far from the level still counts (%).
+    use_high52: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    high52_side: Mapped[str | None] = mapped_column(String, nullable=True, default="LONG")
+    high52_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     level_line: Mapped[str | None] = mapped_column(String, nullable=True, default="BB_MIDDLE")
     st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
@@ -481,6 +499,8 @@ class BotConfig(Base):
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
     max_trades_per_day: Mapped[int] = mapped_column(Integer, default=40)
+    # Entries one stock may take per IST day on this bot (0 = no cap); per bot and per stock (stock_settings).
+    max_trades_per_stock: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # 1 after the one-time raise from the old default of 15. A later edit to
     # 15 is kept.
     max_trades_bumped: Mapped[int] = mapped_column(Integer, default=1)

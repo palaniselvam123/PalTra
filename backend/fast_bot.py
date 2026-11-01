@@ -82,6 +82,14 @@ class Settings:
     min_profit_pct: float = 0.3
     # Bot 5 trades on a moved stock before it goes back to its own bot; 0 = it stays on Bot 5 all day.
     bot5_trades: int = 1
+    # Bot 5's own entry checks (the ticked filters in its strategy settings: VWAP, volume, density, RSI, ADX,
+    # EMA, Supertrend, level, opening range, gap, candle direction) are read on the stock's candles before the
+    # source trade is cut; a refusal leaves the trade where it is. Off = Bot 5 enters whatever they say.
+    entry_checks: bool = True
+    # Keep the source trade: it is not cut; Bot 5 opens its own order on the same side next to it and the
+    # stock is armed on both bots (the source keeps trading it as before). Off = the trade is cut (the old
+    # behaviour). In LIVE both bots cannot hold one stock, so a LIVE pair is left alone (not moved).
+    keep_trade: bool = False
 
 
 def settings_path() -> Path:
@@ -121,6 +129,8 @@ def clean(raw: dict) -> Settings:
     s.max_day = num("max_day", int, 1, 100)
     s.min_profit_pct = num("min_profit_pct", float, 0.0, MAX_PCT)
     s.bot5_trades = num("bot5_trades", int, 0, MAX_BOT5_TRADES)
+    s.entry_checks = bool(raw.get("entry_checks", s.entry_checks))
+    s.keep_trade = bool(raw.get("keep_trade", s.keep_trade))
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -222,6 +232,44 @@ def fast(hist, direction: str, now: float, s: Settings) -> str | None:
     return None
 
 
+def entry_refusal(frame, cfg, direction: str, price: float | None = None) -> str | None:
+    """What Bot 5's ticked entry checks say about entering `direction` on this stock now, else None.
+
+    `frame` is the stock's enriched candle frame (the last row forming, as apply_signal reads it) and
+    `cfg` Bot 5's settings for the stock. The ADX gate and the checked entry filters are read exactly as
+    a cross would read them; nothing else (no cross, pattern, pullback or candle wait).
+    """
+    import strategy_engine
+
+    if frame is None or getattr(frame, "empty", True) or len(frame) < 2:
+        return None  # no candles to read: nothing to refuse on
+    curr = frame.iloc[-2]
+    if bool(getattr(cfg, "use_adx_filter", False)):
+        adx = strategy_engine._finite(curr.get("adx_14"))  # noqa: SLF001
+        threshold = float(getattr(cfg, "adx_threshold", 0) or 0)
+        if adx is None or adx < threshold:
+            return f"ADX {adx:.1f} below {threshold:g}" if adx is not None else f"ADX not formed (needs {threshold:g})"
+    return strategy_engine._entry_block(frame, direction, cfg, price=price)  # noqa: SLF001
+
+
+def _target_cfg(target, symbol: str):
+    """Bot 5's settings for this stock (its shared row with the stock's own overrides on top)."""
+    import copy
+
+    cfg = target.load_config()
+    try:
+        from strategy_engine import _cfg_for
+
+        return _cfg_for(cfg, symbol)
+    except Exception:  # noqa: BLE001 - a plain settings object (tests): read it as it is
+        own = copy.copy(cfg)
+        try:
+            own.symbol = symbol
+        except Exception:  # noqa: BLE001
+            pass
+        return own
+
+
 def ready(target, symbol: str, source_live: bool) -> str | None:
     """Why Bot 5 cannot take the stock now, or None when it can (checked before the source trade is cut)."""
     from strategy_engine import _entry_cutoff, _parse_hhmm
@@ -296,8 +344,13 @@ class FastBot:
             if target is not None and target.positions.get(name) is not None:
                 continue
             del self.handed[name]
-            back = recovery.handoff(TARGET_BOT, name, h["live"], to_bot=h["from"], chop=False)
-            result = f"back to Bot {h['from']} after {h['opened']} Bot {TARGET_BOT} trade(s): {back}"
+            if h.get("keep"):
+                # The source bot kept the stock all along: Bot 5 just lets go of it.
+                back = recovery.unarm(TARGET_BOT, name)
+                result = f"Bot {TARGET_BOT} done with it after {h['opened']} trade(s) (Bot {h['from']} kept it): {back}"
+            else:
+                back = recovery.handoff(TARGET_BOT, name, h["live"], to_bot=h["from"], chop=False)
+                result = f"back to Bot {h['from']} after {h['opened']} Bot {TARGET_BOT} trade(s): {back}"
             self._record(now, symbol=name, from_bot=TARGET_BOT, why="trades done", result=result)
             if target is not None:
                 target._signals[name] = f"{name} {result}"  # noqa: SLF001
@@ -357,18 +410,40 @@ class FastBot:
             reason = f"{s.max_day} hand-offs today already"
         if reason is None and source_live and pos.stop_active and not pos.sl_order_id:
             reason = "the LIVE position was restored without its stop id; left to that stop"
+        if reason is None and s.entry_checks:
+            # Bot 5's own entry checks on the stock's candles, before the source trade is touched.
+            try:
+                refused = entry_refusal(
+                    getattr(src, "_frames", {}).get(symbol),
+                    _target_cfg(target, symbol),
+                    direction,
+                    getattr(src, "_ltps", {}).get(symbol),
+                )
+            except Exception as exc:  # noqa: BLE001 - a broken check must not cut the trade
+                log.exception("fast-mover entry check failed for %s", symbol)
+                refused = f"entry check failed ({exc})"
+            if refused:
+                reason = f"Bot {TARGET_BOT}'s entry check says no: {refused}"
         if reason is not None:
+            self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=f"not moved: {reason}")
+            return f"{head}: not moved — {reason}"
+        if s.keep_trade and source_live:
+            # Two LIVE bots never hold one stock (one LIVE bot per stock); the trade is left where it is.
+            reason = "keep mode: a LIVE trade cannot be held by two LIVE bots, so it is left alone"
             self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=f"not moved: {reason}")
             return f"{head}: not moved — {reason}"
         self.busy.add(symbol)
         try:
-            try:
-                closed = await src.close_symbol(symbol, reason=EXIT_REASON)
-            except ForceRefused as exc:
-                result = f"not moved: Bot {source_bot}'s trade could not be closed ({exc})"
-                self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
-                return f"{head}: {result}"
-            if source_live:
+            if s.keep_trade:
+                closed = f"Bot {source_bot} trade kept"
+            else:
+                try:
+                    closed = await src.close_symbol(symbol, reason=EXIT_REASON)
+                except ForceRefused as exc:
+                    result = f"not moved: Bot {source_bot}'s trade could not be closed ({exc})"
+                    self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
+                    return f"{head}: {result}"
+            if source_live and not s.keep_trade:
                 flat = False
                 for _ in range(FLAT_WAIT_SEC):
                     if await src._groww_net(symbol) == 0:  # noqa: SLF001
@@ -380,10 +455,10 @@ class FastBot:
                     self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
                     src._alert(f"{head}: {result}")  # noqa: SLF001
                     return f"{head}: {result}"
-            moved = recovery.handoff(source_bot, symbol, source_live, to_bot=TARGET_BOT)
+            moved = recovery.handoff(source_bot, symbol, source_live, to_bot=TARGET_BOT, keep_source=s.keep_trade)
             self.moved_today.append(symbol)
-            if moved.startswith("moved"):
-                self.handed[symbol] = {"from": source_bot, "live": source_live, "opened": 0}
+            if moved.startswith("moved") or moved.startswith("armed"):
+                self.handed[symbol] = {"from": source_bot, "live": source_live, "opened": 0, "keep": s.keep_trade}
             else:
                 result = f"{closed}; {moved}"
                 self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
@@ -400,7 +475,7 @@ class FastBot:
             except Exception as exc:  # noqa: BLE001 - the stock stays armed on Bot 5 for its next cross
                 log.exception("fast-mover order failed for %s", symbol)
                 opened = f"not ordered: {exc}"
-            result = f"Bot {source_bot} trade cut; Bot {TARGET_BOT} {word} at once — {opened}"
+            result = f"{closed if s.keep_trade else f'Bot {source_bot} trade cut'}; Bot {TARGET_BOT} {word} at once — {opened}"
             self._record(now, symbol=symbol, from_bot=source_bot, why=why, side=direction, result=result)
             text = f"{head}: {result}"
             target._signals[symbol] = text  # noqa: SLF001
@@ -451,7 +526,7 @@ class FastBot:
             "day": self.day,
             "moved_today": list(self.moved_today),
             "recent": list(self.recent),
-            "on_bot5": {k: {"from_bot": v["from"], "trades": v["opened"]} for k, v in self.handed.items()},
+            "on_bot5": {k: {"from_bot": v["from"], "trades": v["opened"], "kept": bool(v.get("keep"))} for k, v in self.handed.items()},
         }
 
 

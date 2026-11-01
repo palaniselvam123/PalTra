@@ -24,7 +24,10 @@ import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
 import { emaValues, heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
+import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
+import { PinToggle } from "@/components/ui/PinToggle";
+import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 
 type Props = {
@@ -369,6 +372,7 @@ const PROFILE_KEY = "sma.chart.profile";
 const CHART_HIDDEN_KEY = "sma.chart.hidden";
 const TABLE_KEY = "sma.chart.table";
 const SLOPE_KEY = "sma.chart.slope";
+const DETAILS_KEY = "sma.chart.details";
 
 /** SMA 9 slope in % per candle over `back` candles: the number the SMA 9 slope exit reads (slope_exit.py). */
 function slopeAt(rows: ReadonlyArray<{ sma9?: number | null }>, i: number, back: number): number | null {
@@ -430,8 +434,10 @@ function whyNoTrade(p: {
   markers: ChartPayload["markers"];
   filters?: ChartFilters;
   bar: number;
+  /** The bot's own candle size (the turn entry reads it). */
+  botBar: number;
 }): string {
-  const { rows, i, blocked, markers, filters, bar } = p;
+  const { rows, i, blocked, markers, filters, bar, botBar } = p;
   const c = rows[i];
   if (!c) return "";
   const t = c.time;
@@ -450,9 +456,13 @@ function whyNoTrade(p: {
   if (latestEntry) {
     const exit = markers.find((m) => m.kind === "EXIT" && m.trade_ref === latestEntry.trade_ref && m.time >= latestEntry.time);
     if (!exit || exit.time > t) {
+      // Where the slope exits would fire on the next candle, with this candle's numbers (the last closed one
+      // while this candle is still forming: a forming candle has no SMA yet).
+      const at = p.forming && i > 0 ? i - 1 : i;
+      const zone = zoneWords(slopeZones({ rows, i: at, filters, bar, botBar, held: { direction: latestEntry.direction, entryTime: latestEntry.time } }), px);
       return `In a ${latestEntry.direction === "LONG" ? "buy" : "short"} trade since ${istClock(latestEntry.time)}${
         latestEntry.trade_ref ? ` (${latestEntry.trade_ref})` : ""
-      }: no new entry on this stock while one is held.`;
+      }: no new entry on this stock while one is held.${zone ? ` Slope exit: ${zone}.` : ""}`;
     }
   }
   const refused = blocked.find((b) => within(b.time));
@@ -498,7 +508,10 @@ function whyNoTrade(p: {
   const base = `No signal: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
     rows[since].time
   )}), gap ${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%. The bot enters on a fresh cross${filters?.use_gap_mode ? ", then at the gap entry level" : ""}.`;
-  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null].filter(Boolean).join(" ");
+  const turnZone = filters?.turn_entry && !timing ? zoneWords(slopeZones({ rows, i: p.forming && i > 0 ? i - 1 : i, filters, bar, botBar, held: null }), px) : "";
+  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null, turnZone ? `Turn entry: ${turnZone}.` : null]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const NO_MARKERS: ChartPayload["markers"] = [];
@@ -562,6 +575,78 @@ class VolumeProfileBars implements ISeriesPrimitive<Time> {
             : "rgba(148, 163, 184, 0.16)";
         ctx.fillRect(right - width, top, width, height);
       }
+    });
+  }
+}
+
+/** Shaded zones where the next candle's close would fire an SMA 9 slope exit (amber) or a turn
+ * entry (green = buys, red = sells): a band from the level to the pane's edge, a dashed line at the
+ * level and a label. The nearest exit zone is filled; the others only get their line. */
+class ZoneBands implements ISeriesPrimitive<Time> {
+  private zones: Zone[] = [];
+  private lastClose: number | null = null;
+  private host: SeriesAttachedParameter<Time> | null = null;
+  private readonly views: ISeriesPrimitivePaneView[];
+
+  constructor() {
+    this.views = [{ zOrder: () => "bottom", renderer: () => ({ draw: (target) => this.draw(target) }) }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>): void {
+    this.host = param;
+  }
+
+  detached(): void {
+    this.host = null;
+  }
+
+  paneViews(): readonly ISeriesPrimitivePaneView[] {
+    return this.views;
+  }
+
+  set(zones: Zone[], lastClose: number | null): void {
+    this.zones = zones;
+    this.lastClose = lastClose;
+    this.host?.requestUpdate();
+  }
+
+  private draw(target: CanvasRenderingTarget2D): void {
+    const host = this.host;
+    if (!host || this.zones.length === 0) return;
+    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      let filledExit = false;
+      this.zones.forEach((z) => {
+        const y = host.series.priceToCoordinate(z.level);
+        if (y == null) return;
+        const yb = Math.round(y * vr);
+        const rgb = z.rule === "entry" ? (z.direction === "LONG" ? "16, 185, 129" : "244, 63, 94") : "245, 158, 11";
+        const fill = z.rule === "entry" || !filledExit;
+        if (z.rule !== "entry") filledExit = true;
+        if (fill) {
+          ctx.fillStyle = `rgba(${rgb}, 0.09)`;
+          if (z.above) ctx.fillRect(0, 0, bitmapSize.width, Math.max(0, yb));
+          else ctx.fillRect(0, yb, bitmapSize.width, Math.max(0, bitmapSize.height - yb));
+        }
+        ctx.strokeStyle = `rgba(${rgb}, ${fill ? 0.9 : 0.45})`;
+        ctx.lineWidth = Math.max(1, Math.round(vr));
+        ctx.setLineDash([6 * hr, 4 * hr]);
+        ctx.beginPath();
+        ctx.moveTo(0, yb + 0.5);
+        ctx.lineTo(bitmapSize.width, yb + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const head = z.rule === "entry" ? (z.direction === "LONG" ? "Buy zone" : "Sell zone") : "Exit zone";
+        const inside = this.lastClose != null && (z.above ? this.lastClose >= z.level : this.lastClose <= z.level);
+        const text = `${head}${inside ? " (price already inside)" : ""} · next close ${z.above ? "≥" : "≤"} ${z.level.toFixed(2)} · ${z.text}`;
+        ctx.font = `${Math.round(11 * hr)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textBaseline = "alphabetic";
+        const ty = z.above ? yb - 5 * vr : yb + 14 * vr;
+        const w = ctx.measureText(text).width;
+        ctx.fillStyle = `rgba(${rgb}, ${fill ? 0.92 : 0.6})`;
+        ctx.fillRect(6 * hr, ty - 11 * vr, w + 8 * hr, 15 * vr);
+        ctx.fillStyle = "#111827";
+        ctx.fillText(text, 10 * hr, ty);
+      });
     });
   }
 }
@@ -818,6 +903,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const profileBarsRef = useRef<VolumeProfileBars | null>(null);
+  const zoneBandsRef = useRef<ZoneBands | null>(null);
   const tradeBoxesRef = useRef<TradeBoxes | null>(null);
   const theme = usePageTheme();
   useEffect(() => {
@@ -862,6 +948,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [showTable, setShowTable] = useState(false);
   // The SMA 9 slope strip under the candles (always on while the slope exit is).
   const [showSlope, setShowSlope] = useState(false);
+  // The legend and the reading lines (OHLC, "why no trade", last skipped cross) can be hidden to save room,
+  // and the chart's head (toolbar, legend, readings) can be frozen at the top while the page scrolls.
+  const [detailsHidden, setDetailsHidden] = useState(false);
+  const [headPinned, setHeadPinned] = usePinned("chart-head", false);
   // Which lines show and how they look (Groww-style indicator settings), kept in this browser.
   const [look, setLook, resetLook] = useChartStyle();
   const [showLook, setShowLook] = useState(false);
@@ -876,6 +966,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       if (localStorage.getItem(CHART_HIDDEN_KEY) === "1") setChartHidden(true);
       if (localStorage.getItem(TABLE_KEY) === "1") setShowTable(true);
       if (localStorage.getItem(SLOPE_KEY) === "1") setShowSlope(true);
+      if (localStorage.getItem(DETAILS_KEY) === "0") setDetailsHidden(true);
       const small = localStorage.getItem(BOX_SMALL_KEY);
       // Phones start with the compact box so it does not cover the candles.
       setBoxSmall(small == null ? window.matchMedia("(max-width: 639px)").matches : small === "1");
@@ -895,6 +986,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const toggleChart = () => {
     setChartHidden((on) => {
       remember(CHART_HIDDEN_KEY, on ? "0" : "1");
+      return !on;
+    });
+  };
+  const toggleDetails = () => {
+    setDetailsHidden((on) => {
+      remember(DETAILS_KEY, on ? "1" : "0");
       return !on;
     });
   };
@@ -1256,6 +1353,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const boxes = new TradeBoxes();
     candles.attachPrimitive(boxes);
     tradeBoxesRef.current = boxes;
+    const bands = new ZoneBands();
+    candles.attachPrimitive(bands);
+    zoneBandsRef.current = bands;
     // Stretch the price scale so the open position's entry, stop and target
     // lines stay on screen instead of being cut off above or below the candles.
     candles.applyOptions({
@@ -1704,6 +1804,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const latest = latestSma(rows);
   const filters = view?.filters;
   const blocked = view?.blocked ?? [];
+  // The exit zone of the trade held now (or the turn entry's buy / sell zones while flat), read on the
+  // last closed candle: where the next close would fire the SMA 9 slope rules (slopeZone.ts). Not on a
+  // past day: the bands say what the next candle would do, and a finished day has none.
+  const zoneRead = useMemo(() => {
+    if (past || rows.length < 2) return { zones: [] as Zone[], note: null as string | null };
+    const markers = view?.markers ?? NO_MARKERS;
+    const open = markers.filter((m) => m.kind === "ENTRY" && m.open).sort((a, b) => b.time - a.time)[0] ?? null;
+    const pos = state?.position;
+    const held = open
+      ? { direction: open.direction, entryTime: open.time }
+      : pos && (pos.direction === "LONG" || pos.direction === "SHORT") && (state?.symbol ?? "").toUpperCase() === (chart?.symbol ?? "").toUpperCase()
+        ? { direction: pos.direction, entryTime: 0 }
+        : null;
+    return slopeZones({ rows, i: rows.length - 2, filters, bar, botBar: botCandle, held });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, filters, view?.markers, state?.position?.direction, state?.symbol, chart?.symbol, bar, botCandle, past]);
+  useEffect(() => {
+    zoneBandsRef.current?.set(zoneRead.zones, rows.length ? rows[rows.length - 1].close : null);
+  }, [zoneRead, rows]);
   const lastBlocked = blocked.length ? blocked[blocked.length - 1] : null;
   const hoverRow = hoverOhlc ? rows.find((c) => c.time === hoverOhlc.time) ?? null : null;
   const lastOf = (key: "vwap" | "rsi14") => {
@@ -1735,6 +1854,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           markers: view?.markers ?? NO_MARKERS,
           filters,
           bar,
+          botBar: botCandle,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
@@ -1766,8 +1886,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         full ? "fixed inset-0 z-[60] flex flex-col overflow-y-auto" : "rounded-xl border"
       )}
     >
-      <div className="flex flex-col gap-1.5 px-3 py-2 sm:px-4">
+      <div className={clsx("flex flex-col gap-1.5 px-3 py-2 sm:px-4", headPinned && !full && "sticky top-0 z-20 bg-[#151921]")}>
         <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-semibold text-slate-100">
+          <PinToggle pinned={headPinned} onChange={setHeadPinned} what="the chart's toolbar and readings" />
           {shownSymbol ? <span className="text-amber-300">{shownSymbol}</span> : null}
           <span className="font-normal text-slate-300">{barWords(bar)}</span>
           <select
@@ -1850,6 +1971,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </button>
           <button
             type="button"
+            onClick={toggleDetails}
+            aria-pressed={detailsHidden}
+            title={detailsHidden ? "Show the legend and the reading lines (OHLC, why no trade, last skipped cross)" : "Hide the legend and the reading lines under the toolbar to save room"}
+            className="flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-slate-300 ring-1 ring-inset ring-white/10 hover:bg-white/5"
+          >
+            {detailsHidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
+            {detailsHidden ? "Show readings" : "Hide readings"}
+          </button>
+          <button
+            type="button"
             onClick={toggleTable}
             aria-pressed={showTable}
             title={showTable ? "Hide the data table" : "Show these candles as a table: prices, SMA gap, VWAP, RSI, candle names and trade P&L"}
@@ -1911,7 +2042,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </span>
           ) : null}
         </h2>
-        <ul aria-label="Chart legend" className={clsx("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300", chartHidden && "hidden")}>
+        <ul aria-label="Chart legend" className={clsx("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300", (chartHidden || detailsHidden) && "hidden")}>
           {showProfile ? (
             profile ? (
               <>
@@ -1951,6 +2082,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
             </LegendItem>
           ) : null}
+          {zoneRead.zones.length || zoneRead.note ? (
+            <LegendItem swatch={<span className="block h-2.5 w-4 rounded-sm bg-amber-400/40 ring-1 ring-inset ring-amber-400/70" />}>
+              <span
+                className="cursor-help"
+                title={`${zoneWords(zoneRead, px) || "No zone"}. Each level is where the NEXT candle's close would make the SMA 9 slope reach the bot's level (every setting is a minimum, "at least"), worked out from this candle's SMA 9 and the close that drops out of its window. The bot's own reading decides.`}
+              >
+                {zoneRead.zones.length
+                  ? zoneRead.zones[0].rule === "entry"
+                    ? "Turn entry zones"
+                    : `Exit zone · next close ${zoneRead.zones[0].above ? "≥" : "≤"} ${px(zoneRead.zones[0].level)}`
+                  : "Slope zone"}
+              </span>
+            </LegendItem>
+          ) : null}
           {showSlope || filters?.slope_exit ? (
             <LegendItem
               swatch={
@@ -1974,20 +2119,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
             </LegendItem>
           ) : null}
         </ul>
-      </div>
-      {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
-      {showLook && chartHidden ? (
-        // The chart is hidden, so there is nothing to float over: a plain block instead.
-        <ChartIndicators
-          style={look}
-          onChange={setLook}
-          onReset={resetLook}
-          onClose={() => setShowLook(false)}
-          stAvailable={Boolean(filters?.st_line)}
-          floating={false}
-        />
-      ) : null}
-      <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
+      {detailsHidden ? null : (
+      <div className="-mx-3 sm:-mx-4">
       <OhlcLine
         ohlc={ohlc}
         hovering={hoverOhlc != null}
@@ -2015,6 +2148,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           {lastBlocked.reason}
         </p>
       ) : null}
+      </div>
+      )}
+      </div>
+      {showNews && shownSymbol ? <StockNewsPanel symbol={shownSymbol} onClose={() => setShowNews(false)} /> : null}
+      {showLook && chartHidden ? (
+        // The chart is hidden, so there is nothing to float over: a plain block instead.
+        <ChartIndicators
+          style={look}
+          onChange={setLook}
+          onReset={resetLook}
+          onClose={() => setShowLook(false)}
+          stAvailable={Boolean(filters?.st_line)}
+          floating={false}
+        />
+      ) : null}
+      <div id="sma-chart-body" className={clsx(chartHidden && "hidden", full && !chartHidden && "flex flex-1 flex-col")}>
       {measuring ? (
         <MeasureBar
           measure={measure}

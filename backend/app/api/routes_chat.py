@@ -24,6 +24,8 @@ class AskRequest(BaseModel):
     # what they are looking at. Data only; never instructions.
     page: str | None = Field(default=None, max_length=200)
     screen: dict | None = None
+    # "Read everything": the whole snapshot instead of the sections the question needs (costs more).
+    full: bool = False
 
 
 @router.get("/status")
@@ -42,7 +44,7 @@ async def chat_status():
 @router.post("/ask")
 async def ask(body: AskRequest):
     try:
-        return await answer(body.message, [t.model_dump() for t in body.history], body.page, body.screen)
+        return await answer(body.message, [t.model_dump() for t in body.history], body.page, body.screen, full=body.full)
     except AiUnavailable as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
 

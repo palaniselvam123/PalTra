@@ -257,6 +257,17 @@ def summary(series: list[dict], key: str = "total_gross") -> dict | None:
 # ---- replays: the same figure, one point per replayed minute, kept per run ------------------
 
 
+def delete_replay_day(run_id: int, day: dt.date) -> int:
+    """Drop one replayed day's points (a rewind plays the day again). Never raises."""
+    try:
+        with _lock, _connect() as con:
+            cur = con.execute("DELETE FROM replay_pnl WHERE run_id = ? AND day = ?", (int(run_id), day.isoformat()))
+            return int(cur.rowcount or 0)
+    except Exception:  # noqa: BLE001
+        log.exception("could not drop replay %s's points for %s", run_id, day)
+        return 0
+
+
 def save_replay(run_id: int, bot: int, rows: Iterable[tuple[dt.datetime, dict]]) -> int:
     """Store a replay's points ((replay minute, sample) each). Never raises: the log must not hurt the replay."""
     now = dt.datetime.now(dt.timezone.utc)
