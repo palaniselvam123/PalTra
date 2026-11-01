@@ -83,6 +83,7 @@ export const SETTING_LABELS: Record<string, string> = {
   cross_exit: "cross exit",
   late_entry_min: "late entry",
   join_trend: "join morning trend",
+  always_in: "always in a trade",
   join_after_min: "join after",
   counter_exit_count: "counter-candle exit",
   counter_rule: "counter-candle rule",
