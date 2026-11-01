@@ -386,11 +386,13 @@ export function BacktestRuns() {
   const downloadPdf = useCallback(async (run: ReplayRun) => {
     setPrinting(run.id);
     try {
-      const [full, book] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY")]);
+      // The practice wallet's margin share (20% = 5x) sizes the "margin" amounts; without a wallet 20% is assumed.
+      const [full, book, wallet] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY"), smaApi.wallet().catch(() => null)]);
       const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
       await downloadBacktestPdf({
         run: full,
         trades: book.rows.filter((trade) => trade.run_id === run.id),
+        marginPct: wallet?.margin_pct ?? 20,
         strategy: strategyLabel(full.settings),
         settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
         reasons: REASON_SHORT,

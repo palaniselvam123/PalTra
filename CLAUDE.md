@@ -244,7 +244,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `get_run`, shown in the blotter's Backtests tab). The run detail and its PDF
   (`BacktestRuns.bot5Rows`, `lib/backtestPdf.ts`) list, after the strategy
   settings, the fast-mover hand-off settings and Bot 5's own strategy fields
-  from the run's `fast_bot` snapshot when the run played with it.
+  from the run's `fast_bot` snapshot when the run played with it. The PDF's trade table also carries each trade's
+  **full value** (qty × entry price, what it would cost bought outright) and the **intraday margin** actually blocked
+  (the practice wallet's `margin_pct`, 20 % = 5× by default; `backtestPdf.tradeValue`), and the Result table shows the
+  largest trade's full value and margin and the most margin blocked at once (`backtestPdf.peakMargin`: overlapping
+  trades add up). The blotter's summary PDF shows the same.
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only
