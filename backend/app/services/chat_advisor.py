@@ -30,6 +30,7 @@ from app.core.market_clock import IST, ist_now, session_state
 from app.models.database import AiAnalysis, StrategyLog, Trade, async_session
 from app.services.ai_advisor import AiUnavailable, ai_advisor, supports_reasoning
 from app.services.chat_actions import TOOLS, proposals_from, summary
+from app.services.chat_scope import Scope, classify
 from app.services.market_data import market_data
 from app.services.paper_engine import (
     BROKERAGE_PCT,
@@ -222,10 +223,28 @@ def _mechanics() -> dict:
     }
 
 
-async def build_context() -> dict:
-    """Everything the assistant is allowed to know, as plain JSON."""
+async def build_context(scope: Scope | None = None) -> dict:
+    """Everything the assistant is allowed to know about the ORB desk, as plain JSON. With a trimmed `scope` that is
+    not about the ORB desk, only the clock, the mode and the data feed go in (the rest is the desk's own trades,
+    logs and mechanics, which a question about the SMA terminal never needs)."""
     snapshot = strategy_runner.snapshot()
     risk = state.risk_manager
+    now = ist_now()
+    health = market_data.health()
+    if scope is not None and not scope.orb:
+        return {
+            "now_ist": now.isoformat(),
+            "market_session": session_state(now),
+            "mode": state.mode,
+            "kill_switch_active": state.kill_switch_active,
+            "data_feed": {"source": health.source, "connected": health.connected, "stale": health.stale, "market_open": health.market_open},
+            "orb_desk": "left out: this question is about the SMA terminal (ask about the ORB desk, its opening range, "
+            "manual desk or console to read them)",
+            "open_positions": [],
+            "trades": [],
+            "console_log_newest_first": [],
+            "bot": {"status": snapshot.status},
+        }
 
     async with async_session() as session:
         trades = (
@@ -239,8 +258,6 @@ async def build_context() -> dict:
         ).scalars().all()
 
     account = await get_account_summary()
-    health = market_data.health()
-    now = ist_now()
 
     return {
         "now_ist": now.isoformat(),
@@ -355,14 +372,16 @@ async def answer(
     history: list[dict] | None = None,
     page: str | None = None,
     screen: dict | None = None,
+    full: bool = False,
 ) -> dict:
-    """Answers one question against the current factual snapshot."""
+    """Answers one question against the facts it needs (`chat_scope.classify`), or against everything with `full`."""
     cfg = await ai_advisor.config()
     key = await ai_advisor._api_key()  # raises AiUnavailable with a clear message
 
-    context = await build_context()
-    context["sma_terminal"] = await asyncio.to_thread(sma_facts)
-    seen = screen_facts(page, screen)
+    scope = classify(message, page, screen, full=full, history=history)
+    context = await build_context(scope)
+    context["sma_terminal"] = await asyncio.to_thread(sma_facts, scope)
+    seen = screen_facts(page, screen, scope)
     if seen is not None:
         context["screen"] = seen
 
@@ -382,11 +401,11 @@ async def answer(
         if role in ("user", "assistant") and content:
             conversation.append({"role": role, "content": content})
 
+    facts_json = json.dumps(context, default=str)
     conversation.append(
         {
             "role": "user",
-            "content": f"FACTS (the only information you have):\n{json.dumps(context, default=str)}\n\n"
-            f"Question: {message.strip()}",
+            "content": f"FACTS (the only information you have):\n{facts_json}\n\nQuestion: {message.strip()}",
         }
     )
 
@@ -397,8 +416,10 @@ async def answer(
         # Generous because reasoning models bill their internal reasoning
         # against this cap before writing a word. It is a ceiling, not a spend.
         "max_output_tokens": 12000,
-        "tools": TOOLS,
     }
+    if scope.tools:
+        # The tool schemas are sent only when the question asks for a change (they cost tokens on every call).
+        payload["tools"] = TOOLS
     if supports_reasoning(cfg.model):
         # These are lookup-and-explain questions over facts already assembled
         # for the model, not problems needing deep deliberation.
@@ -435,20 +456,32 @@ async def answer(
     if not text:
         raise AiUnavailable("OpenAI returned an empty response.", 502)
 
+    usage = data.get("usage") or {}
+    sma = context["sma_terminal"]
     return {
         "reply": text,
         "proposals": proposals,
         "model": cfg.model,
         "facts_summary": {
-            "trades_in_context": len(context["trades"]),
-            "log_lines_in_context": len(context["console_log_newest_first"]),
-            "open_positions": len(context["open_positions"]),
-            "bot_status": context["bot"]["status"],
-            "sma_terminal": bool(context["sma_terminal"].get("available")),
-            "sma_trades_today": context["sma_terminal"].get("trades_today_count", 0),
-            "sma_bots": len(context["sma_terminal"].get("bots") or []),
-            "sma_recent_trades": len(context["sma_terminal"].get("recent_trades") or []),
+            "trades_in_context": len(context.get("trades") or []),
+            "log_lines_in_context": len(context.get("console_log_newest_first") or []),
+            "open_positions": len(context.get("open_positions") or []),
+            "bot_status": (context.get("bot") or {}).get("status"),
+            "sma_terminal": bool(sma.get("available")),
+            "sma_trades_today": sma.get("trades_today_count", 0),
+            "sma_bots": len(sma.get("bots") or []),
+            "sma_recent_trades": len(sma.get("recent_trades") or []),
             "screen": bool(seen),
+            # What was read for this question and what it cost in tokens.
+            "scope": scope.describe(),
+            "sections": list(sma.get("sections") or []) + (["ORB desk"] if scope.orb else []),
+            "stocks": sma.get("stocks_asked_about") or [],
+            "facts_chars": len(facts_json),
+            "usage": {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+            },
         },
     }
 

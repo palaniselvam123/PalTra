@@ -1184,8 +1184,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   cap, or no recorded reason), `recent_trades[]` of the last 7 days (every bot) with `entry_reason` and a
   `strategy_id` into `strategies_used` (the settings saved at the trade's entry, deduped), `settings_catalog`
   (every changeable field: kind, bounds, choices, `FIELD_HELP`) and `settings_history` (bot 1's saves with
-  what changed). The reply is Markdown, rendered by `components/Chat/ChatMarkdown.tsx` (no HTML from the
-  model); the widget has a wide mode, copy, a "Read: …" facts line and follow-up chips.
+  what changed). **Only what the question needs is sent** (`app/services/chat_scope.py`, `classify`): the question
+  (plus the user's previous turn, so a follow-up keeps its subject) is matched to topics (today, past, settings, howto,
+  change, crosses, backtests, orb), the bots it names and the stock names in it, and `sma_facts(scope)`,
+  `build_context(scope)` and `screen_facts(..., scope)` include only those sections: the strategy guide and bot 1's full
+  settings for settings / how-to / change questions, today's trades and KPIs for today / crosses, the cross timelines
+  (`stocks_today`) only for the bots asked about (named, else the bots holding the stocks named, else the page's bot,
+  `screen.bot`) and only the stocks named (every armed stock with `MAX_CROSSES_BROAD` crosses when none is named), past
+  trades and their strategies for yesterday / last-week questions (that stock's only when one is named), the settings
+  catalog and the tool schemas only for a change, the ORB desk's trades / logs / mechanics only for an ORB question or a
+  desk page, and the page's `settings` block only for a settings question. A question nothing matches reads today's
+  trades and the page bot's crosses. `full: true` on `POST /api/chat/ask` (the widget's "Read everything" tick box,
+  kept per browser) sends everything as before. `facts_summary` carries `scope`, `sections`, `stocks`, `facts_chars`
+  and OpenAI's `usage` (input / output tokens), shown in the widget's "Read: …" line under each answer. The reply is
+  Markdown, rendered by `components/Chat/ChatMarkdown.tsx` (no HTML from the model); the widget has a wide mode, copy
+  and follow-up chips.
 - Alert channels (`AlertChannel.channel_type`, desk Settings → alert cards; `alert_notifier.CHANNEL_TYPES`):
   `trade` (fills, closes, refusals, hand-offs, warnings; `alert_notifier.send`), `critical` (bot down, app
   shutting down, no stop; `send_critical`), `news` (news alerts, `send_news`), `signal` (heads-ups that are
