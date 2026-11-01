@@ -59,6 +59,8 @@ from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
 import ema_filter
+import heikin_ashi
+import macd
 import exit_candle
 import small_candles
 import vwap_stop
@@ -217,6 +219,8 @@ class OpenPosition:
     cc_bar: int | None = None
     # EMA cross exit (ema_filter.py): the last closed candle read.
     ema_bar: int | None = None
+    # MACD exit (macd.py): the last closed candle read.
+    macd_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
@@ -311,6 +315,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -534,6 +539,10 @@ def _entry_block(
         ema = ema_filter.entry_reason(frame, direction, cfg)
         if ema:
             reason = f"{reason}; {ema}" if reason else ema
+    if on("macd"):
+        m = macd.entry_reason(frame, direction, cfg)
+        if m:
+            reason = f"{reason}; {m}" if reason else m
     if on("supertrend"):
         st = supertrend.entry_reason(frame, direction, cfg)
         if st:
@@ -554,6 +563,9 @@ def _entry_block(
 
 
 def _base_entry_reason(frame, direction, cfg, on, only, price):
+    if on("candle_dir"):
+        # Heikin Ashi colours (heikin_ashi.py): the candle direction check reads the smoothed colours.
+        frame = heikin_ashi.view(frame, cfg)
     return entry_filter_reason(
         frame,
         direction,
@@ -642,6 +654,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("Candles")
         elif low.startswith("ema"):
             parts.append("EMA")
+        elif low.startswith("macd"):
+            parts.append("MACD")
         elif low.startswith("supertrend"):
             parts.append("ST")
         elif low.startswith("opening"):
@@ -709,7 +723,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"), ("level", "Price level"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("supertrend", "Supertrend"), ("level", "Price level"),
     ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
@@ -758,6 +772,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return f"Candle direction: last {n} {what} ({closes})"
         if name == "ema":
             return ema_filter.passed_text(frame, direction, cfg)
+        if name == "macd":
+            return macd.passed_text(frame, direction, cfg)
         if name == "supertrend":
             return supertrend.passed_text(frame, direction, cfg)
         if name == "level":
@@ -863,6 +879,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
@@ -1444,6 +1461,7 @@ class StrategyEngine:
             await self._watch_bollinger(symbol_cfg)
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
+            await self._watch_macd_exit(symbol_cfg)
             await self._watch_exit_candle(symbol_cfg)
             await self._watch_small_candles(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
@@ -1735,7 +1753,7 @@ class StrategyEngine:
                     waits = (
                         held not in (None, found[0])
                         and turn_entry.exit_candle_on(cfg)
-                        and not turn_entry.candle_against(closed.iloc[-1], held)
+                        and not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held)
                     )
                     self._alert(
                         turn_entry.alert_text(
@@ -1761,7 +1779,9 @@ class StrategyEngine:
         if held is None and not toward:
             self._turn_done[symbol] = ts
             return self._say(symbol, f"{symbol} no order on the SMA {want} turn — it points away from the 9/21 cross ({note})")
-        if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(frame.iloc[-2], held.signal_direction):
+        if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
+            heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction
+        ):
             # The turn came on a candle of the trade's own colour: wait for one of the other colour to close.
             self._turn_done[symbol] = ts
             self._turn_wait[symbol] = (want, ts, note)
@@ -1814,7 +1834,7 @@ class StrategyEngine:
         if not pd.isna(slope) and float(slope) * side >= slope_exit.vturn_turn_pct(cfg):
             self._turn_wait.pop(symbol, None)
             return self._say(symbol, f"{symbol} keeps its {held.direction} — SMA 9 swung back with the trade")
-        if not turn_entry.candle_against(bar, held.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction):
             self._turn_wait[symbol] = (want, int(bar["ts"]), note)
             colour = "red" if held.signal_direction == "LONG" else "green"
             return self._say(symbol, f"{symbol} holding {held.direction} — still waiting for a {colour} candle to close (SMA 9 turned {want})")
@@ -1836,7 +1856,11 @@ class StrategyEngine:
         if self._counter_done.get(symbol) == key:
             return None
         hit, note = counter_candles.run_towards(
-            closed, want, counter_candles.entry_count(cfg), counter_candles.rule(cfg), counter_candles.need_fast(cfg)
+            heikin_ashi.view(frame, cfg).iloc[:-1],
+            want,
+            counter_candles.entry_count(cfg),
+            counter_candles.rule(cfg),
+            counter_candles.need_fast(cfg),
         )
         if not hit:
             return None
@@ -1877,7 +1901,7 @@ class StrategyEngine:
         if int(bar["ts"]) <= exit_ts:
             text = waiting
         else:
-            hit, note = counter_candles.resumes(bar, side, level)
+            hit, note = counter_candles.resumes(heikin_ashi.view(frame, cfg).iloc[-2], side, level)
             if not hit:
                 text = waiting
             else:
@@ -3886,7 +3910,7 @@ class StrategyEngine:
             return
         towards = counter_candles.against(pos.signal_direction)
         hit, note = counter_candles.run_towards(
-            closed,
+            heikin_ashi.view(enriched, cfg).iloc[:-1],
             towards,
             count,
             counter_candles.rule(cfg),
@@ -3929,6 +3953,31 @@ class StrategyEngine:
             return
         self._signals[symbol] = f"{symbol} EMA cross exit — {note}"
         await self._exit_now(cfg, self.ltp, "EMA_CROSS")
+
+    async def _watch_macd_exit(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit when MACD crosses its signal line against the trade (macd.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not macd.exit_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.macd_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            # That candle had closed before the entry: a cross on it is not "after the entry".
+            return
+        pos.macd_bar = closed_ts
+        hit, note = macd.crossed_against(frame.iloc[:-1], pos.signal_direction, cfg)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} MACD cross exit — {note}"
+        await self._exit_now(cfg, self.ltp, macd.EXIT_REASON)
 
     async def _watch_exit_candle(self, cfg: BotConfig) -> None:
         """Once per closed exit candle: the SMA cross exit read on another candle size (exit_candle.py)."""
@@ -4042,7 +4091,9 @@ class StrategyEngine:
         if hit is None:
             return
         reason, note = hit
-        if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(closed.iloc[-1], pos.signal_direction):
+        if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
+            heikin_ashi.view(closed, cfg).iloc[-1], pos.signal_direction
+        ):
             # Wait for a candle of the other colour (turn_exit_candle); the next candle is judged again.
             colour = "red" if pos.signal_direction == "LONG" else "green"
             self._signals[symbol] = f"{symbol} {note} — held until a {colour} candle closes"
@@ -4083,7 +4134,7 @@ class StrategyEngine:
             # mostly the price before the trade, so only candles that open with or after the entry count.
             return
         pos.tc_bar = closed_ts
-        if not turn_entry.candle_against(frame.iloc[-2], pos.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], pos.signal_direction):
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
         self._signals[symbol] = f"{symbol} SMA 9 turn trade closed on a {colour} candle"
@@ -4180,6 +4231,7 @@ class StrategyEngine:
                     "PIVOT_TARGET": "pivot target reached — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
+                    "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
                     "SMA9_TURN": "SMA 9 turned against the trade — flat",
@@ -5578,6 +5630,7 @@ _ALERT_REASON = {
     "BB_MIDDLE": "Bollinger middle band",
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
+    "MACD_CROSS": "MACD cross against the trade",
     "SUPERTREND": "Supertrend turned against the trade",
     "VWAP_SL_HIT": "VWAP stop hit",
     "SMA9_BEND": "SMA 9 bent",
@@ -6033,7 +6086,7 @@ STOP_LOST = "STOP_LOST"
 STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
@@ -6059,6 +6112,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("candle direction")
     if bool(getattr(cfg, "use_ema", False)):
         checked.append("EMA")
+    if bool(getattr(cfg, "use_macd", False)):
+        checked.append("MACD")
     if bool(getattr(cfg, "use_supertrend", False)):
         checked.append("Supertrend")
     if bool(getattr(cfg, "use_level", False)):

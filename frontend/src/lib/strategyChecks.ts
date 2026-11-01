@@ -41,6 +41,7 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     String(cfg.bb_exit ?? "OFF").toUpperCase() === "OFF" &&
     !(Number(cfg.counter_exit_count ?? 0) > 0) &&
     !cfg.ema_exit &&
+    !cfg.macd_exit &&
     !cfg.st_exit &&
     !cfg.slope_exit &&
     !cfg.vturn_exit &&
@@ -200,6 +201,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (num(cfg.counter_exit_count, 0) > 0 && !cfg.slow_sma_exit)
     out.push({ name: `Counter candles (${cfg.counter_exit_count} against the trade)`, when: candle, code: "COUNTER_CANDLES" });
   if (cfg.ema_exit) out.push({ name: `EMA cross exit (${cfg.ema_fast ?? 9}/${cfg.ema_slow ?? 200})`, when: candle, code: "EMA_CROSS" });
+  if (cfg.macd_exit) out.push({ name: `MACD cross exit (${cfg.macd_fast ?? 12}/${cfg.macd_slow ?? 26}/${cfg.macd_signal ?? 9})`, when: candle, code: "MACD_CROSS" });
   const exitCandle = num(cfg.exit_candle_minutes, 0);
   const ownCandle = num(cfg.candle_minutes, 1);
   const mixed = crossExitOn(cfg) && exitCandle > 0 && exitCandle !== ownCandle;

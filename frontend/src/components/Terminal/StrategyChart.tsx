@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { emaValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { emaValues, heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { PinToggle } from "@/components/ui/PinToggle";
@@ -1568,7 +1568,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Held: remember the time span on screen and put it back after the new data.
     const kept = holdRef.current ? apiRef.current?.timeScale().getVisibleRange() ?? null : null;
     candleRef.current.setData(
-      rows.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close }))
+      (look.heikinAshi ? heikinAshi(rows) : rows).map((c) => ({
+        time: c.time as never,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }))
     );
     smaFastRef.current.setData(
       rows.filter((c) => c.sma9 != null).map((c) => ({ time: c.time as never, value: c.sma9 as number }))
