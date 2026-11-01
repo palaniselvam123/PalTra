@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import case, func
 
+import high52
 from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
@@ -832,6 +833,14 @@ def delete_run(run_id: int) -> bool:
     return True
 
 
+def _wants_high52(settings: dict, symbol: str) -> bool:
+    """Does the replayed bot (or this stock's own settings) read the 52-week check?"""
+    own = (settings.get("stock_settings") or {}).get(symbol) if isinstance(settings.get("stock_settings"), dict) else None
+    if isinstance(own, dict) and "use_high52" in own:
+        return bool(own.get("use_high52"))
+    return bool(settings.get("use_high52"))
+
+
 @dataclass
 class ReplaySession:
     """One bot's replay: download the range, then play each day in turn (one per bot can run together)."""
@@ -1016,6 +1025,12 @@ class ReplaySession:
             return
         self.symbols = list(frames)
         self.universe = list(frames)
+        # The 52-week levels for the stocks whose entry check reads them: one daily download per stock.
+        for symbol in list(frames):
+            if self._stop:
+                return
+            if _wants_high52(settings, symbol):
+                await high52.preload(broker, symbol, days)
         done = 0
         if resume is not None:
             # The run's own day list: finished days count, the rest play now.

@@ -368,6 +368,10 @@ class BotConfig(Base):
     use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level.
     use_level: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # 52-week high entry check (high52.py): side LONG / SHORT / BOTH, and how far from the level still counts (%).
+    use_high52: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    high52_side: Mapped[str | None] = mapped_column(String, nullable=True, default="LONG")
+    high52_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     level_line: Mapped[str | None] = mapped_column(String, nullable=True, default="BB_MIDDLE")
     st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)

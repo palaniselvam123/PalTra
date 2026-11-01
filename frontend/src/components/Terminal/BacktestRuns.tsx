@@ -88,6 +88,7 @@ export function strategyLabel(s: Settings): string {
     if (s.use_ema) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} entry`);
     if (s.ema_exit) parts.push(`EMA ${s.ema_fast ?? 9}/${s.ema_slow ?? 200} exit`);
     if (s.use_level) parts.push(`level ${s.level_line ?? "BB_MIDDLE"}`);
+    if (s.use_high52) parts.push(`52w high ${s.high52_side ?? "LONG"}${Number(s.high52_pct ?? 0) > 0 ? ` ±${s.high52_pct}%` : ""}`);
     if (s.use_supertrend) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} entry`);
     if (s.st_exit) parts.push(`Supertrend ${s.st_period ?? 10}×${s.st_mult ?? 3} exit`);
     if (s.slope_exit) parts.push(`SMA 9 slope exit (bend ${s.slope_bend_pct ?? 60}%, over ${s.slope_lookback ?? 2})`);
@@ -266,6 +267,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
+  ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Slow SMA exit", (s) => (s.slow_sma_exit ? "On" : "Off")],

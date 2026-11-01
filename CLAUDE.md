@@ -515,6 +515,24 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   breakeven (+1.5R) at …"), shown under the exit reason in the blotter and in the CSV. A restart restores R from the ATR
   stop at entry and stage 1 when the saved stop is at or past the entry. Settings → 5. Stop-loss and target. The stock
   research baseline keeps it off.
+- `backend/high52.py` – 52-week high (two read-only readers of Groww's daily candles, `interval_in_minutes` 1440; no
+  order path). **Entry check** (`use_high52`, off by default; per bot and per stock, PAPER and LIVE, replays too; entries
+  only; wired through `_entry_block`, check name `high52`, chart ✕ "52w high"): the closed signal candle must close at the
+  stock's 52-week high, the highest daily high of the 52 weeks *before* that day (`levels_from`; today's own breakout
+  counts). `high52_side` `LONG` (default: a buy needs the high, a sell is refused) | `SHORT` (the mirror at the 52-week low)
+  | `BOTH`; `high52_pct` (0, 0-20): 0 = the close must reach the level, N = within N % of it counts. Levels are read once per
+  stock and day: the live engine loads them in the background from `tick` (`ensure` → `_load_live` on the bots' Groww
+  threads via `groww_pressure.run_bot_call`; a failure is retried after `RETRY_SEC`), a replay preloads them for its days
+  (`ReplaySession._load_and_play` → `preload`, one download per stock, `_wants_high52`), kept in `_CACHE` (memory). Until
+  loaded (or on a broker without a Groww session: research, replay brokers) the entry is refused ("52-week high not loaded
+  yet"), like the other checks. Settings → 2. Checks before entering. The stock research baseline keeps it off.
+  **Scan** (`High52Scanner`, mirrors `MorningScanner`: one pass at a time, the scanner process via
+  `scan_worker.high52_job`, stopped by Pause scans; `POST /api/high52-scan/start` (symbols, force), `GET /api/high52-scan`):
+  each stock's `analyze` row: last price, 52-week high / low and their dates, `dist_high_pct` / `dist_low_pct`,
+  `broke_high` / `broke_low` (today's high / low reached the level), sessions since the high, day and year move; breakouts
+  first, then nearest the high (`sort_key`). The Scalp page's "52-week high" tab (`components/Scalp/High52Scan.tsx`: scan
+  lists, Show new high / within the band of the high or low / all, band %, tick boxes, Arm / Arm ticked). Nothing in the
+  strategy reads the scan.
 - `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
   entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
   `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /

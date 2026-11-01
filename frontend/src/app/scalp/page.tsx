@@ -18,6 +18,7 @@ import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { MorningScan } from "@/components/Scalp/MorningScan";
+import { High52Scan } from "@/components/Scalp/High52Scan";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -66,6 +67,7 @@ const TABS = [
   { id: "cross", label: "Cross scan" },
   { id: "morning", label: "09:30 Morning" },
   { id: "trend", label: "Trend quality" },
+  { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
   { id: "history", label: "History" },
@@ -106,10 +108,12 @@ export default function ScalpPage() {
   const [crossStatus, setCrossStatus] = useState<ScanStatus | null>(null);
   const [trendStatus, setTrendStatus] = useState<ScanStatus | null>(null);
   const [morningStatus, setMorningStatus] = useState<ScanStatus | null>(null);
+  const [high52Status, setHigh52Status] = useState<ScanStatus | null>(null);
   const [activeStatus, setActiveStatus] = useState<ScanStatus | null>(null);
   const onCrossStatus = useCallback((st: ScanStatus) => setCrossStatus(st), []);
   const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
   const onMorningStatus = useCallback((st: ScanStatus) => setMorningStatus(st), []);
+  const onHigh52Status = useCallback((st: ScanStatus) => setHigh52Status(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -345,6 +349,7 @@ export default function ScalpPage() {
     cross: crossStatus,
     morning: morningStatus,
     trend: trendStatus,
+    high52: high52Status,
     active: activeStatus,
     backtest: null,
     history: null,
@@ -708,6 +713,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "trend"}>
           <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} onArmMany={(list) => armSeveral(list, "Trend quality")} paused={paused} onStatus={onTrendStatus} />
+        </div>
+        <div hidden={tab !== "high52"}>
+          <High52Scan armed={armed} arming={arming} onArm={(s) => arm(s, "52-week high")} onArmMany={(list) => armSeveral(list, "52-week high")} paused={paused} onStatus={onHigh52Status} />
         </div>
         <div hidden={tab !== "active"}>
           <MostActive

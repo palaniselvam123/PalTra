@@ -341,6 +341,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
+    use_high52: Boolean(form.use_high52),
+    high52_side: ["LONG", "SHORT", "BOTH"].includes(String(form.high52_side)) ? (String(form.high52_side) as SmaConfig["high52_side"]) : "LONG",
+    high52_pct: Math.min(20, Math.max(0, Number(form.high52_pct ?? 0) || 0)),
     level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
     st_exit: Boolean(form.st_exit),
     slope_exit: Boolean(form.slope_exit),
@@ -1502,6 +1505,48 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <option value="PIVOT_R1">R1 for a buy, S1 for a sell</option>
               </select>
             </label>
+          ) : null}
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_high52)}
+              onChange={(e) => set("use_high52", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_high52") && <OwnTag />}
+            Enter only at the 52-week high
+            <InfoTip label="About the 52-week high check">
+              A breakout check. The signal candle must close at the stock&apos;s 52-week high (the highest daily high of the last 52
+              weeks before that day, from Groww&apos;s daily candles): a buy at or above it, with &quot;Buys only&quot; a sell is refused.
+              &quot;Sells only&quot; is the mirror at the 52-week low; &quot;Both&quot; judges each side on its own level. The band lets a
+              close a little under the high count too (2 = within 2% of it). The levels load once a day in the background; until
+              they have loaded the entry is refused, like the other checks when a line is not ready. The Scalp page&apos;s 52-week
+              high tab lists the stocks near their high to arm.
+            </InfoTip>
+          </label>
+          {form.use_high52 ? (
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                {isOwn("high52_side") && <OwnTag />}
+                Which side
+                <select
+                  value={String(form.high52_side ?? "LONG")}
+                  onChange={(e) => set("high52_side", e.target.value)}
+                  className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+                >
+                  <option value="LONG">Buys only, at the 52-week high (sells refused)</option>
+                  <option value="SHORT">Sells only, at the 52-week low (buys refused)</option>
+                  <option value="BOTH">Both: buys at the high, sells at the low</option>
+                </select>
+              </label>
+              <Field
+                label="Band under the high (0 = must reach it)"
+                suffix="%"
+                value={String(form.high52_pct ?? 0)}
+                onChange={(v) => set("high52_pct", v)}
+                own={isOwn("high52_pct")}
+              />
+            </div>
           ) : null}
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
@@ -2775,6 +2820,11 @@ export function activeRules(f: SmaConfig): Rule[] {
       PIVOT_P: "Price beyond the pivot P (buy above, sell below)",
       PIVOT_R1: "Price beyond R1 / S1 (buy above R1, sell below S1)",
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
+  );
+  check(
+    "use_high52",
+    f.use_high52,
+    `${{ LONG: "Buy only at the 52-week high", SHORT: "Sell only at the 52-week low", BOTH: "Buy at the 52-week high, sell at the 52-week low" }[String(f.high52_side ?? "LONG")] ?? "52-week high check"}${n(f.high52_pct, 0) > 0 ? ` (within ${n(f.high52_pct, 0)}%)` : ""}`
   );
   check("use_or_volume", f.use_or_volume, "Opening 15 min: volume check");
   check("use_or_vwap", f.use_or_vwap, "Opening 15 min: VWAP check");
