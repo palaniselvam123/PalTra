@@ -148,6 +148,8 @@ export default function TerminalPage() {
     const todays = deskTrades.filter((t) => t.date === today && (t.mode ?? "PAPER").toUpperCase() !== "REPLAY");
     return {
       view: research ? "SMA terminal — research desk (paper only, own settings and book)" : "SMA terminal",
+      // Which bot this page shows, so the chat reads that bot's crosses for "why did it not trade".
+      bot: research ? "research" : desk === "live" ? "1" : desk.replace("bot", ""),
       chart_stock: state?.symbol ?? config?.symbol ?? null,
       bot_status: state?.bot_status,
       halt_reason: state?.halt_reason || undefined,

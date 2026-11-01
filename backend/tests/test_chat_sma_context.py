@@ -85,7 +85,7 @@ async def test_question_is_sent_with_the_sma_facts_and_the_screen(monkeypatch):
     async def key(required: bool = True):
         return "sk-test"
 
-    async def context():
+    async def context(scope=None):
         return {"trades": [], "console_log_newest_first": [], "open_positions": [], "bot": {"status": "STOPPED"}}
 
     async def no_price(_message):
@@ -94,7 +94,7 @@ async def test_question_is_sent_with_the_sma_facts_and_the_screen(monkeypatch):
     monkeypatch.setattr(chat_advisor.ai_advisor, "config", config)
     monkeypatch.setattr(chat_advisor.ai_advisor, "_api_key", key)
     monkeypatch.setattr(chat_advisor, "build_context", context)
-    monkeypatch.setattr(chat_advisor, "sma_facts", lambda: {"available": True, "trades_today_count": 3})
+    monkeypatch.setattr(chat_advisor, "sma_facts", lambda scope=None: {"available": True, "trades_today_count": 3})
     monkeypatch.setattr("app.services.price_questions.lookup_async", no_price)
     sent: dict = {}
 

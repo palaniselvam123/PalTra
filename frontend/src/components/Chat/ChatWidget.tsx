@@ -25,13 +25,43 @@ function followUps(question: string, reply: string): string[] {
   return Array.from(new Set(out)).slice(0, 3);
 }
 
+const SECTION_WORDS: Record<string, string> = {
+  today: "today's trades",
+  guide: "strategy guide",
+  settings: "settings",
+  "past trades": "past trades",
+  "settings catalog": "settings catalog",
+  "settings history": "settings history",
+  backtests: "backtests",
+  "ORB desk": "ORB desk",
+};
+
+function tokens(n: unknown): string | null {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
+}
+
+/** What the answer was read from and what it cost: the sections picked for the question (or everything) and the
+ *  tokens OpenAI counted. */
 function factsLine(f: Facts | undefined): string | null {
   if (!f) return null;
   const parts: string[] = [];
-  if (typeof f.sma_bots === "number" && f.sma_bots > 0) parts.push(`${f.sma_bots} bot${f.sma_bots === 1 ? "" : "s"}`);
-  if (typeof f.sma_trades_today === "number") parts.push(`${f.sma_trades_today} trade${f.sma_trades_today === 1 ? "" : "s"} today`);
-  if (typeof f.sma_recent_trades === "number" && f.sma_recent_trades > 0) parts.push(`${f.sma_recent_trades} past`);
+  const scope = (f.scope ?? null) as { full?: boolean } | null;
+  const sections = Array.isArray(f.sections) ? (f.sections as string[]) : [];
+  if (scope?.full) parts.push("everything");
+  else if (sections.length) parts.push(...sections.map((s) => SECTION_WORDS[s] ?? s));
+  else {
+    if (typeof f.sma_bots === "number" && f.sma_bots > 0) parts.push(`${f.sma_bots} bot${f.sma_bots === 1 ? "" : "s"}`);
+    if (typeof f.sma_trades_today === "number") parts.push(`${f.sma_trades_today} trade${f.sma_trades_today === 1 ? "" : "s"} today`);
+    if (typeof f.sma_recent_trades === "number" && f.sma_recent_trades > 0) parts.push(`${f.sma_recent_trades} past`);
+  }
+  const stocks = Array.isArray(f.stocks) ? (f.stocks as string[]) : [];
+  if (stocks.length) parts.push(stocks.join(", "));
   if (f.screen) parts.push("this page");
+  const usage = (f.usage ?? null) as { input_tokens?: unknown; output_tokens?: unknown } | null;
+  const tin = tokens(usage?.input_tokens);
+  const tout = tokens(usage?.output_tokens);
+  if (tin) parts.push(`${tin} tokens in${tout ? ` / ${tout} out` : ""}`);
   return parts.length ? `Read: ${parts.join(" · ")}` : null;
 }
 
@@ -53,6 +83,8 @@ export function ChatWidget() {
   const [error, setError] = useState<string | null>(null);
   const [showStarters, setShowStarters] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
+  // "Read everything": send the whole snapshot instead of the sections the question needs (costs several times more).
+  const [full, setFull] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pathname = usePathname();
@@ -64,10 +96,22 @@ export function ChatWidget() {
   useEffect(() => {
     try {
       setWide(window.localStorage.getItem("chat.wide") === "1");
+      setFull(window.localStorage.getItem("chat.full") === "1");
     } catch {
       /* no storage: default width */
     }
   }, []);
+
+  const toggleFull = () => {
+    setFull((v) => {
+      try {
+        window.localStorage.setItem("chat.full", v ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -103,7 +147,7 @@ export function ChatWidget() {
 
     try {
       const history = priorTurns.map(({ role, content }) => ({ role, content }));
-      const res = await api.askChat(question, history, pathname ?? undefined, chatScreen());
+      const res = await api.askChat(question, history, pathname ?? undefined, chatScreen(), full);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: res.reply, proposals: res.proposals, at: Date.now(), facts: res.facts_summary },
@@ -163,7 +207,7 @@ export function ChatWidget() {
         <div className="min-w-0">
           <div className="text-sm font-medium text-slate-200">Ask the bot</div>
           <div className="truncate text-[10px] text-slate-500">
-            {status?.model ? `${status.model} · ` : ""}reads your trades, every bot and this page
+            {status?.model ? `${status.model} · ` : ""}reads what the question needs: your trades, the bots, this page
           </div>
         </div>
         <div className="ml-auto flex items-center gap-0.5">
@@ -366,10 +410,19 @@ export function ChatWidget() {
                 <Send size={14} />
               </button>
             </div>
-            <p className="mt-1.5 text-[10px] text-slate-600">
-              Enter sends, Shift+Enter for a new line. Settings changes show as cards; nothing saves until you tap Apply. Never
-              places orders.
-            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-600">
+              <span>
+                Enter sends, Shift+Enter for a new line. Settings changes show as cards; nothing saves until you tap Apply. Never
+                places orders.
+              </span>
+              <label
+                className="ml-auto inline-flex cursor-pointer items-center gap-1 text-slate-500"
+                title="Off: the assistant is given only the facts the question needs (today's trades, a stock's crosses, settings…), which costs a fraction. On: every bot, every past trade, every setting and the ORB desk go with each question."
+              >
+                <input type="checkbox" checked={full} onChange={toggleFull} className="h-3 w-3 accent-bot" />
+                Read everything (costs more)
+              </label>
+            </div>
           </div>
         </>
       )}

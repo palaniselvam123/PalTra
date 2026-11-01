@@ -80,7 +80,7 @@ async def test_answer_returns_proposals_and_saves_nothing(monkeypatch):
     async def key(required: bool = True):
         return "sk-test"
 
-    async def context():
+    async def context(scope=None):
         return {"trades": [], "console_log_newest_first": [], "open_positions": [], "bot": {"status": "STOPPED"}}
 
     async def no_price(_message):
@@ -89,7 +89,7 @@ async def test_answer_returns_proposals_and_saves_nothing(monkeypatch):
     monkeypatch.setattr(chat_advisor.ai_advisor, "config", config)
     monkeypatch.setattr(chat_advisor.ai_advisor, "_api_key", key)
     monkeypatch.setattr(chat_advisor, "build_context", context)
-    monkeypatch.setattr(chat_advisor, "sma_facts", lambda: {"available": True})
+    monkeypatch.setattr(chat_advisor, "sma_facts", lambda scope=None: {"available": True})
     monkeypatch.setattr("app.services.price_questions.lookup_async", no_price)
     sent: dict = {}
     posts: list[str] = []

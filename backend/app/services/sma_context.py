@@ -21,6 +21,7 @@ import logging
 from collections import defaultdict
 
 from app.core.market_clock import IST
+from app.services.chat_scope import Scope
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ MAX_RECENT_TRADES = 120
 RECENT_TRADE_DAYS = 7
 # Today's SMA crosses per armed stock in the timeline, newest kept.
 MAX_CROSSES_PER_STOCK = 40
+# ... and when the question names no stock, so every armed stock's timeline goes in.
+MAX_CROSSES_BROAD = 12
+# Past trades when the question names a stock: that stock's only, but reach further back.
+MAX_RECENT_TRADES_STOCK = 60
+# The screen snapshot when the facts are trimmed to the question.
+MAX_SCREEN_CHARS_TRIMMED = 8_000
 MAX_SETTINGS_HISTORY = 10
 # The screen snapshot comes from the browser. Cap it so a large page cannot
 # blow up the prompt.
@@ -294,7 +301,7 @@ def _hhmm_epoch(day: dt.date, hhmm: str | None, default: str) -> float:
         return dt.datetime(day.year, day.month, day.day, int(h), int(m), tzinfo=IST).timestamp()
 
 
-def cross_timeline(engine, cfg, symbol: str, trades: list[dict], today: dt.date, armed_windows=None) -> dict:
+def cross_timeline(engine, cfg, symbol: str, trades: list[dict], today: dt.date, armed_windows=None, max_crosses: int = MAX_CROSSES_PER_STOCK) -> dict:
     """Today's closed-candle SMA crosses of one armed stock and what the bot did with each.
 
     Read from the bot's own candles (`engine._frames`), judged the way the bot judges a cross (`filter_blocks`
@@ -397,7 +404,7 @@ def cross_timeline(engine, cfg, symbol: str, trades: list[dict], today: dt.date,
             what.append("no trade on this cross and no recorded refusal for it: the bot may have been STOPPED / PAUSED / HALTED or at its day cap then (status changes are not recorded by time)")
         row["what_happened"] = "; ".join(what)
         crosses.append(row)
-    out["crosses_today"] = crosses[-MAX_CROSSES_PER_STOCK:]
+    out["crosses_today"] = crosses[-max_crosses:]
     out["crosses_today_count"] = len(crosses)
     if not crosses:
         out["note"] = "no closed-candle SMA cross on this stock today on this bot's candle size"
@@ -417,8 +424,12 @@ def settings_history(presets) -> list[dict]:
     return list(reversed(out))[:MAX_SETTINGS_HISTORY]
 
 
-def _bot_facts(mod, eng, label: str, today: dt.date, trades_today: list[dict], defaults: dict | None, full_settings: bool) -> dict:
-    """One bot (or the research desk) as the assistant sees it."""
+def _bot_facts(
+    mod, eng, label: str, today: dt.date, trades_today: list[dict], defaults: dict | None, full_settings: bool,
+    timelines: bool = True, only_symbols: set[str] | None = None, max_crosses: int = MAX_CROSSES_PER_STOCK,
+) -> dict:
+    """One bot (or the research desk) as the assistant sees it. `timelines` adds today's cross timeline per stock
+    (the costly part), for `only_symbols` when given."""
     from strategy_engine import trade_names
 
     cfg = eng.load_config()
@@ -454,6 +465,9 @@ def _bot_facts(mod, eng, label: str, today: dt.date, trades_today: list[dict], d
         facts["settings_differing_from_defaults"] = {k: v for k, v in settings.items() if k in defaults and defaults[k] != v}
         facts["stock_settings"] = settings.get("stock_settings") or {}
     bot_trades = [t for t in trades_today if (t.get("bot") or 1) == bot_id and (t.get("mode") or "").upper() == facts["mode"]]
+    facts["stocks_traded_today"] = sorted({t.get("symbol") for t in bot_trades if t.get("symbol")})
+    if not timelines:
+        return facts
     windows = None
     try:
         import arm_log
@@ -462,24 +476,30 @@ def _bot_facts(mod, eng, label: str, today: dt.date, trades_today: list[dict], d
     except Exception:  # noqa: BLE001
         windows = None
     stocks = list(dict.fromkeys([*facts["armed_stocks"], *positions.keys(), *(t.get("symbol") for t in bot_trades if t.get("symbol"))]))
+    if only_symbols:
+        stocks = [s for s in stocks if s in only_symbols]
     facts["stocks_today"] = [
-        cross_timeline(eng, cfg, symbol, bot_trades, today, (windows or {}).get(symbol) if windows else None)
+        cross_timeline(eng, cfg, symbol, bot_trades, today, (windows or {}).get(symbol) if windows else None, max_crosses)
         for symbol in stocks[:30]
     ]
     return facts
 
 
-def _recent_trades(session_factory, TradeLog, _trade_dict, today: dt.date) -> tuple[list[dict], dict]:
-    """Past days' trades of every bot with the strategy each one used (deduped into `strategies_used`)."""
+def _recent_trades(
+    session_factory, TradeLog, _trade_dict, today: dt.date, symbols: set[str] | None = None, bots: set[int] | None = None
+) -> tuple[list[dict], dict]:
+    """Past days' trades of every bot with the strategy each one used (deduped into `strategies_used`).
+    With `symbols` only those stocks' trades (more of them, since they are what was asked)."""
     since = (today - dt.timedelta(days=RECENT_TRADE_DAYS)).isoformat()
     with session_factory()() as db:
-        rows = (
-            db.query(TradeLog)
-            .filter(TradeLog.date >= since, TradeLog.date < today.isoformat(), TradeLog.mode.in_(("PAPER", "LIVE", "RESEARCH")))
-            .order_by(TradeLog.id.desc())
-            .limit(MAX_RECENT_TRADES)
-            .all()
+        query = db.query(TradeLog).filter(
+            TradeLog.date >= since, TradeLog.date < today.isoformat(), TradeLog.mode.in_(("PAPER", "LIVE", "RESEARCH"))
         )
+        if symbols:
+            query = query.filter(TradeLog.symbol.in_(sorted(symbols)))
+        if bots:
+            query = query.filter(TradeLog.bot.in_(sorted(bots)))
+        rows = query.order_by(TradeLog.id.desc()).limit(MAX_RECENT_TRADES_STOCK if symbols else MAX_RECENT_TRADES).all()
         dicts = [_trade_dict(r) for r in rows]
     strategies: dict[str, dict] = {}
     keys: dict[str, str] = {}
@@ -543,12 +563,37 @@ def _day_totals(rows) -> list[dict]:
     ]
 
 
-def sma_facts() -> dict:
-    """The SMA terminal's state as plain JSON for the assistant."""
-    facts: dict = {"strategy_guide": STRATEGY_GUIDE}
+def _resolve_bots(scope: Scope, bots: list[tuple[str, object]], symbols: set[str], by_symbol: dict[str, set[str]]) -> set[str]:
+    """Which bots' cross timelines a question needs: the bots it names, else every bot that has the stocks it
+    names (armed, held or traded today), else the page's bot, else bot 1."""
+    labels = [label for label, _ in bots]
+    if scope.full or scope.all_bots:
+        return set(labels)
+    if scope.bots:
+        return {b for b in scope.bots if b in labels} or {labels[0]}
+    if symbols:
+        found = {b for sym in symbols for b in by_symbol.get(sym, set())}
+        if found:
+            return found
+    if scope.page_bot in labels:
+        return {scope.page_bot}
+    return {labels[0]}
+
+
+def sma_facts(scope: Scope | None = None) -> dict:
+    """The SMA terminal's state as plain JSON for the assistant.
+
+    `scope` (from `chat_scope.classify`) keeps only the sections the question needs; None = everything."""
+    scope = scope or Scope(full=True)
+    facts: dict = {}
+    sections: list[str] = []
+    if scope.wants("howto", "settings", "change"):
+        facts["strategy_guide"] = STRATEGY_GUIDE
+        sections.append("guide")
     mod = _terminal()
     engine = getattr(mod, "engine", None) if mod is not None else None
     if engine is None:
+        facts["strategy_guide"] = STRATEGY_GUIDE
         facts["available"] = False
         facts["note"] = (
             "The SMA terminal is not running inside this server (local development runs it separately), so "
@@ -569,6 +614,12 @@ def sma_facts() -> dict:
         if mode == "PAPER"
         else "Could not read the mode; check the terminal's mode button."
     )
+    if not scope.full:
+        facts["facts_note"] = (
+            "Only the sections this question needs are here. If the answer needs trades, crosses or settings that are "
+            "not in these facts, say which and that asking with 'Read everything' on, or a more specific question "
+            "(the bot, stock, day or setting), will bring them."
+        )
     try:
         from database import session_factory
         from models import TradeLog
@@ -576,7 +627,10 @@ def sma_facts() -> dict:
 
         cfg = engine.load_config()
         config_dict = getattr(mod, "_config_dict", None)
-        facts["settings"] = config_dict(cfg) if config_dict else {}
+        want_settings = scope.wants("settings", "howto", "change")
+        if want_settings:
+            facts["settings"] = config_dict(cfg) if config_dict else {}
+            sections.append("settings")
         facts["armed_stocks"] = trade_names(cfg)
         snap = engine.snapshot()
         facts["state"] = {
@@ -587,38 +641,50 @@ def sma_facts() -> dict:
                 "realized_net_pnl", "open_net_total", "trades_today", "max_trades", "max_daily_loss",
             )
         }
-        facts["today_kpis"] = {mode: engine._kpis(mode) for mode in ("PAPER", "LIVE")}
-
         today = dt.datetime.now(IST).date()
+        want_today = scope.wants("today", "crosses")
+        if want_today:
+            facts["today_kpis"] = {mode: engine._kpis(mode) for mode in ("PAPER", "LIVE")}
+            sections.append("today")
         since = (today - dt.timedelta(days=RECENT_DAYS * 2)).isoformat()
         with session_factory()() as db:
-            todays = (
-                db.query(TradeLog)
-                .filter(TradeLog.date == today.isoformat(), TradeLog.mode.in_(("PAPER", "LIVE")))
-                .order_by(TradeLog.id.desc())
-                .limit(MAX_TRADES_TODAY)
-                .all()
-            )
+            if want_today:
+                todays = (
+                    db.query(TradeLog)
+                    .filter(TradeLog.date == today.isoformat(), TradeLog.mode.in_(("PAPER", "LIVE")))
+                    .order_by(TradeLog.id.desc())
+                    .limit(MAX_TRADES_TODAY)
+                    .all()
+                )
+            else:
+                todays = []
             recent = (
                 db.query(TradeLog)
                 .filter(TradeLog.date >= since, TradeLog.mode.in_(("PAPER", "LIVE")))
                 .all()
+                if scope.wants("today", "past")
+                else []
             )
             from strategy_engine import _trade_dict
 
             facts["trades_today"] = [_trade(_trade_dict(r)) for r in todays]
-        facts["trades_today_count"] = len(facts["trades_today"])
-        facts["recent_days"] = _day_totals(recent)[: RECENT_DAYS * 2]
-        try:
-            from replay import list_runs
+        facts["trades_today_count"] = len(facts["trades_today"]) if want_today else int(getattr(engine, "trades_today", 0) or 0)
+        if not want_today:
+            facts.pop("trades_today")
+        if scope.wants("today", "past"):
+            facts["recent_days"] = _day_totals(recent)[: RECENT_DAYS * 2]
+        if scope.wants("backtests"):
+            try:
+                from replay import list_runs
 
-            facts["recent_backtests"] = [
-                {k: run.get(k) for k in ("id", "start_date", "end_date", "symbols", "status", "totals", "settings")}
-                for run in list_runs(RECENT_RUNS)
-            ]
-        except Exception:  # noqa: BLE001
-            logger.exception("replay runs for chat failed")
-        # Every bot: its own status, book, signal lines and today's cross timeline per stock.
+                facts["recent_backtests"] = [
+                    {k: run.get(k) for k in ("id", "start_date", "end_date", "symbols", "status", "totals", "settings")}
+                    for run in list_runs(RECENT_RUNS)
+                ]
+                sections.append("backtests")
+            except Exception:  # noqa: BLE001
+                logger.exception("replay runs for chat failed")
+        # Every bot: its own status, book and signal lines; today's cross timeline per stock for the bots asked about.
         try:
             with session_factory()() as db:
                 all_today = (
@@ -637,32 +703,69 @@ def sma_facts() -> dict:
             research = getattr(mod, "research_engine", None)
             if research is not None:
                 engines.append(("research", research))
+            # The stocks the question names, among the ones any bot knows today.
+            by_symbol: dict[str, set[str]] = defaultdict(set)
+            for label, eng in engines:
+                try:
+                    names = set(trade_names(eng.load_config())) | set((getattr(eng, "positions", {}) or {}).keys())
+                except Exception:  # noqa: BLE001
+                    names = set()
+                bot_no = int(getattr(eng, "bot_id", 1) or 1)
+                names |= {t.get("symbol") for t in today_dicts if (t.get("bot") or 1) == bot_no and t.get("symbol")}
+                for sym in names:
+                    by_symbol[sym].add(label)
+            known = set(by_symbol) | set(facts["armed_stocks"])
+            symbols = {w for w in scope.words if w in known} if not scope.full else set()
+            facts["stocks_asked_about"] = sorted(symbols)
+            want_timelines = scope.wants("crosses")
+            timeline_bots = _resolve_bots(scope, engines, symbols, by_symbol) if want_timelines else set()
+            max_crosses = MAX_CROSSES_PER_STOCK if (scope.full or symbols) else MAX_CROSSES_BROAD
             facts["bots"] = []
             for label, eng in engines:
                 try:
-                    facts["bots"].append(_bot_facts(mod, eng, label, today, today_dicts, defaults, full_settings=(label == "1")))
+                    facts["bots"].append(
+                        _bot_facts(
+                            mod, eng, label, today, today_dicts, defaults, full_settings=(scope.full and label == "1"),
+                            timelines=label in timeline_bots, only_symbols=symbols or None, max_crosses=max_crosses,
+                        )
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("bot %s facts for chat failed", label)
                     facts["bots"].append({"bot": label, "error": f"could not read: {exc}"})
+            if timeline_bots:
+                sections.append("crosses (bot " + ", ".join(sorted(timeline_bots)) + ")")
             facts["bots_note"] = (
-                "Each bot has its own book, Trade list, settings and status. `stocks_today[].crosses_today` lists every "
-                "closed-candle SMA cross on that bot's candle size today with what the bot did on it (entered, closed, "
-                "refused and why, cut-off, not armed, cross exit off, gap mode, caps). Bot 1's `settings` are complete; "
-                "the other bots show only the settings that differ from the defaults."
+                "Each bot has its own book, Trade list, settings and status. `stocks_today[].crosses_today` (on the bots "
+                "the question is about) lists every closed-candle SMA cross on that bot's candle size today with what "
+                "the bot did on it (entered, closed, refused and why, cut-off, not armed, cross exit off, gap mode, caps). "
+                + ("Bot 1's `settings` are complete; the other bots show only the settings that differ from the defaults."
+                   if scope.full else
+                   "Each bot shows only the settings that differ from the defaults (`settings` at the top, when present, "
+                   "is bot 1's full set).")
             )
-            facts["recent_trades"], facts["strategies_used"] = _recent_trades(session_factory, TradeLog, _trade_dict, today)
-            facts["recent_trades_note"] = (
-                "Trades of the last days (newest first, every bot, PAPER / LIVE / RESEARCH). Each carries `strategy_id`; "
-                "`strategies_used[strategy_id]` is the exact strategy settings saved at that trade's entry (the fields "
-                "of the bot's strategy then). `entry_reason` says what opened it (SMA_CROSS, GAP_MODE, JOIN_TREND, "
-                "SMA9_TURN, FAST_MOVE, NEWS ...), `exit_reason` what closed it. A trade without a strategy_id was booked "
-                "before settings were recorded per trade: then use `settings_history` by time."
-            )
-            facts["settings_catalog"] = settings_catalog(mod)
+            if scope.wants("past"):
+                bot_filter = {int(b) for b in scope.bots if b.isdigit()} if scope.bots else None
+                facts["recent_trades"], facts["strategies_used"] = _recent_trades(
+                    session_factory, TradeLog, _trade_dict, today, symbols or None, bot_filter
+                )
+                facts["recent_trades_note"] = (
+                    "Trades of the last days (newest first, every bot, PAPER / LIVE / RESEARCH"
+                    + (", only the stocks asked about" if symbols else "")
+                    + "). Each carries `strategy_id`; "
+                    "`strategies_used[strategy_id]` is the exact strategy settings saved at that trade's entry (the fields "
+                    "of the bot's strategy then). `entry_reason` says what opened it (SMA_CROSS, GAP_MODE, JOIN_TREND, "
+                    "SMA9_TURN, FAST_MOVE, NEWS ...), `exit_reason` what closed it. A trade without a strategy_id was booked "
+                    "before settings were recorded per trade: then use `settings_history` by time."
+                )
+                sections.append("past trades")
+            if scope.wants("change"):
+                facts["settings_catalog"] = settings_catalog(mod)
+                sections.append("settings catalog")
             presets = getattr(mod, "strategy_presets", None)
-            if presets is not None:
+            if presets is not None and scope.wants("past", "settings", "change"):
                 try:
                     facts["settings_history"] = settings_history(presets)
+                    sections.append("settings history")
                 except Exception:  # noqa: BLE001
                     logger.exception("settings history for chat failed")
         except Exception as exc:  # noqa: BLE001
@@ -671,19 +774,28 @@ def sma_facts() -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.exception("SMA facts for chat failed")
         facts["error"] = f"Could not read the SMA terminal: {exc}"
+    facts["sections"] = sections
     return facts
 
 
-def screen_facts(page: str | None, screen: dict | None) -> dict | None:
-    """What the page showed when the question was asked, capped in size."""
+def screen_facts(page: str | None, screen: dict | None, scope: Scope | None = None) -> dict | None:
+    """What the page showed when the question was asked, capped in size. With a trimmed `scope` the page's full
+    settings block goes only with a settings question, and the cap is tighter."""
     if not page and not screen:
         return None
     out: dict = {"page": (page or "")[:200]}
+    trimmed = scope is not None and not scope.full
+    if trimmed and isinstance(screen, dict) and "settings" in screen and not scope.wants("settings", "howto", "change"):
+        screen = {k: v for k, v in screen.items() if k != "settings"}
+        screen["settings"] = "(left out: not a settings question)"
+    if trimmed and isinstance(screen, dict) and "todays_trades" in screen and not scope.wants("today"):
+        screen = {k: v for k, v in screen.items() if k != "todays_trades"}
+    cap = MAX_SCREEN_CHARS_TRIMMED if trimmed else MAX_SCREEN_CHARS
     if screen:
         text = json.dumps(screen, default=str)
-        if len(text) > MAX_SCREEN_CHARS:
+        if len(text) > cap:
             out["data_truncated"] = True
-            text = text[:MAX_SCREEN_CHARS]
+            text = text[:cap]
             out["data_json_prefix"] = text
         else:
             out["data"] = screen
