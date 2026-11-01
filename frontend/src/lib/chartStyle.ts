@@ -35,7 +35,12 @@ export type LineLook = {
 
 export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "pivots";
 
-export type ChartStyle = Record<LineKey, LineLook> & { candleUp: string; candleDown: string };
+export type ChartStyle = Record<LineKey, LineLook> & {
+  candleUp: string;
+  candleDown: string;
+  /** Draw Heikin Ashi candles instead of the real ones (display only; the bot reads real prices). */
+  heikinAshi: boolean;
+};
 
 export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: string }> = {
   sma9: { name: "SMA fast (9)", auto: "always" },
@@ -52,6 +57,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
 export const DEFAULT_CHART_STYLE: ChartStyle = {
   candleUp: "#10B981",
   candleDown: "#F43F5E",
+  heikinAshi: false,
   sma9: { show: "on", color: "#F43F5E", width: 2, style: 0 },
   sma21: { show: "on", color: "#3B82F6", width: 2, style: 0 },
   vwap: { show: "auto", color: "#22D3EE", width: 2, style: 1 },
@@ -74,6 +80,7 @@ function clean(raw: unknown): ChartStyle {
   for (const k of ["candleUp", "candleDown"] as const) {
     if (typeof src[k] === "string" && HEX.test(src[k] as string)) out[k] = src[k] as string;
   }
+  out.heikinAshi = src.heikinAshi === true;
   for (const key of Object.keys(LINE_NAMES) as LineKey[]) {
     const v = src[key] as Partial<LineLook> | undefined;
     if (!v || typeof v !== "object") continue;
@@ -123,6 +130,24 @@ export function useChartStyle(): [ChartStyle, (next: ChartStyle) => void, () => 
   }, []);
   const reset = useCallback(() => save(clean(null)), [save]);
   return [style, save, reset];
+}
+
+type Candle = { open: number; high: number; low: number; close: number };
+
+/** Heikin Ashi candles (as backend/heikin_ashi.py): close = (O + H + L + C) / 4, open = the middle of the
+ *  Heikin Ashi candle before (the first: (O + C) / 2), high / low stretched to cover both. Display only. */
+export function heikinAshi<T extends Candle>(rows: T[]): T[] {
+  let po: number | null = null;
+  let pc: number | null = null;
+  return rows.map((r) => {
+    const close = (r.open + r.high + r.low + r.close) / 4;
+    const open = po == null || pc == null ? (r.open + r.close) / 2 : (po + pc) / 2;
+    if (Number.isFinite(open) && Number.isFinite(close)) {
+      po = open;
+      pc = close;
+    }
+    return { ...r, open, close, high: Math.max(r.high, open, close), low: Math.min(r.low, open, close) };
+  });
 }
 
 /** EMA of the closes (`ewm(adjust=False)`, as the bot); null until `n` candles. */

@@ -143,6 +143,14 @@ export type SmaConfig = {
   ema_exit?: boolean;
   ema_fast?: number;
   ema_slow?: number;
+  /** MACD check (macd.py): entry only on the MACD / signal side; exit on a MACD cross against the trade. */
+  use_macd?: boolean;
+  macd_exit?: boolean;
+  macd_fast?: number;
+  macd_slow?: number;
+  macd_signal?: number;
+  /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
+  ha_colours?: boolean;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
   use_supertrend?: boolean;
   /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */

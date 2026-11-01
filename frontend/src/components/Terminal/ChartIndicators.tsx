@@ -249,6 +249,18 @@ export function ChartIndicators({
                 className={COLOR}
               />
             </label>
+            <label
+              className="flex items-center gap-1.5"
+              title="Smoothed candles: a trend shows as a run of one colour. Display only; the bot trades real prices (its own Heikin Ashi switch is in Settings)."
+            >
+              <input
+                type="checkbox"
+                checked={style.heikinAshi}
+                onChange={(e) => onChange({ ...style, heikinAshi: e.target.checked })}
+                className="accent-[#10B981]"
+              />
+              Heikin Ashi
+            </label>
           </li>
         </ul>
       </div>

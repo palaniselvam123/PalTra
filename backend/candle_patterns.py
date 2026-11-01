@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from charges import calculate_charges
+import heikin_ashi
 
 IST = ZoneInfo("Asia/Kolkata")
 SESSION_OPEN_MIN = 9 * 60 + 15
@@ -340,6 +341,10 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
     if not rows:
         return PatternCall(None, "", f"waiting for a closed {tf}-minute candle")
     last = rows[-1]
+    if heikin_ashi.on(cfg):
+        # Heikin Ashi colours (heikin_ashi.py): the colour of the smoothed candle.
+        ha = heikin_ashi.view(pd.DataFrame(rows), cfg)
+        last = {"open": float(ha["open"].iloc[-1]), "close": float(ha["close"].iloc[-1])}
     if last["close"] > last["open"]:
         return PatternCall("LONG", "Green candle", f"green {tf}-minute candle")
     if last["close"] < last["open"]:

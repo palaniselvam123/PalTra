@@ -404,6 +404,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once per closed candle (`pos.ema_bar`); a LIVE position restored without its stop id is left to
   that stop. EMAs are `ewm(adjust=False)` on the bot's own candles. The stock research baseline keeps
   both off.
+- `backend/macd.py` – MACD check and exit (off by default, per bot and per stock, PAPER and LIVE, replays too): MACD line =
+  EMA(close, `macd_fast` 12) − EMA(close, `macd_slow` 26), signal = EMA(MACD, `macd_signal` 9) (`ewm(adjust=False)`, 1-200),
+  on the bot's own closed candles. **Entry** (`use_macd`): through `_entry_block` (check name `macd`, chart ✕ "MACD"): a buy
+  only while the histogram (MACD − signal) is above zero, a sell only while below; refused until `slow + signal` closed
+  candles. **Exit** (`macd_exit`): `StrategyEngine._watch_macd_exit` closes the trade (`MACD_CROSS`, via `_exit_now`, which
+  cancels a LIVE stop first) on a candle closed after the entry on which MACD crossed its signal line against it; once per
+  closed candle (`pos.macd_bar`); a LIVE position restored without its stop id is left to that stop. Settings → 2. Checks
+  before entering (numbers) and 3. When to exit. The stock research baseline keeps both off.
+- `backend/heikin_ashi.py` – Heikin Ashi colours (`ha_colours`, off by default, per bot and per stock, PAPER and LIVE,
+  replays too): HA close = (O + H + L + C) / 4, HA open = (previous HA open + previous HA close) / 2 (`candles`). With it on,
+  every rule that reads a candle's colour reads the HA one through `view(frame, cfg)` (the real close, with `open` moved so
+  close − open is the HA body): the candle direction check (`_base_entry_reason`), counter candles (exit, early reversal,
+  re-entry), candle colour entries (`candle_patterns.colour_call`), the SMA 9 turn's other-colour waits / holds and the
+  turn-trade colour exit. Prices never change (orders, stops, targets, SMAs, P&L stay real); candle patterns keep the real
+  candles. Settings → 2. Checks before entering. The chart's Indicators panel has its own display-only "Heikin Ashi" switch
+  (`chartStyle.heikinAshi`, `lib/chartStyle.heikinAshi`). The stock research baseline keeps it off.
 - `backend/supertrend.py` – Supertrend (off by default, per bot and per stock, PAPER and LIVE): the same
   line as Groww's / TradingView's Supertrend (`st_period` ATR length, default 10, 1-100; `st_mult` factor,
   default 3, 0.5-10; Wilder ATR seeded with the SMA of the first `st_period` true ranges, bands on

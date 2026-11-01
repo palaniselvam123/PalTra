@@ -94,6 +94,12 @@ const LABELS: Record<string, string> = {
   ema_exit: "EMA exit",
   ema_fast: "fast EMA",
   ema_slow: "slow EMA",
+  use_macd: "MACD entry",
+  macd_exit: "MACD exit",
+  macd_fast: "MACD fast",
+  macd_slow: "MACD slow",
+  macd_signal: "MACD signal",
+  ha_colours: "Heikin Ashi colours",
   use_supertrend: "Supertrend entry",
   use_level: "price level entry check",
   level_line: "price level line",
@@ -433,6 +439,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ema_exit: Boolean(form.ema_exit),
     ema_fast: Math.min(500, Math.max(1, Math.round(Number(form.ema_fast ?? 9)))),
     ema_slow: Math.min(500, Math.max(1, Math.round(Number(form.ema_slow ?? 200)))),
+    use_macd: Boolean(form.use_macd),
+    macd_exit: Boolean(form.macd_exit),
+    macd_fast: Math.min(200, Math.max(1, Math.round(Number(form.macd_fast ?? 12)) || 12)),
+    macd_slow: Math.min(200, Math.max(1, Math.round(Number(form.macd_slow ?? 26)) || 26)),
+    macd_signal: Math.min(200, Math.max(1, Math.round(Number(form.macd_signal ?? 9)) || 9)),
+    ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
     level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
@@ -1486,6 +1498,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Buy only while the fast EMA is above the slow one, sell only while below
           </label>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            MACD (check here; the exit is in step 3)
+            <InfoTip label="About MACD">
+              MACD line = EMA(fast) − EMA(slow) of the closes; the signal line is an EMA of the MACD line; the histogram is
+              the gap between them. Read on the bot&apos;s own closed candles. The bot still trades the SMA cross; MACD is an
+              extra check. Entry: a buy only while the MACD line is above its signal line (histogram above zero), a sell only
+              while it is below; otherwise the cross is skipped (✕ &quot;MACD&quot; on the chart). Exit: an open trade closes
+              when MACD crosses its signal line against it after the entry. Usual numbers 12 / 26 / 9. Off by default; try it
+              on Replay first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field label="Fast (candles)" value={String(form.macd_fast ?? 12)} onChange={(v) => set("macd_fast", v)} own={isOwn("macd_fast")} />
+            <Field label="Slow (candles)" value={String(form.macd_slow ?? 26)} onChange={(v) => set("macd_slow", v)} own={isOwn("macd_slow")} />
+            <Field label="Signal (candles)" value={String(form.macd_signal ?? 9)} onChange={(v) => set("macd_signal", v)} own={isOwn("macd_signal")} />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_macd)}
+              onChange={(e) => set("use_macd", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_macd") && <OwnTag />}
+            Buy only while MACD is above its signal line, sell only while below
+          </label>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.ha_colours)}
+              onChange={(e) => set("ha_colours", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("ha_colours") && <OwnTag />}
+            Read candle colours from Heikin Ashi candles
+            <InfoTip label="About Heikin Ashi colours">
+              Heikin Ashi candles are averages (close = (open + high + low + close) / 4, open = the middle of the candle
+              before), so a trend shows as a long run of one colour and a lone red candle in a rise mostly disappears. With
+              this on, every rule that reads a candle&apos;s colour reads the Heikin Ashi one: the candle direction check,
+              counter candles (exit, early reversal, re-entry), candle colour entries, and the SMA 9 turn&apos;s &quot;other
+              colour&quot; rules. Prices never change: orders, stops, targets, SMAs and P&amp;L stay on the real candles.
+              Candle patterns keep the real candles. Off by default; try it on Replay first.
+            </InfoTip>
+          </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Supertrend (check here; the exit is in step 3)
             <InfoTip label="About the Supertrend">
               One line that follows the price, the same as Groww&apos;s &quot;Supertrend&quot; (ATR length 10, factor 3). It sits
@@ -1797,6 +1853,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("ema_exit") && <OwnTag />}
             Close when the EMAs cross against the trade (lengths set in step 2)
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.macd_exit)}
+              onChange={(e) => set("macd_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("macd_exit") && <OwnTag />}
+            Close when MACD crosses its signal line against the trade (numbers set in step 2)
           </label>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -2721,6 +2787,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_gap_short", f.use_gap_short, `Sell only when the SMA gap is ${n(f.gap_short_min, -0.5)}% to ${n(f.gap_short_max, -0.02)}%`);
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
+  check("use_macd", f.use_macd, `MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} must be on the trade's side of its signal line`);
   check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
   check(
     "use_level",
@@ -2749,6 +2816,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
+  if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
+  if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });

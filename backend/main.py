@@ -53,6 +53,8 @@ import backtest_server
 import server_role
 import counter_candles
 import ema_filter
+import heikin_ashi
+import macd
 import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
@@ -503,6 +505,12 @@ class ConfigUpdate(BaseModel):
     ema_exit: bool | None = None
     ema_fast: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
     ema_slow: int | None = Field(default=None, ge=1, le=ema_filter.MAX_LEN)
+    use_macd: bool | None = None
+    macd_exit: bool | None = None
+    macd_fast: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    macd_slow: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    macd_signal: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
     level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
@@ -1123,6 +1131,12 @@ def _gap_dict(row) -> dict:
         "ema_exit": ema_filter.exit_on(row),
         "ema_fast": ema_filter.lengths(row)[0],
         "ema_slow": ema_filter.lengths(row)[1],
+        "use_macd": macd.entry_on(row),
+        "macd_exit": macd.exit_on(row),
+        "macd_fast": macd.lengths(row)[0],
+        "macd_slow": macd.lengths(row)[1],
+        "macd_signal": macd.lengths(row)[2],
+        "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
         "level_line": level_check.line_of(row),
