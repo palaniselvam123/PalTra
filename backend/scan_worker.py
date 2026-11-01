@@ -163,6 +163,23 @@ def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
     return analyze(_frame(token, symbol, download_start(symbol, now), end), sma_fast, sma_slow, now, symbol=symbol)
 
 
+def high52_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
+    """One stock's 52-week reading from Groww's daily candles (high52.py)."""
+    from candle_history import HistoryError
+    from groww_client import _is_auth_error
+    from high52 import analyze, download_daily
+
+    try:
+        frame = download_daily(_Paced(_sdk(token)), symbol, start, end)
+    except Exception as exc:  # noqa: BLE001
+        detail = (str(exc).strip() or type(exc).__name__)[:200]
+        if _is_auth_error(exc):
+            _sdk_cache["sdk"] = None
+            raise AuthFailed(detail) from None
+        raise ScanFailed(f"Groww did not send daily candles: {detail}"[:240]) from None
+    return analyze(frame, now, symbol=symbol)
+
+
 def check_job(token, symbol, start, end, kind, row, as_of, minutes, sma_fast, sma_slow):
     from scan_accuracy import evaluate
 

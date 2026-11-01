@@ -45,6 +45,7 @@ import news_entry
 import arm_log
 import chop_auto
 import chop_scan
+import high52
 import morning_scan
 import groww_pressure
 import open_pnl_log
@@ -122,6 +123,8 @@ cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
 # The Scalp page's 09:30 Morning tab: five opening checks per stock (morning_scan.py).
 morning_scanner = morning_scan.MorningScanner()
+# The Scalp page's 52-week high tab: each stock's distance from its 52-week high / low (high52.py).
+high52_scanner = high52.High52Scanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 # Scan & arm presets: a Trend quality pass, then arm the matches on a bot, now or at set times (scan_arm.py).
@@ -345,7 +348,7 @@ def _boot_backtest_server() -> asyncio.Task:
     engine.broker.set_mode("PAPER")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
-        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner))
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
@@ -516,6 +519,9 @@ class ConfigUpdate(BaseModel):
     use_supertrend: bool | None = None
     use_level: bool | None = None
     level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
+    use_high52: bool | None = None
+    high52_side: str | None = Field(default=None, pattern="^(LONG|SHORT|BOTH)$")
+    high52_pct: float | None = Field(default=None, ge=0, le=high52.MAX_PCT)
     st_exit: bool | None = None
     st_period: int | None = Field(default=None, ge=1, le=supertrend.MAX_PERIOD)
     st_mult: float | None = Field(default=None, ge=supertrend.MIN_FACTOR, le=supertrend.MAX_FACTOR)
@@ -1270,6 +1276,9 @@ def _gap_dict(row) -> dict:
         "ema_slow": ema_filter.lengths(row)[1],
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
+        "use_high52": high52.on(row),
+        "high52_side": high52.side_of(row),
+        "high52_pct": high52.pct_of(row),
         "level_line": level_check.line_of(row),
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
@@ -2193,6 +2202,7 @@ async def scans_pause(body: ScanPause):
         cross_scanner.stop("Stopped: scans are paused.")
         chop_scanner.stop("Stopped: scans are paused.")
         morning_scanner.stop("Stopped: scans are paused.")
+        high52_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -2727,6 +2737,35 @@ async def morning_scan_start(body: MorningScanStart):
 @app.get("/api/morning-scan")
 async def morning_scan_status():
     return {**morning_scanner.snapshot(), "paused": _scans_paused}
+
+
+class High52ScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    force: bool = False
+
+
+@app.post("/api/high52-scan/start")
+async def high52_scan_start(body: High52ScanStart):
+    """Start the 52-week high scan (read-only: Groww daily candles, no order). Poll GET /api/high52-scan.
+
+    Each stock's distance from its 52-week high and low, whether it broke the high today, the day's and the
+    year's move (high52.py). No bot setting is read or changed.
+    """
+    _refuse_when_paused()
+    try:
+        return high52_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: high52.fetch_daily(_scan_broker(), symbol, start, end),
+            force=body.force,
+            job=_scan_job(scan_worker.high52_job, 0, 0, high52.DAILY_MINUTES),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/high52-scan")
+async def high52_scan_status():
+    return {**high52_scanner.snapshot(), "paused": _scans_paused}
 
 
 # ---- open P&L log: each desk's "Open" figure, minute by minute (open_pnl_log.py)

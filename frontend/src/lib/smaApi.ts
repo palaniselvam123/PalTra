@@ -161,6 +161,11 @@ export type SmaConfig = {
   /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */
   use_level?: boolean;
   level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1";
+  /** 52-week high check (high52.py): a buy only on a close at the 52-week high (a sell at the low), from Groww daily candles. */
+  use_high52?: boolean;
+  high52_side?: "LONG" | "SHORT" | "BOTH";
+  /** 0 = the close must reach the level; N = within N % of it counts. */
+  high52_pct?: number;
   st_exit?: boolean;
   st_period?: number;
   st_mult?: number;
@@ -381,6 +386,39 @@ export type MorningScan = {
   market_open: boolean;
   rules?: { rvol_min: number; gap_min_pct: number; runner_min: number; sessions: number };
   rows: MorningScanRow[];
+  paused?: boolean;
+};
+
+/** The 52-week high scan (high52.py): each stock's distance from its 52-week high / low — information only. */
+export type High52ScanRow = {
+  symbol: string;
+  ltp: number | null;
+  high52: number | null;
+  high52_date: string | null;
+  low52: number | null;
+  low52_date: string | null;
+  /** How far under the 52-week high, % (0 = at it, negative = above it today). */
+  dist_high_pct: number | null;
+  dist_low_pct: number | null;
+  broke_high: boolean;
+  broke_low: boolean;
+  days_since_high: number | null;
+  day_move_pct: number | null;
+  year_move_pct: number | null;
+  sessions: number;
+  ts: number | null;
+};
+export type High52Scan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  weeks: number;
+  as_of: string | null;
+  finished_at?: string | null;
+  market_open: boolean;
+  rows: High52ScanRow[];
   paused?: boolean;
 };
 
@@ -1798,6 +1836,10 @@ export const smaApi = {
   morningScanStart: (symbols: string[], force = false) =>
     request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
+  /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
+  high52ScanStart: (symbols: string[], force = false) =>
+    request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
+  high52Scan: () => request<High52Scan>("/api/high52-scan", undefined, undefined, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>

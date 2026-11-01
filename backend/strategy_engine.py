@@ -73,6 +73,7 @@ import decel_guard
 import slope_exit
 import stop_plan
 import turn_entry
+import high52
 import level_check
 import day_extreme
 import recovery
@@ -311,6 +312,7 @@ SNAPSHOT_FIELDS = (
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
+    "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
@@ -540,6 +542,10 @@ def _entry_block(
         lvl = level_check.entry_reason(frame, direction, cfg)
         if lvl:
             reason = f"{reason}; {lvl}" if reason else lvl
+    if on("high52"):
+        h52 = high52.entry_reason(frame, direction, cfg)
+        if h52:
+            reason = f"{reason}; {h52}" if reason else h52
     if any(on(name) for name in opening_range.CHECKS):
         opening = opening_range.entry_reason(frame, direction, cfg, only=only)
         if opening:
@@ -704,6 +710,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
     ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("supertrend", "Supertrend"), ("level", "Price level"),
+    ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
 
@@ -755,6 +762,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return supertrend.passed_text(frame, direction, cfg)
         if name == "level":
             return level_check.passed_text(frame, direction, cfg)
+        if name == "high52":
+            return high52.passed_text(frame, direction, cfg)
         if name in opening_range.CHECKS:
             return opening_range.passed_text(frame, direction, cfg, name)
         if name == "density":
@@ -1324,6 +1333,8 @@ class StrategyEngine:
         self.broker.set_mode(cfg.trading_mode)
         view = (cfg.symbol or "").upper()
         armed = trade_names(cfg)
+        # The 52-week levels of the stocks whose entry check reads them, loaded in the background once a day.
+        high52.ensure(self.broker, [s for s in armed if high52.on(_cfg_for(cfg, s))], now.date())
         # Armed names come first so a chart symbol cannot crowd one of them
         # out of the quote loop. Open books stay watched after they are disarmed.
         watch = [name for name in dict.fromkeys([*armed, *self.positions.keys(), view]) if name]
@@ -6052,6 +6063,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("Supertrend")
     if bool(getattr(cfg, "use_level", False)):
         checked.append("price level")
+    if high52.on(cfg):
+        checked.append("52-week high")
     if opening_range.any_on(cfg):
         checked.append("opening range")
     if bool(getattr(cfg, "use_adx_filter", False)):
