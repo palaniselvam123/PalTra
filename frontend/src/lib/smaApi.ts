@@ -137,6 +137,8 @@ export type SmaConfig = {
   late_entry_min?: number;
   /** Join the morning trend once a day, join_after_min minutes after 09:15. */
   join_trend?: boolean;
+  /** Always in a trade (always_in.py): a flat armed stock is entered at once on the SMAs' side, again after every exit. */
+  always_in?: boolean;
   join_after_min?: number;
   /** Counter candles: close after N closed candles against the trade (0 = off). */
   counter_exit_count?: number;

@@ -58,6 +58,7 @@ from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
 from models import BotConfig, ReviewLog, TradeLog, trade_ref
 import counter_candles
+import always_in
 import ema_filter
 import heikin_ashi
 import macd
@@ -138,6 +139,7 @@ ENTRY_REASONS = (
     "SMA_CROSS",
     "GAP_MODE",
     "JOIN_TREND",
+    "ALWAYS_IN",
     "LATE_ENTRY",
     "EARLY_REVERSAL",
     "COUNTER_REENTRY",
@@ -311,7 +313,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar", "gap_fade_minute",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min", "always_in",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
@@ -1015,6 +1017,10 @@ class StrategyEngine:
         # today (never joined), and the stocks already joined or given up on today.
         self._side_entered: dict[str, tuple[str, int]] = {}
         self._joined_today: set[str] = set()
+        # Always in a trade (always_in.py): the closed candle each flat stock was last asked on, and the stocks
+        # held at the last pass (a stock that was held and is flat now just exited: it is asked again at once).
+        self._always_tried: dict[str, int] = {}
+        self._always_held: set[str] = set()
         # Early reversal entry (counter_candles.py): the SMA run each stock was entered against.
         self._counter_done: dict[str, tuple[str, int]] = {}
         # SMA 9 turn (turn_entry.py): the last closed candle read, the turn on it, and the turn already acted on.
@@ -1500,6 +1506,10 @@ class StrategyEngine:
                 if self.status != "RUNNING":
                     break
             if self._judged_bar.get(symbol) == closed_ts:
+                # Always in a trade: between candles, a stock that just went flat is entered again at once.
+                await self._always_in_pass(symbol, frame, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 continue
             # The candle on the tape when the stock was armed is not read for a breakout.
             seen_before = symbol in self._judged_bar
@@ -1521,6 +1531,10 @@ class StrategyEngine:
             judged = _closed_bar_ts(enriched) or closed_ts
             if judged is not None:
                 self._judged_bar[symbol] = judged
+            if self.status != "RUNNING":
+                break
+            # After the candle's own signals (a fresh cross goes first): still flat = always in enters now.
+            await self._always_in_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
         # After every exit and cross of this pass: a trade the strategy just
@@ -1556,7 +1570,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait,
+            self._turn_last, self._turn_wait, self._always_tried,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1678,6 +1692,50 @@ class StrategyEngine:
             self._signals[symbol] = result
             self.last_signal = result
         return result
+
+    async def _always_in_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Always in a trade (always_in.py): a flat armed stock is entered on the side the SMAs point to now.
+
+        Asked once per closed candle while the entry checks say no, and again at once after any exit.
+        """
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if not always_in.enabled(symbol_cfg) or self.status != "RUNNING":
+            return
+        if symbol in self.positions:
+            self._always_held.add(symbol)
+            return
+        if symbol in self._always_held:
+            # It was held at the last pass and is flat now: it just exited, so it is asked again at once.
+            self._always_held.discard(symbol)
+            self._always_tried.pop(symbol, None)
+        if uses_gap_mode(symbol_cfg) or uses_patterns(symbol_cfg) or uses_colour(symbol_cfg) or symbol in self._pullback:
+            return
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or self._always_tried.get(symbol) == closed_ts:
+            return
+        if not market_is_open(now) or now.time() < dt.time(9, 20) or self._past_square_off(now, symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+        want = always_in.side(enriched)
+        if want is None:
+            return
+        self._always_tried[symbol] = int(closed_ts)
+        self._focus = symbol
+        self.ltp = self._ltps.get(symbol, self.ltp)
+        sig = "BULLISH" if want == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, enriched, symbol_cfg, now, alert=False, why=always_in.ENTRY_REASON)
+        if result.startswith("blocked — order PENDING"):
+            self._always_tried.pop(symbol, None)
+            return
+        if symbol in self.positions:
+            self._always_held.add(symbol)
+            text = f"{result} — always in ({want}: SMA {symbol_cfg.sma_fast} {'above' if want == 'LONG' else 'below'} SMA {symbol_cfg.sma_slow})"
+        else:
+            text = f"{symbol} always in: no {want} order yet — {result.split(' — ', 1)[-1]}"
+        self._signals[symbol] = text
+        self.last_signal = text
 
     def _joinable(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> tuple[str, int] | None:
         """Today's morning trend to join (join_trend.py), or None."""

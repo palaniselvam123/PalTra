@@ -440,6 +440,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Never twice a day (`_joined_today`) or on a run the bot already entered (`_side_entered`,
   set in `apply_signal`); a later cross is a normal cross. A cross printed before the stock was
   armed is still not traded as a cross. Settings → 1. When to enter.
+- `backend/always_in.py` – always in a trade (`always_in`, off by default, per bot and per stock, PAPER and LIVE, replays
+  too): every armed stock that is flat is entered at once on the side the SMAs point to now (`side`: SMA fast vs slow on
+  the last closed candle), with no fresh cross needed, when the bot starts / the stock is armed and again straight after
+  any exit. `StrategyEngine._always_in_pass` runs in the armed loop on every pass (after `on_minute` on a new candle, so a
+  fresh cross goes first; between candles too), through `apply_signal(..., alert=False, why="ALWAYS_IN")`: every entry
+  check, the stop, flip, market hours, cut-off, caps, loss limit and one LIVE bot per stock apply. A refusal is asked again
+  on the next closed candle (`_always_tried`); a stock that was held at the last pass and is flat now is asked again at
+  once (`_always_held`). Gap mode, candle patterns / colour and a waiting pullback skip it. Settings → 1. When to enter.
+  The stock research baseline keeps it off.
 - `backend/counter_candles.py` – counter candles (off by default, per bot and per stock, PAPER and LIVE):
   a run of closed candles against the trade turns it before the SMAs cross. **Exit**
   (`counter_exit_count` N, 0 = off, max 10): `StrategyEngine._watch_counter_candles` closes an open
