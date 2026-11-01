@@ -15,16 +15,39 @@ entry cut-off, the trade caps, the loss limit and one LIVE bot per stock all sti
 check that says no is asked again on the next closed candle. Exits are the bot's own exit
 rules, unchanged; an opposite cross still closes and reverses as usual. Gap mode and candle
 patterns / colour have their own entries and ignore it. Nothing here places an order itself.
+
+**Reverse after a loss** (`always_in_reverse`, off by default, needs `always_in`): when the trade
+that just closed lost money (its P&L before charges below zero), the next entry goes the other
+way of that trade's signal side (a losing long is followed by a short), whatever the SMAs say;
+after a winning or flat trade the SMAs' side is used as above. Kept until that entry opens
+(asked again on each closed candle while a check says no), and dropped with the day.
 """
 from __future__ import annotations
 
 import pandas as pd
 
 ENTRY_REASON = "ALWAYS_IN"
+REVERSE_REASON = "ALWAYS_IN_REVERSE"
 
 
 def enabled(cfg) -> bool:
     return bool(getattr(cfg, "always_in", False))
+
+
+def reverse_on(cfg) -> bool:
+    return enabled(cfg) and bool(getattr(cfg, "always_in_reverse", False))
+
+
+def lost(gross_pnl) -> bool:
+    """The closed trade lost money before charges."""
+    try:
+        return gross_pnl is not None and float(gross_pnl) < 0
+    except (TypeError, ValueError):
+        return False
+
+
+def opposite(side: str) -> str:
+    return "SHORT" if side == "LONG" else "LONG"
 
 
 def side(frame: pd.DataFrame | None) -> str | None:

@@ -447,8 +447,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   fresh cross goes first; between candles too), through `apply_signal(..., alert=False, why="ALWAYS_IN")`: every entry
   check, the stop, flip, market hours, cut-off, caps, loss limit and one LIVE bot per stock apply. A refusal is asked again
   on the next closed candle (`_always_tried`); a stock that was held at the last pass and is flat now is asked again at
-  once (`_always_held`). Gap mode, candle patterns / colour and a waiting pullback skip it. Settings → 1. When to enter.
-  The stock research baseline keeps it off.
+  once (`_always_held`: symbol → (signal side, trade id)). Gap mode, candle patterns / colour and a waiting pullback skip
+  it. **Reverse after a loss** (`always_in_reverse`, off, needs `always_in`): when the trade that just closed lost money
+  before charges (`_closed_gross` reads its `TradeLog` row, `always_in.lost`), the next entry goes the other way of its
+  signal side (`_always_reverse`, entry reason `ALWAYS_IN_REVERSE`), whatever the SMAs say; after a winning or flat trade
+  the SMAs' side is used; kept until that entry opens, asked again each closed candle while a check says no. The chart's
+  "why" line says "Always in a trade … buys / sells at once" (`chart_filters` carries `always_in`, `always_in_reverse`).
+  Settings → 1. When to enter. The stock research baseline keeps both off.
 - `backend/counter_candles.py` – counter candles (off by default, per bot and per stock, PAPER and LIVE):
   a run of closed candles against the trade turns it before the SMAs cross. **Exit**
   (`counter_exit_count` N, 0 = off, max 10): `StrategyEngine._watch_counter_candles` closes an open

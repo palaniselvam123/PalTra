@@ -139,6 +139,8 @@ export type SmaConfig = {
   join_trend?: boolean;
   /** Always in a trade (always_in.py): a flat armed stock is entered at once on the SMAs' side, again after every exit. */
   always_in?: boolean;
+  /** With always_in: after a losing trade the next entry goes the opposite way. */
+  always_in_reverse?: boolean;
   join_after_min?: number;
   /** Counter candles: close after N closed candles against the trade (0 = off). */
   counter_exit_count?: number;
@@ -1067,6 +1069,9 @@ export type ChartFilters = {
   square_off_time?: string;
   entry_mode?: "SMA" | "PATTERN" | "COLOUR";
   use_gap_mode?: boolean;
+  /** Always in a trade (always_in.py) and its reverse-after-a-loss option, for the chart's "why" line. */
+  always_in?: boolean;
+  always_in_reverse?: boolean;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */

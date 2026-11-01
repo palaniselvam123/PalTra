@@ -509,6 +509,7 @@ class ConfigUpdate(BaseModel):
     late_entry_min: int | None = Field(default=None, ge=0, le=late_entry.MAX_MIN)
     join_trend: bool | None = None
     always_in: bool | None = None
+    always_in_reverse: bool | None = None
     counter_exit_count: int | None = Field(default=None, ge=0, le=counter_candles.MAX_COUNT)
     counter_entry: bool | None = None
     counter_rule: Literal["COLOUR", "CLOSES", "BOTH"] | None = None
@@ -1273,6 +1274,7 @@ def _gap_dict(row) -> dict:
         "late_entry_min": late_entry.window_min(row),
         "join_trend": join_trend.enabled(row),
         "always_in": always_in.enabled(row),
+        "always_in_reverse": bool(getattr(row, "always_in_reverse", False)),
         "join_after_min": join_trend.after_min(row),
         "counter_exit_count": counter_candles.exit_count(row),
         "counter_entry": counter_candles.entry_on(row),

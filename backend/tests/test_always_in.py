@@ -47,3 +47,29 @@ async def test_always_in_enters_at_once_and_again_after_every_exit(db):  # noqa:
         # Back in straight after the exit (the next minute at most in this replayer).
         assert after["entry_time"] - before["exit_time"] <= dt.timedelta(minutes=2), (before, after)
     assert len(always) > len(plain)
+
+
+def test_reverse_helpers():
+    on = type("C", (), {"always_in": True, "always_in_reverse": True})()
+    assert always_in.reverse_on(on)
+    assert not always_in.reverse_on(type("C", (), {"always_in": False, "always_in_reverse": True})())
+    assert always_in.lost(-0.5) and not always_in.lost(0) and not always_in.lost(None) and not always_in.lost(3)
+    assert always_in.opposite("LONG") == "SHORT" and always_in.opposite("SHORT") == "LONG"
+
+
+@pytest.mark.asyncio
+async def test_reverse_after_a_loss_goes_the_other_way(db):  # noqa: F811
+    stop = dict(use_stop=True, stop_type="TSL", tsl_mode="POINTS", tsl_sl_points=0.3, tsl_trail_points=0.1, tsl_target_points=0.0)
+    rows = sorted(await _trades(db, always_in=True, always_in_reverse=True, **stop), key=lambda t: t["entry_time"])
+    reversed_ = [t for t in rows if t["entry_reason"] == "ALWAYS_IN_REVERSE"]
+    assert reversed_, "a losing exit must be followed by a reverse"
+    cutoff = dt.time(15, 0)
+    for before, after in zip(rows, rows[1:]):
+        if before["exit_time"] is None or before["exit_time"].time() >= cutoff:
+            continue
+        if after["entry_reason"] != "ALWAYS_IN_REVERSE":
+            continue
+        # A reverse only follows a losing trade, and goes the other way.
+        gross = (before["exit_price"] - before["entry_price"]) * (1 if before["direction"] == "LONG" else -1)
+        assert gross < 0, (before, after)
+        assert after["direction"] != before["direction"], (before, after)

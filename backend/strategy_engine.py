@@ -140,6 +140,7 @@ ENTRY_REASONS = (
     "GAP_MODE",
     "JOIN_TREND",
     "ALWAYS_IN",
+    "ALWAYS_IN_REVERSE",
     "LATE_ENTRY",
     "EARLY_REVERSAL",
     "COUNTER_REENTRY",
@@ -313,7 +314,7 @@ SNAPSHOT_FIELDS = (
     "gap_short_max", "use_gap_mode", "gap_entry_long", "gap_exit_long", "gap_entry_short",
     "gap_exit_short", "gap_giveback_pct", "gap_entry_delay_min", "gap_entry_window_min",
     "gap_fade_confirm_sma", "gap_fade_min_candles", "gap_fade_intrabar", "gap_fade_minute",
-    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min", "always_in",
+    "use_candle_dir", "candle_dir_count", "candle_dir_rule", "flip_orders", "cross_exit", "late_entry_min", "join_trend", "join_after_min", "always_in", "always_in_reverse",
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
@@ -870,6 +871,9 @@ def chart_filters(cfg) -> dict:
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
         "entry_mode": (getattr(cfg, "entry_mode", None) or "SMA").upper(),
         "use_gap_mode": bool(getattr(cfg, "use_gap_mode", False)),
+        # Always in a trade (always_in.py): the chart's "why" line says how a flat stock is entered.
+        "always_in": always_in.enabled(cfg),
+        "always_in_reverse": always_in.reverse_on(cfg),
     }
 
 
@@ -1020,7 +1024,9 @@ class StrategyEngine:
         # Always in a trade (always_in.py): the closed candle each flat stock was last asked on, and the stocks
         # held at the last pass (a stock that was held and is flat now just exited: it is asked again at once).
         self._always_tried: dict[str, int] = {}
-        self._always_held: set[str] = set()
+        # Held at the last pass: {symbol: (signal side, trade id)}; reverse after a loss: {symbol: side to enter}.
+        self._always_held: dict[str, tuple[str, int]] = {}
+        self._always_reverse: dict[str, str] = {}
         # Early reversal entry (counter_candles.py): the SMA run each stock was entered against.
         self._counter_done: dict[str, tuple[str, int]] = {}
         # SMA 9 turn (turn_entry.py): the last closed candle read, the turn on it, and the turn already acted on.
@@ -1570,7 +1576,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait, self._always_tried,
+            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1701,13 +1707,17 @@ class StrategyEngine:
         symbol_cfg = _cfg_for(cfg, symbol)
         if not always_in.enabled(symbol_cfg) or self.status != "RUNNING":
             return
-        if symbol in self.positions:
-            self._always_held.add(symbol)
+        pos = self.positions.get(symbol)
+        if pos is not None:
+            self._always_held[symbol] = (pos.signal_direction, int(pos.trade_id))
+            self._always_reverse.pop(symbol, None)
             return
-        if symbol in self._always_held:
+        held = self._always_held.pop(symbol, None)
+        if held is not None:
             # It was held at the last pass and is flat now: it just exited, so it is asked again at once.
-            self._always_held.discard(symbol)
             self._always_tried.pop(symbol, None)
+            if always_in.reverse_on(symbol_cfg) and always_in.lost(self._closed_gross(held[1])):
+                self._always_reverse[symbol] = always_in.opposite(held[0])
         if uses_gap_mode(symbol_cfg) or uses_patterns(symbol_cfg) or uses_colour(symbol_cfg) or symbol in self._pullback:
             return
         closed_ts = _closed_bar_ts(frame)
@@ -1718,24 +1728,50 @@ class StrategyEngine:
         if not self._still_armed(symbol):
             return
         enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
-        want = always_in.side(enriched)
+        reverse = self._always_reverse.get(symbol) if always_in.reverse_on(symbol_cfg) else None
+        want = reverse or always_in.side(enriched)
         if want is None:
             return
         self._always_tried[symbol] = int(closed_ts)
         self._focus = symbol
         self.ltp = self._ltps.get(symbol, self.ltp)
         sig = "BULLISH" if want == "LONG" else "BEARISH"
-        result = await self.apply_signal(sig, enriched, symbol_cfg, now, alert=False, why=always_in.ENTRY_REASON)
+        why = always_in.REVERSE_REASON if reverse else always_in.ENTRY_REASON
+        result = await self.apply_signal(sig, enriched, symbol_cfg, now, alert=False, why=why)
         if result.startswith("blocked — order PENDING"):
             self._always_tried.pop(symbol, None)
             return
-        if symbol in self.positions:
-            self._always_held.add(symbol)
-            text = f"{result} — always in ({want}: SMA {symbol_cfg.sma_fast} {'above' if want == 'LONG' else 'below'} SMA {symbol_cfg.sma_slow})"
+        pos = self.positions.get(symbol)
+        if pos is not None:
+            self._always_held[symbol] = (pos.signal_direction, int(pos.trade_id))
+            self._always_reverse.pop(symbol, None)
+            why = (
+                "reversed after a losing trade"
+                if reverse
+                else f"SMA {symbol_cfg.sma_fast} {'above' if want == 'LONG' else 'below'} SMA {symbol_cfg.sma_slow}"
+            )
+            text = f"{result} — always in ({want}: {why})"
         else:
             text = f"{symbol} always in: no {want} order yet — {result.split(' — ', 1)[-1]}"
         self._signals[symbol] = text
         self.last_signal = text
+
+    def _closed_gross(self, trade_id: int) -> float | None:
+        """The P&L before charges of a closed trade row, or None while it is not closed / not found."""
+        try:
+            with session_factory()() as db:
+                row = db.get(TradeLog, int(trade_id))
+                if row is None or row.exit_time is None:
+                    return None
+                if row.gross_pnl is not None:
+                    return float(row.gross_pnl)
+                if row.exit_price is None or row.entry_price is None:
+                    return None
+                move = float(row.exit_price) - float(row.entry_price)
+                return move * int(row.qty or 0) * (1 if (row.direction or "LONG") == "LONG" else -1)
+        except Exception:  # noqa: BLE001 - bookkeeping only: no reverse when it cannot be read
+            logger.exception("always in: could not read trade %s", trade_id)
+            return None
 
     def _joinable(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> tuple[str, int] | None:
         """Today's morning trend to join (join_trend.py), or None."""
