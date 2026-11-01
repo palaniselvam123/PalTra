@@ -63,7 +63,50 @@ export type BacktestPdfInput = {
   note?: string;
   settingsHead?: [string, string];
   fileName?: string;
+  /** Share of a trade's value blocked as intraday margin (the practice wallet's setting, 20 = 5x leverage). */
+  marginPct?: number;
 };
+
+/** The full amount a trade would have cost bought outright: qty x entry price. */
+export function tradeValue(trade: Pick<TradeRow, "qty" | "entry_price">): number | null {
+  const entry = trade.entry_price;
+  if (entry == null || !Number.isFinite(entry) || !trade.qty) return null;
+  return Math.abs(Number(trade.qty) * entry);
+}
+
+/**
+ * The most margin blocked at the same moment across the trades: each trade blocks `marginPct` % of its value from
+ * its entry to its exit, and the trades that overlap in time add up (an open trade counts to the end).
+ */
+export function peakMargin(trades: TradeRow[], marginPct: number): { peak: number; count: number; at: string | null } {
+  const events: { at: number; delta: number; open: boolean; stamp: string }[] = [];
+  for (const r of trades) {
+    const value = tradeValue(r);
+    const start = r.entry_time ? Date.parse(r.entry_time) : NaN;
+    if (value == null || !Number.isFinite(start)) continue;
+    const end = r.exit_time ? Date.parse(r.exit_time) : Number.POSITIVE_INFINITY;
+    const margin = (value * marginPct) / 100;
+    events.push({ at: start, delta: margin, open: true, stamp: r.entry_time ?? "" });
+    events.push({ at: end, delta: -margin, open: false, stamp: r.exit_time || "" });
+  }
+  // Exits before entries at the same instant, so a reverse does not double count.
+  events.sort((a, b) => a.at - b.at || Number(a.open) - Number(b.open));
+  let now = 0;
+  let count = 0;
+  let peak = 0;
+  let peakCount = 0;
+  let at: string | null = null;
+  for (const e of events) {
+    now += e.delta;
+    count += e.open ? 1 : -1;
+    if (now > peak + 1e-9) {
+      peak = now;
+      peakCount = count;
+      at = e.stamp;
+    }
+  }
+  return { peak, count: peakCount, at };
+}
 
 export async function downloadBacktestPdf({
   run,
@@ -76,6 +119,7 @@ export async function downloadBacktestPdf({
   note,
   settingsHead,
   fileName,
+  marginPct = 20,
 }: BacktestPdfInput): Promise<void> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -108,6 +152,26 @@ export async function downloadBacktestPdf({
     "Best case (each at its best price)": best,
     "Worst case (each at its worst price)": worst,
   };
+
+  // Capital: the biggest trade bought outright, what the intraday margin took of it, and the most blocked at once.
+  const pct = Number.isFinite(marginPct) && marginPct > 0 ? marginPct : 20;
+  const valued = trades.filter((r) => tradeValue(r) != null);
+  const biggest = valued.reduce<TradeRow | null>((top, r) => (top == null || (tradeValue(r) ?? 0) > (tradeValue(top) ?? 0) ? r : top), null);
+  const biggestValue = biggest ? tradeValue(biggest) ?? 0 : 0;
+  const peak = peakMargin(trades, pct);
+  const capitalRows: [string, string][] = biggest
+    ? [
+        [
+          "Largest trade, full value",
+          `${pdfMoney(biggestValue).replace("+", "")} (${biggest.symbol} ${biggest.qty} x ${price(biggest.entry_price)})`,
+        ],
+        [`Largest trade, ${pct}% intraday margin`, pdfMoney((biggestValue * pct) / 100).replace("+", "")],
+        [
+          `Most margin blocked at once (${pct}%)`,
+          `${pdfMoney(peak.peak).replace("+", "")}${peak.count > 1 ? ` (${peak.count} trades open)` : ""}${peak.at ? ` at ${pdfText(istStamp(peak.at))}` : ""}`,
+        ],
+      ]
+    : [];
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
@@ -157,6 +221,7 @@ export async function downloadBacktestPdf({
       ["Max drawdown", pdfMoney(t.max_drawdown)],
       ["Green / red days", `${t.green_days} / ${t.red_days}`],
       ...rangeRows,
+      ...capitalRows,
     ],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [30, 41, 59] },
@@ -272,7 +337,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "P&L (before charges)"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "P&L (before charges)"]],
     body: rows.length
       ? rows.map((r) => [
           r.trade_ref || `#${r.id}`,
@@ -281,6 +346,8 @@ export async function downloadBacktestPdf({
           r.qty,
           pdfText(istStamp(r.entry_time)),
           price(r.entry_price),
+          tradeValue(r) == null ? "-" : price(tradeValue(r)),
+          tradeValue(r) == null ? "-" : price(((tradeValue(r) ?? 0) * pct) / 100),
           pdfText(r.exit_time ? istStamp(r.exit_time) : "open"),
           price(r.exit_price),
           r.max_high == null ? "-" : `${price(r.max_high)}\n${pdfMoney(pnlAtPrice(r, r.max_high))}`,
@@ -290,18 +357,18 @@ export async function downloadBacktestPdf({
           r.brokerage_and_taxes == null ? "-" : pdfMoney(r.brokerage_and_taxes).replace("+", ""),
           pdfMoney(r.net_pnl),
         ])
-      : [[{ content: "No closed trades.", colSpan: 14 }]],
+      : [[{ content: "No closed trades.", colSpan: 16 }]],
     styles: { fontSize: 7.5, cellPadding: 3 },
     headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: Object.fromEntries([0, 3, 5, 7, 8, 9, 10, 12, 13].map((i) => [i, { halign: "right" as const }])),
+    columnStyles: Object.fromEntries([0, 3, 5, 6, 7, 9, 10, 11, 12, 14, 15].map((i) => [i, { halign: "right" as const }])),
     didParseCell: (cell) => {
-      if (cell.section === "head" && [0, 3, 5, 7, 8, 9, 10, 12, 13].includes(cell.column.index)) cell.cell.styles.halign = "right";
+      if (cell.section === "head" && [0, 3, 5, 6, 7, 9, 10, 11, 12, 14, 15].includes(cell.column.index)) cell.cell.styles.halign = "right";
       if (cell.section !== "body" || !rows.length) return;
       const r = rows[cell.row.index];
-      if (cell.column.index === 13 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
-      if (cell.column.index === 10) cell.cell.styles.textColor = tone(r.points);
-      if (cell.column.index === 8) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_high));
-      if (cell.column.index === 9) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));
+      if (cell.column.index === 15 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
+      if (cell.column.index === 12) cell.cell.styles.textColor = tone(r.points);
+      if (cell.column.index === 10) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_high));
+      if (cell.column.index === 11) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));
     },
   });
 

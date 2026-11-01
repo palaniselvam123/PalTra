@@ -554,10 +554,11 @@ export function TradeHistoryTable({
     try {
       const run = summarizeBook(completedRows);
       const range = run.start_date ? (run.end_date !== run.start_date ? `${run.start_date} to ${run.end_date}` : run.start_date) : "no trades";
-      const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
+      const [{ downloadBacktestPdf }, wallet] = await Promise.all([import("@/lib/backtestPdf"), smaApi.wallet().catch(() => null)]);
       await downloadBacktestPdf({
         run,
         trades: completedRows,
+        marginPct: wallet?.margin_pct ?? 20,
         strategy: `Filters: ${filterWords()}`,
         settings: strategiesUsed(completedRows, (st) => strategyLabel(st as Settings)),
         settingsHead: ["Strategy used", "Trades"],
