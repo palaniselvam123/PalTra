@@ -191,7 +191,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   from its entry (`in_profit`; a losing trade that bounced off its low never moves; a replay run saved before the check
   plays with 0). `ready` first checks Bot 5 can take it (RUNNING, market hours, before its cut-off /
   square-off, under its trade cap, not already holding it; same mode only: a LIVE Bot 5 never takes a PAPER trade and
-  a LIVE trade is never cut for a PAPER Bot 5; a LIVE position restored without its stop id stays), then the source's `close_symbol` (`FAST_MOVE_HANDOFF`, LIVE stop cancelled first),
+  a LIVE trade is never cut for a PAPER Bot 5, except with **practice bots watch, LIVE Bot 5 trades** (`paper_to_live`,
+  off by default; ticking it while Bot 5 is LIVE needs `confirm_live`, 409 without): a PAPER source's fast mover then
+  hands off to a LIVE Bot 5 (`ready(..., paper_to_live)`, `recovery.handoff(allow_paper_source=True)`), which places a
+  real Groww order at its own size; a LIVE trade is still never cut for a PAPER Bot 5; a LIVE position restored without its stop id stays), then the source's `close_symbol` (`FAST_MOVE_HANDOFF`, LIVE stop cancelled first),
   in LIVE a wait until Groww shows no shares (`FLAT_WAIT_SEC`), `recovery.handoff(to_bot=5)` (off the source's Trade list,
   onto Bot 5's; one LIVE bot per stock), and Bot 5's `direct_order` (entry reason `FAST_MOVE`: no SMA cross, VWAP / RSI
   or other entry check; Bot 5's stop and exits run it). After `bot5_trades` (1, 0 = all day) Bot 5 entries on the stock

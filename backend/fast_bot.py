@@ -6,7 +6,8 @@ started in `boot_engine` on the desk only, every `POLL_SEC` 5 s while NSE is ope
 
 1. checks Bot 5 can take it (`ready`: RUNNING, market hours, before its entry cut-off and square-off,
    under its trade cap, not already holding the stock, and both in the same mode: a LIVE Bot 5 never takes
-   a practice trade, and a LIVE trade is never cut for a PAPER Bot 5);
+   a practice trade (unless `paper_to_live` is on: practice bots watch, a LIVE Bot 5 places the real order),
+   and a LIVE trade is never cut for a PAPER Bot 5);
 2. closes the source bot's trade (`close_symbol`, exit reason `FAST_MOVE_HANDOFF`; a LIVE stop is
    cancelled first), and in LIVE waits until Groww shows no shares (`FLAT_WAIT_SEC`);
 3. moves the stock off the source bot's Trade list onto Bot 5's (`recovery.handoff(to_bot=5)`, source
@@ -90,6 +91,10 @@ class Settings:
     # stock is armed on both bots (the source keeps trading it as before). Off = the trade is cut (the old
     # behaviour). In LIVE both bots cannot hold one stock, so a LIVE pair is left alone (not moved).
     keep_trade: bool = False
+    # Practice bots watch, LIVE Bot 5 trades: a PAPER source trade that moves fast may hand off to a LIVE Bot 5,
+    # which then places a real Groww order at its own size. Off (default) = same mode only. Turning it on while
+    # Bot 5 is LIVE needs `confirm_live` (main.fast_bot_put). A LIVE trade is still never cut for a PAPER Bot 5.
+    paper_to_live: bool = False
 
 
 def settings_path() -> Path:
@@ -131,6 +136,7 @@ def clean(raw: dict) -> Settings:
     s.bot5_trades = num("bot5_trades", int, 0, MAX_BOT5_TRADES)
     s.entry_checks = bool(raw.get("entry_checks", s.entry_checks))
     s.keep_trade = bool(raw.get("keep_trade", s.keep_trade))
+    s.paper_to_live = bool(raw.get("paper_to_live", s.paper_to_live))
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -270,7 +276,7 @@ def _target_cfg(target, symbol: str):
         return own
 
 
-def ready(target, symbol: str, source_live: bool) -> str | None:
+def ready(target, symbol: str, source_live: bool, paper_to_live: bool = False) -> str | None:
     """Why Bot 5 cannot take the stock now, or None when it can (checked before the source trade is cut)."""
     from strategy_engine import _entry_cutoff, _parse_hhmm
 
@@ -289,8 +295,8 @@ def ready(target, symbol: str, source_live: bool) -> str | None:
     if target.trades_today >= int(cfg.max_trades_per_day):
         return f"Bot {TARGET_BOT}'s trade cap is reached"
     target_live = (cfg.trading_mode or "PAPER").upper() == "LIVE"
-    if target_live and not source_live:
-        return f"Bot {TARGET_BOT} is LIVE and this trade was practice money"
+    if target_live and not source_live and not paper_to_live:
+        return f"Bot {TARGET_BOT} is LIVE and this trade was practice money (tick \"practice bots watch, LIVE Bot {TARGET_BOT} trades\" to allow it)"
     if source_live and not target_live:
         # Never close a real trade only to open a practice one in its place.
         return f"this trade is LIVE and Bot {TARGET_BOT} is PAPER (switch Bot {TARGET_BOT} to LIVE, or the source bot to PAPER)"
@@ -405,7 +411,7 @@ class FastBot:
         source_live = (pos.mode or "PAPER").upper() == "LIVE"
         direction = pos.direction
         head = f"{symbol} fast move on Bot {source_bot} ({why})"
-        reason = ready(target, symbol, source_live)
+        reason = ready(target, symbol, source_live, s.paper_to_live)
         if reason is None and len(self.moved_today) >= s.max_day:
             reason = f"{s.max_day} hand-offs today already"
         if reason is None and source_live and pos.stop_active and not pos.sl_order_id:
@@ -455,7 +461,14 @@ class FastBot:
                     self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
                     src._alert(f"{head}: {result}")  # noqa: SLF001
                     return f"{head}: {result}"
-            moved = recovery.handoff(source_bot, symbol, source_live, to_bot=TARGET_BOT, keep_source=s.keep_trade)
+            moved = recovery.handoff(
+                source_bot,
+                symbol,
+                source_live,
+                to_bot=TARGET_BOT,
+                keep_source=s.keep_trade,
+                allow_paper_source=s.paper_to_live,
+            )
             self.moved_today.append(symbol)
             if moved.startswith("moved") or moved.startswith("armed"):
                 self.handed[symbol] = {"from": source_bot, "live": source_live, "opened": 0, "keep": s.keep_trade}

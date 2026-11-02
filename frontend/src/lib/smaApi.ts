@@ -651,6 +651,8 @@ export type FastBotSettings = {
   entry_checks?: boolean;
   /** Keep the trade on its bot; Bot 5 opens its own order next to it and the stock is armed on both. */
   keep_trade?: boolean;
+  /** Practice bots watch, LIVE Bot 5 trades: a PAPER source trade may hand off to a LIVE Bot 5 (real order). */
+  paper_to_live?: boolean;
   on_bot5?: Record<string, { from_bot: number; trades: number; kept?: boolean }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";
