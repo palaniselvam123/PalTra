@@ -42,6 +42,7 @@ export function FastMoverBot() {
             bot5_trades: String(v.bot5_trades ?? 1),
             entry_checks: v.entry_checks !== false,
             keep_trade: Boolean(v.keep_trade),
+            paper_to_live: Boolean(v.paper_to_live),
           });
           setSources(v.sources);
         }
@@ -65,9 +66,13 @@ export function FastMoverBot() {
   const save = async () => {
     const on = Boolean(form.on);
     let confirm = false;
-    if (on && live) {
+    if ((on || form.paper_to_live) && live) {
       confirm = window.confirm(
-        `Bot 5 is LIVE. Fast movers will be ${form.keep_trade ? "kept on their bot (a LIVE pair is left alone)" : "cut on their bot"} and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"}). Turn it on?`
+        `Bot 5 is LIVE. Fast movers will be ${form.keep_trade ? "kept on their bot (a LIVE pair is left alone)" : "cut on their bot"} and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"}).` +
+          (form.paper_to_live
+            ? ` Practice (PAPER) bots' fast movers WILL become real-money Bot 5 trades, up to ${form.max_day || 10} a day.`
+            : "") +
+          " Turn it on?"
       );
       if (!confirm) return;
     }
@@ -91,6 +96,7 @@ export function FastMoverBot() {
         })(),
         entry_checks: Boolean(form.entry_checks),
         keep_trade: Boolean(form.keep_trade),
+        paper_to_live: Boolean(form.paper_to_live),
         sources,
         confirm_live: confirm,
       });
@@ -217,6 +223,15 @@ export function FastMoverBot() {
           >
             <input type="checkbox" checked={Boolean(form.keep_trade)} onChange={(e) => set("keep_trade", e.target.checked)} className="accent-[#10B981]" />
             Keep the trade on its bot: don&apos;t cut it, Bot 5 opens its own order next to it (the stock is armed on both bots)
+          </label>
+          <label
+            className="flex basis-full items-center gap-2 text-xs text-slate-300"
+            title="On: Bots 1-4 can stay in PAPER and just watch many stocks with practice money; when one of their trades moves fast its way (and passes the profit guard and Bot 5's entry checks), it hands off to a LIVE Bot 5, which places a REAL Groww order at its own quantity. Each stock once a day, at most 'Max moves a day'. Off: a LIVE Bot 5 only takes trades from LIVE bots. A LIVE trade is never cut for a PAPER Bot 5 either way."
+          >
+            <input type="checkbox" checked={Boolean(form.paper_to_live)} onChange={(e) => set("paper_to_live", e.target.checked)} className="accent-[#F43F5E]" />
+            <span>
+              Practice bots watch, <span className="font-semibold text-rose-300">LIVE Bot 5 trades</span>: a PAPER bot&apos;s fast mover becomes a real-money Bot 5 order
+            </span>
           </label>
           <button
             type="button"

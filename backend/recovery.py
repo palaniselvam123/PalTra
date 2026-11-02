@@ -202,7 +202,8 @@ def judge(
 
 
 def handoff(
-    from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT, chop: bool | None = None, keep_source: bool = False
+    from_bot: int, symbol: str, source_live: bool, to_bot: int = HANDOFF_BOT, chop: bool | None = None, keep_source: bool = False,
+    allow_paper_source: bool = False,
 ) -> str:
     """Move `symbol` from `from_bot` to `to_bot`. Returns what happened.
 
@@ -212,6 +213,8 @@ def handoff(
     `chop=False` keeps Bot 2's own settings (a stock the fast-mover hand-off sends back, fast_bot.py).
     `keep_source=True` leaves the stock on the source bot's Trade list too (the fast-mover "keep the
     trade" mode): it is then armed on both bots; the one-LIVE-bot-per-stock rule still applies.
+    `allow_paper_source=True` lets a practice trade arm a LIVE target (the fast-mover "practice bots watch,
+    LIVE Bot 5 trades" option, confirmed by the owner); every other hand-off keeps the same-mode rule.
     """
     from database import session_factory
     from models import BotConfig
@@ -230,7 +233,7 @@ def handoff(
             if target is None or source is None:
                 return f"no handoff: Bot {to_bot} is not set up"
             target_live = (target.trading_mode or "PAPER").upper() == "LIVE"
-            if target_live and not source_live:
+            if target_live and not source_live and not allow_paper_source:
                 return f"no handoff: Bot {to_bot} is LIVE and this trade was practice money"
             names = trade_names(target)
             if name not in names and len(names) >= MAX_TRADE_SYMBOLS:

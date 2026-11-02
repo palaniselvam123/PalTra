@@ -3690,6 +3690,8 @@ class FastBotSettings(BaseModel):
     entry_checks: bool | None = None
     # Keep the source trade and let Bot 5 open its own order next to it (the stock is armed on both bots).
     keep_trade: bool | None = None
+    # Practice bots watch, a LIVE Bot 5 trades: a PAPER source trade may hand off to a LIVE Bot 5.
+    paper_to_live: bool | None = None
     confirm_live: bool = False
 
 
@@ -3719,7 +3721,7 @@ async def fast_bot_put(body: FastBotSettings):
     """Save the fast-mover hand-off settings. Turning it on while Bot 5 is LIVE needs `confirm_live`.
 
     No order is placed here; hand-offs happen in the watcher while NSE is open."""
-    if body.on:
+    if body.on or body.paper_to_live:
         ensure_bot_config(fast_bot.TARGET_BOT)
         target = bot_engines[fast_bot.TARGET_BOT].load_config()
         if (target.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:

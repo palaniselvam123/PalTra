@@ -609,3 +609,86 @@ def test_handoff_keep_source_arms_both_and_unarm_drops_one(tmp_path, monkeypatch
         assert trade_names(s.get(BotConfig, bots.config_id_for(5))) == []
         assert trade_names(s.get(BotConfig, 1)) == ["ACME", "TCS"]
     database.reset_engine()
+
+
+# ---- Practice bots watch, LIVE Bot 5 trades (paper_to_live) ----
+
+
+def test_paper_to_live_is_off_by_default_and_only_opens_paper_to_live():
+    import fast_bot
+
+    assert fast_bot.Settings().paper_to_live is False
+    assert fast_bot.clean({"paper_to_live": True}).paper_to_live is True
+    live5, paper5 = _Target(mode="LIVE"), _Target(mode="PAPER")
+    assert "practice money" in fast_bot.ready(live5, "ACME", source_live=False)
+    assert fast_bot.ready(live5, "ACME", source_live=False, paper_to_live=True) is None
+    # It never lets a LIVE trade be cut for a PAPER Bot 5.
+    assert "Bot 5 is PAPER" in fast_bot.ready(paper5, "ACME", source_live=True, paper_to_live=True)
+
+
+@pytest.mark.asyncio
+async def test_a_paper_fast_mover_hands_to_a_live_bot5_only_when_ticked(moved):
+    src, target = _Source(mode="PAPER"), _Target(mode="LIVE")
+    _bot, done = await _run(src, target)
+    assert "not moved" in done[0] and src.closed == [] and target.orders == [] and moved == []
+    src, target = _Source(mode="PAPER"), _Target(mode="LIVE")
+    _bot, done = await _run(src, target, paper_to_live=True)
+    # The practice trade is cut (no Groww wait: it was never on Groww) and LIVE Bot 5 orders at once.
+    assert src.closed == ["FAST_MOVE_HANDOFF"]
+    assert moved == [(1, "ACME", False, 5)]
+    assert target.orders == [("ACME", "BULLISH", "FAST_MOVE")]
+
+
+@pytest.mark.asyncio
+async def test_paper_to_live_still_reads_the_profit_guard(moved):
+    src, target = _Source(mode="PAPER", price=100.6), _Target(mode="LIVE")
+    src.positions["ACME"].entry_price = 100.5  # only +0.1 % in profit, under the 0.3 % guard
+    _bot, done = await _run(src, target, paper_to_live=True)
+    assert done == [] and target.orders == []
+
+
+def test_recovery_handoff_arms_a_live_bot5_from_paper_only_when_allowed(engine):  # noqa: F811
+    import database
+    import recovery
+    from bots import config_id_for, ensure_bot_config
+    from models import BotConfig
+    from strategy_engine import trade_names
+
+    ensure_bot_config(5)
+    with database.session_factory()() as db:
+        db.get(BotConfig, 1).trade_symbols = "ACME"
+        five = db.get(BotConfig, config_id_for(5))
+        five.trading_mode, five.trade_symbols = "LIVE", ""
+        db.commit()
+    try:
+        assert "practice money" in recovery.handoff(1, "ACME", False, to_bot=5, chop=False)
+        done = recovery.handoff(1, "ACME", False, to_bot=5, chop=False, allow_paper_source=True)
+        assert done.startswith("moved to Bot 5")
+        with database.session_factory()() as db:
+            assert "ACME" not in trade_names(db.get(BotConfig, 1))
+            assert "ACME" in trade_names(db.get(BotConfig, config_id_for(5)))
+    finally:
+        with database.session_factory()() as db:
+            five = db.get(BotConfig, config_id_for(5))
+            five.trading_mode, five.trade_symbols = "PAPER", ""
+            db.commit()
+
+
+def test_ticking_paper_to_live_needs_confirm_while_bot5_is_live(api, monkeypatch, tmp_path):
+    import database
+    from bots import config_id_for, ensure_bot_config
+    from models import BotConfig
+
+    monkeypatch.setenv("FAST_BOT_FILE", str(tmp_path / "fast_bot.json"))
+    ensure_bot_config(5)
+    with database.session_factory()() as db:
+        db.get(BotConfig, config_id_for(5)).trading_mode = "LIVE"
+        db.commit()
+    try:
+        assert api.put("/api/bots/fast-mover", json={"paper_to_live": True}).status_code == 409
+        ok = api.put("/api/bots/fast-mover", json={"on": True, "paper_to_live": True, "confirm_live": True})
+        assert ok.status_code == 200 and ok.json()["paper_to_live"] is True
+    finally:
+        with database.session_factory()() as db:
+            db.get(BotConfig, config_id_for(5)).trading_mode = "PAPER"
+            db.commit()
