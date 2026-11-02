@@ -1207,7 +1207,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `BotConfig.trade_symbols` saved through the ORM (Settings, Arm switch, scanner link, copy settings, handoffs, chat /
   MCP); `baseline()` at boot adds an `ARMED` row for each armed stock whose last row is not an arm. `windows(config_id,
   day)` gives each stock's armed stretches that day. `GET /api/arm-log?desk=1-4|research&day=` (rows + stretches);
-  terminal Stocks bar "Arm log" button (`components/Terminal/ArmLog.tsx`). **Replay as armed** (`ReplayStart.as_armed`,
+  terminal Stocks bar "Arm log" button (`components/Terminal/ArmLog.tsx`). The Stocks box's search takes a pasted list too (`Header.tsx` `listTokens`: two or more names split by commas, spaces, semicolons or new lines): each is looked up (exact NSE symbol ticked, else the closest unticked), with Select all and **Arm ticked** (each armed with the bot's own settings through `setTradeSymbol`, source "Manual"; one LIVE confirm; the arm limit applies). **Replay as armed** (`ReplayStart.as_armed`,
   replay bar "As armed live", saved as `as_armed` in the run's settings so Resume / Run again keep it): the stocks the
   bot had armed on those days, from 09:15, each traded only inside its stretches (`ReplayEngine.arm_windows`,
   `_armed_now` feeds the Trade list); a stock armed mid-day waits for a fresh cross, as live. Still refused while the bot
