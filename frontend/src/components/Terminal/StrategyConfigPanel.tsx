@@ -318,6 +318,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     late_entry_min: Math.min(375, Math.max(0, Math.round(Number(form.late_entry_min ?? 0)))),
     join_trend: Boolean(form.join_trend),
     always_in: Boolean(form.always_in),
+    always_in_reverse: Boolean(form.always_in_reverse),
     join_after_min: Math.min(360, Math.max(0, Math.round(Number(form.join_after_min ?? 15)))),
     counter_exit_count: Math.min(10, Math.max(0, Math.round(Number(form.counter_exit_count ?? 0)))),
     counter_rule: (["CLOSES", "COLOUR", "BOTH"] as const).includes(form.counter_rule as "CLOSES")
@@ -877,6 +878,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               next closed candle. An opposite cross still closes and reverses. Re-entering after a stop can mean many trades
               on a choppy stock: set a per-stock trade cap in step 6 and try it on Replay first. Gap mode and candle patterns
               ignore it.
+            </InfoTip>
+          </label>
+          <label className={`ml-6 mt-2 flex items-center gap-2 text-sm text-slate-300 ${form.always_in ? "" : "opacity-50"}`}>
+            <input
+              type="checkbox"
+              checked={Boolean(form.always_in_reverse)}
+              disabled={!form.always_in}
+              onChange={(e) => set("always_in_reverse", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("always_in_reverse") && <OwnTag />}
+            After a losing trade, enter the opposite way
+            <InfoTip label="About reverse after a loss">
+              Needs &quot;Always in a trade&quot;. When a trade closes at a loss (before charges), by any exit (stop, trailing
+              stop or an exit rule), the next entry goes the other way at once: a losing buy is followed by a sell, a losing
+              sell by a buy, whatever the SMAs say. After a winning trade the bot re-enters on the side the SMAs point to, as
+              before. The entry checks you ticked still apply; if one says no, it is asked again on the next candle. Entry
+              reason &quot;Reversed after loss&quot;.
             </InfoTip>
           </label>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
@@ -2864,6 +2883,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
   if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });
   if (f.always_in) add({ group: "enter", key: "always_in", text: "Always in a trade: every armed stock is held on the SMAs' side and entered again right after each exit (no cross needed)", off: { always_in: false }, warn: true });
+  if (f.always_in && f.always_in_reverse) add({ group: "enter", key: "always_in_reverse", text: "After a losing trade, the next entry goes the opposite way", off: { always_in_reverse: false } });
   if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });

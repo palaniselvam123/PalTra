@@ -505,11 +505,18 @@ function whyNoTrade(p: {
   if (filters?.use_rsi && c.rsi14 != null) {
     hints.push(`RSI ${c.rsi14.toFixed(1)} (buys need ${filters.rsi_long_min}–${filters.rsi_long_max}, sells ${filters.rsi_short_min}–${filters.rsi_short_max})`);
   }
-  const base = `No signal: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
-    rows[since].time
-  )}), gap ${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%. The bot enters on a fresh cross${filters?.use_gap_mode ? ", then at the gap entry level" : ""}.`;
+  const always = Boolean(filters?.always_in) && !filters?.use_gap_mode && (filters?.entry_mode ?? "SMA") === "SMA";
+  const base = always
+    ? `Always in a trade: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
+        rows[since].time
+      )}), so while flat the bot ${side > 0 ? "buys" : "sells"} at once${
+        filters?.always_in_reverse ? " (or goes the opposite way of a trade that just closed at a loss)" : ""
+      }, if the entry checks agree.`
+    : `No signal: SMA 9 has been ${side > 0 ? "above" : "below"} SMA 21 for ${n} candle${n === 1 ? "" : "s"} (since ${istClock(
+        rows[since].time
+      )}), gap ${gap >= 0 ? "+" : ""}${gap.toFixed(3)}%. The bot enters on a fresh cross${filters?.use_gap_mode ? ", then at the gap entry level" : ""}.`;
   const turnZone = filters?.turn_entry && !timing ? zoneWords(slopeZones({ rows, i: p.forming && i > 0 ? i - 1 : i, filters, bar, botBar, held: null }), px) : "";
-  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `If it crossed now: ${hints.join("; ")}.` : null, turnZone ? `Turn entry: ${turnZone}.` : null]
+  return [base, timing ? `Also, ${timing}.` : null, hints.length ? `${always ? "Entry checks now" : "If it crossed now"}: ${hints.join("; ")}.` : null, turnZone ? `Turn entry: ${turnZone}.` : null]
     .filter(Boolean)
     .join(" ");
 }

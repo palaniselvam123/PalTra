@@ -80,7 +80,7 @@ export function strategyLabel(s: Settings): string {
     if (s.cross_exit !== false && Number(s.exit_candle_minutes ?? 0) > 0 && Number(s.exit_candle_minutes) !== Number(s.candle_minutes ?? 1))
       parts.push(`exit on ${s.exit_candle_minutes}m candle`);
     if (Number(s.late_entry_min ?? 0) > 0) parts.push(`late entry ${s.late_entry_min}m`);
-    if (s.always_in) parts.push("always in a trade");
+    if (s.always_in) parts.push(s.always_in_reverse ? "always in a trade, reverse after a loss" : "always in a trade");
     if (s.join_trend) parts.push(`join morning trend from 09:15+${s.join_after_min ?? 15}m`);
     if (Number(s.counter_exit_count ?? 0) > 0) parts.push(`exit on ${s.counter_exit_count} counter candles`);
     if (s.counter_entry) parts.push("early reversal entry");
@@ -263,7 +263,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
           ? `On, read on ${s.exit_candle_minutes}-min candles (no reverse)`
           : "On",
   ],
-  ["Always in a trade", (s) => (s.always_in ? "On" : "Off")],
+  ["Always in a trade", (s) => (s.always_in ? (s.always_in_reverse ? "On, reverse after a loss" : "On") : "Off")],
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],

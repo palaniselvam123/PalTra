@@ -447,8 +447,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   fresh cross goes first; between candles too), through `apply_signal(..., alert=False, why="ALWAYS_IN")`: every entry
   check, the stop, flip, market hours, cut-off, caps, loss limit and one LIVE bot per stock apply. A refusal is asked again
   on the next closed candle (`_always_tried`); a stock that was held at the last pass and is flat now is asked again at
-  once (`_always_held`). Gap mode, candle patterns / colour and a waiting pullback skip it. Settings → 1. When to enter.
-  The stock research baseline keeps it off.
+  once (`_always_held`: symbol → (signal side, trade id)). Gap mode, candle patterns / colour and a waiting pullback skip
+  it. **Reverse after a loss** (`always_in_reverse`, off, needs `always_in`): when the trade that just closed lost money
+  before charges (`_closed_gross` reads its `TradeLog` row, `always_in.lost`), the next entry goes the other way of its
+  signal side (`_always_reverse`, entry reason `ALWAYS_IN_REVERSE`), whatever the SMAs say; after a winning or flat trade
+  the SMAs' side is used; kept until that entry opens, asked again each closed candle while a check says no. The chart's
+  "why" line says "Always in a trade … buys / sells at once" (`chart_filters` carries `always_in`, `always_in_reverse`).
+  Settings → 1. When to enter. The stock research baseline keeps both off.
 - `backend/counter_candles.py` – counter candles (off by default, per bot and per stock, PAPER and LIVE):
   a run of closed candles against the trade turns it before the SMAs cross. **Exit**
   (`counter_exit_count` N, 0 = off, max 10): `StrategyEngine._watch_counter_candles` closes an open
@@ -941,7 +946,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `GET /api/scalp/active/history/{id}`; the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
   and column sorting work on the saved scan). Each row also has `speed_pct_min` (`add_speed`: % per minute since the
   previous scan, signed; none on the day's first scan or after a gap over `SPEED_MAX_GAP_MIN` 30 min), a Speed column,
-  "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". Read-only.
+  "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". The card also has tick boxes (Arm
+  ticked / Watch news, `TickArm`, `onArmMany`), Price from / to and "Vol vs usual at least" filters, **Read trend quality**
+  (runs the shared Trend quality scan, `smaApi.chopScanStart(..., force)`, on the stocks the filters show, up to 200, on
+  1/3/5/15-minute candles, and adds Trend / Crosses / Phase columns plus a "Trend quality" filter: strong, trending, not
+  choppy; it replaces the Trend quality tab's last result) and, on a saved scan, **Check accuracy** (the terminal's
+  `POST /api/scan-history/{id}/check` on the same saved run; `scan_accuracy` kind `active`: the call is the row's bias,
+  else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
+  columns and the per-group summary). Read-only.
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.

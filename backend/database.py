@@ -122,6 +122,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "slope_minutes": "INTEGER DEFAULT 0",
             "join_trend": "BOOLEAN DEFAULT 0",
             "always_in": "BOOLEAN DEFAULT 0",
+            "always_in_reverse": "BOOLEAN DEFAULT 0",
             "join_after_min": "INTEGER DEFAULT 15",
             "counter_exit_count": "INTEGER DEFAULT 0",
             "counter_entry": "BOOLEAN DEFAULT 0",

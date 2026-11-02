@@ -349,6 +349,8 @@ class BotConfig(Base):
     join_after_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)
     # Always in a trade (always_in.py): a flat armed stock is entered at once on the SMAs' side, again after every exit.
     always_in: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # With always_in: after a trade closed at a loss, the next entry goes the other way (always_in.py).
+    always_in_reverse: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Counter candles (counter_candles.py): exit after N closed candles against the trade
     # (0 = off), and an early reversal entry on such a run before the SMAs cross.
     counter_exit_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
