@@ -1261,6 +1261,30 @@ def test_a_live_halt_still_blocks_another_confirm(api, monkeypatch):
     assert engine.status == "HALTED"
 
 
+def test_a_halted_live_bot_can_still_go_back_to_paper(api, monkeypatch):
+    """PAPER is the safe way: a halted LIVE bot may switch to it; it stays halted for the day."""
+    from database import session_factory
+    from models import BotConfig
+    from main import engine
+
+    monkeypatch.setattr("main.preferred_quote_token", lambda: "desk-token")
+    monkeypatch.setattr("groww_client.desk_session_token", lambda: "desk-token")
+    engine.positions.clear()
+    with session_factory()() as db:
+        row = db.get(BotConfig, 1)
+        row.trading_mode = "LIVE"
+        db.commit()
+    engine.status = "HALTED"
+    engine.halt_reason = "max_daily_loss breached"
+    paper = api.post("/api/mode", json={"mode": "PAPER"})
+    assert paper.status_code == 200 and paper.json()["trading_mode"] == "PAPER"
+    with session_factory()() as db:
+        assert db.get(BotConfig, 1).trading_mode == "PAPER"
+    assert engine.status == "HALTED"
+    # And it still cannot go LIVE again the same day.
+    assert api.post("/api/mode", json={"mode": "LIVE", "confirm_live": True}).status_code == 423
+
+
 def test_start_resumes_after_a_manual_panic(api):
     from main import engine
 
