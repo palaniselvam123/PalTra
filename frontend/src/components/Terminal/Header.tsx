@@ -36,6 +36,11 @@ const HIDDEN_KEY = "sma.symbols.hidden";
 const FOLD_KEY = "sma.stocks.folded";
 
 type Hit = { symbol: string; name: string };
+/** One stock of a pasted list ("SBIN, TCS, INFY"): the exact NSE match, else the closest one, else none. */
+type ListHit = { typed: string; symbol: string | null; name: string; exact: boolean };
+/** A search box holding two or more names (comma, space, semicolon or new line between them) is a list. */
+const listTokens = (q: string) =>
+  Array.from(new Set(q.toUpperCase().split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean))).slice(0, 60);
 
 function deskOrigin(): string {
   if (typeof window !== "undefined") {
@@ -206,6 +211,10 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [hits, setHits] = useState<Hit[]>([]);
   const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
+  // A pasted list of stocks: each one's match, and the ones ticked to arm.
+  const [listHits, setListHits] = useState<ListHit[]>([]);
+  const [listTicked, setListTicked] = useState<Set<string>>(new Set());
+  const [listNote, setListNote] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -259,8 +268,39 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     const q = query.trim();
     if (q.length < 1) {
       setHits([]);
+      setListHits([]);
       return;
     }
+    const tokens = listTokens(q);
+    if (tokens.length >= 2) {
+      // A list: look each name up (exact NSE symbol first, else the closest match, left unticked).
+      setHits([]);
+      const id = setTimeout(() => {
+        setSearching(true);
+        setListNote(null);
+        Promise.all(
+          tokens.map(async (typed): Promise<ListHit> => {
+            try {
+              const res = await fetch(`${deskOrigin()}/api/instruments/search?q=${encodeURIComponent(typed)}&limit=5`);
+              const rows = res.ok ? ((await res.json()) as Hit[]) : [];
+              const exact = rows.find((h) => h.symbol.toUpperCase() === typed);
+              const pick = exact ?? rows[0];
+              return { typed, symbol: pick?.symbol.toUpperCase() ?? null, name: pick?.name ?? "", exact: !!exact };
+            } catch {
+              return { typed, symbol: null, name: "", exact: false };
+            }
+          })
+        )
+          .then((found) => {
+            setListHits(found);
+            setListTicked(new Set(found.filter((h) => h.exact && h.symbol).map((h) => h.symbol as string)));
+            setOpen(true);
+          })
+          .finally(() => setSearching(false));
+      }, 400);
+      return () => clearTimeout(id);
+    }
+    setListHits([]);
     const id = setTimeout(() => {
       setSearching(true);
       fetch(`${deskOrigin()}/api/instruments/search?q=${encodeURIComponent(q)}&limit=8`)
@@ -427,6 +467,46 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Arm every ticked stock of a pasted list with the bot's own settings (no per-stock prompt). */
+  const armList = async () => {
+    const wanted = Array.from(listTicked).filter((s) => !armed.has(s));
+    if (!wanted.length) {
+      setListNote("Every ticked stock is already armed.");
+      return;
+    }
+    const room = Math.max(0, armLimit - armedList.length);
+    const take = wanted.slice(0, room);
+    const skipped = wanted.slice(room);
+    if (!take.length) {
+      setListNote(`Trade is limited to ${armLimit} stocks at once; unarm some first.`);
+      return;
+    }
+    if (live && !window.confirm(`Arm ${take.length} stocks for LIVE SMA orders (real money)?\n${take.join(", ")}`)) return;
+    setBusy(true);
+    setListNote(null);
+    const failed: string[] = [];
+    for (const name of take) {
+      try {
+        await smaApi.setTradeSymbol(name, true, "Manual");
+        remember(name);
+      } catch (e: unknown) {
+        failed.push(`${name}: ${e instanceof Error ? e.message : "could not arm"}`);
+      }
+    }
+    setBusy(false);
+    onChanged();
+    const done = take.length - failed.length;
+    setListNote(
+      [
+        `Armed ${done} of ${wanted.length}.`,
+        skipped.length ? `Not armed (limit of ${armLimit}): ${skipped.join(", ")}.` : "",
+        failed.length ? `Refused: ${failed.join("; ")}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
   };
 
   const isHeld = (s: string) => {
@@ -881,6 +961,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               onSubmit={(e) => {
                 e.preventDefault();
                 const typed = query.trim().toUpperCase();
+                if (listTokens(typed).length >= 2) return; // a list: use the ticks and Arm ticked
                 if (typed) applySymbol(typed, true);
               }}
             >
@@ -889,13 +970,85 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 value={query}
                 onChange={(e) => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => hits.length > 0 && setOpen(true)}
-                placeholder="Find a stock"
+                placeholder="Find a stock, or paste several: SBIN, TCS, INFY"
                 className="min-w-0 flex-1 bg-transparent py-1 text-sm uppercase text-slate-100 outline-none placeholder:normal-case placeholder:text-slate-400"
                 aria-label="Find an NSE stock"
               />
               {searching && <Loader2 size={14} className="shrink-0 animate-spin text-slate-400" />}
             </form>
-            {open && query.trim() && !searching && hits.length === 0 && (
+            {open && listHits.length > 0 && (
+              <div className="absolute left-3 top-full z-40 mt-1 w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-[#151921] shadow-xl">
+                <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2 text-xs text-slate-300">
+                  <label className="flex min-h-8 cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-emerald-400"
+                      checked={listHits.some((h) => h.symbol) && listHits.every((h) => !h.symbol || listTicked.has(h.symbol))}
+                      onChange={(e) =>
+                        setListTicked(e.target.checked ? new Set(listHits.flatMap((h) => (h.symbol ? [h.symbol] : []))) : new Set())
+                      }
+                      aria-label="Select every stock in the list"
+                    />
+                    Select all
+                  </label>
+                  <span className="text-slate-500">
+                    {listHits.filter((h) => h.exact).length} of {listHits.length} found
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy || listTicked.size === 0}
+                    onClick={() => void armList()}
+                    className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md bg-profit/15 px-3 font-semibold text-profit ring-1 ring-inset ring-profit/40 hover:bg-profit/25 disabled:opacity-40"
+                  >
+                    {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+                    Arm ticked ({listTicked.size})
+                  </button>
+                </div>
+                {listNote && <p className="border-b border-white/10 px-3 py-1.5 text-xs text-accentSky">{listNote}</p>}
+                <ul className="max-h-80 overflow-y-auto">
+                  {listHits.map((h) => (
+                    <li key={h.typed} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-white/[0.04]">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-emerald-400"
+                        disabled={!h.symbol}
+                        checked={!!h.symbol && listTicked.has(h.symbol)}
+                        onChange={(e) =>
+                          setListTicked((prev) => {
+                            const next = new Set(prev);
+                            if (!h.symbol) return next;
+                            if (e.target.checked) next.add(h.symbol);
+                            else next.delete(h.symbol);
+                            return next;
+                          })
+                        }
+                        aria-label={`Tick ${h.symbol ?? h.typed}`}
+                      />
+                      {h.symbol ? (
+                        <button
+                          type="button"
+                          onClick={() => applySymbol(h.symbol as string)}
+                          title="Show it on the chart"
+                          className="font-semibold text-[#FBBF24] hover:underline"
+                        >
+                          {h.symbol}
+                        </button>
+                      ) : (
+                        <span className="font-semibold text-slate-500 line-through">{h.typed}</span>
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-xs text-slate-400">
+                        {!h.symbol ? "no NSE match" : h.exact ? h.name : `closest to “${h.typed}”: ${h.name}`}
+                      </span>
+                      {h.symbol && armed.has(h.symbol) ? <span className="text-[11px] font-semibold text-profit">armed</span> : null}
+                    </li>
+                  ))}
+                </ul>
+                <p className="border-t border-white/10 px-3 py-1.5 text-[11px] text-slate-500">
+                  Each stock is armed with this bot&apos;s own quantity, stop and target. A stock another LIVE bot trades is refused.
+                </p>
+              </div>
+            )}
+            {open && query.trim() && !searching && hits.length === 0 && listHits.length === 0 && listTokens(query).length < 2 && (
               <div className="absolute left-3 top-full z-40 mt-1 w-56 rounded-xl border border-white/10 bg-[#151921] px-3 py-2 text-xs text-slate-400 shadow-xl">
                 No NSE match
               </div>
