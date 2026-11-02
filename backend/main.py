@@ -1572,8 +1572,12 @@ async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
             )
         # Overnight practice can halt itself. That must not block this confirm.
         eng.release_paper_halt()
-    if eng.status == "HALTED":
+    if eng.status == "HALTED" and mode == "LIVE":
+        # Back to PAPER is the safe way and is always allowed; a halted bot never goes LIVE the same day.
         raise HTTPException(423, "Bot is halted for the day — restart tomorrow or reset after review")
+    if eng.status == "HALTED" and (eng.load_config().trading_mode or "PAPER").upper() == "LIVE":
+        # A LIVE halt going back to PAPER stays a LIVE halt for the day (no LIVE again before tomorrow).
+        eng.live_halt_day = _ist_now().date()
     if _open_symbols(eng):
         raise HTTPException(409, "Close the open position before switching execution mode")
     with session_factory()() as db:

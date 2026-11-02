@@ -1497,7 +1497,9 @@ There are separate switches. All of them boot safe.
 - **SMA Terminal mode** (`POST /api/mode` in `backend/main.py`): `PAPER`
   (default, `TRADING_MODE`/`trading_mode`) or `LIVE`. `LIVE` needs
   `confirm_live=true` from the UI confirmation modal and a saved Groww
-  session/`GROWW_ACCESS_TOKEN`. In PAPER the client fills locally at the
+  session/`GROWW_ACCESS_TOKEN`. A HALTED bot may always switch back to PAPER (the safe way), never to LIVE the same
+  day: a LIVE halt taken back to PAPER keeps `StrategyEngine.live_halt_day`, so `release_paper_halt` does not treat it as
+  a practice halt on the next LIVE confirm. In PAPER the client fills locally at the
   candle close/LTP, using real Groww candles when a token works and the market
   is open, otherwise the built-in `CandleSimulator`.
 - **Market hours apply to PAPER too.** No new entry (cross or force order)

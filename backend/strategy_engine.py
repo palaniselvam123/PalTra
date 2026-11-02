@@ -969,6 +969,9 @@ class StrategyEngine:
     #: bots.live_conflict once the bots are registered: refuses a LIVE entry on
     #: a stock another LIVE bot owns. None (no check) for a lone engine in tests.
     live_guard = None
+    #: The day a LIVE bot that was halted went back to PAPER (main._set_mode): its halt stays a LIVE halt,
+    #: so confirming LIVE again that day does not release it (release_paper_halt).
+    live_halt_day: dt.date | None = None
     #: Last check before any entry, gate(engine, symbol) -> why not, or None to go ahead (counts the
     #: entry). The fast-mover hand-off sets it on Bot 5 and on replays (fast_bot.py `bot5_trades`).
     entry_gate = None
@@ -4888,6 +4891,9 @@ class StrategyEngine:
             pass
         mode = (cfg.trading_mode if cfg is not None else "PAPER") or "PAPER"
         if mode.upper() == "LIVE":
+            return False
+        if self.live_halt_day is not None and self.live_halt_day == self._now().date():
+            # Halted while LIVE today, then switched back to PAPER: that halt is not a practice halt.
             return False
         self.status = "STOPPED"
         self.halt_reason = ""
