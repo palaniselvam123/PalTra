@@ -946,7 +946,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `GET /api/scalp/active/history/{id}`; the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
   and column sorting work on the saved scan). Each row also has `speed_pct_min` (`add_speed`: % per minute since the
   previous scan, signed; none on the day's first scan or after a gap over `SPEED_MAX_GAP_MIN` 30 min), a Speed column,
-  "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". Read-only.
+  "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". The card also has tick boxes (Arm
+  ticked / Watch news, `TickArm`, `onArmMany`), Price from / to and "Vol vs usual at least" filters, **Read trend quality**
+  (runs the shared Trend quality scan, `smaApi.chopScanStart(..., force)`, on the stocks the filters show, up to 200, on
+  1/3/5/15-minute candles, and adds Trend / Crosses / Phase columns plus a "Trend quality" filter: strong, trending, not
+  choppy; it replaces the Trend quality tab's last result) and, on a saved scan, **Check accuracy** (the terminal's
+  `POST /api/scan-history/{id}/check` on the same saved run; `scan_accuracy` kind `active`: the call is the row's bias,
+  else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
+  columns and the per-group summary). Read-only.
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.

@@ -726,6 +726,7 @@ export default function ScalpPage() {
             onWatched={refresh}
             paused={paused}
             onStatus={onActiveStatus}
+            onArmMany={(list) => armSeveral(list, "Most active")}
           />
         </div>
         <div hidden={tab !== "backtest"}>

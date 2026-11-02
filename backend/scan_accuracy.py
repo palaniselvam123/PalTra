@@ -72,6 +72,14 @@ def _by_minutes(book: dict | None, minutes: int):
 def call_side(kind: str, row: dict, minutes: int) -> str | None:
     if kind == "cross":
         side = row.get("side")
+    elif kind == "active":
+        # Most active (active_stocks.py): the row's bias, else the way the stock was moving on the day.
+        bias = row.get("bias")
+        if bias in ("LONG", "SHORT"):
+            side = "BULLISH" if bias == "LONG" else "BEARISH"
+        else:
+            change = row.get("change_pct")
+            side = None if not change else ("BULLISH" if float(change) > 0 else "BEARISH")
     else:
         side = _by_minutes(row.get("side_by_minutes"), minutes) or row.get("last_cross_direction")
     return side if side in ("BULLISH", "BEARISH") else None
@@ -157,6 +165,9 @@ def evaluate(kind: str, row: dict, frame_1m: pd.DataFrame, as_of: str, minutes: 
             out["crossed"] = crossed
             limit = max(float(predicted or 0) * ON_TIME_FACTOR, 2 * minutes)
             out["on_time"] = bool(crossed and out["next_cross_after_min"] is not None and out["next_cross_after_min"] <= limit)
+    elif kind == "active":
+        out["bias"] = row.get("bias")
+        out["rvol"] = row.get("rvol")
     else:
         out["quiet_runner"] = bool(row.get("quiet_runner"))
         out["trend"] = row.get("trend")
@@ -195,6 +206,10 @@ def summarize(kind: str, rows: list[dict]) -> list[dict]:
     if kind == "cross":
         groups.append(_group("approaching", "About to cross", [r for r in rows if r.get("state") == APPROACHING]))
         groups.append(_group("crossed", "Just crossed", [r for r in rows if r.get("state") != APPROACHING]))
+    elif kind == "active":
+        groups.append(_group("long", "Bias long", [r for r in rows if r.get("bias") == "LONG"]))
+        groups.append(_group("short", "Bias short", [r for r in rows if r.get("bias") == "SHORT"]))
+        groups.append(_group("volume", "Volume 2× usual or more", [r for r in rows if (r.get("rvol") or 0) >= 2]))
     else:
         groups.append(_group("quiet", "Quiet runners", [r for r in rows if r.get("quiet_runner")]))
         groups.append(_group("strong", "Strong trend", [r for r in rows if r.get("trend")]))

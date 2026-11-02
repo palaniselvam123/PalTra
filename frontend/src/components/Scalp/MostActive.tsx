@@ -1,9 +1,9 @@
 "use client";
 
 import { Explain } from "@/components/ui/Explain";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, Flame, History, Loader2, RefreshCw } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, Flame, History, Loader2, RefreshCw, Target } from "lucide-react";
 import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
@@ -12,6 +12,8 @@ import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { smaApi, type ChopScanRow, type CrossScanMinutes, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -62,6 +64,26 @@ function activeCsv(rows: ActiveStock[]): string {
   return [CSV_HEAD.join(","), ...lines].join("\n");
 }
 
+/** Trend quality filter on the stocks read (Read trend quality). */
+type TrendPick = "ALL" | "STRONG" | "TRENDING" | "NOT_CHOPPY";
+const TREND_PICKS: { value: TrendPick; label: string }[] = [
+  { value: "ALL", label: "Any" },
+  { value: "STRONG", label: "Strong trend" },
+  { value: "TRENDING", label: "Trending" },
+  { value: "NOT_CHOPPY", label: "Not choppy" },
+];
+const TQ_SIZES: CrossScanMinutes[] = [1, 3, 5, 15];
+const TQ_MAX = 200;
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+function trendPasses(pick: TrendPick, row: ChopScanRow | undefined): boolean {
+  if (pick === "ALL") return true;
+  if (!row) return false;
+  if (pick === "STRONG") return !!row.trend;
+  if (pick === "TRENDING") return row.score === "TRENDING";
+  return row.score !== "CHOPPY";
+}
+
 type Props = {
   /** Stocks already on the desk feed (shown in the monitor below). */
   watching: Set<string>;
@@ -75,13 +97,28 @@ type Props = {
   paused?: boolean;
   /** Tells the page's tab bar when this scan last ran. */
   onStatus?: OnScanStatus;
+  /** Arm the ticked stocks on one bot at once (the other Scalp tables' Arm ticked). */
+  onArmMany?: (symbols: string[]) => void;
 };
 
 const pct = (v: number | null, digits = 2) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`);
 
 /** The F&O stocks ranked by where traders are: money traded, volume against
  * usual, and buy vs sell quantity waiting. From Groww quotes; no orders. */
-export function MostActive({ watching, armed, arming, onArm, onWatched, paused = false, onStatus }: Props) {
+export function MostActive({ watching, armed, arming, onArm, onWatched, paused = false, onStatus, onArmMany }: Props) {
+  const ticks = useTicks();
+  const [priceMin, setPriceMin] = useState(0);
+  const [priceMax, setPriceMax] = useState(0);
+  const [minRvol, setMinRvol] = useState(0);
+  // Trend quality of the stocks on screen (the Trend quality scan, run on just these stocks).
+  const [tqMinutes, setTqMinutes] = useState<CrossScanMinutes>(5);
+  const [tq, setTq] = useState<Map<string, ChopScanRow>>(new Map());
+  const [tqBusy, setTqBusy] = useState(false);
+  const [tqNote, setTqNote] = useState<string | null>(null);
+  const [trendPick, setTrendPick] = useState<TrendPick>("ALL");
+  // A saved scan's accuracy check (the same check as the History tab's).
+  const [detail, setDetail] = useState<ScanRunDetail | null>(null);
+  const [checkNote, setCheckNote] = useState<string | null>(null);
   const cols = useColumnOrder<Col>("scalp.cols.active", COLUMNS);
   const [data, setData] = useState<ActiveStocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +195,41 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     };
   }, [view, runId]);
 
+  // The saved scan's accuracy check, and whether its day can be checked yet.
+  const loadDetail = useCallback(async (id: number) => {
+    try {
+      setDetail(await smaApi.scanHistoryRun(id));
+    } catch {
+      setDetail(null);
+    }
+  }, []);
+  useEffect(() => {
+    setDetail(null);
+    setCheckNote(null);
+    if (view === "history" && saved?.id != null) void loadDetail(saved.id);
+  }, [view, saved?.id, loadDetail]);
+  const checking = !!detail?.checking.running && detail.checking.run_id === detail.id;
+  useEffect(() => {
+    if (!checking || !detail) return;
+    const id = setTimeout(() => void loadDetail(detail.id), 4_000);
+    return () => clearTimeout(id);
+  }, [checking, detail, loadDetail]);
+  const startCheck = async () => {
+    if (!saved) return;
+    setCheckNote(null);
+    try {
+      await smaApi.scanHistoryCheck(saved.id);
+      setCheckNote("Checking — each stock's candles for that day are downloaded again; this takes a few minutes.");
+      void loadDetail(saved.id);
+    } catch (e: unknown) {
+      setCheckNote(e instanceof Error ? e.message : "Could not start the check");
+    }
+  };
+  const checkBy = useMemo(
+    () => (detail?.check ? new Map(detail.check.rows.map((c) => [c.symbol, c])) : null),
+    [detail?.check]
+  );
+
   const runs = hist?.runs ?? [];
   const runAt = runs.findIndex((r) => r.id === runId);
   // A saved scan is filtered and ranked here the way the server ranks the live one.
@@ -205,10 +277,48 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const found = useMemo(
     () =>
       source.filter(
-        (r) => matchesText(query, r.symbol) && (minSpeed <= 0 || Math.abs(r.speed_pct_min ?? 0) >= minSpeed)
+        (r) =>
+          matchesText(query, r.symbol) &&
+          (minSpeed <= 0 || Math.abs(r.speed_pct_min ?? 0) >= minSpeed) &&
+          (priceMin <= 0 || r.ltp >= priceMin) &&
+          (priceMax <= 0 || r.ltp <= priceMax) &&
+          (minRvol <= 0 || (r.rvol ?? 0) >= minRvol) &&
+          trendPasses(trendPick, tq.get(r.symbol)) &&
+          ticks.shows(r.symbol)
       ),
-    [source, query, minSpeed]
+    [source, query, minSpeed, priceMin, priceMax, minRvol, trendPick, tq, ticks]
   );
+
+  // Read trend quality: run the Trend quality scan on the stocks the filters show (read-only, candles only).
+  const readTrend = async () => {
+    const symbols = found.map((r) => r.symbol).slice(0, TQ_MAX);
+    if (!symbols.length) return;
+    setTqBusy(true);
+    setTqNote(`Reading trend quality of ${symbols.length} stock${symbols.length === 1 ? "" : "s"} on ${tqMinutes}-minute candles…`);
+    try {
+      await smaApi.chopScanStart(symbols, tqMinutes, true);
+      const want = new Set(symbols);
+      for (let i = 0; i < 120; i += 1) {
+        await sleep(3_000);
+        const scan = await smaApi.chopScan();
+        if (!scan.running) {
+          setTq(new Map(scan.rows.filter((row) => want.has(row.symbol)).map((row) => [row.symbol, row])));
+          setTqNote(
+            scan.error
+              ? `Trend quality: ${scan.error}`
+              : `Trend quality read ${clockIst(new Date().toISOString())} IST on ${tqMinutes}-minute candles (${scan.rows.filter((row) => want.has(row.symbol)).length} stocks).`
+          );
+          return;
+        }
+        setTqNote(`Reading trend quality… ${scan.done} of ${scan.total}`);
+      }
+      setTqNote("Trend quality is still running; press the button again in a minute.");
+    } catch (e: unknown) {
+      setTqNote(e instanceof Error ? e.message : "Could not read trend quality");
+    } finally {
+      setTqBusy(false);
+    }
+  };
   const { sorted: rows, sort: colSort, onSort } = useSort<ActiveStock, ColKey>(found, (r, k) => {
     switch (k) {
       case "symbol":
@@ -383,8 +493,89 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         />
         <NumberFilter label="Min traded today" value={minValue} onChange={setMinValue} min={0} max={500} step={5} prefix="₹" suffix="cr" />
         <NumberFilter label="Min speed, either way" value={minSpeed} onChange={setMinSpeed} min={0} max={1} step={0.01} suffix="%/m" />
+        <NumberFilter label="Price from (0 = any)" value={priceMin} onChange={setPriceMin} min={0} max={50000} step={10} prefix="₹" />
+        <NumberFilter label="Price to (0 = any)" value={priceMax} onChange={setPriceMax} min={0} max={50000} step={10} prefix="₹" />
+        <NumberFilter
+          label="Vol vs usual at least"
+          value={minRvol}
+          onChange={setMinRvol}
+          min={0}
+          max={10}
+          step={0.1}
+          suffix="×"
+          hint="Volume so far against the 20-day usual for this time of day; 0 = any"
+        />
+        <SelectFilter
+          label="Trend quality"
+          value={trendPick}
+          onChange={(v) => setTrendPick(v as TrendPick)}
+          options={TREND_PICKS}
+          className="w-36"
+        />
         <TextFilter value={query} onChange={setQuery} />
       </FilterRow>
+
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <button
+          type="button"
+          onClick={() => void readTrend()}
+          disabled={tqBusy || found.length === 0 || paused}
+          title="Run the Trend quality scan (strong trend, crosses today, phase) on the stocks the filters show now. Read-only; it replaces the Trend quality tab's last result."
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
+        >
+          {tqBusy ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />} Read trend quality
+        </button>
+        <label className="flex items-center gap-1">
+          on
+          <select
+            value={tqMinutes}
+            onChange={(e) => setTqMinutes(Number(e.target.value) as CrossScanMinutes)}
+            className="min-h-8 rounded-md border border-slate-700 bg-panel px-1 text-xs text-slate-100"
+          >
+            {TQ_SIZES.map((m) => (
+              <option key={m} value={m}>
+                {m}-min candles
+              </option>
+            ))}
+          </select>
+        </label>
+        {tq.size > 0 && (
+          <button type="button" onClick={() => setTq(new Map())} className="text-slate-500 hover:text-slate-300">
+            Clear trend columns
+          </button>
+        )}
+        {tqNote && <span className="text-accentSky">{tqNote}</span>}
+        {view === "history" && saved && (
+          <span className="ml-auto inline-flex flex-wrap items-center gap-2">
+            {detail?.check ? (
+              <span className="text-profit">Checked ✓</span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void startCheck()}
+              disabled={!detail?.can_check || checking || !!detail?.checking.running}
+              title={detail?.can_check ? "Download that day's candles again and see what each stock did after the scan (its call = its Bias, else its day move)" : "Available after 15:30 on the scan's day"}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
+            >
+              {checking ? <Loader2 size={13} className="animate-spin" /> : <Target size={13} />}
+              {checking ? `Checking ${detail?.checking.done ?? 0}/${detail?.checking.total ?? 0}` : detail?.check ? "Check again" : "Check accuracy"}
+            </button>
+          </span>
+        )}
+      </div>
+      {checkNote && <p className="mb-2 text-xs text-accentSky">{checkNote}</p>}
+      {view === "history" && detail?.check && (
+        <div className="mb-2 rounded-lg border border-border bg-surface2/60 p-2 text-xs text-slate-300">
+          {detail.check.summary.map((g) => (
+            <p key={g.key}>
+              <span className="font-semibold text-slate-100">{g.label}</span> ({g.count}): went the call&apos;s way after 30 min{" "}
+              {g.right_after_30_pct == null ? "—" : `${g.right_after_30_pct}%`} (avg {pct(g.avg_after_30_pct)}), at the close{" "}
+              {g.right_close_pct == null ? "—" : `${g.right_close_pct}%`} (avg {pct(g.avg_close_pct)}), best on the way {pct(g.avg_best_pct)}
+            </p>
+          ))}
+          {detail.check.error ? <p className="text-amber-300">{detail.check.error}</p> : null}
+        </div>
+      )}
 
       {note && <p className="mb-2 text-xs text-accentSky">{note}</p>}
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}
@@ -408,11 +599,13 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         </p>
       ) : (
         <div className="overflow-x-auto" ref={paged.anchor}>
+          {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
           <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
+                {onArmMany ? <TickHead ticks={ticks} symbols={rows.map((r) => r.symbol)} /> : null}
                 {inOrder(cols.order, {
                   rank: (
                     <th {...cols.dragProps("rank")} className={clsx("px-1 pb-2 text-left font-medium", cols.dragProps("rank").className)}>
@@ -473,6 +666,22 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                     </th>
                   ),
                 })}
+                {tq.size > 0 && (
+                  <>
+                    <th className="pb-2 text-left font-medium" title="Strong trend, else the Trend quality score (trending / mixed / choppy)">Trend</th>
+                    <th className="pb-2 text-right font-medium" title="SMA crosses today on the chosen candle">Crosses</th>
+                    <th className="pb-2 text-left font-medium" title="Trend phase now">Phase</th>
+                  </>
+                )}
+                {checkBy && (
+                  <>
+                    <th className="pb-2 text-left font-medium" title="The call checked: the row's Bias, else its day move">Call</th>
+                    <th className="pb-2 text-right font-medium">30 min</th>
+                    <th className="pb-2 text-right font-medium">1 hour</th>
+                    <th className="pb-2 text-right font-medium">At close</th>
+                    <th className="pb-2 text-right font-medium" title="Best move on the way to the close">Best</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -488,6 +697,9 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
                   arming={arming === r.symbol}
                   onArm={() => onArm(r.symbol)}
+                  tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null}
+                  trend={tq.size > 0 ? tq.get(r.symbol) ?? null : undefined}
+                  check={checkBy ? checkBy.get(r.symbol) ?? null : undefined}
                 />
               ))}
             </tbody>
@@ -509,7 +721,15 @@ function ActiveRowView({
   armedOn,
   arming,
   onArm,
+  tick,
+  trend,
+  check,
 }: {
+  tick?: ReactNode;
+  /** The stock's Trend quality row (undefined = the columns are not shown). */
+  trend?: ChopScanRow | null;
+  /** The saved scan's accuracy check for this stock (undefined = not checked). */
+  check?: ScanCheckRow | null;
   order: readonly Col[];
   rank: number;
   row: ActiveStock;
@@ -523,6 +743,7 @@ function ActiveRowView({
   const share = row.buy_share;
   return (
     <tr className="whitespace-nowrap border-t border-slate-800/70 [&>td]:px-2">
+      {tick}
       {inOrder(order, {
         rank: (
           <td className="py-1.5 pr-2 text-xs text-slate-500">{rank}</td>
@@ -628,6 +849,47 @@ function ActiveRowView({
           </td>
         ),
       })}
+      {trend !== undefined && (
+        <>
+          <td className="py-1.5 text-xs">
+            {trend == null ? (
+              <span className="text-slate-500">—</span>
+            ) : trend.trend ? (
+              <span className={clsx("font-semibold", trend.trend === "STRONG_BULLISH" ? "text-profit" : "text-loss")}>
+                Strong {trend.trend === "STRONG_BULLISH" ? "↑" : "↓"}
+              </span>
+            ) : (
+              <span className={trend.score === "CHOPPY" ? "text-amber-300" : "text-slate-300"}>{trend.score.toLowerCase()}</span>
+            )}
+          </td>
+          <td className="py-1.5 text-right font-mono text-xs">{trend?.crosses_today ?? "—"}</td>
+          <td className="py-1.5 text-xs">
+            {trend?.phase ? (
+              <span className={trend.phase === "BULL" ? "text-profit" : trend.phase === "BEAR" ? "text-loss" : "text-slate-400"}>
+                {trend.phase === "BULL" ? "up" : trend.phase === "BEAR" ? "down" : "choppy"}
+              </span>
+            ) : (
+              <span className="text-slate-500">—</span>
+            )}
+          </td>
+        </>
+      )}
+      {check !== undefined && (
+        <>
+          <td className="py-1.5 text-xs">
+            {check?.side ? (
+              <span className={check.side === "BULLISH" ? "text-profit" : "text-loss"}>{check.side === "BULLISH" ? "↑ up" : "↓ down"}</span>
+            ) : (
+              <span className="text-slate-500">—</span>
+            )}
+          </td>
+          {[check?.after_30_pct, check?.after_60_pct, check?.close_pct, check?.best_pct].map((v, i) => (
+            <td key={i} className={clsx("py-1.5 text-right font-mono text-xs", v == null ? "text-slate-500" : v >= 0 ? "text-profit" : "text-loss")}>
+              {v == null ? "—" : pct(v)}
+            </td>
+          ))}
+        </>
+      )}
     </tr>
   );
 }

@@ -281,3 +281,17 @@ def test_api_refuses_a_check_on_a_desk_with_scans_off(sma_api, monkeypatch):
     run_id = scan_history.save("cross", {"as_of": _at(10, 0).isoformat(), "rows": [{"symbol": "A"}]})
     monkeypatch.setenv("SCANS", "off")
     assert sma_api.post(f"/api/scan-history/{run_id}/check").status_code == 409
+
+
+def test_a_most_active_row_is_judged_on_its_bias_else_its_day_move():
+    tape = _day_tape([100 + i * 0.1 for i in range(200)])
+    as_of = _at(11, 0).isoformat()
+    long = scan_accuracy.evaluate("active", {"symbol": "A", "bias": "LONG", "rvol": 2.4}, tape, as_of, 5, 9, 21)
+    assert long["side"] == "BULLISH" and long["after_30_pct"] > 0 and long["bias"] == "LONG" and long["rvol"] == 2.4
+    short = scan_accuracy.evaluate("active", {"symbol": "A", "bias": "SHORT"}, tape, as_of, 5, 9, 21)
+    assert short["side"] == "BEARISH" and short["after_30_pct"] < 0
+    by_day = scan_accuracy.evaluate("active", {"symbol": "A", "bias": "NONE", "change_pct": -1.2}, tape, as_of, 5, 9, 21)
+    assert by_day["side"] == "BEARISH"
+    groups = {g["key"]: g for g in scan_accuracy.summarize("active", [long, short, by_day])}
+    assert groups["all"]["count"] == 3 and groups["long"]["count"] == 1 and groups["short"]["count"] == 1
+    assert groups["volume"]["count"] == 1 and groups["long"]["right_after_30_pct"] == 100.0

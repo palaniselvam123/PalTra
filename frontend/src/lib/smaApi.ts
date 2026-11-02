@@ -666,7 +666,7 @@ export type OpenPnlReplayRun = { run_id: number; first: string; last: string; da
 export type OpenPnlReplayLog = Omit<OpenPnlLog, "desk" | "every_sec"> & { run_id: number };
 
 /** One saved Cross scan / Trend quality pass (scan history), without its rows. */
-export type ScanKind = "cross" | "chop";
+export type ScanKind = "cross" | "chop" | "active";
 export type ScanRun = {
   id: number;
   kind: ScanKind;
