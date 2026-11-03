@@ -281,7 +281,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   hour by default** (owner's choice: he decides when; `main.desk_market_hours_free`); the desk secret
   `DESK_REPLAY_HOURS=after` brings back the refusal in market hours (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST
   Mon-Fri, 409; start, resume and Scalp-pick runs; the scan accuracy check follows the same switch). MCP `start_backtest`
-  stays refused in market hours.
+  stays refused in market hours. **Today during the session** (`parse_replay_range(..., allow_today=)`, `main._replay_today_ok`:
+  always on the backtest server, on the desk unless `DESK_REPLAY_HOURS=after`; from `replay.TODAY_FROM` 09:20): the
+  candles are loaded as they stand and the day ends at the last minute closed then (`replay.session_cut`,
+  `ReplaySession._loaded_at` / `_day_end`; the seek slider stops there too), then squares off as usual; a start time at or
+  after that cut is refused (400).
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
   chart focus, and an optional `interval` (1, 2, 3, 5, 10, 15, 30, 60 or 240

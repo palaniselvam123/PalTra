@@ -986,6 +986,8 @@ class ReplaySession:
     ) -> None:
         assert self.day is not None and self.end_day is not None
         first_day, last_day = self.day, self.end_day
+        # Today, replayed during the session, ends at the last minute closed now (session_cut).
+        self._loaded_at = dt.datetime.now(IST)
         frames: dict[str, pd.DataFrame] = {}
         first = dt.datetime.combine(first_day - dt.timedelta(days=WARMUP_DAYS), dt.time(9, 0))
         last = dt.datetime.combine(last_day, SESSION_END)
@@ -1194,7 +1196,7 @@ class ReplaySession:
         """
         eng = self.engine
         assert eng is not None and self.day is not None
-        end = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST)
+        end = self._day_end()
         last = time.monotonic()
         owed = 0.0  # replay seconds earned but not yet played
         try:
@@ -1288,6 +1290,10 @@ class ReplaySession:
         if log_ is not None:
             log_.flush()
 
+    def _day_end(self) -> dt.datetime:
+        assert self.day is not None
+        return session_cut(self.day, getattr(self, "_loaded_at", None))
+
     async def _finish_day(self) -> None:
         self._flush_pnl()
         eng = self.engine
@@ -1296,7 +1302,8 @@ class ReplaySession:
         if eng is not None and eng.status in ("RUNNING", "PAUSED"):
             keep = eng.status
             eng.status = "DAY_COMPLETED" if keep == "RUNNING" else keep
-            eng.halt_reason = "Replay day finished at 15:30"
+            end = self._day_end() if self.day is not None else None
+            eng.halt_reason = f"Replay day finished at {end:%H:%M}" if end is not None else "Replay day finished at 15:30"
 
     def control(self, action: str, speed: int | None = None, at: str | None = None) -> None:
         if speed is not None:
@@ -1326,7 +1333,7 @@ class ReplaySession:
         if self.rule is not None:
             first = max(first, self.rule.pick_time)
         lo = dt.datetime.combine(self.day, first, tzinfo=IST)
-        hi = dt.datetime.combine(self.day, SESSION_END, tzinfo=IST) - dt.timedelta(seconds=STEP_SECONDS)
+        hi = self._day_end() - dt.timedelta(seconds=STEP_SECONDS)
         target = min(hi, max(lo, dt.datetime.combine(self.day, when, tzinfo=IST)))
         clock = eng.feed.clock
         if target > clock:
@@ -1366,8 +1373,10 @@ class ReplaySession:
         self.status = "IDLE"
 
 
-def parse_replay_day(text: str, now: dt.datetime | None = None) -> dt.date:
-    """A finished weekday: before today, or today after 15:30 IST."""
+def parse_replay_day(text: str, now: dt.datetime | None = None, allow_today: bool = False) -> dt.date:
+    """A finished weekday: before today, or today after 15:30 IST. With `allow_today` (the backtest server, and the
+    desk unless DESK_REPLAY_HOURS=after) today may be replayed during the session too, up to the last closed minute
+    (`session_cut`)."""
     try:
         day = dt.date.fromisoformat((text or "").strip())
     except ValueError as exc:
@@ -1375,15 +1384,37 @@ def parse_replay_day(text: str, now: dt.datetime | None = None) -> dt.date:
     now = (now or dt.datetime.now(IST)).astimezone(IST)
     if day.weekday() >= 5:
         raise ValueError("That is a weekend. Pick a trading day.")
-    if day > now.date() or (day == now.date() and (market_is_open(now) or now.time() < SESSION_END)):
+    if day > now.date():
         raise ValueError("Pick a day that has already closed. Today replays after 15:30 IST.")
+    if day == now.date() and (market_is_open(now) or now.time() < SESSION_END):
+        if not allow_today:
+            raise ValueError("Pick a day that has already closed. Today replays after 15:30 IST.")
+        if now.time() < TODAY_FROM:
+            raise ValueError(f"Today's session has only just begun: replay today from {TODAY_FROM:%H:%M} IST.")
     return day
 
 
-def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime | None = None) -> tuple[dt.date, dt.date]:
-    """From/To for a run: both finished days, To on or after From, at most MAX_RANGE_DAYS (45) calendar days."""
+# Today replayed during the session: from this time on, so a few closed candles exist.
+TODAY_FROM = dt.time(9, 20)
+
+
+def session_cut(day: dt.date, now: dt.datetime | None = None) -> dt.datetime:
+    """Where a replayed day ends: 15:30 IST, or for today while the session is on, the start of the last closed
+    minute when the candles were loaded (a forming candle is never played)."""
+    close = dt.datetime.combine(day, SESSION_END, tzinfo=IST)
+    now = (now or dt.datetime.now(IST)).astimezone(IST)
+    if day != now.date():
+        return close
+    return min(close, now.replace(second=0, microsecond=0) - dt.timedelta(minutes=1))
+
+
+def parse_replay_range(
+    start_text: str, end_text: str | None, now: dt.datetime | None = None, allow_today: bool = False
+) -> tuple[dt.date, dt.date]:
+    """From/To for a run: both finished days (today too with `allow_today`), To on or after From, at most
+    MAX_RANGE_DAYS (45) calendar days."""
     if not end_text or end_text.strip() == (start_text or "").strip():
-        first = parse_replay_day(start_text, now)
+        first = parse_replay_day(start_text, now, allow_today)
         return first, first
     try:
         first = dt.date.fromisoformat((start_text or "").strip())
@@ -1395,7 +1426,7 @@ def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime |
     # A range may start on a weekend: it begins on the next trading day.
     while first.weekday() >= 5 and first < last:
         first += dt.timedelta(days=1)
-    first = parse_replay_day(first.isoformat(), now)
+    first = parse_replay_day(first.isoformat(), now, allow_today)
     if last < first:
         raise ValueError("To must be on or after From.")
     if (last - first).days > MAX_RANGE_DAYS:
@@ -1403,7 +1434,7 @@ def parse_replay_range(start_text: str, end_text: str | None, now: dt.datetime |
     # The last day must have closed too; weekends inside the range are skipped.
     while last.weekday() >= 5 and last > first:
         last -= dt.timedelta(days=1)
-    parse_replay_day(last.isoformat(), now)
+    parse_replay_day(last.isoformat(), now, allow_today)
     return first, last
 
 

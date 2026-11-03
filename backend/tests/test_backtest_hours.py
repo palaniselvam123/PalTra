@@ -151,3 +151,35 @@ def test_role_reports_the_built_version(monkeypatch):
     assert server_role.describe()["version"] == "dev"
     monkeypatch.setenv("APP_VERSION", "957de75fd109632f800a3e0d04cb54bcc0de2954")
     assert server_role.describe()["version"].startswith("957de75")
+
+
+def test_today_replays_in_market_hours_only_when_allowed():
+    from replay import parse_replay_range, session_cut
+
+    with pytest.raises(ValueError, match="already closed"):
+        parse_replay_range(THU.date().isoformat(), None, now=THU)
+    first, last = parse_replay_range(THU.date().isoformat(), None, now=THU, allow_today=True)
+    assert first == last == THU.date()
+    # A range ending today works too.
+    first, last = parse_replay_range("2026-10-26", THU.date().isoformat(), now=THU, allow_today=True)
+    assert first.isoformat() == "2026-10-26" and last == THU.date()
+    with pytest.raises(ValueError, match="only just begun"):
+        parse_replay_range(THU.date().isoformat(), None, now=THU.replace(hour=9, minute=16), allow_today=True)
+    with pytest.raises(ValueError, match="already closed"):
+        parse_replay_range("2026-10-30", None, now=THU, allow_today=True)  # tomorrow
+    # Today ends at the last closed minute; another day at 15:30.
+    assert session_cut(THU.date(), THU.replace(minute=7, second=30)).strftime("%H:%M") == "11:06"
+    assert session_cut(dt.date(2026, 10, 28), THU).strftime("%H:%M") == "15:30"
+    assert session_cut(THU.date(), THU.replace(hour=16)).strftime("%H:%M") == "15:30"
+
+
+def test_replay_today_is_allowed_on_the_backtest_server_and_free_desk(monkeypatch):
+    import main
+
+    monkeypatch.setenv("PALTRA_ROLE", "backtest")
+    monkeypatch.setenv("DESK_REPLAY_HOURS", "after")
+    assert main._replay_today_ok() is True
+    monkeypatch.delenv("PALTRA_ROLE", raising=False)
+    assert main._replay_today_ok() is False
+    monkeypatch.setenv("DESK_REPLAY_HOURS", "any")
+    assert main._replay_today_ok() is True

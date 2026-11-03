@@ -89,6 +89,7 @@ from replay import (
     run_trades,
     list_runs,
     parse_replay_range,
+    session_cut,
     parse_start,
     settings_snapshot,
 )
@@ -1639,6 +1640,12 @@ def desk_market_hours_free() -> bool:
     return os.environ.get("DESK_REPLAY_HOURS", "any").lower() != "after"
 
 
+def _replay_today_ok() -> bool:
+    """Today may be replayed during the session (up to the last closed minute): always on the backtest server,
+    and on the desk unless DESK_REPLAY_HOURS=after."""
+    return server_role.is_backtest() or desk_market_hours_free()
+
+
 def _refuse_desk_replay_in_market(now: dt.datetime | None = None) -> None:
     """With `DESK_REPLAY_HOURS=after`, backtests start on the main desk only outside market hours (09:00-15:45
     IST, Mon-Fri), so a heavy replay never slows the live bots. By default the desk replays at any time."""
@@ -1906,7 +1913,7 @@ async def replay_scalp_picks(body: ScalpPickStart):
     if body.speed not in SPEEDS:
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
-        day, end_day = parse_replay_range(body.date, body.end_date)
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
         pick_time = parse_start(body.pick_time)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1961,10 +1968,13 @@ async def replay_start(body: ReplayStart):
     if body.speed not in SPEEDS:
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
-        day, end_day = parse_replay_range(body.date, body.end_date)
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
         start = parse_start(body.start)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    cut = session_cut(day)
+    if day == end_day and dt.datetime.combine(day, start, tzinfo=IST) >= cut:
+        raise HTTPException(400, f"Today has closed candles only up to {cut:%H:%M} IST: pick an earlier start time.")
     if body.as_armed:
         symbols = []
         cid = arm_log.config_id_of(body.bot)
