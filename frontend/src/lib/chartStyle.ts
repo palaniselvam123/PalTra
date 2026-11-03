@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "pivots";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & {
   candleUp: string;
@@ -51,6 +51,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   st: { name: "Supertrend", auto: "while the Supertrend check or exit is on", color2: "down" },
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
+  cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
   pivots: { name: "Pivot points (P, R1/S1, R2/S2)", auto: "while the pivot target is on", color2: "P" },
 };
 
@@ -66,6 +67,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   st: { show: "auto", color: "#16A34A", color2: "#DC2626", width: 2, style: 0 },
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
+  cvd: { show: "auto", color: "#2DD4BF", width: 2, style: 0 },
   pivots: { show: "auto", color: "#EAB308", color2: "#94A3B8", width: 1, style: 2 },
 };
 
@@ -147,6 +149,28 @@ export function heikinAshi<T extends Candle>(rows: T[]): T[] {
       pc = close;
     }
     return { ...r, open, close, high: Math.max(r.high, open, close), low: Math.min(r.low, open, close) };
+  });
+}
+
+const IST_OFFSET_SEC = 19_800;
+
+/**
+ * Cumulative delta, the same estimate as the bot (cum_delta.py): each candle's volume × (close − open) ÷ (high − low),
+ * added up from the first candle of each IST day. A candle with no volume or no range adds 0.
+ */
+export function cvdValues(rows: { time: number; open: number; high: number; low: number; close: number; volume?: number | null }[]): number[] {
+  let day = -1;
+  let sum = 0;
+  return rows.map((c) => {
+    const d = Math.floor((c.time + IST_OFFSET_SEC) / 86_400);
+    if (d !== day) {
+      day = d;
+      sum = 0;
+    }
+    const span = c.high - c.low;
+    const vol = c.volume != null && Number.isFinite(c.volume) && c.volume > 0 ? c.volume : 0;
+    if (span > 0) sum += (vol * Math.max(-1, Math.min(1, (c.close - c.open) / span)));
+    return sum;
   });
 }
 

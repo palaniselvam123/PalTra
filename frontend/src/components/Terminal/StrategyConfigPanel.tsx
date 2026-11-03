@@ -346,6 +346,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     macd_fast: Math.min(200, Math.max(1, Math.round(Number(form.macd_fast ?? 12)) || 12)),
     macd_slow: Math.min(200, Math.max(1, Math.round(Number(form.macd_slow ?? 26)) || 26)),
     macd_signal: Math.min(200, Math.max(1, Math.round(Number(form.macd_signal ?? 9)) || 9)),
+    use_cvd: Boolean(form.use_cvd),
+    cvd_lookback: Math.min(50, Math.max(1, Math.round(Number(form.cvd_lookback ?? 5)) || 5)),
+    cvd_div_exit: Boolean(form.cvd_div_exit),
+    cvd_div_lookback: Math.min(100, Math.max(3, Math.round(Number(form.cvd_div_lookback ?? 10)) || 10)),
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
@@ -1508,6 +1512,30 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_macd") && <OwnTag />}
             Buy only while MACD is above its signal line, sell only while below
           </label>
+          <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
+            Cumulative delta (check here; the divergence exit is in step 3)
+            <InfoTip label="About cumulative delta">
+              Groww does not say which shares were bought at the ask and which sold at the bid, so each candle&apos;s
+              delta is estimated: its volume × (close − open) ÷ (high − low). A strong green candle counts as mostly
+              buying, a doji as none. The deltas are added up from 09:15 each day. Entry: a buy only while the cumulative
+              delta has risen over the last N closed candles (since the open when fewer have closed), a sell only while it
+              has fallen; otherwise the cross is skipped (✕ &quot;CVD&quot; on the chart). Off by default; try it on Replay
+              first.
+            </InfoTip>
+          </div>
+          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+            <Field label="Compare over (candles)" value={String(form.cvd_lookback ?? 5)} onChange={(v) => set("cvd_lookback", v)} own={isOwn("cvd_lookback")} />
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_cvd)}
+              onChange={(e) => set("use_cvd", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_cvd") && <OwnTag />}
+            Buy only while the cumulative delta is rising, sell only while it is falling
+          </label>
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1893,6 +1921,27 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("macd_exit") && <OwnTag />}
             Close when MACD crosses its signal line against the trade (numbers set in step 2)
           </label>
+          <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.cvd_div_exit)}
+              onChange={(e) => set("cvd_div_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("cvd_div_exit") && <OwnTag />}
+            Close on a cumulative delta divergence
+            <InfoTip label="About the divergence exit">
+              Once per closed candle after the entry: a buy closes when the candle&apos;s high is above every high of the
+              candles before it today (up to the look-back) but the cumulative delta is lower than it was at that earlier
+              high: price made a new high, buyers did not. A short closes on a new low the delta does not follow. No
+              reverse. Exit reason CVD_DIVERGENCE.
+            </InfoTip>
+          </label>
+          {form.cvd_div_exit && (
+            <div className="mt-2 grid grid-cols-3 items-end gap-2">
+              <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
+            </div>
+          )}
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2913,6 +2962,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
   check("use_macd", f.use_macd, `MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} must be on the trade's side of its signal line`);
+  check("use_cvd", f.use_cvd, `Cumulative delta must have moved the trade's way over the last ${n(f.cvd_lookback, 5)} candles`);
   check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
   check(
     "use_level",
@@ -2950,6 +3000,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
+  if (f.cvd_div_exit) add({ group: "exit", key: "cvd_div_exit", text: `Close when price makes a new high / low over ${n(f.cvd_div_lookback, 10)} candles without the cumulative delta`, off: { cvd_div_exit: false } });
   if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });

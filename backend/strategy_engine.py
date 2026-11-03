@@ -62,6 +62,7 @@ import always_in
 import ema_filter
 import heikin_ashi
 import macd
+import cum_delta
 import exit_candle
 import small_candles
 import vwap_stop
@@ -224,6 +225,8 @@ class OpenPosition:
     ema_bar: int | None = None
     # MACD exit (macd.py): the last closed candle read.
     macd_bar: int | None = None
+    # Cumulative delta divergence exit (cum_delta.py): the last closed candle read.
+    cvd_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
@@ -319,6 +322,7 @@ SNAPSHOT_FIELDS = (
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -546,6 +550,10 @@ def _entry_block(
         m = macd.entry_reason(frame, direction, cfg)
         if m:
             reason = f"{reason}; {m}" if reason else m
+    if on("cvd"):
+        cv = cum_delta.entry_reason(frame, direction, cfg)
+        if cv:
+            reason = f"{reason}; {cv}" if reason else cv
     if on("supertrend"):
         st = supertrend.entry_reason(frame, direction, cfg)
         if st:
@@ -659,6 +667,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("EMA")
         elif low.startswith("macd"):
             parts.append("MACD")
+        elif low.startswith("cumulative delta"):
+            parts.append("CVD")
         elif low.startswith("supertrend"):
             parts.append("ST")
         elif low.startswith("opening"):
@@ -726,7 +736,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("supertrend", "Supertrend"), ("level", "Price level"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"),
     ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
@@ -777,6 +787,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return ema_filter.passed_text(frame, direction, cfg)
         if name == "macd":
             return macd.passed_text(frame, direction, cfg)
+        if name == "cvd":
+            return cum_delta.passed_text(frame, direction, cfg)
         if name == "supertrend":
             return supertrend.passed_text(frame, direction, cfg)
         if name == "level":
@@ -842,6 +854,10 @@ def chart_filters(cfg) -> dict:
         "ema_lines": ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg),
         "ema_fast": ema_filter.lengths(cfg)[0],
         "ema_slow": ema_filter.lengths(cfg)[1],
+        # Cumulative delta strip (cum_delta.py): drawn while its entry check or divergence exit is on.
+        "use_cvd": cum_delta.entry_on(cfg),
+        "cvd_div_exit": cum_delta.exit_on(cfg),
+        "cvd_lookback": cum_delta.lookback(cfg),
         # Supertrend line (supertrend.py): drawn while its entry check or exit is on.
         "st_line": supertrend.entry_on(cfg) or supertrend.exit_on(cfg),
         "st_period": supertrend.settings(cfg)[0],
@@ -886,6 +902,7 @@ _FILTER_KEYS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
@@ -1482,6 +1499,7 @@ class StrategyEngine:
             await self._watch_counter_candles(symbol_cfg)
             await self._watch_ema_exit(symbol_cfg)
             await self._watch_macd_exit(symbol_cfg)
+            await self._watch_cvd_exit(symbol_cfg)
             await self._watch_exit_candle(symbol_cfg)
             await self._watch_small_candles(symbol_cfg)
             await self._watch_supertrend_exit(symbol_cfg)
@@ -4081,6 +4099,31 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} MACD cross exit — {note}"
         await self._exit_now(cfg, self.ltp, macd.EXIT_REASON)
 
+    async def _watch_cvd_exit(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit on a price / cumulative delta divergence against the trade (cum_delta.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not cum_delta.exit_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._frames.get(symbol)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.cvd_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            # That candle had closed before the entry: a divergence on it is not "after the entry".
+            return
+        pos.cvd_bar = closed_ts
+        hit, note = cum_delta.divergence(frame.iloc[:-1], pos.signal_direction, cfg)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} cumulative delta divergence exit — {note}"
+        await self._exit_now(cfg, self.ltp, cum_delta.EXIT_REASON)
+
     async def _watch_exit_candle(self, cfg: BotConfig) -> None:
         """Once per closed exit candle: the SMA cross exit read on another candle size (exit_candle.py)."""
         pos = self.position
@@ -4334,6 +4377,7 @@ class StrategyEngine:
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
+                    "CVD_DIVERGENCE": "price made a new extreme without the cumulative delta — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
                     "SMA9_TURN": "SMA 9 turned against the trade — flat",
@@ -5736,6 +5780,7 @@ _ALERT_REASON = {
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
     "MACD_CROSS": "MACD cross against the trade",
+    "CVD_DIVERGENCE": "price / cumulative delta divergence",
     "SUPERTREND": "Supertrend turned against the trade",
     "VWAP_SL_HIT": "VWAP stop hit",
     "SMA9_BEND": "SMA 9 bent",
@@ -6191,7 +6236,7 @@ STOP_LOST = "STOP_LOST"
 STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
@@ -6219,6 +6264,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("EMA")
     if bool(getattr(cfg, "use_macd", False)):
         checked.append("MACD")
+    if cum_delta.entry_on(cfg):
+        checked.append("cumulative delta")
     if bool(getattr(cfg, "use_supertrend", False)):
         checked.append("Supertrend")
     if bool(getattr(cfg, "use_level", False)):

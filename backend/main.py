@@ -59,6 +59,7 @@ import counter_candles
 import ema_filter
 import heikin_ashi
 import macd
+import cum_delta
 import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
@@ -599,6 +600,10 @@ class ConfigUpdate(BaseModel):
     macd_fast: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_slow: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_signal: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    use_cvd: bool | None = None
+    cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
+    cvd_div_exit: bool | None = None
+    cvd_div_lookback: int | None = Field(default=None, ge=cum_delta.MIN_DIV_LOOKBACK, le=cum_delta.MAX_DIV_LOOKBACK)
     ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
@@ -1573,6 +1578,10 @@ def _gap_dict(row) -> dict:
         "macd_fast": macd.lengths(row)[0],
         "macd_slow": macd.lengths(row)[1],
         "macd_signal": macd.lengths(row)[2],
+        "use_cvd": cum_delta.entry_on(row),
+        "cvd_lookback": cum_delta.lookback(row),
+        "cvd_div_exit": cum_delta.exit_on(row),
+        "cvd_div_lookback": cum_delta.div_lookback(row),
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
