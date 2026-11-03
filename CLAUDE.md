@@ -510,6 +510,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   cancels a LIVE stop first) on a candle closed after the entry on which MACD crossed its signal line against it; once per
   closed candle (`pos.macd_bar`); a LIVE position restored without its stop id is left to that stop. Settings → 2. Checks
   before entering (numbers) and 3. When to exit. The stock research baseline keeps both off.
+- `backend/cum_delta.py` – cumulative delta (CVD) check and divergence exit (off by default, per bot and per stock, PAPER
+  and LIVE, replays too). Groww gives no buy / sell split, so each candle's delta is estimated (owner's choice): volume ×
+  (close − open) ÷ (high − low) (0 for no range or no volume), summed from each IST session's first candle (`series`).
+  **Entry** (`use_cvd`, `cvd_lookback` 5, 1-50): through `_entry_block` (check name `cvd`, chart ✕ "CVD"): a buy only while
+  today's cumulative delta has risen over the last N closed candles (since the open when fewer), a sell only while it fell.
+  **Divergence exit** (`cvd_div_exit`, `cvd_div_lookback` 10, 3-100): `StrategyEngine._watch_cvd_exit`, once per candle
+  closed after the entry (`pos.cvd_bar`), closes a long whose candle's high tops every high of the N candles before it
+  today while the delta is below its value at that earlier high (a short mirrors on lows): `CVD_DIVERGENCE` via `_exit_now`
+  (LIVE stop cancelled first; a LIVE position restored without its stop id is left to that stop). No reverse. Counts as an
+  exit for `strategyChecks.noExitOn`. Settings → 2. Checks before entering and 3. When to exit. The chart's "Cumulative
+  delta (strip)" (`chartStyle` key `cvd`, Auto = while either is on) is worked out in the browser (`chartStyle.cvdValues`,
+  same arithmetic). The stock research baseline keeps both off.
 - `backend/heikin_ashi.py` – Heikin Ashi colours (`ha_colours`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): HA close = (O + H + L + C) / 4, HA open = (previous HA open + previous HA close) / 2 (`candles`). With it on,
   every rule that reads a candle's colour reads the HA one through `view(frame, cfg)` (the real close, with `open` moved so

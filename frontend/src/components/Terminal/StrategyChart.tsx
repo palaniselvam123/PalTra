@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { emaValues, heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
+import { cvdValues, emaValues, heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { PinToggle } from "@/components/ui/PinToggle";
@@ -928,6 +928,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
   const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
+  // Cumulative delta strip (cum_delta.py), worked out in the browser from the candles' volume.
+  const cvdRef = useRef<ISeriesApi<"Line"> | null>(null);
   const bbRefs = useRef<ISeriesApi<"Line">[]>([]);
   // EMA cross lines (ema_filter.py): fast, slow. Drawn only while the EMA check or exit is on.
   const emaRefs = useRef<ISeriesApi<"Line">[]>([]);
@@ -1425,6 +1427,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     instance.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     vwapRef.current = vwap;
     rsiRef.current = rsi;
+    const cvd = instance.addLineSeries({
+      color: "#2DD4BF",
+      lineWidth: 2,
+      priceScaleId: "cvd",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: tag("Cum. delta"),
+      visible: false,
+    });
+    instance.priceScale("cvd").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    cvdRef.current = cvd;
     // SMA 9 slope (%/candle): green bars while the line rises, red while it falls.
     const slopeBars = instance.addHistogramSeries({
       priceScaleId: "slope",
@@ -1559,6 +1572,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     paint(vwapRef.current, look.vwap);
     paint(atrRef.current, look.atr);
     paint(rsiRef.current, look.rsi);
+    paint(cvdRef.current, look.cvd);
     paint(emaRefs.current[0], look.ema);
     paint(emaRefs.current[1], look.ema, look.ema.color2);
     paint(stRefs.current[0], look.st);
@@ -1598,18 +1612,30 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const showAtr = shown(look.atr, filters ? filters.atr_stop : true);
     const showVwap = shown(look.vwap, Boolean(filters?.use_vwap));
     const showRsi = shown(look.rsi, Boolean(filters?.use_rsi));
+    const showCvd = shown(look.cvd, Boolean(filters?.use_cvd || filters?.cvd_div_exit));
     smaFastRef.current.applyOptions({ visible: look.sma9.show !== "off" });
     smaSlowRef.current.applyOptions({ visible: look.sma21.show !== "off" });
     const showSlopeBars = showSlope || Boolean(filters?.slope_exit);
     atrRef.current.applyOptions({ visible: showAtr });
     // Both strips at once share the bottom: ATR above, RSI below; the slope strip, when on, sits under both.
     const lift = showSlopeBars ? 0.17 : 0;
-    apiRef.current?.priceScale("atr").applyOptions({
-      scaleMargins: showRsi ? { top: 0.72 - lift, bottom: 0.15 + lift } : { top: 0.75 - lift, bottom: 0.02 + lift },
-    });
-    apiRef.current?.priceScale("rsi").applyOptions({
-      scaleMargins: showAtr ? { top: 0.87 - lift, bottom: 0.01 + lift } : { top: 0.75 - lift, bottom: 0.02 + lift },
-    });
+    // The strips on show share the bottom band in equal slices (one alone keeps the old 0.75–0.98).
+    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd]] as const).filter(([, on]) => on).map(([id]) => id);
+    const sliceOf = (id: string) => {
+      const i = strips.indexOf(id as (typeof strips)[number]);
+      if (strips.length <= 1 || i < 0) return { top: 0.75 - lift, bottom: 0.02 + lift };
+      const start = 0.72 - lift;
+      const h = 0.27 / strips.length;
+      return { top: start + i * h + 0.01, bottom: Math.max(0, 1 - (start + (i + 1) * h) + 0.005) };
+    };
+    apiRef.current?.priceScale("atr").applyOptions({ scaleMargins: sliceOf("atr") });
+    apiRef.current?.priceScale("rsi").applyOptions({ scaleMargins: sliceOf("rsi") });
+    apiRef.current?.priceScale("cvd").applyOptions({ scaleMargins: sliceOf("cvd") });
+    if (cvdRef.current) {
+      cvdRef.current.applyOptions({ visible: showCvd });
+      const values = showCvd ? cvdValues(rows) : [];
+      cvdRef.current.setData(values.map((v, i) => ({ time: rows[i].time as never, value: v })));
+    }
     if (slopeRef.current) {
       const series = slopeRef.current;
       const back = filters?.slope_lookback ?? 2;

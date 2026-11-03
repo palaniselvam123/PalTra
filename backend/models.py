@@ -26,7 +26,7 @@ class TradeLog(Base):
     sl_trigger_price: Mapped[float] = mapped_column(Float)
     exit_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | COUNTER_CANDLES | EMA_CROSS | MACD_CROSS | SUPERTREND | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
+    # MA_CROSS | MA_APPROACH | USER_REVIEW_EXIT | ATR_SL_HIT | GAP_SL_HIT | TARGET_HIT | BB_TARGET | BB_MIDDLE | GAP_FADE | COUNTER_CANDLES | EMA_CROSS | MACD_CROSS | CVD_DIVERGENCE | SUPERTREND | EOD_SQUARE_OFF | KILL_SWITCH | NOT_ON_GROWW | MANUAL_CLOSE | SL_REJECTED
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     gross_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     brokerage_and_taxes: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -374,6 +374,11 @@ class BotConfig(Base):
     macd_fast: Mapped[int | None] = mapped_column(Integer, nullable=True, default=12)
     macd_slow: Mapped[int | None] = mapped_column(Integer, nullable=True, default=26)
     macd_signal: Mapped[int | None] = mapped_column(Integer, nullable=True, default=9)
+    # Cumulative delta (cum_delta.py): entry only while it moves the trade's way, exit on a price / delta divergence.
+    use_cvd: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    cvd_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
+    cvd_div_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    cvd_div_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     # Heikin Ashi colours (heikin_ashi.py): every candle-colour rule reads Heikin Ashi candles.
     ha_colours: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.

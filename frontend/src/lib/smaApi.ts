@@ -166,6 +166,11 @@ export type SmaConfig = {
   macd_fast?: number;
   macd_slow?: number;
   macd_signal?: number;
+  /** Cumulative delta (cum_delta.py): entry only while it moves the trade's way; exit on a price / delta divergence. */
+  use_cvd?: boolean;
+  cvd_lookback?: number;
+  cvd_div_exit?: boolean;
+  cvd_div_lookback?: number;
   /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
   ha_colours?: boolean;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
@@ -1036,6 +1041,10 @@ export type BbExit = (typeof BB_EXITS)[number];
 
 export type ChartFilters = {
   use_vwap: boolean;
+  /** Cumulative delta strip (cum_delta.py): drawn on Auto while its check or divergence exit is on. */
+  use_cvd?: boolean;
+  cvd_div_exit?: boolean;
+  cvd_lookback?: number;
   use_rsi: boolean;
   rsi_long_min: number;
   rsi_long_max: number;
