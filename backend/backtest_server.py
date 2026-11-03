@@ -278,6 +278,21 @@ def stop_now(reason: str) -> None:
 # ---- the desk link -----------------------------------------------------------
 
 
+# Practice bots started here (Start bot on this server, main._start_backtest_bots): from then until the
+# process restarts, this server's quotes and candles use its OWN Groww login (groww_client.desk_session_token),
+# so the bots never count against the desk's Groww rate limit. Before that the replays borrow the desk's session.
+_own_login = False
+
+
+def use_own_login() -> None:
+    global _own_login
+    _own_login = True
+
+
+def own_login_on() -> bool:
+    return _own_login and server_role.is_backtest()
+
+
 def remote_token() -> str:
     """The desk's Groww access token, as last fetched (memory only)."""
     return state.token if server_role.is_backtest() else ""

@@ -1059,7 +1059,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `note_request` via the desk app's middleware, for `idle_minutes()`, default 30, 10-240, `backtest_server.json` next to
   the SMA DB → SIGTERM → exit → Fly stops the machine; `[[restart]] on-failure`). **Never orders**
   (`server_role.no_orders` covers scanner and backtest: `refuse_orders`, the LIVE switch 403, the desk broker and manual
-  desk) and runs no live bots, alerts or ORB feed (`main._boot_backtest_server`; `_start_bot` answers 409). **Scalp scans
+  desk) and runs no alerts or ORB feed (`main._boot_backtest_server`). **Practice bots here** (owner's choice): Start bot
+  (`_start_bot` → `main._start_backtest_bots`) runs the bots on today's live prices, PAPER only, and is refused (409)
+  until this server's own Groww login is saved (Settings → Broker keys, `groww_client._read_desk_token`); the first
+  Start starts every bot's loop (bot 1 in `_bt_bot1_task`, bots 2-5 in `_bot_tasks`) and the fast-mover hand-off, and
+  calls `backtest_server.use_own_login`, after which `groww_client.desk_session_token` returns that own login, not the
+  desk's borrowed one, until the process restarts (replays then use it too), so the desk's Groww rate limit is never
+  used by them. No alert or call is sent (`StrategyEngine._alert` returns on `server_role.no_orders()`), and a running,
+  paused or holding bot keeps the machine awake (`main._bot_running_here` busy check). **Scalp scans
   on demand** (`server_role.scans_enabled` is true here; no background most-active loop; the Trend quality auto re-scan,
   off by default, runs here too once turned on (`chop_autos.start_loop` in `_boot_backtest_server`), and while it or a
   scheduled Scan & arm preset is on the machine stays awake in market hours (`main._auto_scans_due` busy check)): they download with **this server's own Groww login** (`scan_session.OwnSession`, the token saved by its own

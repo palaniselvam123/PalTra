@@ -555,3 +555,78 @@ def test_auto_rescan_runs_and_keeps_the_backtest_server_awake(monkeypatch, backt
     scan_arm.save({"bot": 3, "sizes": [5], "times": ["10:00"], "on": True})
     assert main._auto_scans_due(open_at) is True
     database.reset_engine()
+
+
+# ---- Practice bots on the backtest server (main._start_backtest_bots) ----
+
+
+def test_start_bot_here_needs_this_servers_own_groww_login(monkeypatch, backtest):
+    import groww_client
+    import main
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "")
+    monkeypatch.setattr(main, "_backtest_bots_on", False)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(main._start_backtest_bots())
+    assert err.value.status_code == 409 and "Log in to Groww on this backtest server" in err.value.detail
+    assert main._backtest_bots_on is False and not backtest_server.own_login_on()
+
+
+def test_first_start_switches_to_its_own_login_and_starts_the_loops(monkeypatch, backtest):
+    import fast_bot
+    import groww_client
+    import main
+
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "OWN-TOKEN")
+    monkeypatch.setattr(main, "_backtest_bots_on", False)
+    monkeypatch.setattr(backtest_server, "_own_login", False)
+    monkeypatch.setattr(groww_client, "_desk_token_cache", None)
+    backtest_server.state.token = "DESK-TOKEN"
+    assert groww_client.desk_session_token() == "DESK-TOKEN"  # replays borrow the desk's session until then
+    started: list[str] = []
+
+    async def fake_run(self=None):
+        started.append("run")
+
+    for eng in (main.engine, *main.bot_engines.values()):
+        monkeypatch.setattr(type(eng), "run", fake_run)
+        monkeypatch.setattr(type(eng), "restore_open_books", lambda self: None)
+        monkeypatch.setattr(type(eng), "restore_trades_today", lambda self: None)
+    monkeypatch.setattr(fast_bot.watcher, "start", lambda *_a: started.append("fast"))
+    checks = list(backtest_server._busy_checks)
+
+    async def go():
+        await main._start_backtest_bots()
+        await asyncio.sleep(0)
+        await main._start_backtest_bots()  # a second Start does not start the loops twice
+        await asyncio.sleep(0)
+
+    try:
+        asyncio.run(go())
+        assert backtest_server.own_login_on()
+        monkeypatch.setattr(groww_client, "_desk_token_cache", None)
+        assert groww_client.desk_session_token() == "OWN-TOKEN"  # never the desk's session for live quotes
+        assert started.count("fast") == 1 and started.count("run") == 1 + len(main.bot_engines)
+        assert main.engine.broker.mode == "PAPER"
+        # Each bot's book is the practice one, and the machine stays awake while one runs.
+        assert main._bot_running_here in backtest_server._busy_checks
+    finally:
+        backtest_server._busy_checks[:] = checks
+        main._bot_tasks.clear()
+        main._bt_bot1_task = None
+
+
+def test_bots_on_the_backtest_server_send_no_alert(monkeypatch, backtest):
+    import strategy_engine
+
+    sent = []
+    monkeypatch.setattr(strategy_engine, "_schedule_whatsapp", lambda m: sent.append(m))
+    monkeypatch.setattr(strategy_engine, "_schedule_critical_whatsapp", lambda m, call=False: sent.append(m))
+    eng = strategy_engine.StrategyEngine.__new__(strategy_engine.StrategyEngine)
+    strategy_engine.StrategyEngine._alert(eng, "fill", critical=True, call=True)
+    strategy_engine.StrategyEngine._alert(eng, "fill")
+    assert sent == []
+    monkeypatch.delenv("PALTRA_ROLE")
+    strategy_engine.StrategyEngine._alert(eng, "fill")
+    assert sent == ["fill"]

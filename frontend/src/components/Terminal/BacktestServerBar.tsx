@@ -92,7 +92,8 @@ export function BacktestServerBar() {
   return (
     <div role="note" className="space-y-2 rounded-xl border border-violet-400/40 bg-violet-500/[0.08] px-3 py-2 text-sm text-violet-100">
       <p>
-        <span className="font-semibold">Backtest server</span>: backtests only, with practice money. The bots trade on the{" "}
+        <span className="font-semibold">Backtest server</span>: backtests, and Start bot runs the bots here on today&apos;s
+        live prices with practice money only (this server&apos;s own Groww login; no alerts). Real orders only ever go from the{" "}
         <a href={role.desk_url} className="underline" target="_blank" rel="noreferrer">
           main desk
         </a>
