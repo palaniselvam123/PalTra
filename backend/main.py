@@ -1633,10 +1633,16 @@ async def start_bot():
 DESK_REPLAY_BLOCK = (dt.time(9, 0), dt.time(15, 45))
 
 
+def desk_market_hours_free() -> bool:
+    """True when the main desk may run backtests and accuracy checks in market hours too (the default, the
+    owner's choice: he decides when). `DESK_REPLAY_HOURS=after` brings back the old 09:00-15:45 refusal."""
+    return os.environ.get("DESK_REPLAY_HOURS", "any").lower() != "after"
+
+
 def _refuse_desk_replay_in_market(now: dt.datetime | None = None) -> None:
-    """On the main desk, backtests start only outside market hours (09:00-15:45 IST, Mon-Fri), so a heavy
-    replay never slows the live bots; the backtest server takes them then. `DESK_REPLAY_HOURS=any` lifts it."""
-    if not server_role.is_desk() or os.environ.get("DESK_REPLAY_HOURS", "after").lower() == "any":
+    """With `DESK_REPLAY_HOURS=after`, backtests start on the main desk only outside market hours (09:00-15:45
+    IST, Mon-Fri), so a heavy replay never slows the live bots. By default the desk replays at any time."""
+    if not server_role.is_desk() or desk_market_hours_free():
         return
     now = now or dt.datetime.now(IST)
     if now.weekday() < 5 and DESK_REPLAY_BLOCK[0] <= now.time() < DESK_REPLAY_BLOCK[1]:
@@ -2952,7 +2958,7 @@ async def scan_history_pull(days: int = Query(14, ge=1, le=scan_sync.MAX_DAYS)):
 async def scan_history_check(run_id: int):
     """Download that day's candles again and measure what each stock did after the scan. Read-only."""
     _refuse_when_paused()
-    if server_role.is_desk() and market_is_open():
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
         raise HTTPException(409, "During market hours the check runs only on the scanner server, so it never shares the bots' Groww limit.")
     run = await asyncio.to_thread(scan_history.get, run_id)
     if run is None:

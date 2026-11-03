@@ -131,3 +131,23 @@ def test_sync_copies_the_fast_mover_settings_too(monkeypatch):
     assert asyncio.run(go()) == {"synced": ["1"]}
     saved = fast_bot.load()
     assert saved.on and saved.rule == "SPEED" and saved.sources == [4]
+
+
+def test_desk_replays_any_time_by_default_owner_decides(monkeypatch):
+    import main
+
+    monkeypatch.delenv("PALTRA_ROLE", raising=False)
+    monkeypatch.delenv("DESK_REPLAY_HOURS", raising=False)
+    assert main.desk_market_hours_free() is True
+    main._refuse_desk_replay_in_market(THU)  # a Thursday inside market hours: allowed
+    monkeypatch.setenv("DESK_REPLAY_HOURS", "after")
+    assert main.desk_market_hours_free() is False
+
+
+def test_role_reports_the_built_version(monkeypatch):
+    import server_role
+
+    monkeypatch.delenv("APP_VERSION", raising=False)
+    assert server_role.describe()["version"] == "dev"
+    monkeypatch.setenv("APP_VERSION", "957de75fd109632f800a3e0d04cb54bcc0de2954")
+    assert server_role.describe()["version"].startswith("957de75")

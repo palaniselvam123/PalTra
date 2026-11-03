@@ -107,15 +107,27 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
    - secret `FLY_BACKTEST_API_TOKEN` = `fly tokens create deploy -a paltra-backtest`
    - variable `DEPLOY_BACKTEST` = `true`
 
-   Every push to `main` then deploys the backtest server too, after the desk and the
-   scanner, with the same market-hours gate.
+   Every tested push to `main` then deploys **only the backtest server**, at any hour (it never orders).
+
+## Releasing: backtest server first, then the main desk
+
+1. A merge to `main` lands on the backtest server. Its bar shows **This server runs version abc1234**.
+2. Try the change there (backtests, scans).
+3. Happy with it? Press **Tested OK? Deploy this version to the main desk** on the bar (or **Copy version** first).
+   On GitHub → Actions → *Test and deploy* → **Run workflow**: target `main-desk`, commit = the copied version
+   (blank = latest main). The main desk and then the scanner are deployed with exactly that commit.
+4. Inside market hours (09:00-15:45 IST, Mon-Fri) the main desk is only deployed with **market_hours_ok** ticked: the
+   desk restarts for about a minute and the bots lose their in-memory state. Otherwise run it after 15:45.
+
+The desk's terminal shows **Desk version …** next to the backtest-server link, so you can see whether it is behind.
 
 ## Market hours only (optional)
 
 Tick **Market hours only, stop after 15:45** on this server's bar to use it only while NSE is open. After the stop time
 (and on weekends) it stops itself once no backtest or scan has run for 5 minutes, even with the page open, so it is only
-billed in market hours. Opening it after hours wakes it for those few minutes only. Run evening backtests on the main
-desk instead: the desk starts replays only after 15:45 (and at weekends), so they never slow the live bots.
+billed in market hours. Opening it after hours wakes it for those few minutes only. The main desk runs backtests and
+accuracy checks at any time too (you decide when; a heavy backtest in market hours shares the bots' machine). Set the
+desk secret `DESK_REPLAY_HOURS=after` to bring back the old rule (desk backtests only after 15:45 and at weekends).
 
 Every Cross scan, Trend quality and Most active scan finished here, and each accuracy check, is also copied to the desk,
 so the desk's Scalp page (History tab, Most active → History) shows them while this server is stopped.
