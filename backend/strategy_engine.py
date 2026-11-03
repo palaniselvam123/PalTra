@@ -1106,7 +1106,12 @@ class StrategyEngine:
 
         `kind` picks the channel: "trade" (fills, closes, refusals, hand-offs) or "signal" (a cross
         coming, an SMA 9 turn, a 1-minute review); each falls back to the trade channel when unset.
+        The scanner and the backtest server never send one: their practice bots must not message or ring the owner.
         """
+        import server_role
+
+        if server_role.no_orders():
+            return
         if critical:
             _schedule_critical_whatsapp(message, call=call)
         elif kind == "trade":

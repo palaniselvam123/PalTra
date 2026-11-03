@@ -365,6 +365,46 @@ def _boot_backtest_server() -> asyncio.Task:
     return _task
 
 
+_backtest_bots_on = False
+_bt_bot1_task: asyncio.Task | None = None  # bot 1's loop on the backtest server (_task there is the idle watcher)
+
+
+def _bot_running_here() -> bool:
+    """Backtest server: a practice bot is running or paused, or holds a trade (keeps the machine awake)."""
+    return any(e.status in ("RUNNING", "PAUSED") or e.positions for e in (engine, *bot_engines.values()))
+
+
+async def _start_backtest_bots() -> None:
+    """Backtest server: Start bot runs the bots here on today's live prices, practice money only (PAPER forced;
+    server_role.refuse_orders stops any Groww order, and no alert or call is sent). The first Start starts every
+    bot's loop and the fast-mover hand-off, and switches this server to its own Groww login for good (until it
+    restarts), so the desk's rate limit is never used by them. Refused without that login."""
+    global _backtest_bots_on
+    from groww_client import _read_desk_token
+
+    if not await asyncio.to_thread(_read_desk_token):
+        raise HTTPException(
+            409,
+            "Log in to Groww on this backtest server first (Settings → Broker keys). Its practice bots use its own "
+            "Groww login, never the main desk's, so they do not slow the desk's bots.",
+        )
+    if _backtest_bots_on:
+        return
+    _backtest_bots_on = True
+    backtest_server.use_own_login()
+    engine.broker.adopt_saved_session(force=True)
+    for eng in (engine, *bot_engines.values()):
+        eng.broker.set_mode("PAPER")
+        eng.restore_open_books()
+        eng.restore_trades_today()
+    global _bt_bot1_task
+    _bt_bot1_task = asyncio.create_task(engine.run())
+    for eng in bot_engines.values():
+        _bot_tasks.append(asyncio.create_task(eng.run()))
+    fast_bot.watcher.start(_bots_by_number)
+    backtest_server.add_busy_check(_bot_running_here)
+
+
 def _auto_scans_due(now: dt.datetime | None = None) -> bool:
     """Backtest server: the auto re-scan or a scheduled Scan & arm wants this machine during market hours."""
     now = now or dt.datetime.now(IST)
@@ -405,7 +445,7 @@ def stop_engine() -> None:
     research_engine.stop()
     for eng in bot_engines.values():
         eng.stop()
-    for task in (_task, _research_task, _guard_task, _pnl_alert_task, _auto_start_task, *_bot_tasks):
+    for task in (_task, _research_task, _guard_task, _pnl_alert_task, _auto_start_task, _bt_bot1_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -1599,7 +1639,7 @@ async def _start_bot(eng: StrategyEngine):
     from strategy_engine import _ist_now
 
     if server_role.is_backtest():
-        raise HTTPException(409, "This is the backtest server: the bots trade on the main desk. Run backtests here.")
+        await _start_backtest_bots()
 
     eng._roll_session(_ist_now())
     eng.release_manual_panic()
