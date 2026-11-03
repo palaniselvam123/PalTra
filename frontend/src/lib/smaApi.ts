@@ -1147,6 +1147,51 @@ export const SLOPE_MINUTES = [0, 1, 2, 3, 5, 10, 15];
 
 export type ArmTarget = 1 | 2 | 3 | 4 | 5 | "research";
 
+/** 09:45 / 11:15 / 13:30 market regime (market_regime.py). */
+export interface MarketRegimeReading {
+  day: string;
+  at: string;
+  checkpoint: string;
+  error?: string;
+  last_error?: string;
+  regime?: "TREND_DAY" | "SELECTIVE_STOCK_SPECIFIC" | "SIDEWAYS_CHOP" | string;
+  score?: number;
+  max_score?: number;
+  position_size_multiplier?: number;
+  adx_value?: number | null;
+  chop_value?: number | null;
+  cpr_width_pct?: number | null;
+  breakdown?: Record<string, boolean>;
+  notes?: Record<string, string>;
+  symbols?: string[];
+  proxy?: string;
+}
+
+export interface MarketRegimeView {
+  on: boolean;
+  rvol_min: number;
+  atr_pct_min: number;
+  checkpoints: string[];
+  rules: {
+    trend_at: number;
+    selective_at: number;
+    adx_min: number;
+    chop_max: number;
+    chop_hard: number;
+    cpr_narrow: number;
+    gap_max: number;
+    ad_high: number;
+    ad_low: number;
+    sector_move: number;
+    vwap_bars: number;
+  };
+  basket: { banks: string[]; it: string[]; other: string[] };
+  reading: MarketRegimeReading | null;
+  applies: boolean;
+  running: boolean;
+  gated: string[];
+}
+
 /** The all-bots day target / stop loss (all_bots_guard.py). */
 export interface AllBotsGuard {
   target: number;
@@ -1909,6 +1954,17 @@ export const smaApi = {
   /** Panic on every SMA bot at once (main desk and bots 2-4). */
   /** All-bots day target / stop loss (₹, 0 = off) and today's combined P&L before charges. */
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
+  /** 09:45 market regime: score, size multiplier, and whether it is applied. */
+  marketRegime: () => request<MarketRegimeView>("/api/market-regime", undefined, undefined, false),
+  saveMarketRegime: (body: { on: boolean; rvol_min: number; atr_pct_min: number; confirm_live?: boolean }) =>
+    request<MarketRegimeView>("/api/market-regime", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  runMarketRegime: (confirmLive = false) =>
+    request<{ started: boolean }>(
+      "/api/market-regime/run",
+      { method: "POST", body: JSON.stringify({ confirm_live: confirmLive }) },
+      undefined,
+      false
+    ),
   pnlAlerts: () => request<PnlAlertSettings>("/api/bots/pnl-alerts"),
   /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
   fastBot: () => request<FastBotSettings>("/api/bots/fast-mover"),

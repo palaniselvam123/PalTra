@@ -4,6 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
+import { RegimeChip } from "@/components/Terminal/RegimeChip";
 import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
 import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { ArmLog } from "@/components/Terminal/ArmLog";
@@ -764,6 +765,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               <ThemeToggle />
               <PinToggle pinned={pinned} onChange={setPinned} what="the terminal header" />
               <WalletChip />
+              <RegimeChip />
             </span>
             <div className="flex shrink-0 items-baseline gap-2 text-sm">
               {config?.symbol ? <span className="font-semibold text-amber-300">{config.symbol}</span> : null}

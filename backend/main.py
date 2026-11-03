@@ -40,6 +40,7 @@ import fast_bot
 import tsl_calc as tsl_calc_mod
 import strategy_presets
 import fast_move
+import market_regime
 import level_check
 import news_entry
 import arm_log
@@ -211,6 +212,27 @@ async def _fast_move_call(message: str) -> None:
     await alert_notifier.place_call(message)
 
 
+async def _regime_fetch(symbol: str, start: dt.datetime, end: dt.datetime):
+    """One name's 1-minute candles for the regime basket. Waits if the bots were just rate-limited."""
+    await groww_pressure.wait_for_bots()
+    return await fetch_frame(engine.broker, symbol, start, end)
+
+
+async def _regime_send(message: str) -> None:
+    from app.services.alert_notifier import alert_notifier
+
+    await alert_notifier.send(message)
+
+
+def _regime_live_bot() -> int | None:
+    """A bot number that is LIVE, when the regime gate would change a real order."""
+    for eng in (engine, *bot_engines.values()):
+        mode = (eng.load_config().trading_mode or "PAPER").upper()
+        if mode == "LIVE":
+            return int(eng.bot_id)
+    return None
+
+
 async def _fast_move_scan(snapshot: dict) -> None:
     """Fast-move alert on a finished Trend quality pass (fast_move.py, `scan_on`). Never raises."""
     try:
@@ -330,6 +352,9 @@ def boot_engine() -> asyncio.Task | None:
         fast_move.watcher.start(_fast_move_prices, _fast_move_send, _fast_move_call)
         # Fast-mover hand-off (fast_bot.py): a held stock running its trade's way moves to Bot 5.
         fast_bot.watcher.start(_bots_by_number)
+        # 09:45 / 11:15 / 13:30 regime (market_regime.py). Off until Settings turns it on.
+        market_regime.attach([engine, *bot_engines.values()])
+        market_regime.watcher.start(_regime_fetch, _regime_send, engine._now)
     # Auto-start (auto_start.py): presses Start for a STOPPED PAPER bot with it on while NSE is open.
     global _auto_start_task
     if not server_role.no_orders():
@@ -436,6 +461,7 @@ def stop_engine() -> None:
     stall_tracer.stop()
     chop_autos.stop()
     fast_move.watcher.stop()
+    market_regime.watcher.stop()
     fast_bot.watcher.stop()
     scan_arm_runner.stop()
     open_pnl_recorder.stop()
@@ -3605,6 +3631,70 @@ async def all_bots_guard_put(body: AllBotsGuard):
         db.commit()
     engine.load_config()
     return await _guard_view()
+
+
+class MarketRegimeSettings(BaseModel):
+    on: bool = False
+    rvol_min: float = Field(default=market_regime.RVOL_MIN, ge=0.5, le=10)
+    atr_pct_min: float = Field(default=market_regime.ATR_PCT_MIN, ge=0.05, le=5)
+    confirm_live: bool = False
+
+
+def _regime_view() -> dict:
+    return market_regime.view(engine._now())
+
+
+@app.get("/api/market-regime")
+async def market_regime_get():
+    """Today's 09:45 / 11:15 / 13:30 regime, and whether it is sizing entries."""
+    return _regime_view()
+
+
+@app.put("/api/market-regime")
+async def market_regime_put(body: MarketRegimeSettings):
+    """Save the regime switch and the selective-session floors. No order is placed here.
+
+    Turning it on, or changing the floors while it is on, needs confirm_live when a bot is LIVE:
+    the next trend entry can be halved or refused.
+    """
+    if body.on:
+        live = _regime_live_bot()
+        if live is not None and not body.confirm_live:
+            raise HTTPException(
+                409,
+                f"Bot {live} is LIVE. This can halve the next trend order, or pause trend entries. Confirm first.",
+            )
+    market_regime.save({"on": body.on, "rvol_min": body.rvol_min, "atr_pct_min": body.atr_pct_min})
+    return _regime_view()
+
+
+class MarketRegimeRun(BaseModel):
+    confirm_live: bool = False
+
+
+@app.post("/api/market-regime/run")
+async def market_regime_run(body: MarketRegimeRun):
+    """Score the basket now. The result is stored; it only changes orders when the switch is on."""
+    if market_regime.load().on:
+        live = _regime_live_bot()
+        if live is not None and not body.confirm_live:
+            raise HTTPException(
+                409,
+                f"Bot {live} is LIVE. A new reading can change the size of the next real trend order. Confirm first.",
+            )
+    if market_regime.watcher.busy or market_regime.watcher._lock.locked():
+        raise HTTPException(409, "A regime reading is already running.")
+
+    async def _job() -> None:
+        try:
+            await market_regime.watcher.evaluate(
+                _regime_fetch, _regime_send, engine._now(), "manual", mark=False
+            )
+        except Exception:  # noqa: BLE001
+            logging.getLogger("sma.market_regime").exception("manual regime reading failed")
+
+    asyncio.create_task(_job())
+    return {"started": True}
 
 
 class PnlAlertSettings(BaseModel):

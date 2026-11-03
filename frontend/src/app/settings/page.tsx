@@ -7,6 +7,7 @@ import { AiKeyForm } from "@/components/Settings/AiKeyForm";
 import { RiskSettings } from "@/components/Settings/RiskSettings";
 import { MarketDataDiagnostics } from "@/components/Settings/MarketDataDiagnostics";
 import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
+import { MarketRegime } from "@/components/Settings/MarketRegime";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
 import { FastMoveAlerts } from "@/components/Settings/FastMoveAlerts";
 import { FastMoverBot } from "@/components/Settings/FastMoverBot";
@@ -29,6 +30,7 @@ const GROUPS: SettingsGroup[] = [
     label: "Bots",
     sections: [
       ["all-bots-guard", "All-bots target"],
+      ["market-regime", "Market regime"],
       ["fast-mover-bot", "Fast movers → Bot 5"],
       ["news-entries", "News entries"],
     ],
@@ -100,6 +102,7 @@ export default function SettingsPage() {
       body = (
         <>
           <AllBotsGuard />
+          <MarketRegime />
           <FastMoverBot />
           <NewsEntries />
         </>

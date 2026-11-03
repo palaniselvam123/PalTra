@@ -1154,6 +1154,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   day_gross`, `open_gross_total`, `kpis.gross_wins`, `/api/bots` `gross_today`,
   chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
   daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
+- `backend/market_regime.py` – 9:45 market regime (off by default; `market_regime.json` next to the SMA DB,
+  `MARKET_REGIME_FILE`). At 09:45, 11:15 and 13:30 IST (`Watcher`, desk only, `boot_engine`) six checks score an
+  equal-weight basket of 5 banks, 5 IT names and 5 other heavyweights, because Groww's cash candles do not include
+  the Nifty: outside yesterday's range or CPR width under 0.25%, basket advance/decline ratio ≥ 1.8 or ≤ 0.55, the
+  bank group and the IT group both moving with the basket by more than 0.25%, the last four 5-minute closes on one
+  side of VWAP, an opening gap under 0.65%, and Wilder ADX ≥ 22 with choppiness ≤ 55. Score 5–6 is `TREND_DAY`
+  (full quantity), 3–4 is `SELECTIVE_STOCK_SPECIFIC` (half quantity, and the stock's own relative volume and
+  5-minute ATR must clear `rvol_min` / `atr_pct_min`), 0–2 is `SIDEWAYS_CHOP` (those entries paused). A choppiness
+  index above 61.8 on the basket or on the stock's 5-minute tape refuses the entry on any score. The gate is
+  `StrategyEngine.regime_block` / `regime_qty` (`regime_sized_qty`), attached to the live bots only, and it covers
+  SMA cross, gap mode, join, late, counter, breakout, SMA 9 turn and always-in (including a waiting pullback). News,
+  Force, a hand-off, a fast-move, and candle pattern or colour entries are unchanged. Replays and the research desk
+  are not attached. No reading yet today, or the switch off, leaves quantity as saved. A failed later pass keeps
+  the last good reading. `GET/PUT /api/market-regime`, `POST /api/market-regime/run` (a LIVE bot needs
+  `confirm_live` while the switch is on). Settings → "Market regime at 9:45, 11:15 and 1:30"; the terminal header
+  shows the chip once a reading exists. One Telegram when a reading lands. Nothing here places an order.
 - `backend/all_bots_guard.py` – all-bots day target / stop loss (off by default: `all_bots_target` /
   `all_bots_stop` ₹ on `BotConfig` row 1, 0 = off; `GET/PUT /api/bots/guard`, Settings → "All bots: day target and
   stop loss", `components/Settings/AllBotsGuard.tsx`). While NSE is open the watcher (`run`, started in `boot_engine`,

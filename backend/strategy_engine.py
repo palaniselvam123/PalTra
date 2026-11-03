@@ -975,6 +975,12 @@ class StrategyEngine:
     #: Last check before any entry, gate(engine, symbol) -> why not, or None to go ahead (counts the
     #: entry). The fast-mover hand-off sets it on Bot 5 and on replays (fast_bot.py `bot5_trades`).
     entry_gate = None
+    #: Market regime (market_regime.py), set on the live bots at boot. None on replays, the research
+    #: desk and in tests. block(engine, symbol, why) -> why a trend entry stops, or None.
+    regime_block = None
+    #: (engine, why, qty) -> quantity after today's size multiplier. A paused session is refused
+    #: by regime_block, so this never turns a quantity into zero.
+    regime_qty = None
     # Recovery handoff (recovery.handoff), set by bots.register for the live bots only:
     # replays and the research desk never move a stock between bots.
     handoff = None
@@ -2552,6 +2558,17 @@ class StrategyEngine:
         except Exception:  # noqa: BLE001
             logger.exception("refused-cross alert failed")
 
+    def _regime_reason(self, why: str, symbol: str = "") -> str | None:
+        """Why the market regime stops this entry, or None. A broken check does not stop the trade."""
+        fn = self.regime_block
+        if fn is None:
+            return None
+        try:
+            return fn(self, (symbol or self._focus or ""), why)
+        except Exception:
+            logger.exception("market regime check failed")
+            return None
+
     async def _apply_locked(
         self,
         *,
@@ -2610,6 +2627,8 @@ class StrategyEngine:
                 return f"closed on {signal} — {stock_cap}"
             if (cfg.symbol or "").upper() in self._recovery_blocked:
                 return "closed on cross — no new trade in this stock today (emergency recovery exit)"
+            if (reason := self._regime_reason(why, cfg.symbol)):
+                return f"closed on {signal} — {reason}"
             if pullback is not None:
                 return "reversed — " + self._arm_pullback(pullback, cfg)
             await self._open(want, cross_price, atr, cfg, now, why=why)
@@ -2629,6 +2648,8 @@ class StrategyEngine:
             return f"{signal} ignored — {stock_cap}"
         if (cfg.symbol or "").upper() in self._recovery_blocked:
             return "entry blocked — no new trade in this stock today (emergency recovery exit)"
+        if (reason := self._regime_reason(why, cfg.symbol)):
+            return f"{signal} ignored — {reason}"
         if pullback is not None:
             return self._arm_pullback(pullback, cfg)
         await self._open(want, cross_price, atr, cfg, now, why=why)
@@ -2926,15 +2947,20 @@ class StrategyEngine:
                 self.inflight = "TRANSIT"
                 try:
                     how = "CANDLE_CONFIRM" if order.confirm else "EXTREME_LIMIT" if order.invalid_at is not None else "PULLBACK"
-                    await self._open(
-                        order.direction, order.cross_price, order.atr, symbol_cfg, now, why=f"{order.why}:{how}"
-                    )
-                    if order.confirm:
-                        colour = "green" if real == "LONG" else "red"
-                        result = f"opened {real} — the entry candle turned {colour} ({float(price):.2f} past {order.limit:.2f})"
+                    entry_why = f"{order.why}:{how}"
+                    reason = self._regime_reason(entry_why, symbol)
+                    if reason:
+                        result = f"pullback {side} {symbol} cancelled — {reason}"
                     else:
-                        level = "the candle-extreme limit" if order.invalid_at is not None else "the pullback level"
-                        result = f"opened {real} — price came back to {level} {order.limit:.2f}"
+                        await self._open(
+                            order.direction, order.cross_price, order.atr, symbol_cfg, now, why=entry_why
+                        )
+                        if order.confirm:
+                            colour = "green" if real == "LONG" else "red"
+                            result = f"opened {real} — the entry candle turned {colour} ({float(price):.2f} past {order.limit:.2f})"
+                        else:
+                            level = "the candle-extreme limit" if order.invalid_at is not None else "the pullback level"
+                            result = f"opened {real} — price came back to {level} {order.limit:.2f}"
                 except SlCancelFailed as exc:
                     self._note_broker_block(exc)
                     result = f"pullback {side} not filled — {exc}"
@@ -3371,7 +3397,7 @@ class StrategyEngine:
             refused = gate(self, cfg.symbol)
             if refused:
                 raise SlCancelFailed(refused)
-        qty = int(cfg.qty)
+        qty = regime_sized_qty(int(cfg.qty), why, self.regime_qty, self)
         # The order goes out at the market price now. cross_price stays the
         # signal candle's close, so entry minus cross is the real fill lag.
         order_price = self._market_price(cfg.symbol, cross_price)
@@ -6143,6 +6169,19 @@ def _book_note(symbol: str, book: OpenPosition | None, note: str) -> str:
     if book is not None and " flat" in (note or ""):
         return f"{symbol} holding {book.direction}"
     return note
+
+
+def regime_sized_qty(qty: int, why: str, scale, engine) -> int:
+    """Quantity after the market-regime multiplier. A missing scale, a failure, or a zero keeps `qty`."""
+    base = int(qty)
+    if scale is None or base < 1:
+        return base
+    try:
+        sized = int(scale(engine, why, base))
+    except Exception:
+        logger.exception("market regime size failed")
+        return base
+    return sized if sized >= 1 else base
 
 
 def _entry_cutoff(cfg: BotConfig) -> dt.time:
