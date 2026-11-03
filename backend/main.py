@@ -25,7 +25,7 @@ import gzip
 
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
@@ -1101,6 +1101,214 @@ async def copy_settings(body: SettingsCopy):
     if "max_trades_per_day" in changed:
         dst_eng.release_trade_cap(cap)
     return {"changed": changed, "config": payload}
+
+
+# ---- Export / import settings (Settings → "Export / import settings") --------------------------------
+# A JSON file of the desks' strategy settings, and optionally each stock's own settings, the Trade lists and
+# the fast-mover card. The PAPER/LIVE switch, names and the desk-wide rows (COPY_SKIP) are never written by an
+# import; values go through ConfigUpdate (bounds, choices) and the same checks as Save.
+SETTINGS_FILE_KIND = "paltra-settings"
+SETTINGS_FILE_VERSION = 1
+SETTINGS_DESKS = ("1", "2", "3", "4", "5", "research")
+
+
+def _desk_label(desk: str) -> str:
+    return "Research" if desk == "research" else f"Bot {desk}"
+
+
+def _export_desk(desk: str) -> dict:
+    eng = _desk_engine(desk)
+    with session_factory()() as db:
+        row = db.get(BotConfig, eng.config_id)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        payload = _config_dict(row)
+        return {
+            "name": getattr(row, "bot_name", None) or _desk_label(desk),
+            "mode": (row.trading_mode or "PAPER").upper(),
+            "settings": _strategy_fields(payload),
+            "stock_settings": stock_settings(row),
+            "trade_symbols": trade_names(row),
+        }
+
+
+@app.get("/api/settings/export")
+async def export_settings(desks: str = "1,2,3,4,5,research", fast: bool = True):
+    """Every chosen desk's strategy settings, each stock's own settings and Trade list, and the fast-mover card,
+    as one JSON file. Read-only."""
+    picked = [d.strip() for d in desks.split(",") if d.strip() in SETTINGS_DESKS]
+    if not picked:
+        raise HTTPException(400, "Pick at least one bot to export")
+    out = {
+        "kind": SETTINGS_FILE_KIND,
+        "version": SETTINGS_FILE_VERSION,
+        "exported_at": dt.datetime.now(IST).isoformat(timespec="seconds"),
+        "server": server_role.role(),
+        "app_version": server_role.app_version(),
+        "desks": {d: await asyncio.to_thread(_export_desk, d) for d in dict.fromkeys(picked)},
+    }
+    if fast:
+        from dataclasses import asdict
+
+        out["fast_bot"] = asdict(fast_bot.load())
+    return out
+
+
+class SettingsImport(BaseModel):
+    file: dict
+    # Which desks of the file to write ("1"-"5", "research"); each onto the same desk here.
+    desks: list[str] = Field(default_factory=list)
+    stock_settings: bool = True
+    # Add the file's stocks to each Trade list (never removes one); PAPER bots only.
+    trade_lists: bool = False
+    fast_bot: bool = False
+    # A LIVE bot trades real money: the page asked first.
+    confirm_live: bool = False
+
+
+def _import_desk(desk: str, data: dict, body: SettingsImport, dry: bool = False) -> dict:
+    eng = _desk_engine(desk)
+    raw = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    allowed = set(ConfigUpdate.model_fields) - COPY_SKIP
+    fields = {k: v for k, v in raw.items() if k in allowed}
+    try:
+        checked = ConfigUpdate(**fields).model_dump(exclude_unset=True)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        where = ".".join(str(x) for x in first.get("loc", ()))
+        raise HTTPException(400, f"{_desk_label(desk)}: {where} {first.get('msg', 'is not valid')}".strip()) from exc
+    # The same clean-ups as Save (_put_config).
+    if "square_off_time" in checked:
+        _validate_hhmm(checked["square_off_time"])
+    if "entry_cutoff_time" in checked:
+        _validate_hhmm(checked["entry_cutoff_time"], "entry_cutoff_time")
+    if "review_check_minutes" in checked:
+        checked["review_check_minutes"] = _as_check_minutes_csv(checked["review_check_minutes"])
+    if "small_exit_minutes" in checked:
+        checked["small_exit_minutes"] = small_candles.clean_sizes(checked["small_exit_minutes"])
+    notes: list[str] = []
+    with session_factory()() as db:
+        row = db.get(BotConfig, eng.config_id)
+        if row is None:
+            raise HTTPException(500, "BotConfig missing")
+        live = (row.trading_mode or "PAPER").upper() == "LIVE"
+        if live and not body.confirm_live:
+            raise HTTPException(409, f"{_desk_label(desk)} is LIVE: confirm before changing its settings")
+        own_in = data.get("stock_settings") if isinstance(data.get("stock_settings"), dict) else {}
+        own = {str(k).upper(): v for k, v in own_in.items() if isinstance(v, dict)} if body.stock_settings else stock_settings(row)
+        qty = int(checked.get("qty", row.qty))
+        held = {symbol: pos.qty for symbol, pos in eng.positions.items() if pos is not None}
+        if any(int(q) != qty for symbol, q in held.items() if "qty" not in own.get(symbol, {})):
+            raise HTTPException(409, f"{_desk_label(desk)}: close the open position before changing quantity")
+        changed = sorted(name for name, value in checked.items() if getattr(row, name) != value)
+        for name, value in checked.items():
+            setattr(row, name, value)
+        if body.stock_settings:
+            for symbol, values in own.items():
+                if not is_nse_symbol(symbol):
+                    raise HTTPException(400, f"{_desk_label(desk)}: {symbol} is not an NSE trading symbol")
+                bad = sorted(k for k in values if k not in STOCK_FIELDS)
+                if bad:
+                    raise HTTPException(400, f"{_desk_label(desk)}: {symbol} has unknown settings {', '.join(bad[:5])}")
+                probe = dict(values)
+                if isinstance(probe.get("review_check_minutes"), str):
+                    probe["review_check_minutes"] = [int(x) for x in probe["review_check_minutes"].split(",") if x.strip()]
+                try:
+                    ConfigUpdate(**probe)
+                    if "review_check_minutes" in values:
+                        values["review_check_minutes"] = _as_check_minutes_csv(probe["review_check_minutes"])
+                    if "small_exit_minutes" in values:
+                        values["small_exit_minutes"] = small_candles.clean_sizes(values["small_exit_minutes"])
+                except (ValidationError, ValueError, TypeError) as exc:
+                    if not isinstance(exc, ValidationError):
+                        raise HTTPException(400, f"{_desk_label(desk)}: {symbol} has a setting that is not valid") from exc
+                    first = exc.errors()[0] if exc.errors() else {}
+                    raise HTTPException(
+                        400, f"{_desk_label(desk)}: {symbol} {'.'.join(str(x) for x in first.get('loc', ()))} {first.get('msg', '')}"
+                    ) from exc
+            if json.dumps(own, sort_keys=True) != json.dumps(stock_settings(row), sort_keys=True):
+                changed.append("stock_settings")
+            row.stock_settings = json.dumps(own)
+        _check_settings(row)
+        for symbol in stock_settings(row):
+            _check_settings(_cfg_for(row, symbol), symbol)
+        added: list[str] = []
+        if body.trade_lists:
+            if live:
+                notes.append("Trade list not changed: the bot is LIVE (arm its stocks on the terminal)")
+            else:
+                names = trade_names(row)
+                cap = _symbol_cap(eng)
+                for symbol in data.get("trade_symbols") or []:
+                    name = str(symbol or "").strip().upper()
+                    if not is_nse_symbol(name) or name in names:
+                        continue
+                    if len(names) >= cap:
+                        notes.append(f"Trade list full ({cap}): the rest were not added")
+                        break
+                    names.append(name)
+                    added.append(name)
+                if added:
+                    row.trade_symbols = ",".join(names)
+                    row.trade_sources = apply_trade_sources(row, {n: "Imported" for n in added}, names)
+                    if not dry:
+                        eng.hold_for_next_cross(added)
+        if dry:
+            db.rollback()
+            return {"desk": desk, "changed": changed, "added": added, "notes": notes}
+        db.commit()
+        db.refresh(row)
+        payload = _config_dict(row)
+        cap_now = int(row.max_trades_per_day)
+        db.expunge(row)
+    _reload(eng, payload)
+    if "max_trades_per_day" in changed:
+        eng.release_trade_cap(cap_now)
+    try:
+        strategy_presets.remember(_preset_desk(eng), _strategy_fields(payload))
+    except Exception:  # noqa: BLE001 - bookkeeping only
+        logging.getLogger("sma.presets").exception("strategy history not written")
+    return {"desk": desk, "changed": changed, "added": added, "notes": notes}
+
+
+@app.post("/api/settings/import")
+async def import_settings(body: SettingsImport):
+    """Write a settings file from Export onto the chosen desks (and the fast-mover card). Each desk is checked
+    first, so a bad value or an unconfirmed LIVE bot changes nothing. No order is placed."""
+    if body.file.get("kind") != SETTINGS_FILE_KIND:
+        raise HTTPException(400, "That is not a PalTra settings file (export one from Settings first)")
+    desks_in = body.file.get("desks") if isinstance(body.file.get("desks"), dict) else {}
+    picked = [d for d in dict.fromkeys(body.desks) if d in SETTINGS_DESKS and isinstance(desks_in.get(d), dict)]
+    fast_in = body.file.get("fast_bot") if body.fast_bot and isinstance(body.file.get("fast_bot"), dict) else None
+    if not picked and fast_in is None:
+        raise HTTPException(400, "Nothing to import: tick a bot that is in the file")
+    for desk in picked:  # LIVE first, before anything is written
+        eng = _desk_engine(desk)
+        cfg = eng.load_config()
+        if (cfg.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(409, f"{_desk_label(desk)} is LIVE: confirm before changing its settings")
+    if fast_in is not None and fast_in.get("on"):
+        ensure_bot_config(fast_bot.TARGET_BOT)
+        target = bot_engines[fast_bot.TARGET_BOT].load_config()
+        if (target.trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+            raise HTTPException(
+                409, f"Bot {fast_bot.TARGET_BOT} is LIVE: fast movers would place real Groww orders at its size. Confirm first."
+            )
+    fast_checked = None
+    if fast_in is not None:
+        allowed_fast = set(FastBotSettings.model_fields) - {"confirm_live"}
+        try:
+            fast_checked = FastBotSettings(**{k: v for k, v in fast_in.items() if k in allowed_fast})
+        except ValidationError as exc:
+            raise HTTPException(400, f"Fast movers: {exc.errors()[0].get('msg', 'not valid')}") from exc
+    for desk in picked:  # every desk checked in full before any is written
+        await asyncio.to_thread(_import_desk, desk, desks_in[desk], body, True)
+    results = [await asyncio.to_thread(_import_desk, desk, desks_in[desk], body) for desk in picked]
+    fast_done = None
+    if fast_checked is not None:
+        fast_bot.save(fast_checked.model_dump(exclude={"confirm_live"}, exclude_none=True))
+        fast_done = True
+    return {"desks": results, "fast_bot": fast_done}
 
 
 async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
