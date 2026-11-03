@@ -1220,6 +1220,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   replace the destination's only when ticked. A LIVE destination needs `confirm_live` (409 without); an open trade
   blocks a qty change as on Save. Settings → SMA strategy, "Copy settings from" (`components/Settings/CopySettings.tsx`).
   No order is placed.
+- **Export / import settings** (`main.export_settings` / `import_settings`; Settings → SMA strategy, "Export / import
+  settings", `components/Settings/SettingsTransfer.tsx`): `GET /api/settings/export?desks=1,…,5,research&fast=` gives one
+  JSON file (`kind: "paltra-settings"`, version 1): each desk's strategy fields (`_strategy_fields`, so never `COPY_SKIP`),
+  its per-stock settings, Trade list, name and mode (for reading only), plus the fast-mover card. `POST /api/settings/import`
+  (`file`, `desks`, `stock_settings`, `trade_lists`, `fast_bot`, `confirm_live`) writes each chosen desk onto the same desk:
+  values through `ConfigUpdate` and Save's clean-ups and checks, per-stock fields only from `STOCK_FIELDS`; every desk is
+  checked first in a dry run (`_import_desk(dry=True)`), so one bad value writes nothing; the PAPER/LIVE switch and names are
+  never written; a LIVE bot (or turning the fast-mover card on with a LIVE Bot 5) needs `confirm_live` (409 without); Trade
+  lists only gain stocks (`Imported` source chip, cap applies) and a LIVE bot's list is never changed; an open position still
+  blocks a quantity change. Kept in each desk's settings history. No order is placed.
 - Entry reason (`TradeLog.entry_reason`, display only): `apply_signal(..., why=)` → `_apply_locked` → `_open(why=)`
   saves why each trade opened (`strategy_engine.ENTRY_REASONS`: `SMA_CROSS`, `GAP_MODE`, `JOIN_TREND`, `LATE_ENTRY`,
   `EARLY_REVERSAL`, `COUNTER_REENTRY`, `CANDLE_PATTERN`, `BREAKOUT_ARRIVAL`, `FORCE_ORDER`, `NEWS`, `HANDOFF`, `SMA9_TURN`); a fill from a waiting

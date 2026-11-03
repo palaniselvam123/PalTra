@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { StrategyConfigPanel } from "@/components/Terminal/StrategyConfigPanel";
 import { CopySettings } from "@/components/Settings/CopySettings";
+import { SettingsTransfer } from "@/components/Settings/SettingsTransfer";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { DESKS, setDesk, smaApi, type BotSummary, type Desk, type SmaConfig } from "@/lib/smaApi";
@@ -180,6 +181,7 @@ export function SmaStrategySettings() {
       {config ? (
         <div className="mb-2">
           <CopySettings key={desk} to={desk} bots={bots} onCopied={load} />
+          <SettingsTransfer bots={bots} onImported={load} />
         </div>
       ) : null}
       {config ? (

@@ -1201,6 +1201,26 @@ export interface NewsEntrySettings {
   recent?: { at: string; bot: number; symbol: string; side: "BUY" | "SHORT"; impact: string; title: string; url?: string; result: string }[];
 }
 
+/** A settings file from Settings → Export (backend main.export_settings). */
+export type SettingsFile = {
+  kind: "paltra-settings";
+  version: number;
+  exported_at: string;
+  server?: string;
+  app_version?: string;
+  desks: Record<
+    string,
+    {
+      name: string;
+      mode: "PAPER" | "LIVE";
+      settings: Record<string, unknown>;
+      stock_settings: Record<string, Record<string, unknown>>;
+      trade_symbols: string[];
+    }
+  >;
+  fast_bot?: Record<string, unknown>;
+};
+
 export type BotSummary = {
   bot: number;
   name: string;
@@ -1788,6 +1808,29 @@ export const smaApi = {
         }),
       },
       undefined,
+      false
+    ),
+  /** Settings file of the chosen desks ("1"-"5", "research") and the fast-mover card. Read-only. */
+  exportSettings: (desks: string[], fast = true) =>
+    request<SettingsFile>(
+      `/api/settings/export?desks=${encodeURIComponent(desks.join(","))}&fast=${fast}`,
+      undefined,
+      30000,
+      false
+    ),
+  /** Write a settings file onto the chosen desks. Mode and names are never written; a LIVE bot needs confirmLive. */
+  importSettings: (body: {
+    file: SettingsFile;
+    desks: string[];
+    stock_settings: boolean;
+    trade_lists: boolean;
+    fast_bot: boolean;
+    confirm_live: boolean;
+  }) =>
+    request<{ desks: { desk: string; changed: string[]; added: string[]; notes: string[] }[]; fast_bot: boolean | null }>(
+      "/api/settings/import",
+      { method: "POST", body: JSON.stringify(body) },
+      30000,
       false
     ),
   /** Copy stocks onto another bot's Trade list. The source bot keeps them. */
