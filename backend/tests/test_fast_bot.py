@@ -692,3 +692,72 @@ def test_ticking_paper_to_live_needs_confirm_while_bot5_is_live(api, monkeypatch
         with database.session_factory()() as db:
             db.get(BotConfig, config_id_for(5)).trading_mode = "PAPER"
             db.commit()
+
+
+@pytest.mark.asyncio
+async def test_bot5_tab_shows_its_part_of_a_replay(tmp_path, monkeypatch):
+    """bot5_view: the Bot 5 tab's view of a Bot 1 replay keeps only the handed-over stock, its FAST_MOVE trades
+    and their P&L, and lists each fast move."""
+    import database
+    import fast_bot
+    from models import BotConfig, TradeLog
+    from replay import ReplayEngine, ReplayFeed, bot5_view
+    from tests.test_replay import DAY, _frames
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/replay.db")
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", lambda msg: None)
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.symbol, row.trade_symbols, row.qty = "TCS", "TCS", 10
+        s.commit()
+    snap = {
+        "settings": {"on": True, "rule": "MOVE", "pct": 0.1, "minutes": 3, "sources": [1], "max_day": 10},
+        "bot5": {"qty": 50},
+        "bot5_stocks": {},
+    }
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], run_id=7, fast=snap)
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, dt.time(15, 20), tzinfo=IST)
+    while engine.feed.clock < end:
+        engine.feed.clock += dt.timedelta(seconds=10)
+        await engine.tick(engine.feed.clock)
+    view = bot5_view(engine, engine.snapshot())
+    with database.session_factory()() as s:
+        mine = [
+            r for r in s.query(TradeLog).filter(TradeLog.run_id == 7).all()
+            if (r.entry_reason or "").startswith(fast_bot.ENTRY_REASON) and r.exit_price is not None
+        ]
+    assert view["bot"] == 5 and view["follows_bot"] == 1
+    assert [b["symbol"] for b in view["books"]] == ["TCS"]
+    assert view["kpis"]["trades"] == len(mine) >= 1
+    assert view["realized_net_pnl"] == pytest.approx(sum(float(r.net_pnl or 0) for r in mine))
+    moved = [row for row in view["fast_log"] if row["moved"]]
+    assert moved and moved[0]["symbol"] == "TCS" and moved[0]["from_bot"] == 1 and moved[0]["at"]
+    database.reset_engine()
+
+
+def test_bot5_follows_a_playing_fast_mover_replay_only(monkeypatch):
+    import main
+
+    def sess(status, fast, bot):
+        return SimpleNamespace(status=status, bot=bot, engine=SimpleNamespace(fast=fast) if status != "IDLE" else None)
+
+    idle5 = sess("IDLE", None, 5)
+    one = sess("FINISHED", {"settings": {}}, 1)
+    two = sess("PLAYING", {"settings": {}}, 2)
+    three = sess("PLAYING", None, 3)  # no fast mover in that run: nothing to follow
+    monkeypatch.setattr(main, "replays", {1: one, 2: two, 3: three, 4: sess("IDLE", None, 4), 5: idle5})
+    assert main._bot5_follows() is two
+    assert main._replay_view(5) == (two, True)
+    assert main._replay_view(1) == (one, False)
+    # Bot 5's own replay wins.
+    monkeypatch.setattr(main, "replays", {1: one, 2: two, 5: sess("PLAYING", None, 5)})
+    assert main._bot5_follows() is None
+    monkeypatch.setattr(main, "replays", {1: sess("IDLE", None, 1), 5: idle5})
+    assert main._bot5_follows() is None and main._replay_view(5) == (idle5, False)

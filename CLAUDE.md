@@ -211,7 +211,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   bot's own settings; a run saved before the setting plays 0 = all day); a Bot 5 setting never saved is carried as its column default (`_column_default`), so the replayed
   bot's own value never leaks into Bot 5's trade
   (`_fast_moved`, merged in `load_config`; the feed gets enough bars for either candle size). Trades stay in the
-  replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run). The
+  replayed bot's book; `replay._fast_move_part` gives the run's `fast_move` totals (shown on the Backtests run).
+  **The Bot 5 tab follows the replay** (owner's choice): with no replay of its own, Bot 5 follows the Bot 1-4 replay
+  that plays the hand-off (`main._bot5_follows`: playing, else paused, else the last finished; `_replay_view`), so
+  `/api/replay?bot=5` answers that run's info with `bot: 5` and `follows`, `/api/replay/state?bot=5` gives
+  `replay.bot5_view` (only the handed-over stocks, their `FAST_MOVE` trades and P&L, `fast_log`: each fast move's time,
+  stock, side, why and result, kept by `ReplayEngine._note_fast`), `/api/replay/chart?bot=5` that engine's chart and
+  `/api/replay/control?bot=5` drives that run. The page shows `components/Terminal/FastFollow.tsx` (the hand-off list)
+  and lists the run's `FAST_MOVE` rows on Bot 5's desk too. Display only: the trades stay in the replayed bot's book. The
   backtest server copies `fast_bot.json` from the desk with the bot settings (`export_bot_settings` → `sync`).
   Research never hands off. **Keep the trade** (`keep_trade`, off by default; Settings card tick box): the source
   trade is not cut; `recovery.handoff(..., keep_source=True)` arms the stock on Bot 5 while it stays on the source

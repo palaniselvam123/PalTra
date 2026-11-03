@@ -252,6 +252,38 @@ def _replay_for(bot: int) -> ReplaySession:
     if session is None:
         raise HTTPException(422, f"bot must be 1 to {EXTRA_BOTS[-1]}")
     return session
+
+
+_ACTIVE_REPLAY = ("LOADING", "PLAYING", "PAUSED", "FINISHED")
+
+
+def _bot5_follows() -> ReplaySession | None:
+    """The Bot 5 tab follows another bot's replay (owner's choice): when Bot 5 has no replay of its own and a
+    Bot 1-4 replay plays with the fast-mover hand-off, the Bot 5 tab shows that run's Bot 5 part
+    (replay.bot5_view). The one playing (else paused, else the last finished) is followed."""
+    own = replays.get(fast_bot.TARGET_BOT)
+    if own is not None and own.status in _ACTIVE_REPLAY:
+        return None
+    best = None
+    for n, session in replays.items():
+        if n == fast_bot.TARGET_BOT or session.status not in _ACTIVE_REPLAY:
+            continue
+        eng = session.engine
+        if eng is None or not getattr(eng, "fast", None):
+            continue
+        rank = ("FINISHED", "LOADING", "PAUSED", "PLAYING").index(session.status)
+        if best is None or rank > best[0]:
+            best = (rank, session)
+    return best[1] if best else None
+
+
+def _replay_view(bot: int) -> tuple[ReplaySession, bool]:
+    """The replay a desk shows: its own, or for Bot 5 the run it follows. (session, following)."""
+    if int(bot) == fast_bot.TARGET_BOT:
+        source = _bot5_follows()
+        if source is not None:
+            return source, True
+    return _replay_for(bot), False
 # Paper-only second bot on the same live quotes (research.py). It reads quotes
 # through the live client's refresh and nothing else.
 
@@ -1930,8 +1962,13 @@ def _replay_engine(bot: int = 1):
 
 @app.get("/api/replay")
 async def replay_info(bot: int = 1):
-    """One bot's replay (`bot` 1-4, default 1). Each bot has its own and they can run together."""
-    return _replay_for(bot).info()
+    """One bot's replay (`bot` 1-5, default 1). Each bot has its own and they can run together. Bot 5 with
+    none of its own follows a Bot 1-4 replay that plays the fast-mover hand-off (`follows`: that bot)."""
+    session, following = _replay_view(bot)
+    info = session.info()
+    if following:
+        info = {**info, "bot": fast_bot.TARGET_BOT, "follows": session.bot, "bot_name": f"Bot {fast_bot.TARGET_BOT}"}
+    return info
 
 
 @app.get("/api/replay/all")
@@ -2147,7 +2184,7 @@ async def replay_run_delete(run_id: int):
 
 @app.post("/api/replay/control")
 async def replay_control(body: ReplayControl, bot: int = 1):
-    session = _replay_for(bot)
+    session, _following = _replay_view(bot)
     if body.action == "stop":
         await session.stop()
         return session.info()
@@ -2165,6 +2202,11 @@ async def replay_answer_review(review_id: int, action: str, bot: int = 1):
 
 @app.get("/api/replay/state")
 async def replay_state(bot: int = 1):
+    session, following = _replay_view(bot)
+    if following and session.engine is not None:
+        from replay import bot5_view
+
+        return {**bot5_view(session.engine, session.engine.snapshot()), "replay": await replay_info(bot)}
     eng = _replay_engine(bot)
     return {**eng.snapshot(), "replay": _replay_for(bot).info()}
 
@@ -2172,6 +2214,9 @@ async def replay_state(bot: int = 1):
 @app.get("/api/replay/chart")
 async def replay_chart(limit: int = 240, symbol: str | None = None, bot: int = 1, interval: int | None = None):
     # Off the event loop: building the chart must not hold up /api/state.
+    session, following = _replay_view(bot)
+    if following and session.engine is not None:
+        return await _chart(session.engine, limit, symbol, interval)
     return await _chart(_replay_engine(bot), limit, symbol, interval)
 
 

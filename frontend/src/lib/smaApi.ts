@@ -857,7 +857,21 @@ export type ReviewItem = {
   note: string;
 };
 
+/** One fast move in a replay (replay.bot5_view): when, which stock and side, why, and what happened. */
+export type FastLogRow = {
+  at: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  why: string;
+  result: string;
+  moved: boolean;
+  from_bot: number;
+};
+
 export type SmaState = {
+  /** Bot 5's view of a Bot 1-4 replay: the bot it follows and the day's fast moves. */
+  follows_bot?: number;
+  fast_log?: FastLogRow[];
   /** Recent 1-minute reviews of this desk's open trades (pending first to answer). */
   reviews?: ReviewItem[];
   /** Which SMA bot this is (1 = main desk) and its name. */
@@ -1356,6 +1370,8 @@ export type ReplayInfo = {
   /** The SMA bot whose settings the replay plays (1 = main desk, 2-4). */
   bot?: number;
   bot_name?: string;
+  /** Bot 5 only: the Bot 1-4 replay this tab follows (its fast-mover hand-offs to Bot 5). */
+  follows?: number | null;
   /** Scalp-pick runs: the rule and each day's picks (date -> picks, best first). */
   pick_rule?: ScalpPickRule | null;
   picks?: Record<string, ScalpPick[]>;
