@@ -40,8 +40,9 @@ Groww market data. Two trading engines live in this repo and share one frontend:
   (CI, tests, other backend code) also wait for the owner's OK.
 - **Never stack PRs.** Every PR targets `main` directly. Merge with a merge
   commit, and delete the branch after it is merged.
-- A merge to `main` deploys (outside 09:00–15:45 IST, Mon–Fri), so only merge
-  what is ready to run in production.
+- A merge to `main` deploys to the backtest server only. The main desk gets a version when the
+  owner runs "Test and deploy" with target `main-desk` (see Deployment), so only merge what is
+  ready to be tried there.
 
 ## Tech stack
 
@@ -276,10 +277,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (a stock handed off earlier that day stays handed off). UI: `ReplayScrub` in `components/Terminal/ReplayBar.tsx`
   (slider 09:15-15:30 plus ± 5 / 15-minute buttons, in the replay bar and on the chart page header while it follows a
   replay; the top strip's `ReplayChip` has ± 5).
-  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **On the main desk a replay
-  starts only outside market hours** (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST Mon-Fri, 409; start, resume and
-  Scalp-pick runs), so it never slows the live bots; the backtest server takes them then (`DESK_REPLAY_HOURS=any` lifts
-  it; the test suite sets it).
+  API: `/api/replay*`, `/api/replay/runs[/{id}]`. Refused while the replayed bot is LIVE. **The main desk replays at any
+  hour by default** (owner's choice: he decides when; `main.desk_market_hours_free`); the desk secret
+  `DESK_REPLAY_HOURS=after` brings back the refusal in market hours (`main._refuse_desk_replay_in_market`, 09:00-15:45 IST
+  Mon-Fri, 409; start, resume and Scalp-pick runs; the scan accuracy check follows the same switch). MCP `start_backtest`
+  stays refused in market hours.
   The chart endpoints (`/api/chart`, `/api/research/chart`, `/api/replay/chart`)
   take an optional `symbol` to draw another watched stock without moving the
   chart focus, and an optional `interval` (1, 2, 3, 5, 10, 15, 30, 60 or 240
@@ -1570,12 +1572,18 @@ No credentials are needed. The desk starts on the simulated feed.
   `.github/workflows/test-and-deploy.yml`:
   - every pull request and push runs the backend tests (Python 3.13,
     `requirements-dev.txt`) and the frontend typecheck plus static export
-  - a push to `main` that passes both runs `flyctl deploy --remote-only`
-    with the exported `frontend/out/` (built in CI, not committed)
-  - **no automatic deploy during NSE market hours** (09:00–15:45 IST,
-    Mon–Fri): the `market-hours-gate` job skips the deploy with a warning.
-    "Run workflow" (workflow_dispatch) on `main` deploys at any time, so use
-    it after 15:45 to ship a push that was held back
+  - **backtest server first** (owner's choice): a push to `main` that passes both deploys
+    **only the backtest server** (`deploy-backtest`, `fly.backtest.toml`, needs `DEPLOY_BACKTEST`),
+    at any hour, with the exported `frontend/out/` (built in CI, not committed)
+  - **the main desk only by hand**: "Run workflow" (workflow_dispatch) on `main` with
+    `target: main-desk` and optional `commit` (the version the backtest server shows; blank =
+    latest main) deploys that commit to the desk (`deploy`) and then the scanner (`deploy-scanner`).
+    Inside NSE market hours (09:00–15:45 IST, Mon–Fri) the `release-gate` job refuses it unless
+    `market_hours_ok` is ticked. `target: backtest` re-deploys the backtest server.
+  - every image carries its commit (`--build-arg APP_VERSION`, Dockerfile `ENV APP_VERSION`), shown
+    by `/api/role` `version`: the backtest server's bar ("This server runs version …", Copy version,
+    "Deploy this version to the main desk" link to the workflow page) and the desk's "Desk version …"
+    (`components/Terminal/BacktestServerBar.tsx`)
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required

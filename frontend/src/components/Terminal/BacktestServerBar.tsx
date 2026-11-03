@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ExternalLink, FlaskConical, Loader2, Power, RefreshCw } from "lucide-react";
+import { ExternalLink, FlaskConical, Loader2, Power, RefreshCw, Rocket } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type ServerRole } from "@/lib/api";
 import { smaApi, type BacktestServerStatus } from "@/lib/smaApi";
@@ -10,6 +10,13 @@ const STOP_CHOICES = ["15:30", "15:45", "16:00", "16:30", "17:00", "18:00"];
 const IDLE_CHOICES = [10, 15, 30, 60, 120, 240];
 const BTN =
   "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold ring-1 ring-inset disabled:opacity-50";
+
+// "Test and deploy" in GitHub Actions: Run workflow → target "main-desk" ships a tested version to the main desk.
+const DEPLOY_PAGE = "https://github.com/palaniselvam123/PalTra/actions/workflows/test-and-deploy.yml";
+
+function shortVersion(v?: string): string {
+  return v && v !== "dev" ? v.slice(0, 7) : "dev";
+}
 
 function ago(epochSec: number | null): string {
   if (!epochSec) return "not yet";
@@ -63,6 +70,10 @@ export function BacktestServerBar() {
 
   if (role?.role === "desk" && role.backtest_url) {
     return (
+      <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-xs text-slate-500" title="The version (git commit) the main desk runs. New versions reach the backtest server first.">
+        Desk version {shortVersion(role.version)}
+      </span>
       <a
         href={`${role.backtest_url}/terminal/`}
         target="_blank"
@@ -72,6 +83,7 @@ export function BacktestServerBar() {
       >
         <FlaskConical size={13} aria-hidden /> Run backtests on the backtest server <ExternalLink size={12} aria-hidden />
       </a>
+      </span>
     );
   }
   if (role?.role !== "backtest") return null;
@@ -111,7 +123,7 @@ export function BacktestServerBar() {
         </span>
         <label
           className="flex items-center gap-1.5"
-          title="Use this server only in market hours. After the stop time (and on weekends) it stops once no backtest or scan is running, even with this page open. Backtests after hours run on the main desk."
+          title="Use this server only in market hours. After the stop time (and on weekends) it stops once no backtest or scan is running, even with this page open."
         >
           <input
             type="checkbox"
@@ -185,6 +197,34 @@ export function BacktestServerBar() {
         >
           <Power size={12} aria-hidden /> Stop server
         </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+        <span title="The git commit this server runs. Every merge to main is deployed here first; the main desk only gets it when you send it there.">
+          This server runs version <span className="font-mono text-violet-200">{shortVersion(role.version)}</span>
+        </span>
+        <a
+          href={DEPLOY_PAGE}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 font-semibold text-emerald-300 hover:underline"
+          title={`Opens GitHub Actions. Press "Run workflow", choose target "main-desk" and paste ${role.version && role.version !== "dev" ? role.version : "this version"} as the commit. The main desk restarts for about a minute; during market hours you must tick the market-hours box too.`}
+        >
+          <Rocket size={12} aria-hidden /> Tested OK? Deploy this version to the main desk <ExternalLink size={11} aria-hidden />
+        </a>
+        {role.version && role.version !== "dev" ? (
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard?.writeText(role.version ?? "").then(
+                () => setNote("Version copied: paste it as the commit in Run workflow."),
+                () => setNote(`Version: ${role.version}`)
+              );
+            }}
+            className="text-slate-300 underline decoration-dotted hover:text-slate-100"
+          >
+            Copy version
+          </button>
+        ) : null}
       </div>
       {note ? <p className="text-xs text-slate-400">{note}</p> : null}
     </div>

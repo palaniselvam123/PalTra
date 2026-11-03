@@ -117,4 +117,10 @@ def describe() -> dict:
         "backtest_arm": is_scanner() and bool(backtest_url()) and bool(link_token()),
         # Backtest server only: its Arm can also arm the desk's bots (the link token set here too).
         "desk_arm": is_backtest() and bool(link_token()),
+        # The git commit this image was built from (APP_VERSION build argument, set by CI), "dev" locally.
+        "version": app_version(),
     }
+
+
+def app_version() -> str:
+    return (os.environ.get("APP_VERSION") or "dev").strip()[:40] or "dev"

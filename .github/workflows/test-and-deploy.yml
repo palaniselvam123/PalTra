@@ -1,22 +1,42 @@
 name: Test and deploy
 
-# Every pull request and every push runs the tests. A push to main that passes
-# them deploys to Fly.io, except inside NSE market hours (09:00-15:45 IST,
-# Mon-Fri). "Run workflow" (workflow_dispatch) on main deploys at any time.
-# Tests never place orders: they use fake brokers, PAPER mode, and no Groww
-# credentials exist in this workflow.
+# Every pull request and every push runs the tests.
+#
+# Two-step release (owner's choice, so the main desk never changes before a version is tried):
+# 1. A push to main that passes the tests deploys to the BACKTEST SERVER only (paltra-backtest,
+#    fly.backtest.toml), at any hour: that server never sends an order.
+# 2. Once the version is checked there, "Run workflow" with target "main-desk" deploys it to the
+#    MAIN DESK (paltra) and then the scanner. Paste the version the backtest server shows as
+#    "commit" to ship exactly that one (blank = the latest main). Inside NSE market hours
+#    (09:00-15:45 IST, Mon-Fri) the main desk is deployed only with "market_hours_ok" ticked,
+#    because a restart drops the bots' in-memory state mid-session.
+# Tests never place orders: they use fake brokers, PAPER mode, and no Groww credentials exist here.
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to deploy: backtest = the backtest server; main-desk = the main desk (paltra) and the scanner"
+        type: choice
+        options: [backtest, main-desk]
+        default: backtest
+      commit:
+        description: "Commit to deploy (the version the backtest server shows). Blank = the latest main."
+        type: string
+        default: ""
+      market_hours_ok:
+        description: "main-desk only: allow the deploy inside NSE market hours (09:00-15:45 IST). The desk restarts for about a minute."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.target || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -31,6 +51,8 @@ jobs:
       SMA_TICK_SIZES: "off"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -51,6 +73,8 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -69,21 +93,28 @@ jobs:
           path: frontend/out
           retention-days: 3
 
-  market-hours-gate:
-    name: Market-hours deploy gate
+  release-gate:
+    name: Release gate
     needs: [backend-tests, frontend-build]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      allowed: ${{ steps.check.outputs.allowed }}
+      backtest: ${{ steps.check.outputs.backtest }}
+      desk: ${{ steps.check.outputs.desk }}
+      version: ${{ steps.check.outputs.version }}
     steps:
-      # A restart while NSE is trading drops the bot's in-memory state and
-      # quotes mid-session. Pushes to main inside 09:00-15:45 IST, Mon-Fri,
-      # do not deploy. A manual "Run workflow" always may.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - id: check
         env:
           EVENT: ${{ github.event_name }}
+          TARGET: ${{ inputs.target || 'backtest' }}
+          MARKET_OK: ${{ inputs.market_hours_ok || false }}
+          DEPLOY_BACKTEST: ${{ vars.DEPLOY_BACKTEST }}
         run: |
+          version=$(git rev-parse HEAD)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           day=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" +%u)     # 1=Mon .. 7=Sun
           hhmm=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" +%H%M)
           clock=$(TZ=Asia/Kolkata date -d "${GATE_NOW:-now}" '+%a %d %b %H:%M IST')
@@ -91,59 +122,108 @@ jobs:
           if [ "$day" -le 5 ] && [ "$((10#$hhmm))" -ge 900 ] && [ "$((10#$hhmm))" -le 1545 ]; then
             in_hours=true
           fi
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
-            if [ "$in_hours" = true ]; then
-              msg="Manual deploy at $clock, inside NSE market hours. Allowed because it was started by hand."
-              echo "::warning title=Deploying during market hours::$msg"
-            else
-              msg="Manual deploy at $clock."
-              echo "::notice title=Deploy allowed::$msg"
+          backtest=false
+          desk=false
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$TARGET" = "main-desk" ]; then
+            if [ "$in_hours" = true ] && [ "$MARKET_OK" != "true" ]; then
+              msg="Main desk NOT deployed: $clock is inside NSE market hours (09:00-15:45 IST, Mon-Fri). Run again after 15:45, or tick market_hours_ok to deploy now (the desk restarts for about a minute)."
+              echo "::error title=Main desk deploy refused (market hours)::$msg"
+              echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
-          elif [ "$in_hours" = true ]; then
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-            msg="Deploy skipped: $clock is inside NSE market hours (09:00-15:45 IST, Mon-Fri). Tests passed; nothing was deployed. Deploy after 15:45 with Actions > Test and deploy > Run workflow on main, or push again outside market hours."
-            echo "::warning title=Deploy skipped (market hours)::$msg"
+            desk=true
+            msg="Deploying ${version:0:7} to the MAIN DESK and the scanner at $clock."
+            if [ "$in_hours" = true ]; then
+              echo "::warning title=Main desk deploy during market hours::$msg (market_hours_ok ticked)"
+            else
+              echo "::notice title=Main desk deploy::$msg"
+            fi
           else
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
-            msg="Outside NSE market hours ($clock). Deploying."
-            echo "::notice title=Deploy allowed::$msg"
+            if [ "$DEPLOY_BACKTEST" != "true" ]; then
+              msg="Nothing deployed: new versions go to the backtest server first, and the repo variable DEPLOY_BACKTEST is not true. Set it, or deploy with Run workflow → target main-desk."
+              echo "::warning title=No backtest server::$msg"
+            else
+              backtest=true
+              msg="Deploying ${version:0:7} to the BACKTEST SERVER at $clock. Check it there, then Run workflow → target main-desk (commit ${version:0:7}) to ship it to the main desk."
+              echo "::notice title=Backtest server deploy::$msg"
+            fi
           fi
+          echo "backtest=$backtest" >> "$GITHUB_OUTPUT"
+          echo "desk=$desk" >> "$GITHUB_OUTPUT"
           echo "$msg" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    name: Deploy to Fly.io
-    needs: [backend-tests, frontend-build, market-hours-gate]
-    if: needs.market-hours-gate.outputs.allowed == 'true'
+  # The backtest server (fly.backtest.toml, BACKTEST.md): every tested push to main lands here first.
+  # Needs the repo variable DEPLOY_BACKTEST = "true" and the secret FLY_BACKTEST_API_TOKEN
+  # (`fly tokens create deploy -a paltra-backtest`). Any hour: it never sends an order. A backtest
+  # playing there is cut by the restart and can be resumed (Resume on the replay bar).
+  deploy-backtest:
+    name: Deploy backtest server to Fly.io
+    needs: [backend-tests, frontend-build, release-gate]
+    if: needs.release-gate.outputs.backtest == 'true'
     runs-on: ubuntu-latest
     environment: production
-    # One deploy at a time; a newer push waits instead of cancelling a rollout.
+    timeout-minutes: 25
+    concurrency:
+      group: fly-deploy-backtest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-gate.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-out
+          path: frontend/out
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: flyctl deploy (backtest server, retried once if it stalls)
+        run: |
+          for attempt in 1 2; do
+            if timeout 480 flyctl deploy --remote-only -c fly.backtest.toml --build-arg APP_VERSION="$VERSION"; then
+              exit 0
+            fi
+            echo "::warning title=Backtest deploy attempt $attempt failed or stalled::retrying in 30 s"
+            sleep 30
+          done
+          echo "::error title=Backtest deploy failed::two attempts did not finish; the backtest server keeps its previous version"
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_BACKTEST_API_TOKEN }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+
+  # The main desk (paltra): only by hand, Run workflow → target main-desk.
+  deploy:
+    name: Deploy main desk to Fly.io
+    needs: [backend-tests, frontend-build, release-gate]
+    if: needs.release-gate.outputs.desk == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    # One deploy at a time; a newer run waits instead of cancelling a rollout.
     concurrency:
       group: fly-deploy
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-gate.outputs.version }}
       - uses: actions/download-artifact@v4
         with:
           name: frontend-out
           path: frontend/out
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # Builds the Dockerfile on Fly's builders and waits for the health check.
-      - run: flyctl deploy --remote-only
+      - run: flyctl deploy --remote-only --build-arg APP_VERSION="$VERSION"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
 
-  # The scanner server (fly.scanner.toml, SCANNER.md). Off until the repo variable
-  # DEPLOY_SCANNER is "true" and the secret FLY_SCANNER_API_TOKEN
-  # (`fly tokens create deploy -a paltra-scanner`) is set. Same market-hours gate.
+  # The scanner server (fly.scanner.toml, SCANNER.md), shipped with the main desk. Off until the repo
+  # variable DEPLOY_SCANNER is "true" and the secret FLY_SCANNER_API_TOKEN
+  # (`fly tokens create deploy -a paltra-scanner`) is set. After the desk's deploy, not beside it: both
+  # build on the org's one remote Fly builder. It still runs when the desk's deploy failed (!cancelled).
   deploy-scanner:
     name: Deploy scanner to Fly.io
-    # After the desk's deploy, not beside it: both apps build on the org's one
-    # remote Fly builder, and the scanner's deploy kept hanging after "pushing
-    # layers" when the two ran at once. It still runs when the
-    # desk's deploy failed (!cancelled), so one app never blocks the other.
-    needs: [backend-tests, frontend-build, market-hours-gate, deploy]
-    if: ${{ !cancelled() && needs.market-hours-gate.outputs.allowed == 'true' && vars.DEPLOY_SCANNER == 'true' }}
+    needs: [backend-tests, frontend-build, release-gate, deploy]
+    if: ${{ !cancelled() && needs.release-gate.outputs.desk == 'true' && vars.DEPLOY_SCANNER == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 25
@@ -152,6 +232,8 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-gate.outputs.version }}
       - uses: actions/download-artifact@v4
         with:
           name: frontend-out
@@ -162,7 +244,7 @@ jobs:
       - name: flyctl deploy (scanner, retried once if it stalls)
         run: |
           for attempt in 1 2; do
-            if timeout 480 flyctl deploy --remote-only -c fly.scanner.toml; then
+            if timeout 480 flyctl deploy --remote-only -c fly.scanner.toml --build-arg APP_VERSION="$VERSION"; then
               exit 0
             fi
             echo "::warning title=Scanner deploy attempt $attempt failed or stalled::retrying in 30 s"
@@ -172,38 +254,4 @@ jobs:
           exit 1
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_SCANNER_API_TOKEN }}
-
-  # The backtest server (fly.backtest.toml, BACKTEST.md). Off until the repo variable
-  # DEPLOY_BACKTEST is "true" and the secret FLY_BACKTEST_API_TOKEN
-  # (`fly tokens create deploy -a paltra-backtest`) is set. After the scanner's deploy
-  # (one remote builder), even if an earlier deploy failed. Same market-hours gate.
-  deploy-backtest:
-    name: Deploy backtest server to Fly.io
-    needs: [backend-tests, frontend-build, market-hours-gate, deploy, deploy-scanner]
-    if: ${{ !cancelled() && needs.market-hours-gate.outputs.allowed == 'true' && vars.DEPLOY_BACKTEST == 'true' }}
-    runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 25
-    concurrency:
-      group: fly-deploy-backtest
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-out
-          path: frontend/out
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: flyctl deploy (backtest server, retried once if it stalls)
-        run: |
-          for attempt in 1 2; do
-            if timeout 480 flyctl deploy --remote-only -c fly.backtest.toml; then
-              exit 0
-            fi
-            echo "::warning title=Backtest deploy attempt $attempt failed or stalled::retrying in 30 s"
-            sleep 30
-          done
-          echo "::error title=Backtest deploy failed::two attempts did not finish; the backtest server keeps its previous version"
-          exit 1
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_BACKTEST_API_TOKEN }}
+          VERSION: ${{ needs.release-gate.outputs.version }}

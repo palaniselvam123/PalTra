@@ -353,6 +353,8 @@ export type ServerRole = {
   backtest_arm?: boolean;
   /** Backtest server only: Arm can also arm the desk's bots over the link (the link token set there). */
   desk_arm?: boolean;
+  /** The git commit this server's image was built from ("dev" locally). */
+  version?: string;
 };
 
 /** Where the scanner's Arm goes: the trading desk's bots, or the backtest server's (always PAPER). */

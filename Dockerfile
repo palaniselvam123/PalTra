@@ -16,6 +16,11 @@ ENV PYTHONUNBUFFERED=1 \
     DATABASE_URL=sqlite+aiosqlite:////data/trading.db \
     DEFAULT_MODE=paper
 
+# The git commit CI builds from (flyctl deploy --build-arg APP_VERSION=<sha>), shown by /api/role so the
+# backtest server and the main desk can tell which version each one runs.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 WORKDIR /app
 
 RUN apt-get update \
