@@ -270,6 +270,8 @@ class ReplayEngine(StrategyEngine):
         # Bot 5 entries on each moved stock (`bot5_trades`), and the stocks already sent back to this bot.
         self._fast_opened: dict[str, int] = {}
         self._fast_back: set[str] = set()
+        # Each fast move this day (time, stock, side, why, what happened), for the Bot 5 tab's view of the replay.
+        self.fast_log: list[dict] = []
         if fast:
             self.entry_gate = self._fast_gate
         # "Replay as armed" (arm_log.py): each stock trades only while it was armed live that
@@ -382,7 +384,26 @@ class ReplayEngine(StrategyEngine):
         self._fast_opened[name] = self._fast_opened.get(name, 0) + 1
         return None
 
+    def _note_fast(self, name: str, direction: str, why: str, result: str, moved: bool) -> None:
+        self.fast_log.append(
+            {
+                "at": self._now().strftime("%H:%M"),
+                "symbol": name,
+                "side": direction,
+                "why": why,
+                "result": result,
+                "moved": moved,
+                "from_bot": self.bot_id,
+            }
+        )
+        del self.fast_log[:-100]
+
     async def _fast_move(self, name: str, direction: str, why: str) -> None:
+        await self._fast_move_inner(name, direction, why)
+        note = self._signals.get(name, "")
+        self._note_fast(name, direction, why, note.split("): ", 1)[-1] if note else "", name in self._fast_moved)
+
+    async def _fast_move_inner(self, name: str, direction: str, why: str) -> None:
         raw = dict(self.fast.get("settings") or {})
         raw.setdefault("entry_checks", False)
         if fast_bot.clean(raw).entry_checks:
@@ -474,6 +495,110 @@ class ReplayEngine(StrategyEngine):
         snap = super().snapshot()
         snap["max_trades"] = None  # no cap on a replay
         return snap
+
+
+def _is_fast(reason: str | None) -> bool:
+    return (reason or "").startswith(fast_bot.ENTRY_REASON)
+
+
+def bot5_view(eng: "ReplayEngine", snap: dict) -> dict:
+    """The Bot 5 tab's view of a source bot's replay (owner's choice): only the stocks the fast-mover hand-off
+    sent to Bot 5, their Bot 5 trades (entry reason FAST_MOVE) and P&L, plus the day's hand-off list. Display
+    only: the trades stay in the replayed bot's book and run, played by that one engine."""
+    rows: list[TradeLog] = []
+    if eng.run_id is not None:
+        with session_factory()() as db:
+            rows = (
+                db.query(TradeLog)
+                .filter(TradeLog.run_id == eng.run_id, TradeLog.date == eng._session_date)  # noqa: SLF001
+                .all()
+            )
+    rows = [r for r in rows if _is_fast(r.entry_reason)]
+    closed = [r for r in rows if r.exit_price is not None]
+    by_symbol: dict[str, dict] = {}
+    gross = net = charges = 0.0
+    wins = gross_wins = 0
+    for r in closed:
+        per = by_symbol.setdefault((r.symbol or "").upper(), {"net": 0.0, "gross": 0.0, "trades": 0})
+        per["net"] += float(r.net_pnl or 0)
+        per["gross"] += float(r.gross_pnl or 0)
+        per["trades"] += 1
+        gross += float(r.gross_pnl or 0)
+        net += float(r.net_pnl or 0)
+        charges += float(r.brokerage_and_taxes or 0)
+        wins += 1 if (r.net_pnl or 0) > 0 else 0
+        gross_wins += 1 if (r.gross_pnl or 0) > 0 else 0
+    held = {name for name, pos in eng.positions.items() if pos is not None and _is_fast(pos.entry_why)}
+    names = set(eng._fast_moved) | held | {(r.symbol or "").upper() for r in rows}  # noqa: SLF001
+    books = []
+    open_net = open_gross = 0.0
+    for book in snap.get("books") or []:
+        name = book.get("symbol")
+        if name not in names:
+            continue
+        mine = name in held
+        done = by_symbol.get(name, {"net": 0.0, "gross": 0.0, "trades": 0})
+        on = book.get("open_net") if mine else None
+        og = book.get("open_gross") if mine else None
+        open_net += on or 0.0
+        open_gross += og or 0.0
+        flat = {"direction": "FLAT", "qty": 0, "entry_price": None, "sl_trigger": None, "stop_active": None,
+                "target": None, "trailing": None, "tsl_step": None}
+        books.append(
+            {
+                **book,
+                **({} if mine else flat),
+                "open_net": on,
+                "open_gross": og,
+                "closed_net": done["net"],
+                "closed_gross": done["gross"],
+                "closed_trades": done["trades"],
+                "day_net": done["net"] + (on or 0.0),
+                "day_gross": done["gross"] + (og or 0.0),
+            }
+        )
+    n = len(closed)
+    kpis = {
+        **(snap.get("kpis") or {}),
+        "actual_gross": gross,
+        "theoretical_gross": gross,
+        "total_charges": charges,
+        "net": net,
+        "trades": n,
+        "wins": wins,
+        "gross_wins": gross_wins,
+        "win_rate": (wins / n * 100) if n else 0.0,
+        "by_symbol": by_symbol,
+    }
+    focus_mine = (snap.get("symbol") or "").upper() in held
+    out = {
+        **snap,
+        "bot": fast_bot.TARGET_BOT,
+        "bot_name": f"Bot {fast_bot.TARGET_BOT}",
+        "books": books,
+        "trade_symbols": sorted(eng._fast_moved),  # noqa: SLF001
+        "kpis": kpis,
+        "realized_net_pnl": net,
+        "open_net_total": open_net,
+        "open_gross_total": open_gross,
+        "trades_today": len(rows),
+        "follows_bot": eng.bot_id,
+        "fast_log": list(eng.fast_log),
+    }
+    if not focus_mine:
+        out.update(
+            {
+                "position": None,
+                "active_sl_trigger": None,
+                "unrealized_gross_pnl": 0.0,
+                "unrealized_net_pnl": 0.0,
+                "estimated_charges": 0.0,
+                "sl_room": None,
+                "sl_room_pct": None,
+                "charge_estimate": None,
+            }
+        )
+    return out
 
 
 def close_orphan_replay_rows(run_id: int | None = None, interrupted: bool = False) -> int:

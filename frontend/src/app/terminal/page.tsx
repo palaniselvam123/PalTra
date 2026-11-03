@@ -12,6 +12,7 @@ import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
 import { AlertsStatus } from "@/components/Terminal/WhatsAppAlerts";
 import { SectionTabs, TAB_KEY, TERMINAL_TABS, inTab, type TerminalTab } from "@/components/Terminal/SectionTabs";
 import { ReplayBar } from "@/components/Terminal/ReplayBar";
+import { FastFollow } from "@/components/Terminal/FastFollow";
 import { BacktestServerBar } from "@/components/Terminal/BacktestServerBar";
 import { Board } from "@/components/Layout/Board";
 import { StockTabs, chartHref, tradeTotals, type StockTab } from "@/components/Terminal/StockTabs";
@@ -93,7 +94,9 @@ export default function TerminalPage() {
         : trades.filter((t) => {
             const mode = (t.mode || "PAPER").toUpperCase();
             // Replays sit on the desk of the bot whose settings they played; research rows on the main desk.
-            if (mode === "REPLAY") return (t.bot ?? 1) === botNo;
+            // Bot 5 also shows the Bot 1-4 replay trades the fast-mover hand-off gave it (entry reason FAST_MOVE).
+            if (mode === "REPLAY")
+              return (t.bot ?? 1) === botNo || (botNo === 5 && (t.entry_reason ?? "").startsWith("FAST_MOVE"));
             if (mode !== "PAPER" && mode !== "LIVE") return botNo === 1;
             return (t.bot ?? 1) === botNo;
           }),
@@ -533,6 +536,7 @@ export default function TerminalPage() {
               bot={botNo}
               botName={config?.bot_name ?? `Bot ${botNo}`}
             />
+            {replay?.follows ? <FastFollow source={replay.follows} log={state?.fast_log ?? []} /> : null}
           </>
         ) : research ? (
           <div role="note" className="rounded-xl border border-teal-400/30 bg-teal-500/[0.07] px-3 py-2 text-sm text-teal-100">
