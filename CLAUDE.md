@@ -230,7 +230,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `fast_bot.entry_refusal` reads Bot 5's own settings for the stock (`_target_cfg` → `_cfg_for`) on the source bot's
   enriched frame exactly as a cross would (the ADX gate, then `strategy_engine._entry_block`: VWAP, volume, density,
   RSI, EMA, Supertrend, level, opening range, gap, candle direction; never the cross, patterns, pullback or candle waits);
-  a refusal leaves the trade on its bot ("not moved — Bot 5's entry check says no: …", listed in `recent`). No candles
+  a refusal leaves the trade on its bot ("not moved — Bot 5's entry check says no: …", listed in `recent`). **Flip** (`flip`, off by default; Settings card tick box, PAPER and LIVE, replays too): Bot 5
+  opens the OTHER side of the trade that moved (`fast_bot.bot5_side`: a fast-rising long → Bot 5 sells, a fast-falling short
+  → Bot 5 buys), and its entry checks are read for that side; `direct_order` itself still never applies Bot 5's own
+  `flip_orders`. No candles
   = nothing to refuse on. Replays read the same with the run's snapshot of Bot 5's settings (`ReplayEngine._fast_move`;
   a run saved before the setting plays with it off). Off = Bot 5 enters whatever the checks say (the old behaviour).
 - **Per-stock daily trade cap** (`max_trades_per_stock`, 0 = off by default; per bot and per stock, PAPER and LIVE,

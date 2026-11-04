@@ -663,6 +663,8 @@ export type FastBotSettings = {
   keep_trade?: boolean;
   /** Practice bots watch, LIVE Bot 5 trades: a PAPER source trade may hand off to a LIVE Bot 5 (real order). */
   paper_to_live?: boolean;
+  /** Flip: Bot 5 opens the other side of the trade that moved fast (bets the spike fades). */
+  flip?: boolean;
   on_bot5?: Record<string, { from_bot: number; trades: number; kept?: boolean }>;
   target_bot?: number;
   target_mode?: "PAPER" | "LIVE";

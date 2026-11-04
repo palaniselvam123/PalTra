@@ -4083,6 +4083,7 @@ class FastBotSettings(BaseModel):
     keep_trade: bool | None = None
     # Practice bots watch, a LIVE Bot 5 trades: a PAPER source trade may hand off to a LIVE Bot 5.
     paper_to_live: bool | None = None
+    flip: bool | None = None
     confirm_live: bool = False
 
 

@@ -363,6 +363,7 @@ export function bot5Rows(settings: Settings): [string, string][] {
     ["Bot 5 · only in profit", Number(fb.min_profit_pct ?? 0) > 0 ? `≥ ${fb.min_profit_pct}% from entry` : "Any trade"],
     ["Bot 5 · trades per stock", Number(fb.bot5_trades ?? 1) > 0 ? `${fb.bot5_trades ?? 1}, then back to its bot` : "All day"],
     ["Bot 5 · entry checks first", fb.entry_checks === false ? "Off (enters whatever they say)" : "On"],
+    ["Bot 5 · side", fb.flip ? "Flip: the other side of the trade that moved" : "Same side as the trade that moved"],
     ["Bot 5 · hand-offs per day", String(fb.max_day ?? 10)],
   ];
   if (snap.bot5 && typeof snap.bot5 === "object") {

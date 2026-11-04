@@ -406,6 +406,7 @@ class ReplayEngine(StrategyEngine):
     async def _fast_move_inner(self, name: str, direction: str, why: str) -> None:
         raw = dict(self.fast.get("settings") or {})
         raw.setdefault("entry_checks", False)
+        side = fast_bot.bot5_side(direction, fast_bot.clean(raw))  # flip = Bot 5 takes the other side
         if fast_bot.clean(raw).entry_checks:
             # Bot 5's own entry checks, with its settings for this stock, before the trade is cut.
             from strategy_engine import _cfg_for
@@ -413,7 +414,7 @@ class ReplayEngine(StrategyEngine):
             cfg = _cfg_for(self.load_config(), name)
             for key, value in fast_bot.bot5_overrides(self.fast, name).items():
                 setattr(cfg, key, value)
-            refused = fast_bot.entry_refusal(self._frames.get(name), cfg, direction, self._ltps.get(name))
+            refused = fast_bot.entry_refusal(self._frames.get(name), cfg, side, self._ltps.get(name))
             if refused:
                 self._signals[name] = f"{name} fast move ({why}): not moved, Bot {fast_bot.TARGET_BOT}'s entry check says no: {refused}"
                 return
@@ -431,10 +432,11 @@ class ReplayEngine(StrategyEngine):
             self._signals[name] = f"{name} fast move ({why}): not moved, the trade could not be closed ({exc})"
             return
         self._fast_moved[name] = fast_bot.bot5_overrides(self.fast, name)
-        signal = "BULLISH" if direction == "LONG" else "BEARISH"
+        signal = "BULLISH" if side == "LONG" else "BEARISH"
+        flip = " (flip)" if side != direction else ""
         try:
             opened = await self.direct_order(
-                name, signal, why=fast_bot.ENTRY_REASON, note=f"fast mover to Bot {fast_bot.TARGET_BOT}: {why}"
+                name, signal, why=fast_bot.ENTRY_REASON, note=f"fast mover to Bot {fast_bot.TARGET_BOT}: {why}{flip}"
             )
         except ForceRefused as exc:
             opened = f"not ordered: {exc}"

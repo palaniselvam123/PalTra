@@ -43,6 +43,7 @@ export function FastMoverBot() {
             entry_checks: v.entry_checks !== false,
             keep_trade: Boolean(v.keep_trade),
             paper_to_live: Boolean(v.paper_to_live),
+            flip: Boolean(v.flip),
           });
           setSources(v.sources);
         }
@@ -68,7 +69,7 @@ export function FastMoverBot() {
     let confirm = false;
     if ((on || form.paper_to_live) && live) {
       confirm = window.confirm(
-        `Bot 5 is LIVE. Fast movers will be ${form.keep_trade ? "kept on their bot (a LIVE pair is left alone)" : "cut on their bot"} and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"}).` +
+        `Bot 5 is LIVE. Fast movers will be ${form.keep_trade ? "kept on their bot (a LIVE pair is left alone)" : "cut on their bot"} and Bot 5 will place real Groww orders at once with its own quantity (${view?.target_qty ?? "?"})${form.flip ? ", on the OTHER side (flip: a fast-rising long is sold, a fast-falling short is bought)" : ""}.` +
           (form.paper_to_live
             ? ` Practice (PAPER) bots' fast movers WILL become real-money Bot 5 trades, up to ${form.max_day || 10} a day.`
             : "") +
@@ -97,6 +98,7 @@ export function FastMoverBot() {
         entry_checks: Boolean(form.entry_checks),
         keep_trade: Boolean(form.keep_trade),
         paper_to_live: Boolean(form.paper_to_live),
+        flip: Boolean(form.flip),
         sources,
         confirm_live: confirm,
       });
@@ -223,6 +225,16 @@ export function FastMoverBot() {
           >
             <input type="checkbox" checked={Boolean(form.keep_trade)} onChange={(e) => set("keep_trade", e.target.checked)} className="accent-[#10B981]" />
             Keep the trade on its bot: don&apos;t cut it, Bot 5 opens its own order next to it (the stock is armed on both bots)
+          </label>
+          <label
+            className="flex basis-full items-center gap-2 text-xs text-slate-300"
+            title="On: Bot 5 opens the OTHER side of the trade that moved fast: a long that shot up is SOLD (short), a short that fell fast is BOUGHT, betting the spike fades. Bot 5's entry checks are read for that side, and its own stop and exits run the trade. Replays play it the same way. Off: Bot 5 opens the same side (rides the move)."
+          >
+            <input type="checkbox" checked={Boolean(form.flip)} onChange={(e) => set("flip", e.target.checked)} className="accent-[#F59E0B]" />
+            <span>
+              <span className="font-semibold text-amber-300">Flip</span>: Bot 5 takes the opposite side (a fast-rising long is sold, a
+              fast-falling short is bought)
+            </span>
           </label>
           <label
             className="flex basis-full items-center gap-2 text-xs text-slate-300"
