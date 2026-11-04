@@ -1396,6 +1396,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `NEUTRAL`, `AFTER_CLOSE`, `PENDING`, `NO_DATA`. `summarize`: per positive / negative × high / medium / low (hit rate, average
   signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a run. Desk
   `GET /api/news-impact/validate?date=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
+- **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
+  inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
+  explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the
+  file there and adding an entry. Topic filter, search, a reader with the PDF embedded, Open in a new tab, Download, and
+  "Mark as done" (kept per browser). `/learn/?lesson=<id>` opens one; the Settings slope editor links to its guide.
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's

@@ -271,7 +271,12 @@ export function SlopeEditor({
   return (
     <section id="sma-slope-editor" aria-label="Slope editor" className="mt-3 scroll-mt-24 rounded-lg border border-sky-400/20 bg-sky-500/[0.04] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-slate-100">SMA {fast} slope, as a picture</h4>
+        <h4 className="text-sm font-semibold text-slate-100">
+          SMA {fast} slope, as a picture{" "}
+          <a href="/learn/?lesson=sma9-slope" className="ml-1 text-xs font-normal text-sky-300 underline hover:text-sky-200">
+            Read the guide (PDF)
+          </a>
+        </h4>
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Slope presets">
           {PRESETS.map((p) => (
             <button
