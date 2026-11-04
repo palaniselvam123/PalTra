@@ -251,6 +251,37 @@ export default function TerminalPage() {
     [state?.mode]
   );
 
+  const reversePosition = useCallback(
+    (symbol: string, direction: string, qty: number) => {
+      const name = symbol.toUpperCase();
+      const live = state?.mode === "LIVE";
+      const other = direction === "LONG" ? "SHORT" : "LONG";
+      const sure = window.confirm(
+        live
+          ? `REAL MONEY: reverse ${name}? This sends two real Groww orders: close ${direction} ${qty}, then open ${other} ${qty} at once. The bot keeps running.`
+          : `Reverse ${name} on the practice book? Close ${direction} ${qty}, then open ${other} ${qty} at once.`
+      );
+      if (!sure) return;
+      setClosingSymbol(name);
+      setCloseNote(null);
+      smaApi
+        .reversePosition(name, live)
+        .then((res) => {
+          setCloseNote(res.last_signal);
+          return Promise.allSettled([smaApi.state(), smaApi.trades(), smaApi.chart(liveBars.current, heldRef.current, liveInterval.current)]).then(([next, rows, nextChart]) => {
+            if (next.status === "fulfilled") {
+              setState((prev) => (next.value.ltp > 0 || !prev || prev.ltp <= 0 ? next.value : prev));
+            }
+            if (rows.status === "fulfilled") setTrades(rows.value);
+            if (nextChart.status === "fulfilled") setChart(nextChart.value);
+          });
+        })
+        .catch((err: unknown) => setCloseNote(err instanceof Error ? err.message : "Reverse failed"))
+        .finally(() => setClosingSymbol(null));
+    },
+    [state?.mode]
+  );
+
   useEffect(() => {
     refresh();
     const poll = setInterval(refresh, 15000);
@@ -586,6 +617,11 @@ export default function TerminalPage() {
                       if (!pos || !viewState?.symbol) return;
                       closePosition(viewState.symbol, pos.direction, pos.qty);
                     }}
+                    onReverse={() => {
+                      const pos = viewState?.position;
+                      if (!pos || !viewState?.symbol) return;
+                      reversePosition(viewState.symbol, pos.direction, pos.qty);
+                    }}
                   />
                 </div>
               ),
@@ -603,7 +639,7 @@ export default function TerminalPage() {
               title: "Open positions",
               collapsible: true,
               out: !inTab(shownTab, "live"),
-              node: <OpenPositionsCard state={state} closing={closingSymbol} onClose={closePosition} />,
+              node: <OpenPositionsCard state={state} closing={closingSymbol} onClose={closePosition} onReverse={reversePosition} />,
             },
             {
               id: "strategy",

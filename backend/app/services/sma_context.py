@@ -198,6 +198,7 @@ FIELD_HELP = {
     "use_cvd": "entry check: cumulative delta (volume × body ÷ range, summed from 09:15) rose over cvd_lookback candles for a buy / fell for a sell",
     "cvd_lookback": "cumulative delta check: candles compared", "cvd_div_exit": "exit when price makes a new high (long) / low (short) over cvd_div_lookback candles but cumulative delta does not",
     "cvd_div_lookback": "cumulative delta divergence: candles before the new high / low",
+    "reverse_on_exit": "reverse instead of only closing: CSV of VTURN (SMA 9 V-turn exit), TURN (SMA 9 turn exit), CANDLES (counter-candle exit); after that exit the bot opens the other side at once if every check agrees",
     "use_supertrend": "entry check: Supertrend on the trade's side", "st_exit": "exit when Supertrend flips against",
     "st_period": "Supertrend ATR length", "st_mult": "Supertrend factor",
     "use_level": "entry check: close beyond level_line (BB_MIDDLE | BB_UPPER | PIVOT_P | PIVOT_R1)",

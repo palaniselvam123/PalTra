@@ -92,6 +92,7 @@ export function strategyLabel(s: Settings): string {
     if (s.macd_exit) parts.push(`MACD ${s.macd_fast ?? 12}/${s.macd_slow ?? 26}/${s.macd_signal ?? 9} exit`);
     if (s.use_cvd) parts.push(`Cum. delta ${s.cvd_lookback ?? 5} entry`);
     if (s.cvd_div_exit) parts.push(`Cum. delta divergence ${s.cvd_div_lookback ?? 10} exit`);
+    if (s.reverse_on_exit) parts.push(`Reverse on ${String(s.reverse_on_exit).toLowerCase().replace(/,/g, " / ")} exit`);
     if (s.ha_colours) parts.push("Heikin Ashi colours");
     if (s.use_level) parts.push(`level ${s.level_line ?? "BB_MIDDLE"}`);
     if (s.use_high52) parts.push(`52w high ${s.high52_side ?? "LONG"}${Number(s.high52_pct ?? 0) > 0 ? ` ±${s.high52_pct}%` : ""}`);
@@ -277,6 +278,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["MACD cross exit", (s) => (s.macd_exit ? `On (${s.macd_fast ?? 12}/${s.macd_slow ?? 26}/${s.macd_signal ?? 9})` : "Off")],
   ["Cumulative delta entry", (s) => (s.use_cvd ? `On (${s.cvd_lookback ?? 5} candles)` : "Off")],
   ["Cumulative delta divergence exit", (s) => (s.cvd_div_exit ? `On (${s.cvd_div_lookback ?? 10} candles)` : "Off")],
+  ["Reverse instead of only closing", (s) => (s.reverse_on_exit ? String(s.reverse_on_exit) : "Off")],
   ["Heikin Ashi colours", (s) => (s.ha_colours ? "On" : "Off")],
   ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
   ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],

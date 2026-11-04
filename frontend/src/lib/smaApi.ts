@@ -171,6 +171,8 @@ export type SmaConfig = {
   cvd_lookback?: number;
   cvd_div_exit?: boolean;
   cvd_div_lookback?: number;
+  /** Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off. */
+  reverse_on_exit?: string;
   /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
   ha_colours?: boolean;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
@@ -2030,6 +2032,12 @@ export const smaApi = {
     request<{ bot_status: string; last_signal: string }>("/api/bot/close", {
       method: "POST",
       body: JSON.stringify({ symbol }),
+    }),
+  /** Close the open trade and open the same stock the other way at once (reverse_exit.py). LIVE needs confirmLive. */
+  reversePosition: (symbol: string, confirmLive = false) =>
+    request<{ bot_status: string; last_signal: string }>("/api/bot/reverse", {
+      method: "POST",
+      body: JSON.stringify({ symbol, confirm_live: confirmLive }),
     }),
   /** Newest 200 trades across all books; the page polls this. */
   trades: (): Promise<TradeRow[]> => request<TradeRow[]>("/api/trades").then((rows) => rows.map((r) => tradeBeforeCharges(r))),

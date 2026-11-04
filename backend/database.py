@@ -145,6 +145,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "cvd_lookback": "INTEGER DEFAULT 5",
             "cvd_div_exit": "BOOLEAN DEFAULT 0",
             "cvd_div_lookback": "INTEGER DEFAULT 10",
+            "reverse_on_exit": "VARCHAR DEFAULT ''",
             "ha_colours": "BOOLEAN DEFAULT 0",
             "use_supertrend": "BOOLEAN DEFAULT 0",
             "use_level": "BOOLEAN DEFAULT 0",

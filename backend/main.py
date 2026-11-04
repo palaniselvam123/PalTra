@@ -25,7 +25,7 @@ import gzip
 
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
@@ -60,6 +60,7 @@ import ema_filter
 import heikin_ashi
 import macd
 import cum_delta
+import reverse_exit
 import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
@@ -604,6 +605,13 @@ class ConfigUpdate(BaseModel):
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
     cvd_div_lookback: int | None = Field(default=None, ge=cum_delta.MIN_DIV_LOOKBACK, le=cum_delta.MAX_DIV_LOOKBACK)
+    # Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off.
+    reverse_on_exit: str | None = Field(default=None, max_length=40)
+
+    @field_validator("reverse_on_exit", mode="before")
+    @classmethod
+    def _reverse_keys(cls, value):
+        return None if value is None else reverse_exit.clean(value)
     ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
@@ -1582,6 +1590,7 @@ def _gap_dict(row) -> dict:
         "cvd_lookback": cum_delta.lookback(row),
         "cvd_div_exit": cum_delta.exit_on(row),
         "cvd_div_lookback": cum_delta.div_lookback(row),
+        "reverse_on_exit": ",".join(k for k in reverse_exit.KEYS if k in reverse_exit.keys(row)),
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
@@ -2074,6 +2083,46 @@ async def _close_position(eng: StrategyEngine, body: CloseOrder):
 @app.post("/api/bot/close")
 async def close_position(body: CloseOrder):
     return await _close_position(engine, body)
+
+
+class ReverseOrder(BaseModel):
+    symbol: str = ""
+    confirm_live: bool = False
+
+
+async def _reverse_position(eng: StrategyEngine, body: ReverseOrder):
+    """Close one open stock and open it the other way at once (reverse_exit.py). A LIVE bot needs confirm_live."""
+    try:
+        live = (eng.load_config().trading_mode or "PAPER").upper() == "LIVE"
+    except Exception:  # noqa: BLE001
+        live = False
+    if live and not body.confirm_live:
+        raise HTTPException(409, "This bot is LIVE: a reverse sends two real Groww orders. Confirm to go ahead.")
+    try:
+        result = await eng.reverse_position(body.symbol)
+    except ForceRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"bot_status": eng.status, "last_signal": result}
+
+
+@app.post("/api/bot/reverse")
+async def reverse_position(body: ReverseOrder):
+    return await _reverse_position(engine, body)
+
+
+@app.post("/api/research/bot/reverse")
+async def research_reverse_position(body: ReverseOrder):
+    return await _reverse_position(_research(), body)
+
+
+@app.post("/api/bots/{bot}/bot/reverse")
+async def bot_reverse(bot: int, body: ReverseOrder):
+    return await _reverse_position(_bot(bot), body)
+
+
+@app.post("/api/replay/bot/reverse")
+async def replay_bot_reverse(body: ReverseOrder, bot: int = 1):
+    return await _reverse_position(_replay_engine(bot), body)
 
 
 async def _answer_review(eng: StrategyEngine, review_id: int, action: str):

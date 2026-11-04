@@ -15,11 +15,14 @@ export function OpenPositionsCard({
   state,
   closing,
   onClose,
+  onReverse,
 }: {
   state: SmaState | null;
   /** The stock whose close is in flight, if any. */
   closing?: string | null;
   onClose?: (symbol: string, direction: "LONG" | "SHORT", qty: number) => void;
+  /** Close the trade and open the same stock the other way at once (asks first). */
+  onReverse?: (symbol: string, direction: "LONG" | "SHORT", qty: number) => void;
 }) {
   const held = (state?.books ?? []).filter((b): b is Book & { direction: "LONG" | "SHORT" } => b.direction === "LONG" || b.direction === "SHORT");
   const total = state?.open_gross_total ?? state?.open_net_total ?? held.reduce((sum, b) => sum + (openOf(b) ?? 0), 0);
@@ -73,8 +76,19 @@ export function OpenPositionsCard({
                         onClick={() => onClose(b.symbol, b.direction, b.qty)}
                         className="rounded px-2 py-0.5 text-[11px] font-semibold text-rose-300 ring-1 ring-inset ring-rose-500/50 hover:bg-rose-500/15 disabled:opacity-50"
                       >
-                        {closing === b.symbol ? "Closing…" : "Close"}
+                        {closing === b.symbol ? "Working…" : "Close"}
                       </button>
+                      {onReverse ? (
+                        <button
+                          type="button"
+                          disabled={closing === b.symbol}
+                          onClick={() => onReverse(b.symbol, b.direction, b.qty)}
+                          title={`Close this ${b.direction === "LONG" ? "buy" : "short"} and open a ${b.direction === "LONG" ? "short" : "buy"} at once`}
+                          className="ml-1 rounded px-2 py-0.5 text-[11px] font-semibold text-sky-300 ring-1 ring-inset ring-sky-500/50 hover:bg-sky-500/15 disabled:opacity-50"
+                        >
+                          Reverse
+                        </button>
+                      ) : null}
                     </td>
                   ) : null}
                 </tr>

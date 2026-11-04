@@ -522,6 +522,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   exit for `strategyChecks.noExitOn`. Settings → 2. Checks before entering and 3. When to exit. The chart's "Cumulative
   delta (strip)" (`chartStyle` key `cvd`, Auto = while either is on) is worked out in the browser (`chartStyle.cvdValues`,
   same arithmetic). The stock research baseline keeps both off.
+- `backend/reverse_exit.py` – reverse a position (PAPER and LIVE). **Reverse instead of only closing** (`reverse_on_exit`,
+  CSV of `VTURN` / `TURN` / `CANDLES`, "" = off by default; per bot and per stock, replays too; validated by
+  `ConfigUpdate._reverse_keys` → `clean`): right after the SMA 9 V-turn exit (`SMA9_VTURN`), the SMA 9 turn exit
+  (`SMA9_TURN`) or the counter-candle exit (`COUNTER_CANDLES`) closes a trade, `StrategyEngine._reverse_after_exit` asks for
+  the other side of its signal side through `apply_signal(..., alert=False, why="EXIT_REVERSE")` (every check, the stop,
+  flip, cut-off, caps, loss lock and one LIVE bot per stock apply; a refusal leaves the stock flat; no V-turn hand-off or
+  counter re-entry follows a reverse). The exit itself must be on. Settings → 3. When to exit ("Reverse instead of only
+  closing", `StrategyConfigPanel.ReverseOnExit`). **Reverse button** (`StrategyEngine.reverse_position`; `POST /api/bot/reverse`
+  and the `/api/research/bot/`, `/api/bots/{n}/bot/`, `/api/replay/bot/` forms, body `symbol`, `confirm_live`): market hours,
+  square-off, cut-off and Trade list are checked first (a refusal leaves the trade), then `close_symbol(reason=
+  "MANUAL_REVERSE")` and an `_apply_locked` entry the real opposite way (flip not applied, no cross or filter read, entry
+  reason `MANUAL_REVERSE`, `hold_for_next_cross`); caps, loss lock and one LIVE bot per stock still apply to the new side. A
+  LIVE bot needs `confirm_live` (409 without). UI: the chart's position box (Close position / Reverse) and the Open positions
+  card, each asking first (LIVE: "two real Groww orders"). The stock research baseline keeps it off.
 - `backend/heikin_ashi.py` – Heikin Ashi colours (`ha_colours`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): HA close = (O + H + L + C) / 4, HA open = (previous HA open + previous HA close) / 2 (`candles`). With it on,
   every rule that reads a candle's colour reads the HA one through `view(frame, cfg)` (the real close, with `open` moved so
