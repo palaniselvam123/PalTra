@@ -21,6 +21,24 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "day-high-low",
+    title: "Day high/low guard: don't buy at the top",
+    summary:
+      "What the three boxes mean (near the high/low, wait for a pullback, wait at most), with candle charts of a dip that gives a cheaper buy, no dip so no trade, a signal far from the high, and the short version.",
+    topic: "Entries",
+    file: "/guides/day-high-low-guard-guide.pdf",
+    pages: 3,
+    minutes: 5,
+    added: "2026-11-04",
+    open: { href: "/settings/#sma-day-extreme", label: "Open the setting" },
+    points: [
+      "Signal within 0.15% of the day's high (₹1.50 on ₹1,000): don't buy yet.",
+      "Wait for the price to dip 0.15% (or to the SMA 9 if nearer), then buy there.",
+      "No dip within 3 candles: no trade, the move is let go.",
+      "Shorts work the same upside down, near the day's low.",
+    ],
+  },
+  {
     id: "sma9-slope",
     title: "SMA 9 slope: Turn exit and V-turn",
     summary:
