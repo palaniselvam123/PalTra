@@ -326,7 +326,7 @@ SNAPSHOT_FIELDS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
-    "reverse_on_exit",
+    "reverse_on_exit", "reverse_colour_exit",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -4348,12 +4348,15 @@ class StrategyEngine:
             self._alert(text)
 
     async def _watch_turn_colour(self, cfg: BotConfig) -> None:
-        """A trade opened by an SMA 9 turn closes on the first candle of the other colour closed after its entry
-        (turn_colour_exit, turn_entry.py): red for a long, green for a short. No reverse."""
+        """A trade opened by an SMA 9 turn (turn_colour_exit, turn_entry.py) or by reverse on exit
+        (reverse_colour_exit, reverse_exit.py) closes on the first candle of the other colour closed after its entry:
+        red for a long, green for a short. No reverse."""
         pos = self.position
-        if pos is None or self.status != "RUNNING" or not turn_entry.colour_exit_on(cfg) or self.ltp <= 0:
+        if pos is None or self.status != "RUNNING" or self.ltp <= 0:
             return
-        if not pos.entry_why.startswith(turn_entry.ENTRY_REASON):
+        turn_trade = turn_entry.colour_exit_on(cfg) and pos.entry_why.startswith(turn_entry.ENTRY_REASON)
+        reversed_trade = reverse_exit.colour_exit_applies(cfg, pos.entry_why)
+        if not (turn_trade or reversed_trade):
             return
         symbol = (cfg.symbol or self._focus or "").upper()
         frame = self._frames.get(symbol)
@@ -4371,7 +4374,8 @@ class StrategyEngine:
         if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], pos.signal_direction):
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
-        self._signals[symbol] = f"{symbol} SMA 9 turn trade closed on a {colour} candle"
+        what = "SMA 9 turn" if turn_trade else "reversed"
+        self._signals[symbol] = f"{symbol} {what} trade closed on a {colour} candle"
         await self._exit_now(cfg, self.ltp, turn_entry.COLOUR_EXIT)
 
     def _pivots(self, symbol: str, day: dt.date) -> dict | None:
