@@ -305,6 +305,10 @@ class TradeBoxes implements ISeriesPrimitive<Time> {
       ctx.textAlign = "center";
       const h = 14;
       const gap = 7;
+      // Labels already placed: a stop-and-reverse closes one trade and opens the next on the same candle at the same
+      // price (a buy's "X" and the new short's "S" both sit above it), so a label that would cover another is stacked
+      // one row further out instead of being hidden under it.
+      const placed: { l: number; t: number; r: number; b: number }[] = [];
       for (const b of this.boxes) {
         const x = scale.timeToCoordinate(b.time as Time);
         const y = host.series.priceToCoordinate(b.price);
@@ -312,7 +316,10 @@ class TradeBoxes implements ISeriesPrimitive<Time> {
         const w = Math.ceil(ctx.measureText(b.text).width) + 8;
         // A buy entry sits under its fill and a sell entry above it; the exit goes the other way.
         const below = (b.direction === "LONG") === (b.kind === "ENTRY");
-        const top = below ? y + gap : y - gap - h;
+        let top = below ? y + gap : y - gap - h;
+        const hits = (t: number) => placed.some((p) => x - w / 2 < p.r + 2 && x + w / 2 > p.l - 2 && t < p.b + 2 && t + h > p.t - 2);
+        for (let k = 0; k < 6 && hits(top); k += 1) top += below ? h + 3 : -(h + 3);
+        placed.push({ l: x - w / 2, t: top, r: x + w / 2, b: top + h });
         ctx.strokeStyle = b.color;
         ctx.lineWidth = 1;
         ctx.beginPath();
