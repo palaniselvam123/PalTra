@@ -40,6 +40,8 @@ type Props = {
   closing: boolean;
   /** Closes the chart stock's position. Left out on a read-only chart (no Close button). */
   onClose?: () => void;
+  /** Closes the chart stock's position and opens it the other way at once (asks first). Left out on a read-only chart. */
+  onReverse?: () => void;
   /** Asks the page for this many 1-minute bars on the live chart (bigger candles need more). */
   /** How many candles the live chart needs, and the candle size to ask the server for (null: the bot's own, merged up here). */
   onLiveBars?: (count: number, interval?: number | null) => void;
@@ -912,7 +914,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onLiveBars, pin, onHoldChange }: Props) {
+export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onReverse, onLiveBars, pin, onHoldChange }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -2341,15 +2343,30 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                 </dd>
               </div>
             </dl>
-            {onClose ? (
-              <button
-                type="button"
-                disabled={closing}
-                onClick={onClose}
-                className="pointer-events-auto mt-2 min-h-11 w-full rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
-              >
-                {closing ? "Closing…" : "Close position"}
-              </button>
+            {onClose || onReverse ? (
+              <div className="pointer-events-auto mt-2 flex gap-2">
+                {onClose ? (
+                  <button
+                    type="button"
+                    disabled={closing}
+                    onClick={onClose}
+                    className="min-h-11 flex-1 rounded-md border border-rose-400/50 bg-rose-500/15 px-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:opacity-50 sm:min-h-9"
+                  >
+                    {closing ? "Working…" : "Close position"}
+                  </button>
+                ) : null}
+                {onReverse ? (
+                  <button
+                    type="button"
+                    disabled={closing}
+                    onClick={onReverse}
+                    title={`Close this ${pos.direction === "LONG" ? "buy" : "short"} and open a ${pos.direction === "LONG" ? "short" : "buy"} at once (asks first)`}
+                    className="min-h-11 flex-1 rounded-md border border-sky-400/50 bg-sky-500/15 px-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 sm:min-h-9"
+                  >
+                    Reverse
+                  </button>
+                ) : null}
+              </div>
             ) : null}
             </>
             )}

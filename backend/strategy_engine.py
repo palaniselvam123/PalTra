@@ -63,6 +63,7 @@ import ema_filter
 import heikin_ashi
 import macd
 import cum_delta
+import reverse_exit
 import exit_candle
 import small_candles
 import vwap_stop
@@ -153,6 +154,8 @@ ENTRY_REASONS = (
     "HANDOFF",
     "SMA9_TURN",
     "FAST_MOVE",
+    "EXIT_REVERSE",
+    "MANUAL_REVERSE",
 )
 
 
@@ -323,6 +326,7 @@ SNAPSHOT_FIELDS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
+    "reverse_on_exit",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -3222,6 +3226,70 @@ class StrategyEngine:
                 self._focus = saved_focus
                 self.ltp = saved_ltp
 
+    async def reverse_position(self, symbol: str) -> str:
+        """Close the open trade on `symbol` and open it the other way at once (the Reverse button, reverse_exit.py).
+
+        Market hours, the square-off, the cut-off and the Trade list are checked before the close, so those refusals
+        leave the trade untouched. No cross or entry filter is read (the person decided); the caps, the loss lock and
+        (in `_open`) one LIVE bot per stock still apply to the new side, and if one of them refuses it the stock is
+        left flat and the result says so.
+        """
+        if self.status == "HALTED":
+            raise ForceRefused(self.halt_reason or "Halted for the day")
+        if self.status == "DAY_COMPLETED":
+            raise ForceRefused(self.halt_reason or "Session already squared off")
+        name = (symbol or "").upper().strip()
+        held = self.positions.get(name)
+        if held is None:
+            raise ForceRefused(f"{name or 'That stock'} has no open position")
+        cfg = self.load_config()
+        clock = self._now()
+        if not market_is_open(clock):
+            raise ForceRefused("Market is closed. Use Close instead.")
+        if clock.time() >= _parse_hhmm(cfg.square_off_time):
+            raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. Use Close instead.")
+        if clock.time() >= _entry_cutoff(cfg):
+            raise ForceRefused(f"No new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST. Use Close instead.")
+        if name not in trade_names(cfg):
+            raise ForceRefused(f"{name} is not on the Trade list, so the other side cannot open. Use Close instead.")
+        enriched, price, reference, atr = await self._manual_ready(name, cfg)
+        old = held.direction
+        signal = "BEARISH" if old == "LONG" else "BULLISH"
+        await self.close_symbol(name, reason=reverse_exit.MANUAL_REASON)
+        own = _cfg_for(cfg, name)
+        # The button reverses the real position: the new order is the real opposite side, never flipped again.
+        own.flip_orders = False
+        # A cross already on the tape must not turn the new trade straight round.
+        self.hold_for_next_cross([name])
+        self.ltp = price
+        now = self._now()
+        async with self.lock:
+            if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
+                raise ForceRefused(f"{name} closed, but the reverse was blocked: an order is in progress")
+            self.inflight = "TRANSIT"
+            self._focus = name
+            try:
+                result = await self._apply_locked(
+                    signal=signal,
+                    cross_price=price,
+                    atr=atr,
+                    adx_blocks_entry=False,
+                    cfg=own,
+                    now=now,
+                    why=reverse_exit.MANUAL_REASON,
+                )
+            except SlCancelFailed as exc:
+                self.last_error = str(exc)
+                self._order_refused(name, str(exc))
+                raise ForceRefused(f"{name} closed, but the reverse order was refused: {exc}") from exc
+            finally:
+                self.inflight = None
+        text = f"{name} {old} closed and reversed: {result}"
+        self.last_signal = text
+        self._signals[name] = text
+        self._log_decision(signal, enriched, own, now, result, note="Manual reverse: no SMA cross or entry filter is read.")
+        return text
+
     async def _read_order(self, order_id: str) -> tuple[str, float | None]:
         fn = getattr(self.broker, "read_order", None)
         try:
@@ -4042,6 +4110,10 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
         side = pos.signal_direction
         await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")
+        if symbol not in self.positions and reverse_exit.on(cfg, "COUNTER_CANDLES"):
+            # Reverse instead of only closing (reverse_exit.py); no re-entry wait after a reverse.
+            await self._reverse_after_exit(cfg, symbol, side, "COUNTER_CANDLES")
+            return
         if counter_candles.reenter_on(cfg) and symbol not in self.positions:
             run = join_trend.side_start(enriched)
             level = counter_candles.exit_level(closed.iloc[-1], side)
@@ -4193,6 +4265,19 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
         await self._exit_now(cfg, self.ltp, small_candles.REASON)
 
+    async def _reverse_after_exit(self, cfg: BotConfig, symbol: str, signal_side: str, exit_reason: str) -> None:
+        """After an exit set to reverse (reverse_on_exit): ask for the other side at once, every check applying."""
+        if symbol in self.positions or self.status != "RUNNING":
+            return
+        frame = self._frames.get(symbol)
+        if frame is None or len(frame) < 3:
+            return
+        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+        signal = reverse_exit.opposite_signal(signal_side)
+        result = await self.apply_signal(signal, enriched, cfg, self._now(), alert=False, why=reverse_exit.ENTRY_REASON)
+        side = "short" if signal == "BEARISH" else "long"
+        self._signals[symbol] = f"{symbol} {exit_reason} exit, reverse {side}: {result}"
+
     async def _watch_slope_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the SMA 9 bends or turns against the trade (slope_exit.py)."""
         pos = self.position
@@ -4246,6 +4331,10 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} SMA 9 slope exit — {note}"
         price, live = self.ltp, (pos.mode or "PAPER").upper() == "LIVE"
         await self._exit_now(cfg, price, reason)
+        if self.position is None and reverse_exit.on(cfg, reason):
+            # Reverse instead of only closing (reverse_exit.py); a hand-off never follows a reverse.
+            await self._reverse_after_exit(cfg, symbol, pos.signal_direction, reason)
+            return
         if (
             reason == slope_exit.VTURN_EXIT
             and slope_exit.vturn_handoff_on(cfg)
@@ -5780,6 +5869,7 @@ _ALERT_REASON = {
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
     "MACD_CROSS": "MACD cross against the trade",
+    "MANUAL_REVERSE": "reversed by hand",
     "CVD_DIVERGENCE": "price / cumulative delta divergence",
     "SUPERTREND": "Supertrend turned against the trade",
     "VWAP_SL_HIT": "VWAP stop hit",

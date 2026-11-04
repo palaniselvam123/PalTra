@@ -16,6 +16,8 @@ const ENTRY_SHORT: Record<string, string> = {
   HANDOFF: "Hand-off",
   SMA9_TURN: "SMA 9 turn",
   FAST_MOVE: "Fast mover",
+  EXIT_REVERSE: "Reversed on exit",
+  MANUAL_REVERSE: "Reversed by hand",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -35,6 +37,8 @@ const ENTRY_LONG: Record<string, string> = {
   HANDOFF: "Handed over from another bot: ordered at once, the opposite of that bot's closed trade",
   SMA9_TURN: "SMA 9 turn: the fast SMA made a sharp V (or a rounded U), ordered before the cross",
   FAST_MOVE: "Fast mover: moved from another bot while running its way, ordered at once at this bot's size",
+  EXIT_REVERSE: "Reverse on exit: a V-turn, turn or counter-candle exit closed the other side and this one opened at once",
+  MANUAL_REVERSE: "Reverse button: the open trade was closed and this side opened at once",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

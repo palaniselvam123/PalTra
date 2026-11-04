@@ -350,6 +350,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     cvd_lookback: Math.min(50, Math.max(1, Math.round(Number(form.cvd_lookback ?? 5)) || 5)),
     cvd_div_exit: Boolean(form.cvd_div_exit),
     cvd_div_lookback: Math.min(100, Math.max(3, Math.round(Number(form.cvd_div_lookback ?? 10)) || 10)),
+    reverse_on_exit: String(form.reverse_on_exit ?? ""),
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
@@ -1942,6 +1943,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
             </div>
           )}
+          <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -3001,6 +3003,16 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
   if (f.cvd_div_exit) add({ group: "exit", key: "cvd_div_exit", text: `Close when price makes a new high / low over ${n(f.cvd_div_lookback, 10)} candles without the cumulative delta`, off: { cvd_div_exit: false } });
+  if (f.reverse_on_exit)
+    add({
+      group: "exit",
+      key: "reverse_on_exit",
+      text: `Reverse instead of only closing after the ${String(f.reverse_on_exit)
+        .split(",")
+        .map((k) => REVERSE_KEYS.find((r) => r.key === k)?.label ?? k)
+        .join(" / ")} exit`,
+      off: { reverse_on_exit: "" },
+    });
   if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
@@ -3446,6 +3458,56 @@ function TslAtrSliders({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Reverse instead of only closing (backend reverse_exit.py): which exits open the other side at once. */
+const REVERSE_KEYS = [
+  { key: "VTURN", label: "SMA 9 V-turn", on: (f: SmaConfig) => Boolean(f.vturn_exit) },
+  { key: "TURN", label: "SMA 9 turn", on: (f: SmaConfig) => Boolean(f.slope_exit) && f.slope_turn !== false },
+  { key: "CANDLES", label: "counter-candle", on: (f: SmaConfig) => Number(f.counter_exit_count ?? 0) > 0 },
+] as const;
+
+function ReverseOnExit({ form, set, own }: { form: SmaConfig; set: (key: keyof SmaConfig, value: string | boolean) => void; own: boolean }) {
+  const picked = new Set(
+    String(form.reverse_on_exit ?? "")
+      .split(",")
+      .map((k) => k.trim().toUpperCase())
+      .filter(Boolean)
+  );
+  const toggle = (key: string, tick: boolean) => {
+    const next = new Set(picked);
+    if (tick) next.add(key);
+    else next.delete(key);
+    set("reverse_on_exit", REVERSE_KEYS.map((r) => r.key).filter((k) => next.has(k)).join(","));
+  };
+  return (
+    <div className="mt-4 rounded-md border border-white/10 p-2">
+      <div className="flex items-center gap-1 text-sm text-slate-300">
+        {own && <OwnTag />}
+        Reverse instead of only closing
+        <InfoTip label="About reverse on exit">
+          These exits only close the trade. Tick one and, right after it closes the trade, the bot opens the other side at
+          once (a buy becomes a sell). Every entry check still applies (filters, the stop, flip, market hours, the cut-off,
+          the trade caps, the loss limit, one LIVE bot per stock); if one says no, the stock just stays flat. The exit
+          itself must be switched on for its tick to do anything. Entry reason EXIT_REVERSE. Try it on Replay first.
+        </InfoTip>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+        {REVERSE_KEYS.map((r) => (
+          <label key={r.key} className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={picked.has(r.key)}
+              onChange={(e) => toggle(r.key, e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            After the {r.label} exit
+            {picked.has(r.key) && !r.on(form) ? <span className="text-xs text-amber-300">(that exit is off)</span> : null}
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

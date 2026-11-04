@@ -54,6 +54,7 @@ BASELINE_OFF = {
     "use_supertrend": False,
     "use_cvd": False,
     "cvd_div_exit": False,
+    "reverse_on_exit": "",
     "use_level": False,
     "use_high52": False,
     "tall_pullback": False,

@@ -57,6 +57,7 @@ const REASON: Record<string, string> = {
   SOLD_ON_GROWW: "SOLD ON GROWW",
   SL_REJECTED: "STOP REFUSED",
   MANUAL_CLOSE: "MANUAL CLOSE",
+  MANUAL_REVERSE: "REVERSED",
   USER_REVIEW_EXIT: "EXIT ON 1-MIN REVIEW",
 };
 
@@ -1044,6 +1045,7 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   KILL_SWITCH: "red",
   SL_REJECTED: "red",
   MANUAL_CLOSE: "blue",
+  MANUAL_REVERSE: "blue",
   USER_REVIEW_EXIT: "violet",
   NOT_ON_GROWW: "slate",
   STOP_LOST: "red",
@@ -1088,6 +1090,7 @@ export const REASON_SHORT: Record<string, string> = {
   KILL_SWITCH: "Kill switch",
   SL_REJECTED: "Stop refused",
   MANUAL_CLOSE: "Manual",
+  MANUAL_REVERSE: "Reversed by hand (Reverse button)",
   USER_REVIEW_EXIT: "Review",
   NOT_ON_GROWW: "Not on Groww",
   STOP_LOST: "Groww dropped the stop; closed at the market",
