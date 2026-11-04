@@ -186,3 +186,77 @@ def test_api_saves_the_reversed_trade_colour_exit(tmp_path, monkeypatch):
         ok = client.put("/api/config", json={"reverse_colour_exit": True})
         assert ok.status_code == 200 and ok.json()["reverse_colour_exit"] is True
     database.reset_engine()
+
+
+def test_reverse_settings_overlay_and_groups():
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        use_vwap=True, bb_exit="BOTH", counter_exit_count=0, cross_exit=True,
+        reverse_settings='{"use_vwap":false,"bb_exit":"OFF","counter_exit_count":2}',
+    )
+    over = reverse_exit.overlay(cfg)
+    assert over.use_vwap is False and over.bb_exit == "OFF" and over.counter_exit_count == 2
+    assert cfg.use_vwap is True  # the bot's own settings are not changed
+    only_exits = reverse_exit.overlay(cfg, groups=("exits",))
+    assert only_exits.bb_exit == "OFF" and only_exits.use_vwap is True and only_exits.counter_exit_count == 0
+    assert reverse_exit.overlay(SimpleNamespace(use_vwap=True, reverse_settings="")).use_vwap is True
+    assert reverse_exit.parse_settings('{"symbol":"X","use_rsi":true}') == {"use_rsi": True}
+    with pytest.raises(ValueError):
+        reverse_exit.clean_settings({"trading_mode": "LIVE"})
+
+
+@pytest.mark.asyncio
+async def test_reverse_uses_its_own_entry_checks_and_exits(engine, monkeypatch):  # noqa: F811
+    _session(monkeypatch)
+    engine._frames["SHIPROCKET"] = _ohlcv([100.0 + i * 0.1 for i in range(40)])
+    engine._ltps["SHIPROCKET"] = 104.0
+    engine.status = "RUNNING"
+    _arm("SHIPROCKET")
+    cfg = engine.load_config()
+    cfg.symbol = "SHIPROCKET"
+    cfg.use_adx_filter = False
+    # The bot's own RSI check refuses every short.
+    cfg.use_rsi = True
+    cfg.rsi_short_min = 0.0
+    cfg.rsi_short_max = 0.0
+    engine._focus = "SHIPROCKET"
+    engine.ltp = 104.0
+    await engine._reverse_after_exit(cfg, "SHIPROCKET", "LONG", "SMA9_VTURN")
+    assert "SHIPROCKET" not in engine.positions  # refused by the bot's RSI check
+    # The reversed trades' own settings switch the RSI check off: the reverse opens.
+    cfg.reverse_settings = '{"use_rsi":false,"bb_exit":"MIDDLE"}'
+    await engine._reverse_after_exit(cfg, "SHIPROCKET", "LONG", "SMA9_VTURN")
+    assert engine.positions["SHIPROCKET"].direction == "SHORT"
+    # While it is open its own exits apply; a normal trade keeps the bot's.
+    from strategy_engine import _cfg_for
+
+    cfg.bb_exit = "OFF"
+    assert engine._trade_cfg(cfg, "SHIPROCKET").bb_exit == "MIDDLE"
+    assert engine._trade_cfg(cfg, "SHIPROCKET", groups=("exits",)).use_rsi is True
+    engine.positions["SHIPROCKET"].entry_why = "SMA_CROSS"
+    assert engine._trade_cfg(cfg, "SHIPROCKET").bb_exit == "OFF"
+    assert _cfg_for(cfg, "SHIPROCKET").bb_exit == "OFF"
+
+
+def test_api_saves_reverse_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api3.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "reverse_settings" in STOCK_FIELDS
+    with TestClient(app) as client:
+        assert client.get("/api/config").json()["reverse_settings"] == {}
+        ok = client.put("/api/config", json={"reverse_settings": {"use_vwap": False, "counter_exit_count": 3}})
+        assert ok.status_code == 200 and ok.json()["reverse_settings"] == {"use_vwap": False, "counter_exit_count": 3}
+        assert client.put("/api/config", json={"reverse_settings": {"trading_mode": "LIVE"}}).status_code == 422
+        assert client.put("/api/config", json={"reverse_settings": {"counter_exit_count": 99}}).status_code == 422
+        cleared = client.put("/api/config", json={"reverse_settings": {}})
+        assert cleared.json()["reverse_settings"] == {}
+    database.reset_engine()

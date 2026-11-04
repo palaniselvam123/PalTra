@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
+import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
 import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -280,6 +281,14 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Cumulative delta divergence exit", (s) => (s.cvd_div_exit ? `On (${s.cvd_div_lookback ?? 10} candles)` : "Off")],
   ["Reverse instead of only closing", (s) => (s.reverse_on_exit ? String(s.reverse_on_exit) : "Off")],
   ["Reversed trade: close on the other colour", (s) => (s.reverse_colour_exit ? "On" : "Off")],
+  [
+    "Reversed trades' own settings",
+    (s) => {
+      const own = readReverse(s.reverse_settings);
+      const parts = Object.entries(own).map(([k, v]) => `${k} ${typeof v === "boolean" ? (v ? "on" : "off") : v}`);
+      return parts.length ? parts.join(", ") : "Same as the bot";
+    },
+  ],
   ["Heikin Ashi colours", (s) => (s.ha_colours ? "On" : "Off")],
   ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
   ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],

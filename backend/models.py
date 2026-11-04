@@ -382,6 +382,8 @@ class BotConfig(Base):
     # Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off.
     reverse_on_exit: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     reverse_colour_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Reversed trades' own entry checks / exits / stop (reverse_exit.py), JSON; "" = the bot's own.
+    reverse_settings: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     # Heikin Ashi colours (heikin_ashi.py): every candle-colour rule reads Heikin Ashi candles.
     ha_colours: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.

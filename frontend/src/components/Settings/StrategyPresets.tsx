@@ -11,6 +11,23 @@ import { smaApi, type SmaConfig, type StrategyPreset, type StrategyPresets as Li
  * has an answer. Load puts a copy's numbers into the form; the usual Save then applies
  * them. Each entry says how many fields differ from the form now, and which.
  */
+/** An object setting (reversed trades' own settings) as text, so it can be compared and shown. */
+function showObj(v: unknown): string {
+  if (v == null || v === "") return "";
+  let o: unknown = v;
+  if (typeof v === "string") {
+    try {
+      o = JSON.parse(v);
+    } catch {
+      return v;
+    }
+  }
+  if (!o || typeof o !== "object") return String(o);
+  return Object.entries(o as Record<string, unknown>)
+    .map(([k, x]) => `${k}=${String(x)}`)
+    .join(", ");
+}
+
 export function StrategyPresets({
   current,
   labels,
@@ -55,6 +72,7 @@ export function StrategyPresets({
   };
 
   const same = (a: unknown, b: unknown) => {
+    if ((a && typeof a === "object") || (b && typeof b === "object")) return showObj(a) === showObj(b);
     if (typeof a === "boolean" || typeof b === "boolean") return Boolean(a) === Boolean(b);
     const na = Number(a);
     const nb = Number(b);
@@ -65,7 +83,8 @@ export function StrategyPresets({
     (Object.keys(settings) as (keyof SmaConfig)[])
       .filter((k) => k in current && !same(settings[k], current[k]))
       .map((k) => ({ key: k, label: labels[k] ?? k, from: current[k], to: settings[k] }));
-  const show = (v: unknown) => (typeof v === "boolean" ? (v ? "on" : "off") : String(v ?? "—"));
+  const show = (v: unknown) =>
+    typeof v === "boolean" ? (v ? "on" : "off") : v && typeof v === "object" ? showObj(v) || "—" : String(v ?? "—");
 
   const entry = (id: string, title: string, when: string, settings: Partial<SmaConfig>, extra?: React.ReactNode) => {
     const d = diffs(settings);
