@@ -3,18 +3,17 @@
 import clsx from "clsx";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { SmaConfig } from "@/lib/smaApi";
+import { slopeExample } from "@/lib/slopeExample";
 
 /**
- * The SMA 9 slope settings as a picture. The bot reads slopes in % per candle, which has no
- * angle of its own (a chart's angle depends on its zoom), so the picture uses one stated
- * convention, "45° = X % per candle" (kept in this browser), and labels every leg with both
- * its % per candle and the angle that gives. Dragging a handle or moving a slider writes the
- * same fields the number boxes edit, and typing a number moves the curve. Display only: the
- * numbers saved are the ones the bot reads.
+ * The SMA 9 slope settings as a picture. The bot reads slopes in % per candle, so every level is shown and typed in
+ * % per candle (no angles: a chart's angle depends on its zoom), with what it means in rupees on an example price, and
+ * a worked example on made-up candles (lib/slopeExample.ts, the bot's own slope arithmetic) shows how big the candles
+ * must be for the steep run and the turn back. Dragging a handle or moving a slider writes the same fields. Display
+ * only: the numbers saved are the ones the bot reads.
  */
-const DEG45_KEY = "sma.slope.deg45";
 const SIDE_KEY = "sma.slope.side";
-const DEG45_DEFAULT = 0.05;
+const PRICE_KEY = "sma.slope.price";
 
 type Num =
   | "slope_turn_pct"
@@ -33,21 +32,11 @@ type Num =
 
 const SLOPE_CANDLES = [0, 1, 2, 3, 5, 10, 15] as const;
 
-export function slopeAngle(pctPerCandle: number, deg45: number): number {
-  if (!deg45) return 0;
-  return (Math.atan(pctPerCandle / deg45) * 180) / Math.PI;
-}
-
-/** A slope from an angle under the same convention. */
-export function slopeFromAngle(deg: number, deg45: number): number {
-  return Math.tan((deg * Math.PI) / 180) * deg45;
-}
-
 function clean(v: number, digits = 4): string {
   return String(Number(v.toFixed(digits)));
 }
 
-const PRESETS: { id: string; label: string; blurb: string; apply: (deg45: number) => Partial<Record<keyof SmaConfig, string | boolean>> }[] = [
+const PRESETS: { id: string; label: string; blurb: string; apply: () => Partial<Record<keyof SmaConfig, string | boolean>> }[] = [
   {
     id: "v",
     label: "V-turn (sharp)",
@@ -60,12 +49,6 @@ const PRESETS: { id: string; label: string; blurb: string; apply: (deg45: number
     blurb: "A gentle run one way, a flat top, then the other way: a rounded U, read by the turn alert / entry.",
     apply: () => ({ uturn_on: true, uturn_run: "5", uturn_min_pct: "0.005" }),
   },
-  {
-    id: "45",
-    label: "45° slope",
-    blurb: "Steep run and turn back both at 45° under the convention below.",
-    apply: (deg45) => ({ vturn_exit: true, vturn_move_pct: clean(deg45), vturn_turn_pct: clean(deg45), vturn_within: "6", slope_turn_pct: clean(deg45) }),
-  },
 ];
 
 export function SlopeEditor({
@@ -75,14 +58,15 @@ export function SlopeEditor({
   form: SmaConfig;
   set: (key: keyof SmaConfig, value: string | boolean) => void;
 }) {
-  const [deg45, setDeg45] = useState(DEG45_DEFAULT);
+  // The example stock price the rupee figures and the example candles use (kept in this browser).
+  const [price, setPrice] = useState(1000);
   // Which trade the picture is drawn for: a buy (the V points up then down) or a short (its mirror image).
   // The bot reads the same numbers for both; it handles the sign.
   const [side, setSide] = useState<"LONG" | "SHORT">("LONG");
   useEffect(() => {
     try {
-      const v = Number(localStorage.getItem(DEG45_KEY));
-      if (v > 0) setDeg45(v);
+      const v = Number(localStorage.getItem(PRICE_KEY));
+      if (v > 0) setPrice(v);
       if (localStorage.getItem(SIDE_KEY) === "SHORT") setSide("SHORT");
     } catch {
       /* private window */
@@ -96,11 +80,11 @@ export function SlopeEditor({
       /* private window */
     }
   };
-  const saveDeg45 = (v: number) => {
-    const next = Math.min(1, Math.max(0.005, v));
-    setDeg45(next);
+  const savePrice = (v: number) => {
+    const next = Math.min(1_000_000, Math.max(1, v || 1000));
+    setPrice(next);
     try {
-      localStorage.setItem(DEG45_KEY, String(next));
+      localStorage.setItem(PRICE_KEY, String(next));
     } catch {
       /* private window */
     }
@@ -133,7 +117,9 @@ export function SlopeEditor({
   const turnEntryOn = Boolean(form.turn_entry);
   const uOn = Boolean(form.uturn_on) && (turnEntryOn || Boolean(form.turn_alert));
 
-  // Geometry: one candle = CW px wide; a slope of deg45 % per candle rises CW px per candle (45°).
+  // Picture scale (fixed, so a dragged handle stays under the pointer): 0.04%/candle rises one candle width per candle.
+  const deg45 = 0.04;
+  // Geometry: one candle = CW px wide; a slope of deg45 % per candle rises CW px per candle.
   const W = 560;
   const H = 230;
   const CW = 26;
@@ -158,7 +144,6 @@ export function SlopeEditor({
   const uPath = `M ${ux0} ${uTop} L ${ux0 + uCandles * CW} ${uTop + uDrop} Q ${ux0 + uCandles * CW + 1.5 * CW} ${uTop + uDrop + 10} ${
     ux0 + uCandles * CW + 3 * CW
   } ${uTop + uDrop} L ${ux0 + 2 * uCandles * CW + 3 * CW} ${uTop}`;
-  const ref45 = { x: W - 150, y: H - 24, len: 36 };
   // The picture is worked out for a buy; a short is its mirror image (flipped top to bottom).
   const my = (y: number) => (side === "SHORT" ? H - y : y);
   /** A label's baseline: `off` px from the point in the buy picture (negative = above), flipped for a short. */
@@ -198,14 +183,14 @@ export function SlopeEditor({
     drag.current = null;
   };
 
-  const deg = (pct: number) => `${slopeAngle(pct, deg45).toFixed(0)}°`;
-  const label = (pct: number) => `${clean(pct)}%/c · ${deg(pct)}`;
+  const rupees = (pct: number) => `₹${((pct / 100) * price).toFixed(2)}`;
+  const label = (pct: number) => `${clean(pct)}%/candle`;
   const matches = (p: (typeof PRESETS)[number]) => {
-    const want = p.apply(deg45);
+    const want = p.apply();
     return Object.entries(want).every(([k, v]) => (typeof v === "boolean" ? Boolean(form[k as keyof SmaConfig]) === v : Number(form[k as keyof SmaConfig]) === Number(v)));
   };
   const applyPreset = (p: (typeof PRESETS)[number]) => {
-    for (const [k, v] of Object.entries(p.apply(deg45))) set(k as keyof SmaConfig, v as string | boolean);
+    for (const [k, v] of Object.entries(p.apply())) set(k as keyof SmaConfig, v as string | boolean);
   };
 
   type Show = "angle" | "count" | "pct" | "atr";
@@ -216,19 +201,19 @@ export function SlopeEditor({
         <span className="flex items-center gap-1.5 font-mono text-slate-100">
           {show === "angle" ? (
             <>
-              {clean(value)}%/c ·
               <input
                 type="number"
                 min={0}
-                max={85}
-                step={1}
-                value={Math.round(slopeAngle(value, deg45))}
-                onChange={(e) => set(key, clean(Math.min(5, slopeFromAngle(Math.min(85, Math.max(0, Number(e.target.value) || 0)), deg45))))}
-                aria-label={`${text}, in degrees`}
-                title="Type any angle; it is turned into % per candle with the picture scale below"
-                className="h-6 w-12 rounded border border-white/15 bg-black/30 px-1 text-right text-xs text-slate-100"
+                max={5}
+                step={0.001}
+                value={clean(value)}
+                onChange={(e) => set(key, clean(Math.min(5, Math.max(0, Number(e.target.value) || 0))))}
+                aria-label={`${text}, in % per candle`}
+                title="The SMA 9 slope in % per candle, the number the bot reads"
+                className="h-6 w-16 rounded border border-white/15 bg-black/30 px-1 text-right text-xs text-slate-100"
               />
-              °
+              %/candle
+              <span className="text-slate-500">≈ {rupees(value)} on ₹{price}</span>
             </>
           ) : show === "pct" ? (
             `${clean(value)}%`
@@ -309,12 +294,10 @@ export function SlopeEditor({
         </div>
       </div>
       <p className="mt-1 text-xs text-slate-400">
-        Drag the two handles, move the sliders, or type in the boxes above: all of them change the same settings. Each leg shows
-        its % per candle and its angle; the angle follows the convention at the bottom right.{" "}
-        The picture is drawn for a buy or a short (switch below): a short is the mirror image with the same numbers.{" "}
-        <span className="text-slate-300">Every level is a minimum, not an exact value</span>: &quot;turn back ≥ 0.015%/c&quot; fires on
-        the first closed candle whose slope is at least that against the trade. The chart shades where that is in price
-        (&quot;Exit zone&quot; / &quot;Buy zone&quot;): the next candle&apos;s close at which the slope reaches the level.
+        <span className="text-slate-200">Slope</span> = how much the SMA {fast} line moves per candle, in % of the price.
+        On a ₹{price} stock, 0.02%/candle means the line moves ₹{((0.02 / 100) * price).toFixed(2)} per candle. Every level is a
+        minimum: it fires on the first closed candle whose slope is at least that. The example candles under the picture show
+        how big the candles must be.
       </p>
       <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Which slope rules are on">
         {rule(turnExitOn, "Turn exit", "Closes when the SMA 9 slope is at least the turn level against the trade (SMA9_TURN).", (on) => {
@@ -393,13 +376,19 @@ export function SlopeEditor({
         <text x={ux0} y={ty(uTop, -10)} fill={form.uturn_on ? "#a78bfa" : "rgba(167,139,250,0.5)"} fontSize={11} fontFamily="monospace">
           U-turn · {uRun} candles {down} ≥ {label(uMin)}, then {up}{form.uturn_on ? "" : " (off)"}
         </text>
-        {/* 45° reference */}
-        <line x1={ref45.x} y1={ref45.y} x2={ref45.x + ref45.len} y2={ref45.y - ref45.len} stroke="#e2e8f0" strokeWidth={1.5} />
-        <line x1={ref45.x} y1={ref45.y} x2={ref45.x + ref45.len} y2={ref45.y} stroke="rgba(226,232,240,0.5)" strokeWidth={1} />
-        <text x={ref45.x - 4} y={ref45.y + 14} fill="#e2e8f0" fontSize={10} fontFamily="monospace">
-          45° = {clean(deg45)}%/candle
-        </text>
       </svg>
+      <ExampleCandles
+        price={price}
+        onPrice={savePrice}
+        fast={fast}
+        back={lookback}
+        move={move}
+        turn={turn}
+        within={within}
+        turnExit={turnExitOn ? turnExit : 0}
+        side={side}
+        entryOn={turnEntryOn}
+      />
       <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
         {slider("vturn_move_pct", "Steep run (with the trade)", move, 0, 0.2, 0.001)}
         {slider("vturn_turn_pct", "Turn back (against the trade)", turn, 0, 0.2, 0.001)}
@@ -426,28 +415,6 @@ export function SlopeEditor({
               </option>
             ))}
           </select>
-        </label>
-        <label className="block text-xs text-slate-300 sm:col-span-2">
-          <span className="flex items-center justify-between gap-2">
-            <span>
-              Picture scale: 45° on this picture = this many % per candle{" "}
-              <span className="text-slate-500">
-                (any angle can be typed in the ° boxes; this only sets how steep the same numbers are drawn, because a chart&apos;s angle
-                depends on its zoom. The bot reads only % per candle.)
-              </span>
-            </span>
-            <span className="font-mono text-slate-100">{clean(deg45)}%/candle = 45°</span>
-          </span>
-          <input
-            type="range"
-            min={0.005}
-            max={0.5}
-            step={0.005}
-            value={deg45}
-            onChange={(e) => saveDeg45(Number(e.target.value))}
-            className="mt-1 w-full accent-slate-300"
-            aria-label="Angle convention: % per candle that counts as 45 degrees"
-          />
         </label>
       </div>
       <div className={clsx("mt-3 rounded-md border border-white/10 p-2", !decelOn && "opacity-60")}>
@@ -481,9 +448,208 @@ export function SlopeEditor({
       </div>
       <p className="mt-2 text-[11px] text-slate-500">
         The bot reads slopes in % per candle over {form.slope_lookback ?? 2} candle{Number(form.slope_lookback ?? 2) === 1 ? "" : "s"}
-        {form.slope_minutes ? ` on ${form.slope_minutes}-minute candles` : ""}; the degrees are this picture&apos;s way of showing
-        the same numbers. Press Save to keep a change.
+        {form.slope_minutes ? ` on ${form.slope_minutes}-minute candles` : ""}. The example candles are made up to show the
+        sizes; real candles are never this even. Press Save to keep a change.
       </p>
     </section>
+  );
+}
+
+/**
+ * The slope rules on made-up candles (lib/slopeExample.ts): how big the candles must be, in rupees, for the steep run
+ * and the turn back on an example price, drawn as candles with the SMA line and listed candle by candle.
+ */
+function ExampleCandles({
+  price,
+  onPrice,
+  fast,
+  back,
+  move,
+  turn,
+  within,
+  turnExit,
+  side,
+  entryOn,
+}: {
+  price: number;
+  onPrice: (v: number) => void;
+  fast: number;
+  back: number;
+  move: number;
+  turn: number;
+  within: number;
+  turnExit: number;
+  side: "LONG" | "SHORT";
+  entryOn: boolean;
+}) {
+  const ex = slopeExample({ price, fast, back, move, turn, within, turnExit, side });
+  const c = ex.candles;
+  const long = side === "LONG";
+  const runWord = long ? "higher" : "lower";
+  const backWord = long ? "lower" : "higher";
+  const firstRun = c.findIndex((k) => k.phase === "run");
+  const firstBack = c.findIndex((k) => k.phase === "back");
+  const nth = (i: number | null, from: number) => (i == null || from < 0 ? null : i - from + 1);
+  const steepN = nth(ex.steepAt, firstRun);
+  const turnN = nth(ex.vturnAt, firstBack);
+  const exitN = nth(ex.turnExitAt, firstBack);
+  const pctOf = (rs: number) => ((rs / price) * 100).toFixed(3);
+  const money = (v: number) => `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Drawing
+  const W = 560;
+  const H = 200;
+  const padT = 24;
+  const padB = 22;
+  const cw = W / Math.max(1, c.length);
+  const hi = Math.max(...c.map((k) => k.high));
+  const lo = Math.min(...c.map((k) => k.low));
+  const y = (v: number) => padT + ((hi - v) / Math.max(1e-9, hi - lo)) * (H - padT - padB);
+  const x = (i: number) => i * cw + cw / 2;
+  const smaPts = c.filter((k) => k.sma != null).map((k) => `${x(k.i)},${y(k.sma as number)}`).join(" ");
+  const mark = (i: number | null, color: string, text: string, above: boolean) => {
+    if (i == null) return null;
+    const k = c[i];
+    const yy = above ? y(k.high) - 6 : y(k.low) + 14;
+    const anchor = i > c.length * 0.6 ? "end" : "start";
+    return (
+      <g>
+        <circle cx={x(i)} cy={y(k.close)} r={4} fill={color} />
+        <text x={x(i)} y={yy} fill={color} fontSize={10} fontFamily="monospace" textAnchor={anchor}>
+          {text}
+        </text>
+      </g>
+    );
+  };
+  const turnText = `turn back ${clean(turn)}%/c → exit${entryOn ? (long ? " + sell" : " + buy") : ""}`;
+
+  return (
+    <div className="mt-3 rounded-md border border-white/10 bg-black/20 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h5 className="text-xs font-semibold text-slate-200">Example with candles: how big must the candles be?</h5>
+        <label className="flex items-center gap-1.5 text-xs text-slate-300">
+          Example price ₹
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={price}
+            onChange={(e) => onPrice(Number(e.target.value))}
+            aria-label="Example stock price in rupees"
+            className="h-7 w-24 rounded border border-white/15 bg-black/30 px-1 text-right font-mono text-xs text-slate-100"
+          />
+        </label>
+      </div>
+      <ol className="mt-2 space-y-1 text-xs text-slate-300">
+        <li>
+          <span className="font-semibold text-emerald-300">1. Steep run:</span> each candle closes about{" "}
+          <span className="font-mono text-slate-100">{money(ex.runStep)}</span> ({pctOf(ex.runStep)}%) {runWord} than the one before.
+          {steepN != null ? (
+            <>
+              {" "}
+              By candle {steepN} the SMA {fast} slope reaches{" "}
+              <span className="font-mono text-slate-100">{clean(move)}%/candle</span> (the line moves {money((move / 100) * price)} per
+              candle).
+            </>
+          ) : (
+            " The slope does not reach your steep-run level in this example."
+          )}
+        </li>
+        <li>
+          <span className="font-semibold text-rose-300">2. Pull-back:</span> then each candle closes about{" "}
+          <span className="font-mono text-slate-100">{money(ex.backStep)}</span> ({pctOf(ex.backStep)}%) {backWord}.{" "}
+          {turnN != null ? (
+            <>
+              On pull-back candle {turnN} the slope is {clean(turn)}%/candle the other way:{" "}
+              <span className="text-slate-100">the V-turn fires{entryOn ? `, the trade closes and the bot ${long ? "sells" : "buys"}` : " and the trade closes"}</span>.
+            </>
+          ) : (
+            `No turn within ${within} candles in this example.`
+          )}
+        </li>
+        {turnExit > 0 ? (
+          <li>
+            <span className="font-semibold text-amber-300">Turn exit:</span>{" "}
+            {exitN != null ? `closes on pull-back candle ${exitN}, when the slope is ${clean(turnExit)}%/candle against the trade.` : "does not fire in this example."}
+          </li>
+        ) : null}
+        <li className="text-slate-500">
+          The SMA {fast} lags: it keeps rising for a few candles after the closes start falling, so a small dip of one candle is
+          usually not a turn. Bigger numbers = a bigger pull-back is needed before it fires.
+        </li>
+      </ol>
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full rounded-md bg-black/30" role="img" aria-label="Example candles with the SMA line">
+        {c.map((k) => {
+          const green = k.close >= k.open;
+          const color = k.phase === "flat" ? "#64748b" : green ? "#10B981" : "#F43F5E";
+          const top = y(Math.max(k.open, k.close));
+          const bot = y(Math.min(k.open, k.close));
+          return (
+            <g key={k.i}>
+              <line x1={x(k.i)} x2={x(k.i)} y1={y(k.high)} y2={y(k.low)} stroke={color} strokeWidth={1} />
+              <rect x={x(k.i) - cw * 0.3} y={top} width={cw * 0.6} height={Math.max(1.5, bot - top)} fill={color} rx={1} />
+            </g>
+          );
+        })}
+        {smaPts ? <polyline points={smaPts} fill="none" stroke="#F43F5E" strokeOpacity={0.55} strokeWidth={2} strokeDasharray="4 3" /> : null}
+        {mark(ex.steepAt, "#34d399", `steep ${clean(move)}%/c ✓`, long)}
+        {mark(ex.turnExitAt != null && ex.turnExitAt !== ex.vturnAt ? ex.turnExitAt : null, "#f59e0b", `turn exit`, !long)}
+        {mark(ex.vturnAt, "#fb7185", turnText, !long)}
+        <text x={4} y={H - 6} fill="#94a3b8" fontSize={10} fontFamily="monospace">
+          grey = before · {long ? "green = climb, red = pull-back" : "red = fall, green = bounce"} · dashed = SMA {fast}
+        </text>
+      </svg>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[420px] text-right font-mono text-[11px] text-slate-300">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="px-1 text-left font-normal">Candle</th>
+              <th className="px-1 font-normal">Close</th>
+              <th className="px-1 font-normal">Move</th>
+              <th className="px-1 font-normal">SMA {fast}</th>
+              <th className="px-1 font-normal">Slope %/c</th>
+              <th className="px-1 text-left font-normal">What happens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c
+              .filter((k) => k.phase !== "flat")
+              .map((k) => {
+                const prev = c[k.i - 1];
+                const moveRs = prev ? k.close - prev.close : 0;
+                const what =
+                  k.i === ex.vturnAt
+                    ? entryOn
+                      ? `V-turn: exit + ${long ? "sell" : "buy"}`
+                      : "V-turn: exit"
+                    : k.i === ex.turnExitAt
+                      ? "turn exit"
+                      : k.i === ex.steepAt
+                        ? "steep run reached"
+                        : k.phase === "run"
+                          ? long
+                            ? "climb"
+                            : "fall"
+                          : "pull-back";
+                return (
+                  <tr key={k.i} className={clsx("border-t border-white/5", (k.i === ex.vturnAt || k.i === ex.steepAt) && "text-slate-100")}>
+                    <td className="px-1 text-left">{k.phase === "run" ? `run ${k.i - firstRun + 1}` : `back ${k.i - firstBack + 1}`}</td>
+                    <td className="px-1">{money(k.close)}</td>
+                    <td className={clsx("px-1", moveRs >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                      {moveRs >= 0 ? "+" : "−"}
+                      {Math.abs(moveRs).toFixed(2)}
+                    </td>
+                    <td className="px-1">{k.sma == null ? "—" : money(k.sma)}</td>
+                    <td className={clsx("px-1", (k.slope ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                      {k.slope == null ? "—" : `${k.slope >= 0 ? "+" : ""}${k.slope.toFixed(4)}`}
+                    </td>
+                    <td className="px-1 text-left">{what}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
