@@ -1211,7 +1211,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+          <label id="sma-day-extreme" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
               checked={Boolean(form.day_extreme_guard)}
@@ -1220,6 +1220,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
             {isOwn("day_extreme_guard") && <OwnTag />}
             Don&apos;t buy at the day&apos;s high or short at the day&apos;s low: wait for a pullback
+            <a href="/learn/?lesson=day-high-low" className="text-xs text-sky-300 underline hover:text-sky-200">
+              Guide (PDF)
+            </a>
             <InfoTip label="About the day high/low guard">
               In a strong trend the signal candle often closes right at the day&apos;s high (a buy) or low (a short), so the
               order fills at the most stretched price of the day and the first pullback turns it into a loss. With this on, a
