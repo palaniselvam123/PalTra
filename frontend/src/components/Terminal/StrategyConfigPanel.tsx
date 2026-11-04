@@ -8,6 +8,7 @@ import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModeP
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
+import { REVERSE_GROUPS, ReverseOwnSettings, reverseBody, reverseGroupsOn, type ReverseSettings } from "@/components/Terminal/ReverseOwnSettings";
 import { ChevronDown, Search } from "lucide-react";
 import { SETTING_LABELS } from "@/lib/settingLabels";
 import { TslCalculator } from "@/components/Settings/TslCalculator";
@@ -213,6 +214,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   // The no-exit warning sits with the exits, the rest with gap mode.
   const gapNotes = strategyNotes(form).filter((n) => n.id !== "no-exit");
 
+  const setReverse = (next: ReverseSettings) => {
+    markDirty(true);
+    setForm((prev) => (prev ? { ...prev, reverse_settings: next } : prev));
+    setMsg(null);
+  };
   const set = (key: keyof SmaConfig, value: string | boolean | number | number[]) => {
     markDirty(true);
     setForm((prev) => {
@@ -352,6 +358,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     cvd_div_lookback: Math.min(100, Math.max(3, Math.round(Number(form.cvd_div_lookback ?? 10)) || 10)),
     reverse_on_exit: String(form.reverse_on_exit ?? ""),
     reverse_colour_exit: Boolean(form.reverse_colour_exit),
+    reverse_settings: reverseBody(form.reverse_settings),
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
@@ -1948,6 +1955,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </div>
           )}
           <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} ownColour={isOwn("reverse_colour_exit")} />
+          <ReverseOwnSettings form={form} onChange={setReverse} own={isOwn("reverse_settings")} disabled={!form.reverse_on_exit} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -3016,6 +3024,15 @@ export function activeRules(f: SmaConfig): Rule[] {
         .map((k) => REVERSE_KEYS.find((r) => r.key === k)?.label ?? k)
         .join(" / ")} exit`,
       off: { reverse_on_exit: "" },
+    });
+  if (f.reverse_on_exit && reverseGroupsOn(f.reverse_settings).length)
+    add({
+      group: "exit",
+      key: "reverse_settings",
+      text: `Reversed trades use their own ${reverseGroupsOn(f.reverse_settings)
+        .map((id) => REVERSE_GROUPS.find((g) => g.id === id)?.title.toLowerCase() ?? id)
+        .join(", ")}`,
+      off: { reverse_settings: "" },
     });
   if (f.reverse_on_exit && f.reverse_colour_exit) add({ group: "exit", key: "reverse_colour_exit", text: "A reversed trade closes on the first candle of the other colour", off: { reverse_colour_exit: false } });
   if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });

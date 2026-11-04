@@ -199,6 +199,7 @@ FIELD_HELP = {
     "cvd_lookback": "cumulative delta check: candles compared", "cvd_div_exit": "exit when price makes a new high (long) / low (short) over cvd_div_lookback candles but cumulative delta does not",
     "cvd_div_lookback": "cumulative delta divergence: candles before the new high / low",
     "reverse_on_exit": "reverse instead of only closing: CSV of VTURN (SMA 9 V-turn exit), TURN (SMA 9 turn exit), CANDLES (counter-candle exit); after that exit the bot opens the other side at once if every check agrees",
+    "reverse_settings": "JSON of the reversed trades' own settings (entry checks use_vwap/use_rsi/rsi_*/use_adx_filter/adx_threshold/use_cvd/cvd_lookback, counter-candle exit counter_*, exits bb_exit/st_exit/vturn_exit/cross_exit, trailing stop tsl_*), used only for the reverse order and while that reversed trade is open; a field left out keeps the bot's value",
     "reverse_colour_exit": "a trade opened by reverse on exit (EXIT_REVERSE) closes on the first candle of the other colour after its entry (red for a long, green for a short); no reverse",
     "use_supertrend": "entry check: Supertrend on the trade's side", "st_exit": "exit when Supertrend flips against",
     "st_period": "Supertrend ATR length", "st_mult": "Supertrend factor",

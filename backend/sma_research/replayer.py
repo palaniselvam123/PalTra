@@ -56,6 +56,7 @@ BASELINE_OFF = {
     "cvd_div_exit": False,
     "reverse_on_exit": "",
     "reverse_colour_exit": False,
+    "reverse_settings": "",
     "use_level": False,
     "use_high52": False,
     "tall_pullback": False,

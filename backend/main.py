@@ -615,6 +615,25 @@ class ConfigUpdate(BaseModel):
 
     # A reversed trade closes on the first candle of the other colour (reverse_exit.colour_exit_on).
     reverse_colour_exit: bool | None = None
+    # Reversed trades' own entry checks / exits / stop (reverse_exit.FIELDS), a JSON object; "" = none.
+    reverse_settings: str | dict | None = None
+
+    @field_validator("reverse_settings", mode="before")
+    @classmethod
+    def _reverse_settings(cls, value):
+        if value is None:
+            return None
+
+        def check(fields: dict) -> dict:
+            try:
+                cleaned = ConfigUpdate(**fields)
+            except ValidationError as exc:
+                first = exc.errors()[0]
+                where = ".".join(str(p) for p in first.get("loc", ()))
+                raise ValueError(f"reverse_settings {where}: {first.get('msg')}") from None
+            return cleaned.model_dump(include=set(fields), exclude_none=True)
+
+        return reverse_exit.clean_settings(value, check)
     ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
@@ -1595,6 +1614,7 @@ def _gap_dict(row) -> dict:
         "cvd_div_lookback": cum_delta.div_lookback(row),
         "reverse_on_exit": ",".join(k for k in reverse_exit.KEYS if k in reverse_exit.keys(row)),
         "reverse_colour_exit": reverse_exit.colour_exit_on(row),
+        "reverse_settings": reverse_exit.own_settings(row),
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),

@@ -326,7 +326,7 @@ SNAPSHOT_FIELDS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
-    "reverse_on_exit", "reverse_colour_exit",
+    "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -1492,7 +1492,7 @@ class StrategyEngine:
         for symbol in list(self.positions):
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, 0.0)
-            symbol_cfg = _cfg_for(cfg, symbol)
+            symbol_cfg = self._trade_cfg(cfg, symbol)
             self._trail_gap_levels(symbol_cfg)
             await self._trail_tsl(symbol_cfg)
             await self._trail_supertrend(symbol_cfg)
@@ -1552,7 +1552,8 @@ class StrategyEngine:
             if not self._still_armed(symbol):
                 # Taken off the Trade list while this pass fetched quotes.
                 continue
-            symbol_cfg = _cfg_for(cfg, symbol)
+            # While a reversed trade is open its own SMA cross exit applies; a new entry keeps the bot's checks.
+            symbol_cfg = self._trade_cfg(cfg, symbol, groups=("exits",))
             enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
@@ -2889,6 +2890,8 @@ class StrategyEngine:
         """Every pass: send a waiting pullback entry once the price reaches its level (tall_pullback.py)."""
         for symbol, order in list(self._pullback.items()):
             symbol_cfg = _cfg_for(cfg, symbol)
+            if reverse_exit.is_reversed(order.why):
+                symbol_cfg = reverse_exit.overlay(symbol_cfg)
             real = order.side or order.direction
             side = "BUY" if real == "LONG" else "SELL"
             frame = self._frames.get(symbol)
@@ -4265,6 +4268,15 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
         await self._exit_now(cfg, self.ltp, small_candles.REASON)
 
+    def _trade_cfg(self, cfg: BotConfig, symbol: str, groups: tuple[str, ...] | None = None) -> BotConfig:
+        """The stock's settings, with the reversed trades' own settings on top while a reversed trade is open
+        (reverse_settings, reverse_exit.py); `groups` limits which."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        pos = self.positions.get(symbol)
+        if pos is not None and reverse_exit.is_reversed(pos.entry_why):
+            return reverse_exit.overlay(symbol_cfg, groups)
+        return symbol_cfg
+
     async def _reverse_after_exit(self, cfg: BotConfig, symbol: str, signal_side: str, exit_reason: str) -> None:
         """After an exit set to reverse (reverse_on_exit): ask for the other side at once, every check applying."""
         if symbol in self.positions or self.status != "RUNNING":
@@ -4272,6 +4284,7 @@ class StrategyEngine:
         frame = self._frames.get(symbol)
         if frame is None or len(frame) < 3:
             return
+        cfg = reverse_exit.overlay(cfg)  # the reversed trades' own entry checks and stop (reverse_settings)
         enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         signal = reverse_exit.opposite_signal(signal_side)
         result = await self.apply_signal(signal, enriched, cfg, self._now(), alert=False, why=reverse_exit.ENTRY_REASON)

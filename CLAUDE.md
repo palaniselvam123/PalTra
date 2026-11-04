@@ -532,7 +532,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   closing", `StrategyConfigPanel.ReverseOnExit`). **Close a reversed trade on the other colour** (`reverse_colour_exit`, off by default, same
   card): a trade opened by that reverse (`EXIT_REVERSE`) closes on the first candle of the other colour that opened with or
   after its entry (`StrategyEngine._watch_turn_colour`, shared with the turn trades' `turn_colour_exit`; `COLOUR_TURN` via
-  `_exit_now`, no reverse after it; a manual Reverse is not covered). **Reverse button** (`StrategyEngine.reverse_position`; `POST /api/bot/reverse`
+  `_exit_now`, no reverse after it; a manual Reverse is not covered). **Reversed trades' own settings** (`reverse_settings`, JSON, "" = none, same card;
+  `reverse_exit.GROUPS` / `FIELDS`, checked by `ConfigUpdate`): the entry checks (VWAP, RSI ranges, ADX, cumulative delta),
+  the counter-candle exit, the other exits (Bollinger, Supertrend, V-turn, SMA cross) and the TSL stop / target numbers used
+  only for the reverse order (`_reverse_after_exit` → `reverse_exit.overlay`) and while that `EXIT_REVERSE` trade is open
+  (`StrategyEngine._trade_cfg`; the armed loop overlays the exits group only, a waiting reverse pullback all of it); a field
+  left out keeps the bot's value. UI `components/Terminal/ReverseOwnSettings.tsx` (a tick per group). **Reverse button** (`StrategyEngine.reverse_position`; `POST /api/bot/reverse`
   and the `/api/research/bot/`, `/api/bots/{n}/bot/`, `/api/replay/bot/` forms, body `symbol`, `confirm_live`): market hours,
   square-off, cut-off and Trade list are checked first (a refusal leaves the trade), then `close_symbol(reason=
   "MANUAL_REVERSE")` and an `_apply_locked` entry the real opposite way (flip not applied, no cross or filter read, entry
