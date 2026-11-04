@@ -138,3 +138,51 @@ def test_api_saves_the_setting_and_guards_live(tmp_path, monkeypatch):
             db.get(BotConfig, 1).trading_mode = "PAPER"
             db.commit()
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_a_reversed_trade_closes_on_the_first_candle_of_the_other_colour():
+    import turn_entry
+    from types import SimpleNamespace
+
+    from tests.test_turn_entry import _colour_frame, _held_engine
+
+    cfg = SimpleNamespace(symbol="X", reverse_colour_exit=True, candle_minutes=1)
+    eng, exits = _held_engine("X", why="EXIT_REVERSE", direction="SHORT")
+    eng._frames["X"] = _colour_frame(["r"])
+    await eng._watch_turn_colour(cfg)
+    assert exits == []  # a red candle keeps the short
+    eng._frames["X"] = _colour_frame(["r", "g"])
+    await eng._watch_turn_colour(cfg)
+    assert exits == [turn_entry.COLOUR_EXIT]
+    assert "reversed trade closed on a green candle" in eng._signals["X"]
+    # Off by default; a manual Reverse and a cross trade are left alone; the turn switch alone does not cover it.
+    for why, setting in (
+        ("EXIT_REVERSE", SimpleNamespace(symbol="X", candle_minutes=1)),
+        ("MANUAL_REVERSE", cfg),
+        ("SMA_CROSS", cfg),
+        ("EXIT_REVERSE", SimpleNamespace(symbol="X", turn_colour_exit=True, candle_minutes=1)),
+    ):
+        other, got = _held_engine("X", why=why, direction="SHORT")
+        other._frames["X"] = _colour_frame(["r", "g"])
+        await other._watch_turn_colour(setting)
+        assert got == [], why
+
+
+def test_api_saves_the_reversed_trade_colour_exit(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api2.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "reverse_colour_exit" in STOCK_FIELDS
+    with TestClient(app) as client:
+        assert client.get("/api/config").json()["reverse_colour_exit"] is False
+        ok = client.put("/api/config", json={"reverse_colour_exit": True})
+        assert ok.status_code == 200 and ok.json()["reverse_colour_exit"] is True
+    database.reset_engine()

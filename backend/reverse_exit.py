@@ -12,6 +12,13 @@ check, the stop, flip, market hours, the cut-off, the caps, the loss lock and on
 The other side is the opposite of the closed trade's signal side, so a flipped stock stays flipped. A refusal leaves
 the stock flat; the bot's own signals take over from there.
 
+**Close a reversed trade on the other colour** (`reverse_colour_exit`, off by default; per bot and per stock, PAPER and
+LIVE, replays too): a trade opened by that reverse (entry reason `EXIT_REVERSE`) closes on the first candle of the other
+colour that opened with or after its entry (red for a long, green for a short), like "Close a turn trade on the other
+colour" does for SMA 9 turn trades (`StrategyEngine._watch_turn_colour`, exit `COLOUR_TURN`, via `_exit_now`, which
+cancels a LIVE stop first). No reverse after it, so a stock never ping-pongs. A manual Reverse (`MANUAL_REVERSE`) is not
+affected.
+
 **Manual Reverse** (`StrategyEngine.reverse_position`, `POST /api/bot/reverse` and the research / bots / replay forms):
 closes the open trade (`MANUAL_REVERSE`) and opens the same stock the other way at once (entry reason `MANUAL_REVERSE`,
 like a direct order: no cross or entry filter is read; market hours, the cut-off, the Trade list, the caps, the loss
@@ -53,6 +60,15 @@ def keys(cfg) -> set[str]:
 def on(cfg, exit_reason: str) -> bool:
     """Does this exit reason reverse under the bot's / stock's setting?"""
     return any(KEYS[k] == exit_reason for k in keys(cfg))
+
+
+def colour_exit_on(cfg) -> bool:
+    return bool(getattr(cfg, "reverse_colour_exit", False))
+
+
+def colour_exit_applies(cfg, entry_why: str) -> bool:
+    """Does the reversed-trade colour exit cover a trade with this entry reason?"""
+    return colour_exit_on(cfg) and (entry_why or "").startswith(ENTRY_REASON)
 
 
 def opposite_signal(signal_side: str) -> str:

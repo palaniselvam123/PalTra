@@ -116,6 +116,7 @@ export const SETTING_LABELS: Record<string, string> = {
   cvd_div_exit: "Cumulative delta divergence exit",
   cvd_div_lookback: "Divergence look-back candles",
   reverse_on_exit: "Reverse instead of only closing",
+  reverse_colour_exit: "a reversed trade closes on the first candle of the other colour",
   ha_colours: "Heikin Ashi colours",
   use_supertrend: "Supertrend entry",
   use_level: "price level entry check",

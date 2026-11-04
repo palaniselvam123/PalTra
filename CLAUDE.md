@@ -529,7 +529,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the other side of its signal side through `apply_signal(..., alert=False, why="EXIT_REVERSE")` (every check, the stop,
   flip, cut-off, caps, loss lock and one LIVE bot per stock apply; a refusal leaves the stock flat; no V-turn hand-off or
   counter re-entry follows a reverse). The exit itself must be on. Settings → 3. When to exit ("Reverse instead of only
-  closing", `StrategyConfigPanel.ReverseOnExit`). **Reverse button** (`StrategyEngine.reverse_position`; `POST /api/bot/reverse`
+  closing", `StrategyConfigPanel.ReverseOnExit`). **Close a reversed trade on the other colour** (`reverse_colour_exit`, off by default, same
+  card): a trade opened by that reverse (`EXIT_REVERSE`) closes on the first candle of the other colour that opened with or
+  after its entry (`StrategyEngine._watch_turn_colour`, shared with the turn trades' `turn_colour_exit`; `COLOUR_TURN` via
+  `_exit_now`, no reverse after it; a manual Reverse is not covered). **Reverse button** (`StrategyEngine.reverse_position`; `POST /api/bot/reverse`
   and the `/api/research/bot/`, `/api/bots/{n}/bot/`, `/api/replay/bot/` forms, body `symbol`, `confirm_live`): market hours,
   square-off, cut-off and Trade list are checked first (a refusal leaves the trade), then `close_symbol(reason=
   "MANUAL_REVERSE")` and an `_apply_locked` entry the real opposite way (flip not applied, no cross or filter read, entry

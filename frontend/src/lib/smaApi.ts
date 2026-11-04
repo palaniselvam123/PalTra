@@ -173,6 +173,7 @@ export type SmaConfig = {
   cvd_div_lookback?: number;
   /** Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off. */
   reverse_on_exit?: string;
+  reverse_colour_exit?: boolean;
   /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
   ha_colours?: boolean;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */

@@ -351,6 +351,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     cvd_div_exit: Boolean(form.cvd_div_exit),
     cvd_div_lookback: Math.min(100, Math.max(3, Math.round(Number(form.cvd_div_lookback ?? 10)) || 10)),
     reverse_on_exit: String(form.reverse_on_exit ?? ""),
+    reverse_colour_exit: Boolean(form.reverse_colour_exit),
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
@@ -1946,7 +1947,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
             </div>
           )}
-          <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} />
+          <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} ownColour={isOwn("reverse_colour_exit")} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -3016,6 +3017,7 @@ export function activeRules(f: SmaConfig): Rule[] {
         .join(" / ")} exit`,
       off: { reverse_on_exit: "" },
     });
+  if (f.reverse_on_exit && f.reverse_colour_exit) add({ group: "exit", key: "reverse_colour_exit", text: "A reversed trade closes on the first candle of the other colour", off: { reverse_colour_exit: false } });
   if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
@@ -3472,7 +3474,17 @@ const REVERSE_KEYS = [
   { key: "CANDLES", label: "counter-candle", on: (f: SmaConfig) => Number(f.counter_exit_count ?? 0) > 0 },
 ] as const;
 
-function ReverseOnExit({ form, set, own }: { form: SmaConfig; set: (key: keyof SmaConfig, value: string | boolean) => void; own: boolean }) {
+function ReverseOnExit({
+  form,
+  set,
+  own,
+  ownColour,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  own: boolean;
+  ownColour: boolean;
+}) {
   const picked = new Set(
     String(form.reverse_on_exit ?? "")
       .split(",")
@@ -3511,6 +3523,22 @@ function ReverseOnExit({ form, set, own }: { form: SmaConfig; set: (key: keyof S
           </label>
         ))}
       </div>
+      <label className={clsx("mt-2 flex items-center gap-2 text-sm text-slate-300", picked.size === 0 && "opacity-50")}>
+        <input
+          type="checkbox"
+          checked={Boolean(form.reverse_colour_exit)}
+          onChange={(e) => set("reverse_colour_exit", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {ownColour && <OwnTag />}
+        Close a reversed trade on the first candle of the other colour
+        <InfoTip label="About closing a reversed trade on the candle colour">
+          A trade opened by the reverse above (&quot;Reversed on exit&quot;) closes on the first candle that closes the other
+          way after its entry: red for a long, green for a short (saved as &quot;Colour turned&quot;), like &quot;Close a turn
+          trade on the first candle of the other colour&quot; does for SMA 9 turn trades. No reverse after it. A trade you
+          reversed by hand with the Reverse button is not affected. The stop and the other exits still apply.
+        </InfoTip>
+      </label>
     </div>
   );
 }

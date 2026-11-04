@@ -612,6 +612,9 @@ class ConfigUpdate(BaseModel):
     @classmethod
     def _reverse_keys(cls, value):
         return None if value is None else reverse_exit.clean(value)
+
+    # A reversed trade closes on the first candle of the other colour (reverse_exit.colour_exit_on).
+    reverse_colour_exit: bool | None = None
     ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
@@ -1591,6 +1594,7 @@ def _gap_dict(row) -> dict:
         "cvd_div_exit": cum_delta.exit_on(row),
         "cvd_div_lookback": cum_delta.div_lookback(row),
         "reverse_on_exit": ",".join(k for k in reverse_exit.KEYS if k in reverse_exit.keys(row)),
+        "reverse_colour_exit": reverse_exit.colour_exit_on(row),
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
