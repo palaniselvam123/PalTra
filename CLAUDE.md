@@ -1086,7 +1086,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   median, worst, best, all days added, % above 0 and % beating the close (`by_time`); `best_exit` (highest average and
   highest median vs holding to the close), half-hour histograms of when the high / low came, totals, and the same per
   stock (`stock_table`, gross: closed trades by that minute + open P&L, `open_pnl_log.by_stock`). Filters: stocks (only
-  their P&L, gross), basis, step, weekdays. `GET /api/pnl-dashboard/options` (`open_pnl_log.all_replay_runs`, market
+  their P&L, gross), basis, step, weekdays, and **Qty per trade** (`qty`, 0 = as traded; As traded / 100 / 500 / 1,000 /
+  any number): every trade restated as that many shares so runs sized differently compare (`pnl_dashboard.per_qty` on
+  each closed trade's `TradeLog.qty`, `scale_points` on each held stock's logged qty; the day curve is then the sum of
+  the stocks, always before charges). The Runs list has Select all / Finished only. `GET /api/pnl-dashboard/options` (`open_pnl_log.all_replay_runs`, market
   days), `GET /api/pnl-dashboard?source=replay|market&runs=&desks=&start=&end=&stocks=&basis=&step=&weekdays=`. Charts are
   plain SVG (`PnlDashboard/charts.tsx`: time chart with min-max band, day high/low/close ranges, bars, stock bars); CSV.
   The ORB desk's old dashboard (bot control, manual order form, AI expert, account) moved unchanged to `/orb`

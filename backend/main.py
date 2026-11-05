@@ -3254,15 +3254,18 @@ def _open_pnl_desks() -> list[tuple[str, object]]:
     return out
 
 
-def _closed_by_stock(day: str, desk: str | None = None, modes: set[str] | None = None, run_id: int | None = None):
-    """The day's closed trades of one book as (symbol, exit "HH:MM", gross P&L), for the per-stock P&L log."""
+def _closed_by_stock(day: str, desk: str | None = None, modes: set[str] | None = None, run_id: int | None = None,
+                     per_qty: int = 0):
+    """The day's closed trades of one book as (symbol, exit "HH:MM", gross P&L), for the per-stock P&L log.
+
+    `per_qty` > 0 restates each trade's gross P&L as if it had been that many shares (P&L dashboard's "Qty")."""
     from sqlalchemy import or_
 
     from models import TradeLog
     from strategy_engine import _mode_filter, bot_rows
 
     with session_factory()() as db:
-        q = db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.gross_pnl).filter(
+        q = db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.gross_pnl, TradeLog.qty).filter(
             TradeLog.date == day, TradeLog.exit_time.isnot(None)
         )
         if run_id is not None:
@@ -3272,8 +3275,8 @@ def _closed_by_stock(day: str, desk: str | None = None, modes: set[str] | None =
         else:
             q = q.filter(bot_rows(int(desk or 1)), or_(*[_mode_filter(m) for m in (modes or {"PAPER"})]))
         return [
-            (str(sym).upper(), exit_at.strftime("%H:%M"), float(gross or 0.0))
-            for sym, exit_at, gross in q.all()
+            (str(sym).upper(), exit_at.strftime("%H:%M"), pnl_dashboard.per_qty(float(gross or 0.0), qty, per_qty))
+            for sym, exit_at, gross, qty in q.all()
             if exit_at is not None
         ]
 
@@ -3356,26 +3359,28 @@ def _dash_stocks(series: list[dict], closed) -> dict[str, list[float]]:
     }
 
 
-def _dash_replay_days(run_ids: list[int], basis: str, weekdays: set[int] | None) -> list[dict]:
+def _dash_replay_days(run_ids: list[int], basis: str, weekdays: set[int] | None, qty: int = 0) -> list[dict]:
     out = []
     for run_id in run_ids:
         for row in open_pnl_log.replay_days(run_id):
             day = row["day"]
             if weekdays is not None and dt.date.fromisoformat(day).weekday() not in weekdays:
                 continue
-            pts = open_pnl_log.replay_points(run_id, day)
+            pts = pnl_dashboard.scale_points(open_pnl_log.replay_points(run_id, day), qty)
             sp = pnl_dashboard.span((p["t"], 0) for p in pts)
             if sp is None:
                 continue
-            curve = pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts)
-            stocks = _dash_stocks(pts, _closed_by_stock(day, run_id=run_id))
+            stocks = _dash_stocks(pts, _closed_by_stock(day, run_id=run_id, per_qty=qty))
+            curve = (pnl_dashboard.add_curves(list(stocks.values())) if qty
+                     else pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts))
             label = f"R{run_id} · {day}" if len(run_ids) > 1 else day
             out.append(pnl_dashboard.build_day(f"{run_id}:{day}", label, curve, sp[0], sp[1], stocks))
     out.sort(key=lambda d: d["key"].split(":", 1)[1])
     return out[-pnl_dashboard.MAX_DAYS:]
 
 
-def _dash_market_days(desks: list[str], start: str | None, end: str | None, basis: str, weekdays: set[int] | None) -> list[dict]:
+def _dash_market_days(desks: list[str], start: str | None, end: str | None, basis: str, weekdays: set[int] | None,
+                      qty: int = 0) -> list[dict]:
     picked = sorted(
         d["day"] for d in open_pnl_log.days(None, limit=400)
         if (not start or d["day"] >= start) and (not end or d["day"] <= end)
@@ -3385,14 +3390,16 @@ def _dash_market_days(desks: list[str], start: str | None, end: str | None, basi
     for day in picked:
         curves, spans, stocks = [], [], {}
         for desk in desks:
-            pts = open_pnl_log.points(day, desk)
+            pts = pnl_dashboard.scale_points(open_pnl_log.points(day, desk), qty)
             sp = pnl_dashboard.span((p["t"], 0) for p in pts)
             if sp is None:
                 continue
             spans.append(sp)
-            curves.append(pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts))
             modes = {str(p.get("mode") or "PAPER").upper() for p in pts} or {"PAPER"}
-            for name, c in _dash_stocks(pts, _closed_by_stock(day, desk, modes)).items():
+            desk_stocks = _dash_stocks(pts, _closed_by_stock(day, desk, modes, per_qty=qty))
+            curves.append(pnl_dashboard.add_curves(list(desk_stocks.values())) if qty
+                          else pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts))
+            for name, c in desk_stocks.items():
                 stocks[name] = pnl_dashboard.add_curves([stocks[name], c]) if name in stocks else c
         if not curves:
             continue
@@ -3440,6 +3447,7 @@ async def pnl_dashboard_view(
     basis: Literal["gross", "net"] = "gross",
     step: int = Query(5, ge=1, le=30),
     weekdays: str = Query("", description="Comma list 0-4 (Mon-Fri); empty = every day"),
+    qty: int = Query(0, ge=0, le=1_000_000, description="Restate every trade as this many shares (0 = as traded)"),
 ):
     """Each day's P&L curve, high, low and close, the P&L by time of day across the days, the best time to close
     everything and the same per stock. Read-only."""
@@ -3449,16 +3457,16 @@ async def pnl_dashboard_view(
         if not ids:
             latest = await asyncio.to_thread(open_pnl_log.all_replay_runs, 1)
             ids = [latest[0]["run_id"]] if latest else []
-        built = await asyncio.to_thread(_dash_replay_days, ids, basis, days_of_week)
+        built = await asyncio.to_thread(_dash_replay_days, ids, basis, days_of_week, qty)
         picked = {"runs": ids}
     else:
         want = [d.strip() for d in desks.split(",") if d.strip() in OPEN_PNL_DESKS] or ["1"]
-        built = await asyncio.to_thread(_dash_market_days, want, start, end, basis, days_of_week)
+        built = await asyncio.to_thread(_dash_market_days, want, start, end, basis, days_of_week, qty)
         picked = {"desks": want, "start": start, "end": end}
     names = [s.strip().upper() for s in stocks.split(",") if s.strip()]
     out = await asyncio.to_thread(pnl_dashboard.analyze, built, step, names or None)
     all_stocks = sorted({s for d in built for s in d["stocks"]})
-    return {"source": source, **picked, "basis": "gross" if names else basis, "stocks_picked": names,
+    return {"source": source, **picked, "basis": "gross" if names or qty else basis, "stocks_picked": names, "qty": qty,
             "all_stocks": all_stocks, **out}
 
 
