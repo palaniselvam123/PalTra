@@ -8,6 +8,7 @@ import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModeP
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
+import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
 import { REVERSE_GROUPS, ReverseOwnSettings, reverseBody, reverseGroupsOn, type ReverseSettings } from "@/components/Terminal/ReverseOwnSettings";
 import { ChevronDown, Search } from "lucide-react";
 import { SETTING_LABELS } from "@/lib/settingLabels";
@@ -359,6 +360,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     reverse_on_exit: String(form.reverse_on_exit ?? ""),
     reverse_colour_exit: Boolean(form.reverse_colour_exit),
     reverse_settings: reverseBody(form.reverse_settings),
+    exit_join: String(form.exit_join ?? "OR").toUpperCase() === "AND" ? "AND" : "OR",
+    exit_group: String(form.exit_group ?? ""),
+    exit_need: Math.max(0, Math.min(15, Math.round(Number(form.exit_need ?? 0) || 0))),
+    exit_within: Math.max(1, Math.min(20, Math.round(Number(form.exit_within ?? 3) || 3))),
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
@@ -1954,6 +1959,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
             </div>
           )}
+          <ExitJoinCard form={form} set={set} isOwn={isOwn} />
           <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} ownColour={isOwn("reverse_colour_exit")} />
           <ReverseOwnSettings form={form} onChange={setReverse} own={isOwn("reverse_settings")} disabled={!form.reverse_on_exit} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -3025,6 +3031,8 @@ export function activeRules(f: SmaConfig): Rule[] {
         .join(" / ")} exit`,
       off: { reverse_on_exit: "" },
     });
+  const joinText = exitJoinText(f);
+  if (joinText) add({ group: "exit", key: "exit_join", text: joinText, off: { exit_join: "OR" }, warn: true });
   if (f.reverse_on_exit && reverseGroupsOn(f.reverse_settings).length)
     add({
       group: "exit",
@@ -3218,6 +3226,12 @@ function ExitOrder({ form }: { form: SmaConfig }) {
         it see no trade. Price exits act on the live price, candle exits wait for the candle to close, so a stop can beat them inside a
         candle. Square-off, the daily loss limit and Panic always win. In LIVE the Groww stop is cancelled before any other exit.
       </p>
+      {exitJoinText(form) ? (
+        <p className="mt-1 text-[11px] leading-snug text-amber-300">
+          {exitJoinText(form)}: those exits only vote when they fire, and the trade closes once enough of them agree. The other exits
+          in the list still close on their own.
+        </p>
+      ) : null}
       <ol className="mt-2 space-y-1">
         {steps.map((s, i) => (
           <li key={s.code + i} className="flex items-baseline gap-2 text-[12px]">

@@ -39,6 +39,7 @@ import day_extreme as day_extreme_mod
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
+import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
 import level_check
@@ -617,6 +618,18 @@ class ConfigUpdate(BaseModel):
 
     # A reversed trade closes on the first candle of the other colour (reverse_exit.colour_exit_on).
     reverse_colour_exit: bool | None = None
+    # How exits combine (exit_join.py): OR = any one closes; AND = the ticked group (CSV of exit_join.KEYS) must agree,
+    # exit_need of them (0 = all) within exit_within candles.
+    exit_join: Literal["OR", "AND"] | None = None
+    exit_group: str | None = Field(default=None, max_length=120)
+    exit_need: int | None = Field(default=None, ge=0, le=len(exit_join_mod.KEYS))
+    exit_within: int | None = Field(default=None, ge=1, le=exit_join_mod.MAX_WITHIN)
+
+    @field_validator("exit_group", mode="before")
+    @classmethod
+    def _exit_group_keys(cls, value):
+        return None if value is None else exit_join_mod.clean_group(value)
+
     # Reversed trades' own entry checks / exits / stop (reverse_exit.FIELDS), a JSON object; "" = none.
     reverse_settings: str | dict | None = None
 
@@ -1617,6 +1630,10 @@ def _gap_dict(row) -> dict:
         "reverse_on_exit": ",".join(k for k in reverse_exit.KEYS if k in reverse_exit.keys(row)),
         "reverse_colour_exit": reverse_exit.colour_exit_on(row),
         "reverse_settings": reverse_exit.own_settings(row),
+        "exit_join": "AND" if str(getattr(row, "exit_join", "") or "OR").upper() == "AND" else "OR",
+        "exit_group": ",".join(exit_join_mod.group(row)),
+        "exit_need": int(getattr(row, "exit_need", 0) or 0),
+        "exit_within": exit_join_mod.within(row),
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),

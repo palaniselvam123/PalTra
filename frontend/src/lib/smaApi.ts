@@ -176,6 +176,11 @@ export type SmaConfig = {
   reverse_colour_exit?: boolean;
   /** Reversed trades' own entry checks / exits / stop (backend reverse_exit.FIELDS); {} = the bot's own. */
   reverse_settings?: Record<string, string | number | boolean>;
+  /** How exits combine (backend exit_join.py): OR = any one closes; AND = the ticked group must agree. */
+  exit_join?: "OR" | "AND";
+  exit_group?: string;
+  exit_need?: number | string;
+  exit_within?: number | string;
   /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
   ha_colours?: boolean;
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
