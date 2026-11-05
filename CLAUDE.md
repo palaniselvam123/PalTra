@@ -1032,6 +1032,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `POST /api/scan-history/{id}/check` on the same saved run; `scan_accuracy` kind `active`: the call is the row's bias,
   else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
   columns and the per-group summary). Read-only.
+  **Auto scan** (`active_stocks.AutoSettings`, `active_auto.json` next to the desk DB, `ACTIVE_AUTO_FILE`): the server runs
+  the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 2-60, default 5) while NSE is open, no browser
+  needed (`ActiveScanner.start_background`, checked every `CHECK_SEC` 15 s; a manual Scan now counts as a run; Pause scans
+  and `SCANS=off` stop it). On by default on the desk and scanner (the old fixed 5-minute loop), off on the backtest
+  server, where while on in market hours it keeps the machine awake. `GET /api/scalp/active` carries `auto`; `PUT
+  /api/scalp/active/auto` (`on`, `every_min`). The card's "Auto scan … every N min" row (`MostActive.tsx`).
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.

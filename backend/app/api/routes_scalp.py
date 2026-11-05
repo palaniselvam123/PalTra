@@ -314,7 +314,25 @@ async def most_active(
     out["connected"] = _groww_session() is not None
     out["paused"] = scans_paused()
     out["market_open"] = is_market_open()
+    out["auto"] = active_scanner.auto_view()
     return out
+
+
+class ActiveAutoBody(BaseModel):
+    on: bool | None = None
+    every_min: int | None = None
+
+
+@router.put("/active/auto")
+async def most_active_auto(body: ActiveAutoBody):
+    """The auto scan's switch and interval, saved on the server (no browser needed). Market data only."""
+    try:
+        active_scanner.set_auto(on=body.on, every_min=body.every_min)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"Could not save the auto scan setting: {exc}") from exc
+    return active_scanner.auto_view()
 
 
 UNIVERSE_LISTS = ("fno", *index_lists.INDEXES)

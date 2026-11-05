@@ -177,3 +177,55 @@ def test_most_active_history_is_kept_apart_from_the_terminal_history(monkeypatch
     run = client.get(f"/api/scalp/active/history/{run_id}").json()
     assert run["rows"][0]["symbol"] == "BIG" and run["total"] == 4
     assert client.get(f"/api/scalp/active/history/{other}").status_code == 404
+
+
+def test_auto_scan_settings_are_saved_and_its_clock_counts_from_the_last_pass(monkeypatch, tmp_path):
+    import app.services.active_stocks as act
+
+    monkeypatch.setenv("ACTIVE_AUTO_FILE", str(tmp_path / "active_auto.json"))
+    monkeypatch.setattr(act, "is_market_open", lambda *a, **k: True)
+    scanner = ActiveScanner()
+    assert scanner.auto_settings.on and scanner.auto_settings.every_min == 5  # the old 5-minute loop by default
+    assert scanner.auto_due(NOON)  # never scanned: due at once
+    scanner._last_start = NOON
+    assert not scanner.auto_due(NOON + dt.timedelta(minutes=4))
+    assert scanner.auto_due(NOON + dt.timedelta(minutes=5))
+    scanner.set_auto(every_min=15)
+    assert not scanner.auto_due(NOON + dt.timedelta(minutes=10))
+    assert scanner.auto_due(NOON + dt.timedelta(minutes=15))
+    scanner.paused = True
+    assert not scanner.auto_due(NOON + dt.timedelta(minutes=20))
+    scanner.paused = False
+    scanner.set_auto(on=False)
+    assert not scanner.auto_due(NOON + dt.timedelta(minutes=20))
+    with pytest.raises(ValueError):
+        scanner.set_auto(every_min=7)
+    # A restart reads the saved choice.
+    again = ActiveScanner()
+    assert again.auto_settings.on is False and again.auto_settings.every_min == 15
+    monkeypatch.setattr(act, "is_market_open", lambda *a, **k: False)
+    assert not again.auto_due(NOON)
+
+
+def test_auto_scan_is_off_by_default_on_the_backtest_server(monkeypatch, tmp_path):
+    import server_role
+
+    monkeypatch.setenv("ACTIVE_AUTO_FILE", str(tmp_path / "active_auto.json"))
+    monkeypatch.setattr(server_role, "is_backtest", lambda: True)
+    assert ActiveScanner().auto_settings.on is False
+
+
+def test_the_api_switches_the_auto_scan(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.services.active_stocks import active_scanner
+
+    monkeypatch.setenv("ACTIVE_AUTO_FILE", str(tmp_path / "active_auto.json"))
+    monkeypatch.setattr(active_scanner, "auto", None)
+    client = TestClient(app)
+    assert client.get("/api/scalp/active").json()["auto"]["every_min"] == 5
+    out = client.put("/api/scalp/active/auto", json={"on": False, "every_min": 10}).json()
+    assert out["on"] is False and out["every_min"] == 10 and out["next_at"] is None
+    assert client.put("/api/scalp/active/auto", json={"every_min": 7}).status_code == 400
+    assert client.get("/api/scalp/active").json()["auto"]["on"] is False

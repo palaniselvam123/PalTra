@@ -626,6 +626,17 @@ export type ActiveStocksResponse = {
   connected: boolean;
   market_open: boolean;
   rows: ActiveStock[];
+  /** The server's auto scan (on / every N minutes), saved on the server. */
+  auto?: ActiveAuto;
+};
+
+export type ActiveAuto = {
+  on: boolean;
+  every_min: number;
+  every_choices: number[];
+  /** Next automatic pass (IST, ISO); null while off, paused or the market is shut. */
+  next_at: string | null;
+  last_error: string | null;
 };
 
 export type ScalpMonitorResponse = {
@@ -1338,6 +1349,9 @@ export const api = {
   scalpActiveHistoryRun: (id: number) =>
     request<ActiveHistoryRun & { rows: ActiveStock[] }>(`/api/scalp/active/history/${id}`),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
+  /** The most-active auto scan: on / off and every N minutes (saved on the server). */
+  scalpActiveAuto: (body: { on?: boolean; every_min?: number }) =>
+    request<ActiveAuto>("/api/scalp/active/auto", { method: "PUT", body: JSON.stringify(body) }),
   /** Pause / resume the desk's Scalp work (monitor scoring + history fill, alerts, most-active scan). */
   scalpPause: (paused: boolean) =>
     request<{ paused: boolean }>("/api/scalp/pause", { method: "POST", body: JSON.stringify({ paused }) }),

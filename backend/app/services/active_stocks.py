@@ -18,21 +18,32 @@ Groww quote per stock and ranks them by what the crowd is doing:
 Every finished pass can be kept (`on_done`, saved to the scan history as kind
 `active` by routes_scalp), so the page can show what any past scan said.
 
+**Auto scan** (`AutoSettings`, `active_auto.json` next to the desk database, `ACTIVE_AUTO_FILE`): the server
+scans by itself every `every_min` minutes (`EVERY_CHOICES`, default 5) while NSE is open, no browser needed. On by
+default on the desk and the scanner (the old fixed 5-minute loop), off on the backtest server. A manual Scan now
+counts as a run. Pause scans and SCANS=off still stop it.
+
 Market data only. Nothing here places, changes or cancels an order.
 """
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import logging
+import os
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import groww_pressure
 from app.core.market_clock import IST, ist_now, is_market_open
 
 log = logging.getLogger("active_stocks")
 
-SCAN_EVERY_SEC = 300          # one pass every 5 minutes while the market is open
+SCAN_EVERY_SEC = 300          # the default auto-scan interval (5 minutes)
+EVERY_CHOICES = (2, 3, 5, 10, 15, 20, 30, 60)
+DEFAULT_EVERY = 5
+CHECK_SEC = 15                # how often the auto-scan loop looks at the clock
 MIN_MANUAL_GAP_SEC = 60       # "Scan now" at most once a minute
 CONCURRENCY = 3               # parallel quote calls, gentle on Groww's rate limit
 CALL_GAP_SEC = 0.12
@@ -162,8 +173,65 @@ def add_speed(rows: list[ActiveRow], prev: dict[str, float], prev_at: dt.datetim
             row.speed_pct_min = (row.ltp - before) / before * 100 / gap
 
 
+@dataclass
+class AutoSettings:
+    on: bool = True
+    every_min: int = DEFAULT_EVERY
+
+
+def auto_path() -> Path:
+    """ACTIVE_AUTO_FILE, else next to the desk's SQLite file (the Fly volume), else here."""
+    explicit = os.environ.get("ACTIVE_AUTO_FILE", "").strip()
+    if explicit:
+        return Path(explicit)
+    url = os.environ.get("DATABASE_URL", "")
+    if "sqlite" in url and ":///" in url:
+        return Path(url.split(":///", 1)[1]).with_name("active_auto.json")
+    return Path("active_auto.json")
+
+
+def _default_on() -> bool:
+    try:
+        import server_role
+
+        return not server_role.is_backtest()
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def clean_auto(raw: dict | None) -> AutoSettings:
+    out = AutoSettings(on=_default_on())
+    raw = raw or {}
+    if "on" in raw:
+        out.on = bool(raw["on"])
+    try:
+        every = int(raw.get("every_min", DEFAULT_EVERY))
+    except (TypeError, ValueError):
+        every = DEFAULT_EVERY
+    out.every_min = every if every in EVERY_CHOICES else DEFAULT_EVERY
+    return out
+
+
+def load_auto() -> AutoSettings:
+    try:
+        return clean_auto(json.loads(auto_path().read_text()))
+    except FileNotFoundError:
+        return clean_auto(None)
+    except Exception as exc:  # noqa: BLE001 — a broken file falls back to the defaults
+        log.warning("could not read the most-active auto settings: %s", exc)
+        return clean_auto(None)
+
+
+def save_auto(settings: AutoSettings) -> None:
+    path = auto_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(asdict(settings)))
+    tmp.replace(path)
+
+
 class ActiveScanner:
-    """Holds the last scan and runs the next one. Memory only."""
+    """Holds the last scan and runs the next one. Memory only (the auto settings are saved)."""
 
     def __init__(self) -> None:
         self.rows: list[ActiveRow] = []
@@ -184,6 +252,56 @@ class ActiveScanner:
         self.manual_task: asyncio.Task | None = None
         # Scalp page "Pause scans": no new pass, and a running pass stops asking Groww.
         self.paused = False
+        self.auto: AutoSettings | None = None
+        self.auto_error: str | None = None
+
+    @property
+    def auto_settings(self) -> AutoSettings:
+        if self.auto is None:
+            self.auto = load_auto()
+        return self.auto
+
+    def set_auto(self, on: bool | None = None, every_min: int | None = None) -> AutoSettings:
+        cur = self.auto_settings
+        raw = asdict(cur)
+        if on is not None:
+            raw["on"] = on
+        if every_min is not None:
+            if int(every_min) not in EVERY_CHOICES:
+                raise ValueError(f"every_min must be one of {', '.join(map(str, EVERY_CHOICES))}")
+            raw["every_min"] = int(every_min)
+        self.auto = clean_auto(raw)
+        save_auto(self.auto)
+        return self.auto
+
+    def next_auto_at(self, now: dt.datetime | None = None) -> dt.datetime | None:
+        """When the next automatic pass starts (None while it is off or paused)."""
+        cfg = self.auto_settings
+        if not cfg.on or self.paused:
+            return None
+        now = now or ist_now()
+        if self._last_start is None:
+            return now
+        return max(now, self._last_start + dt.timedelta(minutes=cfg.every_min))
+
+    def auto_due(self, now: dt.datetime | None = None) -> bool:
+        """The auto scan wants a pass now (market open, on, not paused, interval gone by)."""
+        now = now or ist_now()
+        if self.running or not is_market_open(now):
+            return False
+        nxt = self.next_auto_at(now)
+        return nxt is not None and nxt <= now
+
+    def auto_view(self) -> dict:
+        cfg = self.auto_settings
+        nxt = self.next_auto_at()
+        return {
+            "on": cfg.on,
+            "every_min": cfg.every_min,
+            "every_choices": list(EVERY_CHOICES),
+            "next_at": nxt.astimezone(IST).isoformat() if nxt and cfg.on and is_market_open() else None,
+            "last_error": self.auto_error,
+        }
 
     def universe_symbols(self) -> list[str]:
         from app.services.instruments import instrument_master
@@ -281,22 +399,27 @@ class ActiveScanner:
         return (ist_now() - self._last_start).total_seconds() >= MIN_MANUAL_GAP_SEC
 
     def start_background(self, get_client) -> None:
-        """Rescan every few minutes while the market is open and a Groww session exists."""
+        """The auto scan: every `every_min` minutes while it is on, the market is open and a Groww session exists."""
         if self._task is not None and not self._task.done():
             return
 
         async def loop() -> None:
             while True:
                 try:
-                    client = get_client()
-                    if client is not None and is_market_open() and not self.paused:
-                        await self.scan(client)
+                    if self.auto_due():
+                        client = get_client()
+                        if client is None:
+                            self.auto_error = "Groww is not connected, so the auto scan waits."
+                        else:
+                            self.auto_error = None
+                            await self.scan(client)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 — never let the loop die
                     self.error = f"{type(exc).__name__}: {exc}"
+                    self.auto_error = self.error
                     log.warning("active scan failed: %s", exc)
-                await asyncio.sleep(SCAN_EVERY_SEC)
+                await asyncio.sleep(CHECK_SEC)
 
         self._task = asyncio.create_task(loop())
 

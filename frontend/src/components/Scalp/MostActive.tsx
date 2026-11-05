@@ -260,6 +260,22 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     }
   };
 
+  const auto = data?.auto;
+  const [autoBusy, setAutoBusy] = useState(false);
+  const saveAuto = async (change: { on?: boolean; every_min?: number }) => {
+    setAutoBusy(true);
+    setNote(null);
+    try {
+      const next = await api.scalpActiveAuto(change);
+      setData((d) => (d ? { ...d, auto: next } : d));
+    } catch (e: unknown) {
+      setNote(e instanceof Error ? e.message : "Could not change the auto scan");
+    } finally {
+      setAutoBusy(false);
+    }
+  };
+  const every = auto?.every_min ?? 5;
+
   const watch = async (symbol: string) => {
     setAdding(symbol);
     setNote(null);
@@ -384,8 +400,47 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
       </div>
-      <Explain className="mb-3" lead="The most traded F&O stocks, ranked every 5 minutes. Market data only — nothing here places an order.">
-        Every 5 minutes while the market is open, one Groww quote for each NSE stock that has futures. Ranked by money
+      {view === "live" && auto ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-slate-300">
+          <label className="inline-flex min-h-9 items-center gap-2 font-semibold text-slate-200">
+            <input
+              type="checkbox"
+              checked={auto.on}
+              disabled={autoBusy}
+              onChange={(e) => void saveAuto({ on: e.target.checked })}
+              className="accent-[#10B981]"
+            />
+            Auto scan
+          </label>
+          <label className="inline-flex items-center gap-1.5">
+            every
+            <select
+              value={auto.every_min}
+              disabled={autoBusy}
+              onChange={(e) => void saveAuto({ every_min: Number(e.target.value) })}
+              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+            >
+              {auto.every_choices.map((m) => (
+                <option key={m} value={m}>
+                  {m} min
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="text-slate-400">
+            {!auto.on
+              ? "Off: nothing is scanned until you press Scan now."
+              : paused
+                ? "Waiting: scans are paused at the top of the page."
+                : auto.next_at
+                  ? `The server scans by itself while the market is open; next at ${clockIst(auto.next_at)}.`
+                  : "The server scans by itself while the market is open (09:15–15:30), no browser needed."}
+          </span>
+          {auto.on && auto.last_error ? <span className="text-amber-300">{auto.last_error}</span> : null}
+        </div>
+      ) : null}
+      <Explain className="mb-3" lead={`The most traded F&O stocks, ranked ${auto?.on ? `every ${every} minutes` : "on each Scan now"}. Market data only — nothing here places an order.`}>
+        {auto?.on ? `Every ${every} minutes` : "On each Scan now"} while the market is open (Auto scan above sets how often), one Groww quote for each NSE stock that has futures. Ranked by money
         traded today, volume against its 20-day usual for this time of day, and how many shares buyers vs sellers have
         waiting. Speed is the price change since the previous scan, in % per minute. Every scan is saved: History shows
         any past scan (same filters, sorting and CSV). Watch adds a stock to the desk feed so the monitor below scores it
@@ -456,7 +511,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           {histBusy && <Loader2 size={14} className="animate-spin text-slate-400" />}
           <p className="w-full text-slate-500">
             {hist && hist.days.length === 0
-              ? "No saved scans yet. Each scan is saved from now on (one every 5 minutes while the market is open)."
+              ? "No saved scans yet. Each scan is saved from now on (each Scan now and each auto scan while the market is open)."
               : `Saved scans are kept ${hist?.keep_days ?? 90} days. Filters, Rank by, column sorting and Find a stock work on the saved scan.`}
           </p>
         </div>
@@ -594,7 +649,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           {data?.running
             ? "Scanning…"
             : data?.market_open
-              ? "Nothing yet. Click Scan now, or wait for the next 5-minute scan."
+              ? auto?.on ? `Nothing yet. Click Scan now, or wait for the next auto scan (every ${every} min).` : "Nothing yet. Click Scan now."
               : "Scans run while the market is open (09:15–15:30). Click Scan now to read the last prices."}
         </p>
       ) : (
