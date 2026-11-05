@@ -30,7 +30,10 @@ stock orders at once, as in tall_pullback.py. Only live bots do this
 (`bots.register` sets `breakout_arrival`); a replay moves the stock but plays one bot.
 
 The candle already on the tape when the stock is armed is not read, so a stock just
-handed over is not sent straight back on the candle that moved it.
+handed over is not sent straight back on the candle that moved it. Nor is the day's first
+candle (`opening_candle`): its volume is set against the quiet end of the day before and
+the opening move is often the day's tallest, so it would read as a breakout on almost every
+stock.
 """
 from __future__ import annotations
 
@@ -141,11 +144,36 @@ def arrive(to_bot: int, symbol: str, arrival: Arrival) -> str:
         return f"Bot {to_bot} entry not queued: {exc}"
 
 
+def _ist_day(ts) -> int | None:
+    try:
+        return (int(ts) + 19_800) // 86_400
+    except (TypeError, ValueError):
+        return None
+
+
+def opening_candle(closed: pd.DataFrame) -> bool:
+    """Is the last closed candle the first of its IST session?
+
+    Its volume is set against the quiet end of the day before and the opening move is often the day's tallest, so
+    nearly every stock would read as a breakout at 09:30 (owner's ICICIGI / UNOMINDA examples). It is never read.
+    """
+    if closed is None or len(closed) == 0 or "ts" not in closed.columns:
+        return False
+    day = _ist_day(closed["ts"].iloc[-1])
+    if day is None:
+        return False
+    if len(closed) < 2:
+        return True
+    return _ist_day(closed["ts"].iloc[-2]) != day
+
+
 def read(enriched: pd.DataFrame, cfg) -> tuple[bool, str]:
     """Judge the last closed candle (iloc[-2]) of an enriched frame (forming bar last)."""
     if enriched is None or len(enriched) < 3:
         return False, "too few candles"
     closed = enriched.iloc[:-1]
     bar = closed.iloc[-1]
+    if opening_candle(closed):
+        return False, "the day's first candle is not read for a breakout"
     volume, average, _ratio = minute_volume_stats(closed, VOLUME_LOOKBACK)
     return check(bar, bar.get("atr_14"), bar.get("sma_9"), bar.get("sma_21"), volume, average, cfg)

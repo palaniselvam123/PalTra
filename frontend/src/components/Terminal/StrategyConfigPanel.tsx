@@ -2733,7 +2733,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               For the chop bot (Bot 2). A hand-off does not tick it: a stock moved to Bot 2 follows Bot 2&apos;s own setting here
               (all stocks, or that stock&apos;s own). On each closed candle, a
               breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
-              volume at least the × below of the last 20 candles&apos; average. A trade already on the breakout&apos;s side (a
+              volume at least the × below of the last 20 candles&apos; average. The day&apos;s first candle is never read: its volume is
+              set against the quiet end of the day before, so nearly every stock would look like a breakout at the open. A
+              trade already on the breakout&apos;s side (a
               buy on a green breakout, a sell on a red one) is kept and the stock stays on this bot. Otherwise an open trade
               against it is cut at once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3
               with Bot 3&apos;s own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
