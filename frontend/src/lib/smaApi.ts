@@ -681,6 +681,108 @@ export type FastBotSettings = {
 };
 export type OpenPnlStockPoint = { t: string; closed: number; open: number; total: number; side: "LONG" | "SHORT" | null };
 
+/** P&L dashboard (backend pnl_dashboard.py): the bots' P&L by time of day, across days or backtest runs. */
+export type PnlDashRun = {
+  run_id: number;
+  bot: number;
+  first: string;
+  last: string;
+  days: number;
+  points: number;
+  status?: string;
+  start?: string;
+  end?: string;
+  created_at?: string | null;
+};
+export type PnlDashOptions = { runs: PnlDashRun[]; market_days: string[]; desks: string[]; steps: number[]; keep_days: number };
+export type PnlDashDay = {
+  key: string;
+  label: string;
+  first: string;
+  last: string;
+  high: number;
+  high_at: string;
+  low: number;
+  low_at: string;
+  close: number;
+  giveback: number;
+  curve: number[];
+};
+export type PnlDashTime = {
+  t: string;
+  avg: number;
+  median: number;
+  min: number;
+  max: number;
+  sum: number;
+  pos_pct: number;
+  beat_close_pct: number;
+  vs_close: number;
+};
+export type PnlDashStock = {
+  symbol: string;
+  days: number;
+  sum_close: number;
+  avg_close: number;
+  avg_high: number;
+  avg_low: number;
+  win_days: number;
+  best_exit: string | null;
+  avg_at_best: number | null;
+  gain_vs_close: number | null;
+};
+export type PnlDashboard = {
+  source: "replay" | "market";
+  runs?: number[];
+  desks?: string[];
+  basis: "gross" | "net";
+  stocks_picked: string[];
+  all_stocks: string[];
+  grid: string[];
+  step: number;
+  days: PnlDashDay[];
+  by_time: PnlDashTime[];
+  best_exit: {
+    by_avg: string;
+    avg_at_best: number;
+    sum_at_best: number;
+    beat_close_pct: number;
+    by_median: string;
+    median_at_best: number;
+    avg_close: number;
+    sum_close: number;
+    gain_vs_close: number;
+  } | null;
+  high_when: { bucket: string; days: number }[];
+  low_when: { bucket: string; days: number }[];
+  totals: {
+    days: number;
+    sum_close: number;
+    avg_close: number;
+    win_days: number;
+    loss_days: number;
+    avg_high: number;
+    avg_low: number;
+    best_day: string;
+    best_close: number;
+    worst_day: string;
+    worst_close: number;
+    avg_giveback: number;
+  } | null;
+  stocks: PnlDashStock[];
+};
+export type PnlDashQuery = {
+  source: "replay" | "market";
+  runs?: number[];
+  desks?: string[];
+  start?: string;
+  end?: string;
+  stocks?: string[];
+  basis?: "gross" | "net";
+  step?: number;
+  weekdays?: number[];
+};
+
 export type OpenPnlReplayRun = { run_id: number; first: string; last: string; days: number; points: number; saved_at: string };
 export type OpenPnlReplayLog = Omit<OpenPnlLog, "desk" | "every_sec"> & { run_id: number };
 
@@ -1946,6 +2048,21 @@ export const smaApi = {
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>
     request<OpenPnlLog>(`/api/open-pnl?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`, undefined, undefined, false),
+  /** P&L dashboard: the backtest runs and market days it can read. */
+  pnlDashOptions: () => request<PnlDashOptions>("/api/pnl-dashboard/options", undefined, 30000, false),
+  /** P&L dashboard: curves, highs / lows / closes and the P&L by time of day for the picked runs or days. */
+  pnlDashboard: (q: PnlDashQuery) => {
+    const p = new URLSearchParams({ source: q.source });
+    if (q.runs?.length) p.set("runs", q.runs.join(","));
+    if (q.desks?.length) p.set("desks", q.desks.join(","));
+    if (q.start) p.set("start", q.start);
+    if (q.end) p.set("end", q.end);
+    if (q.stocks?.length) p.set("stocks", q.stocks.join(","));
+    if (q.basis) p.set("basis", q.basis);
+    if (q.step) p.set("step", String(q.step));
+    if (q.weekdays?.length) p.set("weekdays", q.weekdays.join(","));
+    return request<PnlDashboard>(`/api/pnl-dashboard?${p.toString()}`, undefined, 60000, false);
+  },
   /** A bot's replay runs that have an open P&L log, newest first. */
   openPnlReplays: (bot: number) => request<{ bot: number; runs: OpenPnlReplayRun[] }>(`/api/open-pnl/replays?bot=${bot}`, undefined, undefined, false),
   /** One replay run's open P&L through one of its days (its last day when none is given). */

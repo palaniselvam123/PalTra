@@ -418,7 +418,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
               value={auto.every_min}
               disabled={autoBusy}
               onChange={(e) => void saveAuto({ every_min: Number(e.target.value) })}
-              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+              className="min-h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-100"
             >
               {auto.every_choices.map((m) => (
                 <option key={m} value={m}>
@@ -457,7 +457,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                 setHistDay(e.target.value);
                 setRunId(null);
               }}
-              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+              className="min-h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-100"
             >
               {(hist?.days ?? []).map((d) => (
                 <option key={d.day} value={d.day}>
@@ -471,7 +471,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
             <select
               value={runId ?? ""}
               onChange={(e) => setRunId(Number(e.target.value))}
-              className="min-h-9 rounded-md border border-slate-700 bg-panel px-2 text-sm text-slate-100"
+              className="min-h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-100"
             >
               {runs.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -585,7 +585,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           <select
             value={tqMinutes}
             onChange={(e) => setTqMinutes(Number(e.target.value) as CrossScanMinutes)}
-            className="min-h-8 rounded-md border border-slate-700 bg-panel px-1 text-xs text-slate-100"
+            className="min-h-8 rounded-md border border-slate-700 bg-surface2 px-1 text-xs text-slate-100"
           >
             {TQ_SIZES.map((m) => (
               <option key={m} value={m}>

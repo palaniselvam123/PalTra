@@ -51,6 +51,7 @@ import high52
 import morning_scan
 import groww_pressure
 import open_pnl_log
+import pnl_dashboard
 import scan_accuracy
 import scan_history
 import scan_sync
@@ -3304,6 +3305,122 @@ async def open_pnl_replay(run_id: int, day: str | None = Query(None, pattern=r"^
         "summary": open_pnl_log.summary(series),
         "keep_days": open_pnl_log.keep_days(),
     }
+
+
+# ---- P&L dashboard: when in the day is the P&L best? (pnl_dashboard.py, the desk's home page). Read-only.
+
+
+def _dash_stocks(series: list[dict], closed) -> dict[str, list[float]]:
+    return {
+        name: pnl_dashboard.day_curve((r["t"], r["total"]) for r in rows)
+        for name, rows in open_pnl_log.by_stock(series, closed).items()
+    }
+
+
+def _dash_replay_days(run_ids: list[int], basis: str, weekdays: set[int] | None) -> list[dict]:
+    out = []
+    for run_id in run_ids:
+        for row in open_pnl_log.replay_days(run_id):
+            day = row["day"]
+            if weekdays is not None and dt.date.fromisoformat(day).weekday() not in weekdays:
+                continue
+            pts = open_pnl_log.replay_points(run_id, day)
+            sp = pnl_dashboard.span((p["t"], 0) for p in pts)
+            if sp is None:
+                continue
+            curve = pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts)
+            stocks = _dash_stocks(pts, _closed_by_stock(day, run_id=run_id))
+            label = f"R{run_id} · {day}" if len(run_ids) > 1 else day
+            out.append(pnl_dashboard.build_day(f"{run_id}:{day}", label, curve, sp[0], sp[1], stocks))
+    out.sort(key=lambda d: d["key"].split(":", 1)[1])
+    return out[-pnl_dashboard.MAX_DAYS:]
+
+
+def _dash_market_days(desks: list[str], start: str | None, end: str | None, basis: str, weekdays: set[int] | None) -> list[dict]:
+    picked = sorted(
+        d["day"] for d in open_pnl_log.days(None, limit=400)
+        if (not start or d["day"] >= start) and (not end or d["day"] <= end)
+        and (weekdays is None or dt.date.fromisoformat(d["day"]).weekday() in weekdays)
+    )[-pnl_dashboard.MAX_DAYS:]
+    out = []
+    for day in picked:
+        curves, spans, stocks = [], [], {}
+        for desk in desks:
+            pts = open_pnl_log.points(day, desk)
+            sp = pnl_dashboard.span((p["t"], 0) for p in pts)
+            if sp is None:
+                continue
+            spans.append(sp)
+            curves.append(pnl_dashboard.day_curve((p["t"], p[f"total_{basis}"]) for p in pts))
+            modes = {str(p.get("mode") or "PAPER").upper() for p in pts} or {"PAPER"}
+            for name, c in _dash_stocks(pts, _closed_by_stock(day, desk, modes)).items():
+                stocks[name] = pnl_dashboard.add_curves([stocks[name], c]) if name in stocks else c
+        if not curves:
+            continue
+        first, last = min(s[0] for s in spans), max(s[1] for s in spans)
+        out.append(pnl_dashboard.build_day(day, day, pnl_dashboard.add_curves(curves), first, last, stocks))
+    return out
+
+
+@app.get("/api/pnl-dashboard/options")
+async def pnl_dashboard_options():
+    """What the P&L dashboard can read: the backtest runs with a P&L log, and the market days per desk."""
+    runs = await asyncio.to_thread(open_pnl_log.all_replay_runs)
+    ids = [r["run_id"] for r in runs]
+
+    def names() -> dict[int, dict]:
+        from models import ReplayRun
+
+        with session_factory()() as db:
+            rows = db.query(ReplayRun).filter(ReplayRun.id.in_(ids)).all() if ids else []
+            return {
+                r.id: {"status": r.status, "start": r.start_date, "end": r.end_date,
+                       "created_at": r.created_at.isoformat() if r.created_at else None}
+                for r in rows
+            }
+
+    info = await asyncio.to_thread(names)
+    market = await asyncio.to_thread(open_pnl_log.days, None, 400)
+    return {
+        "runs": [{**r, **info.get(r["run_id"], {})} for r in runs],
+        "market_days": [d["day"] for d in market],
+        "desks": list(OPEN_PNL_DESKS),
+        "steps": list(pnl_dashboard.STEPS),
+        "keep_days": open_pnl_log.keep_days(),
+    }
+
+
+@app.get("/api/pnl-dashboard")
+async def pnl_dashboard_view(
+    source: Literal["replay", "market"] = "replay",
+    runs: str = Query("", description="Comma list of backtest run ids (source=replay)"),
+    desks: str = Query("1", description="Comma list of desks 1-5, research (source=market)"),
+    start: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    end: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    stocks: str = Query("", description="Comma list: only these stocks' P&L (before charges)"),
+    basis: Literal["gross", "net"] = "gross",
+    step: int = Query(5, ge=1, le=30),
+    weekdays: str = Query("", description="Comma list 0-4 (Mon-Fri); empty = every day"),
+):
+    """Each day's P&L curve, high, low and close, the P&L by time of day across the days, the best time to close
+    everything and the same per stock. Read-only."""
+    days_of_week = {int(x) for x in weekdays.split(",") if x.strip().isdigit() and int(x) < 7} or None
+    if source == "replay":
+        ids = [int(x) for x in runs.split(",") if x.strip().isdigit()]
+        if not ids:
+            latest = await asyncio.to_thread(open_pnl_log.all_replay_runs, 1)
+            ids = [latest[0]["run_id"]] if latest else []
+        built = await asyncio.to_thread(_dash_replay_days, ids, basis, days_of_week)
+        picked = {"runs": ids}
+    else:
+        want = [d.strip() for d in desks.split(",") if d.strip() in OPEN_PNL_DESKS] or ["1"]
+        built = await asyncio.to_thread(_dash_market_days, want, start, end, basis, days_of_week)
+        picked = {"desks": want, "start": start, "end": end}
+    names = [s.strip().upper() for s in stocks.split(",") if s.strip()]
+    out = await asyncio.to_thread(pnl_dashboard.analyze, built, step, names or None)
+    all_stocks = sorted({s for d in built for s in d["stocks"]})
+    return {"source": source, **picked, "basis": "gross" if names else basis, "stocks_picked": names,
+            "all_stocks": all_stocks, **out}
 
 
 # ---- scan history: every finished pass, kept (scan_history.py), and how it turned out (scan_accuracy.py)
