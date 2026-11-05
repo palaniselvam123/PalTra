@@ -114,6 +114,7 @@ def test_run_stops_the_server_once_idle(monkeypatch, backtest):
     monkeypatch.setattr(backtest_server, "idle_minutes", lambda: 0)
     monkeypatch.setattr(backtest_server, "stop_now", lambda reason: stopped.append(reason))
     monkeypatch.delenv("BACKTEST_LINK_TOKEN", raising=False)
+    backtest_server.set_auto_sync(True)  # the start-up copy (off by default) is tried and its error shown
     asyncio.run(asyncio.wait_for(backtest_server.run(lambda rows: [], lambda: {}), 5))
     assert stopped and "idle" in stopped[0]
     assert "BACKTEST_LINK_TOKEN" in (backtest_server.state.sync_error or "")
@@ -314,6 +315,7 @@ def test_scanner_arm_list_survives_the_idle_setting():
 
 def test_boot_copy_keeps_scanner_arms_and_waits(monkeypatch, backtest):
     monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
+    backtest_server.set_auto_sync(True)
     backtest_server.note_scanner_arm(4, "INFY")
     seen = []
 
@@ -336,6 +338,29 @@ def test_boot_copy_keeps_scanner_arms_and_waits(monkeypatch, backtest):
 
     asyncio.run(go())
     assert seen == [{4: ["INFY"]}]
+
+
+def test_boot_does_not_copy_the_desk_settings_by_default(monkeypatch, backtest):
+    """Owner's choice: a deploy or restart keeps this server's own settings; only Sync from desk copies."""
+    monkeypatch.setenv("BACKTEST_LINK_TOKEN", TOKEN)
+    assert backtest_server.auto_sync() is False
+    seen = []
+    asked = []
+
+    async def go():
+        async def fake_get(path, client=None):
+            asked.append(path)
+            return {"token": ""} if path == backtest_server.GROWW_PATH else {"rows": {"4": {"qty": 1}}}
+
+        monkeypatch.setattr(backtest_server, "_desk_get", fake_get)
+        monkeypatch.setattr(backtest_server, "CHECK_EVERY_SEC", 60)
+        task = asyncio.create_task(backtest_server.run(lambda rows, keep=None: seen.append(rows) or [], lambda: {}))
+        await asyncio.wait_for(backtest_server.wait_first_sync(), 5)
+        task.cancel()
+
+    asyncio.run(go())
+    assert seen == [] and backtest_server.SETTINGS_PATH not in asked
+    assert backtest_server.status({})["auto_sync"] is False
 
 
 def test_import_keeps_scanner_arms_still_armed_here(sma_api, monkeypatch):

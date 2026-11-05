@@ -10,8 +10,10 @@ never slows the bots. Same image; this role:
 * **Copies the bots' settings from the desk** (``sync``): every ``BotConfig`` row (bots 1-5,
   research) with its Trade list and per-stock settings, and the fast-mover hand-off settings
   (``fast_bot.json``, so replays here play it as the desk would), read from the desk's
-  ``GET /api/link/backtest/settings``, written here with PAPER forced. At boot and on
-  "Sync from desk". Nothing is ever written back to the desk.
+  ``GET /api/link/backtest/settings``, written here with PAPER forced. Only on "Sync from desk"
+  (owner's choice): a start (deploy, restart, wake from idle) keeps this server's own saved settings
+  unless ``auto_sync`` is on (off by default, ``backtest_server.json``, ``PUT /api/backtest/auto-sync``).
+  Nothing is ever written back to the desk.
 * **Uses the desk's Groww session** for past candles (``remote_token``): the desk's access
   token comes from ``GET /api/link/backtest/groww`` every ``TOKEN_EVERY_SEC`` and is kept in
   memory only, never logged or saved. Logging in again with the same API key here could end
@@ -156,6 +158,15 @@ def _hhmm(text: str | None) -> dt.time | None:
     except (ValueError, TypeError):
         return None
     return value if MARKET_START < value <= dt.time(23, 59) else None
+
+
+def auto_sync() -> bool:
+    """Copy the desk's settings at every start (off by default: only "Sync from desk" copies them)."""
+    return bool(_read_file().get("auto_sync", False))
+
+
+def set_auto_sync(on: bool) -> None:
+    _write_file(auto_sync=bool(on))
 
 
 def market_hours_only() -> bool:
@@ -381,18 +392,20 @@ def status(replays: dict) -> dict:
         "synced": state.synced,
         "sync_error": state.sync_error,
         "scanner_armed": sum(len(v) for v in scanner_armed().values()),
+        "auto_sync": auto_sync(),
         "up_sec": round(time.monotonic() - state.started),
     }
 
 
 async def run(apply: Callable[[dict], list[str]], replays: Callable[[], dict]) -> None:
-    """Sync once, then keep the Groww session fresh and stop the server once it has been idle."""
+    """Sync once when `auto_sync` is on, then keep the Groww session fresh and stop the server once idle."""
     if not server_role.is_backtest():
         return
     async with httpx.AsyncClient(timeout=15) as client:
         await refresh_token(client)
         try:
-            await sync(apply, client, keep=scanner_armed())
+            if auto_sync():
+                await sync(apply, client, keep=scanner_armed())
         except Exception:  # noqa: BLE001 - shown on the page; the last synced settings stay
             pass
         finally:

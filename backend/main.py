@@ -2048,6 +2048,18 @@ async def backtest_idle(body: IdleUpdate):
     return backtest_server.status(replays)
 
 
+class AutoSyncUpdate(BaseModel):
+    on: bool
+
+
+@app.put("/api/backtest/auto-sync")
+async def backtest_auto_sync(body: AutoSyncUpdate):
+    """Copy the desk's settings at every start of this server (off: only "Sync from desk" copies them)."""
+    _backtest_only()
+    await asyncio.to_thread(backtest_server.set_auto_sync, body.on)
+    return backtest_server.status(replays)
+
+
 @app.put("/api/backtest/hours")
 async def backtest_hours(body: MarketHoursUpdate):
     """Market hours only: after the stop time (and on weekends) the server stops once nothing is running."""

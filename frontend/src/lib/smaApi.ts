@@ -1866,6 +1866,8 @@ export type BacktestServerStatus = {
   scanner_armed?: number;
   /** Market hours only: after `stop_at` (and on weekends) it stops once nothing is running. */
   market_hours_only?: boolean;
+  /** Copy the desk's settings at every start (off by default: only Sync from desk copies them). */
+  auto_sync?: boolean;
   stop_at?: string;
   after_hours?: boolean;
   up_sec: number;
@@ -1889,6 +1891,8 @@ export const smaApi = {
     request<BacktestServerStatus>("/api/backtest/idle", { method: "PUT", body: JSON.stringify({ minutes }) }, 12000, false),
   backtestHours: (on: boolean, stop_at?: string) =>
     request<BacktestServerStatus>("/api/backtest/hours", { method: "PUT", body: JSON.stringify({ on, stop_at }) }, 12000, false),
+  backtestAutoSync: (on: boolean) =>
+    request<BacktestServerStatus>("/api/backtest/auto-sync", { method: "PUT", body: JSON.stringify({ on }) }, 12000, false),
   backtestStop: (force = false) =>
     request<{ stopping: boolean }>(`/api/backtest/stop${force ? "?force=true" : ""}`, { method: "POST" }, 12000, false),
   state: () => request<SmaState>("/api/state"),

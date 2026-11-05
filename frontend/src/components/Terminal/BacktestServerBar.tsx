@@ -97,8 +97,8 @@ export function BacktestServerBar() {
         <a href={role.desk_url} className="underline" target="_blank" rel="noreferrer">
           main desk
         </a>
-        ; nothing here sends an order. Settings and armed stocks are copied from the desk; the scanner&apos;s Arm can also arm
-        stocks here.
+        ; nothing here sends an order. Settings and armed stocks are copied from the desk when you press Sync from desk
+        {" "}(or at every start, if ticked below); the scanner&apos;s Arm can also arm stocks here.
       </p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-400">
         <span>
@@ -161,6 +161,24 @@ export function BacktestServerBar() {
               </option>
             ))}
           </select>
+        </label>
+        <label
+          className="flex items-center gap-1.5"
+          title="Off: this server keeps its own settings and armed stocks after a deploy or restart; only Sync from desk copies the desk's. On: the desk's are copied at every start."
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(st?.auto_sync)}
+            disabled={!st || busy}
+            onChange={(e) =>
+              act(
+                () => smaApi.backtestAutoSync(e.target.checked),
+                e.target.checked ? "The desk's settings will be copied at every start." : "Settings are copied only when you press Sync from desk."
+              )
+            }
+            className="accent-violet-400"
+          />
+          Copy from desk at every start
         </label>
         <button
           type="button"
