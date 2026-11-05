@@ -1932,6 +1932,11 @@ export const smaApi = {
   high52ScanStart: (symbols: string[], force = false) =>
     request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   high52Scan: () => request<High52Scan>("/api/high52-scan", undefined, undefined, false),
+  /** Sideways test (read-only research on past candles; backend regime_study.py). */
+  regimeStudy: () => request<RegimeStudy>("/api/regime-study", undefined, undefined, false),
+  regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
+    request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>
@@ -2197,3 +2202,39 @@ export function stateForSymbol(state: SmaState | null, symbol: string | null | u
       : null,
   };
 }
+
+
+/** Sideways test (backend regime_study.py): how often the next window trended after each signal's reading. */
+export type RegimeBucket = {
+  bucket: string;
+  samples: number;
+  trended_pct?: number;
+  vs_base?: number;
+  next_crosses?: number;
+  move_atr?: number;
+  cross_pnl_pct?: number;
+  win_pct?: number;
+};
+export type RegimeSignal = { key: string; label: string; buckets: RegimeBucket[]; spread: number; pnl_spread: number; verdict: string };
+export type RegimeReport = {
+  samples: number;
+  stocks?: number;
+  days?: number;
+  base_trended_pct?: number;
+  base_next_crosses?: number;
+  base_cross_pnl_pct?: number;
+  min_bucket?: number;
+  signals: RegimeSignal[];
+  best: string | null;
+  stopped?: boolean;
+};
+export type RegimeStudy = {
+  status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
+  done: number;
+  total: number;
+  errors: { symbol: string; error: string }[];
+  params: { symbols?: number; days?: number; minutes?: number; window?: number; sma_fast?: number; sma_slow?: number };
+  started_at: string | null;
+  finished_at: string | null;
+  report: RegimeReport | null;
+};

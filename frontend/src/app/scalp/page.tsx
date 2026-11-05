@@ -19,6 +19,7 @@ import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { MorningScan } from "@/components/Scalp/MorningScan";
 import { High52Scan } from "@/components/Scalp/High52Scan";
+import { RegimeStudy } from "@/components/Scalp/RegimeStudy";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -70,6 +71,7 @@ const TABS = [
   { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
+  { id: "sideways", label: "Sideways test" },
   { id: "history", label: "History" },
   { id: "alerts", label: "Alerts" },
 ] as const;
@@ -114,6 +116,8 @@ export default function ScalpPage() {
   const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
   const onMorningStatus = useCallback((st: ScanStatus) => setMorningStatus(st), []);
   const onHigh52Status = useCallback((st: ScanStatus) => setHigh52Status(st), []);
+  const [sidewaysStatus, setSidewaysStatus] = useState<ScanStatus | null>(null);
+  const onSidewaysStatus = useCallback((st: ScanStatus) => setSidewaysStatus(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -352,6 +356,7 @@ export default function ScalpPage() {
     high52: high52Status,
     active: activeStatus,
     backtest: null,
+    sideways: sidewaysStatus,
     history: null,
     alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
   };
@@ -731,6 +736,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "backtest"}>
           <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
+        </div>
+        <div hidden={tab !== "sideways"}>
+          <RegimeStudy armed={armed} paused={paused} onStatus={onSidewaysStatus} />
         </div>
         <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>

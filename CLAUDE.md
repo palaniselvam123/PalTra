@@ -981,6 +981,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   next to the desk DB for when NSE refuses). Desk `GET /api/scalp/universe?lists=fno,nifty50,…` (default `fno`; per-list
   `counts` / `errors`). The Trend quality auto re-scan keeps the card's `lists` (`chop_auto.AutoSettings.lists`,
   `main._auto_symbols`); MCP `start_scan` takes `stocks` nifty50 / nifty100 / niftybank. Read-only.
+- `backend/regime_study.py` – **Sideways test** (read-only research; the Scalp page's "Sideways test" tab,
+  `components/Scalp/RegimeStudy.tsx`; no order path, nothing in the strategy reads it): does a "sideways" / "trending"
+  reading hold? For past trading days (`trading_days`, 3-30) of the picked stocks (scan lists, up to `MAX_STOCKS` 200), at
+  each `CHECK_TIMES` (10:00, 11:00, 12:00, 13:00, 14:00, 14:30 IST), `analyze_stock` reads on the bot's candle size
+  (`candles.resample`, `indicators.enrich`, closed candles only) six signals over the `window` (30/60/90) minutes just
+  finished: SMA crosses, SMA fast turns (slope over 2 candles changing sign, under `TURN_MIN_ATR` ignored), ADX 14,
+  efficiency (|net| / path), candle overlap (intersection / union) and the SMA gap %, and the next window's outcome:
+  `trended` (efficiency ≥ 0.5 and ≥ 1 ATR, the trend_phases rule), next crosses, move in ATRs and `cross_pnl_pct` (follow
+  the SMA side, flip on each cross, before charges). `summarize` buckets each signal (`BUCKETS`) against the base rate,
+  `spread` = points between the buckets' trended % (buckets under `min_bucket` 30 checks left out), `verdict` strong ≥ 20 /
+  some ≥ 10 / weak, sorted strongest first, `best`. `RegimeStudy` (one at a time) downloads each stock once with
+  `fetch_frame` on `main._scan_broker()` after `groww_pressure.wait_for_bots`, keeps the last report in `regime_study.json`
+  next to the SMA DB (`REGIME_STUDY_FILE`) and keeps the backtest server awake while it runs. `GET /api/regime-study`,
+  `POST /api/regime-study/start` (symbols, days, minutes 1/3/5/10/15, window; refused when scans are paused / off, and on
+  the desk in market hours unless `desk_market_hours_free`), `POST /api/regime-study/stop`. Learn lesson `sideways-test`.
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
@@ -1426,8 +1441,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the
   file there and adding an entry. Topic filter, search, a reader with the PDF embedded, Open in a new tab, Download, and
   "Mark as done" (kept per browser). `/learn/?lesson=<id>` opens one. Lessons now: `sma9-slope` (Turn exit vs V-turn,
-  linked from the Settings slope editor) and `day-high-low` (the day high/low guard, linked from that setting,
-  anchor `#sma-day-extreme`).
+  linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
+  anchor `#sma-day-extreme`) and `sideways-test` (the Scalp page's Sideways test, linked from its card).
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
