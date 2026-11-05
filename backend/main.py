@@ -38,6 +38,7 @@ import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import fast_bot
 import tsl_calc as tsl_calc_mod
+import regime_study
 import strategy_presets
 import fast_move
 import level_check
@@ -389,6 +390,7 @@ def _boot_backtest_server() -> asyncio.Task:
         lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
+    backtest_server.add_busy_check(lambda: regime_study.study().running)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
     # so it does not stop itself between two passes.
     chop_autos.reload()
@@ -3765,6 +3767,59 @@ async def tsl_calc(
     )
     out["source"] = source
     return out
+
+
+class RegimeStudyStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=regime_study.MAX_STOCKS)
+    days: int = Field(default=10, ge=regime_study.MIN_DAYS, le=regime_study.MAX_DAYS)
+    minutes: int = 5
+    window: int = 60
+    sma_fast: int | None = Field(default=None, ge=2, le=200)
+    sma_slow: int | None = Field(default=None, ge=3, le=400)
+
+
+@app.get("/api/regime-study")
+async def regime_study_get():
+    """The Sideways test (regime_study.py): progress and the last report. Read-only."""
+    return regime_study.study().view()
+
+
+@app.post("/api/regime-study/start")
+async def regime_study_start(body: RegimeStudyStart):
+    """Start the Sideways test: past days of each stock's Groww 1-minute candles, read-only, no order.
+
+    On the main desk in market hours it is refused unless the desk runs backtests at any hour (the bots' Groww limit);
+    the backtest server runs it any time on its own login."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run the Sideways test on the backtest server, so it never shares the bots' Groww limit.")
+    if body.minutes not in regime_study.SIZES:
+        raise HTTPException(400, f"Candle size must be one of {', '.join(map(str, regime_study.SIZES))} minutes.")
+    if body.window not in regime_study.WINDOWS:
+        raise HTTPException(400, f"Window must be one of {', '.join(map(str, regime_study.WINDOWS))} minutes.")
+    cfg = engine.load_config()
+    fast = int(body.sma_fast or cfg.sma_fast)
+    slow = int(body.sma_slow or cfg.sma_slow)
+    if fast >= slow:
+        raise HTTPException(400, "Fast SMA period must be shorter than the slow period.")
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    try:
+        return regime_study.study().start(
+            body.symbols, fetch, body.days, body.minutes, body.window, fast, slow, wait=groww_pressure.wait_for_bots
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/regime-study/stop")
+async def regime_study_stop():
+    """Stop after the stock being read; the report covers the stocks read so far."""
+    return regime_study.study().stop()
 
 
 def _tape_for(symbol: str):

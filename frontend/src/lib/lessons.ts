@@ -21,6 +21,24 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "sideways-test",
+    title: "Sideways test: does sideways or trending hold?",
+    summary:
+      "How the Scalp page's Sideways test checks, on your own stocks and past days, whether SMA crosses, SMA 9 turns, ADX, efficiency, candle overlap or the SMA gap tell you what the next hour does, how to run it, how to read a signal card, and what to change in Settings when a signal works (or what to do when none does).",
+    topic: "Backtests",
+    file: "/guides/sideways-test-guide.pdf",
+    pages: 3,
+    minutes: 6,
+    added: "2026-11-05",
+    open: { href: "/scalp/", label: "Open the Scalp page" },
+    points: [
+      "At 10:00-14:30 each past day it reads 6 chop signals on the last hour and checks if the next hour trended.",
+      "A signal is useful only if its buckets are far apart (spread 20+ points = strong, under 10 = guessing).",
+      "Turn a strong signal into a setting (trade cap, ADX, SMA gap), then prove it with a replay.",
+      "Run it on the backtest server; it never places an order.",
+    ],
+  },
+  {
     id: "day-high-low",
     title: "Day high/low guard: don't buy at the top",
     summary:
