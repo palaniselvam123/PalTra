@@ -75,7 +75,7 @@ def test_api_reads_replay_runs_and_market_days(tmp_path, monkeypatch):
     import main
 
     ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
-    sample = lambda g: {"gross": g, "net": g - 10, "held": 1, "stocks": [{"symbol": "SBIN", "gross": g, "net": g - 10}],
+    sample = lambda g: {"gross": g, "net": g - 10, "held": 1, "stocks": [{"symbol": "SBIN", "qty": 50, "gross": g, "net": g - 10}],
                         "closed_gross": 0.0, "closed_net": 0.0}
     open_pnl_log.save_replay(7, 1, [(dt.datetime(2026, 10, 20, 10, 0, tzinfo=ist), sample(100)),
                                     (dt.datetime(2026, 10, 20, 11, 0, tzinfo=ist), sample(400)),
@@ -94,7 +94,21 @@ def test_api_reads_replay_runs_and_market_days(tmp_path, monkeypatch):
         mkt = client.get("/api/pnl-dashboard?source=market&desks=1,2").json()
         assert mkt["days"][0]["close"] == 100 and mkt["stocks"][0]["symbol"] == "SBIN"
         assert client.get("/api/pnl-dashboard?source=market&desks=1&start=2026-10-22").json()["totals"] is None
+        # Qty: every trade restated as N shares (the sample holds 50 SBIN)
+        q = client.get("/api/pnl-dashboard?source=replay&runs=7&step=30&qty=100&basis=net").json()
+        assert q["qty"] == 100 and q["basis"] == "gross"
+        assert q["days"][0]["high"] == 800 and q["days"][0]["close"] == -100
     database.reset_engine()
+
+
+def test_per_qty_restates_a_trade_as_n_shares():
+    assert pd.per_qty(120.0, 40, 100) == 300.0
+    assert pd.per_qty(-30.0, -10, 50) == -150.0  # a short's qty sign is ignored
+    assert pd.per_qty(120.0, 40, 0) == 120.0 and pd.per_qty(120.0, None, 100) == 120.0
+    pts = [{"t": "x", "stocks": [{"symbol": "A", "qty": 10, "gross": 5.0, "net": 4.0}]}]
+    out = pd.scale_points(pts, 20)
+    assert out[0]["stocks"][0]["gross"] == 10.0 and out[0]["stocks"][0]["net"] == 8.0
+    assert pts[0]["stocks"][0]["gross"] == 5.0  # the input is untouched
 
 
 def test_a_day_without_any_pnl_is_left_out():

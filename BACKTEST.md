@@ -19,11 +19,13 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
 - **No orders, ever.** Every Groww order, stop, cancel and square-off call refuses
   (`server_role.refuse_orders`), the LIVE switch answers 403, and the bots' Start
   answers 409: no live bot, scan, alert or ORB price feed runs here.
-- **Settings come from the desk.** At start-up, and when you press **Sync from desk**
+- **Settings come from the desk, when you ask.** When you press **Sync from desk**
   on its terminal page, it copies every bot's settings row (bots 1-4 and research:
   strategy, Trade list, per-stock settings) from the desk, with PAPER forced. Nothing
   is ever written back to the desk. Sync is refused while a backtest plays, so a run
-  keeps the settings it started with.
+  keeps the settings it started with. A deploy, restart or wake from idle keeps this
+  server's own saved settings and armed stocks (they live on its volume); tick **Copy from
+  desk at every start** on the bar to copy the desk's at each start instead.
 - **The desk's Groww session, not a second login.** Past candles come from Groww with
   the desk's own access token, fetched over the link every 10 minutes and kept in
   memory only (never saved, logged or shown). Logging in again with the same API key
@@ -39,7 +41,7 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
   **Main desk / Backtest server** switch. On Backtest server the stocks go on this server's
   copies of the bots (always PAPER) with the quantity and stop you set, and the desk is not
   touched. If this server is stopped, the arm starts it (allow 20-30 s) and waits for its
-  start-up copy from the desk, so the copy does not wipe it. Stocks armed this way are kept
+  start-up copy from the desk (when that is ticked), so the copy does not wipe it. Stocks armed this way are kept
   each time this server starts again, while they are still armed here; **Sync from desk**
   replaces them with the desk's lists (it asks first). The bar on the terminal shows how
   many there are.
@@ -98,7 +100,7 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
    `paltra-backtest`. The scanner's Arm then shows **Main desk / Backtest server**.
 
 6. **Check it**: open `https://paltra-backtest.fly.dev/terminal/`, sign in. The violet
-   **Backtest server** bar should say "Settings copied just now" and "Groww: desk
+   **Backtest server** bar: press **Sync from desk** once, then it should say "Settings copied just now" and "Groww: desk
    session in use" (log in to Groww on the desk first if it says no session). Run a
    backtest as on the desk.
 

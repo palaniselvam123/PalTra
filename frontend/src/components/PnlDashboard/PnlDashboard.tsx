@@ -20,11 +20,13 @@ const DESK_LABEL: Record<string, string> = { "1": "Bot 1", "2": "Bot 2", "3": "B
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const STEPS = [1, 5, 10, 15, 30];
 
-type Filters = Required<Pick<PnlDashQuery, "source" | "runs" | "desks" | "stocks" | "basis" | "step" | "weekdays">> & {
+const QTY_PICKS = [100, 500, 1000];
+
+type Filters = Required<Pick<PnlDashQuery, "source" | "runs" | "desks" | "stocks" | "basis" | "step" | "weekdays" | "qty">> & {
   start: string;
   end: string;
 };
-const DEFAULTS: Filters = { source: "replay", runs: [], desks: ["1"], start: "", end: "", stocks: [], basis: "gross", step: 5, weekdays: [] };
+const DEFAULTS: Filters = { source: "replay", runs: [], desks: ["1"], start: "", end: "", stocks: [], basis: "gross", step: 5, weekdays: [], qty: 0 };
 
 function loadFilters(): Filters {
   try {
@@ -79,6 +81,7 @@ export function PnlDashboard() {
         basis: f.basis,
         step: f.step,
         weekdays: f.weekdays,
+        qty: f.qty,
       });
       setData(out);
       setPickedDay((p) => (p && out.days.some((d) => d.label === p) ? p : null));
@@ -170,7 +173,7 @@ export function PnlDashboard() {
         <>
           <Card
             title="If you closed every trade at this time…"
-            sub={`Average across ${data.days.length} day${data.days.length === 1 ? "" : "s"} (${data.basis === "net" ? "after" : "before"} charges${data.stocks_picked.length ? `, ${data.stocks_picked.join(", ")} only` : ""}). Hover for the details; click a time to see that moment.`}
+            sub={`Average across ${data.days.length} day${data.days.length === 1 ? "" : "s"} (${data.basis === "net" ? "after" : "before"} charges${data.qty ? `, every trade as ${data.qty.toLocaleString("en-IN")} shares` : ""}${data.stocks_picked.length ? `, ${data.stocks_picked.join(", ")} only` : ""}). Hover for the details; click a time to see that moment.`}
             legend={
               <Legend
                 items={[
@@ -300,7 +303,17 @@ function Filters({
 }) {
   const [stockText, setStockText] = useState("");
   const [showRuns, setShowRuns] = useState(false);
+  const customQty = (q: number) => (q && !QTY_PICKS.includes(q) ? String(q) : "");
+  const [qtyText, setQtyText] = useState(customQty(f.qty));
+  useEffect(() => setQtyText(customQty(f.qty)), [f.qty]);
   const runs = opts?.runs ?? [];
+  const allIds = runs.map((r) => r.run_id);
+  const allPicked = allIds.length > 0 && allIds.every((id) => f.runs.includes(id));
+  const finishedIds = runs.filter((r) => (r.status ?? "").toUpperCase() !== "RUNNING").map((r) => r.run_id);
+  const applyQty = (v: string) => {
+    const n = Math.round(Number(v.replace(/[^0-9]/g, "")));
+    set("qty", Number.isFinite(n) && n > 0 ? Math.min(n, 1_000_000) : 0);
+  };
   const runLabel = (id: number) => {
     const r = runs.find((x) => x.run_id === id);
     return r ? `#${r.run_id} · Bot ${r.bot} · ${r.first === r.last ? r.first : `${r.first} → ${r.last}`} · ${r.days}d` : `#${id}`;
@@ -333,10 +346,28 @@ function Filters({
           <Field label="Runs">
             <div className="relative">
               <button type="button" onClick={() => setShowRuns((v) => !v)} className={clsx(input, "w-full min-w-[220px] max-w-[320px] text-left")}>
-                {f.runs.length ? (f.runs.length === 1 ? runLabel(f.runs[0]) : `${f.runs.length} runs`) : "Latest run"}
+                {f.runs.length ? (f.runs.length === 1 ? runLabel(f.runs[0]) : allPicked ? `All ${f.runs.length} runs` : `${f.runs.length} runs`) : "Latest run"}
               </button>
               {showRuns ? (
                 <div className="absolute z-20 mt-1 max-h-80 w-[min(360px,calc(100vw-48px))] overflow-auto rounded-md border border-border bg-surface p-1 shadow-card">
+                  {runs.length ? (
+                    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-border bg-surface px-2 pb-1">
+                      <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold text-slate-100">
+                        <input
+                          type="checkbox"
+                          checked={allPicked}
+                          onChange={() => set("runs", allPicked ? [] : allIds)}
+                          className="accent-[#10B981]"
+                        />
+                        Select all ({runs.length})
+                      </label>
+                      {finishedIds.length && finishedIds.length < runs.length ? (
+                        <button type="button" className="min-h-8 text-xs text-accentSky" onClick={() => set("runs", finishedIds)}>
+                          Finished only
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {runs.length ? (
                     runs.map((r) => (
                       <label key={r.run_id} className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-2 text-sm text-slate-200 hover:bg-white/5">
@@ -385,6 +416,28 @@ function Filters({
             <option value="gross">Before charges</option>
             <option value="net">After charges</option>
           </select>
+        </Field>
+        <Field label="Qty per trade">
+          <div className="flex flex-wrap items-center gap-1">
+            <Chip on={!f.qty} onClick={() => set("qty", 0)}>
+              As traded
+            </Chip>
+            {QTY_PICKS.map((q) => (
+              <Chip key={q} on={f.qty === q} onClick={() => set("qty", q)}>
+                {q.toLocaleString("en-IN")}
+              </Chip>
+            ))}
+            <input
+              inputMode="numeric"
+              value={qtyText}
+              placeholder="Other…"
+              aria-label="Shares per trade"
+              onChange={(e) => setQtyText(e.target.value.replace(/[^0-9]/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && applyQty(qtyText)}
+              onBlur={() => qtyText && applyQty(qtyText)}
+              className={clsx(input, "w-24")}
+            />
+          </div>
         </Field>
         <Field label="Every">
           <select value={f.step} onChange={(e) => set("step", Number(e.target.value))} className={input}>
@@ -438,7 +491,11 @@ function Filters({
             Clear
           </button>
         ) : null}
-        {f.stocks.length ? <span className="text-slate-500">(stock P&amp;L is always before charges)</span> : null}
+        {f.stocks.length || f.qty ? (
+          <span className="text-slate-500">
+            ({f.qty ? `every trade restated as ${f.qty.toLocaleString("en-IN")} shares; ` : ""}stock and per-qty P&amp;L is always before charges)
+          </span>
+        ) : null}
       </div>
     </div>
   );

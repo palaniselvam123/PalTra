@@ -59,6 +59,35 @@ def day_curve(points: Iterable[tuple[str, float]]) -> list[float]:
     return out
 
 
+def per_qty(pnl: float, qty, target: int) -> float:
+    """A trade's P&L restated as `target` shares (P&L before charges is linear in qty); unchanged when target is 0
+    or the trade's qty is unknown."""
+    try:
+        q = abs(int(qty or 0))
+    except (TypeError, ValueError):
+        q = 0
+    if not target or q <= 0:
+        return round(float(pnl or 0.0), 2)
+    return round(float(pnl or 0.0) * target / q, 2)
+
+
+def scale_points(points: list[dict], target: int) -> list[dict]:
+    """The P&L log's points with every held stock's open P&L restated as `target` shares (copies; 0 = unchanged)."""
+    if not target:
+        return points
+    out = []
+    for p in points:
+        stocks = []
+        for s in p.get("stocks") or []:
+            s = dict(s)
+            for k in ("gross", "net"):
+                if s.get(k) is not None:
+                    s[k] = per_qty(s[k], s.get("qty"), target)
+            stocks.append(s)
+        out.append({**p, "stocks": stocks})
+    return out
+
+
 def add_curves(curves: list[list[float]]) -> list[float]:
     if not curves:
         return [0.0] * len(GRID)

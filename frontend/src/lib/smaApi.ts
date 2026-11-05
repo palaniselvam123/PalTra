@@ -785,6 +785,8 @@ export type PnlDashboard = {
   desks?: string[];
   basis: "gross" | "net";
   stocks_picked: string[];
+  /** Shares every trade was restated as (0 = as traded). */
+  qty?: number;
   all_stocks: string[];
   grid: string[];
   step: number;
@@ -829,6 +831,8 @@ export type PnlDashQuery = {
   basis?: "gross" | "net";
   step?: number;
   weekdays?: number[];
+  /** Restate every trade as this many shares (0 / unset = as traded), so runs with different sizes compare. */
+  qty?: number;
 };
 
 export type OpenPnlReplayRun = { run_id: number; first: string; last: string; days: number; points: number; saved_at: string };
@@ -1862,6 +1866,8 @@ export type BacktestServerStatus = {
   scanner_armed?: number;
   /** Market hours only: after `stop_at` (and on weekends) it stops once nothing is running. */
   market_hours_only?: boolean;
+  /** Copy the desk's settings at every start (off by default: only Sync from desk copies them). */
+  auto_sync?: boolean;
   stop_at?: string;
   after_hours?: boolean;
   up_sec: number;
@@ -1885,6 +1891,8 @@ export const smaApi = {
     request<BacktestServerStatus>("/api/backtest/idle", { method: "PUT", body: JSON.stringify({ minutes }) }, 12000, false),
   backtestHours: (on: boolean, stop_at?: string) =>
     request<BacktestServerStatus>("/api/backtest/hours", { method: "PUT", body: JSON.stringify({ on, stop_at }) }, 12000, false),
+  backtestAutoSync: (on: boolean) =>
+    request<BacktestServerStatus>("/api/backtest/auto-sync", { method: "PUT", body: JSON.stringify({ on }) }, 12000, false),
   backtestStop: (force = false) =>
     request<{ stopping: boolean }>(`/api/backtest/stop${force ? "?force=true" : ""}`, { method: "POST" }, 12000, false),
   state: () => request<SmaState>("/api/state"),
@@ -2113,6 +2121,7 @@ export const smaApi = {
     if (q.basis) p.set("basis", q.basis);
     if (q.step) p.set("step", String(q.step));
     if (q.weekdays?.length) p.set("weekdays", q.weekdays.join(","));
+    if (q.qty && q.qty > 0) p.set("qty", String(Math.round(q.qty)));
     return request<PnlDashboard>(`/api/pnl-dashboard?${p.toString()}`, undefined, 60000, false);
   },
   /** A bot's replay runs that have an open P&L log, newest first. */
