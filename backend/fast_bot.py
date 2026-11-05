@@ -14,7 +14,9 @@ started in `boot_engine` on the desk only, every `POLL_SEC` 5 s while NSE is ope
    chip "Handoff from Bot N"; the one-LIVE-bot-per-stock rule applies);
 4. has Bot 5 enter the same side at once (`StrategyEngine.direct_order`, entry reason `FAST_MOVE`):
    no SMA cross, VWAP / RSI or other entry check is read; Bot 5's own quantity, stop and exits run
-   the trade.
+   the trade. With `flip` (off by default) Bot 5 opens the OTHER side instead (`bot5_side`: a fast-rising
+   long → Bot 5 sells, a fast-falling short → Bot 5 buys), and its entry checks are read for that side;
+   replays play it the same way.
 5. after `bot5_trades` (1) Bot 5 trades on the stock (0 = no limit: it stays on Bot 5 for the day), Bot 5
    takes no more entries on it (`gate`, `StrategyEngine.entry_gate`) and, once Bot 5 is flat on it, the
    stock goes back to the bot it came from (`give_back` → `recovery.handoff(5, to_bot=source)`), which trades
@@ -95,6 +97,16 @@ class Settings:
     # which then places a real Groww order at its own size. Off (default) = same mode only. Turning it on while
     # Bot 5 is LIVE needs `confirm_live` (main.fast_bot_put). A LIVE trade is still never cut for a PAPER Bot 5.
     paper_to_live: bool = False
+    # Flip: Bot 5 opens the OTHER side of the source trade (a fast-rising long → Bot 5 sells; a fast-falling short →
+    # Bot 5 buys), betting the spike fades. Its entry checks are read for that side. Off (default) = the same side.
+    flip: bool = False
+
+
+def bot5_side(direction: str, s: Settings) -> str:
+    """The side Bot 5 opens for a source trade on `direction` (the other side with `flip`)."""
+    if not s.flip:
+        return direction
+    return "SHORT" if direction == "LONG" else "LONG"
 
 
 def settings_path() -> Path:
@@ -137,6 +149,7 @@ def clean(raw: dict) -> Settings:
     s.entry_checks = bool(raw.get("entry_checks", s.entry_checks))
     s.keep_trade = bool(raw.get("keep_trade", s.keep_trade))
     s.paper_to_live = bool(raw.get("paper_to_live", s.paper_to_live))
+    s.flip = bool(raw.get("flip", s.flip))
     sources = raw.get("sources")
     if isinstance(sources, list):
         picked = []
@@ -410,6 +423,7 @@ class FastBot:
         source_bot = int(getattr(src, "bot_id", 1))
         source_live = (pos.mode or "PAPER").upper() == "LIVE"
         direction = pos.direction
+        side = bot5_side(direction, s)  # the side Bot 5 opens (flip = the other side)
         head = f"{symbol} fast move on Bot {source_bot} ({why})"
         reason = ready(target, symbol, source_live, s.paper_to_live)
         if reason is None and len(self.moved_today) >= s.max_day:
@@ -422,7 +436,7 @@ class FastBot:
                 refused = entry_refusal(
                     getattr(src, "_frames", {}).get(symbol),
                     _target_cfg(target, symbol),
-                    direction,
+                    side,
                     getattr(src, "_ltps", {}).get(symbol),
                 )
             except Exception as exc:  # noqa: BLE001 - a broken check must not cut the trade
@@ -477,11 +491,11 @@ class FastBot:
                 self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
                 src._alert(f"{head}: {result}")  # noqa: SLF001
                 return f"{head}: {result}"
-            signal = "BULLISH" if direction == "LONG" else "BEARISH"
-            word = "buys" if direction == "LONG" else "sells"
+            signal = "BULLISH" if side == "LONG" else "BEARISH"
+            word = ("buys" if side == "LONG" else "sells") + (" (flip)" if s.flip else "")
             try:
                 opened = await target.direct_order(
-                    symbol, signal, why=ENTRY_REASON, note=f"fast mover from Bot {source_bot}: {why}"
+                    symbol, signal, why=ENTRY_REASON, note=f"fast mover from Bot {source_bot}: {why}" + (" (flip)" if s.flip else "")
                 )
             except ForceRefused as exc:
                 opened = f"not ordered: {exc}"
@@ -489,7 +503,7 @@ class FastBot:
                 log.exception("fast-mover order failed for %s", symbol)
                 opened = f"not ordered: {exc}"
             result = f"{closed if s.keep_trade else f'Bot {source_bot} trade cut'}; Bot {TARGET_BOT} {word} at once — {opened}"
-            self._record(now, symbol=symbol, from_bot=source_bot, why=why, side=direction, result=result)
+            self._record(now, symbol=symbol, from_bot=source_bot, why=why, side=side, result=result)
             text = f"{head}: {result}"
             target._signals[symbol] = text  # noqa: SLF001
             target._alert(text)  # noqa: SLF001

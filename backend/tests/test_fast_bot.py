@@ -761,3 +761,77 @@ def test_bot5_follows_a_playing_fast_mover_replay_only(monkeypatch):
     assert main._bot5_follows() is None
     monkeypatch.setattr(main, "replays", {1: sess("IDLE", None, 1), 5: idle5})
     assert main._bot5_follows() is None and main._replay_view(5) == (idle5, False)
+
+
+@pytest.mark.asyncio
+async def test_flip_has_bot5_take_the_other_side(moved):
+    import fast_bot
+
+    assert fast_bot.Settings().flip is False
+    assert fast_bot.bot5_side("LONG", fast_bot.clean({"flip": True})) == "SHORT"
+    assert fast_bot.bot5_side("SHORT", fast_bot.clean({"flip": True})) == "LONG"
+    assert fast_bot.bot5_side("LONG", fast_bot.clean({})) == "LONG"
+    src, target = _Source(bot=2), _Target()
+    bot, done = await _run(src, target, sources=[2], flip=True)
+    assert src.closed == ["FAST_MOVE_HANDOFF"]
+    # A fast-rising long: Bot 5 sells (the other side).
+    assert target.orders == [("ACME", "BEARISH", "FAST_MOVE")]
+    assert "Bot 5 sells (flip) at once" in done[0]
+    assert bot.recent[0]["side"] == "SHORT"
+
+
+@pytest.mark.asyncio
+async def test_flip_reads_bot5s_entry_checks_for_the_flipped_side(moved, monkeypatch):
+    import fast_bot
+
+    seen = []
+
+    def refusal(frame, cfg, direction, price=None):
+        seen.append(direction)
+        return None
+
+    monkeypatch.setattr(fast_bot, "entry_refusal", refusal)
+    monkeypatch.setattr(fast_bot, "_target_cfg", lambda target, symbol: SimpleNamespace())
+    src, target = _Source(bot=2), _Target()
+    await _run(src, target, sources=[2], flip=True, entry_checks=True)
+    assert seen == ["SHORT"]
+
+
+@pytest.mark.asyncio
+async def test_a_replay_with_flip_opens_bot5_the_other_way(tmp_path, monkeypatch):
+    import database
+    import fast_bot
+    from models import BotConfig, TradeLog
+    from replay import ReplayEngine, ReplayFeed
+    from tests.test_replay import DAY, _frames
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/replay_flip.db")
+    monkeypatch.setattr("strategy_engine._schedule_whatsapp", lambda msg: None)
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1)
+        row.symbol, row.trade_symbols, row.qty = "TCS", "TCS", 10
+        s.commit()
+    snap = {
+        "settings": {"on": True, "rule": "MOVE", "pct": 0.1, "minutes": 3, "sources": [1], "max_day": 10, "flip": True},
+        "bot5": {"qty": 50},
+        "bot5_stocks": {},
+    }
+    clock = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST)
+    engine = ReplayEngine(ReplayFeed(_frames(), clock), ["TCS"], fast=snap)
+    engine.load_config()
+    await engine.tick(clock)
+    engine.hold_for_next_cross(["TCS"])
+    engine.status = "RUNNING"
+    end = dt.datetime.combine(DAY, dt.time(15, 20), tzinfo=IST)
+    while engine.feed.clock < end:
+        engine.feed.clock += dt.timedelta(seconds=10)
+        await engine.tick(engine.feed.clock)
+    with database.session_factory()() as s:
+        rows = s.query(TradeLog).order_by(TradeLog.id).all()
+        cut = [r for r in rows if r.exit_reason == fast_bot.EXIT_REASON]
+        opened = [r for r in rows if (r.entry_reason or "").startswith(fast_bot.ENTRY_REASON)]
+        assert cut and opened
+        assert opened[0].direction != cut[0].direction
+    database.reset_engine()
