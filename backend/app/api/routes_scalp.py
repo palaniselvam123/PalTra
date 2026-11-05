@@ -15,7 +15,7 @@ import groww_pressure
 import server_role
 from app import state
 from app.core.market_clock import ist_now, is_market_open
-from app.services import index_lists
+from app.services import delivery, index_lists
 from app.services.active_stocks import SORTS, active_scanner
 from app.services.alert_notifier import alert_notifier
 from app.services.backfill import ensure_backfilled
@@ -367,6 +367,17 @@ async def fno_universe(lists: str = Query("fno", description="Comma list: fno, n
         symbols.extend(n for n in names if n not in symbols)
     error = "; ".join(errors.values()) if not symbols else None
     return {"symbols": symbols, "error": error, "counts": counts, "errors": errors}
+
+
+@router.get("/delivery")
+async def delivery_report(
+    symbols: str = Query("", description="Comma list of NSE symbols; blank = every EQ stock in the file"),
+    days: int = Query(5, ge=1, le=delivery.MAX_DAYS),
+):
+    """Delivery % per stock from NSE's end-of-day file (the latest published session) and its average over the
+    sessions before it. Read-only; one download per day, kept next to the desk's database."""
+    names = [s.strip().upper() for s in symbols.split(",") if s.strip()][:1000]
+    return await asyncio.to_thread(delivery.report, names or None, days)
 
 
 @router.post("/active/scan")

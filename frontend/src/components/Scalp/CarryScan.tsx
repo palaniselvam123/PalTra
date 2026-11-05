@@ -14,6 +14,8 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { DeliveryCells, DeliveryHead, DeliveryNote, useDelivery } from "@/components/Scalp/delivery";
+import type { DeliveryRow } from "@/lib/api";
 
 const POLL_MS = 3_000;
 const STORE = "sma.carry.filters";
@@ -167,6 +169,7 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
     }
   });
   const paged = usePaged(rows, "scalp.carry.pageSize");
+  const deliv = useDelivery(rows.map((r) => r.symbol));
   const sma = data ? `SMA ${data.sma_fast}/${data.sma_slow}` : "SMA 9/21";
   const day = all[0];
   const continuedPct = all.length ? Math.round((counts.CONTINUED / all.length) * 100) : null;
@@ -286,6 +289,7 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
           {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
           <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
+          <DeliveryNote day={deliv.day} error={deliv.error} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
@@ -311,6 +315,7 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
                     </th>
                   ),
                 })}
+                <DeliveryHead />
               </tr>
             </thead>
             <tbody>
@@ -323,6 +328,7 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
                   armedOn={armed.get(r.symbol.toUpperCase()) ?? []}
                   arming={arming === r.symbol}
                   onArm={() => onArm(r.symbol)}
+                  deliv={deliv.rows.get(r.symbol.toUpperCase())}
                 />
               ))}
             </tbody>
@@ -356,7 +362,9 @@ function Row({
   armedOn,
   arming,
   onArm,
+  deliv,
 }: {
+  deliv?: DeliveryRow;
   order: readonly Col[];
   row: CarryRow;
   tick: React.ReactNode;
@@ -455,6 +463,7 @@ function Row({
           </td>
         ),
       })}
+      <DeliveryCells d={deliv} />
     </tr>
   );
 }
