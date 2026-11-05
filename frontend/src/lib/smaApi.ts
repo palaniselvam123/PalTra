@@ -1212,6 +1212,9 @@ export const BB_EXITS = ["OFF", "BAND", "MIDDLE", "BOTH"] as const;
 export type BbExit = (typeof BB_EXITS)[number];
 
 export type ChartFilters = {
+  /** Breakout hand-off on this bot / stock, and the candle height it needs in ATRs (breakout.py). */
+  breakout_handoff?: boolean;
+  breakout_atr_mult?: number;
   use_vwap: boolean;
   /** Cumulative delta strip (cum_delta.py): drawn on Auto while its check or divergence exit is on. */
   use_cvd?: boolean;

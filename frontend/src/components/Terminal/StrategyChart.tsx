@@ -1867,12 +1867,14 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   }, [zoneRead, rows]);
   const lastBlocked = blocked.length ? blocked[blocked.length - 1] : null;
   const hoverRow = hoverOhlc ? rows.find((c) => c.time === hoverOhlc.time) ?? null : null;
-  const lastOf = (key: "vwap" | "rsi14") => {
+  const lastOf = (key: "vwap" | "rsi14" | "atr14") => {
     for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i][key] != null) return rows[i][key] as number;
     return null;
   };
   const shownVwap = hoverRow ? hoverRow.vwap ?? null : lastOf("vwap");
   const shownRsi = hoverRow ? hoverRow.rsi14 ?? null : lastOf("rsi14");
+  // The candle's own ATR 14 (the forming candle has none yet: the last closed one's), as the breakout rule reads it.
+  const shownAtr = hoverRow?.atr14 ?? lastOf("atr14");
   const slopeBack = filters?.slope_lookback ?? 2;
   const shownIndex = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
   const slopeRead = (() => {
@@ -2171,6 +2173,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         gap={smaGap}
         vwap={shownVwap}
         rsi={shownRsi}
+        atr={shownAtr}
+        breakoutMult={filters?.breakout_handoff ? filters.breakout_atr_mult ?? 1.8 : null}
         slope={shownSlope}
         slopeBack={slopeBack}
         slopeTip={slopeTip}
@@ -2636,6 +2640,8 @@ function OhlcLine({
   gap,
   vwap,
   rsi,
+  atr,
+  breakoutMult,
   slope,
   slopeBack,
   slopeTip,
@@ -2649,6 +2655,10 @@ function OhlcLine({
   gap: number | null;
   vwap: number | null;
   rsi: number | null;
+  /** ATR 14 of this candle (else the last closed one). */
+  atr: number | null;
+  /** The breakout hand-off's height rule in ATRs while it is on (null = off). */
+  breakoutMult: number | null;
   slope: number | null;
   slopeBack: number;
   /** The slope's arithmetic with this candle's numbers (tooltip). */
@@ -2704,6 +2714,29 @@ function OhlcLine({
         <span style={{ color: colors.rsi }}>RSI</span>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
+      {(() => {
+        const height = ohlc.high - ohlc.low;
+        const times = atr != null && atr > 0 ? height / atr : null;
+        const tall = breakoutMult != null && times != null && times >= breakoutMult;
+        const tip =
+          atr == null
+            ? "ATR 14 is not formed yet"
+            : `ATR 14 = ${atr.toFixed(2)}: the average candle range (Wilder, 14 candles). This candle is ${height.toFixed(2)} high to low = ${times?.toFixed(2)}× ATR.` +
+              (breakoutMult != null
+                ? ` The breakout hand-off needs at least ${breakoutMult}× ATR${tall ? " (tall enough; it also needs the SMA gap or the volume)" : " (not tall enough)"}.`
+                : "");
+        return (
+          <span className="cursor-help whitespace-nowrap" title={tip}>
+            <span className="text-slate-400">ATR</span> <span className="text-slate-100">{atr == null ? "—" : atr.toFixed(2)}</span>{" "}
+            <span className="text-slate-400">Size</span>{" "}
+            <span className={clsx(tall ? "font-semibold text-amber-300" : "text-slate-100")}>
+              {height.toFixed(2)}
+              {times == null ? "" : ` = ${times.toFixed(2)}× ATR`}
+            </span>
+            {breakoutMult != null ? <span className="ml-1 font-sans text-[11px] text-slate-400">(breakout ≥ {breakoutMult}×)</span> : null}
+          </span>
+        );
+      })()}
       <span className="cursor-help whitespace-nowrap" title={slopeTip || `SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle`}>
         <span className="text-slate-400">Slope</span>{" "}
         <span className={clsx(slope == null ? "text-slate-400" : slope >= 0 ? "text-emerald-300" : "text-rose-300")}>
