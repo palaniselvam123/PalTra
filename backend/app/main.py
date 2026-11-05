@@ -284,6 +284,7 @@ async def lifespan(app: FastAPI):
     ]
     # Most-active scan: one Groww quote per F&O stock every few minutes while
     # the market is open and Groww is connected. Market data only.
+    from app.core.market_clock import is_market_open
     from app.services.active_stocks import active_scanner
     from app.services.groww_funds import groww_client as _groww_session
 
@@ -292,11 +293,16 @@ async def lifespan(app: FastAPI):
 
     # Every finished pass goes to the scan history (the card's History view).
     active_scanner.on_done = keep_active_scan
-    if server_role.is_backtest():
-        # Scans run on demand here (Scan now), never as a background loop.
-        pass
-    elif server_role.scans_enabled():
+    if server_role.scans_enabled():
+        # The auto scan (on by default on the desk and scanner, off on the backtest server; the card's switch).
         active_scanner.start_background(_groww_session)
+        if server_role.is_backtest():
+            import backtest_server
+
+            # While the auto scan is on in market hours, the backtest machine stays awake for it.
+            backtest_server.add_busy_check(
+                lambda: active_scanner.auto_settings.on and not active_scanner.paused and is_market_open()
+            )
     else:
         # SCANS=off: the Scalp scans run on the scanner server; this desk keeps them paused.
         active_scanner.paused = True
