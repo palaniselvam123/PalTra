@@ -954,6 +954,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   process via `scan_worker.morning_job`, stopped by Pause scans). `POST /api/morning-scan/start` (symbols, force),
   `GET /api/morning-scan`. Arm / Arm ticked use the same routes as the other tabs. No order path; nothing in the
   strategy reads it.
+- `backend/carry_scan.py` – **Carry-over** scan (read-only; the Scalp page's "Carry-over" tab,
+  `components/Scalp/CarryScan.tsx`; no order path, nothing in the strategy reads it): did yesterday's SMA trend carry on
+  today? Per stock, on the picked candle (`minutes` 1/3/5/10/15; `closed_bars`, `enrich` with the main desk's SMA periods,
+  the SMAs run straight across days), from `WARMUP_DAYS` (7) of 1-minute candles: yesterday's closing side (`prev_side`
+  LONG / SHORT), since when (`prev_since`, the run's start across days), close, SMA fast / slow ("the last day's moving
+  average") and gap %; today's gap at the open (`gap_pct`, `gap_with`), `status` `CONTINUED` (no cross against it on
+  today's closed candles) / `REVERSED` (`reversed_at`) / `BACK` (`back_at`), the last price's deviation from yesterday's
+  closing SMA fast in ₹ and % (`dev_rs`, `dev_pct`; slow `dev_slow_pct`), the move since yesterday's close signed the
+  trend's way (`move_with_pct`) and the best / worst move with / against it (`best_pct` / `worst_pct` and times). "Today" is
+  the latest session in the download, so after hours it reads the last two. `CarryScanner` mirrors `MorningScanner` (one
+  pass at a time, scanner process via `scan_worker.carry_job`, stopped by Pause scans). `POST /api/carry-scan/start`
+  (symbols, minutes, force), `GET /api/carry-scan`. Filters: status, yesterday's side, gap with / against, deviation at
+  least, stock lists; tick boxes, Arm / Arm ticked.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just

@@ -49,6 +49,7 @@ import chop_auto
 import chop_scan
 import high52
 import morning_scan
+import carry_scan
 import groww_pressure
 import open_pnl_log
 import pnl_dashboard
@@ -134,6 +135,8 @@ chop_scanner = ChopScanner()
 morning_scanner = morning_scan.MorningScanner()
 # The Scalp page's 52-week high tab: each stock's distance from its 52-week high / low (high52.py).
 high52_scanner = high52.High52Scanner()
+# The Scalp page's Carry-over tab: did yesterday's SMA trend carry on today (carry_scan.py).
+carry_scanner = carry_scan.CarryScanner()
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 # Scan & arm presets: a Trend quality pass, then arm the matches on a bot, now or at set times (scan_arm.py).
@@ -389,7 +392,7 @@ def _boot_backtest_server() -> asyncio.Task:
     engine.broker.set_mode("PAPER")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
-        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner))
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
@@ -2637,6 +2640,7 @@ async def scans_pause(body: ScanPause):
         chop_scanner.stop("Stopped: scans are paused.")
         morning_scanner.stop("Stopped: scans are paused.")
         high52_scanner.stop("Stopped: scans are paused.")
+        carry_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -3171,6 +3175,41 @@ async def morning_scan_start(body: MorningScanStart):
 @app.get("/api/morning-scan")
 async def morning_scan_status():
     return {**morning_scanner.snapshot(), "paused": _scans_paused}
+
+
+class CarryScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    force: bool = False
+
+
+@app.post("/api/carry-scan/start")
+async def carry_scan_start(body: CarryScanStart):
+    """Start the carry-over scan (read-only: candles only, no order). Poll GET /api/carry-scan.
+
+    Per stock, on the picked candle: which way the SMA fast / slow pointed at yesterday's close, and today whether it
+    continued or reversed, the gap at the open, the deviation from yesterday's closing SMA and the best / worst move
+    (carry_scan.py), with the main desk's SMA periods. No bot setting is read or changed.
+    """
+    _refuse_when_paused()
+    cfg = engine.load_config()
+    try:
+        return carry_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
+            minutes=body.minutes,
+            sma_fast=int(cfg.sma_fast),
+            sma_slow=int(cfg.sma_slow),
+            force=body.force,
+            job=_scan_job(scan_worker.carry_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/carry-scan")
+async def carry_scan_status():
+    return {**carry_scanner.snapshot(), "paused": _scans_paused}
 
 
 class High52ScanStart(BaseModel):

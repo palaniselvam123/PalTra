@@ -163,6 +163,13 @@ def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
     return analyze(_frame(token, symbol, download_start(symbol, now), end), sma_fast, sma_slow, now, symbol=symbol)
 
 
+def carry_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
+    """One stock's carry-over row: yesterday's SMA side and how today went (carry_scan.py)."""
+    from carry_scan import read
+
+    return read(_frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now, symbol=symbol)
+
+
 def high52_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
     """One stock's 52-week reading from Groww's daily candles (high52.py)."""
     from candle_history import HistoryError
