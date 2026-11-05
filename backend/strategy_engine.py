@@ -2827,7 +2827,8 @@ class StrategyEngine:
             at=self._now(),
             mode=mode,
             run_id=run_id,
-            from_bot=self.bot_id,
+            # In a backtest that plays the hand-offs, the stock may already be playing as another bot.
+            from_bot=int((getattr(self, "_on_bot", None) or {}).get((symbol or "").upper(), self.bot_id)),
             to_bot=to_bot,
             symbol=symbol,
             kind=kind,
