@@ -384,6 +384,11 @@ class BotConfig(Base):
     reverse_colour_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Reversed trades' own entry checks / exits / stop (reverse_exit.py), JSON; "" = the bot's own.
     reverse_settings: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    # How exits combine (exit_join.py): OR = any one closes; AND = the ticked group must agree.
+    exit_join: Mapped[str | None] = mapped_column(String, nullable=True, default="OR")
+    exit_group: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    exit_need: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    exit_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Heikin Ashi colours (heikin_ashi.py): every candle-colour rule reads Heikin Ashi candles.
     ha_colours: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.

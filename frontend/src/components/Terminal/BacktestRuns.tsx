@@ -280,6 +280,13 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Cumulative delta entry", (s) => (s.use_cvd ? `On (${s.cvd_lookback ?? 5} candles)` : "Off")],
   ["Cumulative delta divergence exit", (s) => (s.cvd_div_exit ? `On (${s.cvd_div_lookback ?? 10} candles)` : "Off")],
   ["Reverse instead of only closing", (s) => (s.reverse_on_exit ? String(s.reverse_on_exit) : "Off")],
+  [
+    "How exits combine",
+    (s) =>
+      String(s.exit_join ?? "OR").toUpperCase() === "AND" && String(s.exit_group ?? "").includes(",")
+        ? `AND: ${String(s.exit_group).toLowerCase().replace(/,/g, " + ")}${Number(s.exit_need ?? 0) > 0 ? `, any ${s.exit_need}` : ", all"} within ${s.exit_within ?? 3} candles`
+        : "OR (any one closes)",
+  ],
   ["Reversed trade: close on the other colour", (s) => (s.reverse_colour_exit ? "On" : "Off")],
   [
     "Reversed trades' own settings",

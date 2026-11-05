@@ -547,6 +547,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   reason `MANUAL_REVERSE`, `hold_for_next_cross`); caps, loss lock and one LIVE bot per stock still apply to the new side. A
   LIVE bot needs `confirm_live` (409 without). UI: the chart's position box (Close position / Reverse) and the Open positions
   card, each asking first (LIVE: "two real Groww orders"). The stock research baseline keeps it off.
+- `backend/exit_join.py` – how exits combine (`exit_join` `OR` default | `AND`, `exit_group` CSV of `KEYS`: CROSS, COLOUR,
+  VTURN, TURN, BEND, DECEL, COUNTER, SMALL, XCANDLE, ST, BB, EMA, MACD, CVD, SLOW; `exit_need` 0 = all; `exit_within` 3
+  candles, 1-20; per bot and per stock, PAPER and LIVE, replays too; Settings → 3. When to exit, "How exits combine",
+  `components/Terminal/ExitJoin.tsx`). OR: every exit closes on its own, the first wins. AND (with 2+ ticked): a grouped
+  exit only votes in `StrategyEngine._exit_now` (`exit_join.vote` → `OpenPosition.exit_votes`, key → time, memory only;
+  votes older than `exit_within` × the bot's candle are dropped) and the trade is held ("… exit noted, holding …" on the
+  signal line) until `need` of them agree; the exit that completes it closes under its own reason, so reverse on exit
+  still follows. The SMA cross votes in `_apply_locked` (only an `SMA_CROSS` signal; one that completes the group closes
+  and reverses as usual, else the trade is held like the cross exit off). Never grouped: stops of every type, targets,
+  gap fade, recovery, square-off, loss limit, kill switch, candle-pattern / candle-colour entry modes (`gate=False`).
 - `backend/heikin_ashi.py` – Heikin Ashi colours (`ha_colours`, off by default, per bot and per stock, PAPER and LIVE,
   replays too): HA close = (O + H + L + C) / 4, HA open = (previous HA open + previous HA close) / 2 (`candles`). With it on,
   every rule that reads a candle's colour reads the HA one through `view(frame, cfg)` (the real close, with `open` moved so

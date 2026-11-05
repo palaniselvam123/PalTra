@@ -64,6 +64,7 @@ import heikin_ashi
 import macd
 import cum_delta
 import reverse_exit
+import exit_join
 import exit_candle
 import small_candles
 import vwap_stop
@@ -269,6 +270,8 @@ class OpenPosition:
     plan_stage: int = 0
     plan_bar: int | None = None
     plan_line: float | None = None
+    # Exits set to AND (exit_join.py): which grouped exits have fired and when (memory only).
+    exit_votes: dict = field(default_factory=dict)
 
     @property
     def signal_direction(self) -> str:
@@ -327,6 +330,7 @@ SNAPSHOT_FIELDS = (
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
+    "exit_join", "exit_group", "exit_need", "exit_within",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -2127,7 +2131,7 @@ class StrategyEngine:
             return text
         if pos is not None:
             self._focus = symbol
-            await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN")
+            await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN", gate=False)
             if symbol in self.positions:
                 text = f"{symbol} could not close on the {call.note} — {self.last_signal}"
                 self._signals[symbol] = text
@@ -2603,6 +2607,11 @@ class StrategyEngine:
                 f"holding {pos.direction} — SMA cross exit is off; the stop, target, gap fade, "
                 "Bollinger exit or square-off closes it"
             )
+        if pos is not None and pos.signal_direction != want and why == "SMA_CROSS" and exit_join.in_group(cfg, "MA_CROSS"):
+            # Exits set to AND (exit_join.py): the cross votes; it closes (and reverses) only once enough agree.
+            done, text = exit_join.vote(pos.exit_votes, cfg, "MA_CROSS", now.timestamp(), candle_minutes(cfg))
+            if not done:
+                return f"holding {pos.direction} — SMA cross noted; {text}"
 
         exit_reason = turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS"
         if pos is not None and pos.signal_direction != want and recovery.on(cfg):
@@ -4447,8 +4456,19 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} Supertrend exit — {note}"
         await self._exit_now(cfg, self.ltp, "SUPERTREND")
 
-    async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str) -> None:
-        """Close the focused position for a stop, target or Bollinger exit."""
+    async def _exit_now(self, cfg: BotConfig, fill_price: float, reason: str, gate: bool = True) -> None:
+        """Close the focused position for a stop, target or Bollinger exit.
+
+        With exits set to AND (exit_join.py) a grouped exit only votes until enough of the group agree."""
+        if gate and self.position is not None and exit_join.in_group(cfg, reason):
+            symbol = (cfg.symbol or self._focus or "").upper()
+            done, text = exit_join.vote(
+                self.position.exit_votes, cfg, reason, self._now().timestamp(), candle_minutes(cfg)
+            )
+            if not done:
+                self._signals[symbol] = f"{symbol} {reason} exit noted, holding {self.position.direction} — {text}"
+                return
+            self._signals[symbol] = f"{symbol} {text}: closed on {reason}"
         async with self.lock:
             if self.position is None or self.inflight:
                 return
