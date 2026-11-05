@@ -245,6 +245,8 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   const [speed, setSpeed] = useState(60);
   // Replay as armed (arm log): each stock trades only while it was armed live that day.
   const [asArmed, setAsArmed] = useState(false);
+  // Play the hand-offs (handoff_chain.py): a stock handed to Bot 2 / Bot 3 stays in the run on that bot's settings.
+  const [playHandoffs, setPlayHandoffs] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -297,7 +299,16 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void run(() =>
-      smaApi.replayStart(day, asArmed ? "09:15" : start, speed, endDay && endDay !== day ? endDay : undefined, undefined, bot, asArmed)
+      smaApi.replayStart(
+        day,
+        asArmed ? "09:15" : start,
+        speed,
+        endDay && endDay !== day ? endDay : undefined,
+        undefined,
+        bot,
+        asArmed,
+        playHandoffs
+      )
     );
   };
 
@@ -376,6 +387,18 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
                 className="accent-violet-400"
               />
               As armed live
+            </label>
+            <label
+              className="flex min-h-9 items-center gap-1.5 self-end text-xs text-slate-200"
+              title="When a hand-off moves a stock (a recovery or losing V-turn to Bot 2, a breakout to Bot 3), the stock stays in this backtest and trades from then on with that bot's settings, so you can see Bot 2 and Bot 3 at work. Their trades are marked 'as Bot 2' / 'as Bot 3'. The live Trade lists are not touched. Off: the stock leaves the backtest and really moves on the live lists (the old way)."
+            >
+              <input
+                type="checkbox"
+                checked={playHandoffs}
+                onChange={(e) => setPlayHandoffs(e.target.checked)}
+                className="accent-violet-400"
+              />
+              Play hand-offs (Bot 2 / Bot 3)
             </label>
             <button
               type="submit"
@@ -544,6 +567,15 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
         </span>
         <span>{multi && info?.date && info?.end_date ? `${info.days?.[0] ?? info.date} → ${info.end_date}` : "09:15 → 15:30"}</span>
       </div>
+      {info?.chain && Object.keys(info.chain.on_bot).length ? (
+        <p className="mt-1 text-xs text-sky-200" title="Hand-offs played in this backtest: these stocks now trade with the named bot's settings.">
+          Hand-offs:{" "}
+          {Object.entries(info.chain.on_bot)
+            .map(([name, n]) => `${name} → Bot ${n}`)
+            .join(", ")}
+          {info.chain.return_eod ? " (back on this bot each new day)" : ""}
+        </p>
+      ) : null}
       {msg || info?.error ? (
         <p role="alert" className="mt-1 text-xs text-amber-300">
           {msg || info?.error}

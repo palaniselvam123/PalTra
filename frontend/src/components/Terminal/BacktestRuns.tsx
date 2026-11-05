@@ -103,6 +103,7 @@ export function strategyLabel(s: Settings): string {
     if ((s.slope_exit || s.vturn_exit) && Number(s.slope_minutes ?? 0) > 0) parts.push(`slope on ${s.slope_minutes}m candle`);
     if (s.vturn_exit) parts.push("SMA 9 V-turn exit");
     if (s.as_armed) parts.push("as armed live");
+    if (s.play_handoffs) parts.push("hand-offs played as Bot 2 / Bot 3");
     if (s.slow_sma_exit) parts.push("slow SMA exit");
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
@@ -407,7 +408,16 @@ export function BacktestRuns() {
     if (!window.confirm(ask)) return;
     setStarting(run.id);
     smaApi
-      .replayStart(run.start_date, run.start_time || "09:15", 300, run.end_date, run.symbols, bot, Boolean(run.settings.as_armed))
+      .replayStart(
+        run.start_date,
+        run.start_time || "09:15",
+        300,
+        run.end_date,
+        run.symbols,
+        bot,
+        Boolean(run.settings.as_armed),
+        Boolean(run.settings.play_handoffs)
+      )
       .then(() => {
         setError(null);
         load();
@@ -922,6 +932,19 @@ function RunDetailBody({
           {run.fast_move.trades === 1 ? "" : "s"} with Bot 5&apos;s size and settings: {run.fast_move.wins} won,{" "}
           <span className={clsx("font-mono font-semibold", pnlTone(run.fast_move.gross))}>{signed(run.fast_move.gross)}</span>{" "}
           before charges. Both are part of the totals; the blotter shows them as &quot;TO BOT 5&quot; and &quot;Fast mover&quot;.
+        </p>
+      ) : null}
+      {run.handoffs?.length ? (
+        <p className="mb-2 rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+          <span className="font-semibold">Hand-offs played:</span>{" "}
+          {run.handoffs.map((h, i) => (
+            <span key={h.bot}>
+              {i ? "; " : ""}as Bot {h.bot}: {h.trades} trade{h.trades === 1 ? "" : "s"} on {h.stocks} stock
+              {h.stocks === 1 ? "" : "s"}, {h.wins} won,{" "}
+              <span className={clsx("font-mono font-semibold", pnlTone(h.gross))}>{signed(h.gross)}</span>
+            </span>
+          ))}{" "}
+          before charges. Part of the totals; the blotter&apos;s Entry reason says &quot;as Bot 2&quot; / &quot;as Bot 3&quot;.
         </p>
       ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}

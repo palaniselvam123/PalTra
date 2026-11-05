@@ -10,6 +10,7 @@ import { AllBotsGuard } from "@/components/Settings/AllBotsGuard";
 import { PnlAlerts } from "@/components/Settings/PnlAlerts";
 import { FastMoveAlerts } from "@/components/Settings/FastMoveAlerts";
 import { FastMoverBot } from "@/components/Settings/FastMoverBot";
+import { HandoffReturn } from "@/components/Settings/HandoffReturn";
 import { NewsEntries } from "@/components/Settings/NewsEntries";
 import { NewsAlerts } from "@/components/Settings/NewsAlerts";
 import { NewsByDay } from "@/components/Settings/NewsByDay";
@@ -101,6 +102,7 @@ export default function SettingsPage() {
         <>
           <AllBotsGuard />
           <FastMoverBot />
+          <HandoffReturn />
           <NewsEntries />
         </>
       );

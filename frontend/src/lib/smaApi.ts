@@ -1539,6 +1539,14 @@ export type TslCalcResult = {
   error?: string;
 };
 
+export type HandoffReturn = {
+  on: boolean;
+  at: string;
+  /** Stocks handed off and not yet sent back: where they came from and which bot has them now. */
+  moved: Record<string, { origin: number; on: number; at: string }>;
+  last: { at: string; lines: string[] } | [];
+};
+
 export type ReplayInfo = {
   status: ReplayStatus;
   date: string | null;
@@ -1567,6 +1575,12 @@ export type ReplayInfo = {
   bot_name?: string;
   /** Bot 5 only: the Bot 1-4 replay this tab follows (its fast-mover hand-offs to Bot 5). */
   follows?: number | null;
+  /** Played hand-offs (handoff_chain.py): which bot each handed-off stock plays as now, and each hand-off. */
+  chain?: {
+    on_bot: Record<string, number>;
+    log: { at: string; day: string; symbol: string; from_bot: number; to_bot: number }[];
+    return_eod: boolean;
+  } | null;
   /** Scalp-pick runs: the rule and each day's picks (date -> picks, best first). */
   pick_rule?: ScalpPickRule | null;
   picks?: Record<string, ScalpPick[]>;
@@ -1668,6 +1682,8 @@ export type ReplayRun = {
   totals: ReplayRunTotals;
   /** Money in open trades at the run's busiest moment, and each day's own peak. */
   capital?: ReplayCapitalPeak & { days: (ReplayCapitalPeak & { date: string })[] };
+  /** Played hand-offs (handoff_chain.py): closed trades per bot they were played as (Bot 2, Bot 3). */
+  handoffs?: { bot: number; trades: number; stocks: number; gross: number; net: number; wins: number }[] | null;
   /** The fast-mover hand-off's part (fast_bot.py): trades cut on this bot, and the ones played on with Bot 5's settings. */
   fast_move?: { cut: number; cut_gross: number; trades: number; gross: number; net: number; wins: number } | null;
   days?: ReplayDayRow[];
@@ -2174,6 +2190,12 @@ export const smaApi = {
   allBotsGuard: () => request<AllBotsGuard>("/api/bots/guard"),
   pnlAlerts: () => request<PnlAlertSettings>("/api/bots/pnl-alerts"),
   /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
+  /** Send handed-off stocks back to the bot they came from at the end of the day (handoff_chain.py). */
+  handoffReturn: () => request<HandoffReturn>("/api/bots/handoff-return"),
+  handoffReturnSave: (on: boolean, at?: string) =>
+    request<HandoffReturn>("/api/bots/handoff-return", { method: "PUT", body: JSON.stringify({ on, at }) }),
+  handoffReturnNow: () =>
+    request<HandoffReturn & { lines: string[] }>("/api/bots/handoff-return/now", { method: "POST" }, 20000),
   fastBot: () => request<FastBotSettings>("/api/bots/fast-mover"),
   saveFastBot: (body: Partial<Omit<FastBotSettings, "recent" | "moved_today" | "day">> & { confirm_live?: boolean }) =>
     request<FastBotSettings>("/api/bots/fast-mover", { method: "PUT", body: JSON.stringify(body) }),
@@ -2305,7 +2327,17 @@ export const smaApi = {
       false
     ),
   /** `asArmed`: the stocks the bot had armed on those days, each traded only while it was armed live (arm log). */
-  replayStart: (date: string, start: string, speed: number, endDate?: string, symbols?: string[], bot = 1, asArmed = false) =>
+  /** `playHandoffs`: a stock handed to Bot 2 / Bot 3 stays in the run on that bot's settings (handoff_chain.py). */
+  replayStart: (
+    date: string,
+    start: string,
+    speed: number,
+    endDate?: string,
+    symbols?: string[],
+    bot = 1,
+    asArmed = false,
+    playHandoffs = true
+  ) =>
     request<ReplayInfo>(
       "/api/replay/start",
       {
@@ -2318,6 +2350,7 @@ export const smaApi = {
           symbols: symbols?.length ? symbols : null,
           bot,
           ...(asArmed ? { as_armed: true } : {}),
+          play_handoffs: playHandoffs,
         }),
       },
       20000
