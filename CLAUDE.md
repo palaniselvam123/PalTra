@@ -787,7 +787,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle on the tape when the stock was armed), `StrategyEngine._watch_breakout` (before `on_minute`, in the armed loop)
   runs `breakout.read`: height ≥ `breakout_atr_mult` (1.8) × ATR and either |SMA fast − slow| / slow ≥ `breakout_gap_pct`
   (0.20) % or the candle's volume ≥ `breakout_volume_mult` (1.5) × the previous 20 candles' average (missing volume never
-  counts). Then an open trade on the stock is cut (`BREAKOUT_STOP`, via `_exit_now`, which cancels a LIVE stop first; a
+  counts). An open trade already on the breakout's side (its real side: a buy on a green breakout candle, a sell on a
+  red one; `breakout.side`) is kept and the stock stays on this bot (no hand-off). Otherwise an open trade on the stock is
+  cut (`BREAKOUT_STOP`, via `_exit_now`, which cancels a LIVE stop first; a
   LIVE position restored without its stop id is left to that stop) and, in LIVE only once Groww shows no shares,
   `engine.handoff(..., to_bot=breakout.TREND_BOT)` → `recovery.handoff(to_bot=3)` takes it off this bot's Trade list and
   arms it on Bot 3 with Bot 3's own settings. Never on Bot 3 itself. A PAPER source never arms a LIVE Bot 3, and the

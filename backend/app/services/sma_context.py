@@ -236,7 +236,7 @@ FIELD_HELP = {
     "day_extreme_guard": "no buy at the day's high / sell at the day's low without a pullback",
     "slow_sma_exit": "exit on a close beyond the slow SMA against the trade", "recovery_hold": "hold a losing trade through a cross (recovery)",
     "recovery_handoff": "after a recovery, hand the stock to Bot 2", "handoff_now": "Bot 2 orders at once on a hand-off",
-    "breakout_handoff": "a breakout candle hands the stock to Bot 3",
+    "breakout_handoff": "a breakout candle hands the stock to Bot 3 (a trade against it is cut; one on its side is kept)",
     "flip_orders": "flip: every order goes the other way of the signal",
     "max_daily_loss": "daily loss limit in rupees (the bot halts)", "max_trades_per_day": "entries per day for the bot",
     "max_trades_per_stock": "entries per day per stock (0 = off)",

@@ -2694,9 +2694,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               For the chop bot (Bot 2). A hand-off does not tick it: a stock moved to Bot 2 follows Bot 2&apos;s own setting here
               (all stocks, or that stock&apos;s own). On each closed candle, a
               breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
-              volume at least the × below of the last 20 candles&apos; average. Then an open trade on that stock is cut at
-              once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3 with Bot 3&apos;s
-              own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
+              volume at least the × below of the last 20 candles&apos; average. A trade already on the breakout&apos;s side (a
+              buy on a green breakout, a sell on a red one) is kept and the stock stays on this bot. Otherwise an open trade
+              against it is cut at once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3
+              with Bot 3&apos;s own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
               new cross: every Bot 3 check still applies, and the order waits at the breakout candle&apos;s 9 SMA or half-way
               level for 2 candles instead of buying its top. In LIVE the move waits until Groww shows no shares. A practice
               bot never hands a stock to a LIVE Bot 3. A replay moves the stock too, but plays one bot, so Bot 3&apos;s entry
@@ -2711,7 +2712,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("breakout_handoff") && <OwnTag />}
-            On a breakout, cut the trade and move the stock to Bot 3
+            On a breakout, move the stock to Bot 3 (a trade against it is cut; one on its side is kept)
           </label>
           <div className="mt-2 grid grid-cols-3 items-end gap-2">
             <Field
@@ -3093,7 +3094,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
   if (f.recovery_hold && f.recovery_handoff !== false) add({ group: "advanced", key: "recovery_handoff", text: "After a recovery, the stock moves to Bot 2", off: { recovery_handoff: false } });
   if (f.handoff_now && ((f.recovery_hold && f.recovery_handoff !== false) || (f.vturn_exit && f.vturn_handoff))) add({ group: "advanced", key: "handoff_now", text: "Bot 2 orders at once on a handed-over stock (opposite of this bot's trade, no filters)", off: { handoff_now: false }, warn: true });
-  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the trade is cut and the stock moves to Bot 3", off: { breakout_handoff: false } });
+  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the stock moves to Bot 3 (a trade against it is cut, one on its side kept)", off: { breakout_handoff: false } });
   if (f.review_on)
     add({
       group: "advanced",
