@@ -2813,6 +2813,8 @@ class StrategyEngine:
     async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
         """A breakout candle on the chop bot: cut the trade, hand the stock to Bot 3 (breakout.py).
 
+        A trade already on the breakout's side (its real side, so a flipped trade counts by where it really stands) is
+        kept and the stock stays on this bot; a trade against it is cut, and a flat stock is handed off as before.
         True when the stock was handled here (cut and/or handed off), so the cross is not judged.
         """
         if not breakout.on(cfg) or self.handoff is None or self.bot_id == breakout.TREND_BOT:
@@ -2821,6 +2823,12 @@ class StrategyEngine:
         if not hit:
             return False
         pos = self.positions.get(symbol)
+        if pos is not None and breakout.side(enriched.iloc[-2]) == pos.direction:
+            # The trade already rides the breakout (a buy on a green breakout, a sell on a red one): it is kept and
+            # the stock stays here; cutting it would only book a small loss on the right side of the move.
+            text = f"{symbol} trend breakout — {note}; the {pos.direction.lower()} trade is already on its side, kept"
+            self._signals[symbol] = text
+            return False
         live = False
         if pos is not None:
             live = (pos.mode or "PAPER").upper() == "LIVE"

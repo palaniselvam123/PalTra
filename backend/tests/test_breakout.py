@@ -17,27 +17,27 @@ from tests.test_recovery import _seed_bots
 
 DAY = dt.date(2026, 9, 22)
 JUMP = 120  # 11:15
+LONG_JUMP = 130  # 11:25: the sine wave has a buy open when the green breakout candle closes
 
 
-def _frame(spike_volume: bool) -> pd.DataFrame:
+def _frame(spike_volume: bool, jump: int = JUMP) -> pd.DataFrame:
     flat = lambda i, p: 1000.0 + (0.02 if i % 2 else -0.02)  # noqa: E731
 
     def chop(i, p):  # a slow wave the SMAs cross every few minutes, then one tall candle up
-        if i < JUMP:
+        if i < jump:
             return 1000.0 + math.sin(i * 2 * math.pi / 30)
-        if i == JUMP:
+        if i == jump:
             return p + 6.0
         return p + 0.05
 
     rows = _day(dt.date(2026, 9, 21), flat) + _day(DAY, chop)
     if spike_volume:
-        jump = 375 + JUMP
-        for row in rows[jump:]:
+        for row in rows[375 + jump:]:
             row["volume"] += 30_000  # that minute traded 31x the usual 1,000 shares
     return pd.DataFrame(rows)
 
 
-async def _run(database, frame, **over):
+async def _run(database, frame, until=None, **over):
     """Replay the day on bot 1 with the breakout handoff wired as a live bot has it."""
     from replay import IST, SESSION_END, SESSION_OPEN, ReplayFeed, _to_next_grid
     from sma_research.replayer import ResearchEngine, _trade_rows
@@ -52,7 +52,7 @@ async def _run(database, frame, **over):
     await engine.tick(feed.clock)
     engine.hold_for_next_cross(["SIMB"])
     engine.status = "RUNNING"
-    end = dt.datetime.combine(DAY, SESSION_END, tzinfo=IST)
+    end = until or dt.datetime.combine(DAY, SESSION_END, tzinfo=IST)
     while feed.clock < end and not moved:
         feed.clock = min(end, feed.clock + dt.timedelta(seconds=_to_next_grid(feed.clock)))
         await engine.tick(feed.clock)
@@ -248,3 +248,33 @@ async def test_bot_3_checks_still_refuse_the_arrival(db):  # noqa: F811
     queued, trend, rows = await _loop(db, _pulls_back_frame(), dt.time(12, 0), use_rsi=True, rsi_long_min=95.0, rsi_long_max=100.0)
     assert len(queued) == 1 and rows == []
     assert "BULLISH ignored" in trend.arrival_results[0] and "RSI" in trend.arrival_results[0], trend.arrival_results
+
+
+@pytest.mark.asyncio
+async def test_a_trade_already_on_the_breakout_side_is_kept(db, monkeypatch):  # noqa: F811
+    """A buy open when a green breakout candle closes rides it: not cut, and the stock stays on this bot."""
+    import bots
+    from models import BotConfig
+    from replay import IST
+    from strategy_engine import trade_names
+
+    _seed(db)
+    hits = []
+    real_read = breakout.read
+
+    def read(frame, cfg):
+        out = real_read(frame, cfg)
+        if out[0]:
+            hits.append(breakout.side(frame.iloc[-2]))
+        return out
+
+    monkeypatch.setattr(breakout, "read", read)
+    until = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST) + dt.timedelta(minutes=LONG_JUMP + 3)
+    moved, trades, engine = await _run(db, _frame(spike_volume=True, jump=LONG_JUMP), until=until, breakout_handoff=True)
+    pos = engine.positions.get("SIMB")
+    assert moved == [] and pos is not None and pos.direction == "LONG"
+    assert hits and hits[0] == "LONG"  # the green breakout was seen…
+    assert all(t["exit_reason"] != breakout.BREAKOUT_EXIT for t in trades)  # …and the buy riding it was kept
+    with db.session_factory()() as s:
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(1)))
+        assert "SIMB" not in trade_names(s.get(BotConfig, bots.config_id_for(3)))

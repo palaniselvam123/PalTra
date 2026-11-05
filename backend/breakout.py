@@ -13,9 +13,10 @@ On each closed candle of an armed stock (the bot's own candle, e.g. 5 minutes), 
     volume  the candle's volume >= `breakout_volume_mult` (1.5) x the average of
             the previous 20 candles' volume (missing volume never counts)
 
-On a breakout an open trade on that stock is cut at once (`BREAKOUT_STOP`), and the
-stock leaves this bot's Trade list and is armed on Bot 3 (`TREND_BOT`) with Bot 3's
-own settings. In LIVE the move waits until Groww shows no shares. A PAPER source never
+On a breakout an open trade already on its side (a buy on a green candle, a sell on a
+red one; the trade's real side) is kept and the stock stays on this bot. Otherwise an
+open trade on that stock is cut at once (`BREAKOUT_STOP`), and the stock leaves this
+bot's Trade list and is armed on Bot 3 (`TREND_BOT`) with Bot 3's own settings. In LIVE the move waits until Groww shows no shares. A PAPER source never
 arms a LIVE Bot 3, and the one-LIVE-bot-per-stock rule applies.
 
 **Bot 3 enters on the breakout's side** (green candle: buy, red: sell) without waiting
