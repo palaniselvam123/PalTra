@@ -1030,6 +1030,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   next to the desk DB for when NSE refuses). Desk `GET /api/scalp/universe?lists=fno,nifty50,…` (default `fno`; per-list
   `counts` / `errors`). The Trend quality auto re-scan keeps the card's `lists` (`chop_auto.AutoSettings.lists`,
   `main._auto_symbols`); MCP `start_scan` takes `stocks` nifty50 / nifty100 / niftybank. Read-only.
+- `backend/app/services/delivery.py` – **Delivery %** (read-only; the Scalp page's Most active and Carry-over tables, trailing
+  "Deliv %" / "vs usual" columns, `components/Scalp/delivery.tsx` `useDelivery`): NSE's evening full bhavcopy
+  (`sec_bhavdata_full_DDMMYYYY.csv` on archives.nseindia.com, about 18:00 IST, EQ series) gives each stock's traded and
+  delivered shares; the rest was intraday. `report(symbols, days)` reads the latest `days` (5, max 10) published sessions
+  (weekends / holidays / not-yet-published days walked back, `MAX_LOOKBACK` 21) and gives the latest day's %, shares and
+  its change against the average of the sessions before. Each day's file is kept in memory and next to the desk DB
+  (`delivery_DDMMYYYY.csv`, last `KEEP_FILES` 15); a missing day is asked again after `MISS_RETRY_SEC` (30 min). Desk
+  `GET /api/scalp/delivery?symbols=&days=`. End of day only (no intraday split during the session). Nothing in the
+  strategy reads it; no order path.
 - `backend/regime_study.py` – **Sideways test** (read-only research; the Scalp page's "Sideways test" tab,
   `components/Scalp/RegimeStudy.tsx`; no order path, nothing in the strategy reads it): does a "sideways" / "trending"
   reading hold? For past trading days (`trading_days`, 3-30) of the picked stocks (scan lists, up to `MAX_STOCKS` 200), at

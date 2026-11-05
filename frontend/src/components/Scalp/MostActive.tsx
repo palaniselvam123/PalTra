@@ -4,12 +4,13 @@ import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, Flame, History, Loader2, RefreshCw, Target } from "lucide-react";
-import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse } from "@/lib/api";
+import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
+import { DeliveryCells, DeliveryHead, DeliveryNote, useDelivery } from "./delivery";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
@@ -358,6 +359,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     }
   });
   const asOf = data?.as_of ? clockIst(data.as_of) + " IST" : null;
+  const deliv = useDelivery(rows.map((r) => r.symbol));
 
   useEffect(() => {
     onStatus?.({ when: data?.as_of ?? null, running: !!data?.running });
@@ -657,6 +659,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
           <Pager p={paged} className="mb-2" />
           <ColumnHint moved={cols.moved} onReset={cols.reset} />
+          <DeliveryNote day={deliv.day} error={deliv.error} />
           <table className="w-full text-sm">
             <thead className="whitespace-nowrap text-xs uppercase text-slate-500 [&_th]:px-2">
               <tr>
@@ -721,6 +724,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                     </th>
                   ),
                 })}
+                <DeliveryHead />
                 {tq.size > 0 && (
                   <>
                     <th className="pb-2 text-left font-medium" title="Strong trend, else the Trend quality score (trending / mixed / choppy)">Trend</th>
@@ -754,6 +758,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   onArm={() => onArm(r.symbol)}
                   tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null}
                   trend={tq.size > 0 ? tq.get(r.symbol) ?? null : undefined}
+                  deliv={deliv.rows.get(r.symbol.toUpperCase())}
                   check={checkBy ? checkBy.get(r.symbol) ?? null : undefined}
                 />
               ))}
@@ -779,8 +784,11 @@ function ActiveRowView({
   tick,
   trend,
   check,
+  deliv,
 }: {
   tick?: ReactNode;
+  /** NSE's delivery % of the stock (latest published day). */
+  deliv?: DeliveryRow;
   /** The stock's Trend quality row (undefined = the columns are not shown). */
   trend?: ChopScanRow | null;
   /** The saved scan's accuracy check for this stock (undefined = not checked). */
@@ -904,6 +912,7 @@ function ActiveRowView({
           </td>
         ),
       })}
+      <DeliveryCells d={deliv} />
       {trend !== undefined && (
         <>
           <td className="py-1.5 text-xs">

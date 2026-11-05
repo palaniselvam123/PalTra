@@ -1358,6 +1358,9 @@ export const api = {
   scalpPauseStatus: () => request<{ paused: boolean }>("/api/scalp/pause"),
   /** The F&O stock names (for scans on the SMA terminal). `error` says why the list is empty. */
   /** The stocks to scan: F&O (default) and / or NSE index lists, joined (`lists` e.g. ["nifty50", "nifty100"]). */
+  /** Delivery % per stock from NSE's end-of-day file (the latest published session) and its average before. */
+  scalpDelivery: (symbols: string[], days = 5) =>
+    request<DeliveryReport>(`/api/scalp/delivery?days=${days}&symbols=${encodeURIComponent(symbols.join(","))}`),
   scalpUniverse: (lists: string[] = ["fno"]) =>
     request<{ symbols: string[]; error: string | null; counts?: Record<string, number>; errors?: Record<string, string> }>(
       `/api/scalp/universe?lists=${encodeURIComponent(lists.join(","))}`
@@ -1600,3 +1603,15 @@ export const api = {
       `/api/course/search${queryString({ q, top_k: String(top_k) })}`
     ),
 };
+
+/** One stock's delivery on NSE's latest published session (app/services/delivery.py). */
+export type DeliveryRow = {
+  pct: number | null;
+  delivered: number | null;
+  traded: number;
+  intraday: number | null;
+  avg_pct: number | null;
+  vs_avg: number | null;
+  history: { day: string; pct: number | null }[];
+};
+export type DeliveryReport = { day: string | null; days: string[]; rows: Record<string, DeliveryRow>; errors: string[] };
