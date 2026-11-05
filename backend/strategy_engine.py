@@ -78,6 +78,7 @@ import entry_candle
 import decel_guard
 import slope_exit
 import stop_plan
+import stock_regime
 import turn_entry
 import high52
 import level_check
@@ -5188,6 +5189,13 @@ class StrategyEngine:
             "room_pct": room_pct,
         }
 
+    def _regime_of(self, cfg: BotConfig, symbol: str) -> dict | None:
+        """Choppy / trending read of one stock for the Stocks bar (display only, cached per closed candle)."""
+        own = stock_overrides(cfg, symbol)
+        fast = int(own.get("sma_fast") or cfg.sma_fast or 9)
+        slow = int(own.get("sma_slow") or cfg.sma_slow or 21)
+        return stock_regime.cached(id(self), symbol, self._tapes.get(symbol), fast, slow, candle_minutes(cfg, own), self._now())
+
     def snapshot(self) -> dict:
         # Serve the config the loop already loaded. A sqlite read on this
         # request path blocks every other page while the file is busy.
@@ -5222,6 +5230,7 @@ class StrategyEngine:
                 open_total += open_net or 0.0
                 open_gross_total += open_gross or 0.0
                 closed = closed_by.get(symbol, {"net": 0.0, "gross": 0.0, "trades": 0})
+                regime = self._regime_of(cfg, symbol) if cfg is not None else None
                 books.append(
                     {
                         "symbol": symbol,
@@ -5244,6 +5253,8 @@ class StrategyEngine:
                         "open_gross": open_gross,
                         "closed_gross": closed.get("gross", 0.0),
                         "day_gross": closed.get("gross", 0.0) + (open_gross or 0.0),
+                        # Choppy or trending on the bot's own candle (stock_regime.py; display only).
+                        "regime": regime,
                         # Groww's last refusal on this stock today, until an order fills.
                         "last_reject": self._rejects[symbol][0] if symbol in self._rejects else None,
                         "last_reject_at": self._rejects[symbol][1].strftime("%H:%M")

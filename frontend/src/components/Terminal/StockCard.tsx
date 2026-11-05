@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { LineChart, X } from "lucide-react";
-import { inr, px } from "@/lib/smaApi";
+import { inr, px, type StockRegime } from "@/lib/smaApi";
 import { Badge, SideBadge } from "./ui";
 
 export type StockCardData = {
@@ -29,7 +29,45 @@ export type StockCardData = {
   /** Where this stock came from: "Cross scan", "Movers", "Trend quality", "Scalp monitor", "Manual",
    * "Copied from bot 2" — information only, shown as a chip under the symbol. */
   source?: string | null;
+  /** Choppy or trending on the bot's own candle (display only). */
+  regime?: StockRegime | null;
 };
+
+const SCORE_WORD: Record<StockRegime["score"], string> = { TRENDING: "trending", MIXED: "mixed", CHOPPY: "choppy" };
+
+/** The phase now (up / down / choppy, since when) and today's cross count, e.g. "Up ↑ 12:10 · 1 cross". */
+export function RegimeChip({ regime }: { regime: StockRegime | null | undefined }) {
+  if (!regime) return <span className="text-xs text-slate-500" title="Not enough candles yet">—</span>;
+  const { phase, phase_since, phase_move_pct, crosses, score, minutes, strong_phases } = regime;
+  const up = phase === "BULL";
+  const down = phase === "BEAR";
+  const label = up ? "Up ↑" : down ? "Down ↓" : "Choppy";
+  const move = phase_move_pct == null ? "" : ` (${phase_move_pct > 0 ? "+" : ""}${phase_move_pct.toFixed(2)}%)`;
+  const title = [
+    `On ${minutes}-minute candles.`,
+    up || down
+      ? `Strong ${up ? "up" : "down"} phase since ${phase_since ?? "?"}${move}.`
+      : `Choppy since ${phase_since ?? "the open"}: no clean run of 5+ candles now.`,
+    `${crosses} SMA cross${crosses === 1 ? "" : "es"} today, so the day reads ${SCORE_WORD[score]}.`,
+    `${strong_phases} strong phase${strong_phases === 1 ? "" : "s"} today.`,
+  ].join(" ");
+  return (
+    <span className="inline-flex flex-col items-start gap-0.5" title={title}>
+      <Badge color={up ? "sky" : down ? "violet" : "amber"}>
+        {label}
+        {phase_since && (up || down) ? <span className="font-mono normal-case opacity-80">{phase_since}</span> : null}
+      </Badge>
+      <span
+        className={clsx(
+          "whitespace-nowrap text-[10px]",
+          score === "CHOPPY" ? "text-amber-300" : score === "TRENDING" ? "text-emerald-300" : "text-slate-400"
+        )}
+      >
+        {SCORE_WORD[score]} · {crosses}×
+      </span>
+    </span>
+  );
+}
 
 function Money({ value }: { value: number }) {
   return <span className={value >= 0 ? "text-emerald-400" : "text-rose-400"}>{inr(value)}</span>;
@@ -76,6 +114,7 @@ export function StockCard({
     rejectAt,
     ownStrategy,
     source,
+    regime,
   } = stock;
   const traded = openNet != null || (closedTrades ?? 0) > 0;
   const cannotArm = !armed && armLimitReached;
@@ -150,6 +189,9 @@ export function StockCard({
           title={changePct == null ? "Day change is sent only for the stock on the chart" : "Change since the previous close"}
         >
           {changePct == null ? "—" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`}
+        </td>
+        <td className="py-1 pr-1.5 sm:pr-2">
+          <RegimeChip regime={regime} />
         </td>
         <td className="hidden whitespace-nowrap py-1 pr-2 text-right font-mono text-xs tabular-nums sm:table-cell" title={traded ? pnlTitle : undefined}>
           {traded ? <Money value={today} /> : <span className="text-slate-500">—</span>}
@@ -231,7 +273,7 @@ export function StockCard({
       </tr>
       {reject ? (
         <tr>
-          <td colSpan={8} className="px-2 pb-2">
+          <td colSpan={9} className="px-2 pb-2">
             <div role="alert" className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200" title={reject}>
               <span className="font-semibold">
                 {symbol} order refused{rejectAt ? ` ${rejectAt}` : ""}:

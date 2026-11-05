@@ -963,6 +963,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`components/Terminal/ScanArm.tsx`: recipes, Run now, schedule switch, last runs, two templates: strong bullish/bearish
   at 10:00/10:15, and the same trend on 1m/5m/15m → Bot 3). MCP: `get_scan_arm`, `save_scan_arm`, `run_scan_arm` (PAPER
   bots only). The bot still trades on its next SMA cross; its "Join the morning trend" enters a running trend.
+- `backend/stock_regime.py` – **Choppy or trending, per armed stock** (display only; the terminal's Stocks table "Trend"
+  column, `StockCard.RegimeChip`, and the "Armed now: N up · N down · N choppy" line, `Header.RegimeSummary`): each
+  `books[]` row of the state carries `regime` (`StrategyEngine._regime_of` → `stock_regime.cached`): on the bot's own candle
+  size (the stock's own SMA periods and `candle_minutes`) from the 1-minute tape it already holds (`_tapes`, no Groww call),
+  the Trend quality card's arithmetic: `score` TRENDING / MIXED / CHOPPY from today's closed-candle crosses
+  (`chop_scan.score_for`) and the phase now (`trend_phases`: BULL / BEAR / CHOP, since when, its move). Worked out once per
+  newly closed candle (cache keyed by engine, stock, SMAs, candle). Nothing in the strategy reads it; no order path.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute

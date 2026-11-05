@@ -11,7 +11,7 @@ import { ScanArm } from "@/components/Terminal/ScanArm";
 import { useTheme } from "@/hooks/useTheme";
 import { useTitle } from "@/lib/useTitle";
 import clsx from "clsx";
-import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState, type StockRegime } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
@@ -26,6 +26,32 @@ const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
 // The research desk shares the live bot's Groww quota, so it arms fewer stocks.
 const RESEARCH_ARM_LIMIT = 10;
+
+/** "Armed now: 3 up · 2 down · 5 choppy" from each armed stock's trend read (display only). */
+function RegimeSummary({
+  armed,
+  bookBySymbol,
+}: {
+  armed: string[];
+  bookBySymbol: Map<string, { regime?: StockRegime | null }>;
+}) {
+  const reads = armed.map((s) => ({ s, r: bookBySymbol.get(s)?.regime ?? null }));
+  const up = reads.filter((x) => x.r?.phase === "BULL").map((x) => x.s);
+  const down = reads.filter((x) => x.r?.phase === "BEAR").map((x) => x.s);
+  const chop = reads.filter((x) => x.r?.phase === "CHOP").map((x) => x.s);
+  const none = reads.filter((x) => !x.r?.phase).length;
+  if (!armed.length || up.length + down.length + chop.length === 0) return null;
+  const list = (names: string[]) => (names.length ? names.join(", ") : "none");
+  return (
+    <p className="px-2 pb-1 text-xs text-slate-400" aria-label="Armed stocks by trend phase">
+      Armed now:{" "}
+      <span className="font-semibold text-sky-300" title={`Strong up phase: ${list(up)}`}>{up.length} up ↑</span> ·{" "}
+      <span className="font-semibold text-violet-300" title={`Strong down phase: ${list(down)}`}>{down.length} down ↓</span> ·{" "}
+      <span className="font-semibold text-amber-300" title={`Choppy: ${list(chop)}`}>{chop.length} choppy</span>
+      {none ? <span title="Not enough candles yet"> · {none} not read yet</span> : null}
+    </p>
+  );
+}
 
 function chipNote(note: string, symbol: string): string {
   return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
@@ -1168,6 +1194,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 Unarm all{armedList.length ? ` (${armedList.length})` : ""}
               </button>
             </div>
+            <RegimeSummary armed={[...armed]} bookBySymbol={bookBySymbol} />
             <div className="relative overflow-x-auto px-1 pb-1 sm:px-2">
             <table className="w-full text-left" aria-label="Stocks">
               <thead className="text-xs font-medium uppercase tracking-wider text-slate-400">
@@ -1176,6 +1203,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   <th className="py-1.5 pr-2">Stock</th>
                   <th className="py-1.5 pr-2 text-right">LTP</th>
                   <th className="py-1.5 pr-2 text-right">Chg</th>
+                  <th className="py-1.5 pr-2" title="Choppy or trending now on the bot's own candle (the Trend quality card's arithmetic). Display only.">Trend</th>
                   <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Today</th>
                   <th className="py-1.5 pr-1">Trade</th>
                   <th className="py-1.5 pr-1"><span className="sr-only">Chart</span></th>
@@ -1217,6 +1245,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       ownStrategy: ownSummary(config?.stock_settings?.[s] as Record<string, unknown> | undefined),
                       rejectAt: book?.last_reject_at ?? null,
                       source: config?.trade_sources?.[s] ?? null,
+                      regime: book?.regime ?? null,
                     }}
                   />
                 );

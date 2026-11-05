@@ -1090,6 +1090,8 @@ export type SmaState = {
     open_gross?: number | null;
     closed_gross?: number;
     day_gross?: number;
+    /** Choppy or trending on the bot's own candle (stock_regime.py); null while the tape is too short. */
+    regime?: StockRegime | null;
     /** Groww's last refusal on this stock today (its own words), until an order fills. */
     last_reject?: string | null;
     last_reject_at?: string | null;
@@ -2453,4 +2455,17 @@ export type RegimeStudy = {
   started_at: string | null;
   finished_at: string | null;
   report: RegimeReport | null;
+};
+
+/** Choppy or trending read of one armed stock (backend stock_regime.py, the Trend quality card's arithmetic). */
+export type StockRegime = {
+  minutes: number;
+  score: "TRENDING" | "MIXED" | "CHOPPY";
+  crosses: number;
+  phase: "BULL" | "BEAR" | "CHOP" | null;
+  phase_since: string | null;
+  phase_move_pct: number | null;
+  phase_candles: number;
+  strong_phases: number;
+  phases: { side: "BULL" | "BEAR" | "CHOP"; start: number; end: number }[];
 };
