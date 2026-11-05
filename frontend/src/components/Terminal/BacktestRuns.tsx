@@ -1,5 +1,6 @@
 "use client";
 
+import { ByTrend, HandoffTable } from "./HandoffTrail";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
@@ -948,6 +949,15 @@ function RunDetailBody({
         </p>
       ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
+      {(run.by_regime ?? []).length ? <ByTrend groups={run.by_regime ?? []} /> : null}
+      {(run.handoffs ?? []).length ? (
+        <div className="mb-4">
+          <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
+            Hand-offs in this run ({(run.handoffs ?? []).length}) · where each stock was sent
+          </div>
+          <HandoffTable rows={[...(run.handoffs ?? [])].reverse()} showDay={run.start_date !== run.end_date} />
+        </div>
+      ) : null}
       <div className="overflow-x-auto">
         <ColumnHint moved={dayCols.moved} onReset={dayCols.reset} />
         <table className="w-full min-w-[720px] whitespace-nowrap text-left text-xs">

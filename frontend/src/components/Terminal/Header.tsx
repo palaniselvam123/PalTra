@@ -4,9 +4,10 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
-import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
 import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { ArmLog } from "@/components/Terminal/ArmLog";
+import { HandoffTrail } from "@/components/Terminal/HandoffTrail";
 import { ScanArm } from "@/components/Terminal/ScanArm";
 import { useTheme } from "@/hooks/useTheme";
 import { useTitle } from "@/lib/useTitle";
@@ -247,6 +248,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [folded, setFolded] = useState(false);
   const [pnlLog, setPnlLog] = useState(false);
   const [armLog, setArmLog] = useState(false);
+  const [handoffs, setHandoffs] = useState(false);
   const [scanArm, setScanArm] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -936,6 +938,15 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </button>
               <button
                 type="button"
+                onClick={() => setHandoffs(true)}
+                title="Hand-offs: which stocks went to Bot 2 (choppy), Bot 3 (trend) or Bot 5, when and why"
+                aria-label="Hand-offs"
+                className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
+              >
+                <ArrowRightLeft size={14} aria-hidden /> <span className="hidden md:inline">Hand-offs</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setScanArm(true)}
                 title="Scan & arm: run the Trend quality scan and arm what it finds on a bot, now or at set times"
                 aria-label="Scan and arm"
@@ -950,6 +961,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 onClose={() => setScanArm(false)}
               />
             )}
+            {handoffs && <HandoffTrail bot={desk === "research" ? undefined : deskBot ?? 1} onClose={() => setHandoffs(false)} />}
             {armLog && (
               <ArmLog
                 desk={desk === "research" ? "research" : String(deskBot ?? 1)}

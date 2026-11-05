@@ -2,6 +2,7 @@
  * One backtest (replay run) as a PDF: settings, totals, day-wise P&L and
  * every trade. Built in the browser; jsPDF loads only when asked for.
  */
+import { TREND_GROUP_WORDS, trendGroup, trendShort, trendText, type TrendGroup } from "./trendAtEntry";
 import { istStamp } from "@/lib/format";
 import { pnlAtPrice, type ReplayRun, type TradeRow } from "@/lib/smaApi";
 
@@ -287,6 +288,71 @@ export async function downloadBacktestPdf({
     y = after() + 22;
   }
 
+  // Closed trades by the trend when each opened (stock_regime at entry), worked out from the trades themselves.
+  const byTrend = new Map<TrendGroup, { trades: number; wins: number; pnl: number }>();
+  for (const r of trades) {
+    if (r.exit_price == null) continue;
+    const g = trendGroup(r.entry_regime, r.direction);
+    const cur = byTrend.get(g) ?? { trades: 0, wins: 0, pnl: 0 };
+    cur.trades += 1;
+    cur.wins += (r.net_pnl ?? 0) > 0 ? 1 : 0;
+    cur.pnl += r.net_pnl ?? 0;
+    byTrend.set(g, cur);
+  }
+  const trendRows = (Object.keys(TREND_GROUP_WORDS) as TrendGroup[]).filter((g) => byTrend.has(g));
+  if (trendRows.length && !(trendRows.length === 1 && trendRows[0] === "UNKNOWN")) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("By trend at entry", margin, y);
+    autoTable(doc, {
+      startY: y + 6,
+      margin: { left: margin, right: margin },
+      theme: "striped",
+      head: [["When it opened", "Trades", "Won", "Win %", "P&L (before charges)"]],
+      body: trendRows.map((g) => {
+        const v = byTrend.get(g)!;
+        return [TREND_GROUP_WORDS[g], v.trades, v.wins, v.trades ? `${((100 * v.wins) / v.trades).toFixed(0)}%` : "-", pdfMoney(v.pnl)];
+      }),
+      styles: { fontSize: 8.5, cellPadding: 3.5 },
+      headStyles: { fillColor: [30, 41, 59] },
+      columnStyles: Object.fromEntries([1, 2, 3, 4].map((i) => [i, { halign: "right" as const }])),
+      didParseCell: (cell) => {
+        if (cell.section === "head" && cell.column.index > 0) cell.cell.styles.halign = "right";
+        if (cell.section === "body" && cell.column.index === 4) cell.cell.styles.textColor = tone(byTrend.get(trendRows[cell.row.index])!.pnl);
+      },
+    });
+    y = after() + 22;
+  }
+
+  const handoffs = [...(run.handoffs ?? [])].reverse();
+  if (handoffs.length) {
+    if (y > doc.internal.pageSize.getHeight() - 80) {
+      doc.addPage();
+      y = 48;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text(`Hand-offs (${handoffs.length})`, margin, y);
+    autoTable(doc, {
+      startY: y + 6,
+      margin: { left: margin, right: margin },
+      theme: "striped",
+      head: [["When", "Stock", "From", "To", "Why", "Trend then", "Result"]],
+      body: handoffs.map((h) => [
+        h.at ? `${day(h.day)} ${h.at.slice(11, 16)}` : day(h.day),
+        h.symbol,
+        `Bot ${h.from_bot}`,
+        h.to_bot === 2 ? "Bot 2 (choppy)" : h.to_bot === 3 ? "Bot 3 (trend)" : `Bot ${h.to_bot}`,
+        pdfText(h.kind_words + (h.why ? ` - ${h.why}` : "")),
+        pdfText(trendText(h.regime, null) || "-"),
+        pdfText(`${h.moved ? "Moved" : "Not moved"}${h.result ? `: ${h.result}` : ""}`),
+      ]),
+      styles: { fontSize: 7.5, cellPadding: 3 },
+      headStyles: { fillColor: [30, 41, 59] },
+    });
+    y = after() + 22;
+  }
+
   const days = run.days ?? [];
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
@@ -337,7 +403,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Charges", "P&L (before charges)"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Trend at entry", "Charges", "P&L (before charges)"]],
     body: rows.length
       ? rows.map((r) => [
           r.trade_ref || `#${r.id}`,
@@ -354,18 +420,19 @@ export async function downloadBacktestPdf({
           r.max_low == null ? "-" : `${price(r.max_low)}\n${pdfMoney(pnlAtPrice(r, r.max_low))}`,
           signedPts(r.points),
           r.exit_price == null ? "Open" : reasons[r.exit_reason || ""] ?? (r.exit_reason || "Closed"),
+          (trendShort(r.entry_regime, r.direction) ?? "-").replace(/ [↑↓]/, ""),
           r.brokerage_and_taxes == null ? "-" : pdfMoney(r.brokerage_and_taxes).replace("+", ""),
           pdfMoney(r.net_pnl),
         ])
-      : [[{ content: "No closed trades.", colSpan: 16 }]],
+      : [[{ content: "No closed trades.", colSpan: 17 }]],
     styles: { fontSize: 7.5, cellPadding: 3 },
     headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: Object.fromEntries([0, 3, 5, 6, 7, 9, 10, 11, 12, 14, 15].map((i) => [i, { halign: "right" as const }])),
+    columnStyles: Object.fromEntries([0, 3, 5, 6, 7, 9, 10, 11, 12, 15, 16].map((i) => [i, { halign: "right" as const }])),
     didParseCell: (cell) => {
-      if (cell.section === "head" && [0, 3, 5, 6, 7, 9, 10, 11, 12, 14, 15].includes(cell.column.index)) cell.cell.styles.halign = "right";
+      if (cell.section === "head" && [0, 3, 5, 6, 7, 9, 10, 11, 12, 15, 16].includes(cell.column.index)) cell.cell.styles.halign = "right";
       if (cell.section !== "body" || !rows.length) return;
       const r = rows[cell.row.index];
-      if (cell.column.index === 15 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
+      if (cell.column.index === 16 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
       if (cell.column.index === 12) cell.cell.styles.textColor = tone(r.points);
       if (cell.column.index === 10) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_high));
       if (cell.column.index === 11) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));

@@ -11,6 +11,7 @@ import { Badge, Skeleton, pnlTone } from "./ui";
 import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
 import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
+import { matchesTrend, trendColor, trendGroup, trendShort, trendText, type TrendFilter } from "@/lib/trendAtEntry";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 
@@ -107,6 +108,7 @@ type SortKey =
   | "entry_time"
   | "entry"
   | "entry_reason"
+  | "trend"
   | "exit_time"
   | "exit"
   | "high"
@@ -128,6 +130,7 @@ const SORT_CHOICES: { key: SortKey; label: string }[] = [
   { key: "side", label: "Side" },
   { key: "reason", label: "Exit reason" },
   { key: "entry_reason", label: "Entry reason" },
+  { key: "trend", label: "Trend at entry" },
   { key: "strategy", label: "Strategy" },
   { key: "entry", label: "Entry price" },
   { key: "exit", label: "Exit price" },
@@ -184,6 +187,8 @@ function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: 
       return trade.entry_price;
     case "entry_reason":
       return entryReasonShort(trade.entry_reason) ?? "";
+    case "trend":
+      return trendShort(trade.entry_regime, trade.direction) ?? "";
     case "exit_time":
       return epoch(trade.exit_time);
     case "exit":
@@ -368,6 +373,7 @@ export function TradeHistoryTable({
   const [minPnl, setMinPnl] = useState("");
   const [maxPnl, setMaxPnl] = useState("");
   const [side, setSide] = useState<SideFilter>("ALL");
+  const [trendPick, setTrendPick] = useState<TrendFilter>("ALL");
   const [reason, setReason] = useState("ALL");
   const [strategy, setStrategy] = useState("ALL");
   const [sort, setSort] = useState<Sort>(null);
@@ -431,6 +437,7 @@ export function TradeHistoryTable({
     if (pickedList.length && !pickedList.includes(trade.symbol.toUpperCase())) return false;
     if (!matchesText(query, trade.symbol)) return false;
     if (side !== "ALL" && trade.direction !== side) return false;
+    if (!matchesTrend(trendPick, trendGroup(trade.entry_regime, trade.direction))) return false;
     if (reasonFilter !== "ALL" && (trade.exit_price == null || (trade.exit_reason || "") !== reasonFilter)) return false;
     if (strategyFilter !== "ALL" && (strategyOf(trade, runs) ?? NOT_RECORDED) !== strategyFilter) return false;
     const day = tradeDay(trade);
@@ -503,6 +510,7 @@ export function TradeHistoryTable({
     stockFilter !== "" ||
     query.trim() !== "" ||
     side !== "ALL" ||
+    trendPick !== "ALL" ||
     reasonFilter !== "ALL" ||
     strategyFilter !== "ALL" ||
     from !== "" ||
@@ -511,13 +519,14 @@ export function TradeHistoryTable({
     minPnl !== "" ||
     maxPnl !== "";
   const selected = BOOKS.find((item) => item.id === book) ?? BOOKS[0];
-  const resetKey = [book, stockFilter, query, side, reasonFilter, strategyFilter, from, to, pnlSide, minPnl, maxPnl, sort?.key, sort?.dir].join("|");
+  const resetKey = [book, stockFilter, query, side, trendPick, reasonFilter, strategyFilter, from, to, pnlSide, minPnl, maxPnl, sort?.key, sort?.dir].join("|");
   const simulation = book === "PAPER";
 
   const clearFilters = () => {
     setStocks(new Set());
     setQuery("");
     setSide("ALL");
+    setTrendPick("ALL");
     setReason("ALL");
     setStrategy("ALL");
     setFrom("");
@@ -541,6 +550,7 @@ export function TradeHistoryTable({
     if (pickedList.length) words.push(pickedList.join(", "));
     if (query.trim()) words.push(`search "${query.trim()}"`);
     if (side !== "ALL") words.push(side === "LONG" ? "long only" : "short only");
+    if (trendPick !== "ALL") words.push(`trend at entry: ${TREND_PICK_WORDS[trendPick]}`);
     if (reasonFilter !== "ALL") words.push(`exit: ${REASON_SHORT[reasonFilter] ?? reasonFilter}`);
     if (strategyFilter !== "ALL") words.push(`strategy: ${strategyFilter}`);
     if (from || to) words.push(`dates ${from || "start"} to ${to || "today"}`);
@@ -606,7 +616,7 @@ export function TradeHistoryTable({
       "net_pnl",
       "mode",
     ] as const;
-    const lines = [[...fields, "pnl_at_max_high", "pnl_at_max_low", "strategy"].join(",")];
+    const lines = [[...fields, "pnl_at_max_high", "pnl_at_max_low", "strategy", "trend_at_entry"].join(",")];
     const amount = (trade: TradeRow, price: number | null | undefined) => {
       const value = pnlAtPrice(trade, price);
       return value == null ? "" : value.toFixed(2);
@@ -618,6 +628,7 @@ export function TradeHistoryTable({
           amount(trade, trade.max_high),
           amount(trade, trade.max_low),
           csvCell(strategyOf(trade, runs)),
+          csvCell(trendText(trade.entry_regime, trade.direction)),
         ].join(",")
       );
     }
@@ -789,6 +800,19 @@ export function TradeHistoryTable({
             <option value="ALL">Both</option>
             <option value="LONG">Long (buy)</option>
             <option value="SHORT">Short (sell)</option>
+          </select>
+        </label>
+        <label
+          className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400"
+          title="Choppy or trending when the trade opened (on the bot's own candle). Saved for trades opened after this was added."
+        >
+          Trend at entry
+          <select value={trendPick} onChange={(e) => setTrendPick(e.target.value as TrendFilter)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
+            {(Object.keys(TREND_PICK_WORDS) as TrendFilter[]).map((k) => (
+              <option key={k} value={k}>
+                {TREND_PICK_WORDS[k]}
+              </option>
+            ))}
           </select>
         </label>
         <label className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400">
@@ -988,7 +1012,7 @@ export function TradeHistoryTable({
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
 type ColKey = Col["key"];
-const COLUMN_KEYS: ColKey[] = ["id", "stock", "side", "entry_time", "entry", "entry_reason", "exit_time", "exit", "high", "low", "points", "reason", "strategy", "charges", "net", "action"];
+const COLUMN_KEYS: ColKey[] = ["id", "stock", "side", "entry_time", "entry", "entry_reason", "trend", "exit_time", "exit", "high", "low", "points", "reason", "strategy", "charges", "net", "action"];
 const COLUMNS: Col[] = [
   { key: "id", label: "Trade ID" },
   { key: "stock", label: "Stock" },
@@ -996,6 +1020,7 @@ const COLUMNS: Col[] = [
   { key: "entry_time", label: "Entry time" },
   { key: "entry", label: "Entry", num: true },
   { key: "entry_reason", label: "Entry reason" },
+  { key: "trend", label: "Trend at entry" },
   { key: "exit_time", label: "Exit time" },
   { key: "exit", label: "Exit", num: true },
   { key: "high", label: "Max high", num: true },
@@ -1162,6 +1187,30 @@ function BookSummary({
         </div>
       </div>
     </section>
+  );
+}
+
+const TREND_PICK_WORDS: Record<TrendFilter, string> = {
+  ALL: "Any",
+  WITH: "With a trend",
+  AGAINST: "Against a trend",
+  CHOPPY: "Choppy",
+  UNKNOWN: "Not read",
+};
+
+function TrendAtEntryBadge({ trade }: { trade: TradeRow }) {
+  const label = trendShort(trade.entry_regime, trade.direction);
+  if (!label) {
+    return (
+      <span className="text-slate-500" title="Saved for trades opened after this was added, once the stock had enough candles.">
+        —
+      </span>
+    );
+  }
+  return (
+    <Badge color={trendColor(trendGroup(trade.entry_regime, trade.direction))} title={`At entry: ${trendText(trade.entry_regime, trade.direction)}`}>
+      {label}
+    </Badge>
   );
 }
 
@@ -1635,6 +1684,9 @@ entry_time: <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-sl
 entry: <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{px(t.entry_price)}</td>,
 entry_reason: <td className="px-3 py-2">
         <EntryReasonBadge trade={t} />
+      </td>,
+trend: <td className="px-3 py-2">
+        <TrendAtEntryBadge trade={t} />
       </td>,
 exit_time: <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>,
 exit: <td className="whitespace-nowrap px-3 py-2 text-right font-mono">

@@ -78,6 +78,7 @@ import entry_candle
 import decel_guard
 import slope_exit
 import stop_plan
+import handoff_log
 import stock_regime
 import turn_entry
 import high52
@@ -2789,18 +2790,73 @@ class StrategyEngine:
             return  # the exit did not go through
         text = f"{symbol} recovery target hit — {note}"
         if recovery.handoff_on(cfg) and self.handoff is not None:
-            text += f"; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
+            text += f"; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction, kind='RECOVERY', why=note, trade_id=pos.trade_id)}"
             self._alert(text)
         self._signals[symbol] = text
 
-    async def _hand_to_chop_bot(self, symbol: str, live: bool, cfg: BotConfig | None = None, closed: str | None = None) -> str:
+    def _regime_at(self, cfg: BotConfig | None, symbol: str) -> dict | None:
+        """The stock's choppy / trending read now on this stock's own candle (stock_regime.py; display only)."""
+        if cfg is None:
+            return None
+        try:
+            return stock_regime.cached(
+                id(self), symbol, self._tapes.get(symbol), int(cfg.sma_fast), int(cfg.sma_slow), candle_minutes(cfg), self._now()
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _log_handoff(
+        self,
+        symbol: str,
+        to_bot: int,
+        kind: str,
+        why: str | None,
+        result: str,
+        cfg: BotConfig | None,
+        trade_id: int | None,
+        live: bool,
+    ) -> None:
+        """Keep the hand-off for the blotter and backtests (handoff_log.py); bookkeeping only."""
+        run_id = getattr(self, "run_id", None)
+        mode = "REPLAY" if run_id is not None else ("LIVE" if live else "PAPER")
+        try:
+            own = _cfg_for(cfg, symbol) if cfg is not None else None
+        except Exception:  # noqa: BLE001 - bookkeeping: a partial settings object reads as is
+            own = cfg
+        handoff_log.record(
+            at=self._now(),
+            mode=mode,
+            run_id=run_id,
+            from_bot=self.bot_id,
+            to_bot=to_bot,
+            symbol=symbol,
+            kind=kind,
+            why=why,
+            result=result,
+            trade_id=trade_id,
+            regime=self._regime_at(own, symbol),
+        )
+
+    async def _hand_to_chop_bot(
+        self,
+        symbol: str,
+        live: bool,
+        cfg: BotConfig | None = None,
+        closed: str | None = None,
+        kind: str = "RECOVERY",
+        why: str | None = None,
+        trade_id: int | None = None,
+    ) -> str:
         """Move a stock that just closed to Bot 2 (recovery.handoff); in LIVE only once Groww shows no shares.
 
         With `handoff_now` Bot 2 then orders at once the opposite way of the trade that closed (`closed`,
         its real side): no filters, its own stop and exits (recovery.order_now)."""
         if live and await self._groww_net(symbol) != 0:
-            return "no handoff: Groww still shows shares"
+            text = "no handoff: Groww still shows shares"
+            self._log_handoff(symbol, recovery.HANDOFF_BOT, kind, why, text, cfg, trade_id, live)
+            return text
         moved = self.handoff(self.bot_id, symbol, live)
+        self._log_handoff(symbol, recovery.HANDOFF_BOT, kind, why, moved, cfg, trade_id, live)
         if (
             moved.startswith("moved")
             and closed in ("LONG", "SHORT")
@@ -2849,6 +2905,9 @@ class StrategyEngine:
             self.handoff(self.bot_id, symbol, live, to_bot=breakout.TREND_BOT)
             if flat
             else "no handoff: Groww still shows shares"
+        )
+        self._log_handoff(
+            symbol, breakout.TREND_BOT, "BREAKOUT", note, moved, cfg, pos.trade_id if pos is not None else None, live
         )
         if moved.startswith("moved") and self.breakout_arrival is not None:
             bar = enriched.iloc[-2]
@@ -3572,6 +3631,7 @@ class StrategyEngine:
             stop_active=stop_active,
             flipped=flipped,
             entry_reason=why,
+            entry_regime=handoff_log.regime_json(self._regime_at(cfg, (cfg.symbol or "").upper())),
         )
         self.trades_today += 1
         self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
@@ -4374,7 +4434,8 @@ class StrategyEngine:
             and slope_exit.lost(pos.direction, pos.entry_price, price)
         ):
             # A losing V-turn: the stock goes to the chop bot, like a recovery (vturn_handoff).
-            text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
+            moved = await self._hand_to_chop_bot(symbol, live, cfg, pos.direction, kind="VTURN_LOSS", why=note, trade_id=pos.trade_id)
+            text = f"{symbol} SMA 9 V-turn exit at a loss; {moved}"
             self._signals[symbol] = text
             self._alert(text)
 
@@ -4657,6 +4718,7 @@ class StrategyEngine:
         stop_active: bool = True,
         flipped: bool = False,
         entry_reason: str | None = None,
+        entry_regime: str | None = None,
     ) -> int:
         mode = (cfg.trading_mode or "PAPER").upper()
         run_id = getattr(self, "run_id", None)
@@ -4679,6 +4741,7 @@ class StrategyEngine:
                 stop_active=bool(stop_active),
                 flipped=bool(flipped),
                 entry_reason=entry_reason,
+                entry_regime=entry_regime,
                 bot=self.bot_id,
                 run_id=run_id,
                 book_seq=seq,
@@ -6596,6 +6659,7 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
         "entry_reason": getattr(row, "entry_reason", None),
+        "entry_regime": handoff_log.parse(getattr(row, "entry_regime", None)),
         "stop_log": getattr(row, "stop_log", None),
         "exit_reason": row.exit_reason,
         "gross_pnl": row.gross_pnl,

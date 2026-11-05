@@ -970,6 +970,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the Trend quality card's arithmetic: `score` TRENDING / MIXED / CHOPPY from today's closed-candle crosses
   (`chop_scan.score_for`) and the phase now (`trend_phases`: BULL / BEAR / CHOP, since when, its move). Worked out once per
   newly closed candle (cache keyed by engine, stock, SMAs, candle). Nothing in the strategy reads it; no order path.
+- `backend/handoff_log.py` – **Hand-off trail and trend at entry** (bookkeeping / display only; nothing in the strategy reads
+  it). **Trend at entry**: `StrategyEngine._open` saves the stock's `stock_regime` read on its own candle
+  (`_regime_at`) on the trade (`TradeLog.entry_regime`, JSON: phase, score, crosses, since, move, candle minutes; NULL on older
+  rows; PAPER, LIVE, replays). The blotter's "Trend at entry" column and filter (with / against a trend, choppy, not read;
+  `lib/trendAtEntry.ts`), the CSVs (`trend_at_entry`), the backtest PDF (trade column and "By trend at entry",
+  `lib/backtestPdf.ts`) and the run detail's **By trend at entry** table (`replay.get_run` → `by_regime`,
+  `components/Terminal/HandoffTrail.ByTrend`). **Hand-offs**: every hand-off attempt between the bots, moved or not, is a
+  `HandoffLog` row (`record`: time on the engine's clock, mode, run, from / to bot, stock, kind `RECOVERY` / `VTURN_LOSS` →
+  Bot 2, `BREAKOUT` → Bot 3, `FAST_MOVE` → Bot 5 / `FAST_BACK`, why, result, the closed trade, the trend then), written by
+  `StrategyEngine._log_handoff` (`_hand_to_chop_bot`, `_watch_breakout`), `FastBot._record` (live; the same result kept at
+  most once per `LOG_REPEAT_SEC` 10 min) and `ReplayEngine._fast_move`. A run's rows go with `delete_run` and its unfinished
+  days with a resume / rewind (`_drop_unfinished_days`). `GET /api/handoffs?run_id=|day=&bot=&mode=`; the run detail lists
+  the run's hand-offs (`get_run` → `handoffs`, `HandoffTable`, also in the PDF) and the Stocks bar's "Hand-offs" button
+  (`HandoffTrail`) a market day's.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute

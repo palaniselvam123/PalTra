@@ -297,6 +297,8 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN entry_reason VARCHAR")
         if "stop_log" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_log VARCHAR")
+        if "entry_regime" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN entry_regime VARCHAR")
         if "recovery_loss" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN recovery_loss FLOAT")
         if "recovery_bar" not in names:
