@@ -963,6 +963,35 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`components/Terminal/ScanArm.tsx`: recipes, Run now, schedule switch, last runs, two templates: strong bullish/bearish
   at 10:00/10:15, and the same trend on 1m/5m/15m → Bot 3). MCP: `get_scan_arm`, `save_scan_arm`, `run_scan_arm` (PAPER
   bots only). The bot still trades on its next SMA cross; its "Join the morning trend" enters a running trend.
+- `backend/stock_regime.py` – **Choppy or trending, per armed stock** (display only; the terminal's Stocks table "Trend"
+  column, `StockCard.RegimeChip`, and the "Armed now: N up · N down · N choppy" line, `Header.RegimeSummary`): each
+  `books[]` row of the state carries `regime` (`StrategyEngine._regime_of` → `stock_regime.cached`): on the bot's own candle
+  size (the stock's own SMA periods and `candle_minutes`) from the 1-minute tape it already holds (`_tapes`, no Groww call),
+  the Trend quality card's arithmetic: `score` TRENDING / MIXED / CHOPPY from today's closed-candle crosses
+  (`chop_scan.score_for`) and the phase now (`trend_phases`: BULL / BEAR / CHOP, since when, its move). Worked out once per
+  newly closed candle (cache keyed by engine, stock, SMAs, candle). Nothing in the strategy reads it; no order path.
+- `backend/stop_handoff.py` – move a stock after a stop-loss exit (`stop_handoff` `OFF` default | `BACK` | `BOT2` | `BOT3`,
+  `stop_handoff_loss` on by default = only when the stop closed at a loss before charges; per bot and per stock, PAPER and
+  LIVE, replays too; Settings → 5. Stop-loss and target). Right after a stop closes a trade (`STOP_REASONS`: ATR, trailing,
+  Supertrend, VWAP, plan, SMA-gap stop; never a target) `StrategyEngine._watch_stop` → `_stop_handoff` moves the stock through
+  the bot's `handoff` (`recovery.handoff`; a replay's `_hand_off`): back to the bot it first came from (`_origin_bot`:
+  `handoff_chain.moved()` live, the replayed bot in a backtest that plays the hand-offs; a stock that never moved stays), to
+  Bot 2 (chop recipe, like a recovery) or Bot 3 (its own settings); it waits for its next cross there. LIVE only once Groww
+  shows no shares; the usual hand-off rules apply. Logged as `STOP_EXIT` in `handoff_log`. No order is placed by it.
+- `backend/handoff_log.py` – **Hand-off trail and trend at entry** (bookkeeping / display only; nothing in the strategy reads
+  it). **Trend at entry**: `StrategyEngine._open` saves the stock's `stock_regime` read on its own candle
+  (`_regime_at`) on the trade (`TradeLog.entry_regime`, JSON: phase, score, crosses, since, move, candle minutes; NULL on older
+  rows; PAPER, LIVE, replays). The blotter's "Trend at entry" column and filter (with / against a trend, choppy, not read;
+  `lib/trendAtEntry.ts`), the CSVs (`trend_at_entry`), the backtest PDF (trade column and "By trend at entry",
+  `lib/backtestPdf.ts`) and the run detail's **By trend at entry** table (`replay.get_run` → `by_regime`,
+  `components/Terminal/HandoffTrail.ByTrend`). **Hand-offs**: every hand-off attempt between the bots, moved or not, is a
+  `HandoffLog` row (`record`: time on the engine's clock, mode, run, from / to bot, stock, kind `RECOVERY` / `VTURN_LOSS` →
+  Bot 2, `BREAKOUT` → Bot 3, `FAST_MOVE` → Bot 5 / `FAST_BACK`, why, result, the closed trade, the trend then), written by
+  `StrategyEngine._log_handoff` (`_hand_to_chop_bot`, `_watch_breakout`), `FastBot._record` (live; the same result kept at
+  most once per `LOG_REPEAT_SEC` 10 min) and `ReplayEngine._fast_move`. A run's rows go with `delete_run` and its unfinished
+  days with a resume / rewind (`_drop_unfinished_days`). `GET /api/handoffs?run_id=|day=&bot=&mode=`; the run detail lists
+  the run's hand-offs (`get_run` → `handoff_trail`, `HandoffTable`, also in the PDF) and the Stocks bar's "Hand-offs" button
+  (`HandoffTrail`) a market day's.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend
   quality, so five checks read just those (`read`), each for a long and a short: `orb` (last closed 1-minute

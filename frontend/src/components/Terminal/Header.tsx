@@ -4,14 +4,15 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WalletChip } from "@/components/Wallet/WalletChip";
-import { AlertTriangle, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, CandlestickChart, ChevronDown, LineChart, ListChecks, Loader2, Moon, ScanSearch, Search, Sun } from "lucide-react";
 import { OpenPnlLog } from "@/components/Terminal/OpenPnlLog";
 import { ArmLog } from "@/components/Terminal/ArmLog";
+import { HandoffTrail } from "@/components/Terminal/HandoffTrail";
 import { ScanArm } from "@/components/Terminal/ScanArm";
 import { useTheme } from "@/hooks/useTheme";
 import { useTitle } from "@/lib/useTitle";
 import clsx from "clsx";
-import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState } from "@/lib/smaApi";
+import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState, type StockRegime } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { NAV } from "@/components/Navbar";
 import { Skeleton } from "./ui";
@@ -26,6 +27,32 @@ const DEFAULTS = ["KIRLOSFER", "ANTELOPUS"];
 const ARM_LIMIT = 24;
 // The research desk shares the live bot's Groww quota, so it arms fewer stocks.
 const RESEARCH_ARM_LIMIT = 10;
+
+/** "Armed now: 3 up · 2 down · 5 choppy" from each armed stock's trend read (display only). */
+function RegimeSummary({
+  armed,
+  bookBySymbol,
+}: {
+  armed: string[];
+  bookBySymbol: Map<string, { regime?: StockRegime | null }>;
+}) {
+  const reads = armed.map((s) => ({ s, r: bookBySymbol.get(s)?.regime ?? null }));
+  const up = reads.filter((x) => x.r?.phase === "BULL").map((x) => x.s);
+  const down = reads.filter((x) => x.r?.phase === "BEAR").map((x) => x.s);
+  const chop = reads.filter((x) => x.r?.phase === "CHOP").map((x) => x.s);
+  const none = reads.filter((x) => !x.r?.phase).length;
+  if (!armed.length || up.length + down.length + chop.length === 0) return null;
+  const list = (names: string[]) => (names.length ? names.join(", ") : "none");
+  return (
+    <p className="px-2 pb-1 text-xs text-slate-400" aria-label="Armed stocks by trend phase">
+      Armed now:{" "}
+      <span className="font-semibold text-sky-300" title={`Strong up phase: ${list(up)}`}>{up.length} up ↑</span> ·{" "}
+      <span className="font-semibold text-violet-300" title={`Strong down phase: ${list(down)}`}>{down.length} down ↓</span> ·{" "}
+      <span className="font-semibold text-amber-300" title={`Choppy: ${list(chop)}`}>{chop.length} choppy</span>
+      {none ? <span title="Not enough candles yet"> · {none} not read yet</span> : null}
+    </p>
+  );
+}
 
 function chipNote(note: string, symbol: string): string {
   return note.replace(new RegExp(`^${symbol}\\s+`, "i"), "").trim();
@@ -221,6 +248,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   const [folded, setFolded] = useState(false);
   const [pnlLog, setPnlLog] = useState(false);
   const [armLog, setArmLog] = useState(false);
+  const [handoffs, setHandoffs] = useState(false);
   const [scanArm, setScanArm] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -910,6 +938,15 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               </button>
               <button
                 type="button"
+                onClick={() => setHandoffs(true)}
+                title="Hand-offs: which stocks went to Bot 2 (choppy), Bot 3 (trend) or Bot 5, when and why"
+                aria-label="Hand-offs"
+                className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 text-xs font-normal text-slate-300 hover:bg-white/5"
+              >
+                <ArrowRightLeft size={14} aria-hidden /> <span className="hidden md:inline">Hand-offs</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setScanArm(true)}
                 title="Scan & arm: run the Trend quality scan and arm what it finds on a bot, now or at set times"
                 aria-label="Scan and arm"
@@ -924,6 +961,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 onClose={() => setScanArm(false)}
               />
             )}
+            {handoffs && <HandoffTrail bot={desk === "research" ? undefined : deskBot ?? 1} onClose={() => setHandoffs(false)} />}
             {armLog && (
               <ArmLog
                 desk={desk === "research" ? "research" : String(deskBot ?? 1)}
@@ -1168,6 +1206,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                 Unarm all{armedList.length ? ` (${armedList.length})` : ""}
               </button>
             </div>
+            <RegimeSummary armed={[...armed]} bookBySymbol={bookBySymbol} />
             <div className="relative overflow-x-auto px-1 pb-1 sm:px-2">
             <table className="w-full text-left" aria-label="Stocks">
               <thead className="text-xs font-medium uppercase tracking-wider text-slate-400">
@@ -1176,6 +1215,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                   <th className="py-1.5 pr-2">Stock</th>
                   <th className="py-1.5 pr-2 text-right">LTP</th>
                   <th className="py-1.5 pr-2 text-right">Chg</th>
+                  <th className="py-1.5 pr-2" title="Choppy or trending now on the bot's own candle (the Trend quality card's arithmetic). Display only.">Trend</th>
                   <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Today</th>
                   <th className="py-1.5 pr-1">Trade</th>
                   <th className="py-1.5 pr-1"><span className="sr-only">Chart</span></th>
@@ -1217,6 +1257,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
                       ownStrategy: ownSummary(config?.stock_settings?.[s] as Record<string, unknown> | undefined),
                       rejectAt: book?.last_reject_at ?? null,
                       source: config?.trade_sources?.[s] ?? null,
+                      regime: book?.regime ?? null,
                     }}
                   />
                 );

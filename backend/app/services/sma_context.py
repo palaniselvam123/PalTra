@@ -227,6 +227,8 @@ FIELD_HELP = {
     "slope_bend_pct": "bend: % off the steepest slope (0 = off)", "slope_turn": "turn exit on", "slope_turn_pct": "turn: %/candle against",
     "vturn_exit": "SMA 9 V-turn exit", "vturn_move_pct": "V: steep run %/candle", "vturn_turn_pct": "V: turn back %/candle",
     "vturn_within": "V: within N candles", "vturn_handoff": "a losing V-turn exit hands the stock to Bot 2",
+    "stop_handoff": "after a stop-loss exit move the stock: OFF, BACK (to the bot it came from), BOT2 (choppy), BOT3 (trend)",
+    "stop_handoff_loss": "stop hand-off only when the stop closed at a loss",
     "decel_exit": "SMA 9 deceleration guard", "slope_minutes": "candle size the slope exits read (0 = the bot's own)",
     "turn_alert": "Telegram on an SMA 9 turn", "turn_entry": "enter on an SMA 9 turn before the cross",
     "turn_toward_cross": "turn entry only toward the 9/21 cross", "turn_exit_candle": "close a turn on a candle of the other colour",

@@ -42,6 +42,9 @@ class TradeLog(Base):
     entry_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     # Staged stop plan moves on this trade, e.g. "11:42 stop → breakeven (+1.5R) at 1672.10"; NULL if none.
     stop_log: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Choppy or trending when the trade opened (stock_regime.py, JSON: phase, score, crosses, since,
+    # move, candle minutes); display only, NULL on older rows.
+    entry_regime: Mapped[str | None] = mapped_column(String, nullable=True)
     # Recovery hold (recovery.py): loss per share at the adverse cross and that candle's start.
     recovery_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovery_bar: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -183,6 +186,32 @@ class ReviewLog(Base):
     status: Mapped[str] = mapped_column(String, default="PENDING", index=True)
     action_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     note: Mapped[str] = mapped_column(String, default="")
+
+
+class HandoffLog(Base):
+    """One hand-off of a stock between SMA bots (handoff_log.py): recovery / V-turn to Bot 2, breakout to Bot 3,
+    fast move to Bot 5 and back. Written whether or not it went through. Bookkeeping only."""
+
+    __tablename__ = "handoff_log"
+    __table_args__ = (Index("ix_handoff_log_at", "at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime)  # engine clock, IST naive (the replayed time in a replay)
+    day: Mapped[str] = mapped_column(String, index=True)  # IST session date YYYY-MM-DD
+    mode: Mapped[str] = mapped_column(String, default="PAPER")  # PAPER | LIVE | REPLAY
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    from_bot: Mapped[int] = mapped_column(Integer)
+    to_bot: Mapped[int] = mapped_column(Integer)
+    symbol: Mapped[str] = mapped_column(String)
+    #: RECOVERY | VTURN_LOSS | BREAKOUT | FAST_MOVE | FAST_BACK
+    kind: Mapped[str] = mapped_column(String)
+    why: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[str | None] = mapped_column(String, nullable=True)
+    moved: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: The source bot's trade that closed just before it (if any).
+    trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: stock_regime JSON at that moment (choppy / trending).
+    regime: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class ArmLog(Base):
@@ -446,6 +475,10 @@ class BotConfig(Base):
     vturn_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     # After a V-turn exit at a loss, move the stock to Bot 2 like a recovery (slope_exit.vturn_handoff_on).
     vturn_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # After a stop-loss exit, move the stock: OFF | BACK (to the bot it came from) | BOT2 | BOT3 (stop_handoff.py).
+    stop_handoff: Mapped[str | None] = mapped_column(String, nullable=True, default="OFF")
+    # ... only when that stop closed at a loss (before charges).
+    stop_handoff_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (recovery.order_now).
     handoff_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Press Start by itself for this bot while it is STOPPED in PAPER and NSE is open (auto_start.py).

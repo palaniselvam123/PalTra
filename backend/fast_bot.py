@@ -61,6 +61,7 @@ log = logging.getLogger("sma.fastbot")
 TARGET_BOT = 5
 SOURCE_BOTS = (1, 2, 3, 4)
 RULES = ("MOVE", "SPEED", "EITHER")
+LOG_REPEAT_SEC = 600  # the same hand-off result is kept in the trail at most once per 10 minutes
 POLL_SEC = 5
 FLAT_WAIT_SEC = 6
 EXIT_REASON = "FAST_MOVE_HANDOFF"
@@ -370,7 +371,7 @@ class FastBot:
             else:
                 back = recovery.handoff(TARGET_BOT, name, h["live"], to_bot=h["from"], chop=False)
                 result = f"back to Bot {h['from']} after {h['opened']} Bot {TARGET_BOT} trade(s): {back}"
-            self._record(now, symbol=name, from_bot=TARGET_BOT, why="trades done", result=result)
+            self._record(now, symbol=name, from_bot=TARGET_BOT, to_bot=h["from"], live=h["live"], why="trades done", result=result)
             if target is not None:
                 target._signals[name] = f"{name} {result}"  # noqa: SLF001
                 target._alert(f"{name} {result}")  # noqa: SLF001
@@ -389,6 +390,31 @@ class FastBot:
         stamp = dt.datetime.fromtimestamp(now, IST).isoformat(timespec="seconds")
         self.recent.insert(0, {"at": stamp, **row})
         del self.recent[50:]
+        # The hand-off trail for the blotter (handoff_log.py; bookkeeping only).
+        import handoff_log
+
+        source = int(row.get("from_bot") or 0)
+        back = source == TARGET_BOT
+        key = (str(row.get("symbol") or ""), str(row.get("result") or ""))
+        logged = getattr(self, "_logged", None)
+        if logged is None:
+            logged = self._logged = {}
+        if now - logged.get(key, -1e18) < LOG_REPEAT_SEC:
+            return  # the same refusal again a few seconds later: one row is enough
+        logged[key] = now
+        if len(logged) > 500:
+            logged.clear()
+        handoff_log.record(
+            at=dt.datetime.fromtimestamp(now, IST),
+            mode="LIVE" if row.get("live") else "PAPER",
+            run_id=None,
+            from_bot=source,
+            to_bot=int(row.get("to_bot") or 0) if back else TARGET_BOT,
+            symbol=str(row.get("symbol") or ""),
+            kind="FAST_BACK" if back else "FAST_MOVE",
+            why=row.get("why"),
+            result=str(row.get("result") or ""),
+        )
 
     def candidates(self, engines: dict[int, object], s: Settings, now: float) -> list[tuple[object, str, object, str]]:
         """(source engine, stock, position, why) for each held stock moving fast its trade's way."""
@@ -445,12 +471,12 @@ class FastBot:
             if refused:
                 reason = f"Bot {TARGET_BOT}'s entry check says no: {refused}"
         if reason is not None:
-            self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=f"not moved: {reason}")
+            self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, result=f"not moved: {reason}")
             return f"{head}: not moved — {reason}"
         if s.keep_trade and source_live:
             # Two LIVE bots never hold one stock (one LIVE bot per stock); the trade is left where it is.
             reason = "keep mode: a LIVE trade cannot be held by two LIVE bots, so it is left alone"
-            self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=f"not moved: {reason}")
+            self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, result=f"not moved: {reason}")
             return f"{head}: not moved — {reason}"
         self.busy.add(symbol)
         try:
@@ -461,7 +487,7 @@ class FastBot:
                     closed = await src.close_symbol(symbol, reason=EXIT_REASON)
                 except ForceRefused as exc:
                     result = f"not moved: Bot {source_bot}'s trade could not be closed ({exc})"
-                    self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
+                    self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, result=result)
                     return f"{head}: {result}"
             if source_live and not s.keep_trade:
                 flat = False
@@ -472,7 +498,7 @@ class FastBot:
                     await asyncio.sleep(1)
                 if not flat:
                     result = f"{closed}; not moved: Groww still shows shares"
-                    self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
+                    self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, result=result)
                     src._alert(f"{head}: {result}")  # noqa: SLF001
                     return f"{head}: {result}"
             moved = recovery.handoff(
@@ -488,7 +514,7 @@ class FastBot:
                 self.handed[symbol] = {"from": source_bot, "live": source_live, "opened": 0, "keep": s.keep_trade}
             else:
                 result = f"{closed}; {moved}"
-                self._record(now, symbol=symbol, from_bot=source_bot, why=why, result=result)
+                self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, result=result)
                 src._alert(f"{head}: {result}")  # noqa: SLF001
                 return f"{head}: {result}"
             signal = "BULLISH" if side == "LONG" else "BEARISH"
@@ -503,7 +529,7 @@ class FastBot:
                 log.exception("fast-mover order failed for %s", symbol)
                 opened = f"not ordered: {exc}"
             result = f"{closed if s.keep_trade else f'Bot {source_bot} trade cut'}; Bot {TARGET_BOT} {word} at once — {opened}"
-            self._record(now, symbol=symbol, from_bot=source_bot, why=why, side=side, result=result)
+            self._record(now, symbol=symbol, from_bot=source_bot, live=source_live, why=why, side=side, result=result)
             text = f"{head}: {result}"
             target._signals[symbol] = text  # noqa: SLF001
             target._alert(text)  # noqa: SLF001

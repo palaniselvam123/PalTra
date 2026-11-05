@@ -78,6 +78,10 @@ import entry_candle
 import decel_guard
 import slope_exit
 import stop_plan
+import handoff_chain
+import handoff_log
+import stop_handoff
+import stock_regime
 import turn_entry
 import high52
 import level_check
@@ -339,6 +343,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
+    "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
@@ -2788,18 +2793,74 @@ class StrategyEngine:
             return  # the exit did not go through
         text = f"{symbol} recovery target hit — {note}"
         if recovery.handoff_on(cfg) and self.handoff is not None:
-            text += f"; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
+            text += f"; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction, kind='RECOVERY', why=note, trade_id=pos.trade_id)}"
             self._alert(text)
         self._signals[symbol] = text
 
-    async def _hand_to_chop_bot(self, symbol: str, live: bool, cfg: BotConfig | None = None, closed: str | None = None) -> str:
+    def _regime_at(self, cfg: BotConfig | None, symbol: str) -> dict | None:
+        """The stock's choppy / trending read now on this stock's own candle (stock_regime.py; display only)."""
+        if cfg is None:
+            return None
+        try:
+            return stock_regime.cached(
+                id(self), symbol, self._tapes.get(symbol), int(cfg.sma_fast), int(cfg.sma_slow), candle_minutes(cfg), self._now()
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _log_handoff(
+        self,
+        symbol: str,
+        to_bot: int,
+        kind: str,
+        why: str | None,
+        result: str,
+        cfg: BotConfig | None,
+        trade_id: int | None,
+        live: bool,
+    ) -> None:
+        """Keep the hand-off for the blotter and backtests (handoff_log.py); bookkeeping only."""
+        run_id = getattr(self, "run_id", None)
+        mode = "REPLAY" if run_id is not None else ("LIVE" if live else "PAPER")
+        try:
+            own = _cfg_for(cfg, symbol) if cfg is not None else None
+        except Exception:  # noqa: BLE001 - bookkeeping: a partial settings object reads as is
+            own = cfg
+        handoff_log.record(
+            at=self._now(),
+            mode=mode,
+            run_id=run_id,
+            # In a backtest that plays the hand-offs, the stock may already be playing as another bot.
+            from_bot=int((getattr(self, "_on_bot", None) or {}).get((symbol or "").upper(), self.bot_id)),
+            to_bot=to_bot,
+            symbol=symbol,
+            kind=kind,
+            why=why,
+            result=result,
+            trade_id=trade_id,
+            regime=self._regime_at(own, symbol),
+        )
+
+    async def _hand_to_chop_bot(
+        self,
+        symbol: str,
+        live: bool,
+        cfg: BotConfig | None = None,
+        closed: str | None = None,
+        kind: str = "RECOVERY",
+        why: str | None = None,
+        trade_id: int | None = None,
+    ) -> str:
         """Move a stock that just closed to Bot 2 (recovery.handoff); in LIVE only once Groww shows no shares.
 
         With `handoff_now` Bot 2 then orders at once the opposite way of the trade that closed (`closed`,
         its real side): no filters, its own stop and exits (recovery.order_now)."""
         if live and await self._groww_net(symbol) != 0:
-            return "no handoff: Groww still shows shares"
+            text = "no handoff: Groww still shows shares"
+            self._log_handoff(symbol, recovery.HANDOFF_BOT, kind, why, text, cfg, trade_id, live)
+            return text
         moved = self.handoff(self.bot_id, symbol, live)
+        self._log_handoff(symbol, recovery.HANDOFF_BOT, kind, why, moved, cfg, trade_id, live)
         if (
             moved.startswith("moved")
             and closed in ("LONG", "SHORT")
@@ -2848,6 +2909,9 @@ class StrategyEngine:
             self.handoff(self.bot_id, symbol, live, to_bot=breakout.TREND_BOT)
             if flat
             else "no handoff: Groww still shows shares"
+        )
+        self._log_handoff(
+            symbol, breakout.TREND_BOT, "BREAKOUT", note, moved, cfg, pos.trade_id if pos is not None else None, live
         )
         if moved.startswith("moved") and self.breakout_arrival is not None:
             bar = enriched.iloc[-2]
@@ -3571,6 +3635,7 @@ class StrategyEngine:
             stop_active=stop_active,
             flipped=flipped,
             entry_reason=why,
+            entry_regime=handoff_log.regime_json(self._regime_at(cfg, (cfg.symbol or "").upper())),
         )
         self.trades_today += 1
         self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
@@ -3984,6 +4049,38 @@ class StrategyEngine:
         if not hit:
             return
         await self._exit_now(cfg, fill_price, reason)
+        if reason in stop_handoff.STOP_REASONS and self.positions.get(symbol) is None:
+            await self._stop_handoff(cfg, symbol, pos, float(fill_price))
+
+    def _origin_bot(self, symbol: str) -> int | None:
+        """The bot a handed-off stock first came from (handoff_chain.py); None when it never moved."""
+        try:
+            row = handoff_chain.moved().get((symbol or "").upper())
+        except Exception:  # noqa: BLE001
+            return None
+        return int(row["origin"]) if row and row.get("origin") else None
+
+    async def _stop_handoff(self, cfg: BotConfig, symbol: str, pos: OpenPosition, price: float) -> None:
+        """After a stop-loss exit, move the stock to the bot set for it (stop_handoff.py): back, Bot 2 or Bot 3."""
+        if not stop_handoff.on(cfg) or self.handoff is None:
+            return
+        name = (symbol or "").upper()
+        if stop_handoff.loss_only(cfg) and not slope_exit.lost(pos.direction, float(pos.entry_price), price):
+            return  # a trailing stop that locked in a profit: the stock stays
+        current = int((getattr(self, "_on_bot", None) or {}).get(name, self.bot_id))
+        to_bot, why_not = stop_handoff.target(cfg, current, self._origin_bot(name))
+        live = (pos.mode or "PAPER").upper() == "LIVE"
+        if to_bot is None:
+            text = f"{name} stop-loss exit; {why_not}"
+        else:
+            if live and await self._groww_net(name) != 0:
+                moved = "no handoff: Groww still shows shares"
+            else:
+                moved = self.handoff(self.bot_id, name, live, to_bot=to_bot)
+            self._log_handoff(name, to_bot, stop_handoff.KIND, f"stop-loss exit at {price:.2f}", moved, cfg, pos.trade_id, live)
+            text = f"{name} stop-loss exit; {moved}"
+            self._alert(text)
+        self._signals[name] = text
 
     async def _real_exit_price(self, pos: OpenPosition, symbol: str) -> float:
         """The price Groww really closed a LIVE position at: the stop's own fill, else Groww's average
@@ -4373,7 +4470,8 @@ class StrategyEngine:
             and slope_exit.lost(pos.direction, pos.entry_price, price)
         ):
             # A losing V-turn: the stock goes to the chop bot, like a recovery (vturn_handoff).
-            text = f"{symbol} SMA 9 V-turn exit at a loss; {await self._hand_to_chop_bot(symbol, live, cfg, pos.direction)}"
+            moved = await self._hand_to_chop_bot(symbol, live, cfg, pos.direction, kind="VTURN_LOSS", why=note, trade_id=pos.trade_id)
+            text = f"{symbol} SMA 9 V-turn exit at a loss; {moved}"
             self._signals[symbol] = text
             self._alert(text)
 
@@ -4656,6 +4754,7 @@ class StrategyEngine:
         stop_active: bool = True,
         flipped: bool = False,
         entry_reason: str | None = None,
+        entry_regime: str | None = None,
     ) -> int:
         mode = (cfg.trading_mode or "PAPER").upper()
         run_id = getattr(self, "run_id", None)
@@ -4678,6 +4777,7 @@ class StrategyEngine:
                 stop_active=bool(stop_active),
                 flipped=bool(flipped),
                 entry_reason=entry_reason,
+                entry_regime=entry_regime,
                 bot=self.bot_id,
                 run_id=run_id,
                 book_seq=seq,
@@ -5188,6 +5288,13 @@ class StrategyEngine:
             "room_pct": room_pct,
         }
 
+    def _regime_of(self, cfg: BotConfig, symbol: str) -> dict | None:
+        """Choppy / trending read of one stock for the Stocks bar (display only, cached per closed candle)."""
+        own = stock_overrides(cfg, symbol)
+        fast = int(own.get("sma_fast") or cfg.sma_fast or 9)
+        slow = int(own.get("sma_slow") or cfg.sma_slow or 21)
+        return stock_regime.cached(id(self), symbol, self._tapes.get(symbol), fast, slow, candle_minutes(cfg, own), self._now())
+
     def snapshot(self) -> dict:
         # Serve the config the loop already loaded. A sqlite read on this
         # request path blocks every other page while the file is busy.
@@ -5222,6 +5329,7 @@ class StrategyEngine:
                 open_total += open_net or 0.0
                 open_gross_total += open_gross or 0.0
                 closed = closed_by.get(symbol, {"net": 0.0, "gross": 0.0, "trades": 0})
+                regime = self._regime_of(cfg, symbol) if cfg is not None else None
                 books.append(
                     {
                         "symbol": symbol,
@@ -5244,6 +5352,8 @@ class StrategyEngine:
                         "open_gross": open_gross,
                         "closed_gross": closed.get("gross", 0.0),
                         "day_gross": closed.get("gross", 0.0) + (open_gross or 0.0),
+                        # Choppy or trending on the bot's own candle (stock_regime.py; display only).
+                        "regime": regime,
                         # Groww's last refusal on this stock today, until an order fills.
                         "last_reject": self._rejects[symbol][0] if symbol in self._rejects else None,
                         "last_reject_at": self._rejects[symbol][1].strftime("%H:%M")
@@ -6585,6 +6695,7 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "exit_time": row.exit_time.isoformat() if row.exit_time else None,
         "exit_price": row.exit_price,
         "entry_reason": getattr(row, "entry_reason", None),
+        "entry_regime": handoff_log.parse(getattr(row, "entry_regime", None)),
         "stop_log": getattr(row, "stop_log", None),
         "exit_reason": row.exit_reason,
         "gross_pnl": row.gross_pnl,

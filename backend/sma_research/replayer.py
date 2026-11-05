@@ -75,6 +75,7 @@ BASELINE_OFF = {
     "turn_colour_exit": False,
     "day_extreme_guard": False,
     "vturn_handoff": False,
+    "stop_handoff": "OFF",
     "handoff_now": False,
     "pivot_target": "OFF",
     "stop_plan": False,

@@ -240,6 +240,10 @@ export type SmaConfig = {
   vturn_within?: number;
   /** After a V-turn exit at a loss, move the stock to Bot 2 (flipped, gap mode). */
   vturn_handoff?: boolean;
+  /** After a stop-loss exit, move the stock: back to the bot it came from, Bot 2 or Bot 3 (stop_handoff.py). */
+  stop_handoff?: "OFF" | "BACK" | "BOT2" | "BOT3";
+  /** ... only when that stop closed at a loss. */
+  stop_handoff_loss?: boolean;
   /** After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (no filters). */
   handoff_now?: boolean;
   /** Press Start by itself while STOPPED in PAPER and NSE is open (auto_start.py). Bots 1-4 only. */
@@ -1090,6 +1094,8 @@ export type SmaState = {
     open_gross?: number | null;
     closed_gross?: number;
     day_gross?: number;
+    /** Choppy or trending on the bot's own candle (stock_regime.py); null while the tape is too short. */
+    regime?: StockRegime | null;
     /** Groww's last refusal on this stock today (its own words), until an order fills. */
     last_reject?: string | null;
     last_reject_at?: string | null;
@@ -1465,6 +1471,8 @@ export type TradeRow = {
   stop_active?: boolean;
   /** Why the trade opened (SMA_CROSS, GAP_MODE, "JOIN_TREND:EXTREME_LIMIT", ...); null on older trades. */
   entry_reason?: string | null;
+  /** Choppy or trending when it opened (stock_regime.py at entry); null on older trades. */
+  entry_regime?: import("./trendAtEntry").TradeRegime | null;
   /** Staged stop plan moves, "; " separated (stop_plan.py). */
   stop_log?: string | null;
   exit_time: string | null;
@@ -1689,6 +1697,40 @@ export type ReplayRun = {
   days?: ReplayDayRow[];
   /** Per-stock split, on the run detail only. */
   stocks?: ReplayStockRow[];
+  /** Closed trades by the trend at entry (handoff_log.by_regime), on the run detail only. */
+  by_regime?: TrendGroupRow[];
+  /** Where each stock was handed during the run (handoff_log.rows), on the run detail only. */
+  handoff_trail?: HandoffRow[];
+};
+
+/** One group of closed trades by the trend at entry. */
+export type TrendGroupRow = {
+  group: import("./trendAtEntry").TrendGroup;
+  label: string;
+  trades: number;
+  wins: number;
+  win_pct: number | null;
+  gross: number;
+  net: number;
+};
+
+/** One hand-off of a stock between the SMA bots (handoff_log.py). */
+export type HandoffRow = {
+  id: number;
+  at: string | null;
+  day: string;
+  mode: string;
+  run_id: number | null;
+  from_bot: number;
+  to_bot: number;
+  symbol: string;
+  kind: "RECOVERY" | "VTURN_LOSS" | "BREAKOUT" | "FAST_MOVE" | "FAST_BACK" | string;
+  kind_words: string;
+  why: string | null;
+  result: string | null;
+  moved: boolean;
+  trade_id: number | null;
+  regime: import("./trendAtEntry").TradeRegime | null;
 };
 
 /** A replay run cut short with days still to play (GET /api/replay/resumable). */
@@ -2356,6 +2398,14 @@ export const smaApi = {
       20000
     ),
   /** When each stock was armed on / taken off a desk's Trade list on one IST day (arm_log.py). */
+  /** Stocks handed between the bots: a backtest run's (`runId`), else a market day's (handoff_log.py). */
+  handoffs: (q: { runId?: number; day?: string; bot?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.runId != null) p.set("run_id", String(q.runId));
+    if (q.day) p.set("day", q.day);
+    if (q.bot != null) p.set("bot", String(q.bot));
+    return request<{ run_id: number | null; day: string | null; rows: HandoffRow[] }>(`/api/handoffs?${p.toString()}`);
+  },
   armLog: (desk: string, day?: string) =>
     request<ArmLogDay>(`/api/arm-log?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`),
   /** The newest `limit` runs (server default 50, at most 500). */
@@ -2453,4 +2503,17 @@ export type RegimeStudy = {
   started_at: string | null;
   finished_at: string | null;
   report: RegimeReport | null;
+};
+
+/** Choppy or trending read of one armed stock (backend stock_regime.py, the Trend quality card's arithmetic). */
+export type StockRegime = {
+  minutes: number;
+  score: "TRENDING" | "MIXED" | "CHOPPY";
+  crosses: number;
+  phase: "BULL" | "BEAR" | "CHOP" | null;
+  phase_since: string | null;
+  phase_move_pct: number | null;
+  phase_candles: number;
+  strong_phases: number;
+  phases: { side: "BULL" | "BEAR" | "CHOP"; start: number; end: number }[];
 };

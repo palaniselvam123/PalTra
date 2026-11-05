@@ -48,6 +48,7 @@ from tick_sizes import round_price
 import all_bots_guard
 import fast_bot
 import handoff_chain
+import handoff_log
 import open_pnl_log
 import recovery
 from scalp_picks import PickRule, picks_for_day
@@ -425,7 +426,20 @@ class ReplayEngine(StrategyEngine):
     async def _fast_move(self, name: str, direction: str, why: str) -> None:
         await self._fast_move_inner(name, direction, why)
         note = self._signals.get(name, "")
-        self._note_fast(name, direction, why, note.split("): ", 1)[-1] if note else "", name in self._fast_moved)
+        result = note.split("): ", 1)[-1] if note else ""
+        moved = name in self._fast_moved
+        self._note_fast(name, direction, why, result, moved)
+        # The hand-off trail (handoff_log.py): in a replay the stock stays in this bot's book on Bot 5's settings.
+        self._log_handoff(
+            name,
+            fast_bot.TARGET_BOT,
+            "FAST_MOVE",
+            why,
+            (f"moved to Bot {fast_bot.TARGET_BOT}'s settings (replay) — {result}" if moved else result or "not moved"),
+            self._cfg_cache,
+            None,
+            False,
+        )
 
     async def _fast_move_inner(self, name: str, direction: str, why: str) -> None:
         raw = dict(self.fast.get("settings") or {})
@@ -475,6 +489,13 @@ class ReplayEngine(StrategyEngine):
             return
         self._on_bot[name] = to_bot
         self._chain_fields[name] = fields
+
+    def _origin_bot(self, symbol: str) -> int | None:
+        """In a backtest that plays the hand-offs, "back" is the replayed bot (stop_handoff.py)."""
+        if getattr(self, "chain", None) is not None:
+            name = (symbol or "").upper()
+            return self.bot_id if self._on_bot.get(name, self.bot_id) != self.bot_id else None
+        return super()._origin_bot(symbol)
 
     def _chain_hand_off(self, from_bot: int, symbol: str, to_bot: int) -> str:
         """Play a hand-off inside this backtest (handoff_chain.py): the stock stays and trades with the target bot's
@@ -770,7 +791,8 @@ def _drop_unfinished_days(run_id: int, days: list[str]) -> int:
                 ReviewLog.created_at < start + dt.timedelta(days=1),
             ).delete(synchronize_session=False)
         db.commit()
-        return int(n)
+    handoff_log.delete_run(run_id, days)
+    return int(n)
 
 
 def _day_rows(trades: list[TradeLog]) -> list[dict]:
@@ -944,6 +966,9 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     if with_days:
         out["days"] = day_rows
         out["stocks"] = _stock_rows(trades, out["symbols"])
+        # Choppy / trending at each trade's entry, and where each stock was handed (handoff_log.py; display only).
+        out["by_regime"] = handoff_log.by_regime(trades)
+        out["handoff_trail"] = handoff_log.rows(run_id=run.id)
     return out
 
 
@@ -1026,6 +1051,7 @@ def run_trades(run_id: int, symbol: str | None = None) -> list[dict] | None:
                 "exit_price": r.exit_price,
                 "exit_reason": r.exit_reason,
                 "entry_reason": getattr(r, "entry_reason", None),
+                "entry_regime": handoff_log.parse(getattr(r, "entry_regime", None)),
                 "gross_pnl": r.gross_pnl,
                 "charges": r.brokerage_and_taxes,
                 "net_pnl": r.net_pnl,
@@ -1054,6 +1080,7 @@ def delete_run(run_id: int) -> bool:
         db.query(ReviewLog).filter(ReviewLog.run_id == run_id).delete()
         db.delete(run)
         db.commit()
+    handoff_log.delete_run(run_id)
     _RUN_CACHE.pop(run_id, None)
     open_pnl_log.delete_replay(run_id)
     return True

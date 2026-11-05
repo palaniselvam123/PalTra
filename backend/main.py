@@ -45,6 +45,7 @@ import fast_move
 import level_check
 import news_entry
 import arm_log
+import handoff_log
 import chop_auto
 import chop_scan
 import high52
@@ -71,6 +72,7 @@ import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
 import entry_candle as entry_candle_mod
 import slope_exit as slope_mod
+import stop_handoff as stop_handoff_mod
 import stop_plan as stop_plan_mod
 import decel_guard as decel_mod
 import recovery as recovery_mod
@@ -700,6 +702,8 @@ class ConfigUpdate(BaseModel):
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
     vturn_handoff: bool | None = None
+    stop_handoff: Literal["OFF", "BACK", "BOT2", "BOT3"] | None = None
+    stop_handoff_loss: bool | None = None
     handoff_now: bool | None = None
     auto_start: bool | None = None
     pivot_target: Literal["OFF", "R1", "R2"] | None = None
@@ -1685,6 +1689,8 @@ def _gap_dict(row) -> dict:
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),
         "vturn_handoff": bool(getattr(row, "vturn_handoff", False)),
+        "stop_handoff": stop_handoff_mod.choice(row),
+        "stop_handoff_loss": stop_handoff_mod.loss_only(row),
         "handoff_now": recovery_mod.handoff_now_on(row),
         "auto_start": bool(getattr(row, "auto_start", False)),
         "pivot_target": pivots.target_mode(row),
@@ -3373,6 +3379,21 @@ async def arm_log_day(
     return {"desk": desk, "day": pick.isoformat(), "rows": rows, "stocks": stocks}
 
 
+@app.get("/api/handoffs")
+async def handoffs(
+    run_id: int | None = Query(None, ge=1),
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    mode: Literal["PAPER", "LIVE", "paper", "live"] | None = None,
+    bot: int | None = Query(None, ge=1, le=5),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """Stocks handed between the bots (recovery / V-turn → Bot 2, breakout → Bot 3, fast move ↔ Bot 5), newest first:
+    a backtest run's (`run_id`), else a market day's (today when none). Bookkeeping only (handoff_log.py)."""
+    pick = None if run_id is not None else (day or dt.datetime.now(IST).date().isoformat())
+    rows = await asyncio.to_thread(handoff_log.rows, run_id=run_id, day=pick, mode=mode, bot=bot, limit=limit)
+    return {"run_id": run_id, "day": pick, "rows": rows}
+
+
 @app.get("/api/open-pnl/replays")
 async def open_pnl_replays(bot: int = Query(1, ge=1, le=5)):
     """A bot's replay runs that have an open P&L log (newest first). Read-only."""
@@ -3713,6 +3734,7 @@ async def trades_csv(mode: str = ""):
         "atr_at_entry",
         "sl_trigger_price",
         "entry_reason",
+        "trend_at_entry",
         "stop_log",
         "exit_time",
         "exit_price",
@@ -3728,7 +3750,7 @@ async def trades_csv(mode: str = ""):
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row)
+        writer.writerow({**row, "trend_at_entry": handoff_log.trend_text(row.get("entry_regime"), row.get("direction"))})
     buffer.seek(0)
     return StreamingResponse(
         iter([buffer.getvalue()]),
