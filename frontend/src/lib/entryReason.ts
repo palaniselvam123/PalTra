@@ -48,18 +48,33 @@ const FILL: Record<string, [string, string]> = {
   CANDLE_CONFIRM: ["candle confirmed", "filled once the entry candle went the trade's way (past its open)"],
 };
 
+/** A backtest trade played as another bot after a hand-off ends "@B2" / "@B3" (handoff_chain.tag). */
+function playedAs(code: string): [string, number | null] {
+  const m = /^(.*)@B(\d)$/.exec(code);
+  return m ? [m[1], Number(m[2])] : [code, null];
+}
+
+/** The bot a backtest trade was played as after a hand-off ("…@B2" → 2), else null. */
+export function entryPlayedAs(code: string | null | undefined): number | null {
+  return code ? playedAs(code)[1] : null;
+}
+
 /** Short label, e.g. "SMA cross · limit"; null for older trades with no reason saved. */
 export function entryReasonShort(code: string | null | undefined): string | null {
   if (!code) return null;
-  const [base, how] = code.split(":");
+  const [plain, bot] = playedAs(code);
+  const [base, how] = plain.split(":");
   const label = ENTRY_SHORT[base] ?? base.replace(/_/g, " ").toLowerCase();
-  return how ? `${label} · ${FILL[how]?.[0] ?? how.toLowerCase()}` : label;
+  const text = how ? `${label} · ${FILL[how]?.[0] ?? how.toLowerCase()}` : label;
+  return bot ? `${text} · as Bot ${bot}` : text;
 }
 
 /** Full sentence for a tooltip. */
 export function entryReasonLong(code: string | null | undefined): string | null {
   if (!code) return null;
-  const [base, how] = code.split(":");
+  const [plain, bot] = playedAs(code);
+  const [base, how] = plain.split(":");
   const text = ENTRY_LONG[base] ?? base.replace(/_/g, " ").toLowerCase();
-  return how ? `${text}; ${FILL[how]?.[1] ?? how.toLowerCase()}` : text;
+  const out = how ? `${text}; ${FILL[how]?.[1] ?? how.toLowerCase()}` : text;
+  return bot ? `${out}. Played as Bot ${bot} in this backtest: the stock had been handed to Bot ${bot}, so its settings were used` : out;
 }

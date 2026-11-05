@@ -769,8 +769,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_recovery_blocked`); still held at the entry cut-off → `SQUARE_OFF_CUTOFF`. A LIVE position restored without its
   stop id is left to that stop. **Handoff** (`recovery_handoff`, on by default once recovery hold is on): after a
   recovery target, on the live bots (`bots.register` sets `engine.handoff`) and in replays (`ReplaySession` sets
-  `ReplayEngine._hand_off`, so the owner can check it after hours: practice money, so it never arms a LIVE Bot 2; the
-  stock leaves the rest of the run, `ReplaySession.handed_off`; research never moves a stock), and in LIVE only once
+  `ReplayEngine._hand_off`; with the replay's "Play hand-offs" off (`ReplayStart.play_handoffs`, on by default) it
+  really moves: practice money, so it never arms a LIVE Bot 2; the stock leaves the rest of the run,
+  `ReplaySession.handed_off`; with it on, see `backend/handoff_chain.py`; research never moves a stock), and in LIVE only once
   Groww shows no shares, `recovery.handoff` takes the stock off the source bot's Trade
   list and arms it on Bot 2 (`HANDOFF_BOT`) with its own settings (`HANDOFF_SETTINGS`: flipped, gap mode ±0.119 in /
   ±0.003 out with the slow-SMA fade confirmation, VWAP, RSI 40-70 / 30-60); Bot 2 waits for its next cross
@@ -781,6 +782,29 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `direct_order` as its own task the opposite way of the closed trade's real side (a losing short → Bot 2 buys; entry reason
   `HANDOFF`): no cross, gap mode, entry filter, ADX or flip is read; Bot 2 must be RUNNING, and market hours, its cut-off,
   trade cap, loss lock and one LIVE bot per stock (in `_open`) apply; the result goes to Bot 2's alert and signal line. The stock research baseline keeps them off.
+- `backend/handoff_chain.py` – where handed-off stocks go back to, and backtests that play the hand-offs (owner's
+  request: Bot 1's list only shrank, and a Bot 1 replay never showed Bot 2 / Bot 3 at work). **Send back at the end of
+  the day** (`on`, off by default, `at` 15:35 IST; `handoff_return.json` next to the SMA DB, `HANDOFF_RETURN_FILE`):
+  `recovery.handoff` notes every hand-off between Bots 1-4 (`note`: the stock's origin, kept through Bot 1 → Bot 2 →
+  Bot 3; a stock handed home is dropped; Bot 5's fast-mover hand-offs are not noted); `run` (desk only, started in
+  `boot_engine`, not with `server_role.no_orders()`, every `POLL_SEC` 60 s) once `due` (after `at`, before 09:00, or a
+  weekend) moves each noted stock that its bot does not hold off that bot and back onto its origin's Trade list
+  (`send_back` → `send_back_one`, source chip "Back from Bot N", one LIVE bot per stock checked; the origin
+  `hold_for_next_cross`). Arming only, no order. `GET/PUT /api/bots/handoff-return`, `POST /api/bots/handoff-return/now`;
+  Settings → Bots, "Hand-offs: send stocks back at the end of the day" (`components/Settings/HandoffReturn.tsx`).
+  **Backtests** (`ReplayStart.play_handoffs`, on by default; the replay bar's "Play hand-offs (Bot 2 / Bot 3)"; saved as
+  `play_handoffs` and the run's `chain` snapshot, `replay_snapshot`: Bot 2's and Bot 3's strategy fields and per-stock
+  settings plus `return_eod`, so Resume plays the same): a recovery / losing V-turn hand-off to Bot 2 or a breakout to
+  Bot 3 no longer drops the stock: `ReplayEngine._chain_hand_off` keeps it in the run on the target bot's settings
+  (`overrides`: that bot's fields and its own per-stock settings, plus `recovery.HANDOFF_SETTINGS` for Bot 2; merged as
+  a stock override in `load_config`, `_on_bot` / `_chain_fields`), waiting for its next cross; Bot 3's breakout
+  arrival (`_chain_arrival` → `queue_breakout_entry`) and Bot 2's `handoff_now` order (`_chain_order`, run after the
+  tick) are played on the same engine. The live Trade lists are not touched. Trades opened on another bot's settings
+  carry that bot in their entry reason (`handoff_chain.tag`: "SMA_CROSS@B2"; `lib/entryReason.ts` shows "· as Bot 2"),
+  the run's `handoffs` totals per bot (`replay._handoff_part`, shown on the Backtests run), and `ReplayInfo.chain`
+  (`on_bot`, `log`) on the replay bar. Each replayed day carries the stocks where the last ended
+  (`ReplaySession.chain_on`), or starts them all back on the replayed bot when send-back is on. A run saved without
+  `chain` plays the old way.
 - `backend/breakout.py` – trend breakout handoff, the reverse of the recovery handoff (`breakout_handoff`, off by
   default, per bot and per stock, PAPER and LIVE; meant for the chop bot, Bot 2; a hand-off does not tick it, so a
   moved stock follows Bot 2's own setting). On each newly closed candle of an armed stock (the bot's own candle; not the

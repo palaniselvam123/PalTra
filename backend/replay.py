@@ -47,6 +47,7 @@ from strategy_engine import (
 from tick_sizes import round_price
 import all_bots_guard
 import fast_bot
+import handoff_chain
 import open_pnl_log
 import recovery
 from scalp_picks import PickRule, picks_for_day
@@ -261,8 +262,17 @@ class ReplayEngine(StrategyEngine):
         settings: dict | None = None,
         arm_windows: dict[str, list[tuple[int, int]]] | None = None,
         fast: dict | None = None,
+        chain: dict | None = None,
+        on_bot: dict[str, int] | None = None,
     ):
         self.feed = feed
+        # Play the hand-offs (handoff_chain.py): a stock handed to Bot 2 / Bot 3 stays in the run and trades
+        # with that bot's settings from the run's snapshot. None = the old way (dropped from the run).
+        self.chain = chain
+        self._on_bot: dict[str, int] = {}
+        self._chain_fields: dict[str, dict] = {}
+        self._chain_orders: list[tuple[str, str]] = []
+        self.chain_log: list[dict] = []
         # Fast-mover hand-off to Bot 5 (fast_bot.replay_snapshot): None = off for this run.
         self.fast = fast
         self._fast_watch = None
@@ -289,6 +299,11 @@ class ReplayEngine(StrategyEngine):
         # Set by ReplaySession: a "Recovered" exit moves the stock to Bot 2 (recovery.py).
         self.on_handoff = None
         super().__init__(broker=ReplayBroker(feed))
+        if chain is not None:
+            self.breakout_arrival = self._chain_arrival
+            self.handoff_order = self._chain_order
+            for name, to_bot in (on_bot or {}).items():
+                self._play_as(name, int(to_bot))
         self._session_date = feed.clock.date().isoformat()
         with session_factory()() as db:
             top = db.query(TradeLog.id).order_by(TradeLog.id.desc()).first()
@@ -312,6 +327,15 @@ class ReplayEngine(StrategyEngine):
                     self._skip_cross_until[name] = None
             self._armed_before = armed
         await super().tick(now)
+        while self._chain_orders:
+            # Bot 2 orders at once after a hand-off (handoff_now), played here after the tick that moved it.
+            name, direction = self._chain_orders.pop(0)
+            signal = "BULLISH" if direction == "LONG" else "BEARISH"
+            try:
+                opened = await self.direct_order(name, signal, why="HANDOFF", note=f"hand-off to Bot {self._on_bot.get(name, self.bot_id)}")
+            except ForceRefused as exc:
+                opened = f"not ordered: {exc}"
+            self._signals[name] = f"{name}: Bot {self._on_bot.get(name, self.bot_id)} at once — {opened}"
         if self.fast and self.status == "RUNNING":
             await self._fast_replay(now)
         if self.day_guard and self.status != "HALTED":
@@ -442,13 +466,59 @@ class ReplayEngine(StrategyEngine):
             opened = f"not ordered: {exc}"
         self._signals[name] = f"{name} fast move ({why}): cut; Bot {fast_bot.TARGET_BOT}'s settings {opened}"
 
+    def _play_as(self, symbol: str, to_bot: int) -> None:
+        name = (symbol or "").upper()
+        fields = handoff_chain.overrides(self.chain, to_bot, name, self.bot_id)
+        if to_bot == self.bot_id and not fields:
+            self._on_bot.pop(name, None)
+            self._chain_fields.pop(name, None)
+            return
+        self._on_bot[name] = to_bot
+        self._chain_fields[name] = fields
+
+    def _chain_hand_off(self, from_bot: int, symbol: str, to_bot: int) -> str:
+        """Play a hand-off inside this backtest (handoff_chain.py): the stock stays and trades with the target bot's
+        settings from now on. The live Trade lists are not touched."""
+        name = (symbol or "").upper()
+        to_bot = int(to_bot)
+        current = self._on_bot.get(name, self.bot_id)
+        if current == to_bot:
+            return f"already on Bot {to_bot}: no handoff"
+        self._play_as(name, to_bot)
+        self.hold_for_next_cross([name])
+        self.chain_log.append(
+            {"at": self._now().strftime("%H:%M"), "day": self._session_date, "symbol": name, "from_bot": current, "to_bot": to_bot}
+        )
+        del self.chain_log[:-200]
+        return f"moved to Bot {to_bot} (played in this backtest) — waits for its next cross"
+
+    def _chain_arrival(self, to_bot: int, symbol: str, arrival) -> str:
+        """Bot 3 enters on the breakout's side at once (breakout.arrive on the live bots), here on this engine."""
+        self.queue_breakout_entry(symbol, arrival)
+        side = "buy" if arrival.direction == "LONG" else "sell"
+        return f"Bot {to_bot} will {side} on a pullback to {arrival.limit:.2f}"
+
+    def _chain_order(self, to_bot: int, symbol: str, direction: str) -> str:
+        """Bot 2 orders at once (handoff_now, recovery.order_now on the live bots), after this tick."""
+        self._chain_orders.append(((symbol or "").upper(), direction))
+        return f"Bot {to_bot} {'buys' if direction == 'LONG' else 'sells'} at once"
+
+    async def _open(self, direction, cross_price, atr, cfg, now, why: str = "SMA_CROSS") -> None:
+        played = self._on_bot.get((cfg.symbol or "").upper())
+        if played is not None and played != self.bot_id:
+            why = handoff_chain.tag(why, played)  # this trade is the other bot's, played in the backtest
+        await super()._open(direction, cross_price, atr, cfg, now, why=why)
+
     def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT) -> str:  # noqa: ARG002
-        """Hand-off in a replay: the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).
+        """Hand-off in a replay. With "Play hand-offs" on (`chain`), it is played inside the run (`_chain_hand_off`).
+        Off, the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).
 
         The owner checks the hand-off after hours on replays. Practice money only, so a
         LIVE target bot is never armed. The stock is then dropped from the rest of this replay,
         as the bot it left would stop trading it.
         """
+        if getattr(self, "chain", None) is not None:
+            return self._chain_hand_off(from_bot, symbol, to_bot)
         text = recovery.handoff(from_bot, symbol, source_live=False, to_bot=to_bot)
         if text.startswith("moved"):
             name = (symbol or "").upper()
@@ -469,6 +539,12 @@ class ReplayEngine(StrategyEngine):
                     data[name] = value if isinstance(value, str) else json.dumps(value or {})
                 elif name in data and name not in ("id", "symbol", "trade_symbols", "trading_mode"):
                     data[name] = value
+        if self._chain_fields:
+            # A stock handed to Bot 2 / Bot 3 in this backtest plays with that bot's settings (handoff_chain.py).
+            own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
+            for name, fields in self._chain_fields.items():
+                own[name] = {**own.get(name, {}), **fields}
+            data["stock_settings"] = json.dumps(own)
         if self._fast_moved:
             # A stock the fast-mover hand-off moved plays the rest of the day on Bot 5's settings.
             own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
@@ -825,6 +901,28 @@ def _fast_move_part(trades: list[TradeLog]) -> dict | None:
     }
 
 
+def _handoff_part(trades: list[TradeLog]) -> list[dict] | None:
+    """Played hand-offs (handoff_chain.py): closed trades per bot they were played as (Bot 2, Bot 3). None when none."""
+    groups: dict[int, list[TradeLog]] = {}
+    for t in trades:
+        bot = handoff_chain.played_as(t.entry_reason)
+        if bot is not None and t.exit_time is not None:
+            groups.setdefault(bot, []).append(t)
+    if not groups:
+        return None
+    return [
+        {
+            "bot": bot,
+            "trades": len(rows),
+            "stocks": len({(t.symbol or "").upper() for t in rows}),
+            "gross": round(sum(float(t.gross_pnl or 0) for t in rows), 2),
+            "net": round(sum(float(t.net_pnl or 0) for t in rows), 2),
+            "wins": sum(1 for t in rows if (t.gross_pnl or 0) > 0),
+        }
+        for bot, rows in sorted(groups.items())
+    ]
+
+
 def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
     day_rows = _day_rows(trades)
     out = {
@@ -841,6 +939,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         "totals": _totals(day_rows),
         "capital": _capital(trades),
         "fast_move": _fast_move_part(trades),
+        "handoffs": _handoff_part(trades),
     }
     if with_days:
         out["days"] = day_rows
@@ -994,6 +1093,10 @@ class ReplaySession:
     universe: list[str] = field(default_factory=list)
     #: Stocks a "Recovered" exit moved to Bot 2 during this run (recovery.py); not traded after it.
     handed_off: list[str] = field(default_factory=list)
+    #: "Play hand-offs" (handoff_chain.py): which bot each handed-off stock plays as, carried from day to day
+    #: (unless stocks go back at the end of the day), and each hand-off of the run.
+    chain_on: dict[str, int] = field(default_factory=dict)
+    chain_log: list[dict] = field(default_factory=list)
     _settings: dict = field(default_factory=dict)
     engine: ReplayEngine | None = None
     _task: asyncio.Task | None = None
@@ -1036,10 +1139,22 @@ class ReplaySession:
             "total": len(self.universe or self.symbols) + len(self.skipped) if self.status != "LOADING" else self._want,
             "error": self.error,
             "handed_off": self.handed_off,
+            "chain": self._chain_info(),
             "pick_rule": self.rule.as_dict() if self.rule is not None else None,
             "picks": self.picks,
             # Where a seek is heading (fast-forward or, after a rewind, the restarted day catching up), else None.
             "seeking": (self._rewind or self._seek).isoformat() if (self._rewind or self._seek) else None,
+        }
+
+    def _chain_info(self) -> dict | None:
+        if not isinstance(self._settings.get("chain"), dict):
+            return None
+        eng = self.engine
+        live = list(eng.chain_log) if eng is not None else []
+        return {
+            "on_bot": dict(eng._on_bot) if eng is not None else dict(self.chain_on),  # noqa: SLF001
+            "log": (self.chain_log + live)[-200:],
+            "return_eod": bool(self._settings["chain"].get("return_eod")),
         }
 
     async def begin(
@@ -1059,6 +1174,7 @@ class ReplaySession:
         self.bot, self.bot_name = int(bot), bot_name or f"Bot {int(bot)}"
         self.rule, self.picks, self.universe = rule, {}, []
         self.handed_off = []
+        self.chain_on, self.chain_log = {}, []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = day, end_day or day, start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
@@ -1097,6 +1213,7 @@ class ReplaySession:
         self.bot, self.bot_name = bot, bot_name
         self.rule, self.picks, self.universe = None, {}, []
         self.handed_off = []
+        self.chain_on, self.chain_log = {}, []
         self.status = "LOADING"
         self.day, self.end_day, self.start, self.speed = all_days[done], all_days[-1], start, speed
         self.symbols, self.skipped, self.loaded, self.error = [], [], 0, ""
@@ -1173,6 +1290,9 @@ class ReplaySession:
             fast = fast_bot.replay_snapshot(self.bot)
             if fast:
                 settings = {**settings, "fast_bot": fast}
+            if settings.get("play_handoffs"):
+                # Bot 2's and Bot 3's settings as they are now, so the hand-offs play the same on Resume.
+                settings = {**settings, "chain": handoff_chain.replay_snapshot(self.bot)}
         self._settings = settings
         if resume is not None:
             self.run_id = resume[0]
@@ -1201,6 +1321,14 @@ class ReplaySession:
         snap = SimpleNamespace(**settings)
         bars = {name: frame_bars(settings_for(snap, name)) for name in frames}
         fast_snap = settings.get("fast_bot") if isinstance(settings.get("fast_bot"), dict) else None
+        chain_snap = settings.get("chain") if isinstance(settings.get("chain"), dict) else None
+        if chain_snap:
+            # A handed-off stock may switch to Bot 2's / Bot 3's candle size: hand enough bars for any of them.
+            for name in frames:
+                for n in handoff_chain.PLAYED_BOTS:
+                    played = handoff_chain.overrides(chain_snap, n, name, self.bot)
+                    if played:
+                        bars[name] = max(bars[name], frame_bars(SimpleNamespace(**{**vars(settings_for(snap, name)), **played})))
         if fast_snap:
             # A moved stock may switch to Bot 5's candle size: hand enough bars for either.
             for name in frames:
@@ -1239,12 +1367,17 @@ class ReplaySession:
                 self._mark_run(days_done=index + 1)
                 continue
             self.symbols = symbols
+            # Played hand-offs: each day starts where the last ended, or back on this bot with "send back".
+            if chain_snap and chain_snap.get("return_eod"):
+                self.chain_on = {}
+            day_on = {k: v for k, v in self.chain_on.items() if k in symbols}
             while True:
                 clock = dt.datetime.combine(day, start, tzinfo=IST)
                 feed.clock = clock
                 # A fresh engine per day: its own trade count, loss limit and P&L.
                 engine = ReplayEngine(
-                    feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap
+                    feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap,
+                    chain=chain_snap, on_bot=day_on,
                 )
                 engine.handoff = engine._hand_off
                 engine.on_handoff = lambda name: self.handed_off.append(name)
@@ -1275,6 +1408,10 @@ class ReplaySession:
                     self._seek = target
                     continue
                 break
+            if chain_snap:
+                self.chain_on = dict(engine._on_bot)  # noqa: SLF001
+                self.chain_log = (self.chain_log + engine.chain_log)[-200:]
+                engine.chain_log = []
             self._mark_run(days_done=index + 1)
         self._mark_run(status="FINISHED")
         self.status = "FINISHED"

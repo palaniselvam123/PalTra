@@ -56,6 +56,10 @@ export default function StockChartPage() {
   const [desk, setDeskName] = useState<Desk>("live");
   useTitle(symbol ? `${symbol} · SMA chart · PalTra` : "SMA chart · PalTra");
   const following = useRef(false);
+  // A past replay run's own candle size (its saved settings, that stock's own setting first): the live state on
+  // this page belongs to the desk's bot, not to the run, so a finished run would otherwise read as 1 minute.
+  const [runCandle, setRunCandle] = useState<number | null>(null);
+  const [live, setLive] = useState(false);
   // The replay this page follows is still loading its candles (its chart answers 409 until it starts).
   const loadingRef = useRef(false);
   const bars = useRef(400);
@@ -80,6 +84,20 @@ export default function StockChartPage() {
     setResearch(p.research);
     // A past replay day shows at once; it switches to following if that run is still playing.
     if (p.date) setPin({ seq: 1, date: p.date, runId: p.runId, symbol: name });
+    if (p.runId != null) {
+      smaApi
+        .replayRun(p.runId)
+        .then((run) => {
+          const s = run.settings as Record<string, unknown>;
+          const stocks = (s.stock_settings && typeof s.stock_settings === "object" ? s.stock_settings : {}) as Record<
+            string,
+            Record<string, unknown> | undefined
+          >;
+          const size = Number(stocks[name]?.candle_minutes ?? s.candle_minutes ?? 1);
+          setRunCandle(Number.isFinite(size) && size > 0 ? size : 1);
+        })
+        .catch(() => undefined);
+    }
   }, []);
 
   const poll = useCallback(async (n: number) => {
@@ -109,6 +127,7 @@ export default function StockChartPage() {
       }
     }
     following.current = follow;
+    setLive(follow);
     if (follow) {
       try {
         const [next, nextChart] = await Promise.all([smaApi.state(), smaApi.chart(bars.current, p.symbol, barInterval.current)]);
@@ -209,7 +228,11 @@ export default function StockChartPage() {
         ) : (
           <StrategyChart
             chart={chart}
-            state={stateForSymbol(state, symbol) ?? ({ symbol } as SmaState)}
+            state={
+              runCandle != null && !live
+                ? { ...(stateForSymbol(state, symbol) ?? ({ symbol } as SmaState)), candle_minutes: runCandle }
+                : stateForSymbol(state, symbol) ?? ({ symbol } as SmaState)
+            }
             trades={chartTrades}
             allTrades={trades}
             pin={pin}

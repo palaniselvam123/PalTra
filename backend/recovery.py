@@ -260,6 +260,11 @@ def handoff(
     except Exception as exc:  # noqa: BLE001
         log.exception("recovery handoff failed for %s", name)
         return f"no handoff: {exc}"
+    if not keep_source:
+        import handoff_chain
+
+        # Where it came from, so "send back at the end of the day" can return it (handoff_chain.py).
+        handoff_chain.note(int(from_bot), to_bot, name)
     engine = bots.engines().get(to_bot)
     if engine is not None:
         # The cross already on the tape is not traded: Bot 2 waits for its next one.

@@ -53,6 +53,7 @@ import carry_scan
 import groww_pressure
 import open_pnl_log
 import pnl_dashboard
+import handoff_chain
 import scan_accuracy
 import scan_history
 import scan_sync
@@ -313,6 +314,7 @@ _bot_tasks: list[asyncio.Task] = []
 _guard_task: asyncio.Task | None = None
 _pnl_alert_task: asyncio.Task | None = None
 _auto_start_task: asyncio.Task | None = None
+_handoff_return_task: asyncio.Task | None = None
 
 
 def boot_engine() -> asyncio.Task | None:
@@ -371,11 +373,13 @@ def boot_engine() -> asyncio.Task | None:
         # Fast-mover hand-off (fast_bot.py): a held stock running its trade's way moves to Bot 5.
         fast_bot.watcher.start(_bots_by_number)
     # Auto-start (auto_start.py): presses Start for a STOPPED PAPER bot with it on while NSE is open.
-    global _auto_start_task
+    global _auto_start_task, _handoff_return_task
     if not server_role.no_orders():
         _auto_start_task = asyncio.create_task(
             auto_start.run(_all_bots, _start_bot, lambda: market_is_open(engine._now()))
         )
+        # Send handed-off stocks back to the bot they came from after the close (handoff_chain.py); off by default.
+        _handoff_return_task = asyncio.create_task(handoff_chain.run(bots_mod.engines, engine._now))
     return _task
 
 
@@ -486,7 +490,7 @@ def stop_engine() -> None:
     research_engine.stop()
     for eng in bot_engines.values():
         eng.stop()
-    for task in (_task, _research_task, _guard_task, _pnl_alert_task, _auto_start_task, _bt_bot1_task, *_bot_tasks):
+    for task in (_task, _research_task, _guard_task, _pnl_alert_task, _auto_start_task, _handoff_return_task, _bt_bot1_task, *_bot_tasks):
         if task is not None and not task.done():
             task.cancel()
 
@@ -2048,6 +2052,34 @@ async def backtest_idle(body: IdleUpdate):
     return backtest_server.status(replays)
 
 
+class HandoffReturnUpdate(BaseModel):
+    on: bool
+    at: str | None = None
+
+
+@app.get("/api/bots/handoff-return")
+async def handoff_return_get():
+    """Send handed-off stocks back to the bot they came from at the end of the day (handoff_chain.py)."""
+    return await asyncio.to_thread(handoff_chain.state)
+
+
+@app.put("/api/bots/handoff-return")
+async def handoff_return_put(body: HandoffReturnUpdate):
+    """Turn the end-of-day send-back on or off (arming only: no order is placed)."""
+    try:
+        await asyncio.to_thread(handoff_chain.save, body.on, body.at)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await asyncio.to_thread(handoff_chain.state)
+
+
+@app.post("/api/bots/handoff-return/now")
+async def handoff_return_now():
+    """Send every handed-off stock that is flat back now, whatever the time (arming only)."""
+    lines = await asyncio.to_thread(handoff_chain.send_back, bots_mod.engines())
+    return {**(await asyncio.to_thread(handoff_chain.state)), "lines": lines}
+
+
 class AutoSyncUpdate(BaseModel):
     on: bool
 
@@ -2256,6 +2288,9 @@ class ReplayStart(BaseModel):
     #: Replay as armed (arm_log.py): the stocks this bot had armed on those days, each traded
     #: only while it was armed live, from 09:15. `symbols` is ignored then.
     as_armed: bool = False
+    #: Play the hand-offs (handoff_chain.py): a stock handed to Bot 2 / Bot 3 stays in the run and trades with
+    #: that bot's settings, and the live Trade lists are not touched. Off = dropped from the run (and moved live).
+    play_handoffs: bool = True
 
 
 class ScalpPickStart(BaseModel):
@@ -2422,6 +2457,7 @@ async def replay_start(body: ReplayStart):
             "bot": body.bot,
             "bot_name": bot_label,
             **({"as_armed": True} if body.as_armed else {}),
+            **({"play_handoffs": True} if body.play_handoffs else {}),
         },
         bot=body.bot,
         bot_name=bot_label,
