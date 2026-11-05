@@ -317,6 +317,17 @@ def replay_runs(bot: int, limit: int = 100) -> list[dict]:
     return [dict(r) for r in out]
 
 
+def all_replay_runs(limit: int = 200) -> list[dict]:
+    """Every bot's replay runs with recorded points, newest first (the P&L dashboard's run picker)."""
+    with _lock, _connect() as con:
+        out = con.execute(
+            "SELECT run_id, MIN(bot) AS bot, MIN(day) AS first, MAX(day) AS last, COUNT(DISTINCT day) AS days,"
+            " COUNT(*) AS points, MAX(saved_at) AS saved_at FROM replay_pnl GROUP BY run_id ORDER BY run_id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    return [dict(r) for r in out]
+
+
 def replay_days(run_id: int) -> list[dict]:
     with _lock, _connect() as con:
         out = con.execute(

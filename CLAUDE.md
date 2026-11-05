@@ -79,7 +79,7 @@ backend/
   config.py, database.py, models.py, charges.py   SMA Terminal settings, DB, cost model
   tests/                  pytest suite (both engines)
 frontend/src/
-  app/                    Pages: / (dashboard), chart, trade, movers, scanner, news,
+  app/                    Pages: / (P&L dashboard), orb (ORB desk), chart, trade, movers, scanner, news,
                           reports, settings, terminal (SMA terminal UI)
   components/             UI by feature (Dashboard, Trade, Terminal, Chart, ...)
   hooks/                  useTradingState, useWebSocket, useNotifications, useTheme
@@ -1062,6 +1062,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (its trades closed by that minute, `gross_pnl` from the trade book, plus its open P&L in the point). The log's Stocks
   chips pick one or more: one line each plus their total, and the summary, table and CSV follow the pick.
   No order path; nothing in the strategy reads it.
+- `backend/pnl_dashboard.py` – **P&L dashboard** (the desk's home page `/`, `components/PnlDashboard/`; read-only, no
+  order path, nothing in the strategy reads it): when in the day is the P&L best, to pick a time to close everything. From
+  the open P&L log (closed + open, `total_gross` / `total_net`) of backtest runs (`replay_pnl`, one or more runs; default the
+  latest) or market days (`open_pnl`, desks 1-5 / research added up, From / To): each day on one 09:15-15:30 minute grid
+  (`day_curve`: last point at or before each minute, 0 before the first), its high / low / close and when (`build_day`; a
+  day with no P&L at all is left out), and per time of day every `step` (1/5/10/15/30) minutes across the days: average,
+  median, worst, best, all days added, % above 0 and % beating the close (`by_time`); `best_exit` (highest average and
+  highest median vs holding to the close), half-hour histograms of when the high / low came, totals, and the same per
+  stock (`stock_table`, gross: closed trades by that minute + open P&L, `open_pnl_log.by_stock`). Filters: stocks (only
+  their P&L, gross), basis, step, weekdays. `GET /api/pnl-dashboard/options` (`open_pnl_log.all_replay_runs`, market
+  days), `GET /api/pnl-dashboard?source=replay|market&runs=&desks=&start=&end=&stocks=&basis=&step=&weekdays=`. Charts are
+  plain SVG (`PnlDashboard/charts.tsx`: time chart with min-max band, day high/low/close ranges, bars, stock bars); CSV.
+  The ORB desk's old dashboard (bot control, manual order form, AI expert, account) moved unchanged to `/orb`
+  (nav "ORB desk").
 - `backend/fast_move.py` – fast-move alerts (off by default; alerts only, never trades; `fast_moves.json` next to the
   SMA DB, `FAST_MOVE_FILE`): **armed and held** (`on`, desk only, `fast_move.watcher` started in `boot_engine`): every
   `POLL_SEC` (5 s) while NSE is open, the bots' own last prices (`main._fast_move_prices`, no extra Groww call) of every

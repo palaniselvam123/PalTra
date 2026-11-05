@@ -639,7 +639,7 @@ export default function ScalpPage() {
             ) : rows.length === 0 ? (
               <Empty>
                 {data.universe === 0
-                  ? "No stocks are streaming. Add stocks to the watchlist on the Dashboard, or track the full universe on Movers."
+                  ? "No stocks are streaming. Add stocks to the watchlist on the ORB desk page, or track the full universe on Movers."
                   : "No stock passes these filters. Lower Min ATR or Min traded, or raise Max spread."}
               </Empty>
             ) : (
