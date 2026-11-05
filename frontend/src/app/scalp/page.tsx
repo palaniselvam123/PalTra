@@ -18,6 +18,7 @@ import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { MorningScan } from "@/components/Scalp/MorningScan";
+import { CarryScan } from "@/components/Scalp/CarryScan";
 import { High52Scan } from "@/components/Scalp/High52Scan";
 import { RegimeStudy } from "@/components/Scalp/RegimeStudy";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
@@ -67,6 +68,7 @@ const TABS = [
   { id: "monitor", label: "Monitor" },
   { id: "cross", label: "Cross scan" },
   { id: "morning", label: "09:30 Morning" },
+  { id: "carry", label: "Carry-over" },
   { id: "trend", label: "Trend quality" },
   { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
@@ -115,6 +117,8 @@ export default function ScalpPage() {
   const onCrossStatus = useCallback((st: ScanStatus) => setCrossStatus(st), []);
   const onTrendStatus = useCallback((st: ScanStatus) => setTrendStatus(st), []);
   const onMorningStatus = useCallback((st: ScanStatus) => setMorningStatus(st), []);
+  const [carryStatus, setCarryStatus] = useState<ScanStatus | null>(null);
+  const onCarryStatus = useCallback((st: ScanStatus) => setCarryStatus(st), []);
   const onHigh52Status = useCallback((st: ScanStatus) => setHigh52Status(st), []);
   const [sidewaysStatus, setSidewaysStatus] = useState<ScanStatus | null>(null);
   const onSidewaysStatus = useCallback((st: ScanStatus) => setSidewaysStatus(st), []);
@@ -352,6 +356,7 @@ export default function ScalpPage() {
     monitor: data ? { when: data.as_of, running: false } : null,
     cross: crossStatus,
     morning: morningStatus,
+    carry: carryStatus,
     trend: trendStatus,
     high52: high52Status,
     active: activeStatus,
@@ -715,6 +720,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "morning"}>
           <MorningScan armed={armed} arming={arming} onArm={(s) => arm(s, "09:30 Morning")} onArmMany={(list) => armSeveral(list, "09:30 Morning")} paused={paused} onStatus={onMorningStatus} />
+        </div>
+        <div hidden={tab !== "carry"}>
+          <CarryScan armed={armed} arming={arming} onArm={(s) => arm(s, "Carry-over")} onArmMany={(list) => armSeveral(list, "Carry-over")} paused={paused} onStatus={onCarryStatus} />
         </div>
         <div hidden={tab !== "trend"}>
           <ChopScan armed={armed} arming={arming} onArm={(s) => arm(s, "Trend quality")} onArmMany={(list) => armSeveral(list, "Trend quality")} paused={paused} onStatus={onTrendStatus} />

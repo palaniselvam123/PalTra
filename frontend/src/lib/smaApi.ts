@@ -681,6 +681,54 @@ export type FastBotSettings = {
 };
 export type OpenPnlStockPoint = { t: string; closed: number; open: number; total: number; side: "LONG" | "SHORT" | null };
 
+/** Carry-over scan (backend carry_scan.py): yesterday's SMA side and how today went. Read-only. */
+export type CarryStatus = "CONTINUED" | "REVERSED" | "BACK";
+export type CarryRow = {
+  symbol: string;
+  prev_day: string;
+  prev_side: "LONG" | "SHORT";
+  prev_since: string | null;
+  prev_close: number;
+  prev_sma_fast: number;
+  prev_sma_slow: number;
+  prev_gap_pct: number;
+  day: string;
+  open: number | null;
+  gap_pct: number | null;
+  gap_with: boolean | null;
+  status: CarryStatus;
+  reversed_at: string | null;
+  back_at: string | null;
+  side_now: "LONG" | "SHORT" | null;
+  last: number;
+  last_at: string;
+  dev_rs: number;
+  dev_pct: number;
+  dev_slow_pct: number;
+  move_with_pct: number;
+  best_pct: number;
+  best_at: string | null;
+  worst_pct: number;
+  worst_at: string | null;
+  candles_today: number;
+};
+export type CarryScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  minutes: number;
+  minutes_choices: number[];
+  sma_fast: number;
+  sma_slow: number;
+  as_of: string | null;
+  finished_at: string | null;
+  market_open: boolean;
+  rows: CarryRow[];
+  paused?: boolean;
+};
+
 /** P&L dashboard (backend pnl_dashboard.py): the bots' P&L by time of day, across days or backtest runs. */
 export type PnlDashRun = {
   run_id: number;
@@ -2035,6 +2083,10 @@ export const smaApi = {
   morningScanStart: (symbols: string[], force = false) =>
     request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
+  /** Start the carry-over scan (read-only; candles only). Returns at once; poll `carryScan`. */
+  carryScanStart: (symbols: string[], minutes: number, force = false) =>
+    request<CarryScan>("/api/carry-scan/start", { method: "POST", body: JSON.stringify({ symbols, minutes, force }) }, 20000, false),
+  carryScan: () => request<CarryScan>("/api/carry-scan", undefined, undefined, false),
   /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
   high52ScanStart: (symbols: string[], force = false) =>
     request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
