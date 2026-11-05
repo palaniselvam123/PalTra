@@ -141,6 +141,8 @@ export const SETTING_LABELS: Record<string, string> = {
   vturn_turn_pct: "V-turn turn back",
   vturn_within: "V-turn within",
   vturn_handoff: "V-turn loss → Bot 2",
+  stop_handoff: "after a stop-loss, move to",
+  stop_handoff_loss: "stop move only on a loss",
   handoff_now: "Bot 2 orders at once",
   pivot_target: "pivot target",
   stop_plan: "staged stop plan",

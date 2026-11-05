@@ -304,6 +304,13 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Slow SMA exit", (s) => (s.slow_sma_exit ? "On" : "Off")],
+  [
+    "After a stop-loss exit",
+    (s) =>
+      s.stop_handoff === "BACK" || s.stop_handoff === "BOT2" || s.stop_handoff === "BOT3"
+        ? `Stock moves ${s.stop_handoff === "BACK" ? "back to the bot it came from" : s.stop_handoff === "BOT2" ? "to Bot 2" : "to Bot 3"}${s.stop_handoff_loss === false ? "" : " (only at a loss)"}`
+        : "Stays",
+  ],
   ["SMA 9 V-turn exit", (s) => (s.vturn_exit ? `On (run ${s.vturn_move_pct ?? 0.02}%, turn ${s.vturn_turn_pct ?? 0.015}%/candle within ${s.vturn_within ?? 6})${s.vturn_handoff ? "; a loss moves the stock to Bot 2" : ""}` : "Off")],
   ["SMA 9 slope exit", (s) => (s.slope_exit ? `On (over ${s.slope_lookback ?? 2} candles, bend ${s.slope_bend_pct ?? 60}%${s.slope_turn === false ? "" : `, turn ${s.slope_turn_pct ?? 0.02}%/candle`})` : "Off")],
   ["SMA 9 deceleration guard", (s) => (s.decel_exit ? `On (${s.decel_drop_pct ?? 50}% off peak, arms ${s.decel_arm_atr ?? 0.1} ATR, ${s.decel_confirm === "OFF" ? "no close check" : "close through SMA 9"}${s.decel_peak_from === "RUN" ? ", peak from run start" : ""})` : "Off")],
@@ -950,12 +957,12 @@ function RunDetailBody({
       ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       {(run.by_regime ?? []).length ? <ByTrend groups={run.by_regime ?? []} /> : null}
-      {(run.handoffs ?? []).length ? (
+      {(run.handoff_trail ?? []).length ? (
         <div className="mb-4">
           <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
-            Hand-offs in this run ({(run.handoffs ?? []).length}) · where each stock was sent
+            Hand-offs in this run ({(run.handoff_trail ?? []).length}) · where each stock was sent
           </div>
-          <HandoffTable rows={[...(run.handoffs ?? [])].reverse()} showDay={run.start_date !== run.end_date} />
+          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} />
         </div>
       ) : null}
       <div className="overflow-x-auto">

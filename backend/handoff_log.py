@@ -15,11 +15,12 @@ import logging
 
 log = logging.getLogger(__name__)
 
-KINDS = ("RECOVERY", "VTURN_LOSS", "BREAKOUT", "FAST_MOVE", "FAST_BACK")
+KINDS = ("RECOVERY", "VTURN_LOSS", "BREAKOUT", "STOP_EXIT", "FAST_MOVE", "FAST_BACK")
 KIND_WORDS = {
     "RECOVERY": "recovered loss → Bot 2 (choppy)",
     "VTURN_LOSS": "V-turn exit at a loss → Bot 2 (choppy)",
     "BREAKOUT": "trend breakout → Bot 3 (trend)",
+    "STOP_EXIT": "stop-loss exit → the bot set for it",
     "FAST_MOVE": "fast move → Bot 5",
     "FAST_BACK": "back from Bot 5",
 }

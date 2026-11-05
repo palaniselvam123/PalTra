@@ -383,6 +383,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     vturn_turn_pct: Math.min(5, Math.max(0, Number(form.vturn_turn_pct ?? 0.015) || 0)),
     vturn_within: Math.min(10, Math.max(1, Math.round(Number(form.vturn_within ?? 6)) || 6)),
     vturn_handoff: Boolean(form.vturn_exit) && Boolean(form.vturn_handoff),
+    stop_handoff: ["BACK", "BOT2", "BOT3"].includes(String(form.stop_handoff)) ? (String(form.stop_handoff) as "BACK" | "BOT2" | "BOT3") : "OFF",
+    stop_handoff_loss: form.stop_handoff_loss !== false,
     handoff_now: Boolean(form.handoff_now),
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
     stop_plan: Boolean(form.stop_plan),
@@ -2385,6 +2387,43 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
           <label className="mt-3 block text-sm text-slate-300">
             <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
+              After a stop-loss exit, move the stock to{isOwn("stop_handoff") && <OwnTag />}
+              <InfoTip label="About moving a stock after a stop-loss">
+                The other hand-offs move a stock after a recovered loss or a losing V-turn (to Bot 2) or a trend breakout (to
+                Bot 3); a stop-loss left it where it was. Pick where it goes right after any stop closes a trade (ATR, trailing,
+                Supertrend, VWAP, staged plan; never a target): back to the bot it came from (a stock that never moved stays),
+                Bot 2, the choppy bot (with the same chop settings as a recovery hand-off: flipped, gap mode), or Bot 3, the
+                trend bot (its own settings). It then waits for its next cross there. In LIVE it moves only once Groww shows no
+                shares; a PAPER bot never arms a LIVE bot, and one LIVE bot per stock still applies. In a backtest that plays
+                the hand-offs the stock carries on in the run with that bot&apos;s settings. Each move is listed under
+                Hand-offs. Off by default.
+              </InfoTip>
+            </span>
+            <select
+              value={["BACK", "BOT2", "BOT3"].includes(String(form.stop_handoff)) ? String(form.stop_handoff) : "OFF"}
+              onChange={(e) => set("stop_handoff", e.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            >
+              <option value="OFF">Off — the stock stays on this bot</option>
+              <option value="BACK">Back to the bot it came from</option>
+              <option value="BOT2">Bot 2 (choppy: flipped, gap mode)</option>
+              <option value="BOT3">Bot 3 (trend)</option>
+            </select>
+          </label>
+          {["BACK", "BOT2", "BOT3"].includes(String(form.stop_handoff)) ? (
+            <label className="mt-1 flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.stop_handoff_loss !== false}
+                onChange={(e) => set("stop_handoff_loss", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("stop_handoff_loss") && <OwnTag />}
+              Only when the stop closed at a loss (a trailing stop in profit leaves the stock here)
+            </label>
+          ) : null}
+          <label className="mt-3 block text-sm text-slate-300">
+            <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
               Pivot target{isOwn("pivot_target") && <OwnTag />}
               <InfoTip label="About the pivot target">
                 Classic daily pivots from the previous session&apos;s high, low and close: P = (H + L + C) ÷ 3, R1 = 2P − L,
@@ -3054,6 +3093,15 @@ export function activeRules(f: SmaConfig): Rule[] {
     if ((f.slope_exit || f.vturn_exit) && slopeCandle > 0 && slopeCandle !== Number(f.candle_minutes ?? 1))
       add({ group: "exit", key: "slope_minutes", text: `SMA ${fast} slope read on ${slopeCandle}-min candles`, off: { slope_minutes: "0" } });
   }
+  if (f.stop_handoff && f.stop_handoff !== "OFF")
+    add({
+      group: "advanced",
+      key: "stop_handoff",
+      text: `After a stop-loss exit${f.stop_handoff_loss !== false ? " at a loss" : ""}, the stock moves ${
+        f.stop_handoff === "BACK" ? "back to the bot it came from" : f.stop_handoff === "BOT2" ? "to Bot 2" : "to Bot 3"
+      }`,
+      off: { stop_handoff: "OFF" },
+    });
   if (f.vturn_exit && f.vturn_handoff) add({ group: "advanced", key: "vturn_handoff", text: "After a losing V-turn exit, the stock moves to Bot 2", off: { vturn_handoff: false } });
 
   // 4. Gap mode

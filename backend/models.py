@@ -475,6 +475,10 @@ class BotConfig(Base):
     vturn_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     # After a V-turn exit at a loss, move the stock to Bot 2 like a recovery (slope_exit.vturn_handoff_on).
     vturn_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # After a stop-loss exit, move the stock: OFF | BACK (to the bot it came from) | BOT2 | BOT3 (stop_handoff.py).
+    stop_handoff: Mapped[str | None] = mapped_column(String, nullable=True, default="OFF")
+    # ... only when that stop closed at a loss (before charges).
+    stop_handoff_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (recovery.order_now).
     handoff_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Press Start by itself for this bot while it is STOPPED in PAPER and NSE is open (auto_start.py).

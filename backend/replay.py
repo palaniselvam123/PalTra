@@ -490,6 +490,13 @@ class ReplayEngine(StrategyEngine):
         self._on_bot[name] = to_bot
         self._chain_fields[name] = fields
 
+    def _origin_bot(self, symbol: str) -> int | None:
+        """In a backtest that plays the hand-offs, "back" is the replayed bot (stop_handoff.py)."""
+        if getattr(self, "chain", None) is not None:
+            name = (symbol or "").upper()
+            return self.bot_id if self._on_bot.get(name, self.bot_id) != self.bot_id else None
+        return super()._origin_bot(symbol)
+
     def _chain_hand_off(self, from_bot: int, symbol: str, to_bot: int) -> str:
         """Play a hand-off inside this backtest (handoff_chain.py): the stock stays and trades with the target bot's
         settings from now on. The live Trade lists are not touched."""
@@ -961,7 +968,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         out["stocks"] = _stock_rows(trades, out["symbols"])
         # Choppy / trending at each trade's entry, and where each stock was handed (handoff_log.py; display only).
         out["by_regime"] = handoff_log.by_regime(trades)
-        out["handoffs"] = handoff_log.rows(run_id=run.id)
+        out["handoff_trail"] = handoff_log.rows(run_id=run.id)
     return out
 
 

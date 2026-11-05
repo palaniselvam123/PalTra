@@ -15,6 +15,7 @@ const KIND_SHORT: Record<string, string> = {
   RECOVERY: "Recovered loss",
   VTURN_LOSS: "V-turn loss",
   BREAKOUT: "Trend breakout",
+  STOP_EXIT: "Stop-loss exit",
   FAST_MOVE: "Fast move",
   FAST_BACK: "Back from Bot 5",
 };

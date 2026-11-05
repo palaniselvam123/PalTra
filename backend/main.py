@@ -72,6 +72,7 @@ import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
 import entry_candle as entry_candle_mod
 import slope_exit as slope_mod
+import stop_handoff as stop_handoff_mod
 import stop_plan as stop_plan_mod
 import decel_guard as decel_mod
 import recovery as recovery_mod
@@ -701,6 +702,8 @@ class ConfigUpdate(BaseModel):
     vturn_turn_pct: float | None = Field(default=None, ge=0, le=slope_mod.MAX_TURN_PCT)
     vturn_within: int | None = Field(default=None, ge=1, le=slope_mod.MAX_VTURN_WITHIN)
     vturn_handoff: bool | None = None
+    stop_handoff: Literal["OFF", "BACK", "BOT2", "BOT3"] | None = None
+    stop_handoff_loss: bool | None = None
     handoff_now: bool | None = None
     auto_start: bool | None = None
     pivot_target: Literal["OFF", "R1", "R2"] | None = None
@@ -1686,6 +1689,8 @@ def _gap_dict(row) -> dict:
         "vturn_turn_pct": slope_mod.vturn_turn_pct(row),
         "vturn_within": slope_mod.vturn_within(row),
         "vturn_handoff": bool(getattr(row, "vturn_handoff", False)),
+        "stop_handoff": stop_handoff_mod.choice(row),
+        "stop_handoff_loss": stop_handoff_mod.loss_only(row),
         "handoff_now": recovery_mod.handoff_now_on(row),
         "auto_start": bool(getattr(row, "auto_start", False)),
         "pivot_target": pivots.target_mode(row),

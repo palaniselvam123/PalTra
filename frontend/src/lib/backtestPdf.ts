@@ -324,7 +324,7 @@ export async function downloadBacktestPdf({
     y = after() + 22;
   }
 
-  const handoffs = [...(run.handoffs ?? [])].reverse();
+  const handoffs = [...(run.handoff_trail ?? [])].reverse();
   if (handoffs.length) {
     if (y > doc.internal.pageSize.getHeight() - 80) {
       doc.addPage();

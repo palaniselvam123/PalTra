@@ -240,6 +240,10 @@ export type SmaConfig = {
   vturn_within?: number;
   /** After a V-turn exit at a loss, move the stock to Bot 2 (flipped, gap mode). */
   vturn_handoff?: boolean;
+  /** After a stop-loss exit, move the stock: back to the bot it came from, Bot 2 or Bot 3 (stop_handoff.py). */
+  stop_handoff?: "OFF" | "BACK" | "BOT2" | "BOT3";
+  /** ... only when that stop closed at a loss. */
+  stop_handoff_loss?: boolean;
   /** After a hand-off to Bot 2, Bot 2 orders at once the opposite way of the closed trade (no filters). */
   handoff_now?: boolean;
   /** Press Start by itself while STOPPED in PAPER and NSE is open (auto_start.py). Bots 1-4 only. */
@@ -1696,7 +1700,7 @@ export type ReplayRun = {
   /** Closed trades by the trend at entry (handoff_log.by_regime), on the run detail only. */
   by_regime?: TrendGroupRow[];
   /** Where each stock was handed during the run (handoff_log.rows), on the run detail only. */
-  handoffs?: HandoffRow[];
+  handoff_trail?: HandoffRow[];
 };
 
 /** One group of closed trades by the trend at entry. */

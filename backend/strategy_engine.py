@@ -78,7 +78,9 @@ import entry_candle
 import decel_guard
 import slope_exit
 import stop_plan
+import handoff_chain
 import handoff_log
+import stop_handoff
 import stock_regime
 import turn_entry
 import high52
@@ -341,6 +343,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
+    "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
@@ -4046,6 +4049,38 @@ class StrategyEngine:
         if not hit:
             return
         await self._exit_now(cfg, fill_price, reason)
+        if reason in stop_handoff.STOP_REASONS and self.positions.get(symbol) is None:
+            await self._stop_handoff(cfg, symbol, pos, float(fill_price))
+
+    def _origin_bot(self, symbol: str) -> int | None:
+        """The bot a handed-off stock first came from (handoff_chain.py); None when it never moved."""
+        try:
+            row = handoff_chain.moved().get((symbol or "").upper())
+        except Exception:  # noqa: BLE001
+            return None
+        return int(row["origin"]) if row and row.get("origin") else None
+
+    async def _stop_handoff(self, cfg: BotConfig, symbol: str, pos: OpenPosition, price: float) -> None:
+        """After a stop-loss exit, move the stock to the bot set for it (stop_handoff.py): back, Bot 2 or Bot 3."""
+        if not stop_handoff.on(cfg) or self.handoff is None:
+            return
+        name = (symbol or "").upper()
+        if stop_handoff.loss_only(cfg) and not slope_exit.lost(pos.direction, float(pos.entry_price), price):
+            return  # a trailing stop that locked in a profit: the stock stays
+        current = int((getattr(self, "_on_bot", None) or {}).get(name, self.bot_id))
+        to_bot, why_not = stop_handoff.target(cfg, current, self._origin_bot(name))
+        live = (pos.mode or "PAPER").upper() == "LIVE"
+        if to_bot is None:
+            text = f"{name} stop-loss exit; {why_not}"
+        else:
+            if live and await self._groww_net(name) != 0:
+                moved = "no handoff: Groww still shows shares"
+            else:
+                moved = self.handoff(self.bot_id, name, live, to_bot=to_bot)
+            self._log_handoff(name, to_bot, stop_handoff.KIND, f"stop-loss exit at {price:.2f}", moved, cfg, pos.trade_id, live)
+            text = f"{name} stop-loss exit; {moved}"
+            self._alert(text)
+        self._signals[name] = text
 
     async def _real_exit_price(self, pos: OpenPosition, symbol: str) -> float:
         """The price Groww really closed a LIVE position at: the stop's own fill, else Groww's average
