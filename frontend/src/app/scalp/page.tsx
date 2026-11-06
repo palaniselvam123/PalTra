@@ -746,7 +746,7 @@ export default function ScalpPage() {
           <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
         </div>
         <div hidden={tab !== "sideways"}>
-          <RegimeStudy armed={armed} paused={paused} onStatus={onSidewaysStatus} />
+          <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />
         </div>
         <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>

@@ -1085,6 +1085,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   next to the SMA DB (`REGIME_STUDY_FILE`) and keeps the backtest server awake while it runs. `GET /api/regime-study`,
   `POST /api/regime-study/start` (symbols, days, minutes 1/3/5/10/15, window; refused when scans are paused / off, and on
   the desk in market hours unless `desk_market_hours_free`), `POST /api/regime-study/stop`. Learn lesson `sideways-test`.
+  **Per stock** (`by_stock`, the page's first table; the clue analysis above sits under "Advanced"): each stock's trend
+  score (% of its windows that `trended`), choppy score (% with 2+ next-window SMA crosses), SMA-follow result, efficiency,
+  ADX and trended % per check time, and `suggest`: Bot 3 (trend score ≥ max(base + 10, 40), choppy ≤ 30, SMA-follow > 0),
+  Bot 2 (choppy ≥ 40, or trend ≤ base − 10 with a loss), else Bot 1; under `MIN_STOCK_WINDOWS` (8) windows "not enough
+  data". `why` gives every number against its rule (the row's ? button, `RegimeStudy.Why`). Arm / Arm ticked open the usual
+  arm prompt (arming only; nothing is moved or unarmed).
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
