@@ -841,6 +841,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   never a market order at the breakout's top (a flipped stock orders at once). An arrival older than
   `ARRIVAL_TTL_SEC` (15 min) is dropped. Replays move the stock (`ReplayEngine._hand_off`) but play one bot, so Bot 3's
   entry happens only on the live bots. The stock research baseline keeps it off.
+  **Owner's rework** (Settings → 7. Advanced, "Trend breakout (move the stock on)"): **what counts** (`breakout_rule`, per
+  bot and per stock): `CANDLE` (default, the tall candle above) or `STRONG` (`breakout.strong`: `trend_strength.read`, the
+  Scalp page's 7-check strong trend, midday rules, on the bot's closed candles with the session VWAP; its side is the
+  trend's; meant for Bot 1, so one tall candle no longer sends a stock to Bot 3); `breakout.judge` picks. **Where it goes**
+  (`StrategyEngine._breakout_target`): a stock that reached this bot through a hand-off goes back to its origin
+  (`_handoff_origin`: `handoff_chain.moved()`; in a replay with hand-offs played, the replayed bot for a stock played as
+  another, `ReplayEngine._acting_bot` / `_handoff_origin`), anything else to Bot 3 (Bot 3's breakout arrival entry only
+  then). **An open trade against it** (`breakout_cut`, off by default, owner's choice): not cut; it runs to its own exits
+  (stop, target, colour, cross…) and the stock moves on the first closed candle after it is flat
+  (`StrategyEngine._breakout_pending`, memory only); on = cut at once (`BREAKOUT_STOP`, `_move_on_breakout`), the old way.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

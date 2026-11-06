@@ -352,7 +352,7 @@ SNAPSHOT_FIELDS = (
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
-    "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
+    "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -1053,6 +1053,8 @@ class StrategyEngine:
         self._pullback: dict[str, PullbackOrder] = {}
         # Stocks handed here by a breakout, waiting for this bot's entry on its side (breakout.py).
         self._arrivals: dict[str, breakout.Arrival] = {}
+        # A breakout while a trade against it was open (breakout_cut off): the stock moves to this bot once flat.
+        self._breakout_pending: dict[str, tuple[int, str]] = {}
         # Stocks not traded again today after an emergency recovery exit (recovery.py).
         self._recovery_blocked: set[str] = set()
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
@@ -2876,25 +2878,80 @@ class StrategyEngine:
             moved += "; " + self.handoff_order(recovery.HANDOFF_BOT, symbol, _opposite(closed))
         return moved
 
-    async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
-        """A breakout candle on the chop bot: cut the trade, hand the stock to Bot 3 (breakout.py).
+    def _acting_bot(self, symbol: str) -> int:
+        """The bot whose settings this stock trades on (a replay may play a handed-off stock as Bot 2 / Bot 3)."""
+        return int(self.bot_id)
 
-        A trade already on the breakout's side (its real side, so a flipped trade counts by where it really stands) is
-        kept and the stock stays on this bot; a trade against it is cut, and a flat stock is handed off as before.
-        True when the stock was handled here (cut and/or handed off), so the cross is not judged.
+    def _handoff_origin(self, symbol: str) -> int | None:
+        """The bot this stock first came from through a hand-off (handoff_chain.py), None when it was armed here."""
+        import handoff_chain
+
+        row = handoff_chain.moved().get((symbol or "").upper())
+        if not row or int(row.get("on") or 0) != int(self.bot_id):
+            return None
+        return int(row.get("origin") or 0) or None
+
+    def _breakout_target(self, symbol: str) -> int:
+        """Where a breakout sends the stock: back to the bot it came from, else Bot 3 (owner's choice)."""
+        origin = self._handoff_origin(symbol)
+        acting = self._acting_bot(symbol)
+        if origin is not None and origin != acting:
+            return origin
+        return breakout.TREND_BOT
+
+    async def _watch_breakout(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
+        """A breakout on this bot (breakout.py): hand the stock on, back where it came from or to Bot 3.
+
+        What counts is the bot's rule (`breakout_rule`: one tall candle, or the 7-check strong trend). A trade already on
+        the breakout's side (its real side, so a flipped trade counts by where it really stands) is kept and the stock
+        stays on this bot. A trade against it is cut at once only with `breakout_cut`; otherwise it runs to its own exits
+        and the stock moves once flat (`_breakout_pending`). A flat stock moves at once.
+        True when the stock was moved here, so the cross is not judged.
         """
-        if not breakout.on(cfg) or self.handoff is None or self.bot_id == breakout.TREND_BOT:
-            return False
-        hit, note = breakout.read(enriched, cfg)
-        if not hit:
+        if not breakout.on(cfg) or self.handoff is None or self._acting_bot(symbol) == breakout.TREND_BOT:
+            self._breakout_pending.pop(symbol, None)
             return False
         pos = self.positions.get(symbol)
-        if pos is not None and breakout.side(enriched.iloc[-2]) == pos.direction:
+        waiting = self._breakout_pending.get(symbol)
+        if waiting is not None:
+            if pos is not None:
+                return False  # still in the trade: its own exits run it
+            # The trade closed by its own exits: move the stock now.
+            target, note = self._breakout_pending.pop(symbol)
+            return await self._move_on_breakout(symbol, cfg, enriched, None, target, note + " (moved once the trade closed)", None)
+        hit, note, want = breakout.judge(enriched, cfg)
+        if not hit:
+            return False
+        if pos is not None and want == pos.direction:
             # The trade already rides the breakout (a buy on a green breakout, a sell on a red one): it is kept and
             # the stock stays here; cutting it would only book a small loss on the right side of the move.
             text = f"{symbol} trend breakout — {note}; the {pos.direction.lower()} trade is already on its side, kept"
             self._signals[symbol] = text
             return False
+        target = self._breakout_target(symbol)
+        if pos is not None and not breakout.cut(cfg):
+            # Owner's choice: never cut the trade at a loss on one candle; it waits for its own stop, target or exit.
+            self._breakout_pending[symbol] = (target, f"{symbol} trend breakout — {note}")
+            text = (
+                f"{symbol} trend breakout — {note}; the {pos.direction.lower()} trade runs to its own exit, "
+                f"then the stock moves to Bot {target}"
+            )
+            self._signals[symbol] = text
+            self.last_signal = text
+            return False
+        return await self._move_on_breakout(symbol, cfg, enriched, pos, target, f"{symbol} trend breakout — {note}", want)
+
+    async def _move_on_breakout(
+        self,
+        symbol: str,
+        cfg: BotConfig,
+        enriched: pd.DataFrame,
+        pos,
+        target: int,
+        text: str,
+        want: str | None,
+    ) -> bool:
+        """Cut an open trade (when given) and hand the stock to `target`; Bot 3 enters on the breakout's side."""
         live = False
         if pos is not None:
             live = (pos.mode or "PAPER").upper() == "LIVE"
@@ -2903,30 +2960,22 @@ class StrategyEngine:
                 return False
             await self._exit_now(cfg, self.ltp, breakout.BREAKOUT_EXIT)  # the focus is this stock
             if self.positions.get(symbol) is not None:
-                self._signals[symbol] = f"{symbol} breakout ({note}) — the exit did not go through"
+                self._signals[symbol] = f"{text} — the exit did not go through"
                 return True
         else:
             live = (getattr(cfg, "trading_mode", None) or "PAPER").upper() == "LIVE"
         flat = True
         if live:
             flat = await self._groww_net(symbol) == 0
-        moved = (
-            self.handoff(self.bot_id, symbol, live, to_bot=breakout.TREND_BOT)
-            if flat
-            else "no handoff: Groww still shows shares"
-        )
-        self._log_handoff(
-            symbol, breakout.TREND_BOT, "BREAKOUT", note, moved, cfg, pos.trade_id if pos is not None else None, live
-        )
-        if moved.startswith("moved") and self.breakout_arrival is not None:
+        moved = self.handoff(self.bot_id, symbol, live, to_bot=target) if flat else "no handoff: Groww still shows shares"
+        self._log_handoff(symbol, target, "BREAKOUT", text, moved, cfg, pos.trade_id if pos is not None else None, live)
+        if moved.startswith("moved") and target == breakout.TREND_BOT and want is not None and self.breakout_arrival is not None:
             bar = enriched.iloc[-2]
-            want, limit = breakout.side(bar), None
-            if want is not None:
-                limit = tall_pullback.level(bar, want)
-            if want is not None and limit is not None:
+            limit = tall_pullback.level(bar, want)
+            if limit is not None:
                 arrival = breakout.Arrival(direction=want, limit=float(limit), made_at=self._now().timestamp())
                 moved += "; " + self.breakout_arrival(breakout.TREND_BOT, symbol, arrival)
-        text = f"{symbol} trend breakout — {note}" + ("; trade cut" if pos is not None else "") + f"; {moved}"
+        text = text + ("; trade cut" if pos is not None else "") + f"; {moved}"
         self._signals[symbol] = text
         self.last_signal = text
         self._alert(text)

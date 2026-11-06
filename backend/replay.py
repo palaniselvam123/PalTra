@@ -497,6 +497,18 @@ class ReplayEngine(StrategyEngine):
             return self.bot_id if self._on_bot.get(name, self.bot_id) != self.bot_id else None
         return super()._origin_bot(symbol)
 
+    def _acting_bot(self, symbol: str) -> int:
+        """With hand-offs played, a handed-off stock trades as the bot it was moved to."""
+        if getattr(self, "chain", None) is None:
+            return int(self.bot_id)
+        return int(self._on_bot.get((symbol or "").upper(), self.bot_id))
+
+    def _handoff_origin(self, symbol: str) -> int | None:
+        """In a backtest every stock starts on the replayed bot; a stock played on another bot came from it."""
+        if getattr(self, "chain", None) is None:
+            return None
+        return int(self.bot_id) if self._acting_bot(symbol) != int(self.bot_id) else None
+
     def _chain_hand_off(self, from_bot: int, symbol: str, to_bot: int) -> str:
         """Play a hand-off inside this backtest (handoff_chain.py): the stock stays and trades with the target bot's
         settings from now on. The live Trade lists are not touched."""

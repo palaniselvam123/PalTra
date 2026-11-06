@@ -29,6 +29,19 @@ Bot 3's `tall_expiry_candles` (2) candles; nothing rests on Groww's book. A flip
 stock orders at once, as in tall_pullback.py. Only live bots do this
 (`bots.register` sets `breakout_arrival`); a replay moves the stock but plays one bot.
 
+**What counts as a breakout** (`breakout_rule`, per bot and per stock; owner's request: "one candle cannot say it is a
+strong trend"): `CANDLE` (default) is the tall candle above; `STRONG` is the strong-trend read of the Scalp page's
+Trend quality (`trend_strength.read`, 7 checks on the bot's closed candles: stack, VWAP, slope, gap widening, hold, structure,
+no cross in 12 candles), its side the trend's side (`judge`). Meant for Bot 1, so it hands a stock to Bot 3 only in a real
+trend.
+
+**Where it goes** (`StrategyEngine._breakout_target`): a stock that reached this bot through a hand-off goes back to the
+bot it came from (`handoff_chain` origin, usually Bot 1; owner's choice), anything else to Bot 3.
+
+**An open trade against it** (`breakout_cut`, off by default; owner's choice): off, the trade is not cut; it runs to its
+own exits (stop, target, candle colour, SMA cross…) and the stock moves on the first closed candle after it is flat
+(`StrategyEngine._breakout_pending`, memory only). On, it is cut at once (`BREAKOUT_STOP`), the old way.
+
 The candle already on the tape when the stock is armed is not read, so a stock just
 handed over is not sent straight back on the candle that moved it. Nor is the day's first
 candle (`opening_candle`): its volume is set against the quiet end of the day before and
@@ -64,8 +77,22 @@ def _num(cfg, name: str, default: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+RULES = ("CANDLE", "STRONG")
+
+
 def on(cfg) -> bool:
     return bool(getattr(cfg, "breakout_handoff", False))
+
+
+def rule(cfg) -> str:
+    """CANDLE (one tall candle) or STRONG (the 7-check strong trend)."""
+    value = str(getattr(cfg, "breakout_rule", None) or "CANDLE").upper()
+    return value if value in RULES else "CANDLE"
+
+
+def cut(cfg) -> bool:
+    """Close an open trade against the breakout at once (the old way); off = let it run to its own exits."""
+    return bool(getattr(cfg, "breakout_cut", False))
 
 
 def atr_mult(cfg) -> float:
@@ -177,3 +204,35 @@ def read(enriched: pd.DataFrame, cfg) -> tuple[bool, str]:
         return False, "the day's first candle is not read for a breakout"
     volume, average, _ratio = minute_volume_stats(closed, VOLUME_LOOKBACK)
     return check(bar, bar.get("atr_14"), bar.get("sma_9"), bar.get("sma_21"), volume, average, cfg)
+
+
+def strong(enriched: pd.DataFrame) -> tuple[bool, str, str | None]:
+    """The strong-trend read (trend_strength.py, midday rules) on the closed candles of an enriched frame."""
+    import trend_strength
+    from indicators import _session_vwap
+
+    if enriched is None or len(enriched) < 3 or not {"sma_9", "sma_21", "close"} <= set(enriched.columns):
+        return False, "too few candles", None
+    closed = enriched.iloc[:-1]
+    if opening_candle(closed):
+        return False, "the day's first candle is not read", None
+    try:
+        read_out = trend_strength.read(closed, _session_vwap(closed))
+    except Exception:  # noqa: BLE001 - a read that fails is never a trend
+        return False, "strong trend not readable", None
+    trend = read_out.get("trend")
+    if trend not in (trend_strength.STRONG_BULLISH, trend_strength.STRONG_BEARISH):
+        return False, f"no strong trend ({read_out.get('trend_score', 0)}% of the checks)", None
+    side_now = "LONG" if trend == trend_strength.STRONG_BULLISH else "SHORT"
+    word = "up" if side_now == "LONG" else "down"
+    passed = sum(1 for v in (read_out.get("trend_checks") or {}).values() if v)
+    return True, f"strong trend {word} ({passed} of {len(read_out.get('trend_checks') or {})} checks)", side_now
+
+
+def judge(enriched: pd.DataFrame, cfg) -> tuple[bool, str, str | None]:
+    """(breakout?, note, side LONG/SHORT) by the bot's rule: one tall candle, or the strong-trend read."""
+    if rule(cfg) == "STRONG":
+        return strong(enriched)
+    hit, note = read(enriched, cfg)
+    return hit, note, (side(enriched.iloc[-2]) if hit else None)
+

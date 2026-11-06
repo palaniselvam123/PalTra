@@ -187,6 +187,8 @@ export const SETTING_LABELS: Record<string, string> = {
   breakout_atr_mult: "breakout candle × ATR",
   breakout_gap_pct: "breakout SMA gap %",
   breakout_volume_mult: "breakout volume ×",
+  breakout_rule: "what counts as a breakout",
+  breakout_cut: "breakout closes an open trade at once",
   use_or_volume: "opening volume check",
   use_or_vwap: "opening VWAP check",
   use_or_spread: "opening SMA spread check",

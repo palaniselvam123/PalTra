@@ -95,7 +95,7 @@ async def test_a_breakout_cuts_the_chop_trade_and_hands_the_stock_to_bot_3(db): 
     from strategy_engine import trade_names
 
     _seed(db)
-    moved, trades, engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True)
+    moved, trades, engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True, breakout_cut=True)
     assert moved == ["SIMB"]
     last = trades[-1]
     assert last["exit_reason"] == breakout.BREAKOUT_EXIT
@@ -142,7 +142,7 @@ def test_api_saves_the_breakout_settings(tmp_path, monkeypatch):
     from main import app
     from strategy_engine import STOCK_FIELDS
 
-    keys = {"breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult"}
+    keys = {"breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut"}
     assert keys <= set(STOCK_FIELDS)
     with TestClient(app) as client:
         got = client.get("/api/bots/2/config").json()
@@ -151,6 +151,10 @@ def test_api_saves_the_breakout_settings(tmp_path, monkeypatch):
         ok = client.put("/api/bots/2/config", json={"breakout_handoff": True, "breakout_gap_pct": 0.3})
         assert ok.status_code == 200 and ok.json()["breakout_handoff"] is True and ok.json()["breakout_gap_pct"] == 0.3
         assert client.put("/api/bots/2/config", json={"breakout_volume_mult": 0.5}).status_code == 422
+        assert got["breakout_rule"] == "CANDLE" and got["breakout_cut"] is False
+        ok = client.put("/api/config", json={"breakout_rule": "STRONG", "breakout_cut": True})
+        assert ok.status_code == 200 and ok.json()["breakout_rule"] == "STRONG" and ok.json()["breakout_cut"] is True
+        assert client.put("/api/bots/2/config", json={"breakout_rule": "BIG"}).status_code == 422
         own = client.put("/api/bots/2/config/stock/SBIN", json={"breakout_handoff": False})
         assert own.status_code == 200 and own.json()["breakout_handoff"] is False
     database.reset_engine()
@@ -174,7 +178,7 @@ async def _loop(database, frame, until: dt.time, **trend_over):
     from sma_research.replayer import ResearchEngine, _trade_rows
 
     feed = ReplayFeed({"SIMB": frame}, dt.datetime.combine(DAY, SESSION_OPEN, tzinfo=IST))
-    chop = ResearchEngine(feed, "SIMB", _settings(database, breakout_handoff=True))
+    chop = ResearchEngine(feed, "SIMB", _settings(database, breakout_handoff=True, breakout_cut=True))
     first_id = chop._min_trade_id
     queued: list = []
     results: list[str] = []
@@ -312,3 +316,81 @@ def test_the_days_first_candle_is_never_a_breakout():
     later = _enriched_day(first_tall=False)  # the same tall candle at 09:30 is read (09:45 forming)
     assert not breakout.opening_candle(later.iloc[:-1])
     assert breakout.read(later, cfg)[0]
+
+
+@pytest.mark.asyncio
+async def test_by_default_the_trade_runs_to_its_own_exit_then_the_stock_moves(db):  # noqa: F811
+    """Owner's choice: a breakout never cuts the open trade; it closes by its own exits and the stock moves after."""
+    import bots
+    from models import BotConfig
+    from strategy_engine import trade_names
+
+    _seed(db)
+    moved, trades, engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True)
+    assert moved == ["SIMB"]
+    assert trades and all(t["exit_reason"] != breakout.BREAKOUT_EXIT for t in trades)  # nothing was cut
+    assert all(t["exit_time"] is not None for t in trades) and "SIMB" not in engine.positions
+    assert "SIMB" not in engine._breakout_pending
+    with db.session_factory()() as s:
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(3)))
+
+
+def test_a_handed_off_stock_goes_back_where_it_came_from(db, tmp_path, monkeypatch):  # noqa: F811
+    import handoff_chain
+    from strategy_engine import StrategyEngine
+
+    monkeypatch.setenv("HANDOFF_RETURN_FILE", str(tmp_path / "hr.json"))
+    eng = StrategyEngine()
+    eng.bot_id = 2
+    assert eng._breakout_target("SIMB") == breakout.TREND_BOT  # armed on Bot 2 by hand: Bot 3, as before
+    handoff_chain.note(1, 2, "SIMB")  # Bot 1's recovery hand-off brought it to Bot 2
+    assert eng._handoff_origin("SIMB") == 1 and eng._breakout_target("SIMB") == 1
+    eng.bot_id = 1
+    assert eng._handoff_origin("SIMB") is None  # the record says it is on Bot 2, not here
+
+
+def test_a_backtest_sends_a_stock_played_as_bot_2_back_to_the_replayed_bot(db):  # noqa: F811
+    import handoff_chain
+    from replay import IST, SESSION_OPEN, ReplayEngine, ReplayFeed
+    from tests.test_gap_mode import _day
+
+    frame = pd.DataFrame(_day(DAY, lambda i, p: 1000.0))
+    feed = ReplayFeed({"SIMB": frame}, dt.datetime.combine(DAY, SESSION_OPEN, tzinfo=IST))
+    engine = ReplayEngine(feed, ["SIMB"], bot=1, chain=handoff_chain.replay_snapshot(1), on_bot={"SIMB": 2})
+    assert engine._acting_bot("SIMB") == 2 and engine._handoff_origin("SIMB") == 1
+    assert engine._breakout_target("SIMB") == 1  # back to Bot 1, not on to Bot 3
+    plain = ReplayEngine(feed, ["SIMB"], bot=1)
+    assert plain._acting_bot("SIMB") == 1 and plain._breakout_target("SIMB") == breakout.TREND_BOT
+
+
+def _trend_frame(step: float) -> pd.DataFrame:
+    """Two sessions of 5-minute candles: flat, then a steady climb (step > 0) or a zig-zag (step = 0)."""
+    from indicators import enrich
+
+    rows, price = [], 1000.0
+    start = int(dt.datetime(2026, 9, 21, 9, 15, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))).timestamp())
+    for d in range(2):
+        for k in range(75):
+            ts = start + d * 86_400 + k * 300
+            if d == 0 or step == 0:
+                nxt = 1000.0 + (1.5 if k % 2 else -1.5)
+            else:
+                nxt = price + step + (0.3 if k % 3 == 0 else 0.0)
+            o = price
+            rows.append({"ts": ts, "open": o, "high": max(o, nxt) + 0.2, "low": min(o, nxt) - 0.2, "close": nxt,
+                         "volume": 1000 * (d * 75 + k + 1)})
+            price = nxt
+    return enrich(pd.DataFrame(rows), 9, 21)
+
+
+def test_the_strong_trend_rule_needs_a_real_trend_not_one_candle():
+    climb = _trend_frame(1.0).iloc[: 75 + 40]
+    hit, note, side = breakout.strong(climb)
+    assert hit and side == "LONG" and "strong trend up" in note, note
+    hit, note, side = breakout.strong(_trend_frame(0.0).iloc[: 75 + 40])
+    assert not hit and side is None
+    cfg = type("C", (), {"breakout_rule": "STRONG"})()
+    assert breakout.judge(climb, cfg)[0] and breakout.rule(cfg) == "STRONG"
+    assert breakout.rule(type("C", (), {"breakout_rule": "nonsense"})()) == "CANDLE"
+    assert breakout.cut(type("C", (), {})()) is False  # off by default
+
