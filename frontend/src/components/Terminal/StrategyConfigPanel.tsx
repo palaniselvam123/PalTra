@@ -427,6 +427,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_atr_mult: Math.min(10, Math.max(0.5, Number(form.breakout_atr_mult ?? 1.8) || 1.8)),
     breakout_gap_pct: Math.min(5, Math.max(0, Number(form.breakout_gap_pct ?? 0.2) || 0)),
     breakout_volume_mult: Math.min(10, Math.max(1, Number(form.breakout_volume_mult ?? 1.5) || 1.5)),
+    breakout_rule: String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "STRONG" : "CANDLE",
+    breakout_cut: Boolean(form.breakout_cut),
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -2769,21 +2771,27 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </InfoTip>
           </label>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
-            Trend breakout (back to Bot 3)
+            Trend breakout (move the stock on)
             <InfoTip label="About the trend breakout">
+              Where it goes: a stock this bot got from another bot through a hand-off goes back to the bot it came from
+              (usually Bot 1); any other stock goes to Bot 3. What counts: one tall candle (below), or a strong trend: the same 7
+              checks as the Scalp page&apos;s &quot;Strong trend&quot; on this bot&apos;s own candles (price beyond SMA 9 beyond SMA 21,
+              beyond VWAP, both SMAs sloping, the gap widening, most of the last 12 closes beyond SMA 9, higher highs and lows,
+              no cross in 12 candles). An open trade against it: by default it is not cut; it runs to its own stop, target or
+              exit, and the stock moves once it is flat. Tick &quot;Close the trade at once&quot; for the old way.{" "}
               For the chop bot (Bot 2). A hand-off does not tick it: a stock moved to Bot 2 follows Bot 2&apos;s own setting here
               (all stocks, or that stock&apos;s own). On each closed candle, a
               breakout is a candle at least the × ATR below tall, plus either an SMA 9/21 gap of at least the % below or
               volume at least the × below of the last 20 candles&apos; average. The day&apos;s first candle is never read: its volume is
               set against the quiet end of the day before, so nearly every stock would look like a breakout at the open. A
               trade already on the breakout&apos;s side (a
-              buy on a green breakout, a sell on a red one) is kept and the stock stays on this bot. Otherwise an open trade
-              against it is cut at once (Breakout stop), and the stock leaves this bot&apos;s Trade list and is armed on Bot 3
-              with Bot 3&apos;s own settings. Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
+              buy on a green breakout, a sell on a red one) is kept and the stock stays on this bot. Otherwise the stock leaves this
+              bot&apos;s Trade list (after an open trade against it closes, or at once with the tick box below) and is armed on the
+              next bot with that bot&apos;s own settings. Moved to Bot 3, Bot 3 then enters on the breakout&apos;s side (green candle buys, red sells) without waiting for a
               new cross: every Bot 3 check still applies, and the order waits at the breakout candle&apos;s 9 SMA or half-way
               level for 2 candles instead of buying its top. In LIVE the move waits until Groww shows no shares. A practice
-              bot never hands a stock to a LIVE Bot 3. A replay moves the stock too, but plays one bot, so Bot 3&apos;s entry
-              happens only on the live bots. Off by default; try it on Replay first.
+              bot never hands a stock to a LIVE Bot 3. A replay with &quot;Play hand-offs&quot; plays the move inside the backtest.
+              Off by default; try it on Replay first.
             </InfoTip>
           </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -2794,8 +2802,33 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("breakout_handoff") && <OwnTag />}
-            On a breakout, move the stock to Bot 3 (a trade against it is cut; one on its side is kept)
+            On a breakout, move the stock on (back where it came from, else to Bot 3)
           </label>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <label className="block text-xs text-slate-400">
+              <span className="flex items-center gap-1">
+                What counts as a breakout {isOwn("breakout_rule") && <OwnTag />}
+              </span>
+              <select
+                value={String(form.breakout_rule ?? "CANDLE").toUpperCase()}
+                onChange={(e) => set("breakout_rule", e.target.value)}
+                className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                <option value="CANDLE">One tall candle (the numbers below)</option>
+                <option value="STRONG">A strong trend (7 checks, as the Scalp page)</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 self-end text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.breakout_cut)}
+                onChange={(e) => set("breakout_cut", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("breakout_cut") && <OwnTag />}
+              Close an open trade against it at once (off: it runs to its own exit first)
+            </label>
+          </div>
           <div className="mt-2 grid grid-cols-3 items-end gap-2">
             <Field
               label="Candle (× ATR)"
@@ -3189,7 +3222,13 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
   if (f.recovery_hold && f.recovery_handoff !== false) add({ group: "advanced", key: "recovery_handoff", text: "After a recovery, the stock moves to Bot 2", off: { recovery_handoff: false } });
   if (f.handoff_now && ((f.recovery_hold && f.recovery_handoff !== false) || (f.vturn_exit && f.vturn_handoff))) add({ group: "advanced", key: "handoff_now", text: "Bot 2 orders at once on a handed-over stock (opposite of this bot's trade, no filters)", off: { handoff_now: false }, warn: true });
-  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the stock moves to Bot 3 (a trade against it is cut, one on its side kept)", off: { breakout_handoff: false } });
+  if (f.breakout_handoff)
+    add({
+      group: "advanced",
+      key: "breakout_handoff",
+      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "a strong trend" : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
+      off: { breakout_handoff: false },
+    });
   if (f.review_on)
     add({
       group: "advanced",

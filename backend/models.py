@@ -528,6 +528,10 @@ class BotConfig(Base):
     breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)
     breakout_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.20)
     breakout_volume_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    # What counts as a breakout (CANDLE: one tall candle; STRONG: the 7-check strong trend), and whether an open trade
+    # against it is cut at once (off by default: it runs to its own exits, then the stock moves).
+    breakout_rule: Mapped[str | None] = mapped_column(String(8), nullable=True, default="CANDLE")
+    breakout_cut: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

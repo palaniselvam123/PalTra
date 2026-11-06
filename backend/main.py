@@ -730,6 +730,8 @@ class ConfigUpdate(BaseModel):
     breakout_atr_mult: float | None = Field(default=None, ge=0.5, le=10)
     breakout_gap_pct: float | None = Field(default=None, ge=0, le=5)
     breakout_volume_mult: float | None = Field(default=None, ge=1, le=10)
+    breakout_rule: Literal["CANDLE", "STRONG"] | None = None
+    breakout_cut: bool | None = None
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -1717,6 +1719,8 @@ def _gap_dict(row) -> dict:
         "breakout_atr_mult": breakout_mod.atr_mult(row),
         "breakout_gap_pct": breakout_mod.gap_pct(row),
         "breakout_volume_mult": breakout_mod.volume_mult(row),
+        "breakout_rule": breakout_mod.rule(row),
+        "breakout_cut": breakout_mod.cut(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

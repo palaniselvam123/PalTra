@@ -282,6 +282,10 @@ export type SmaConfig = {
   breakout_atr_mult?: number;
   breakout_gap_pct?: number;
   breakout_volume_mult?: number;
+  /** CANDLE: one tall candle; STRONG: the 7-check strong trend (breakout.py). */
+  breakout_rule?: "CANDLE" | "STRONG";
+  /** Close an open trade against the breakout at once; off = it runs to its own exits, then the stock moves. */
+  breakout_cut?: boolean;
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;
