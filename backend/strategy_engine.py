@@ -353,7 +353,7 @@ SNAPSHOT_FIELDS = (
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
-    "breakout_trend_checks", "breakout_trend_need",
+    "breakout_trend_checks", "breakout_trend_need", "breakout_when", "chop_losses",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -1056,6 +1056,14 @@ class StrategyEngine:
         self._arrivals: dict[str, breakout.Arrival] = {}
         # A breakout while a trade against it was open (breakout_cut off): the stock moves to this bot once flat.
         self._breakout_pending: dict[str, tuple[int, str]] = {}
+        # Trade first, then sort (breakout_when IN_PROFIT): stocks armed on the trend bot too while this bot's trade runs;
+        # they leave this bot once that trade closes (symbol → target bot). Memory only.
+        self._trend_kept: dict[str, int] = {}
+        # Stocks handed on that way today (once a day each).
+        self._trend_sent: set[str] = set()
+        # Losing trades per stock today on this bot (chop_losses), and the trade each held stock had at the last pass.
+        self._stock_losses: dict[str, int] = {}
+        self._chop_watch: dict[str, tuple[int, str]] = {}
         # Stocks not traded again today after an emergency recovery exit (recovery.py).
         self._recovery_blocked: set[str] = set()
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
@@ -1353,6 +1361,8 @@ class StrategyEngine:
             self._realized_mode = None
             self.trades_today = 0
             self._stock_trades.clear()
+            self._trend_sent.clear()
+            self._stock_losses.clear()
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
@@ -1574,6 +1584,11 @@ class StrategyEngine:
             enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
+            if seen_before and await self._watch_chop_losses(symbol, symbol_cfg):
+                self._judged_bar[symbol] = closed_ts
+                if self.status != "RUNNING":
+                    break
+                continue
             if seen_before and await self._watch_breakout(symbol, symbol_cfg, enriched):
                 self._judged_bar[symbol] = closed_ts
                 if self.status != "RUNNING":
@@ -2909,9 +2924,13 @@ class StrategyEngine:
         and the stock moves once flat (`_breakout_pending`). A flat stock moves at once.
         True when the stock was moved here, so the cross is not judged.
         """
+        if symbol in self._trend_kept and await self._leave_after_trend(symbol, cfg):
+            return True
         if not breakout.on(cfg) or self.handoff is None or self._acting_bot(symbol) == breakout.TREND_BOT:
             self._breakout_pending.pop(symbol, None)
             return False
+        if breakout.when(cfg) == "IN_PROFIT":
+            return await self._trend_on_trade(symbol, cfg, enriched)
         pos = self.positions.get(symbol)
         waiting = self._breakout_pending.get(symbol)
         if waiting is not None:
@@ -2981,6 +3000,108 @@ class StrategyEngine:
         self.last_signal = text
         self._alert(text)
         return True
+
+    def _keeps_both(self) -> bool:
+        """Whether a trend hand-off can leave this bot's trade open next to the target bot's (live bots: yes).
+        A backtest holds one trade per stock, so it hands the trade over instead (ReplayEngine)."""
+        return True
+
+    async def _trend_on_trade(self, symbol: str, cfg: BotConfig, enriched: pd.DataFrame) -> bool:
+        """Trade first, then sort (`breakout_when` IN_PROFIT, owner's choice): a breakout / strong trend moves the stock
+        on only while this bot holds a trade on its side that is in profit. The trade is kept; the stock is armed on the
+        target bot too, which opens the same side at once (`handoff_order`); the stock leaves this bot once its trade
+        closes (`_leave_after_trend`). A stock this bot is not holding, or holds against the trend or at a loss, stays."""
+        pos = self.positions.get(symbol)
+        if pos is None or symbol in self._trend_sent or symbol in self._trend_kept:
+            return False
+        hit, note, want = breakout.judge(enriched, cfg)
+        if not hit:
+            return False
+        if want != pos.direction:
+            self._signals[symbol] = f"{symbol} trend — {note}; the {pos.direction.lower()} trade is against it, stays here"
+            return False
+        price = self._ltps.get(symbol) or self.ltp
+        if not breakout.in_profit(pos.direction, pos.entry_price, price):
+            self._signals[symbol] = f"{symbol} trend — {note}; the trade is not in profit yet, stays here"
+            return False
+        target = self._breakout_target(symbol)
+        live = (pos.mode or "PAPER").upper() == "LIVE"
+        text = f"{symbol} trend while in profit — {note}"
+        self._trend_sent.add(symbol)
+        if not self._keeps_both():
+            # One trade per stock in a backtest: this bot's trade closes here and the target bot takes the same side.
+            await self._exit_now(cfg, price, breakout.TREND_HANDOFF_EXIT, gate=False)
+            if self.positions.get(symbol) is not None:
+                self._signals[symbol] = f"{text} — the exit did not go through"
+                return True
+            moved = self.handoff(self.bot_id, symbol, live, to_bot=target)
+            self._log_handoff(symbol, target, "TREND_PROFIT", text, moved, cfg, pos.trade_id, live)
+            if moved.startswith("moved") and self.handoff_order is not None:
+                moved += "; " + self.handoff_order(target, symbol, pos.direction)
+            text += f"; trade handed over; {moved}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return True
+        moved = self.handoff(self.bot_id, symbol, live, to_bot=target, keep_source=True)
+        self._log_handoff(symbol, target, "TREND_PROFIT", text, moved, cfg, pos.trade_id, live)
+        if moved.startswith("armed"):
+            self._trend_kept[symbol] = target
+            if self.handoff_order is not None:
+                moved += "; " + self.handoff_order(target, symbol, pos.direction)
+            moved += f"; this bot keeps its trade, the stock leaves it once the trade closes"
+        text += f"; {moved}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        self._alert(text)
+        return False
+
+    async def _leave_after_trend(self, symbol: str, cfg: BotConfig) -> bool:
+        """The kept trade closed: the stock now belongs to the trend bot only (off this bot's Trade list)."""
+        if self.positions.get(symbol) is not None:
+            return False
+        target = self._trend_kept.pop(symbol)
+        import handoff_chain
+
+        left = recovery.unarm(self.bot_id, symbol)
+        handoff_chain.note(int(self.bot_id), int(target), symbol)
+        text = f"{symbol}: this bot's trade closed — now traded by Bot {target} only ({left})"
+        self._signals[symbol] = text
+        self.last_signal = text
+        return True
+
+    async def _watch_chop_losses(self, symbol: str, cfg: BotConfig) -> bool:
+        """Move a stock to Bot 2 after `chop_losses` losing trades on it today on this bot (recovery.chop_losses).
+        Each trade is read once it has closed (also one a cross closed and reversed); the stock moves once flat.
+        True when it was moved here."""
+        pos = self.positions.get(symbol)
+        seen = self._chop_watch.get(symbol)
+        if seen is not None and (pos is None or int(pos.trade_id) != seen[0]):
+            gross = self._closed_gross(seen[0])
+            if gross is not None and gross < 0:
+                self._stock_losses[symbol] = self._stock_losses.get(symbol, 0) + 1
+            if gross is not None or pos is not None:
+                self._chop_watch.pop(symbol, None)
+        if pos is not None:
+            self._chop_watch[symbol] = (int(pos.trade_id), pos.direction)
+            return False
+        need = recovery.chop_losses(cfg)
+        losses = self._stock_losses.get(symbol, 0)
+        if need <= 0 or losses < need or self.handoff is None or self._acting_bot(symbol) == recovery.HANDOFF_BOT:
+            return False
+        if symbol in self._trend_kept:
+            return False  # already given to the trend bot; it leaves this bot by that path
+        live = (getattr(cfg, "trading_mode", None) or "PAPER").upper() == "LIVE"
+        last = seen[1] if seen is not None else None
+        note = f"{losses} losing trades today"
+        self._stock_losses.pop(symbol, None)
+        moved = await self._hand_to_chop_bot(
+            symbol, live, cfg, last, kind="CHOP_LOSSES", why=note, trade_id=seen[0] if seen is not None else None
+        )
+        text = f"{symbol} choppy — {note}; {moved}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        self._alert(text)
+        return moved.startswith("moved")
 
     def queue_breakout_entry(self, symbol: str, arrival: breakout.Arrival) -> None:
         """A breakout moved this stock here: enter on its side on the next pass (breakout.py)."""

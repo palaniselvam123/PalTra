@@ -743,6 +743,8 @@ class ConfigUpdate(BaseModel):
     breakout_cut: bool | None = None
     breakout_trend_checks: str | None = Field(default=None, max_length=160)
     breakout_trend_need: int | None = Field(default=None, ge=1, le=7)
+    breakout_when: Literal["ANY", "IN_PROFIT"] | None = None
+    chop_losses: int | None = Field(default=None, ge=0, le=10)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -1734,6 +1736,8 @@ def _gap_dict(row) -> dict:
         "breakout_cut": breakout_mod.cut(row),
         "breakout_trend_checks": ",".join(f"{k}:{v}" for k, v in breakout_mod.trend_rules(row).items()),
         "breakout_trend_need": breakout_mod.trend_need(row),
+        "breakout_when": breakout_mod.when(row),
+        "chop_losses": recovery_mod.chop_losses(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

@@ -441,3 +441,128 @@ def test_api_saves_the_strong_trend_choices(tmp_path, monkeypatch):
         assert client.put("/api/config", json={"breakout_trend_need": 9}).status_code == 422
     database.reset_engine()
 
+
+
+# ---- trade first, then sort (breakout_when IN_PROFIT, chop_losses) ---------------------------------------------
+
+
+def test_when_and_chop_losses_settings_read_safely():
+    from types import SimpleNamespace as NS
+
+    assert breakout.when(NS()) == "ANY" and breakout.when(NS(breakout_when="in_profit")) == "IN_PROFIT"
+    assert breakout.when(NS(breakout_when="junk")) == "ANY"
+    assert breakout.in_profit("LONG", 100.0, 101.0) and not breakout.in_profit("SHORT", 100.0, 101.0)
+    assert recovery.chop_losses(NS()) == 0 and recovery.chop_losses(NS(chop_losses=3)) == 3
+    assert recovery.chop_losses(NS(chop_losses=99)) == 10 and recovery.chop_losses(NS(chop_losses="x")) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_trade_in_profit_on_the_trend_is_kept_and_bot_3_takes_the_same_side(db, tmp_path, monkeypatch):  # noqa: F811
+    """Live bots: the trade is kept, the stock is armed on Bot 3 too and Bot 3 orders the same side at once; once this
+    bot's trade closes, the stock is Bot 3's only (and noted for the end-of-day send-back)."""
+    import bots
+    import handoff_chain
+    from models import BotConfig
+    from replay import IST
+    from strategy_engine import trade_names
+
+    monkeypatch.setenv("HANDOFF_RETURN_FILE", str(tmp_path / "handoff_return.json"))
+    _seed(db)
+    orders: list = []
+    from sma_research.replayer import ResearchEngine
+
+    monkeypatch.setattr(ResearchEngine, "_keeps_both", lambda self: True)
+    real_load = ResearchEngine.load_config
+
+    def load(self):
+        self.handoff = recovery.handoff  # the live bots' hand-off (keep_source)
+        self.handoff_order = lambda to, sym, d: orders.append((to, sym, d)) or f"Bot {to} orders at once"
+        return real_load(self)
+
+    monkeypatch.setattr(ResearchEngine, "load_config", load)
+    until = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST) + dt.timedelta(minutes=LONG_JUMP + 3)
+    _moved, trades, engine = await _run(
+        db, _frame(spike_volume=True, jump=LONG_JUMP), until=until, breakout_handoff=True, breakout_when="IN_PROFIT"
+    )
+    pos = engine.positions.get("SIMB")
+    assert pos is not None and pos.direction == "LONG"  # kept
+    assert all(t["exit_reason"] not in (breakout.BREAKOUT_EXIT, breakout.TREND_HANDOFF_EXIT) for t in trades)
+    assert orders == [(3, "SIMB", "LONG")] and engine._trend_kept == {"SIMB": 3}
+    with db.session_factory()() as s:
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(1)))
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(3)))
+    engine.positions.pop("SIMB")  # this bot's trade closed
+    assert await engine._leave_after_trend("SIMB", engine.load_config()) is True
+    with db.session_factory()() as s:
+        assert "SIMB" not in trade_names(s.get(BotConfig, bots.config_id_for(1)))
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(3)))
+    assert handoff_chain.moved()["SIMB"]["origin"] == 1
+
+
+@pytest.mark.asyncio
+async def test_with_in_profit_a_stock_this_bot_is_not_riding_stays(db):  # noqa: F811
+    """The breakout comes while this bot's trade is against it: with IN_PROFIT nothing moves and nothing is cut."""
+    import bots
+    from models import BotConfig
+    from strategy_engine import trade_names
+
+    _seed(db)
+    moved, trades, engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True, breakout_when="IN_PROFIT")
+    assert moved == [] and engine._trend_kept == {}
+    assert all(t["exit_reason"] not in (breakout.BREAKOUT_EXIT, breakout.TREND_HANDOFF_EXIT) for t in trades)
+    with db.session_factory()() as s:
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(1)))
+        assert "SIMB" not in trade_names(s.get(BotConfig, bots.config_id_for(3)))
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_hands_the_profitable_trade_over(db):  # noqa: F811
+    """One trade per stock in a replay: this bot's trade closes (TREND_HANDOFF) and the stock moves on."""
+    from replay import IST
+
+    _seed(db)
+    until = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST) + dt.timedelta(minutes=LONG_JUMP + 3)
+    moved, trades, _engine = await _run(
+        db, _frame(spike_volume=True, jump=LONG_JUMP), until=until, breakout_handoff=True, breakout_when="IN_PROFIT"
+    )
+    assert moved == ["SIMB"]
+    assert [t["exit_reason"] for t in trades if t["exit_reason"] == breakout.TREND_HANDOFF_EXIT]
+
+
+@pytest.mark.asyncio
+async def test_after_n_losing_trades_the_stock_moves_to_bot_2(db):  # noqa: F811
+    import bots
+    from models import BotConfig
+    from strategy_engine import trade_names
+
+    _seed(db)
+    moved, trades, engine = await _run(db, _frame(spike_volume=False), chop_losses=2)
+    losers = [t for t in trades if t["exit_time"] is not None and t["gross"] < 0]
+    assert moved == ["SIMB"] and len(losers) >= 2
+    assert "SIMB" not in engine.positions
+    with db.session_factory()() as s:
+        assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(2)))
+    _moved, _trades, _e = await _run(db, _frame(spike_volume=False), chop_losses=0)
+    assert _moved == []  # off by default
+
+
+def test_api_saves_trade_first_then_sort(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert {"breakout_when", "chop_losses"} <= set(STOCK_FIELDS)
+    with TestClient(app) as client:
+        got = client.get("/api/config").json()
+        assert got["breakout_when"] == "ANY" and got["chop_losses"] == 0
+        body = client.put("/api/config", json={"breakout_when": "IN_PROFIT", "chop_losses": 2}).json()
+        assert body["breakout_when"] == "IN_PROFIT" and body["chop_losses"] == 2
+        assert client.put("/api/config", json={"breakout_when": "LATER"}).status_code == 422
+        assert client.put("/api/config", json={"chop_losses": 11}).status_code == 422
+    database.reset_engine()

@@ -189,6 +189,8 @@ export const SETTING_LABELS: Record<string, string> = {
   breakout_volume_mult: "breakout volume ×",
   breakout_rule: "what counts as a breakout",
   breakout_cut: "breakout closes an open trade at once",
+  breakout_when: "when a breakout moves the stock",
+  chop_losses: "losing trades before moving to Bot 2",
   breakout_trend_checks: "strong-trend checks (breakout)",
   breakout_trend_need: "strong-trend checks needed (breakout)",
   use_or_volume: "opening volume check",

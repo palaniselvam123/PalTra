@@ -137,6 +137,15 @@ def order_now(to_bot: int, symbol: str, direction: str) -> str:
     return f"Bot {to_bot} {word} at once"
 
 
+def chop_losses(cfg) -> int:
+    """Move a stock to Bot 2 after this many losing trades (before charges) on it today on this bot; 0 = off."""
+    try:
+        value = int(getattr(cfg, "chop_losses", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(10, value))
+
+
 def tolerance_pct(cfg) -> float:
     return _num(cfg, "recovery_tolerance_pct", DEFAULT_TOLERANCE_PCT, 0.0, 5.0)
 
