@@ -109,6 +109,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "pattern_trend": "BOOLEAN DEFAULT 0",
             "pattern_set": "VARCHAR DEFAULT 'STRONG'",
             "pattern_min_edge": "FLOAT DEFAULT 1.5",
+            "colour_count": "INTEGER DEFAULT 1",
+            "colour_min_body": "FLOAT DEFAULT 0",
             "flip_orders": "BOOLEAN DEFAULT 0",
             "cross_exit": "BOOLEAN DEFAULT 1",
             "late_entry_min": "INTEGER DEFAULT 0",

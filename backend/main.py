@@ -738,7 +738,7 @@ class ConfigUpdate(BaseModel):
     or_spread_pct: float | None = Field(default=None, ge=0, le=5)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
     entry_mode: Literal["SMA", "PATTERN", "COLOUR"] | None = None
-    pattern_tf: Literal[1, 3, 5, 10, 15] | None = None
+    pattern_tf: Literal[1, 3, 5, 10, 15, 30, 60] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
     # Watch smaller candles while in a trade (small_candles.py): CSV of sizes, "" = off.
@@ -752,6 +752,8 @@ class ConfigUpdate(BaseModel):
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
+    colour_count: int | None = Field(default=None, ge=1, le=5)
+    colour_min_body: float | None = Field(default=None, ge=0, le=2)
     review_on: bool | None = None
     review_gap_pct: float | None = Field(default=None, gt=0, le=2)
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)

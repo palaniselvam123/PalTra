@@ -75,7 +75,11 @@ export function strategyLabel(s: Settings): string {
       })`
     );
   } else if (String(s.entry_mode ?? "SMA") === "COLOUR") {
-    parts.push(`Candle colour ${s.pattern_tf ?? 1}m (hold while the colour holds)`);
+    parts.push(
+      `Candle colour ${s.pattern_tf ?? 1}m (hold while the colour holds${
+        Number(s.colour_count ?? 1) > 1 ? `, ${s.colour_count} in a row to turn` : ""
+      }${Number(s.colour_min_body ?? 0) > 0 ? `, bodies ≥ ${s.colour_min_body}%` : ""})`
+    );
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);
     if (s.cross_exit === false) parts.push("no cross exit");

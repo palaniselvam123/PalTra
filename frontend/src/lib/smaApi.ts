@@ -31,7 +31,11 @@ export type SmaConfig = {
    * "COLOUR" (ride the candle colour: green buys, red sells, reverse on the other colour). */
   entry_mode?: "SMA" | "PATTERN" | "COLOUR";
   /** Pattern / colour candle size in minutes. */
-  pattern_tf?: 1 | 3 | 5 | 10 | 15;
+  pattern_tf?: 1 | 3 | 5 | 10 | 15 | 30 | 60;
+  /** Candle colour: candles of one colour in a row needed to enter or turn (1-5). */
+  colour_count?: number;
+  /** Candle colour: smallest body in % of the price that counts as a colour (0 = any). */
+  colour_min_body?: number;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
   candle_minutes?: CandleMinutes;
   /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */

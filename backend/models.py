@@ -547,6 +547,10 @@ class BotConfig(Base):
     pattern_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     pattern_set: Mapped[str | None] = mapped_column(String, nullable=True, default="STRONG")
     pattern_min_edge: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    # Candle colour (entry_mode COLOUR): candles of one colour in a row needed to enter or turn
+    # (1-5), and the smallest body in % of the close that counts as a colour (0 = any).
+    colour_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    colour_min_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)

@@ -71,9 +71,17 @@ const GAP_EXITS: Toggle[] = [
 
 const BB_LABEL: Record<BbExit, string> = { OFF: "Off", BAND: "Band", MIDDLE: "Middle", BOTH: "Both" };
 const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap", SUPERTREND: "Supertrend", VWAP: "VWAP + ATR" };
-type PatternTf = "1" | "3" | "5" | "10" | "15";
-const PATTERN_TFS: PatternTf[] = ["1", "3", "5", "10", "15"];
-const PATTERN_TF_LABEL: Record<PatternTf, string> = { "1": "1 min", "3": "3 min", "5": "5 min", "10": "10 min", "15": "15 min" };
+type PatternTf = "1" | "3" | "5" | "10" | "15" | "30" | "60";
+const PATTERN_TFS: PatternTf[] = ["1", "3", "5", "10", "15", "30", "60"];
+const PATTERN_TF_LABEL: Record<PatternTf, string> = {
+  "1": "1 min",
+  "3": "3 min",
+  "5": "5 min",
+  "10": "10 min",
+  "15": "15 min",
+  "30": "30 min",
+  "60": "60 min",
+};
 
 /**
  * Strategy selection on the terminal: switch each part of the strategy on or
@@ -377,7 +385,14 @@ export function StrategySummary({
                   String(c.pattern_tf ?? 1) as PatternTf,
                   PATTERN_TFS,
                   PATTERN_TF_LABEL,
-                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 }, `Colour candle ${v} min`)
+                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 | 30 | 60 }, `Colour candle ${v} min`)
+                )}
+                {segmented<"1" | "2" | "3" | "4" | "5">(
+                  "In a row",
+                  String(Math.min(5, Math.max(1, Number(c.colour_count ?? 1)))) as "1" | "2" | "3" | "4" | "5",
+                  ["1", "2", "3", "4", "5"],
+                  { "1": "1", "2": "2", "3": "3", "4": "4", "5": "5" },
+                  (v) => save({ colour_count: Number(v) }, `Turn after ${v} candle${v === "1" ? "" : "s"} of the other colour`)
                 )}
               </div>
             ) : null}
@@ -395,7 +410,7 @@ export function StrategySummary({
                   String(c.pattern_tf ?? 1) as PatternTf,
                   PATTERN_TFS,
                   PATTERN_TF_LABEL,
-                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 }, `Pattern candle ${v} min`)
+                  (v) => save({ pattern_tf: Number(v) as 1 | 3 | 5 | 10 | 15 | 30 | 60 }, `Pattern candle ${v} min`)
                 )}
                 {segmented<"STRONG" | "ALL">(
                   "Patterns",

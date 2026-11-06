@@ -9,7 +9,10 @@ short; either way the trade is closed at the end of that candle
 ``entry_mode = "COLOUR"`` (`colour_call`) rides the candle colour on the same
 ``pattern_tf`` candles instead: a green candle buys, a red one sells, the trade
 is held while the candles keep its colour and the first candle of the other
-colour closes it (``COLOUR_TURN``) and opens the other way.
+colour closes it (``COLOUR_TURN``) and opens the other way. ``colour_count`` (1-5) asks for
+that many closed candles of a colour in a row before entering or turning, and
+``colour_min_body`` (% of the price, 0 = off) makes a candle whose body is smaller than that
+count as no colour (held, like a doji).
 
 The pattern names follow ``frontend/src/lib/candlePatterns.ts`` (the chart's
 data table), so what the table calls a candle is what the bot acted on.
@@ -36,7 +39,9 @@ import heikin_ashi
 
 IST = ZoneInfo("Asia/Kolkata")
 SESSION_OPEN_MIN = 9 * 60 + 15
-PATTERN_TFS = (1, 3, 5, 10, 15)
+PATTERN_TFS = (1, 3, 5, 10, 15, 30, 60)
+COLOUR_COUNT_MAX = 5
+COLOUR_BODY_MAX = 2.0
 PATTERN_SETS = ("STRONG", "ALL")
 ENTRY_MODES = ("SMA", "PATTERN", "COLOUR")
 
@@ -46,6 +51,8 @@ DEFAULTS = {
     "pattern_trend": False,
     "pattern_set": "STRONG",
     "pattern_min_edge": 1.5,
+    "colour_count": 1,
+    "colour_min_body": 0.0,
 }
 
 # Patterns that order. STRONG: the multi-candle and full-body signals; ALL adds
@@ -322,16 +329,43 @@ def pattern_call(frame: pd.DataFrame, cfg) -> PatternCall:
     return PatternCall(side, name, f"{name} on the {tf}-minute candle")
 
 
-def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
-    """Ride the candle colour (``entry_mode = "COLOUR"``): the side the newest closed candle asks for.
+def colour_count(cfg) -> int:
+    """Candles of one colour in a row needed to enter or turn (1-5)."""
+    try:
+        return min(max(int(setting(cfg, "colour_count") or 1), 1), COLOUR_COUNT_MAX)
+    except (TypeError, ValueError):
+        return 1
 
-    Each time a candle of ``pattern_tf`` minutes closes, a green one (close above open) asks
-    for a long and a red one for a short. The engine holds a trade while the candles keep its
-    colour, and on the first candle of the other colour closes it and opens the other way at
-    the start of the next candle. A doji (close = open) asks for nothing: the trade is held.
-    `frame` is the enriched 1-minute tape with the forming candle last.
+
+def colour_min_body(cfg) -> float:
+    """Smallest body, in % of the close, that counts as a colour (0 = any)."""
+    try:
+        return min(max(float(setting(cfg, "colour_min_body") or 0.0), 0.0), COLOUR_BODY_MAX)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _colour(open_: float, close: float, min_body: float) -> str | None:
+    """"G", "R" or None (a doji, or a body under `min_body` % of the close)."""
+    body = close - open_
+    if body == 0 or (min_body > 0 and close > 0 and abs(body) / close * 100 < min_body):
+        return None
+    return "G" if body > 0 else "R"
+
+
+def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
+    """Ride the candle colour (``entry_mode = "COLOUR"``): the side the newest closed candles ask for.
+
+    Each time a candle of ``pattern_tf`` minutes closes, the last ``colour_count`` closed candles
+    are read: all green asks for a long, all red for a short. The engine holds a trade while the
+    candles keep its colour, and once that many candles of the other colour have closed in a row
+    it closes it and opens the other way at the start of the next candle. A doji (close = open),
+    a candle whose body is under ``colour_min_body`` % of its close, or a mixed run asks for
+    nothing: the trade is held. `frame` is the enriched 1-minute tape with the forming candle last.
     """
     tf = int(setting(cfg, "pattern_tf"))
+    need = colour_count(cfg)
+    min_body = colour_min_body(cfg)
     closed = frame.iloc[:-1] if frame is not None and len(frame) >= 2 else None
     if closed is None or closed.empty:
         return PatternCall(None, "", "waiting for candles")
@@ -340,13 +374,30 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
     rows = tf_candles(closed, tf)
     if not rows:
         return PatternCall(None, "", f"waiting for a closed {tf}-minute candle")
-    last = rows[-1]
     if heikin_ashi.on(cfg):
-        # Heikin Ashi colours (heikin_ashi.py): the colour of the smoothed candle.
+        # Heikin Ashi colours (heikin_ashi.py): the colour of the smoothed candles.
         ha = heikin_ashi.view(pd.DataFrame(rows), cfg)
-        last = {"open": float(ha["open"].iloc[-1]), "close": float(ha["close"].iloc[-1])}
-    if last["close"] > last["open"]:
-        return PatternCall("LONG", "Green candle", f"green {tf}-minute candle")
-    if last["close"] < last["open"]:
-        return PatternCall("SHORT", "Red candle", f"red {tf}-minute candle")
-    return PatternCall(None, "Doji", f"doji {tf}-minute candle — holding")
+        pairs = list(zip(ha["open"].astype(float), ha["close"].astype(float)))
+    else:
+        pairs = [(float(r["open"]), float(r["close"])) for r in rows]
+    if len(pairs) < need:
+        return PatternCall(None, "", f"waiting for {need} closed {tf}-minute candles")
+    colours = [_colour(o, c, min_body) for o, c in pairs[-need:]]
+    last = colours[-1]
+    if last is None:
+        o, c = pairs[-1]
+        if c == o:
+            return PatternCall(None, "Doji", f"doji {tf}-minute candle — holding")
+        return PatternCall(None, "Small candle", f"{tf}-minute candle body under {min_body:g}% — holding")
+    word = "green" if last == "G" else "red"
+    if any(col != last for col in colours):
+        run = 0
+        for col in reversed(colours):
+            if col != last:
+                break
+            run += 1
+        return PatternCall(None, "", f"{run} of {need} {word} {tf}-minute candles in a row — holding")
+    side = "LONG" if last == "G" else "SHORT"
+    if need == 1:
+        return PatternCall(side, f"{word.capitalize()} candle", f"{word} {tf}-minute candle")
+    return PatternCall(side, f"{need} {word} candles", f"{need} {word} {tf}-minute candles in a row")
