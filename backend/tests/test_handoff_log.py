@@ -17,7 +17,7 @@ async def test_a_breakout_hand_off_is_kept_with_the_trend_and_trades_carry_their
     from models import TradeLog
 
     _seed(db)
-    moved, _trades, _engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True)
+    moved, _trades, _engine = await _run(db, _frame(spike_volume=True), breakout_handoff=True, breakout_cut=True)
     assert moved == ["SIMB"]
     rows = handoff_log.rows(day=DAY.isoformat())
     assert len(rows) == 1
