@@ -136,3 +136,30 @@ def test_api_starts_and_reports(tmp_path, monkeypatch):
             time.sleep(0.05)
         assert view["status"] == "DONE" and view["report"]["samples"] > 0
     database.reset_engine()
+
+
+def _sample(symbol, trended, crosses, pnl, at="10:00", day="2026-10-01"):
+    return {
+        "symbol": symbol, "day": day, "at": at, "crosses": crosses, "turns": 0, "adx": 22.0,
+        "efficiency": 0.6 if trended else 0.1, "overlap": 0.4, "gap": 0.1, "trended": trended,
+        "next_crosses": crosses, "move_atr": 1.5 if trended else 0.3, "cross_pnl_pct": pnl,
+    }
+
+
+def test_by_stock_suggests_a_bot_per_stock():
+    samples = []
+    for i in range(10):
+        samples.append(_sample("TREND", True, 0, 0.4, day=f"2026-10-{i + 1:02d}"))
+        samples.append(_sample("CHOP", False, 3, -0.2, day=f"2026-10-{i + 1:02d}"))
+        samples.append(_sample("MIXED", i % 2 == 0, 1, 0.01, day=f"2026-10-{i + 1:02d}"))
+    samples.append(_sample("THIN", True, 0, 0.5))
+    rows = {r["symbol"]: r for r in regime_study.by_stock(samples)}
+    assert rows["TREND"]["bot"] == 3 and rows["TREND"]["trend_score"] == 100
+    assert rows["CHOP"]["bot"] == 2 and rows["CHOP"]["chop_score"] == 100
+    assert rows["MIXED"]["bot"] == 1
+    assert rows["THIN"]["bot"] is None and rows["THIN"]["verdict"] == "NOT_ENOUGH"
+    assert any("Bot 3 because" in w for w in rows["TREND"]["why"])
+    # Trending first, the stock with too few windows last.
+    order = [r["symbol"] for r in regime_study.by_stock(samples)]
+    assert order[0] == "TREND" and order[-1] == "THIN"
+    assert "by_stock" in regime_study.summarize(samples)

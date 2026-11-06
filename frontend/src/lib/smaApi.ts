@@ -2496,6 +2496,27 @@ export type RegimeReport = {
   signals: RegimeSignal[];
   best: string | null;
   stopped?: boolean;
+  /** Each stock's own scores and the bot it suits (older saved reports have none). */
+  by_stock?: RegimeStock[];
+};
+/** One stock in the Sideways test: trend / choppy score and where it belongs (backend regime_study.suggest). */
+export type RegimeStock = {
+  symbol: string;
+  windows: number;
+  days: number;
+  trend_score: number;
+  chop_score: number;
+  avg_crosses: number;
+  follow_pct: number;
+  follow_win_pct: number;
+  efficiency: number;
+  adx: number | null;
+  move_atr: number;
+  by_time: { at: string; windows: number; trended_pct: number }[];
+  bot: 1 | 2 | 3 | null;
+  verdict: "TRENDING" | "CHOPPY" | "MIXED" | "NOT_ENOUGH";
+  headline: string;
+  why: string[];
 };
 export type RegimeStudy = {
   status: "IDLE" | "RUNNING" | "DONE" | "FAILED";

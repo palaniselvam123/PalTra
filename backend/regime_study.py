@@ -22,6 +22,9 @@ Outcome (the next WINDOW minutes):
 `summarize` buckets each signal and reports, per bucket, how often the next stretch trended, the average next
 crosses, move and cross-follow P&L, against the base rate of all samples, plus how far apart the buckets are
 (`spread`): a signal whose buckets all trend about as often as the base rate does not predict anything.
+`by_stock` gives each stock its own trend score (% of its windows that trended), choppy score (% with 2+ SMA crosses),
+SMA-follow result and the bot it suits (`suggest`: 3 trend, 2 sideways, 1 mixed, None too few windows), with the
+reasons in plain words. Display only: nothing is armed or moved.
 `RegimeStudy` downloads each stock's 1-minute Groww candles once (one stock at a time, after the bots' rate limit
 clears) and keeps the last report in `regime_study.json` next to the SMA DB, so it survives a restart.
 """
@@ -244,7 +247,134 @@ def summarize(samples: list[dict], min_bucket: int = 30) -> dict:
         "min_bucket": min_bucket,
         "signals": signals,
         "best": signals[0]["key"] if signals and signals[0]["spread"] >= 10 else None,
+        "by_stock": by_stock(samples, base),
     }
+
+
+# Per-stock verdict (`by_stock`): where each stock belongs, from what it actually did in the past windows.
+MIN_STOCK_WINDOWS = 8  # fewer windows than this = "not enough data"
+TREND_HOME = 3  # the trend bot
+CHOP_HOME = 2  # the sideways (chop) bot
+MAIN_HOME = 1
+
+
+def _stock_row(name: str, picked: list[dict], base: float) -> dict:
+    """One stock's trend and choppy score, the bot it suits and the reasons, in plain words."""
+    n = len(picked)
+    trended = sum(1 for s in picked if s["trended"]) / n * 100
+    whipsaw = sum(1 for s in picked if s["next_crosses"] >= 2) / n * 100
+    crosses = float(np.mean([s["next_crosses"] for s in picked]))
+    follow = float(np.mean([s["cross_pnl_pct"] for s in picked]))
+    follow_win = sum(1 for s in picked if s["cross_pnl_pct"] > 0) / n * 100
+    eff = float(np.mean([s["efficiency"] for s in picked]))
+    adx_vals = [s["adx"] for s in picked if s.get("adx") is not None]
+    adx = float(np.mean(adx_vals)) if adx_vals else None
+    move = float(np.mean([s["move_atr"] for s in picked]))
+    by_time: dict[str, list[dict]] = {}
+    for s in picked:
+        by_time.setdefault(s["at"], []).append(s)
+    times = [
+        {"at": at, "windows": len(rows), "trended_pct": round(sum(1 for r in rows if r["trended"]) / len(rows) * 100, 1)}
+        for at, rows in sorted(by_time.items())
+    ]
+    row = {
+        "symbol": name,
+        "windows": n,
+        "days": len({s["day"] for s in picked}),
+        "trend_score": round(trended, 1),
+        "chop_score": round(whipsaw, 1),
+        "avg_crosses": round(crosses, 2),
+        "follow_pct": round(follow, 3),
+        "follow_win_pct": round(follow_win, 1),
+        "efficiency": round(eff, 3),
+        "adx": round(adx, 1) if adx is not None else None,
+        "move_atr": round(move, 2),
+        "by_time": times,
+    }
+    row.update(suggest(row, base))
+    return row
+
+
+def suggest(row: dict, base: float) -> dict:
+    """`bot` 3 (trend), 2 (sideways), 1 (keep on the main bot) or None (not enough data), with `why` lines."""
+    n = row["windows"]
+    t, c, f = row["trend_score"], row["chop_score"], row["follow_pct"]
+    facts = [
+        f"Trend score {t:.0f}: in {t:.0f} of 100 windows the price moved at least 1 ATR mostly one way "
+        f"(all stocks in this test: {base:.0f}).",
+        f"Choppy score {c:.0f}: in {c:.0f} of 100 windows the SMA lines crossed 2 or more times "
+        f"(on average {row['avg_crosses']:.1f} crosses a window).",
+        f"Following the SMA side made {f:+.3f}% a window on average before charges, and was in profit in "
+        f"{row['follow_win_pct']:.0f}% of windows.",
+        f"How straight it moved: {row['efficiency']:.2f} (0 = back where it started, 1 = a straight line)"
+        + (f"; ADX on average {row['adx']:.0f} (under 20 weak, over 25 strong)." if row.get("adx") is not None else "."),
+    ]
+    best = max(row["by_time"], key=lambda x: x["trended_pct"], default=None)
+    worst = min(row["by_time"], key=lambda x: x["trended_pct"], default=None)
+    if best and worst and best["at"] != worst["at"] and best["trended_pct"] - worst["trended_pct"] >= 25:
+        facts.append(
+            f"Time of day matters: from {best['at']} it trended {best['trended_pct']:.0f}% of the time, "
+            f"from {worst['at']} only {worst['trended_pct']:.0f}%."
+        )
+    if n < MIN_STOCK_WINDOWS:
+        return {
+            "bot": None,
+            "verdict": "NOT_ENOUGH",
+            "headline": f"Only {n} windows read: too few to say. Test more days.",
+            "why": facts,
+        }
+    trend_bar = max(base + 10, 40.0)
+    if t >= trend_bar and c <= 30 and f > 0:
+        return {
+            "bot": TREND_HOME,
+            "verdict": "TRENDING",
+            "headline": "Trends often and the SMA side paid: suits the trend bot (Bot 3).",
+            "why": facts
+            + [
+                f"Bot 3 because its trend score ({t:.0f}) is at least {trend_bar:.0f}, its choppy score ({c:.0f}) is "
+                "30 or less, and following the SMAs made money."
+            ],
+        }
+    if c >= 40 or (t <= base - 10 and f < 0):
+        reason = (
+            f"its choppy score ({c:.0f}) is 40 or more"
+            if c >= 40
+            else f"it trended less than usual ({t:.0f} vs {base:.0f}) and following the SMAs lost money"
+        )
+        return {
+            "bot": CHOP_HOME,
+            "verdict": "CHOPPY",
+            "headline": "Mostly sideways with many crosses: SMA-cross entries lose here. Suits the sideways bot (Bot 2) or skip it.",
+            "why": facts
+            + [
+                f"Bot 2 because {reason}. On Bot 1 / Bot 3 every extra cross is a small loss plus charges.",
+                "If Bot 2 also loses on it in a backtest, take it off the bots altogether.",
+            ],
+        }
+    return {
+        "bot": MAIN_HOME,
+        "verdict": "MIXED",
+        "headline": "Sometimes trends, sometimes chops: keep it on the main bot (Bot 1) and let the hand-offs move it on the day.",
+        "why": facts
+        + [
+            f"Not Bot 3: needs a trend score of {trend_bar:.0f}+, choppy 30 or less and a profit following the SMAs. "
+            "Not Bot 2: needs a choppy score of 40+, or fewer trends than usual with a loss."
+        ],
+    }
+
+
+def by_stock(samples: list[dict], base: float | None = None) -> list[dict]:
+    """Every stock's scores and suggested bot, trending first."""
+    if not samples:
+        return []
+    if base is None:
+        base = sum(1 for s in samples if s["trended"]) / len(samples) * 100
+    groups: dict[str, list[dict]] = {}
+    for s in samples:
+        groups.setdefault(s["symbol"], []).append(s)
+    rows = [_stock_row(name, picked, base) for name, picked in groups.items()]
+    rows.sort(key=lambda r: (r["bot"] is None, -(r["trend_score"] - r["chop_score"])))
+    return rows
 
 
 def verdict(spread: float) -> str:

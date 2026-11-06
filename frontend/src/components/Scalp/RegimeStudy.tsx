@@ -1,12 +1,14 @@
 "use client";
 
 import clsx from "clsx";
-import { BookOpen, CheckCircle2, FastForward, Loader2, Pause, Play, Search, Square, XCircle } from "lucide-react";
+import { BookOpen, CheckCircle2, FastForward, HelpCircle, Loader2, Pause, Play, Search, Square, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists } from "@/components/Scalp/ScanLists";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
-import { smaApi, type RegimeSignal, type RegimeStudy as Study } from "@/lib/smaApi";
+import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { GrowwLink } from "@/components/ui/growwLink";
+import { smaApi, type RegimeSignal, type RegimeStock, type RegimeStudy as Study } from "@/lib/smaApi";
 
 /**
  * Sideways test (backend regime_study.py): does a "sideways" or "trending" reading hold for the next hour? For past
@@ -19,7 +21,21 @@ const DAYS = [5, 10, 15, 20, 30];
 const SIZES = [1, 3, 5, 10, 15];
 const WINDOWS = [30, 60, 90];
 
-export function RegimeStudy({ armed, paused, onStatus }: { armed: Map<string, string[]>; paused?: boolean; onStatus?: OnScanStatus }) {
+export function RegimeStudy({
+  armed,
+  arming,
+  onArm,
+  onArmMany,
+  paused,
+  onStatus,
+}: {
+  armed: Map<string, string[]>;
+  arming?: string | null;
+  onArm?: (symbol: string) => void;
+  onArmMany?: (symbols: string[]) => void;
+  paused?: boolean;
+  onStatus?: OnScanStatus;
+}) {
   const [lists, setLists] = useScanLists("sma.regime.lists", ["armed"]);
   const [days, setDays] = useState(10);
   const [minutes, setMinutes] = useState(5);
@@ -164,6 +180,12 @@ export function RegimeStudy({ armed, paused, onStatus }: { armed: Map<string, st
 
       {rep && rep.samples > 0 ? (
         <>
+          <StockTable rows={rep.by_stock} armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} win={win} base={rep.base_trended_pct ?? 0} />
+          <details className="rounded-lg border border-white/10 p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+              Advanced: which clue tells chop early <span className="font-normal text-slate-400">(for tuning the bots&apos; filters)</span>
+            </summary>
+            <div className="mt-3 space-y-4">
           <Answer rep={rep} win={win} />
           <div>
             <h3 className="text-sm font-semibold text-slate-200">Every clue, best first</h3>
@@ -181,6 +203,8 @@ export function RegimeStudy({ armed, paused, onStatus }: { armed: Map<string, st
             Tested on {rep.samples} pauses, {rep.stocks} stocks, {rep.days} days, {data?.params.minutes}-minute candles
             {rep.stopped ? " (stopped early)" : ""}.
           </p>
+            </div>
+          </details>
         </>
       ) : rep ? (
         <p className="text-xs text-slate-400">The last test found nothing to read (no candles for those days?).</p>
@@ -480,6 +504,214 @@ function SignalCard({ s, base, minBucket, win }: { s: RegimeSignal; base: number
           Normal rate: {base}%. Grey rows had fewer than {minBucket} pauses: too few to trust.
         </p>
       </details>
+    </div>
+  );
+}
+
+const BOT_CHIP: Record<string, { word: string; tone: string }> = {
+  "3": { word: "Bot 3 · trend", tone: "bg-emerald-500/20 text-emerald-200 ring-emerald-400/40" },
+  "2": { word: "Bot 2 · sideways", tone: "bg-amber-500/20 text-amber-200 ring-amber-400/40" },
+  "1": { word: "Bot 1 · keep", tone: "bg-sky-500/15 text-sky-200 ring-sky-400/40" },
+  none: { word: "Not enough data", tone: "bg-white/10 text-slate-300 ring-white/20" },
+};
+const SHOW = [
+  { key: "all", word: "All" },
+  { key: "3", word: "Bot 3 (trend)" },
+  { key: "2", word: "Bot 2 (sideways)" },
+  { key: "1", word: "Bot 1 (keep)" },
+  { key: "none", word: "Not enough data" },
+] as const;
+
+/** A 0-100 score as a small bar with its number. */
+function Score({ value, tone }: { value: number; tone: "trend" | "chop" }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="relative h-2 w-16 overflow-hidden rounded-full bg-white/10" aria-hidden>
+        <span
+          className={clsx("absolute inset-y-0 left-0 rounded-full", tone === "trend" ? "bg-emerald-400/80" : "bg-amber-400/80")}
+          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+        />
+      </span>
+      <span className="w-7 text-right font-mono tabular-nums text-slate-200">{Math.round(value)}</span>
+    </span>
+  );
+}
+
+/**
+ * Each stock: its trend score (% of its past windows that trended), choppy score (% with 2+ SMA crosses), what following
+ * the SMAs made, and the bot it suits, with a "why" for every number. Arming only (the usual Arm prompt); nothing is moved
+ * or unarmed by this page.
+ */
+function StockTable({
+  rows,
+  armed,
+  arming,
+  onArm,
+  onArmMany,
+  win,
+  base,
+}: {
+  rows?: RegimeStock[];
+  armed: Map<string, string[]>;
+  arming?: string | null;
+  onArm?: (symbol: string) => void;
+  onArmMany?: (symbols: string[]) => void;
+  win: number;
+  base: number;
+}) {
+  const [show, setShow] = useState<string>("all");
+  const [open, setOpen] = useState<string | null>(null);
+  const ticks = useTicks();
+  if (!rows) {
+    return (
+      <p className="rounded-lg border border-dashed border-white/15 p-3 text-sm text-slate-400">
+        This saved test is from before the per-stock view. Press <b>Run test</b> again to see each stock&apos;s trend / choppy score
+        and the bot it suits.
+      </p>
+    );
+  }
+  const keyOf = (r: RegimeStock) => (r.bot == null ? "none" : String(r.bot));
+  const counts = rows.reduce<Record<string, number>>((m, r) => ({ ...m, [keyOf(r)]: (m[keyOf(r)] ?? 0) + 1 }), {});
+  const shown = rows.filter((r) => (show === "all" || keyOf(r) === show) && ticks.shows(r.symbol));
+  return (
+    <div className="space-y-2">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-200">Each stock: trending or choppy, and which bot suits it</h3>
+        <p className="text-xs text-slate-400">
+          Read from the past days you picked, one window = {win} minutes. <b className="text-emerald-300">Trend score</b> = out of
+          100 windows, how many really trended. <b className="text-amber-300">Choppy score</b> = how many had 2 or more SMA crosses.
+          Press <HelpCircle size={12} className="inline align-[-2px]" aria-label="why" /> for the full reason. To move a stock, arm it
+          on the suggested bot here, then take it off its old bot in the terminal.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-1.5 text-xs">
+        {SHOW.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => setShow(o.key)}
+            className={clsx(
+              "min-h-8 rounded-full px-3 ring-1 ring-inset",
+              show === o.key ? "bg-sky-500/20 text-sky-100 ring-sky-400/50" : "text-slate-300 ring-white/15 hover:bg-white/5"
+            )}
+          >
+            {o.word} {o.key === "all" ? rows.length : (counts[o.key] ?? 0)}
+          </button>
+        ))}
+      </div>
+      {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-xs">
+          <thead>
+            <tr className="text-left text-slate-500">
+              {onArmMany ? <TickHead ticks={ticks} symbols={shown.map((r) => r.symbol)} /> : null}
+              <th className="pb-2 font-normal">Stock</th>
+              <th className="pb-2 font-normal">Armed now</th>
+              <th className="pb-2 font-normal" title="Out of 100 windows, how many moved at least 1 ATR mostly one way">Trend score</th>
+              <th className="pb-2 font-normal" title="Out of 100 windows, how many had 2 or more SMA crosses">Choppy score</th>
+              <th className="pb-2 text-right font-normal" title="Average result of following the SMA side for one window, before charges">
+                SMA-follow
+              </th>
+              <th className="pb-2 pl-4 font-normal">Suggested</th>
+              <th className="pb-2 font-normal" />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => {
+              const chip = BOT_CHIP[keyOf(r)];
+              const on = armed.get(r.symbol) ?? [];
+              const isOpen = open === r.symbol;
+              const span = onArmMany ? 8 : 7;
+              return (
+                <Fragment key={r.symbol}>
+                  <tr className="border-t border-white/5 align-middle">
+                    {onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null}
+                    <td className="py-1.5 font-semibold text-slate-100">
+                      <GrowwLink symbol={r.symbol} />
+                    </td>
+                    <td className="py-1.5 text-slate-300">{on.length ? on.join(", ") : <span className="text-slate-500">—</span>}</td>
+                    <td className="py-1.5">
+                      <Score value={r.trend_score} tone="trend" />
+                    </td>
+                    <td className="py-1.5">
+                      <Score value={r.chop_score} tone="chop" />
+                    </td>
+                    <td className={clsx("py-1.5 text-right font-mono tabular-nums", r.follow_pct >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                      {pct(r.follow_pct)}
+                    </td>
+                    <td className="py-1.5 pl-4">
+                      <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ring-1 ring-inset", chip.tone)}>
+                        {chip.word}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap py-1.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setOpen(isOpen ? null : r.symbol)}
+                        aria-expanded={isOpen}
+                        title="Why this suggestion"
+                        className="inline-grid h-8 w-8 place-items-center rounded-md text-sky-300 hover:bg-sky-500/10"
+                      >
+                        <HelpCircle size={15} aria-label="Why" />
+                      </button>
+                      {onArm ? (
+                        <button
+                          type="button"
+                          disabled={arming === r.symbol}
+                          onClick={() => onArm(r.symbol)}
+                          title={r.bot ? `Arm on a bot (suggested: Bot ${r.bot})` : "Arm on a bot"}
+                          className="ml-1 min-h-8 rounded-md px-2.5 font-semibold text-profit ring-1 ring-inset ring-profit/40 hover:bg-profit/10 disabled:opacity-50"
+                        >
+                          {arming === r.symbol ? "…" : "Arm"}
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {isOpen ? (
+                    <tr>
+                      <td colSpan={span} className="pb-3">
+                        <Why r={r} base={base} />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!shown.length ? <p className="text-xs text-slate-500">No stock in this group.</p> : null}
+      <p className="text-[11px] text-slate-500">
+        A suggestion from past days, not a promise: replay the stock on the suggested bot (PAPER) before you move it for real.
+      </p>
+    </div>
+  );
+}
+
+/** The full reason for one stock's suggestion: every number against its rule, and its hours. */
+function Why({ r, base }: { r: RegimeStock; base: number }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-sky-400/30 bg-sky-500/[0.06] p-3 text-xs text-slate-300">
+      <p className="text-sm font-semibold text-slate-100">{r.headline}</p>
+      <ul className="list-disc space-y-1 pl-5">
+        {r.why.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+      {r.by_time.length ? (
+        <div>
+          <p className="font-semibold text-slate-200">How often it trended, by time of day</p>
+          <div className="mt-1 space-y-1">
+            {r.by_time.map((t) => (
+              <Bar key={t.at} label={`From ${t.at} (${t.windows} days)`} value={t.trended_pct} base={base} tone="trend" />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <p className="text-slate-500">
+        Read on {r.windows} windows over {r.days} days. The line in each bar is the rate of all stocks in this test ({Math.round(base)}).
+        Move size on average {r.move_atr.toFixed(2)} ATR a window.
+      </p>
     </div>
   );
 }
