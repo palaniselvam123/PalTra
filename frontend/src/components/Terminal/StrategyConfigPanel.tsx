@@ -2817,7 +2817,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
               >
                 <option value="CANDLE">One tall candle (the numbers below)</option>
-                <option value="STRONG">A strong trend (7 checks, as the Scalp page)</option>
+                <option value="STRONG">A strong trend (you pick the checks below)</option>
               </select>
             </label>
             <label className="flex items-center gap-2 self-end text-sm text-slate-300">
