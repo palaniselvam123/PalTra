@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Loader2, Maximize2, Minimize2, Newspaper, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Layers, Loader2, Maximize2, Minimize2, Newspaper, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -29,6 +29,7 @@ import { ChartIndicators } from "./ChartIndicators";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
+import { DrillAsk, DrillPanel, drillSizes, withSlopes, type Drill, type DrillAskAt } from "./ChartDrill";
 
 type Props = {
   chart: ChartPayload | null;
@@ -58,6 +59,7 @@ type Props = {
 export const BAR_MINUTES = [1, 3, 5, 15, 30, 60, 240] as const;
 export type BarMinutes = (typeof BAR_MINUTES)[number];
 const BAR_KEY = "sma.chart.interval";
+const DRILL_KEY = "sma.chart.drill";
 
 /** 1-minute bars the live chart needs so SMA 21 is formed on the bigger candles.
  * 1-minute asks for a whole session (375 minutes) so the volume profile covers the day. */
@@ -136,6 +138,39 @@ function resampleCandles(rows: Candle[], bar: number): Candle[] {
         volume: c.volume ?? null,
       });
     }
+  }
+  return out;
+}
+
+/**
+ * The chart's candles with the drilled ones (ChartDrill.tsx) swapped for their smaller candles. Each smaller run keeps
+ * the bot-size candle's own lines on its last candle (same close), so the SMA lines stay continuous; the rest untouched.
+ */
+function mergeDrill(base: Candle[], drill: Drill | null, bar: number): Candle[] {
+  if (!drill || drill.bar !== bar || !drill.rows.length) return base;
+  const starts = new Set(drill.starts);
+  const out: Candle[] = [];
+  for (const c of base) {
+    const subs = starts.has(c.time) ? drill.rows.filter((r) => r.time >= c.time && r.time < c.time + bar * 60) : [];
+    if (!subs.length) {
+      out.push(c);
+      continue;
+    }
+    subs.forEach((r, i) => {
+      const last = i === subs.length - 1;
+      out.push({
+        ...(last ? c : {}),
+        time: r.time,
+        open: r.open,
+        high: r.high,
+        low: r.low,
+        close: r.close,
+        volume: r.volume ?? null,
+        sma9: last ? c.sma9 : null,
+        sma21: last ? c.sma21 : null,
+        atr14: last ? c.atr14 : null,
+      });
+    });
   }
   return out;
 }
@@ -935,6 +970,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const drillSmaRef = useRef<ISeriesApi<"Line"> | null>(null);
   const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
   // Cumulative delta strip (cum_delta.py), worked out in the browser from the candles' volume.
@@ -1128,7 +1164,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // Candles as drawn: live bars (the bot's candle interval, 1 minute by
   // default) merged into the chosen size, or the past range Groww already built
   // at that size. A size the live candles cannot make shows them as they are.
-  const rows = useMemo(() => {
+  const baseRows = useMemo(() => {
     if (!view) return [];
     const base = sessionCandles(view.candles);
     const source = past ? past.interval ?? 1 : liveSource;
@@ -1136,8 +1172,86 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     if (bar > source && bar % source === 0) return withIndicators(resampleCandles(base, bar), !past);
     return base;
   }, [view, past, bar]);
+  // Drill-down (ChartDrill.tsx): the clicked candle (and the one before) drawn as smaller candles; the rest unchanged.
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const [drillAsk, setDrillAsk] = useState<DrillAskAt | null>(null);
+  const [drillBefore, setDrillBefore] = useState(true);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError, setDrillError] = useState<string | null>(null);
+  const [drillOn, setDrillOn] = useState(true);
+  const drillOnRef = useRef(true);
+  drillOnRef.current = drillOn && drillSizes(bar).length > 0;
+  const drillSeq = useRef(0);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(DRILL_KEY) === "off") setDrillOn(false);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const clearDrill = useCallback(() => {
+    drillSeq.current += 1;
+    setDrill(null);
+    setDrillAsk(null);
+    setDrillError(null);
+    setDrillLoading(false);
+  }, []);
+  // Another stock, candle size or range: the drilled candles belong to the old view.
+  useEffect(() => {
+    clearDrill();
+  }, [symbol, bar, past?.from, past?.to, clearDrill]);
+  const rows = useMemo(() => mergeDrill(baseRows, drill, bar), [baseRows, drill, bar]);
   rowsRef.current = rows;
   const snapToBar = useCallback((sec: number) => bucketStart(sec, bar), [bar]);
+  // The bot-size candle a clicked time belongs to (null when it is not on screen), read by the chart's click handler.
+  const drillStartRef = useRef<(sec: number) => number | null>(() => null);
+  drillStartRef.current = (sec: number) => {
+    const start = bucketStart(sec, bar);
+    return baseRows.some((c) => c.time === start) ? start : null;
+  };
+  const pickDrill = async (size: number) => {
+    const at = drillAsk;
+    setDrillAsk(null);
+    if (!at) return;
+    const starts = drillBefore && baseRows.some((c) => c.time === at.time - bar * 60) ? [at.time - bar * 60, at.time] : [at.time];
+    const seq = (drillSeq.current += 1);
+    setDrillLoading(true);
+    setDrillError(null);
+    setDrill({ starts, size, bar, rows: [] });
+    try {
+      let minute: Candle[];
+      if (past) {
+        // Enough earlier minutes for SMA 21 and ATR 14 of the smaller size.
+        const from = istInput(new Date((starts[0] - 40 * size * 60) * 1000));
+        const to = istInput(new Date((at.time + bar * 60) * 1000));
+        const got = await smaApi.history(past.symbol || symbol, from, to, 1, pastRunRef.current);
+        minute = got.candles;
+      } else {
+        const got = await smaApi.chart(2500, symbol || null, 1);
+        minute = got.candles;
+      }
+      if (seq !== drillSeq.current) return;
+      const built = withSlopes(withIndicators(resampleCandles(sessionCandles(minute), size), false));
+      const end = at.time + bar * 60;
+      setDrill({ starts, size, bar, rows: built.filter((r) => r.time >= starts[0] && r.time < end) });
+    } catch (e) {
+      if (seq !== drillSeq.current) return;
+      setDrillError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (seq === drillSeq.current) setDrillLoading(false);
+    }
+  };
+  const toggleDrillOn = () => {
+    setDrillOn((on) => {
+      try {
+        localStorage.setItem(DRILL_KEY, on ? "off" : "on");
+      } catch {
+        /* private mode */
+      }
+      if (on) setDrillAsk(null);
+      return !on;
+    });
+  };
 
   // Volume profile of the latest session on screen, from the candles as sent
   // (1-minute live; the chosen size on a past range).
@@ -1243,6 +1357,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [measuring]);
+  useEffect(() => {
+    const series = drillSmaRef.current;
+    if (!series) return;
+    const points = (drill?.rows ?? []).filter((r) => r.sma9 != null).map((r) => ({ time: r.time as never, value: r.sma9 as number }));
+    series.setData(points);
+  }, [drill]);
   const toggleMeasure = () => {
     setMeasuring((on) => !on);
     setMeasure(NO_MEASURE);
@@ -1494,6 +1614,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       })
     );
 
+    // The drilled candles' own SMA 9 (smaller size), dotted; empty until a drill-down.
+    drillSmaRef.current = instance.addLineSeries({
+      color: "#F9A8D4",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
     apiRef.current = instance;
     candleRef.current = candles;
     smaFastRef.current = fast;
@@ -1513,6 +1642,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
 
     // Measure: first click is the start, second the end, a third starts again.
     const onClick = (param: { time?: unknown; point?: { x: number; y: number } }) => {
+      if (!measuringRef.current && drillOnRef.current && typeof param.time === "number" && param.point) {
+        // Drill-down: ask which smaller size to split this candle into (a drilled candle maps back to its own).
+        const t = drillStartRef.current(param.time);
+        if (t != null) setDrillAsk({ time: t, x: param.point.x, y: param.point.y });
+        return;
+      }
       if (!measuringRef.current || typeof param.time !== "number" || !param.point) return;
       const t = param.time;
       const candle = rowsRef.current.find((c) => c.time === t);
@@ -1978,6 +2113,24 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </button>
           <button
             type="button"
+            onClick={toggleDrillOn}
+            aria-pressed={drillOn}
+            disabled={!drillSizes(bar).length}
+            title={
+              drillSizes(bar).length
+                ? "Drill down: click a candle to see it as smaller candles (with SMA 9 slope)"
+                : "1-minute candles cannot be split further"
+            }
+            className={clsx(
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset disabled:opacity-40",
+              drillOn ? "bg-sky-400/15 font-semibold text-accentSky ring-sky-400/40" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <Layers size={14} aria-hidden />
+            Drill down
+          </button>
+          <button
+            type="button"
             onClick={toggleMeasure}
             aria-pressed={measuring}
             title="Measure profit or loss between two candles"
@@ -2238,6 +2391,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           data-panel-sized={full ? undefined : ""}
           className={clsx("w-full", full ? "absolute inset-0" : "h-[320px] sm:h-[460px] lg:h-[520px]", measuring && "cursor-crosshair")}
         />
+        {drillAsk ? (
+          <DrillAsk
+            at={drillAsk}
+            bar={bar}
+            before={drillBefore}
+            onBefore={setDrillBefore}
+            onPick={(size) => void pickDrill(size)}
+            onClose={() => setDrillAsk(null)}
+          />
+        ) : null}
         {tradeTipAt ? (
           <TradeTipCard at={tradeTipAt} width={rootRef.current?.clientWidth ?? 0} height={rootRef.current?.clientHeight ?? 0} />
         ) : null}
@@ -2377,6 +2540,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </div>
         )}
       </div>
+      <DrillPanel drill={drill} loading={drillLoading} error={drillError} onClear={clearDrill} />
       {/* Under the dates, like Groww's range buttons. */}
       <RangeBar
         range={range}

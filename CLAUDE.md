@@ -308,6 +308,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
   chart that follows the replay while it plays and shows the replayed day
   afterwards. "Hold view" on the chart keeps its zoom, scroll and stock.
+  **Drill-down candles** (`components/Terminal/ChartDrill.tsx`, display only; the chart's "Drill down" switch, on by default,
+  kept per browser as `sma.chart.drill`): clicking a candle asks for a smaller size that divides it (`drillSizes`: 1 / 2 / 3
+  / 5 / 10 / 15 / 30 / 60 under the candle on screen) and whether to split the candle before it too (on by default); the chart
+  then fetches the 1-minute tape (`smaApi.chart(2500, symbol, 1)`, which follows a replay; a past range asks `history` from 40
+  smaller candles before), groups it from 09:15 (`resampleCandles`, `withIndicators`: the smaller size's own SMA 9 / 21 and
+  ATR) and `mergeDrill` swaps only those candles for their smaller ones (the bot-size candle's lines stay on the last one, so
+  the SMA lines run on); the rest stay. A dotted line draws the smaller candles' own SMA 9. `DrillPanel` lists each smaller
+  candle (OHLC, SMA 9, slope in % per candle and in ATR per candle, flat < 0.01 / steep ≥ 0.03 %/candle) with the average and
+  steepest slope and whether SMA 9 turned inside them, and "Back to N-min candles". A new stock, size or range clears it.
   The chart's **Indicators** panel (`components/Terminal/ChartIndicators.tsx`, `lib/chartStyle.ts`, kept in the
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
