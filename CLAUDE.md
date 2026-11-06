@@ -844,7 +844,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   **Owner's rework** (Settings → 7. Advanced, "Trend breakout (move the stock on)"): **what counts** (`breakout_rule`, per
   bot and per stock): `CANDLE` (default, the tall candle above) or `STRONG` (`breakout.strong`: `trend_strength.read`, the
   Scalp page's 7-check strong trend, midday rules, on the bot's closed candles with the session VWAP; its side is the
-  trend's; meant for Bot 1, so one tall candle no longer sends a stock to Bot 3); `breakout.judge` picks. **Where it goes**
+  trend's; meant for Bot 1, so one tall candle no longer sends a stock to Bot 3); `breakout.judge` picks. The strong-trend
+  rule is adjustable (per bot and per stock): each of the 7 checks is `must` / `use` / `off` (`breakout_trend_checks`, CSV
+  "stack:must,vwap:use,…", `breakout.parse_trend_rules`, checked by `ConfigUpdate._trend_checks`; "" = stack / VWAP / slope
+  must pass, the rest count) and at least `breakout_trend_need` (1-7, default 6, never more than are on, `trend_need`) of the
+  ones on must pass (`breakout.strong` reads `trend_strength`'s `trend_checks` and judges them itself); Settings →
+  7. Advanced, `StrategyConfigPanel.TrendChecks` (Must pass / Counts / Off per check, "Need at least N"). **Where it goes**
   (`StrategyEngine._breakout_target`): a stock that reached this bot through a hand-off goes back to its origin
   (`_handoff_origin`: `handoff_chain.moved()`; in a replay with hand-offs played, the replayed bot for a stock played as
   another, `ReplayEngine._acting_bot` / `_handoff_origin`), anything else to Bot 3 (Bot 3's breakout arrival entry only

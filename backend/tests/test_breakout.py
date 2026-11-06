@@ -394,3 +394,50 @@ def test_the_strong_trend_rule_needs_a_real_trend_not_one_candle():
     assert breakout.rule(type("C", (), {"breakout_rule": "nonsense"})()) == "CANDLE"
     assert breakout.cut(type("C", (), {})()) is False  # off by default
 
+
+def test_the_strong_trend_checks_and_count_are_adjustable():
+    climb = _trend_frame(1.0).iloc[: 75 + 40]
+    C = lambda **kw: type("C", (), {"breakout_rule": "STRONG", **kw})()  # noqa: E731
+    hit, note, _ = breakout.strong(climb, C())
+    assert hit and "needs 6" in note, note
+    # Every check on and all 7 needed: the steady climb still passes the ones it passes, or says how many.
+    hit7, note7, _ = breakout.strong(climb, C(breakout_trend_need=7))
+    assert ("needs 7" in note7) and (hit7 or "of 7 checks" in note7), note7
+    # Only two checks counted, one of them needed: the zig-zag can still fail the must-pass ones.
+    loose = C(breakout_trend_checks="stack:use,vwap:off,slope:off,fan:off,hold:off,structure:off,run:off", breakout_trend_need=1)
+    assert breakout.trend_need(loose) == 1
+    assert breakout.trend_rules(loose)["vwap"] == "off" and breakout.trend_rules(loose)["stack"] == "use"
+    assert breakout.trend_need(C(breakout_trend_checks="stack:must,vwap:off,slope:off,fan:off,hold:off,structure:off,run:off", breakout_trend_need=6)) == 1
+    zig = _trend_frame(0.0).iloc[: 75 + 40]
+    hit, note, _ = breakout.strong(zig, C(breakout_trend_checks="run:must"))
+    assert not hit and ("must-pass" in note or "needs" in note), note
+    with pytest.raises(ValueError):
+        breakout.parse_trend_rules("stack:maybe")
+    with pytest.raises(ValueError):
+        breakout.parse_trend_rules(",".join(f"{k}:off" for k in breakout.TREND_CHECKS))
+    assert breakout.parse_trend_rules("") == breakout.DEFAULT_TREND_RULES
+
+
+def test_api_saves_the_strong_trend_choices(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert {"breakout_trend_checks", "breakout_trend_need"} <= set(STOCK_FIELDS)
+    with TestClient(app) as client:
+        got = client.get("/api/config").json()
+        assert got["breakout_trend_need"] == 6 and "stack:must" in got["breakout_trend_checks"]
+        ok = client.put("/api/config", json={"breakout_trend_checks": "run:off,fan:must", "breakout_trend_need": 4})
+        assert ok.status_code == 200, ok.text
+        body = ok.json()
+        assert body["breakout_trend_need"] == 4 and "run:off" in body["breakout_trend_checks"] and "fan:must" in body["breakout_trend_checks"]
+        assert client.put("/api/config", json={"breakout_trend_checks": "nonsense:must"}).status_code == 422
+        assert client.put("/api/config", json={"breakout_trend_need": 9}).status_code == 422
+    database.reset_engine()
+

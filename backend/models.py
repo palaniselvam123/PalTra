@@ -532,6 +532,9 @@ class BotConfig(Base):
     # against it is cut at once (off by default: it runs to its own exits, then the stock moves).
     breakout_rule: Mapped[str | None] = mapped_column(String(8), nullable=True, default="CANDLE")
     breakout_cut: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # The strong-trend rule's checks ("stack:must,vwap:use,run:off,…"; "" = the Scalp page's default) and how many must pass.
+    breakout_trend_checks: Mapped[str | None] = mapped_column(String(160), nullable=True, default="")
+    breakout_trend_need: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

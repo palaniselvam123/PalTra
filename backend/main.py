@@ -635,6 +635,15 @@ class ConfigUpdate(BaseModel):
     exit_need: int | None = Field(default=None, ge=0, le=len(exit_join_mod.KEYS))
     exit_within: int | None = Field(default=None, ge=1, le=exit_join_mod.MAX_WITHIN)
 
+    @field_validator("breakout_trend_checks", mode="before")
+    @classmethod
+    def _trend_checks(cls, value):
+        """Strong-trend checks for the breakout rule (breakout.parse_trend_rules); stored as the full list."""
+        if value is None:
+            return None
+        rules = breakout_mod.parse_trend_rules(value)
+        return ",".join(f"{k}:{v}" for k, v in rules.items())
+
     @field_validator("exit_group", mode="before")
     @classmethod
     def _exit_group_keys(cls, value):
@@ -732,6 +741,8 @@ class ConfigUpdate(BaseModel):
     breakout_volume_mult: float | None = Field(default=None, ge=1, le=10)
     breakout_rule: Literal["CANDLE", "STRONG"] | None = None
     breakout_cut: bool | None = None
+    breakout_trend_checks: str | None = Field(default=None, max_length=160)
+    breakout_trend_need: int | None = Field(default=None, ge=1, le=7)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -1721,6 +1732,8 @@ def _gap_dict(row) -> dict:
         "breakout_volume_mult": breakout_mod.volume_mult(row),
         "breakout_rule": breakout_mod.rule(row),
         "breakout_cut": breakout_mod.cut(row),
+        "breakout_trend_checks": ",".join(f"{k}:{v}" for k, v in breakout_mod.trend_rules(row).items()),
+        "breakout_trend_need": breakout_mod.trend_need(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

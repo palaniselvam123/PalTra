@@ -429,6 +429,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_volume_mult: Math.min(10, Math.max(1, Number(form.breakout_volume_mult ?? 1.5) || 1.5)),
     breakout_rule: String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "STRONG" : "CANDLE",
     breakout_cut: Boolean(form.breakout_cut),
+    breakout_trend_checks: String(form.breakout_trend_checks ?? ""),
+    breakout_trend_need: Math.min(7, Math.max(1, Math.round(Number(form.breakout_trend_need ?? 6) || 6))),
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -2829,7 +2831,21 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Close an open trade against it at once (off: it runs to its own exit first)
             </label>
           </div>
-          <div className="mt-2 grid grid-cols-3 items-end gap-2">
+          {String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? (
+            <TrendChecks
+              value={String(form.breakout_trend_checks ?? "")}
+              need={Number(form.breakout_trend_need ?? 6) || 6}
+              onChange={(v) => set("breakout_trend_checks", v)}
+              onNeed={(n) => set("breakout_trend_need", String(n))}
+              own={isOwn("breakout_trend_checks") || isOwn("breakout_trend_need")}
+            />
+          ) : null}
+          <div
+            className={clsx(
+              "mt-2 grid-cols-3 items-end gap-2",
+              String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "hidden" : "grid"
+            )}
+          >
             <Field
               label="Candle (× ATR)"
               value={String(form.breakout_atr_mult ?? 1.8)}
@@ -3226,7 +3242,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({
       group: "advanced",
       key: "breakout_handoff",
-      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "a strong trend" : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
+      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? `a strong trend (${Number(f.breakout_trend_need ?? 6) || 6} checks)` : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
       off: { breakout_handoff: false },
     });
   if (f.review_on)
@@ -3812,3 +3828,117 @@ function ReviewConditions({
     </div>
   );
 }
+
+/** The strong-trend rule's 7 checks (breakout.py / trend_strength.py): each must pass, counts or is off, and how many of
+ * the counted ones must pass. Saved as "stack:must,vwap:use,…" plus a number. */
+const TREND_CHECKS: { key: string; name: string; what: string }[] = [
+  { key: "stack", name: "Lines in order", what: "Price beyond SMA 9, SMA 9 beyond SMA 21" },
+  { key: "vwap", name: "Beyond VWAP", what: "Price and SMA 21 on the trend side of VWAP" },
+  { key: "slope", name: "Both SMAs sloping", what: "SMA 9 and SMA 21 moved the trend's way over 3 candles" },
+  { key: "fan", name: "Gap widening", what: "SMA gap at least 0.10 % and not shrinking by a third" },
+  { key: "hold", name: "Holding above SMA 9", what: "At least 75 % of the last 12 closes beyond SMA 9" },
+  { key: "structure", name: "Higher highs / lows", what: "Higher highs and lows (lower for a downtrend), last 12 candles" },
+  { key: "run", name: "No cross lately", what: "No SMA 9 / 21 cross in the last 12 candles" },
+];
+const TREND_DEFAULT: Record<string, string> = { stack: "must", vwap: "must", slope: "must", fan: "use", hold: "use", structure: "use", run: "use" };
+const TREND_MODES: { mode: string; label: string }[] = [
+  { mode: "must", label: "Must pass" },
+  { mode: "use", label: "Counts" },
+  { mode: "off", label: "Off" },
+];
+
+function parseTrend(value: string): Record<string, string> {
+  const out = { ...TREND_DEFAULT };
+  for (const part of value.split(",")) {
+    const [k, m] = part.split(":").map((x) => (x ?? "").trim().toLowerCase());
+    if (k in out && ["must", "use", "off"].includes(m)) out[k] = m;
+  }
+  return out;
+}
+
+function TrendChecks({
+  value,
+  need,
+  onChange,
+  onNeed,
+  own,
+}: {
+  value: string;
+  need: number;
+  onChange: (v: string) => void;
+  onNeed: (n: number) => void;
+  own?: boolean;
+}) {
+  const rules = parseTrend(value);
+  const on = TREND_CHECKS.filter((c) => rules[c.key] !== "off").length;
+  const must = TREND_CHECKS.filter((c) => rules[c.key] === "must").length;
+  const shown = Math.max(1, Math.min(need, on || 1));
+  const setMode = (key: string, mode: string) => {
+    const next = { ...rules, [key]: mode };
+    if (Object.values(next).every((m) => m === "off")) return; // at least one check stays on
+    onChange(TREND_CHECKS.map((c) => `${c.key}:${next[c.key]}`).join(","));
+  };
+  return (
+    <div className="mt-2 rounded-lg border border-white/10 p-2.5">
+      <p className="flex items-center gap-1 text-xs font-semibold text-slate-200">
+        Strong-trend checks {own && <OwnTag />}
+      </p>
+      <p className="text-[11px] text-slate-400">
+        Read on this bot&apos;s own closed candles. &quot;Must pass&quot; ones always have to pass; &quot;Counts&quot; ones add to the total;
+        &quot;Off&quot; ones are not read.
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {TREND_CHECKS.map((c) => (
+          <div key={c.key} className="grid grid-cols-1 items-center gap-1 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-200">{c.name}</p>
+              <p className="text-[11px] text-slate-500">{c.what}</p>
+            </div>
+            <div role="group" aria-label={c.name} className="inline-flex overflow-hidden rounded-md ring-1 ring-inset ring-white/15">
+              {TREND_MODES.map((m) => (
+                <button
+                  key={m.mode}
+                  type="button"
+                  aria-pressed={rules[c.key] === m.mode}
+                  onClick={() => setMode(c.key, m.mode)}
+                  className={clsx(
+                    "min-h-8 px-2.5 text-[11px] font-semibold",
+                    rules[c.key] === m.mode
+                      ? m.mode === "must"
+                        ? "bg-emerald-500/20 text-emerald-200"
+                        : m.mode === "use"
+                          ? "bg-sky-500/20 text-sky-200"
+                          : "bg-white/10 text-slate-300"
+                      : "text-slate-400 hover:bg-white/5"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+        Need at least
+        <select
+          value={shown}
+          onChange={(e) => onNeed(Number(e.target.value))}
+          className="min-h-8 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+        >
+          {Array.from({ length: Math.max(on, 1) }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        of the {on} checks that are on{must ? ` (the ${must} must-pass ones included)` : ""}.
+      </label>
+      <p className="mt-1 text-[11px] text-slate-500">
+        Fewer checks or a lower number = the stock moves to Bot 3 more often (and on weaker trends). Default: lines in order,
+        beyond VWAP and both SMAs sloping must pass, 6 of 7.
+      </p>
+    </div>
+  );
+}
+

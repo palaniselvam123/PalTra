@@ -353,6 +353,7 @@ SNAPSHOT_FIELDS = (
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
+    "breakout_trend_checks", "breakout_trend_need",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",

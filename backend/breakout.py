@@ -206,8 +206,50 @@ def read(enriched: pd.DataFrame, cfg) -> tuple[bool, str]:
     return check(bar, bar.get("atr_14"), bar.get("sma_9"), bar.get("sma_21"), volume, average, cfg)
 
 
-def strong(enriched: pd.DataFrame) -> tuple[bool, str, str | None]:
-    """The strong-trend read (trend_strength.py, midday rules) on the closed candles of an enriched frame."""
+TREND_CHECKS = ("stack", "vwap", "slope", "fan", "hold", "structure", "run")
+TREND_MODES = ("must", "use", "off")
+DEFAULT_TREND_RULES = {"stack": "must", "vwap": "must", "slope": "must", "fan": "use", "hold": "use", "structure": "use", "run": "use"}
+DEFAULT_TREND_NEED = 6
+
+
+def parse_trend_rules(raw) -> dict[str, str]:
+    """`breakout_trend_checks` ("stack:must,vwap:use,run:off,...") as {check: must|use|off}; a check left out keeps its
+    default, an empty value is the default (stack / VWAP / slope must pass, the other four count). Raises ValueError."""
+    rules = dict(DEFAULT_TREND_RULES)
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        name, _, mode = part.partition(":")
+        name, mode = name.strip().lower(), mode.strip().lower()
+        if name not in TREND_CHECKS or mode not in TREND_MODES:
+            raise ValueError(f"unknown strong-trend check {part!r}")
+        rules[name] = mode
+    if all(m == "off" for m in rules.values()):
+        raise ValueError("at least one strong-trend check must be on")
+    return rules
+
+
+def trend_rules(cfg) -> dict[str, str]:
+    try:
+        return parse_trend_rules(getattr(cfg, "breakout_trend_checks", None))
+    except ValueError:
+        return dict(DEFAULT_TREND_RULES)
+
+
+def trend_need(cfg) -> int:
+    """How many of the checks that are on must pass (1-7, never more than are on)."""
+    on = sum(1 for m in trend_rules(cfg).values() if m != "off")
+    try:
+        need = int(getattr(cfg, "breakout_trend_need", None) or DEFAULT_TREND_NEED)
+    except (TypeError, ValueError):
+        need = DEFAULT_TREND_NEED
+    return max(1, min(need, on))
+
+
+def strong(enriched: pd.DataFrame, cfg=None) -> tuple[bool, str, str | None]:
+    """The strong-trend read (trend_strength.py's 7 checks, midday rules) on the closed candles of an enriched frame, judged
+    by the bot's own choice of checks (`breakout_trend_checks`: must pass / counts / off) and count (`breakout_trend_need`)."""
     import trend_strength
     from indicators import _session_vwap
 
@@ -220,19 +262,28 @@ def strong(enriched: pd.DataFrame) -> tuple[bool, str, str | None]:
         read_out = trend_strength.read(closed, _session_vwap(closed))
     except Exception:  # noqa: BLE001 - a read that fails is never a trend
         return False, "strong trend not readable", None
-    trend = read_out.get("trend")
-    if trend not in (trend_strength.STRONG_BULLISH, trend_strength.STRONG_BEARISH):
-        return False, f"no strong trend ({read_out.get('trend_score', 0)}% of the checks)", None
-    side_now = "LONG" if trend == trend_strength.STRONG_BULLISH else "SHORT"
-    word = "up" if side_now == "LONG" else "down"
-    passed = sum(1 for v in (read_out.get("trend_checks") or {}).values() if v)
-    return True, f"strong trend {word} ({passed} of {len(read_out.get('trend_checks') or {})} checks)", side_now
+    checks = read_out.get("trend_checks") or {}
+    side_word = read_out.get("trend_side")
+    if not checks or side_word not in ("BULLISH", "BEARISH"):
+        return False, "too few candles for the strong-trend checks", None
+    rules = trend_rules(cfg)
+    need = trend_need(cfg)
+    on = [k for k in TREND_CHECKS if rules.get(k) != "off"]
+    passed = [k for k in on if checks.get(k)]
+    missing = [k for k in on if rules.get(k) == "must" and not checks.get(k)]
+    word = "up" if side_word == "BULLISH" else "down"
+    if missing:
+        return False, f"no strong trend {word}: must-pass {', '.join(missing)} failed ({len(passed)} of {len(on)})", None
+    if len(passed) < need:
+        return False, f"no strong trend {word}: {len(passed)} of {len(on)} checks, needs {need}", None
+    side_now = "LONG" if side_word == "BULLISH" else "SHORT"
+    return True, f"strong trend {word} ({len(passed)} of {len(on)} checks, needs {need})", side_now
 
 
 def judge(enriched: pd.DataFrame, cfg) -> tuple[bool, str, str | None]:
     """(breakout?, note, side LONG/SHORT) by the bot's rule: one tall candle, or the strong-trend read."""
     if rule(cfg) == "STRONG":
-        return strong(enriched)
+        return strong(enriched, cfg)
     hit, note = read(enriched, cfg)
     return hit, note, (side(enriched.iloc[-2]) if hit else None)
 
