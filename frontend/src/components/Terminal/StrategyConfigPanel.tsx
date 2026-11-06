@@ -429,6 +429,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_volume_mult: Math.min(10, Math.max(1, Number(form.breakout_volume_mult ?? 1.5) || 1.5)),
     breakout_rule: String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "STRONG" : "CANDLE",
     breakout_cut: Boolean(form.breakout_cut),
+    breakout_when: String(form.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? "IN_PROFIT" : "ANY",
+    chop_losses: Math.min(10, Math.max(0, Math.round(Number(form.chop_losses ?? 0) || 0))),
     breakout_trend_checks: String(form.breakout_trend_checks ?? ""),
     breakout_trend_need: Math.min(7, Math.max(1, Math.round(Number(form.breakout_trend_need ?? 6) || 6))),
     use_or_volume: Boolean(form.use_or_volume),
@@ -2772,6 +2774,18 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Off by default; without it Bot 2 waits for its next cross.
             </InfoTip>
           </label>
+          <div className="mt-2 grid max-w-sm grid-cols-1 items-end gap-2">
+            <Field
+              label="Move to Bot 2 after this many losing trades on a stock today (0 = off)"
+              value={String(form.chop_losses ?? 0)}
+              onChange={(v) => set("chop_losses", v)}
+              own={isOwn("chop_losses")}
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Trade first, then sort: once this bot has lost that many trades (before charges) on the same stock today, the stock
+            moves to Bot 2 (flipped, gap mode) when it is flat. Bot 2 orders at once too with the box above ticked.
+          </p>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Trend breakout (move the stock on)
             <InfoTip label="About the trend breakout">
@@ -2817,9 +2831,31 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
               >
                 <option value="CANDLE">One tall candle (the numbers below)</option>
-                <option value="STRONG">A strong trend (7 checks, as the Scalp page)</option>
+                <option value="STRONG">A strong trend (you pick the checks below)</option>
               </select>
             </label>
+            <label className="block text-xs text-slate-400">
+              <span className="flex items-center gap-1">
+                When to move it {isOwn("breakout_when") && <OwnTag />}
+              </span>
+              <select
+                value={String(form.breakout_when ?? "ANY").toUpperCase()}
+                onChange={(e) => set("breakout_when", e.target.value)}
+                className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                <option value="ANY">Whenever it shows (traded here or not)</option>
+                <option value="IN_PROFIT">Only while this bot&apos;s trade rides it in profit</option>
+              </select>
+            </label>
+            {String(form.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? (
+              <p className="self-end text-xs text-slate-400 sm:col-span-2">
+                Trade first, then sort: only a stock this bot is holding, on the trend&apos;s side and in profit, moves on. This
+                bot keeps its trade; the stock is armed on Bot 3 too (or back where it came from), which opens the same side at
+                once with its own size, stop and exits; once this bot&apos;s trade closes, the stock is Bot 3&apos;s only. A stock this
+                bot has not traded stays here. Once a day per stock. A backtest holds one trade per stock, so there this
+                bot&apos;s trade is closed (TREND_HANDOFF) and Bot 3 takes the same side at once.
+              </p>
+            ) : (
             <label className="flex items-center gap-2 self-end text-sm text-slate-300">
               <input
                 type="checkbox"
@@ -2830,6 +2866,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               {isOwn("breakout_cut") && <OwnTag />}
               Close an open trade against it at once (off: it runs to its own exit first)
             </label>
+            )}
           </div>
           {String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? (
             <TrendChecks
@@ -3242,8 +3279,15 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({
       group: "advanced",
       key: "breakout_handoff",
-      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? `a strong trend (${Number(f.breakout_trend_need ?? 6) || 6} checks)` : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
+      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? `a strong trend (${Number(f.breakout_trend_need ?? 6) || 6} checks)` : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${String(f.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? "only while this bot's trade rides it in profit (the trade is kept)" : f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
       off: { breakout_handoff: false },
+    });
+  if (Number(f.chop_losses ?? 0) > 0)
+    add({
+      group: "advanced",
+      key: "chop_losses",
+      text: `After ${Number(f.chop_losses)} losing trades on a stock today, it moves to Bot 2`,
+      off: { chop_losses: "0" },
     });
   if (f.review_on)
     add({

@@ -856,6 +856,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   then). **An open trade against it** (`breakout_cut`, off by default, owner's choice): not cut; it runs to its own exits
   (stop, target, colour, cross…) and the stock moves on the first closed candle after it is flat
   (`StrategyEngine._breakout_pending`, memory only); on = cut at once (`BREAKOUT_STOP`, `_move_on_breakout`), the old way.
+  **Trade first, then sort** (owner's request: Bot 1 trades a stock first, then sends the trenders to Bot 3 and the choppy
+  ones to Bot 2). **When to move it** (`breakout_when` `ANY` default | `IN_PROFIT`, per bot and per stock; `breakout.when`):
+  with `IN_PROFIT` a breakout / strong trend moves the stock only while this bot holds a trade on its side that is in profit
+  (`breakout.in_profit` on the last price; `StrategyEngine._trend_on_trade`, once a day per stock, `_trend_sent`): the trade is
+  **kept** (owner's choice), `recovery.handoff(..., keep_source=True)` arms the stock on the target (`_breakout_target`) too
+  and `handoff_order` (`recovery.order_now`, live bots) has it open the same side at once (`direct_order`, entry reason
+  `HANDOFF`; one LIVE bot per stock applies); once this bot's trade closes, `_leave_after_trend` takes it off this bot's Trade
+  list (`recovery.unarm`) and notes it for the send-back (`handoff_chain.note`) (`_trend_kept`, memory only: a restart leaves
+  it on both). A stock this bot is not holding, holds against the trend or at a loss stays; `breakout_cut` does not apply.
+  Backtests hold one trade per stock (`ReplayEngine._keeps_both` False), so there the trade closes (`TREND_HANDOFF`) and
+  the target takes the same side at once (`_chain_order`). Logged as `TREND_PROFIT` in `handoff_log`. **Choppy after losing
+  trades** (`chop_losses` N, 0 = off by default, max 10; per bot and per stock, PAPER and LIVE, replays too;
+  `recovery.chop_losses`): `StrategyEngine._watch_chop_losses` (armed loop, before the breakout) reads each closed trade of
+  the stock once (`_chop_watch`, `_closed_gross`; also one a cross closed and reversed) and counts the losing ones before
+  charges (`_stock_losses`, memory only, cleared with the day); at N, once flat, `_hand_to_chop_bot(kind="CHOP_LOSSES")` moves
+  it to Bot 2 (chop recipe; `handoff_now` makes Bot 2 order the opposite of the last trade at once). Settings → 7. Advanced.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

@@ -14,7 +14,9 @@ const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}₹${Math.abs(
 const KIND_SHORT: Record<string, string> = {
   RECOVERY: "Recovered loss",
   VTURN_LOSS: "V-turn loss",
+  CHOP_LOSSES: "Losing trades",
   BREAKOUT: "Trend breakout",
+  TREND_PROFIT: "Trend in profit",
   STOP_EXIT: "Stop-loss exit",
   FAST_MOVE: "Fast move",
   FAST_BACK: "Back from Bot 5",

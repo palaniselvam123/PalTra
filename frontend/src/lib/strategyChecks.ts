@@ -236,7 +236,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   const mode = String(cfg.entry_mode ?? "SMA").toUpperCase();
   if (mode === "PATTERN") out.push({ name: "Candle pattern: each candle closes the trade", when: candle, code: "CANDLE_END" });
   if (mode === "COLOUR") out.push({ name: "Candle colour: a candle of the other colour", when: candle, code: "COLOUR_TURN" });
-  if (cfg.breakout_handoff && cfg.breakout_cut) out.push({ name: "Breakout: cut and move the stock on", when: candle, code: "BREAKOUT_STOP" });
+  if (cfg.breakout_handoff && cfg.breakout_cut && String(cfg.breakout_when ?? "ANY").toUpperCase() !== "IN_PROFIT") out.push({ name: "Breakout: cut and move the stock on", when: candle, code: "BREAKOUT_STOP" });
   if (mode === "SMA" && crossExitOn(cfg) && !mixed)
     out.push({ name: cfg.recovery_hold ? "Opposite SMA cross (a loser is held for recovery)" : "Opposite SMA cross (then reverse)", when: candle, code: "MA_CROSS" });
   if (cfg.review_on && String(cfg.review_default_answer ?? "PROMPT").toUpperCase() === "EXIT")

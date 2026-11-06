@@ -58,6 +58,8 @@ import pandas as pd
 from indicators import minute_volume_stats
 
 BREAKOUT_EXIT = "BREAKOUT_STOP"
+# A backtest holds one trade per stock, so with `breakout_when` IN_PROFIT it hands the trade over (breakout.py).
+TREND_HANDOFF_EXIT = "TREND_HANDOFF"
 TREND_BOT = 3
 
 DEFAULT_ATR_MULT = 1.8
@@ -93,6 +95,24 @@ def rule(cfg) -> str:
 def cut(cfg) -> bool:
     """Close an open trade against the breakout at once (the old way); off = let it run to its own exits."""
     return bool(getattr(cfg, "breakout_cut", False))
+
+
+WHEN = ("ANY", "IN_PROFIT")
+
+
+def when(cfg) -> str:
+    """ANY: a breakout moves the stock whether this bot traded it or not (as before). IN_PROFIT (owner's choice: trade
+    first, then sort): only while this bot holds a trade on the trend's side that is in profit; the trade is kept and the
+    target bot opens the same side at once; the stock leaves this bot once that trade closes."""
+    value = str(getattr(cfg, "breakout_when", None) or "ANY").upper()
+    return value if value in WHEN else "ANY"
+
+
+def in_profit(direction: str, entry: float | None, price: float | None) -> bool:
+    """True while a trade's price is beyond its entry on its side."""
+    if not entry or not price:
+        return False
+    return price > entry if direction == "LONG" else price < entry
 
 
 def atr_mult(cfg) -> float:

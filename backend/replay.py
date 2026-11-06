@@ -509,6 +509,10 @@ class ReplayEngine(StrategyEngine):
             return None
         return int(self.bot_id) if self._acting_bot(symbol) != int(self.bot_id) else None
 
+    def _keeps_both(self) -> bool:
+        """One trade per stock here: a trend hand-off (breakout_when IN_PROFIT) hands the trade over."""
+        return False
+
     def _chain_hand_off(self, from_bot: int, symbol: str, to_bot: int) -> str:
         """Play a hand-off inside this backtest (handoff_chain.py): the stock stays and trades with the target bot's
         settings from now on. The live Trade lists are not touched."""
