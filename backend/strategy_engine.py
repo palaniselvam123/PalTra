@@ -863,6 +863,9 @@ def chart_filters(cfg) -> dict:
         "bb_std": float(getattr(cfg, "bb_std", 2.0) or 2.0),
         "bb_exit": (getattr(cfg, "bb_exit", None) or "OFF").upper(),
         "atr_stop": getattr(cfg, "use_stop", True) is not False and (getattr(cfg, "stop_type", "ATR") or "ATR") == "ATR",
+        # Breakout hand-off (breakout.py): the chart's reading line says how tall a candle is in ATRs against this.
+        "breakout_handoff": breakout.on(cfg),
+        "breakout_atr_mult": breakout.atr_mult(cfg),
         # EMA lines (ema_filter.py): drawn while the EMA entry check or the EMA exit is on.
         "ema_lines": ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg),
         "ema_fast": ema_filter.lengths(cfg)[0],

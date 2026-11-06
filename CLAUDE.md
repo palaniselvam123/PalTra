@@ -811,7 +811,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle on the tape when the stock was armed), `StrategyEngine._watch_breakout` (before `on_minute`, in the armed loop)
   runs `breakout.read`: height ≥ `breakout_atr_mult` (1.8) × ATR and either |SMA fast − slow| / slow ≥ `breakout_gap_pct`
   (0.20) % or the candle's volume ≥ `breakout_volume_mult` (1.5) × the previous 20 candles' average (missing volume never
-  counts). An open trade already on the breakout's side (its real side: a buy on a green breakout candle, a sell on a
+  counts; the day's first candle is never read, `opening_candle`: its volume is set against the quiet end of the day
+  before, so nearly every stock looked like a breakout at 09:30). The chart's reading line shows each candle's ATR 14 and its size (high − low) in ATRs, against the
+  breakout's `breakout_atr_mult` while the hand-off is on (`chart_filters` carries `breakout_handoff` / `breakout_atr_mult`). An open trade already on the breakout's side (its real side: a buy on a green breakout candle, a sell on a
   red one; `breakout.side`) is kept and the stock stays on this bot (no hand-off). Otherwise an open trade on the stock is
   cut (`BREAKOUT_STOP`, via `_exit_now`, which cancels a LIVE stop first; a
   LIVE position restored without its stop id is left to that stop) and, in LIVE only once Groww shows no shares,

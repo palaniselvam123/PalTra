@@ -278,3 +278,37 @@ async def test_a_trade_already_on_the_breakout_side_is_kept(db, monkeypatch):  #
     with db.session_factory()() as s:
         assert "SIMB" in trade_names(s.get(BotConfig, bots.config_id_for(1)))
         assert "SIMB" not in trade_names(s.get(BotConfig, bots.config_id_for(3)))
+
+
+def _enriched_day(first_tall: bool):
+    """Yesterday's last 30 quiet 15-minute candles, then today's (forming bar last), ATR 2 and a 0.25% SMA gap."""
+    import datetime as _dt
+
+    ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    rows = []
+    start = _dt.datetime(2026, 10, 16, 9, 15, tzinfo=ist)
+    for i in range(25):
+        t = start + _dt.timedelta(minutes=15 * i)
+        rows.append({"ts": int(t.timestamp()), "open": 100.0, "high": 100.5, "low": 99.5, "close": 100.2, "minute_volume": 1000})
+    today = _dt.datetime(2026, 10, 19, 9, 15, tzinfo=ist)
+    for i in range(3):
+        t = today + _dt.timedelta(minutes=15 * i)
+        tall = (i == 0) == first_tall and i < 2
+        rows.append(
+            {"ts": int(t.timestamp()), "open": 100.0, "high": 106.0 if tall else 100.5, "low": 99.5, "close": 105.0 if tall else 100.2,
+             "minute_volume": 9000 if tall else 1000}
+        )
+    frame = pd.DataFrame(rows)
+    frame["atr_14"], frame["sma_9"], frame["sma_21"] = 2.0, 100.25, 100.0
+    return frame
+
+
+def test_the_days_first_candle_is_never_a_breakout():
+    cfg = type("C", (), {})()
+    opening = _enriched_day(first_tall=True).iloc[:-1]  # the 09:15 candle just closed, 09:30 forming
+    assert breakout.opening_candle(opening.iloc[:-1])
+    hit, note = breakout.read(opening, cfg)
+    assert not hit and "first candle" in note
+    later = _enriched_day(first_tall=False)  # the same tall candle at 09:30 is read (09:45 forming)
+    assert not breakout.opening_candle(later.iloc[:-1])
+    assert breakout.read(later, cfg)[0]
