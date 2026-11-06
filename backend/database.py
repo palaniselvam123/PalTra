@@ -269,6 +269,11 @@ def _ensure_bot_config_columns(engine) -> None:
             "review_check_minutes": "VARCHAR DEFAULT '1'",
             "review_check_mode": "VARCHAR DEFAULT 'ALWAYS'",
             "review_default_answer": "VARCHAR DEFAULT 'PROMPT'",
+            "review_conditions": "VARCHAR DEFAULT 'GAP'",
+            "review_join": "VARCHAR DEFAULT 'OR'",
+            "review_slope_candles": "INTEGER DEFAULT 3",
+            "review_slope_flat": "FLOAT DEFAULT 0.01",
+            "review_steep_pct": "FLOAT DEFAULT 0.03",
         }
         for column, decl in additions.items():
             if column not in names:

@@ -241,5 +241,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
     out.push({ name: cfg.recovery_hold ? "Opposite SMA cross (a loser is held for recovery)" : "Opposite SMA cross (then reverse)", when: candle, code: "MA_CROSS" });
   if (cfg.review_on && String(cfg.review_default_answer ?? "PROMPT").toUpperCase() === "EXIT")
     out.push({ name: "1-minute review answers EXIT by itself", when: candle, code: "AUTO_REVIEW_EXIT" });
+  if (cfg.review_on && String(cfg.review_default_answer ?? "PROMPT").toUpperCase() === "REVERSE")
+    out.push({ name: "1-minute review exits and reverses by itself", when: candle, code: "AUTO_REVIEW_REVERSE" });
   return out;
 }

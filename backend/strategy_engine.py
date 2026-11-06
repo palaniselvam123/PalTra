@@ -161,6 +161,7 @@ ENTRY_REASONS = (
     "FAST_MOVE",
     "EXIT_REVERSE",
     "MANUAL_REVERSE",
+    "AUTO_REVIEW_REVERSE",
 )
 
 
@@ -358,6 +359,7 @@ SNAPSHOT_FIELDS = (
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
+    "review_conditions", "review_join", "review_slope_candles", "review_slope_flat", "review_steep_pct",
     "max_daily_loss", "entry_cutoff_time", "square_off_time",
 )
 
@@ -3313,7 +3315,9 @@ class StrategyEngine:
                 self._focus = saved_focus
                 self.ltp = saved_ltp
 
-    async def reverse_position(self, symbol: str) -> str:
+    async def reverse_position(
+        self, symbol: str, close_reason: str | None = None, why: str | None = None, trade_id: int | None = None
+    ) -> str:
         """Close the open trade on `symbol` and open it the other way at once (the Reverse button, reverse_exit.py).
 
         Market hours, the square-off, the cut-off and the Trade list are checked before the close, so those refusals
@@ -3329,6 +3333,8 @@ class StrategyEngine:
         held = self.positions.get(name)
         if held is None:
             raise ForceRefused(f"{name or 'That stock'} has no open position")
+        if trade_id is not None and held.trade_id != trade_id:
+            raise ForceRefused(f"{name}: that trade has already closed")
         cfg = self.load_config()
         clock = self._now()
         if not market_is_open(clock):
@@ -3342,7 +3348,7 @@ class StrategyEngine:
         enriched, price, reference, atr = await self._manual_ready(name, cfg)
         old = held.direction
         signal = "BEARISH" if old == "LONG" else "BULLISH"
-        await self.close_symbol(name, reason=reverse_exit.MANUAL_REASON)
+        await self.close_symbol(name, reason=close_reason or reverse_exit.MANUAL_REASON)
         own = _cfg_for(cfg, name)
         # The button reverses the real position: the new order is the real opposite side, never flipped again.
         own.flip_orders = False
@@ -3363,7 +3369,7 @@ class StrategyEngine:
                     adx_blocks_entry=False,
                     cfg=own,
                     now=now,
-                    why=reverse_exit.MANUAL_REASON,
+                    why=why or reverse_exit.MANUAL_REASON,
                 )
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
@@ -5518,12 +5524,15 @@ class StrategyEngine:
             self._review_bar[symbol] = closed_ts
             enriched = enrich(frame, scfg.sma_fast, scfg.sma_slow, scfg.atr_period, getattr(scfg, "sma_medium", None))
             band = review.gap_band(scfg)
-            if episode is not None and episode.get("open") and review.episode_over(review.last_gap(enriched), band):
-                episode["open"] = False
-                self._expire_reviews(symbol, "SMA gap moved clear before an answer")
+            hit = review.uncertain(enriched, pos.signal_direction, scfg, cross_exits(scfg))
+            if episode is not None and episode.get("open"):
+                # The stretch ends when the gap moves clear (gap rule alone) or the ticked conditions no longer hold.
+                over = review.episode_over(review.last_gap(enriched), band) if review.gap_only(scfg) else hit is None
+                if over:
+                    episode["open"] = False
+                    self._expire_reviews(symbol, "the SMAs cleared before an answer")
             if episode is not None and episode.get("open"):
                 continue  # one review per uncertain stretch
-            hit = review.uncertainty(enriched, pos.signal_direction, band, cross_exits(scfg))
             if hit is None:
                 continue
             last = episode.get("last_at") if episode else None
@@ -5596,6 +5605,8 @@ class StrategyEngine:
         self._expire_reviews(symbol, "replaced by a newer review")
         if default == "EXIT":
             status, note_tail = review.AUTO_EXIT, "closed at once (default answer: Exit)"
+        elif default == "REVERSE":
+            status, note_tail = review.AUTO_REVERSE, "closed and reversed at once (default answer: Exit and reverse)"
         elif default == "CONTINUE":
             status, note_tail = review.AUTO_CONTINUE, "held (default answer: Continue)"
         else:
@@ -5630,7 +5641,8 @@ class StrategyEngine:
         while len(self.reviews) > REVIEWS_KEPT:
             old = next((i for i, r in enumerate(self.reviews) if r["status"] != review.PENDING), 0)
             self.reviews.pop(old)
-        note = f"{symbol} review — SMA gap {hit.gap_pct:+.3f}% is uncertain; {note_tail}"
+        why = "; ".join(getattr(hit, "reasons", ()) or ()) or f"SMA gap {hit.gap_pct:+.3f}%"
+        note = f"{symbol} review — uncertain ({why}); {note_tail}"
         self._signals[symbol] = note
         self.last_signal = note
         if default == "PROMPT":
@@ -5647,6 +5659,35 @@ class StrategyEngine:
                 await self.close_symbol(symbol, reason=review.AUTO_EXIT, trade_id=int(pos.trade_id))
             except Exception:  # noqa: BLE001
                 logger.exception("auto-exit from the 1-minute review failed for %s", symbol)
+        elif default == "REVERSE":
+            await self._review_reverse(symbol, pos)
+
+    async def _review_reverse(self, symbol: str, pos: OpenPosition) -> None:
+        """Default answer "Exit and reverse": the Reverse button's path for this trade (every check of the new side
+        applies). Refused before the close (cut-off, square-off, Trade list, market closed): closed like Exit."""
+        try:
+            text = await self.reverse_position(
+                symbol, close_reason=review.AUTO_REVERSE, why=review.AUTO_REVERSE, trade_id=int(pos.trade_id)
+            )
+            self._signals[symbol] = f"{symbol} review — {text}"
+            return
+        except ForceRefused as exc:
+            still = self.positions.get(symbol)
+            if still is None or still.trade_id != pos.trade_id:
+                self._signals[symbol] = f"{symbol} review — closed; the reverse was refused: {exc}"
+                return
+            reason = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("auto-reverse from the 1-minute review failed for %s", symbol)
+            reason = str(exc)
+            still = self.positions.get(symbol)
+            if still is None or still.trade_id != pos.trade_id:
+                return
+        try:
+            await self.close_symbol(symbol, reason=review.AUTO_EXIT, trade_id=int(pos.trade_id))
+            self._signals[symbol] = f"{symbol} review — closed (no reverse: {reason})"
+        except Exception:  # noqa: BLE001
+            logger.exception("auto-exit after a refused reverse failed for %s", symbol)
 
     async def answer_review(self, review_id: int, action: str) -> dict:
         """EXIT or WAIT on a review. Only EXIT ever sends an order, and only for the reviewed trade."""

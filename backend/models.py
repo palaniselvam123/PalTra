@@ -584,3 +584,11 @@ class BotConfig(Base):
     review_check_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="1")
     review_check_mode: Mapped[str | None] = mapped_column(String, nullable=True, default="ALWAYS")
     review_default_answer: Mapped[str | None] = mapped_column(String, nullable=True, default="PROMPT")
+    # What counts as uncertain (review.py): CSV of GAP / SLOPE / STEEP, joined OR / AND; the fast SMA's slope over
+    # review_slope_candles closed candles, flat at or under review_slope_flat %/candle with the trade, steep at
+    # review_steep_pct %/candle against it.
+    review_conditions: Mapped[str | None] = mapped_column(String, nullable=True, default="GAP")
+    review_join: Mapped[str | None] = mapped_column(String, nullable=True, default="OR")
+    review_slope_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
+    review_slope_flat: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.01)
+    review_steep_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.03)

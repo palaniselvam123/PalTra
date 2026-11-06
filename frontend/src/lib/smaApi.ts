@@ -290,7 +290,17 @@ export type SmaConfig = {
   /** One or more check candle sizes (minutes). The smart review reads each in turn. */
   review_check_minutes?: number[] | number;
   review_check_mode?: "ALWAYS" | "ONLY_IF_AGAINST" | "ONLY_IF_NOT_WITH";
-  review_default_answer?: "PROMPT" | "EXIT" | "CONTINUE";
+  review_default_answer?: "PROMPT" | "EXIT" | "REVERSE" | "CONTINUE";
+  /** What counts as uncertain: CSV of GAP (gap narrowing in the band), SLOPE (fast SMA flattened), STEEP (fast SMA running against). */
+  review_conditions?: string;
+  /** OR: any ticked condition raises the review; AND: all of them. */
+  review_join?: "OR" | "AND";
+  /** Closed candles the fast SMA's slope is read over. */
+  review_slope_candles?: number;
+  /** SLOPE fires when the slope with the trade is at or under this (% per candle). */
+  review_slope_flat?: number;
+  /** STEEP fires when the slope against the trade is at least this (% per candle). */
+  review_steep_pct?: number;
   /** The band, in % of the slow SMA, on the bot's own candle. */
   review_gap_pct?: number;
   /** No second review on the same trade within this many minutes. */
@@ -969,7 +979,15 @@ export type ChopAutoUpdate = Partial<
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
-export type ReviewStatus = "PENDING" | "USER_REVIEW_EXIT" | "USER_REVIEW_WAIT" | "NO_RESPONSE" | "ALREADY_CLOSED";
+export type ReviewStatus =
+  | "PENDING"
+  | "USER_REVIEW_EXIT"
+  | "USER_REVIEW_WAIT"
+  | "NO_RESPONSE"
+  | "ALREADY_CLOSED"
+  | "AUTO_REVIEW_EXIT"
+  | "AUTO_REVIEW_REVERSE"
+  | "AUTO_REVIEW_CONTINUE";
 
 export type ReviewCandle = { ts: number; open: number; high: number; low: number; close: number; colour: "GREEN" | "RED" | "DOJI" };
 
@@ -995,6 +1013,10 @@ export type ReviewItem = {
     band_pct?: number;
     sma_fast_len?: number;
     sma_slow_len?: number;
+    /** Which ticked conditions made it uncertain (gap / slope / steep), in plain words. */
+    reasons?: string[];
+    slope_pct?: number | null;
+    slope_candles?: number | null;
   };
   one_min: {
     candle_ts?: number;
