@@ -198,6 +198,11 @@ export const SETTING_LABELS: Record<string, string> = {
   review_check_minutes: "review check candle",
   review_check_mode: "review check mode",
   review_default_answer: "review default",
+  review_conditions: "review: uncertain when",
+  review_join: "review: combine conditions",
+  review_slope_candles: "review: slope candles",
+  review_slope_flat: "review: flat slope",
+  review_steep_pct: "review: steep slope",
 };
 
 /** The plain name of a field, or the field name itself when it has none. */

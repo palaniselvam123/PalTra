@@ -18,6 +18,7 @@ const ENTRY_SHORT: Record<string, string> = {
   FAST_MOVE: "Fast mover",
   EXIT_REVERSE: "Reversed on exit",
   MANUAL_REVERSE: "Reversed by hand",
+  AUTO_REVIEW_REVERSE: "Reversed on review",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -39,6 +40,7 @@ const ENTRY_LONG: Record<string, string> = {
   FAST_MOVE: "Fast mover: moved from another bot while running its way, ordered at once at this bot's size",
   EXIT_REVERSE: "Reverse on exit: a V-turn, turn or counter-candle exit closed the other side and this one opened at once",
   MANUAL_REVERSE: "Reverse button: the open trade was closed and this side opened at once",
+  AUTO_REVIEW_REVERSE: "1-minute review, default answer Exit and reverse: the uncertain trade was closed and this side opened at once",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

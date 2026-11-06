@@ -63,9 +63,76 @@ CHECK_MODES = ("ALWAYS", "ONLY_IF_AGAINST", "ONLY_IF_NOT_WITH")
 # What happens when a prompt would fire and nobody is around: PROMPT = today's
 # behaviour, EXIT = close the trade now (reason AUTO_REVIEW_EXIT), CONTINUE =
 # log the uncertain stretch but never message.
-DEFAULT_ANSWERS = ("PROMPT", "EXIT", "CONTINUE")
+DEFAULT_ANSWERS = ("PROMPT", "EXIT", "REVERSE", "CONTINUE")
 AUTO_EXIT = "AUTO_REVIEW_EXIT"
+# REVERSE: close the trade and open the other side at once (`StrategyEngine.reverse_position`); when the reverse is
+# refused before the close (cut-off, square-off, Trade list, market closed) the trade is closed like EXIT.
+AUTO_REVERSE = "AUTO_REVIEW_REVERSE"
 AUTO_CONTINUE = "AUTO_REVIEW_CONTINUE"
+
+
+# What makes the SMAs "uncertain" (`review_conditions`, CSV; `review_join` OR / AND):
+# GAP   the SMA gap is inside the band and narrowing toward a cross (the original rule);
+# SLOPE the fast SMA has flattened: its slope over `review_slope_candles` closed candles, with the trade, is at most
+#       `review_slope_flat` % per candle (zero or below = turned);
+# STEEP the fast SMA is running against the trade: that slope against it is at least `review_steep_pct` % per candle.
+CONDITIONS = ("GAP", "SLOPE", "STEEP")
+JOINS = ("OR", "AND")
+DEFAULT_SLOPE_CANDLES = 3
+MAX_SLOPE_CANDLES = 20
+DEFAULT_SLOPE_FLAT = 0.01
+DEFAULT_STEEP_PCT = 0.03
+
+
+def conditions(cfg) -> list[str]:
+    raw = getattr(cfg, "review_conditions", None)
+    parts = raw if isinstance(raw, (list, tuple)) else str(raw or "").split(",")
+    out = [c for c in (str(p).strip().upper() for p in parts) if c in CONDITIONS]
+    out = list(dict.fromkeys(out))
+    return out or ["GAP"]
+
+
+def join(cfg) -> str:
+    raw = str(getattr(cfg, "review_join", None) or "OR").upper()
+    return raw if raw in JOINS else "OR"
+
+
+def slope_candles(cfg) -> int:
+    try:
+        value = int(getattr(cfg, "review_slope_candles", None) or DEFAULT_SLOPE_CANDLES)
+    except (TypeError, ValueError):
+        return DEFAULT_SLOPE_CANDLES
+    return max(1, min(MAX_SLOPE_CANDLES, value))
+
+
+def _float(cfg, name: str, default: float) -> float:
+    value = getattr(cfg, name, None)
+    try:
+        return float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def slope_flat(cfg) -> float:
+    return _float(cfg, "review_slope_flat", DEFAULT_SLOPE_FLAT)
+
+
+def steep_pct(cfg) -> float:
+    return abs(_float(cfg, "review_steep_pct", DEFAULT_STEEP_PCT)) or DEFAULT_STEEP_PCT
+
+
+def fast_slope(frame: pd.DataFrame | None, candles: int) -> float | None:
+    """The fast SMA's slope in % per candle over the last `candles` closed candles (forming candle never read)."""
+    if frame is None or "sma_9" not in frame or len(frame) < candles + 2:
+        return None
+    now, then = frame["sma_9"].iloc[-2], frame["sma_9"].iloc[-2 - candles]
+    try:
+        now, then = float(now), float(then)
+    except (TypeError, ValueError):
+        return None
+    if then != then or now != now or then == 0:
+        return None
+    return (now - then) / then * 100 / candles
 
 
 def check_minutes_list(cfg) -> list[int]:
@@ -146,9 +213,15 @@ class Uncertain:
     gap_pct: float  # signed: (fast - slow) / slow x 100
     prev_gap_pct: float
     crossed: bool  # the lines have crossed against the trade (cross exit off)
+    reasons: tuple[str, ...] = ()  # which conditions fired, in plain words
+    slope_pct: float | None = None  # fast SMA slope with the trade, % per candle
+    slope_candles: int | None = None
 
     def as_dict(self) -> dict:
         return {
+            "reasons": list(self.reasons),
+            "slope_pct": None if self.slope_pct is None else round(self.slope_pct, 4),
+            "slope_candles": self.slope_candles,
             "candle_ts": self.candle_ts,
             "sma_fast": round(self.sma_fast, 4),
             "sma_slow": round(self.sma_slow, 4),
@@ -191,6 +264,63 @@ def uncertainty(frame: pd.DataFrame | None, signal_direction: str, band: float, 
     except (TypeError, ValueError):
         return None
     return Uncertain(ts, float(bar.get("sma_9")), float(bar.get("sma_21")), float(now), float(prev), crossed)
+
+
+def uncertain(frame: pd.DataFrame | None, signal_direction: str, cfg, cross_exit: bool) -> Uncertain | None:
+    """The ticked conditions (`review_conditions`), joined by `review_join`, on the last closed candle."""
+    if frame is None or len(frame) < 3:
+        return None
+    wanted = conditions(cfg)
+    band = gap_band(cfg)
+    side = 1.0 if signal_direction == "LONG" else -1.0
+    n = slope_candles(cfg)
+    raw = fast_slope(frame, n)
+    with_trade = None if raw is None else raw * side
+    hits: dict[str, str | None] = {}
+    gap_hit = uncertainty(frame, signal_direction, band, cross_exit) if "GAP" in wanted else None
+    if "GAP" in wanted:
+        hits["GAP"] = f"SMA gap {gap_hit.gap_pct:+.3f}% inside ±{band:g}% and narrowing" if gap_hit else None
+    if "SLOPE" in wanted:
+        flat = slope_flat(cfg)
+        ok = with_trade is not None and with_trade <= flat
+        hits["SLOPE"] = (
+            f"SMA {int(getattr(cfg, 'sma_fast', 9) or 9)} slope {with_trade:+.3f}%/candle over {n} candles"
+            f" (flat at or under {flat:g})"
+            if ok
+            else None
+        )
+    if "STEEP" in wanted:
+        steep = steep_pct(cfg)
+        ok = with_trade is not None and -with_trade >= steep
+        hits["STEEP"] = (
+            f"SMA {int(getattr(cfg, 'sma_fast', 9) or 9)} running against the trade {-with_trade:.3f}%/candle over {n}"
+            f" candles (steep at {steep:g}+)"
+            if ok
+            else None
+        )
+    fired = [text for text in hits.values() if text]
+    if not fired or (join(cfg) == "AND" and len(fired) < len(hits)):
+        return None
+    if gap_hit is not None:
+        gap_hit.reasons = tuple(fired)
+        gap_hit.slope_pct, gap_hit.slope_candles = with_trade, n
+        return gap_hit
+    bar, before = frame.iloc[-2], frame.iloc[-3]
+    now, prev = _gap(bar), _gap(before)
+    try:
+        ts = int(bar.get("ts"))
+        fast, slow = float(bar.get("sma_9")), float(bar.get("sma_21"))
+    except (TypeError, ValueError):
+        return None
+    if now is None or prev is None:
+        return None
+    crossed = now * side < 0
+    return Uncertain(ts, fast, slow, float(now), float(prev), crossed, tuple(fired), with_trade, n)
+
+
+def gap_only(cfg) -> bool:
+    """Only the original gap rule is ticked: its stretch ends when the gap moves clear of the band."""
+    return conditions(cfg) == ["GAP"]
 
 
 def episode_over(gap_pct: float | None, band: float) -> bool:
@@ -405,6 +535,8 @@ def review_text(
         f"  SMA{sma_fast} {_num(five.get('sma_fast'))} · SMA{sma_slow} {_num(five.get('sma_slow'))}",
         f"  Gap {gap:+.3f}% ({'crossed' if five.get('crossed') else 'narrowing'}, band ±{band:g}%) · UNCERTAIN",
     ]
+    for reason in five.get("reasons") or []:
+        lines.append(f"  • {reason}")
     if one:
         closes = " → ".join(_num(c["close"]) for c in one["candles"][-4:])
         dots = " ".join(_DOT.get(c["colour"], "⚪") for c in one["candles"][-4:])

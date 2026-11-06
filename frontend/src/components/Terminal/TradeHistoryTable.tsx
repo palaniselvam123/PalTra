@@ -60,6 +60,8 @@ const REASON: Record<string, string> = {
   MANUAL_CLOSE: "MANUAL CLOSE",
   MANUAL_REVERSE: "REVERSED",
   USER_REVIEW_EXIT: "EXIT ON 1-MIN REVIEW",
+  AUTO_REVIEW_EXIT: "AUTO EXIT ON REVIEW",
+  AUTO_REVIEW_REVERSE: "REVERSED ON REVIEW",
 };
 
 type Book = "PAPER" | "LIVE" | "REPLAY" | "RESEARCH";
@@ -1072,6 +1074,8 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   MANUAL_CLOSE: "blue",
   MANUAL_REVERSE: "blue",
   USER_REVIEW_EXIT: "violet",
+  AUTO_REVIEW_EXIT: "violet",
+  AUTO_REVIEW_REVERSE: "violet",
   NOT_ON_GROWW: "slate",
   STOP_LOST: "red",
   PLAN_SL_HIT: "amber",
@@ -1117,6 +1121,8 @@ export const REASON_SHORT: Record<string, string> = {
   MANUAL_CLOSE: "Manual",
   MANUAL_REVERSE: "Reversed by hand (Reverse button)",
   USER_REVIEW_EXIT: "Review",
+  AUTO_REVIEW_EXIT: "1-minute review: no answer needed, closed at once (default answer Exit)",
+  AUTO_REVIEW_REVERSE: "1-minute review: closed and the other side opened at once (default answer Exit and reverse)",
   NOT_ON_GROWW: "Not on Groww",
   STOP_LOST: "Groww dropped the stop; closed at the market",
   PLAN_SL_HIT: "Staged stop plan: the moved stop (breakeven or the Supertrend line) was hit",

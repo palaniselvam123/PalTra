@@ -452,3 +452,87 @@ def test_check_candle_evidence_reads_a_longer_candle_from_the_1_minute_tape():
     assert long is not None and short is not None
     # The 5-minute read has fewer candles than the 1-minute read on the same tape.
     assert len(long["candles"]) <= len(short["candles"])
+
+
+# --- what counts as uncertain: gap / slope / steep, OR / AND -----------------
+
+class _Cfg:
+    def __init__(self, **kw):
+        self.sma_fast = 9
+        self.review_gap_pct = 0.03
+        self.review_conditions = "GAP"
+        self.review_join = "OR"
+        self.review_slope_candles = 2
+        self.review_slope_flat = 0.01
+        self.review_steep_pct = 0.03
+        self.__dict__.update(kw)
+
+
+def _rising_then_flat() -> pd.DataFrame:
+    # SMA 9 climbs to 100.5, then flattens; the slow SMA sits well below, so the gap rule never fires.
+    return _sma_frame([(100.0, 98.0), (100.3, 98.0), (100.5, 98.0), (100.5, 98.0), (100.505, 98.0)])
+
+
+def test_the_gap_rule_alone_is_the_default():
+    frame = _sma_frame([(2105.30, 2104.40), (2104.96, 2104.35)])
+    hit = review.uncertain(frame, "LONG", _Cfg(), cross_exit=True)
+    assert hit is not None and hit.reasons and "narrowing" in hit.reasons[0]
+    assert review.gap_only(_Cfg()) and review.conditions(_Cfg(review_conditions="")) == ["GAP"]
+
+
+def test_slope_flattened_fires_on_a_flat_fast_sma_and_not_while_it_climbs():
+    flat = _rising_then_flat()
+    hit = review.uncertain(flat, "LONG", _Cfg(review_conditions="SLOPE"), cross_exit=True)
+    assert hit is not None and "slope" in hit.reasons[0] and hit.slope_candles == 2
+    climbing = _sma_frame([(100.0, 98.0), (100.3, 98.0), (100.6, 98.0), (100.9, 98.0)])
+    assert review.uncertain(climbing, "LONG", _Cfg(review_conditions="SLOPE"), cross_exit=True) is None
+    # For a short, a climbing fast SMA is against the trade: steep fires, flat (with the trade <= 0.01) too.
+    assert review.uncertain(climbing, "SHORT", _Cfg(review_conditions="STEEP"), cross_exit=True) is not None
+
+
+def test_and_needs_every_ticked_condition_or_any_one():
+    flat = _rising_then_flat()
+    both = "GAP,SLOPE"
+    assert review.uncertain(flat, "LONG", _Cfg(review_conditions=both, review_join="OR"), cross_exit=True) is not None
+    assert review.uncertain(flat, "LONG", _Cfg(review_conditions=both, review_join="AND"), cross_exit=True) is None
+    assert not review.gap_only(_Cfg(review_conditions=both))
+
+
+def test_slope_settings_are_read_safely():
+    cfg = _Cfg(review_slope_candles=99, review_steep_pct=None, review_join="xx", review_conditions="STEEP,BOGUS,STEEP")
+    assert review.slope_candles(cfg) == review.MAX_SLOPE_CANDLES
+    assert review.steep_pct(cfg) == review.DEFAULT_STEEP_PCT and review.join(cfg) == "OR"
+    assert review.conditions(cfg) == ["STEEP"]
+    assert "REVERSE" in review.DEFAULT_ANSWERS
+
+
+@pytest.mark.asyncio
+async def test_default_answer_reverse_asks_for_the_reverse_of_that_trade(db, monkeypatch):  # noqa: F811
+    from strategy_engine import StrategyEngine
+
+    asked = []
+
+    async def fake_reverse(self, symbol, close_reason=None, why=None, trade_id=None):
+        asked.append((symbol, close_reason, why, trade_id))
+        self.positions.pop(symbol, None)
+        return f"{symbol} LONG closed and reversed: opened SHORT"
+
+    monkeypatch.setattr(StrategyEngine, "reverse_position", fake_reverse)
+    sent = []
+    eng, tid = await _engine_with_trade(db, on_review=sent.append, default_answer="REVERSE")
+    assert asked == [("TCS", review.AUTO_REVERSE, review.AUTO_REVERSE, tid)]
+    assert eng.reviews[-1]["status"] == review.AUTO_REVERSE and sent == []
+
+
+@pytest.mark.asyncio
+async def test_a_refused_reverse_still_closes_the_trade(db, monkeypatch):  # noqa: F811
+    from strategy_engine import ForceRefused, StrategyEngine
+
+    async def refuse(self, symbol, close_reason=None, why=None, trade_id=None):
+        raise ForceRefused("No new entries after 15:00 IST. Use Close instead.")
+
+    monkeypatch.setattr(StrategyEngine, "reverse_position", refuse)
+    eng, tid = await _engine_with_trade(db, default_answer="REVERSE")
+    assert "TCS" not in eng.positions
+    assert _trade(db, tid)[0] == review.AUTO_EXIT
+    assert "no reverse" in eng._signals["TCS"]

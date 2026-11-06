@@ -447,7 +447,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     review_cooldown_min: Math.max(0, Math.round(Number(form.review_cooldown_min ?? 15))),
     review_check_minutes: toCheckMinutes(form.review_check_minutes),
     review_check_mode: String(form.review_check_mode ?? "ALWAYS") as "ALWAYS" | "ONLY_IF_AGAINST" | "ONLY_IF_NOT_WITH",
-    review_default_answer: String(form.review_default_answer ?? "PROMPT") as "PROMPT" | "EXIT" | "CONTINUE",
+    review_default_answer: String(form.review_default_answer ?? "PROMPT") as "PROMPT" | "EXIT" | "REVERSE" | "CONTINUE",
+    review_conditions: reviewConditions(form.review_conditions).join(","),
+    review_join: form.review_join === "AND" ? "AND" : "OR",
+    review_slope_candles: Math.min(20, Math.max(1, Math.round(Number(form.review_slope_candles ?? 3)))),
+    review_slope_flat: Number(form.review_slope_flat ?? 0.01),
+    review_steep_pct: Math.max(0.001, Number(form.review_steep_pct ?? 0.03)),
   });
 
   const saveStock = async () => {
@@ -2805,6 +2810,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ) : null}
             </span>
           </label>
+          <ReviewConditions form={form} set={set} isOwn={isOwn} />
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field
               label="Ask when the SMA gap is within ±"
@@ -2871,10 +2877,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               onChange={(e) => {
                 const next = e.target.value;
                 if (
-                  next === "EXIT" &&
+                  (next === "EXIT" || next === "REVERSE") &&
                   String(form.trading_mode ?? "").toUpperCase() === "LIVE" &&
                   !window.confirm(
-                    "Exit automatically on LIVE: the bot will close the reviewed trade without asking you. Continue?"
+                    next === "REVERSE"
+                      ? "Exit and reverse automatically on LIVE: the bot will close the reviewed trade and open the other side (two real Groww orders) without asking you. Continue?"
+                      : "Exit automatically on LIVE: the bot will close the reviewed trade without asking you. Continue?"
                   )
                 ) {
                   return;
@@ -2886,6 +2894,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="PROMPT">Prompt me (default) — no answer keeps the trade</option>
               <option value="CONTINUE">Continue automatically — no prompt, trade stays</option>
               <option value="EXIT">Exit automatically — no prompt, trade is closed</option>
+              <option value="REVERSE">Exit and reverse — no prompt, trade is closed and the other side opened</option>
             </select>
           </label>
         </div>
@@ -3152,11 +3161,13 @@ export function activeRules(f: SmaConfig): Rule[] {
       text:
         f.review_default_answer === "EXIT"
           ? "1-minute review closes the trade by itself when the SMAs get close"
+          : f.review_default_answer === "REVERSE"
+            ? "1-minute review closes the trade and opens the other side by itself when the SMAs get uncertain"
           : f.review_default_answer === "CONTINUE"
             ? "1-minute review: noted only, no question asked"
             : "1-minute review: asks me EXIT or WAIT when the SMAs get close",
       off: { review_on: false },
-      warn: f.review_default_answer === "EXIT",
+      warn: f.review_default_answer === "EXIT" || f.review_default_answer === "REVERSE",
     });
   return out;
 }
@@ -3621,6 +3632,108 @@ function ReverseOnExit({
           reversed by hand with the Reverse button is not affected. The stop and the other exits still apply.
         </InfoTip>
       </label>
+    </div>
+  );
+}
+
+const REVIEW_CONDITIONS: { key: "GAP" | "SLOPE" | "STEEP"; label: string; hint: string }[] = [
+  { key: "GAP", label: "Gap narrowing", hint: "The SMA gap is inside the ± band and getting smaller (heading for a cross)." },
+  { key: "SLOPE", label: "Slope flattened", hint: "The fast SMA's slope with the trade has dropped to the flat level or below (0 or less = turned)." },
+  { key: "STEEP", label: "Steep against", hint: "The fast SMA is running against the trade at least this fast." },
+];
+
+/** The ticked "uncertain" conditions (backend review.conditions): CSV of GAP / SLOPE / STEEP, GAP when none. */
+function reviewConditions(raw: unknown): string[] {
+  const parts = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+  const out = parts.map((p) => String(p).trim().toUpperCase()).filter((p) => REVIEW_CONDITIONS.some((c) => c.key === p));
+  return out.length ? Array.from(new Set(out)) : ["GAP"];
+}
+
+/** 1-minute review: which conditions make the SMAs "uncertain", how they combine, and the slope numbers. */
+function ReviewConditions({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean | number | number[]) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const current = reviewConditions(form.review_conditions);
+  const join = form.review_join === "AND" ? "AND" : "OR";
+  const toggle = (key: string, on: boolean) => {
+    const next = on ? [...current, key] : current.filter((c) => c !== key);
+    set("review_conditions", (next.length ? next : ["GAP"]).join(","));
+  };
+  const slopeOn = current.includes("SLOPE") || current.includes("STEEP");
+  const fast = String(form.sma_fast ?? 9);
+  return (
+    <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <div className="text-xs text-slate-400">
+        Uncertain when{(isOwn("review_conditions") || isOwn("review_join")) && <OwnTag />}
+        <span className="ml-2 text-[11px] text-slate-500">Tick one or more, then pick how they combine.</span>
+      </div>
+      <div className="mt-1 space-y-1">
+        {REVIEW_CONDITIONS.map((c) => (
+          <label key={c.key} className="flex items-start gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={current.includes(c.key)} onChange={(e) => toggle(c.key, e.target.checked)} className="mt-1 accent-[#10B981]" />
+            <span>
+              <b className="text-slate-100">{c.label}</b> <span className="text-xs text-slate-400">— {c.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs" role="radiogroup" aria-label="How the conditions combine">
+        {(["OR", "AND"] as const).map((j) => (
+          <button
+            key={j}
+            type="button"
+            role="radio"
+            aria-checked={join === j}
+            disabled={current.length < 2}
+            onClick={() => set("review_join", j)}
+            className={clsx(
+              "min-h-9 rounded-md px-3 font-semibold ring-1 ring-inset disabled:opacity-40",
+              join === j ? "bg-sky-500/15 text-sky-200 ring-sky-400/50" : "bg-black/20 text-slate-300 ring-white/15 hover:bg-white/5"
+            )}
+          >
+            {j === "OR" ? "OR — any one ticked" : "AND — all ticked together"}
+          </button>
+        ))}
+      </div>
+      {slopeOn ? (
+        <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+          <Field
+            label={`Candles to read SMA ${fast} slope over`}
+            suffix="candles"
+            own={isOwn("review_slope_candles")}
+            value={String(form.review_slope_candles ?? 3)}
+            onChange={(v) => set("review_slope_candles", v)}
+          />
+          {current.includes("SLOPE") ? (
+            <Field
+              label="Flat at or under (with the trade)"
+              suffix="%/candle"
+              own={isOwn("review_slope_flat")}
+              value={String(form.review_slope_flat ?? 0.01)}
+              onChange={(v) => set("review_slope_flat", v)}
+            />
+          ) : null}
+          {current.includes("STEEP") ? (
+            <Field
+              label="Steep at (against the trade)"
+              suffix="%/candle"
+              own={isOwn("review_steep_pct")}
+              value={String(form.review_steep_pct ?? 0.03)}
+              onChange={(v) => set("review_steep_pct", v)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <p className="mt-1 text-[11px] text-slate-500">
+        Slope = how much SMA {fast} moved per candle, in % of its price, over the candles above, on the bot&apos;s own candle.
+        Example: 0.01 flat means it rose 0.01% a candle or less for a buy. The gap band below applies to Gap narrowing.
+      </p>
     </div>
   );
 }

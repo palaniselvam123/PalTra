@@ -857,7 +857,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (default, today's behaviour), `EXIT` (no card, no alert; the trade is closed at once
   with `AUTO_REVIEW_EXIT` through `close_symbol`, LIVE paths included) or `CONTINUE`
   (no card, no alert; the uncertain stretch is recorded as `AUTO_REVIEW_CONTINUE`).
-  Switching a LIVE stock to `EXIT` asks for a confirm in the terminal. The stop,
+  Switching a LIVE stock to `EXIT` asks for a confirm in the terminal. **`REVERSE`** ("Exit and reverse"): no card, no
+  alert; the trade is closed and the other side opened at once (`StrategyEngine._review_reverse` → `reverse_position(...,
+  close_reason=AUTO_REVIEW_REVERSE, why=AUTO_REVIEW_REVERSE, trade_id=)`: the Reverse button's path, so market hours,
+  square-off, cut-off, Trade list, caps, loss lock and one LIVE bot per stock apply to the new side; a reverse refused
+  before the close closes the trade as `AUTO_REVIEW_EXIT`); a LIVE stock asks for a confirm too ("two real Groww orders").
+  **What counts as uncertain** (`review_conditions` CSV of `GAP` (default: the gap rule above) / `SLOPE` (the fast SMA's
+  slope with the trade over `review_slope_candles` (3) closed candles, % per candle, `review.fast_slope`, at or under
+  `review_slope_flat` (0.01); 0 or below = turned) / `STEEP` (that slope against the trade at least `review_steep_pct`
+  (0.03)), joined by `review_join` `OR` (any) | `AND` (all); `review.uncertain`; per bot and per stock): the reasons that
+  fired go in the evidence (`five_min.reasons`), the alert and the card ("Why uncertain"). With the gap rule alone a
+  stretch ends when the gap moves clear of the band (as before); with any other condition ticked it ends on the first
+  closed candle the conditions no longer hold. Settings → 7. Advanced, `StrategyConfigPanel.ReviewConditions`. The stop,
   Bollinger exit, SMA cross exit, gap fade and square-off are untouched; they still
   guard the trade.
   **No answer never exits** under `PROMPT`: the row ends `NO_RESPONSE` when the trade closes or

@@ -243,7 +243,7 @@ FIELD_HELP = {
     "max_daily_loss": "daily loss limit in rupees (the bot halts)", "max_trades_per_day": "entries per day for the bot",
     "max_trades_per_stock": "entries per day per stock (0 = off)",
     "entry_cutoff_time": "no new entries after HH:MM IST", "square_off_time": "everything closed at HH:MM IST",
-    "review_on": "1-minute human review", "review_gap_pct": "review band %", "review_default_answer": "PROMPT | EXIT | CONTINUE",
+    "review_on": "1-minute human review", "review_gap_pct": "review band %", "review_default_answer": "PROMPT | EXIT | REVERSE (exit and open the other side) | CONTINUE", "review_conditions": "what counts as uncertain: GAP,SLOPE,STEEP (review_join OR | AND)",
     "max_concurrent": "stocks held at once",
 }
 

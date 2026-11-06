@@ -160,6 +160,7 @@ export function ReviewCards({ state, onChanged }: { state: SmaState | null; onCh
                   <span className="font-mono">{num(five.sma_fast)}</span> · SMA{slow} <span className="font-mono">{num(five.sma_slow)}</span> · band ±
                   {five.band_pct ?? "—"}%
                 </p>
+                {five.reasons?.length ? <p className="sm:col-span-2">Why uncertain: {five.reasons.join(" · ")}</p> : null}
                 {candles.length ? (
                   <p className="flex flex-wrap items-center gap-1">
                     1-min to {clock(one.candle_ts, 1)}:

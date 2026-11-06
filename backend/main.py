@@ -757,7 +757,12 @@ class ConfigUpdate(BaseModel):
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
     review_check_minutes: list[Literal[1, 2, 3, 5, 10, 15]] | Literal[1, 2, 3, 5, 10, 15] | None = None
     review_check_mode: Literal["ALWAYS", "ONLY_IF_AGAINST", "ONLY_IF_NOT_WITH"] | None = None
-    review_default_answer: Literal["PROMPT", "EXIT", "CONTINUE"] | None = None
+    review_default_answer: Literal["PROMPT", "EXIT", "REVERSE", "CONTINUE"] | None = None
+    review_conditions: str | None = Field(default=None, max_length=32, pattern=r"^(GAP|SLOPE|STEEP)(,(GAP|SLOPE|STEEP)){0,2}$")
+    review_join: Literal["OR", "AND"] | None = None
+    review_slope_candles: int | None = Field(default=None, ge=1, le=review.MAX_SLOPE_CANDLES)
+    review_slope_flat: float | None = Field(default=None, ge=-1, le=1)
+    review_steep_pct: float | None = Field(default=None, gt=0, le=2)
     bot_name: str | None = Field(default=None, min_length=1, max_length=24)
     gap_entry_delay_min: int | None = Field(default=None, ge=0, le=120)
     gap_entry_window_min: int | None = Field(default=None, ge=0, le=375)
@@ -1732,6 +1737,11 @@ def _gap_dict(row) -> dict:
         "review_check_minutes": review.check_minutes_list(row),
         "review_check_mode": review.check_mode(row),
         "review_default_answer": review.default_answer(row),
+        "review_conditions": ",".join(review.conditions(row)),
+        "review_join": review.join(row),
+        "review_slope_candles": review.slope_candles(row),
+        "review_slope_flat": review.slope_flat(row),
+        "review_steep_pct": review.steep_pct(row),
     }
 
 
