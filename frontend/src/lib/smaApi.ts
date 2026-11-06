@@ -286,6 +286,9 @@ export type SmaConfig = {
   breakout_rule?: "CANDLE" | "STRONG";
   /** Close an open trade against the breakout at once; off = it runs to its own exits, then the stock moves. */
   breakout_cut?: boolean;
+  /** The strong-trend rule's checks ("stack:must,vwap:use,run:off,…") and how many must pass (1-7). */
+  breakout_trend_checks?: string;
+  breakout_trend_need?: number;
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;

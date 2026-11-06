@@ -240,6 +240,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "breakout_volume_mult": "FLOAT DEFAULT 1.5",
             "breakout_rule": "VARCHAR(8) DEFAULT 'CANDLE'",
             "breakout_cut": "BOOLEAN DEFAULT 0",
+            "breakout_trend_checks": "VARCHAR(160) DEFAULT ''",
+            "breakout_trend_need": "INTEGER DEFAULT 6",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",
             "use_or_spread": "BOOLEAN DEFAULT 0",
