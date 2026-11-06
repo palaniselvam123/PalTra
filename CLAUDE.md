@@ -841,6 +841,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   never a market order at the breakout's top (a flipped stock orders at once). An arrival older than
   `ARRIVAL_TTL_SEC` (15 min) is dropped. Replays move the stock (`ReplayEngine._hand_off`) but play one bot, so Bot 3's
   entry happens only on the live bots. The stock research baseline keeps it off.
+  **Wait before cutting at a loss** (`breakout_wait_min` 0-120, 0 = cut at once by default; `breakout_wait_end` `CUT` |
+  `KEEP`; per bot and per stock, PAPER and LIVE, replays too; Settings → 7. Advanced): a breakout against a trade that is
+  losing before charges (`breakout.losing`) is held in `StrategyEngine._breakout_wait` (`breakout.Wait`: trade id, until,
+  the breakout candle) and `_watch_breakout_wait` (held-stock loop, every price) cuts it (`_breakout_cut`, the same cut and
+  hand-off) once the price is back at its entry, or when the wait runs out: `CUT` anyway, or `KEEP` the trade on this bot
+  (breakout forgotten). A trade the strategy's own exit or stop closes first ends the wait (no hand-off). A stock a backtest
+  plays as Bot 3 (`ReplayEngine._plays_as`, `handoff_chain`) never breaks out again, like Bot 3 itself.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

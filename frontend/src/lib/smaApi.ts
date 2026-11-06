@@ -282,6 +282,10 @@ export type SmaConfig = {
   breakout_atr_mult?: number;
   breakout_gap_pct?: number;
   breakout_volume_mult?: number;
+  /** Hold a losing trade up to N minutes for breakeven before the breakout cut (0 = at once). */
+  breakout_wait_min?: number;
+  /** When the wait runs out still losing: CUT anyway or KEEP the trade. */
+  breakout_wait_end?: "CUT" | "KEEP";
   /** Opening range (09:15–09:30), each check its own tick box; all ticked must agree. */
   use_or_volume?: boolean;
   use_or_vwap?: boolean;

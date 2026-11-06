@@ -490,6 +490,10 @@ class ReplayEngine(StrategyEngine):
         self._on_bot[name] = to_bot
         self._chain_fields[name] = fields
 
+    def _plays_as(self, symbol: str) -> int:
+        """A stock handed to Bot 2 / Bot 3 in this backtest trades as that bot (handoff_chain.py)."""
+        return int(self._on_bot.get((symbol or "").upper(), self.bot_id))
+
     def _origin_bot(self, symbol: str) -> int | None:
         """In a backtest that plays the hand-offs, "back" is the replayed bot (stop_handoff.py)."""
         if getattr(self, "chain", None) is not None:

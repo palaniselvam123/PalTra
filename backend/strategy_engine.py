@@ -352,7 +352,7 @@ SNAPSHOT_FIELDS = (
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
-    "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult",
+    "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_wait_min", "breakout_wait_end",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -1076,6 +1076,8 @@ class StrategyEngine:
         # A turn against the open trade waiting for a candle of the other colour (turn_exit_candle):
         # (turn direction, last candle read, note).
         self._turn_wait: dict[str, tuple[str, int, str]] = {}
+        # breakout.py: a breakout cut held back while the trade is losing (breakout_wait_min).
+        self._breakout_wait: dict[str, breakout.Wait] = {}
         # Re-entry after a counter-candle exit (counter_candles.py): the exit waiting to be undone
         # (signal side, SMA run start, exit candle's level, exit candle ts), and re-entries used per SMA run.
         self._reentry: dict[str, tuple[str, int, float, int]] = {}
@@ -1527,6 +1529,7 @@ class StrategyEngine:
             await self._watch_recovery(symbol_cfg, now)
             await self._watch_gap_fade(symbol_cfg)
             await self._watch_pivot_target(symbol_cfg)
+            await self._watch_breakout_wait(symbol, symbol_cfg)
 
         await self._watch_pullbacks(cfg, now)
 
@@ -1621,7 +1624,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse,
+            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse, self._breakout_wait,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -2883,18 +2886,74 @@ class StrategyEngine:
         kept and the stock stays on this bot; a trade against it is cut, and a flat stock is handed off as before.
         True when the stock was handled here (cut and/or handed off), so the cross is not judged.
         """
-        if not breakout.on(cfg) or self.handoff is None or self.bot_id == breakout.TREND_BOT:
+        if not breakout.on(cfg) or self.handoff is None or self._plays_as(symbol) == breakout.TREND_BOT:
             return False
         hit, note = breakout.read(enriched, cfg)
         if not hit:
             return False
         pos = self.positions.get(symbol)
-        if pos is not None and breakout.side(enriched.iloc[-2]) == pos.direction:
+        bar = enriched.iloc[-2]
+        if pos is not None and breakout.side(bar) == pos.direction:
             # The trade already rides the breakout (a buy on a green breakout, a sell on a red one): it is kept and
             # the stock stays here; cutting it would only book a small loss on the right side of the move.
             text = f"{symbol} trend breakout — {note}; the {pos.direction.lower()} trade is already on its side, kept"
             self._signals[symbol] = text
             return False
+        wait = self._breakout_wait.get(symbol)
+        if pos is not None and wait is not None and wait.trade_id == pos.trade_id:
+            return False  # already waiting for this trade to come back to its entry
+        minutes = breakout.wait_minutes(cfg)
+        if pos is not None and minutes > 0 and breakout.losing(pos.direction, pos.entry_price, self._exit_price(symbol, pos)):
+            # Hold the losing trade for breakeven before the cut (_watch_breakout_wait).
+            self._breakout_wait[symbol] = breakout.Wait(
+                trade_id=pos.trade_id,
+                until=self._now().timestamp() + minutes * 60,
+                note=note,
+                bar={k: bar.get(k) for k in ("open", "high", "low", "close", "sma_9", "sma_fast")},
+            )
+            then = "cut anyway" if breakout.wait_end(cfg) == "CUT" else "kept"
+            text = (
+                f"{symbol} trend breakout — {note}; the {pos.direction.lower()} trade is at a loss: waiting up to {minutes} min "
+                f"for it to get back to its entry ({pos.entry_price:.2f}) before cutting it, else {then}"
+            )
+            self._signals[symbol] = text
+            self.last_signal = text
+            return False
+        return await self._breakout_cut(symbol, cfg, note, bar)
+
+    def _plays_as(self, symbol: str) -> int:  # noqa: ARG002
+        """The bot whose settings this stock trades with (a backtest that plays the hand-offs overrides it)."""
+        return int(self.bot_id or 1)
+
+    async def _watch_breakout_wait(self, symbol: str, cfg: BotConfig) -> None:
+        """A breakout cut held back while the trade was losing (breakout_wait_min): cut it at breakeven, or when the
+        wait runs out (breakout_wait_end CUT), or keep the trade (KEEP)."""
+        wait = self._breakout_wait.get(symbol)
+        if wait is None:
+            return
+        pos = self.positions.get(symbol)
+        if pos is None or pos.trade_id != wait.trade_id:
+            self._breakout_wait.pop(symbol, None)  # the trade closed on its own
+            return
+        price = self._exit_price(symbol, pos)
+        still_losing = breakout.losing(pos.direction, pos.entry_price, price)
+        if still_losing and self._now().timestamp() < wait.until:
+            return
+        self._breakout_wait.pop(symbol, None)
+        if still_losing and breakout.wait_end(cfg) == "KEEP":
+            text = (
+                f"{symbol} trend breakout wait over — still at a loss ({price:.2f} vs entry {pos.entry_price:.2f}): "
+                f"the {pos.direction.lower()} trade is kept here; its own exits and stop run it"
+            )
+            self._signals[symbol] = text
+            self.last_signal = text
+            return
+        why = "back at its entry" if not still_losing else "wait over, still at a loss"
+        await self._breakout_cut(symbol, cfg, f"{wait.note}; {why}", pd.Series(wait.bar))
+
+    async def _breakout_cut(self, symbol: str, cfg: BotConfig, note: str, bar) -> bool:
+        """Cut the open trade on `symbol` (if any) for a breakout and hand the stock to Bot 3."""
+        pos = self.positions.get(symbol)
         live = False
         if pos is not None:
             live = (pos.mode or "PAPER").upper() == "LIVE"
@@ -2919,7 +2978,6 @@ class StrategyEngine:
             symbol, breakout.TREND_BOT, "BREAKOUT", note, moved, cfg, pos.trade_id if pos is not None else None, live
         )
         if moved.startswith("moved") and self.breakout_arrival is not None:
-            bar = enriched.iloc[-2]
             want, limit = breakout.side(bar), None
             if want is not None:
                 limit = tall_pullback.level(bar, want)

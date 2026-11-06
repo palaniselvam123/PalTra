@@ -528,6 +528,10 @@ class BotConfig(Base):
     breakout_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.8)
     breakout_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.20)
     breakout_volume_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    # breakout.py: hold a losing trade up to N minutes for breakeven before the breakout cut (0 = at once), and
+    # what to do when the wait runs out ("CUT" anyway, or "KEEP" the trade).
+    breakout_wait_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    breakout_wait_end: Mapped[str | None] = mapped_column(String, nullable=True, default="CUT")
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

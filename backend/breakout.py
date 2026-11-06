@@ -29,6 +29,13 @@ Bot 3's `tall_expiry_candles` (2) candles; nothing rests on Groww's book. A flip
 stock orders at once, as in tall_pullback.py. Only live bots do this
 (`bots.register` sets `breakout_arrival`); a replay moves the stock but plays one bot.
 
+**Wait before cutting at a loss** (`breakout_wait_min`, 0 = cut at once, the default, up to 120 minutes): a
+breakout against a trade that is losing (before charges) does not cut it at once. The trade is held and cut, and
+the stock handed to Bot 3, on the first price at or past its entry (breakeven), or when the wait runs out:
+`breakout_wait_end` `CUT` (default: cut anyway, the stock still moves) or `KEEP` (the trade stays on this bot and
+the breakout is forgotten; its own exits, stop and the square-off still run it). A trade already at or past its
+entry is cut at once, as before. The wait ends when the trade closes on its own.
+
 The candle already on the tape when the stock is armed is not read, so a stock just
 handed over is not sent straight back on the candle that moved it. Nor is the day's first
 candle (`opening_candle`): its volume is set against the quiet end of the day before and
@@ -66,6 +73,38 @@ def _num(cfg, name: str, default: float, low: float, high: float) -> float:
 
 def on(cfg) -> bool:
     return bool(getattr(cfg, "breakout_handoff", False))
+
+
+WAIT_MAX_MIN = 120
+WAIT_ENDS = ("CUT", "KEEP")
+
+
+def wait_minutes(cfg) -> int:
+    """Minutes a losing trade is held after a breakout against it before it is cut (0 = cut at once)."""
+    return int(_num(cfg, "breakout_wait_min", 0, 0, WAIT_MAX_MIN))
+
+
+def wait_end(cfg) -> str:
+    """What happens when the wait runs out with the trade still losing: CUT it anyway or KEEP it."""
+    value = str(getattr(cfg, "breakout_wait_end", None) or "CUT").upper()
+    return value if value in WAIT_ENDS else "CUT"
+
+
+def losing(direction: str, entry: float, price: float) -> bool:
+    """Is the trade below its entry (before charges)?"""
+    if not entry or not price:
+        return False
+    return price < entry if direction == "LONG" else price > entry
+
+
+@dataclass
+class Wait:
+    """A breakout cut held back while the trade is losing."""
+
+    trade_id: int
+    until: float
+    note: str
+    bar: dict
 
 
 def atr_mult(cfg) -> float:

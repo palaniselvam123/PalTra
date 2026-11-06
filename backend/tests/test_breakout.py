@@ -312,3 +312,70 @@ def test_the_days_first_candle_is_never_a_breakout():
     later = _enriched_day(first_tall=False)  # the same tall candle at 09:30 is read (09:45 forming)
     assert not breakout.opening_candle(later.iloc[:-1])
     assert breakout.read(later, cfg)[0]
+
+
+def _back_frame() -> pd.DataFrame:
+    """The tall candle up at 11:15 against the short, then the price falls back under the short's entry."""
+    frame = _frame(spike_volume=True)
+    start = 375 + JUMP
+    top = float(frame.loc[start, "close"])
+    for k, idx in enumerate(range(start + 1, len(frame))):
+        price = max(top - 0.5 * (k + 1), 990.0)
+        frame.loc[idx, ["open", "high", "low", "close"]] = [price + 0.25, price + 0.3, price - 0.05, price]
+    return frame
+
+
+@pytest.mark.asyncio
+async def test_a_losing_trade_waits_and_is_cut_when_the_wait_runs_out(db):  # noqa: F811
+    _seed(db)
+    moved, trades, _ = await _run(db, _frame(spike_volume=True), breakout_handoff=True, breakout_wait_min=30, cross_exit=False)
+    assert moved == ["SIMB"]
+    last = trades[-1]
+    assert last["exit_reason"] == breakout.BREAKOUT_EXIT and last["direction"] == "SHORT"
+    assert last["exit_time"] >= dt.datetime(2026, 9, 22, 11, 46)  # not at 11:16: held the 30 minutes
+    assert last["exit_price"] > last["entry_price"]  # still at a loss, cut anyway (CUT)
+
+
+@pytest.mark.asyncio
+async def test_a_losing_trade_is_cut_once_it_is_back_at_its_entry(db):  # noqa: F811
+    _seed(db)
+    moved, trades, _ = await _run(db, _back_frame(), breakout_handoff=True, breakout_wait_min=60, cross_exit=False)
+    assert moved == ["SIMB"]
+    last = trades[-1]
+    assert last["exit_reason"] == breakout.BREAKOUT_EXIT
+    assert last["exit_time"] < dt.datetime(2026, 9, 22, 12, 16)  # before the hour ran out
+    assert last["exit_price"] <= last["entry_price"]  # a short cut at or under its entry: no loss
+
+
+@pytest.mark.asyncio
+async def test_keep_leaves_the_losing_trade_and_the_stock_on_this_bot(db):  # noqa: F811
+    from replay import IST
+
+    _seed(db)
+    until = dt.datetime.combine(DAY, dt.time(12, 0), tzinfo=IST)
+    moved, trades, engine = await _run(
+        db, _frame(spike_volume=True), until=until, breakout_handoff=True, breakout_wait_min=15, breakout_wait_end="KEEP", cross_exit=False
+    )
+    assert moved == [] and all(t["exit_reason"] != breakout.BREAKOUT_EXIT for t in trades)
+    pos = engine.positions.get("SIMB")
+    assert pos is not None and pos.direction == "SHORT"  # the losing short is still held
+    assert "SIMB" not in engine._breakout_wait
+
+
+def test_wait_settings_bounds():
+    C = lambda **kw: type("C", (), kw)()  # noqa: E731
+    assert breakout.wait_minutes(C()) == 0 and breakout.wait_end(C()) == "CUT"
+    assert breakout.wait_minutes(C(breakout_wait_min=500)) == 120
+    assert breakout.wait_end(C(breakout_wait_end="keep")) == "KEEP"
+    assert breakout.losing("SHORT", 100.0, 101.0) and not breakout.losing("SHORT", 100.0, 100.0)
+    assert breakout.losing("LONG", 100.0, 99.0) and not breakout.losing("LONG", 100.0, 100.5)
+
+
+def test_a_stock_played_as_bot_3_in_a_backtest_never_breaks_out_again():
+    """A backtest that plays the hand-offs trades a moved stock on Bot 3's settings; Bot 3 never hands off."""
+    from replay import ReplayEngine
+
+    eng = object.__new__(ReplayEngine)
+    eng.bot_id, eng._on_bot = 1, {"SIMB": breakout.TREND_BOT}
+    assert eng._plays_as("simb") == breakout.TREND_BOT
+    assert eng._plays_as("TCS") == 1

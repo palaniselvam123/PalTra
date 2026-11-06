@@ -242,6 +242,8 @@ FIELD_HELP = {
     "slow_sma_exit": "exit on a close beyond the slow SMA against the trade", "recovery_hold": "hold a losing trade through a cross (recovery)",
     "recovery_handoff": "after a recovery, hand the stock to Bot 2", "handoff_now": "Bot 2 orders at once on a hand-off",
     "breakout_handoff": "a breakout candle hands the stock to Bot 3 (a trade against it is cut; one on its side is kept)",
+    "breakout_wait_min": "breakout: hold a losing trade up to N minutes for breakeven before cutting it (0 = cut at once)",
+    "breakout_wait_end": "breakout: when the wait runs out still losing, CUT the trade anyway or KEEP it",
     "flip_orders": "flip: every order goes the other way of the signal",
     "max_daily_loss": "daily loss limit in rupees (the bot halts)", "max_trades_per_day": "entries per day for the bot",
     "max_trades_per_stock": "entries per day per stock (0 = off)",

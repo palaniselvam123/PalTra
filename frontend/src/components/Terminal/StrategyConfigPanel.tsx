@@ -427,6 +427,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_atr_mult: Math.min(10, Math.max(0.5, Number(form.breakout_atr_mult ?? 1.8) || 1.8)),
     breakout_gap_pct: Math.min(5, Math.max(0, Number(form.breakout_gap_pct ?? 0.2) || 0)),
     breakout_volume_mult: Math.min(10, Math.max(1, Number(form.breakout_volume_mult ?? 1.5) || 1.5)),
+    breakout_wait_min: Math.min(120, Math.max(0, Math.round(Number(form.breakout_wait_min ?? 0)) || 0)),
+    breakout_wait_end: form.breakout_wait_end === "KEEP" ? "KEEP" : "CUT",
     use_or_volume: Boolean(form.use_or_volume),
     use_or_vwap: Boolean(form.use_or_vwap),
     use_or_spread: Boolean(form.use_or_spread),
@@ -2816,6 +2818,34 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("breakout_volume_mult")}
             />
           </div>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2">
+            <Field
+              label="Losing trade: wait for breakeven (min, 0 = cut at once)"
+              value={String(form.breakout_wait_min ?? 0)}
+              onChange={(v) => set("breakout_wait_min", v)}
+              own={isOwn("breakout_wait_min")}
+            />
+            <label className="block text-sm text-slate-300">
+              <span className="text-xs uppercase tracking-wider text-slate-400">
+                Still losing when the wait ends{isOwn("breakout_wait_end") ? " (own)" : ""}
+              </span>
+              <select
+                value={form.breakout_wait_end ?? "CUT"}
+                onChange={(e) => set("breakout_wait_end", e.target.value)}
+                className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+              >
+                <option value="CUT">Cut it anyway (stock moves to Bot 3)</option>
+                <option value="KEEP">Keep the trade (stays on this bot)</option>
+              </select>
+            </label>
+          </div>
+          {Number(form.breakout_wait_min ?? 0) > 0 ? (
+            <p className="mt-1 text-xs text-slate-400">
+              A breakout against a losing trade does not cut it at once: it is cut as soon as the price is back at its entry, or
+              after {Number(form.breakout_wait_min)} min ({form.breakout_wait_end === "KEEP" ? "kept if still losing" : "cut anyway"}).
+              If the trade&apos;s own exit or stop closes it first, the wait ends and the stock stays on this bot.
+            </p>
+          ) : null}
         </div>
         <div className="min-w-0">
           <SectionTitle
@@ -3189,7 +3219,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
   if (f.recovery_hold && f.recovery_handoff !== false) add({ group: "advanced", key: "recovery_handoff", text: "After a recovery, the stock moves to Bot 2", off: { recovery_handoff: false } });
   if (f.handoff_now && ((f.recovery_hold && f.recovery_handoff !== false) || (f.vturn_exit && f.vturn_handoff))) add({ group: "advanced", key: "handoff_now", text: "Bot 2 orders at once on a handed-over stock (opposite of this bot's trade, no filters)", off: { handoff_now: false }, warn: true });
-  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: "On a breakout, the stock moves to Bot 3 (a trade against it is cut, one on its side kept)", off: { breakout_handoff: false } });
+  if (f.breakout_handoff) add({ group: "advanced", key: "breakout_handoff", text: `On a breakout, the stock moves to Bot 3 (a trade against it is cut${Number(f.breakout_wait_min ?? 0) > 0 ? `; a losing one waits up to ${f.breakout_wait_min} min for breakeven` : ""}, one on its side kept)`, off: { breakout_handoff: false } });
   if (f.review_on)
     add({
       group: "advanced",
