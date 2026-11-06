@@ -407,7 +407,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle of the other colour closes it (`COLOUR_TURN`, via `_exit_now`, which cancels a LIVE
   stop first) and `apply_signal(..., why="CANDLE_COLOUR")` opens the other way at once (every
   check, the stop, flip, cut-off, caps and one-LIVE-bot-per-stock apply; after a stop-out the
-  next candle's colour enters again). No Telegram for a refused candle.
+  next candle's colour enters again). No Telegram for a refused candle. **Candles in a row** (`colour_count` 1-5,
+  default 1) and **smallest body** (`colour_min_body`, % of the close, 0 = any; per bot and per stock, replays too): the
+  last N closed colour candles must all be that colour to enter or turn (`colour_call`; a mixed run holds), and a candle
+  whose body (the Heikin Ashi body with `ha_colours`) is under that % counts as no colour, like a doji. Colour / pattern
+  candles can be 1, 3, 5, 10, 15, 30 or 60 minutes (`PATTERN_TFS`).
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.

@@ -436,7 +436,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flip_orders: Boolean(form.flip_orders),
     max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
     entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
-    pattern_tf: ([1, 3, 5, 10, 15].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15,
+    pattern_tf: ([1, 3, 5, 10, 15, 30, 60].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15 | 30 | 60,
+    colour_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1)),
+    colour_min_body: Math.min(2, Math.max(0, Number(form.colour_min_body ?? 0) || 0)),
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -821,8 +823,42 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <option value="5">5 minutes</option>
                   <option value="10">10 minutes</option>
                   <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="60">60 minutes</option>
                 </select>
               </label>
+              {form.entry_mode === "COLOUR" ? (
+                <>
+                  <label className="block text-sm text-slate-300">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">
+                      Candles in a row{isOwn("colour_count") ? " (own)" : ""}
+                    </span>
+                    <select
+                      value={String(form.colour_count ?? 1)}
+                      onChange={(e) => set("colour_count", e.target.value)}
+                      className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                    >
+                      <option value="1">1 candle (turn on the first)</option>
+                      <option value="2">2 candles</option>
+                      <option value="3">3 candles</option>
+                      <option value="4">4 candles</option>
+                      <option value="5">5 candles</option>
+                    </select>
+                  </label>
+                  <Field
+                    label="Smallest candle body, % of price (0 = any)"
+                    value={String(form.colour_min_body ?? 0)}
+                    onChange={(v) => set("colour_min_body", v)}
+                    own={isOwn("colour_min_body")}
+                  />
+                  <p className="col-span-2 text-xs text-slate-400">
+                    Enters, and turns a trade the other way, only once {Number(form.colour_count ?? 1)} closed candle
+                    {Number(form.colour_count ?? 1) > 1 ? "s" : ""} in a row have the new colour. A candle whose body is under the
+                    smallest body counts as no colour: the trade is held, like a doji. With Heikin Ashi colours on, the Heikin
+                    Ashi body is measured.
+                  </p>
+                </>
+              ) : null}
               <label className="block text-sm text-slate-300">
                 <span className="text-xs uppercase tracking-wider text-slate-400">Patterns{isOwn("pattern_set") ? " (own)" : ""}</span>
                 <select
@@ -2997,7 +3033,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until a candle of the other colour, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
