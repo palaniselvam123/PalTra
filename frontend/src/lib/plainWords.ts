@@ -302,6 +302,42 @@ export const PLAIN_WORDS: Record<string, PlainWord> = {
     term: "LTP (last traded price)",
     means: "The price of the most recent trade: the live price.",
   },
+  flip: {
+    term: "Flip",
+    means: "Every signal is traded the other way round: a buy signal sells short and a sell signal buys. For stocks that keep doing the opposite of the lines.",
+    why: "Test it on a replay first; it is a strong setting.",
+  },
+  gap_mode: {
+    term: "SMA gap mode",
+    means: "Instead of trading the cross itself, the bot waits until the two averages have opened a gap of a set size, and closes when the gap fades back.",
+    why: "Skips the many tiny crosses of a choppy stock; enters a little later in a real move.",
+  },
+  recovery: {
+    term: "Recovery hold / hand-off",
+    means: "When a losing trade would be closed by an opposite cross, the bot can hold it a few candles hoping it recovers, and then move the stock to Bot 2 (the choppy-stock bot) with that bot's settings.",
+  },
+  review: {
+    term: "1-minute review",
+    means: "When a trade looks uncertain (the gap narrowing towards a cross), the bot asks you on screen and Telegram: exit or wait. No answer keeps the trade.",
+  },
+  join_trend: {
+    term: "Join the morning trend",
+    means: "A stock that opens already trending has no fresh cross, so the bot would never trade it. With this on it enters on the side the averages already point, after a set time.",
+  },
+  daily_loss: {
+    term: "Max daily loss",
+    means: "The most the bot may lose in a day (₹). When it is reached the bot closes everything and stops for the day.",
+    why: "The one limit that protects your account from a bad day; set it before anything else.",
+  },
+  qty: {
+    term: "Quantity",
+    means: "How many shares each trade buys or sells. With a trailing stop of ₹5 and 100 shares, one stopped-out trade loses about ₹500 plus charges.",
+  },
+  live: {
+    term: "LIVE mode",
+    means: "Real orders on your Groww account with real money. Each bot has its own PAPER / LIVE switch, and switching needs a typed confirmation.",
+    why: "Stay in PAPER until a backtest and a few practice days look right.",
+  },
 };
 
 /** The words for a list of keys, unknown keys skipped. */

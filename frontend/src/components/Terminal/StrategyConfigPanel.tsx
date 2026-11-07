@@ -6,6 +6,7 @@ import { InfoTip } from "@/components/ui/InfoTip";
 import { SlopeEditor } from "@/components/Settings/SlopeEditor";
 import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
+import { TierTag } from "@/components/Settings/SettingsCard";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
@@ -38,6 +39,42 @@ const GROUP_CHIPS: { id: string; label: string; title: string }[] = [
   { id: "advanced", label: "7 Advanced", title: "Moving stocks between bots, asking me" },
 ];
 const CHECK_MINUTES_OPTIONS = [1, 2, 3, 5, 10, 15] as const;
+/** What each numbered group is for, in plain words, shown when the group is open; and which ones a beginner needs. */
+const GROUP_INTRO: Record<string, { tier?: "start" | "advanced"; intro: string }> = {
+  enter: {
+    tier: "start",
+    intro:
+      "The bot normally buys when the fast average (SMA 9) crosses above the slow one (SMA 21) and sells short on the opposite cross, on the candle size you pick. Everything else in this group is an extra way in. Leave the extras off until a backtest says they help.",
+  },
+  check: {
+    intro:
+      "Each ticked check can say no to a signal. More checks mean fewer trades, not better ones by themselves: tick one, backtest it, and keep it only if the numbers improve.",
+  },
+  exit: {
+    intro:
+      "What closes a trade apart from the stop. The opposite cross is the normal exit; every extra exit you tick can close the trade earlier, and whichever fires first wins.",
+  },
+  gap: {
+    tier: "advanced",
+    intro:
+      "Instead of trading the cross itself, wait until the two averages have opened a gap of a set size, and close when the gap fades back. Leave it off until you have read its lesson and tried it on a replay.",
+  },
+  stop: {
+    tier: "start",
+    intro:
+      "The one thing every trade must have. A stop limits how much one trade can lose; a trailing stop follows the price and locks in gains. Start with a trailing stop in rupees you can afford to lose per share.",
+  },
+  risk: {
+    tier: "start",
+    intro:
+      "How many shares per trade, the most the bot may lose in a day, the most trades it may take, and when it stops entering and closes everything. Set the daily loss first.",
+  },
+  advanced: {
+    tier: "advanced",
+    intro:
+      "Rules that move a stock to another bot (Bot 2 for choppy stocks, Bot 3 for trends) and the 1-minute review that asks you what to do. Leave them off until the basics work.",
+  },
+};
 
 function toCheckMinutes(value: unknown): number[] {
   const allowed = new Set<number>(CHECK_MINUTES_OPTIONS);
@@ -597,9 +634,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       {/* The scope picker, then "What's switched on", then the numbered groups (enter, checks, exits, gap mode, stop,
           size and times, advanced). Every field saves through strategyBody() exactly as before. */}
       <div className="min-w-0">
-          <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Strategy & risk</div>
-          <label className="mt-3 block text-sm text-slate-300">
-            <span className="text-xs uppercase tracking-wider text-slate-400">Settings for</span>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="text-sm font-semibold text-slate-100">Settings for</span>
+            <InfoTip label="About shared and per-stock settings">
+              The shared settings apply to every stock this bot trades. Pick a stock to give it its own numbers (marked
+              &quot;own&quot;); whatever you do not change there keeps following the shared ones. Most people never need a
+              per-stock setting.
+            </InfoTip>
+          </div>
+          <label className="mt-1 block text-sm text-slate-300">
+            <span className="sr-only">Settings for</span>
             <select
               value={scope}
               onChange={(e) => pick(e.target.value)}
@@ -727,7 +771,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         ) : null}
       </div>
       {!searching && !openGroup ? (
-        <p className="mt-2 text-xs text-slate-400">Pick a group above to open its settings, or type what you are looking for.</p>
+        <p className="mt-2 text-xs text-slate-400">
+          Pick a group above to open its settings, or type what you are looking for. A beginner needs 1, 5 and 6 (marked
+          &quot;Start here&quot;); 4 and 7 are advanced.
+        </p>
       ) : null}
       <FieldGroup id="enter" open={isOpen("enter")} onToggle={toggleGroup} title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
         <div className="min-w-0">
@@ -3540,6 +3587,7 @@ function FieldGroup({
   onToggle: (id: string, open: boolean) => void;
   children: ReactNode;
 }) {
+  const meta = GROUP_INTRO[id];
   return (
     <details
       id={`sma-${id}`}
@@ -3553,8 +3601,14 @@ function FieldGroup({
         {on ? (
           <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">{on} on</span>
         ) : null}
+        <TierTag tier={meta?.tier} />
         <span className="hidden truncate text-xs font-normal text-slate-400 sm:inline">— {hint}</span>
       </summary>
+      {meta?.intro ? (
+        <p className="mx-3 mb-1 rounded-md border border-sky-400/20 bg-sky-400/[0.05] px-3 py-2 text-xs leading-relaxed text-slate-200">
+          {meta.intro}
+        </p>
+      ) : null}
       <div className={clsx("px-3 pb-3", wide && "lg:grid lg:grid-cols-2 lg:gap-x-10")}>{children}</div>
     </details>
   );

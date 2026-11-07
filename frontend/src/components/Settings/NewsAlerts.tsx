@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { useCallback, useEffect, useState } from "react";
 import { api, type NewsAlertRow, type NewsFeedItem, type NewsImpact, type NewsWatchSettings, type NewsWatchStock } from "@/lib/api";
 import { toneClass, toneWord, urgentAction } from "@/lib/newsTone";
@@ -99,9 +100,13 @@ export function NewsAlerts() {
 
   const st = cfg?.status;
   return (
-    <section id="news-alerts" aria-label="News alerts" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="text-base font-semibold text-slate-100">News alerts (pop-up / Telegram / phone call)</h2>
-      <p className="mt-1 text-xs text-slate-400">
+    <SettingsCard
+      id="news-alerts"
+      title="News alerts (pop-up / Telegram / phone call)"
+      status={cfg ? { on: Boolean(cfg.enabled) } : null}
+      summary="Reads the news of your armed and held stocks every few minutes and tells you (a pop-up, a Telegram, a call for critical news) when something with impact comes out. Information only: nothing is traded from it."
+      help={
+        <>
         Reads the news (NSE filings and Google News) of every stock armed or held on Bots 1–4, plus the ones you add,
         and judges each headline positive or negative{" "}
         {cfg?.ai_key ? "with AI (your OpenAI key)" : "with a rule list (save an OpenAI key under AI Trading Expert for an AI read)"}.
@@ -109,7 +114,9 @@ export function NewsAlerts() {
         avoid). A critical headline against a stock you hold (fraud, raids, bans, defaults, top-management exits, big
         result misses…) also rings the phone-call channel (market hours, one call per 5 minutes). Information only, not
         advice: nothing is traded from it. Checked on trading days 07:30–20:00 IST.
-      </p>
+        </>
+      }
+    >
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         {box("enabled", "On")}
@@ -294,6 +301,6 @@ export function NewsAlerts() {
           })()}
         </div>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

@@ -2,10 +2,17 @@
 
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
-export type SettingsGroup = { id: string; label: string; sections: [id: string, label: string][] };
+export type SettingsGroup = {
+  id: string;
+  label: string;
+  /** One plain line under the label: what is on the tab. */
+  hint?: string;
+  icon?: ReactNode;
+  sections: [id: string, label: string][];
+};
 
 const KEY = "settings.tab.v1";
 
@@ -80,12 +87,21 @@ export function SettingsTabs({ groups, active, onPick }: { groups: SettingsGroup
               e.preventDefault();
               pick(g);
             }}
+            title={g.hint}
             className={clsx(
-              "flex min-h-9 items-center whitespace-nowrap rounded-full px-3.5 font-semibold ring-1 ring-inset",
+              "flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl px-3.5 ring-1 ring-inset",
               active === g.id ? "bg-accentSky text-white ring-accentSky" : "text-slate-300 ring-border hover:bg-white/5"
             )}
           >
-            {g.label}
+            {g.icon ? <span aria-hidden className="shrink-0 opacity-90">{g.icon}</span> : null}
+            <span className="flex flex-col items-start leading-tight">
+              <span className="font-semibold">{g.label}</span>
+              {g.hint ? (
+                <span className={clsx("hidden text-[10px] font-normal md:block", active === g.id ? "text-white/85" : "text-slate-400")}>
+                  {g.hint}
+                </span>
+              ) : null}
+            </span>
           </a>
         ))}
       </div>
@@ -93,17 +109,21 @@ export function SettingsTabs({ groups, active, onPick }: { groups: SettingsGroup
   );
 }
 
-/** Jump links to the sections of a tab that has several. */
+/** Jump links to the sections of a tab that has several, as small pills. */
 export function OnThisTab({ sections }: { sections: [id: string, label: string][] }) {
   if (sections.length < 2) return null;
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+    <nav aria-label="On this tab" className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-slate-400">
       <span>On this tab:</span>
       {sections.map(([id, label]) => (
-        <a key={id} href={`#${id}`} className="text-sky-300 underline-offset-2 hover:underline">
+        <a
+          key={id}
+          href={`#${id}`}
+          className="inline-flex min-h-8 items-center rounded-full px-2.5 font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/30 hover:bg-sky-500/10"
+        >
           {label}
         </a>
       ))}
-    </p>
+    </nav>
   );
 }

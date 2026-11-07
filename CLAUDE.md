@@ -1796,6 +1796,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   gradient, the page glow and `accentViolet` follow) and remaps every hard-coded `violet-*` utility in use, both themes.
   `serverBadge` gives the "Backtest server" / "Scanner" chip next to the logo (Navbar) and the terminal title. Green / red
   never change. Add a new `violet-*` class and add its line to that block.
+- **Settings page** (desk `/settings`, `app/settings/page.tsx`; display only, every control saves through the same routes as
+  before): one tab at a time (Strategy, Bots, Alerts & news, Account), each tab with an icon, a one-line hint and a plain
+  intro line. A header ("Settings", the Learn page link, "What do these words mean?" opening the plain-words panel with the
+  settings terms), a dismissible "New here? Three things to set first" strip (broker keys, stop and daily loss, Telegram;
+  `settings.starthere.v1` in the browser) and pill jump links. Every card is `components/Settings/SettingsCard.tsx`
+  (`SettingsCard` / `CardHeader`: title, an On / Off `StatusChip`, a "Start here" / "Advanced" `TierTag`, one plain
+  `summary` line always shown, the long explanation folded under "How it works", then the controls); the Account cards
+  (broker keys, AI key, live data check, ORB risk) share the same frame. The strategy form (`StrategyConfigPanel`) opens
+  with "Settings for" (shared / one stock, with an ⓘ), tags groups 1, 5, 6 "Start here" and 4, 7 "Advanced"
+  (`GROUP_INTRO`), and shows a plain intro line inside each open group; the bot tabs show each bot's PAPER / LIVE chip and a
+  running dot. Add a card by wrapping it in `SettingsCard` with a one-line `summary` and the explanation as `help`.
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the

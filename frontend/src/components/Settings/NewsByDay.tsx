@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { ExternalLink, Loader2, Newspaper } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type NewsDayReport, type NewsDayRow } from "@/lib/api";
@@ -76,16 +77,20 @@ export function NewsByDay() {
   };
 
   return (
-    <section id="news-by-day" aria-label="News on a date" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="flex items-center gap-2 text-base font-semibold text-slate-100">
-        <Newspaper size={16} aria-hidden /> News on a date: what to do, long or short
-      </h2>
-      <p className="mt-1 text-xs text-slate-400">
-        Pick a day to read the news of every stock armed or held on Bots 1–4 (or type symbols): NSE filings and
-        headlines from the two days before up to that day&apos;s 15:30 close. For each stock you get the news read and
-        what it suggests for a new entry (buy, short, or no bias) and for an open long or short position. Information
-        only, not advice: nothing is traded from it.
-      </p>
+    <SettingsCard
+      id="news-by-day"
+      title="News on a date: what to do, long or short"
+      icon={<Newspaper size={16} aria-hidden />}
+      summary="Pick a past day and read what the news said about your stocks then, with a plain buy / short / stay-out reading for each. Information only: nothing is traded from it."
+      help={
+        <>
+          Pick a day to read the news of every stock armed or held on Bots 1–4 (or type symbols): NSE filings and
+          headlines from the two days before up to that day&apos;s 15:30 close. For each stock you get the news read and
+          what it suggests for a new entry (buy, short, or no bias) and for an open long or short position. Information
+          only, not advice: nothing is traded from it.
+        </>
+      }
+    >
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Date
@@ -157,7 +162,7 @@ export function NewsByDay() {
         </div>
       ) : null}
       {dialogs}
-    </section>
+    </SettingsCard>
   );
 }
 

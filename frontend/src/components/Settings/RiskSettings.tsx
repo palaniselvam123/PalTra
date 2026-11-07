@@ -3,6 +3,7 @@
 import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { CardHeader } from "@/components/Settings/SettingsCard";
 import { api } from "@/lib/api";
 
 type FieldDef = {
@@ -124,16 +125,20 @@ export function RiskSettings() {
   const lockTone = dayState?.lock_kind === "PROFIT_TARGET" ? "profit" : "loss";
 
   return (
-    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <h2 className="flex items-center gap-1 text-sm font-medium text-slate-200">
-        ORB desk risk (ORB bot and manual desk)
-        <InfoTip label="About ORB desk risk">
-          Not the SMA bots: each SMA bot has its own daily loss and trade limits under SMA strategy. Enforced server-side
-          before every ORB order — the ORB bot and the manual form both go through it, and neither can bypass it. Saved values
-          stay on disk and survive a restart; they do not snap back to ₹1,00,000 / 2% / 5 trades. The 15:30 IST auto
-          square-off (the NSE close) is fixed and applies on live market data.
-        </InfoTip>
-      </h2>
+    <section id="risk" aria-labelledby="risk-title" className="terminal-dark scroll-mt-24 rounded-xl border border-white/10 bg-[#151921] p-4 sm:p-5 space-y-4">
+      <CardHeader
+        id="risk"
+        title="ORB desk risk and virtual money"
+        summary="Limits for the ORB desk only: its capital, risk per trade, daily loss and trade cap. The SMA bots have their own limits on the Strategy tab. Load virtual money here for the ORB desk's practice account."
+        help={
+          <>
+            Not the SMA bots: each SMA bot has its own daily loss and trade limits under Strategy → 6. Size, daily limits and
+            times. These are enforced on the server before every ORB order; the ORB bot and the manual form both go through
+            them. Saved values stay on disk and survive a restart. The 15:30 IST auto square-off (the NSE close) is fixed and
+            applies on live market data.
+          </>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3">
         {FIELDS.map((f) => {
@@ -229,6 +234,6 @@ export function RiskSettings() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

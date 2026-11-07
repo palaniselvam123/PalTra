@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { ApiError, smaApi, type FastBotRule, type FastBotSettings } from "@/lib/smaApi";
 
 const input = "min-h-9 w-24 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
@@ -115,10 +116,14 @@ export function FastMoverBot() {
   const rule = (form.rule as FastBotRule) || "MOVE";
   const recent = view?.recent ?? [];
   return (
-    <section id="fast-mover-bot" aria-label="Fast movers to Bot 5" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-100">
-        Fast movers → Bot 5
-        {view ? (
+    <SettingsCard
+      id="fast-mover-bot"
+      title="Fast movers → Bot 5"
+      tier="advanced"
+      status={view ? { on: Boolean(view.on) } : null}
+      summary="When a stock one of your bots holds suddenly runs in its favour, that trade is handed to Bot 5, which takes it on at once with its own (usually bigger) size, stop and exits. Off by default."
+      badge={
+        view ? (
           <span
             className={clsx(
               "rounded px-1.5 py-0.5 text-[11px] font-semibold",
@@ -127,9 +132,11 @@ export function FastMoverBot() {
           >
             Bot 5 {view.target_mode} · qty {view.target_qty ?? "?"} · {view.target_status ?? "not running"}
           </span>
-        ) : null}
-      </h2>
-      <p className="mt-1 text-xs text-slate-400">
+        ) : null
+      }
+      help={
+        <>
+
         When a stock one of the ticked bots holds moves fast in that trade&apos;s favour, its trade there is closed and Bot 5
         opens the same side at once with Bot 5&apos;s own quantity, stop and exits. No SMA cross is waited for; with the
         tick box below on, Bot 5&apos;s own entry checks (VWAP, RSI, ADX and the rest ticked in its strategy settings) are
@@ -141,7 +148,9 @@ export function FastMoverBot() {
         (PAPER) trade, a LIVE trade is never cut for a PAPER Bot 5, and in LIVE the move waits until Groww shows no shares
         on the old bot. Replays of the ticked bots play it too (Bot 5's size and settings for the rest of that day), so
         you can check it on past days.
-      </p>
+        </>
+      }
+    >
       <div className="mt-3 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
@@ -277,6 +286,6 @@ export function FastMoverBot() {
           </ul>
         </div>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

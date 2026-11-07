@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { smaApi, type FastMoveSettings } from "@/lib/smaApi";
 
 const input = "min-h-9 w-24 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
@@ -72,13 +73,19 @@ export function FastMoveAlerts() {
 
   const recent = view?.recent ?? [];
   return (
-    <section id="fast-moves" aria-label="Fast-move alerts" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="text-base font-semibold text-slate-100">Fast-move alerts (Telegram / phone call)</h2>
-      <p className="mt-1 text-xs text-slate-400">
-        Tells you when a stock&apos;s price is changing quickly, either way. Each stock alerts at most once in the cool-down,
-        while NSE is open, through your trade alert channel (the call uses the phone-call channel: market hours, at most one
-        every 5 minutes). Alerts only: nothing is traded.
-      </p>
+    <SettingsCard
+      id="fast-moves"
+      title="Fast-move alerts (Telegram / phone call)"
+      status={view ? { on: Boolean(view.on || view.scan_on) } : null}
+      summary="A Telegram (and a call if you tick it) when a stock's price moves quickly: your armed and held stocks, or every stock in the Trend quality scan. Alerts only: nothing is traded."
+      help={
+        <>
+          Tells you when a stock&apos;s price is changing quickly, either way. Each stock alerts at most once in the cool-down,
+          while NSE is open, through your trade alert channel (the call uses the phone-call channel: market hours, at most one
+          every 5 minutes). Alerts only: nothing is traded.
+        </>
+      }
+    >
       <div className="mt-3 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-300">
@@ -151,6 +158,6 @@ export function FastMoveAlerts() {
           </ul>
         </div>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

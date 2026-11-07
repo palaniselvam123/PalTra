@@ -326,9 +326,11 @@ select {
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\] { background-color: #ffffff; }
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/90 { background-color: rgb(255 255 255 / 0.94); }
 [data-theme="light"] .terminal-dark .bg-\[\#0B0E14\]\/95 { background-color: rgb(255 255 255 / 0.95); }
-[data-theme="light"] .terminal-dark .bg-\[\#151921\] { background-color: #ffffff; }
-/* White cards on the white page: a visible edge and a soft lift. */
-[data-theme="light"] .terminal-dark .rounded-xl.bg-\[\#151921\] {
+[data-theme="light"] .terminal-dark .bg-\[\#151921\],
+[data-theme="light"] .terminal-dark.bg-\[\#151921\] { background-color: #ffffff; }
+/* White cards on the white page: a visible edge and a soft lift (the Settings cards carry the class themselves). */
+[data-theme="light"] .terminal-dark .rounded-xl.bg-\[\#151921\],
+[data-theme="light"] .terminal-dark.rounded-xl.bg-\[\#151921\] {
   border-color: rgb(var(--c-border));
   box-shadow: 0 1px 2px rgb(15 28 51 / 0.06), 0 4px 12px -6px rgb(15 28 51 / 0.1);
 }
