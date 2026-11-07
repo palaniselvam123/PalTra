@@ -175,6 +175,9 @@ def test_api_refuses_bad_requests_and_lists(tmp_path, monkeypatch):
 
     import main
 
+    # No Groww login, whatever an earlier test left on the shared broker: the comparison is refused before it starts.
+    monkeypatch.setattr(main.engine.broker, "token", None, raising=False)
+    monkeypatch.setattr(main.engine.broker, "adopt_saved_session", lambda *a, **k: None, raising=False)
     with TestClient(main.app) as client:
         assert client.get("/api/trend-picks/compare").json() == {"running": None, "items": []}
         base = {"date": "2026-10-01", "end_date": "2026-10-09", "universe": ["SBIN"]}
@@ -183,4 +186,5 @@ def test_api_refuses_bad_requests_and_lists(tmp_path, monkeypatch):
         assert client.post("/api/trend-picks/compare", json={**base, "times": ["10:00", "11:00"]}).status_code == 400
         assert client.get("/api/trend-picks/compare/5").status_code == 404
         assert client.post("/api/trend-picks/compare/stop").json() == {"stopped": False}
+        assert client.get("/api/trend-picks/compare").json()["items"] == []  # nothing was started
     database.reset_engine()
