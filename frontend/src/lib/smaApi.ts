@@ -794,6 +794,93 @@ export type MorningStock = {
   sideways: MorningStockPart;
   avg_deliv_pct: number | null;
 };
+/** Second candle test (backend second_candle.py). One stock on one day: the Nth candle's call and the path after it. */
+export type SecondCandleRow = {
+  symbol: string;
+  day: string;
+  side: "LONG" | "SHORT" | "DOJI";
+  skipped?: string;
+  rank?: number;
+  candidates?: number;
+  rvol: number | null;
+  change_pct: number | null;
+  body_pct: number;
+  signal_at: string;
+  entry_at: string;
+  entry: number;
+  best_pts: number;
+  best_pct: number;
+  best_at: string;
+  worst_pts: number;
+  worst_pct: number;
+  worst_at: string;
+  hit: boolean;
+  target_at: string | null;
+  minutes_to_target: number | null;
+  against_before_target: number | null;
+  close_pts: number;
+  close_pct: number;
+  close_at: string;
+  /** Trailing-stop distance (% of the entry, as a string key) → ₹ per share it made. */
+  trail: Record<string, number>;
+  /** ₹ level (string key) → minutes after the entry it was first reached with / against the trade (null = never). */
+  fav_min: Record<string, number | null>;
+  adv_min: Record<string, number | null>;
+};
+export type SecondCandleGroup = {
+  trades: number;
+  hits: number;
+  hit_pct: number;
+  avg_best: number | null;
+  median_best: number | null;
+  avg_worst: number | null;
+  avg_against_before_target: number | null;
+  max_against_before_target: number;
+  avg_minutes_to_target: number | null;
+  avg_close: number | null;
+  close_win_pct: number;
+  total_close: number;
+  went_against_target_pct: number;
+};
+export type SecondCandleTrail = { pct: number; total: number; avg: number | null; win_pct: number; worst: number; best: number; trades: number };
+export type SecondCandleTargetStop = { target: number; stop: number; trades: number; hit_target: number; hit_stop: number; neither: number; total: number; avg: number | null; win_pct: number };
+export type SecondCandleReport = {
+  rule: { minutes: number; candle_no: number; top_n: number; target_points: number; square_off: string; trails: number[]; min_body_pct: number };
+  trades: number;
+  ranked: number;
+  skipped: number;
+  stocks: number;
+  days: number;
+  all: SecondCandleGroup;
+  by_side: Record<"LONG" | "SHORT", SecondCandleGroup>;
+  by_rank: ({ label: string } & SecondCandleGroup)[];
+  by_day: ({ day: string } & SecondCandleGroup)[];
+  trail: SecondCandleTrail[];
+  best_trail: SecondCandleTrail | null;
+  target_stop: SecondCandleTargetStop[];
+  best_stop: SecondCandleTargetStop | null;
+  by_half_hour: { slot: string; target: number; best: number; worst: number }[];
+  levels: number[];
+  stops: number[];
+  answer: string[];
+  stopped?: boolean;
+};
+export type SecondCandleStock = { symbol: string; best_trail_pct: number | null; best_trail_total: number | null } & SecondCandleGroup;
+export type SecondCandleView = {
+  status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
+  done: number;
+  total: number;
+  errors: { symbol: string; error: string }[];
+  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number };
+  started_at: string | null;
+  finished_at: string | null;
+  report: SecondCandleReport | null;
+  stocks: SecondCandleStock[];
+  rows: SecondCandleRow[];
+  sizes: number[];
+  default_trails: number[];
+};
+
 export type MorningStudy = {
   status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
   done: number;
@@ -2431,6 +2518,20 @@ export const smaApi = {
   morningStudyStart: (body: { symbols: string[]; days: number; at: string; minutes: number; min_move: number; delivery: boolean }) =>
     request<MorningStudy>("/api/morning-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   morningStudyStop: () => request<MorningStudy>("/api/morning-study/stop", { method: "POST" }, 20000, false),
+  /** Second candle test (backend second_candle.py): the Most active routine measured on every stock and day. */
+  secondCandle: (rows = true) => request<SecondCandleView>(`/api/second-candle${rows ? "" : "?rows=false"}`, undefined, 30000, false),
+  secondCandleStart: (body: {
+    symbols: string[];
+    days: number;
+    minutes: number;
+    candle_no: number;
+    top_n: number;
+    target_points: number;
+    square_off: string;
+    trails: number[];
+    min_body_pct: number;
+  }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
     request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
