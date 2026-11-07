@@ -13,6 +13,7 @@ import { useArming } from "@/components/Scalp/useArming";
 import { useServerRole } from "@/hooks/useServerRole";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
+import { TrendPickBacktest } from "@/components/Scalp/TrendPickBacktest";
 import { ScanHistory } from "@/components/Scalp/ScanHistory";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
@@ -756,7 +757,10 @@ export default function ScalpPage() {
           />
         </div>
         <div hidden={tab !== "backtest"}>
-          <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
+          <div className="space-y-4">
+            <TrendPickBacktest armed={armed} />
+            <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
+          </div>
         </div>
         <div hidden={tab !== "sideways"}>
           <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />

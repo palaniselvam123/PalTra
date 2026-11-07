@@ -91,7 +91,12 @@ def bars_known_at(frame: pd.DataFrame, day: dt.date, at: dt.time) -> list[OHLCV]
 
 def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: PickRule) -> list[dict]:
     """The day's picks, best first: scalp-ready (spread not checked), with a
-    LONG/SHORT bias when the rule asks for one, top N by score."""
+    LONG/SHORT bias when the rule asks for one, top N by score. A strong-trend rule
+    (trend_picks.TrendPickRule) picks by the Trend quality read instead."""
+    if getattr(rule, "kind", None) == "TREND":
+        import trend_picks
+
+        return trend_picks.picks_for_day(frames, day, rule)
     scored = []
     for symbol, frame in frames.items():
         bars = bars_known_at(frame, day, rule.pick_time)

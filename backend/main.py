@@ -40,6 +40,7 @@ import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
 import morning_study
+import trend_picks
 import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
@@ -338,6 +339,16 @@ _auto_start_task: asyncio.Task | None = None
 _handoff_return_task: asyncio.Task | None = None
 
 
+_trend_picks_task: asyncio.Task | None = None
+
+
+def _start_trend_picks_loop() -> None:
+    """The daily strong-trend pick backtest (trend_picks.run, off until switched on); one loop per process."""
+    global _trend_picks_task
+    if _trend_picks_task is None or _trend_picks_task.done():
+        _trend_picks_task = asyncio.create_task(trend_picks.run(_trend_picks_daily))
+
+
 def boot_engine() -> asyncio.Task | None:
     """Start the 1-second loop once. Safe if both the standalone app and a mount call it."""
     global _booted, _task, _research_task
@@ -361,6 +372,7 @@ def boot_engine() -> asyncio.Task | None:
     chop_autos.reload()
     chop_autos.start_loop(_chop_auto_start)
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
+    _start_trend_picks_loop()
     open_pnl_recorder.start(_open_pnl_desks)
     ensure_research_config()
     research_engine.restore_open_books()
@@ -428,6 +440,7 @@ def _boot_backtest_server() -> asyncio.Task:
     chop_autos.start_loop(_chop_auto_start)
     backtest_server.add_busy_check(_auto_scans_due)
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
+    _start_trend_picks_loop()
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     return _task
 
@@ -505,6 +518,8 @@ def stop_engine() -> None:
     fast_move.watcher.stop()
     fast_bot.watcher.stop()
     scan_arm_runner.stop()
+    if _trend_picks_task is not None and not _trend_picks_task.done():
+        _trend_picks_task.cancel()
     open_pnl_recorder.stop()
     scan_checker.stop("Stopped: the app is shutting down.")
     scan_worker.shutdown()
@@ -2448,6 +2463,131 @@ async def replay_scalp_picks(body: ScalpPickStart):
         rule=rule,
     )
     return replay.info()
+
+
+class TrendPickStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The stocks to choose from each day (the card's scan lists).
+    universe: list[str]
+    pick_time: str = "10:00"
+    top_n: int = Field(default=10, ge=1, le=trend_picks.MAX_TOP_N)
+    direction: Literal["BULLISH", "BEARISH", "BOTH"] = "BOTH"
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    bot: int = Field(default=1, ge=1, le=4)
+    speed: int = 300
+
+
+async def _start_trend_picks(
+    bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
+    minutes: int, speed: int,
+) -> dict:
+    """Start a strong-trend pick backtest on `bot`'s replay player. Raises HTTPException on a refusal."""
+    eng = engine if bot == 1 else bot_engines.get(bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {bot}")
+    cfg = eng.load_config()
+    bot_label = getattr(cfg, "bot_name", None) or f"Bot {bot}"
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, f"Switch {bot_label} to PAPER before replaying its settings.")
+    names: list[str] = []
+    for raw in universe:
+        name = (raw or "").strip().upper()
+        if is_nse_symbol(name) and name not in names:
+            names.append(name)
+    if not names:
+        raise HTTPException(400, "Give at least one stock to pick from.")
+    names = names[: trend_picks.MAX_UNIVERSE]
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the Settings page first.")
+    rule = trend_picks.TrendPickRule(
+        pick_time=pick_time, top_n=top_n, direction=direction, minutes=minutes,
+        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow),
+    )
+    session = replays[bot]
+    await session.begin(
+        engine.broker,
+        names,
+        day,
+        pick_time,
+        speed,
+        end_day=end_day,
+        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg), "bot": bot, "bot_name": bot_label},
+        rule=rule,
+        bot=bot,
+        bot_name=bot_label,
+    )
+    return session.info()
+
+
+@app.post("/api/replay/trend-picks")
+async def replay_trend_picks(body: TrendPickStart):
+    """Backtest the strong-trend picks (trend_picks.py): each past day, read every stock as the Trend quality card would
+    have at the pick time, keep the strong bullish / bearish ones, take the top N and let the chosen bot trade only those
+    from that minute to the square-off. Practice money; never sends an order, never changes a Trade list."""
+    _refuse_desk_replay_in_market()
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+        pick_time = parse_start(body.pick_time)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not (dt.time(9, 20) <= pick_time <= dt.time(14, 30)):
+        raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
+    return await _start_trend_picks(
+        body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed
+    )
+
+
+class TrendPicksAuto(BaseModel):
+    on: bool | None = None
+    run_at: str | None = None
+    pick_time: str | None = None
+    direction: Literal["BULLISH", "BEARISH", "BOTH"] | None = None
+    top_n: int | None = Field(default=None, ge=1, le=trend_picks.MAX_TOP_N)
+    minutes: Literal[1, 3, 5, 10, 15] | None = None
+    bot: int | None = Field(default=None, ge=1, le=4)
+    lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = Field(default=None, max_length=5)
+
+
+@app.get("/api/trend-picks/auto")
+async def trend_picks_auto_get():
+    """The daily automatic strong-trend pick backtest (trend_picks.py): its settings and the last day it ran."""
+    from dataclasses import asdict
+
+    return asdict(trend_picks.load())
+
+
+@app.put("/api/trend-picks/auto")
+async def trend_picks_auto_put(body: TrendPicksAuto):
+    from dataclasses import asdict
+
+    try:
+        return asdict(trend_picks.update(**body.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple[int | None, str]:
+    """The daily run (trend_picks.run): today's strong-trend picks backtested on the chosen bot, at full speed."""
+    session = replays[s.bot]
+    if session.status in ("LOADING", "PLAYING", "PAUSED"):
+        return None, ""  # that bot's replay player is busy: try again on the next pass
+    try:
+        names = await _auto_symbols(False, s.lists)
+        h, m = s.pick_time.split(":")
+        await _start_trend_picks(
+            s.bot, names, day, day, dt.time(int(h), int(m)), s.top_n, s.direction, s.minutes, max(SPEEDS)
+        )
+    except HTTPException as exc:
+        return None, f"not started: {exc.detail}"
+    except Exception as exc:  # noqa: BLE001
+        return None, f"not started: {exc}"
+    which = {"BULLISH": "strong bullish", "BEARISH": "strong bearish"}.get(s.direction, "strong bullish and bearish")
+    return session.run_id, f"backtested today's top {s.top_n} {which} picks at {s.pick_time} on Bot {s.bot}"
 
 
 @app.post("/api/replay/start")

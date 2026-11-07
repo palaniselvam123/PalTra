@@ -814,6 +814,22 @@ export type MorningStudy = {
   };
 };
 
+/** Strong-trend pick backtest and its daily automatic run (backend trend_picks.py). */
+export type TrendPickDirection = "BULLISH" | "BEARISH" | "BOTH";
+export type TrendPicksAuto = {
+  on: boolean;
+  run_at: string;
+  pick_time: string;
+  direction: TrendPickDirection;
+  top_n: number;
+  minutes: number;
+  bot: number;
+  lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
+  last_day: string | null;
+  last_run_id: number | null;
+  last_note: string | null;
+};
+
 /** Turning scan (backend turn_scan.py): candles turning against the SMA trend before the cross. Read-only. */
 export type TurnRule = "COLOUR" | "CLOSES" | "BOTH";
 export type TurnRow = {
@@ -2508,6 +2524,22 @@ export const smaApi = {
     speed?: number;
   }) =>
     request<ReplayInfo>("/api/replay/scalp-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  /** Backtest the strong-trend picks (backend trend_picks.py): each day, the top N strong trends at the pick time,
+   * traded by `bot` from that minute. Practice money; nothing is armed. */
+  replayTrendPicks: (body: {
+    date: string;
+    end_date: string;
+    universe: string[];
+    pick_time: string;
+    top_n: number;
+    direction: TrendPickDirection;
+    minutes: number;
+    bot: number;
+    speed?: number;
+  }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  trendPicksAuto: () => request<TrendPicksAuto>("/api/trend-picks/auto", undefined, undefined, false),
+  saveTrendPicksAuto: (body: Partial<Omit<TrendPicksAuto, "last_day" | "last_run_id" | "last_note">>) =>
+    request<TrendPicksAuto>("/api/trend-picks/auto", { method: "PUT", body: JSON.stringify(body) }, 20000, false),
   /** `symbols` replays those stocks instead of the armed ones (they are not armed); `bot` whose settings (default 1). */
   /** This desk's bot's replay runs cut short (a deploy/restart, or Stop) with days left, newest first. */
   replayResumable: (bot?: number) =>

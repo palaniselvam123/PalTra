@@ -1391,7 +1391,8 @@ class ReplaySession:
             if self.rule is not None:
                 # Pick as the live Scalp page would have at the pick time, then
                 # trade only those stocks from that minute on.
-                picked = picks_for_day(frames, day, self.rule)
+                # In a worker thread: a strong-trend pick reads every stock of the universe.
+                picked = await asyncio.to_thread(picks_for_day, frames, day, self.rule)
                 self.picks[day.isoformat()] = picked
                 self._save_picks()
                 symbols = [p["symbol"] for p in picked]
