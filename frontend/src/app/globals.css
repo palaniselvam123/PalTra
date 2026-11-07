@@ -62,14 +62,16 @@
   --c-surface-2: 245 247 251;
   --c-border: 214 222 233;
 
-  --c-profit: 0 166 118;
-  --c-loss: 226 55 78;
-  --c-bot: 37 122 235;
+  /* Deep enough for text on white and for white text on a filled button
+     (4.5 : 1 or better both ways, and on their own 15-20 % tints): profit green 7.4, loss red 6.3, sky 7.6. */
+  --c-profit: 6 95 70;
+  --c-loss: 190 18 60;
+  --c-bot: 29 78 216;
 
   --c-violet: 124 77 245;
-  --c-sky: 14 137 226;
-  --c-amber: 214 138 4;
-  --c-teal: 13 158 150;
+  --c-sky: 7 89 133;
+  --c-amber: 146 97 10;
+  --c-teal: 15 118 110;
   --c-pink: 219 39 119;
   --c-indigo: 79 86 232;
 
@@ -144,7 +146,7 @@ select {
 [data-theme="light"] .text-slate-200 { color: #17233b; }
 [data-theme="light"] .text-slate-300 { color: #334155; }
 [data-theme="light"] .text-slate-400 { color: #475569; }
-[data-theme="light"] .text-slate-500 { color: #5b6b80; }
+[data-theme="light"] .text-slate-500 { color: #55667d; }
 [data-theme="light"] .text-slate-600 { color: #74839a; }
 [data-theme="light"] .text-slate-900 { color: #f8fafc; }
 
@@ -177,10 +179,88 @@ select {
   background-color: rgb(15 23 42 / 0.08);
 }
 
-/* Amber warning banners read as muddy on white without a lift. */
+/* Coloured text in light mode. The components were written for dark surfaces,
+   where the pale -100 … -400 shades (emerald-300, rose-300, sky-300 …) are the
+   readable ones. On white those same shades sit at 1.5-2.6 : 1, far under the
+   4.5 : 1 that body text needs (the Scalp page's green / red numbers were the
+   owner's example), so each pale shade becomes the dark shade of the same
+   hue, about 5-7 : 1 on white. Tinted chips (bg-emerald-500/15 …) stay pale
+   on white, so the dark text reads on them too. Dark mode is untouched. */
+[data-theme="light"] .text-amber-100,
+[data-theme="light"] .text-amber-200,
 [data-theme="light"] .text-amber-300 { color: #92610a; }
 [data-theme="light"] .text-amber-400 { color: #a16207; }
-[data-theme="light"] .text-violet-300 { color: #6d28d9; }
+[data-theme="light"] .text-amber-500 { color: #b45309; }
+[data-theme="light"] .text-violet-100,
+[data-theme="light"] .text-violet-200,
+[data-theme="light"] .text-violet-300,
+[data-theme="light"] .text-violet-400 { color: #6d28d9; }
+[data-theme="light"] .text-emerald-100,
+[data-theme="light"] .text-emerald-200,
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400 { color: #047857; }
+[data-theme="light"] .text-emerald-500 { color: #059669; }
+[data-theme="light"] .text-rose-100,
+[data-theme="light"] .text-rose-200,
+[data-theme="light"] .text-rose-300,
+[data-theme="light"] .text-rose-400 { color: #be123c; }
+[data-theme="light"] .text-rose-500 { color: #e11d48; }
+[data-theme="light"] .text-sky-100,
+[data-theme="light"] .text-sky-200,
+[data-theme="light"] .text-sky-300,
+[data-theme="light"] .text-sky-400 { color: #075985; }
+[data-theme="light"] .text-sky-500 { color: #0284c7; }
+[data-theme="light"] .text-blue-200,
+[data-theme="light"] .text-blue-300,
+[data-theme="light"] .text-blue-400 { color: #1d4ed8; }
+[data-theme="light"] .text-teal-100,
+[data-theme="light"] .text-teal-200,
+[data-theme="light"] .text-teal-300,
+[data-theme="light"] .text-teal-400 { color: #0f766e; }
+[data-theme="light"] .text-cyan-200,
+[data-theme="light"] .text-cyan-300,
+[data-theme="light"] .text-cyan-400 { color: #0e7490; }
+[data-theme="light"] .text-indigo-200,
+[data-theme="light"] .text-indigo-300,
+[data-theme="light"] .text-indigo-400 { color: #4338ca; }
+[data-theme="light"] .text-pink-200,
+[data-theme="light"] .text-pink-300,
+[data-theme="light"] .text-pink-400 { color: #be185d; }
+[data-theme="light"] .text-orange-200,
+[data-theme="light"] .text-orange-300,
+[data-theme="light"] .text-orange-400 { color: #c2410c; }
+[data-theme="light"] .text-lime-200,
+[data-theme="light"] .text-lime-300,
+[data-theme="light"] .text-lime-400 { color: #4d7c0f; }
+[data-theme="light"] .text-yellow-200,
+[data-theme="light"] .text-yellow-300,
+[data-theme="light"] .text-yellow-400 { color: #a16207; }
+[data-theme="light"] .text-green-300,
+[data-theme="light"] .text-green-400 { color: #15803d; }
+[data-theme="light"] .text-red-300,
+[data-theme="light"] .text-red-400 { color: #b91c1c; }
+/* The faintest slate step was 3.9 : 1 on white; one step darker keeps it the quietest text and still readable. */
+[data-theme="light"] .text-slate-600 { color: #526178; }
+/* Filled buttons kept their dark-theme fill: white text on sky-500 / 600 was 2.7-4.1 : 1 on white pages. */
+[data-theme="light"] .bg-sky-500,
+[data-theme="light"] .bg-sky-600 { background-color: #0369a1; }
+[data-theme="light"] .hover\:bg-sky-500:hover,
+[data-theme="light"] .hover\:bg-sky-400:hover { background-color: #075985; }
+[data-theme="light"] .bg-emerald-600 { background-color: #047857; }
+[data-theme="light"] .hover\:bg-emerald-500:hover { background-color: #065f46; }
+[data-theme="light"] .bg-rose-600 { background-color: #be123c; }
+[data-theme="light"] .hover\:bg-rose-500:hover { background-color: #9f1239; }
+/* Disabled controls: still clearly dimmer, but readable on white. */
+[data-theme="light"] .disabled\:opacity-40:disabled { opacity: 0.55; }
+[data-theme="light"] .disabled\:opacity-50:disabled { opacity: 0.6; }
+/* Dark chips (bg-slate-800 / 900) were never remapped: on white they are black pills with pale text. */
+[data-theme="light"] .bg-slate-800 { background-color: #e2e8f0; }
+[data-theme="light"] .bg-slate-900 { background-color: #eef2f7; }
+[data-theme="light"] .bg-slate-800\/60,
+[data-theme="light"] .bg-slate-800\/50,
+[data-theme="light"] .bg-slate-900\/60,
+[data-theme="light"] .bg-slate-900\/50,
+[data-theme="light"] .bg-slate-900\/40 { background-color: rgb(15 23 42 / 0.05); }
 
 /* Dark terminal contrast (display only). Muted slate text was under the 4.5:1
    AA ratio on the near-black surfaces; lift it a step, and give hairline card
@@ -296,7 +376,7 @@ select {
 [data-theme="light"] .terminal-dark .text-sky-300,
 [data-theme="light"] .terminal-dark .text-sky-200,
 [data-theme="light"] .terminal-dark .text-sky-100,
-[data-theme="light"] .terminal-dark .text-accentSky { color: #0369a1; }
+[data-theme="light"] .terminal-dark .text-accentSky { color: #075985; }
 [data-theme="light"] .terminal-dark .text-amber-300,
 [data-theme="light"] .terminal-dark .text-amber-200,
 [data-theme="light"] .terminal-dark .text-amber-100 { color: #92400e; }

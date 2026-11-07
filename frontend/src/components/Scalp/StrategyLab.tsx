@@ -586,12 +586,15 @@ function Equity({ days }: { days: StrategyLabResult["per_day"] }) {
             </title>
           </circle>
         ))}
-        <text x={points[1].x} y={H - 4} fontSize={9} fill="rgb(148 163 184)">
+        {/* The day labels take the text colour of the card (light and dark themes); one day shows one label. */}
+        <text x={points[1].x} y={H - 4} fontSize={9} fill="currentColor" className="text-slate-500">
           {days[0].day}
         </text>
-        <text x={last.x} y={H - 4} fontSize={9} fill="rgb(148 163 184)" textAnchor="end">
-          {days[days.length - 1].day}
-        </text>
+        {days.length > 1 ? (
+          <text x={last.x} y={H - 4} fontSize={9} fill="currentColor" className="text-slate-500" textAnchor="end">
+            {days[days.length - 1].day}
+          </text>
+        ) : null}
       </svg>
     </div>
   );
