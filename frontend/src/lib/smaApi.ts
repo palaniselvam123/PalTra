@@ -860,6 +860,10 @@ export type StockRankView = StockRankJob & {
   answer: string[];
 };
 export type TrendPickDirection = "BULLISH" | "BEARISH" | "BOTH";
+/** Most active pick backtest (backend active_picks.py): how the day's picks are ranked and filtered. */
+export type ActivePickRank = "value" | "rvol" | "change" | "vwap" | "speed" | "range";
+export type ActivePickBias = "BOTH" | "LONG" | "SHORT" | "ANY";
+export type ActivePickParams = { rank: ActivePickRank; bias: ActivePickBias; min_value_cr: number };
 /** A pick-time comparison (backend trend_compare.py): one strong-trend pick backtest per time, side by side. */
 export type TrendCompareRun = { time: string; run_id: number | null; status: string; note: string };
 export type TrendCompare = {
@@ -876,6 +880,8 @@ export type TrendCompare = {
   universe: number;
   lists: string[];
   play_handoffs?: boolean;
+  source?: "TREND" | "ACTIVE";
+  active?: ActivePickParams;
   runs: TrendCompareRun[];
   note: string;
 };
@@ -2637,6 +2643,21 @@ export const smaApi = {
     /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (on by default, like the replay bar). */
     play_handoffs?: boolean;
   }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  /** Backtest the Most active picks (backend active_picks.py): each day, the top N by the chosen column at the pick
+   * time, traded by `bot` from that minute. Practice money; nothing is armed. */
+  replayActivePicks: (body: {
+    date: string;
+    end_date: string;
+    universe: string[];
+    pick_time: string;
+    top_n: number;
+    rank: ActivePickRank;
+    bias: ActivePickBias;
+    min_value_cr: number;
+    bot: number;
+    play_handoffs: boolean;
+    speed?: number;
+  }) => request<ReplayInfo>("/api/replay/active-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   /** Stock ranking: backtest a bot's strategy on many stocks in batches, then rank the stocks (stock_rank.py). */
   stockRankStart: (body: {
     date: string;
@@ -2665,6 +2686,10 @@ export const smaApi = {
     bot: number;
     lists?: string[];
     play_handoffs?: boolean;
+    source?: "TREND" | "ACTIVE";
+    rank?: ActivePickRank;
+    bias?: ActivePickBias;
+    min_value_cr?: number;
   }) => request<TrendCompare>("/api/trend-picks/compare", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   trendCompares: () =>
     request<{ running: number | null; items: TrendCompare[] }>("/api/trend-picks/compare", undefined, undefined, false),

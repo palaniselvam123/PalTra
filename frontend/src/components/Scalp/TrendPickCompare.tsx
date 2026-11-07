@@ -11,11 +11,26 @@ import {
   type TrendCompareResult,
   type TrendCompareRow,
   type TrendPickDirection,
+  type ActivePickParams,
 } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 
 const TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"];
 const DEFAULT_TIMES = ["10:00", "11:00", "12:00"];
+const RANK_TEXT: Record<string, string> = {
+  value: "money traded",
+  rvol: "volume vs usual",
+  change: "biggest move",
+  vwap: "distance from average price",
+  speed: "speed",
+  range: "day range",
+};
+const BIAS_TEXT: Record<string, string> = {
+  BOTH: "bullish and bearish",
+  LONG: "bullish only",
+  SHORT: "bearish only",
+  ANY: "any bias",
+};
 const MAX_TIMES = 8;
 
 type Key =
@@ -67,6 +82,7 @@ export function TrendPickCompare({
   minutes,
   bot,
   playHandoffs,
+  active,
 }: {
   armed: Map<string, string[]>;
   lists: string[];
@@ -76,7 +92,10 @@ export function TrendPickCompare({
   minutes: number;
   bot: number;
   playHandoffs: boolean;
+  /** Compare the Most active picks (active_picks.py) instead of the strong-trend ones. */
+  active?: ActivePickParams;
 }) {
+  const source = active ? "ACTIVE" : "TREND";
   const [times, setTimes] = useState<string[]>(DEFAULT_TIMES);
   const [items, setItems] = useState<TrendCompare[]>([]);
   const [running, setRunning] = useState<number | null>(null);
@@ -88,13 +107,16 @@ export function TrendPickCompare({
   const loadList = useCallback(async () => {
     try {
       const got = await smaApi.trendCompares();
-      setItems(got.items);
+      const mine = got.items.filter((c) => (c.source ?? "TREND") === source);
+      got.items = mine;
+      setItems(mine);
       setRunning(got.running);
-      setOpenId((cur) => cur ?? got.running ?? got.items[0]?.id ?? null);
+      const runningMine = got.running != null && mine.some((c) => c.id === got.running) ? got.running : null;
+      setOpenId((cur) => cur ?? runningMine ?? mine[0]?.id ?? null);
     } catch {
       /* the list is optional */
     }
-  }, []);
+  }, [source]);
 
   const loadView = useCallback(async (id: number) => {
     try {
@@ -151,6 +173,8 @@ export function TrendPickCompare({
         bot,
         lists,
         play_handoffs: playHandoffs,
+        source,
+        ...(active ?? {}),
       });
       setOpenId(got.id);
       setRunning(got.id);
@@ -281,7 +305,11 @@ function CompareView({ view, running }: { view: TrendCompare & { result: TrendCo
   return (
     <div className="mt-3 space-y-3">
       <p className="text-xs text-slate-500">
-        {view.start_date} → {view.end_date} · top {view.top_n} {dirText} on {view.minutes}-min candles · {view.universe} stocks
+        {view.start_date} → {view.end_date} ·{" "}
+        {view.active
+          ? `top ${view.top_n} Most active by ${RANK_TEXT[view.active.rank]}, ${BIAS_TEXT[view.active.bias]}, at least ₹${view.active.min_value_cr} cr traded`
+          : `top ${view.top_n} ${dirText} on ${view.minutes}-min candles`}{" "}
+        · {view.universe} stocks
         · Bot {view.bot}&apos;s settings{view.play_handoffs ? " with hand-offs to Bot 2 / Bot 3 played" : ""} · P&amp;L before charges unless marked.
       </p>
       {done.length > 0 && (

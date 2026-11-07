@@ -97,6 +97,10 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: PickRule)
         import trend_picks
 
         return trend_picks.picks_for_day(frames, day, rule)
+    if getattr(rule, "kind", None) == "ACTIVE":
+        import active_picks
+
+        return active_picks.picks_for_day(frames, day, rule)
     scored = []
     for symbol, frame in frames.items():
         bars = bars_known_at(frame, day, rule.pick_time)
