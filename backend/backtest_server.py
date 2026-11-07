@@ -304,6 +304,24 @@ def own_login_on() -> bool:
     return _own_login and server_role.is_backtest()
 
 
+def _own_saved_login() -> str:
+    """This server's own Groww login (Settings → Broker keys here), used when the desk has none. Never raises."""
+    try:
+        from groww_client import _read_desk_token
+
+        return _read_desk_token()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _groww_note() -> str | None:
+    if state.token or not state.token_error:
+        return state.token_error
+    if _own_saved_login():
+        return "The desk has no Groww session today, so this server's own Groww login is used."
+    return state.token_error + " Or log in here (Settings → Broker keys) to use this server's own login."
+
+
 def remote_token() -> str:
     """The desk's Groww access token, as last fetched (memory only)."""
     return state.token if server_role.is_backtest() else ""
@@ -386,8 +404,8 @@ def status(replays: dict) -> dict:
         "stop_at": stop_at(),
         "after_hours": after_hours(),
         "busy": busy(replays),
-        "groww": bool(state.token),
-        "groww_error": state.token_error,
+        "groww": bool(state.token) or bool(_own_saved_login()),
+        "groww_error": _groww_note(),
         "synced_at": state.synced_at,
         "synced": state.synced,
         "sync_error": state.sync_error,
