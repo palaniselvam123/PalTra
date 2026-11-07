@@ -2572,7 +2572,7 @@ export const smaApi = {
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
   /** Strategy lab (backend strategy_lab.py): base trades with every rule's answer, any choice evaluated in seconds. */
   strategyLab: () => request<StrategyLabView>("/api/strategy-lab", undefined, undefined, false),
-  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string }) =>
+  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number }) =>
     request<StrategyLabView & { job: StrategyLabJob }>("/api/strategy-lab/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   strategyLabStop: () => request<StrategyLabView>("/api/strategy-lab/stop", { method: "POST" }, 20000, false),
   strategyLabJob: (id: string) =>
@@ -2992,6 +2992,8 @@ export type StrategyLabJob = {
   status: "RUNNING" | "DONE" | "STOPPED" | "FAILED" | "INTERRUPTED";
   label: string;
   bot: number;
+  /** The candle the run read every stock on (null = the bot's own). */
+  minutes?: number | null;
   symbols: string[];
   first: string;
   last: string;

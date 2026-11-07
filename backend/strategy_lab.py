@@ -58,7 +58,7 @@ import pivots
 import slope_exit
 import supertrend
 import tsl as tsl_mod
-from candles import candle_minutes, resample
+from candles import CANDLE_MINUTES, candle_minutes, resample
 from charges import calculate_charges, legs_for
 from decel_guard import early_warning
 from indicators import _direction_reason, _rsi_reason, bollinger, minute_volume_stats, rsi_wilder, session_vwap_series
@@ -163,6 +163,19 @@ def _hhmm(value, default: str) -> dt.time:
     except (TypeError, ValueError):
         hh, mm = default.split(":")
         return dt.time(int(hh), int(mm))
+
+
+def with_candle(cfg, minutes: int):
+    """A copy of `cfg` that trades SMA crosses on `minutes`-minute candles (the lab's own candle pick)."""
+    import copy
+
+    if hasattr(cfg, "__table__"):
+        out = type(cfg)(**{col.name: getattr(cfg, col.name) for col in cfg.__table__.columns})
+    else:
+        out = copy.copy(cfg)
+    out.candle_minutes = int(minutes)
+    out.entry_mode = "SMA"
+    return out
 
 
 def lab_settings(cfg) -> dict:
@@ -317,6 +330,8 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
         out["stop_type"] = stop
     targets = set(choice.get("targets") or [])
     out["pivot_target"] = "R1" if "pivot_r1" in targets else "R2" if "pivot_r2" in targets else "OFF"
+    if base and base.get("candle_minutes"):
+        out["candle_minutes"] = int(base["candle_minutes"])
     return out
 
 
@@ -1327,9 +1342,14 @@ class StrategyLab:
         return len(self.jobs) < before
 
     # -- run
-    def start(self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "") -> dict:
+    def start(
+        self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "", minutes: int | None = None
+    ) -> dict:
+        """`minutes` (1/2/3/5/10/15) reads every stock on that candle instead of the bot's own (None = the bot's)."""
         if self.running:
             raise RuntimeError("A Strategy lab run is already going. Stop it or wait for it to finish.")
+        if minutes is not None and int(minutes) not in CANDLE_MINUTES:
+            raise ValueError(f"The candle must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes.")
         names = list(dict.fromkeys(s.strip().upper() for s in symbols if s and s.strip()))[:MAX_STOCKS]
         if not names:
             raise ValueError("Pick at least one stock.")
@@ -1345,6 +1365,7 @@ class StrategyLab:
             "status": "RUNNING",
             "label": label[:60],
             "bot": bot,
+            "minutes": int(minutes) if minutes is not None else None,
             "symbols": names,
             "first": first.isoformat(),
             "last": last.isoformat(),
@@ -1385,6 +1406,8 @@ class StrategyLab:
                         await wait()
                     tape = await load_tape(name, first, last, fetch)
                     cfg = cfg_for(name)
+                    if job.get("minutes"):
+                        cfg = with_candle(cfg, int(job["minutes"]))
                     got, s = await asyncio.to_thread(analyze_stock, name, tape, cfg, days)
                     rows.extend(got)
                     if settings is None:

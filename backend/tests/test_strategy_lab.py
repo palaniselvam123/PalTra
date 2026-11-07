@@ -194,6 +194,17 @@ async def test_a_run_reads_each_stock_and_keeps_its_trades(tmp_path, monkeypatch
     again = lab.StrategyLab()
     assert again.job(job["id"])["status"] == "DONE" and len(again.trades_of(job["id"])) == len(rows)
     assert again.delete(job["id"]) and again.job(job["id"]) is None
+    # The lab's own candle pick: the stock is read on 15-minute candles whatever the bot's setting says.
+    fifteen = room.start(["TEST"], D1, D2, 1, lambda symbol: _cfg(), fetch, minutes=15)
+    for _ in range(200):
+        if not room.running:
+            break
+        await asyncio.sleep(0.05)
+    assert fifteen["minutes"] == 15 and fifteen["settings"]["candle_minutes"] == 15
+    assert lab.settings_for_choice(fifteen["choice"], fifteen["settings"])["candle_minutes"] == 15
+    assert job["settings"]["candle_minutes"] == 5
+    with pytest.raises(ValueError):
+        room.start(["TEST"], D1, D2, 1, lambda s: _cfg(), fetch, minutes=7)
     with pytest.raises(ValueError):
         room.start([], D1, D2, 1, lambda s: _cfg(), fetch)
     with pytest.raises(ValueError):

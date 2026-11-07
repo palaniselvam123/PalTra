@@ -4654,6 +4654,8 @@ class StrategyLabStart(BaseModel):
     end_date: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
     label: str = ""
+    # The candle to read every stock on (0 / None = the bot's own).
+    minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
 
 
 class StrategyLabChoice(BaseModel):
@@ -4719,7 +4721,9 @@ async def strategy_lab_start(body: StrategyLabStart):
         return await fetch_frame(_scan_broker(), name, start, end)
 
     try:
-        job = strategy_lab.lab().start(body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label)
+        job = strategy_lab.lab().start(
+            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label, minutes=body.minutes or None
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
