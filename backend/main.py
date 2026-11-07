@@ -41,6 +41,7 @@ import tsl_calc as tsl_calc_mod
 import regime_study
 import morning_study
 import trend_picks
+import trend_compare
 import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
@@ -360,6 +361,7 @@ def boot_engine() -> asyncio.Task | None:
     init_db()
     # A deploy or restart mid-replay: those runs can be resumed where they stopped.
     close_orphan_replay_rows(interrupted=True)
+    trend_compare.interrupt_running()
     if server_role.is_backtest():
         return _boot_backtest_server()
     cfg = engine.load_config()
@@ -434,6 +436,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
     backtest_server.add_busy_check(lambda: morning_study.study().running)
+    backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
     # so it does not stop itself between two passes.
     chop_autos.reload()
@@ -2588,6 +2591,121 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         return None, f"not started: {exc}"
     which = {"BULLISH": "strong bullish", "BEARISH": "strong bearish"}.get(s.direction, "strong bullish and bearish")
     return session.run_id, f"backtested today's top {s.top_n} {which} picks at {s.pick_time} on Bot {s.bot}"
+
+
+class TrendCompareStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    universe: list[str]
+    #: 2-8 pick times (HH:MM, 09:20-14:30) to set side by side.
+    times: list[str] = Field(min_length=trend_compare.MIN_TIMES, max_length=trend_compare.MAX_TIMES)
+    top_n: int = Field(default=10, ge=1, le=trend_picks.MAX_TOP_N)
+    direction: Literal["BULLISH", "BEARISH", "BOTH"] = "BOTH"
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    bot: int = Field(default=1, ge=1, le=4)
+    lists: list[str] = Field(default_factory=list, max_length=5)
+
+
+@app.post("/api/trend-picks/compare")
+async def trend_compare_start(body: TrendCompareStart):
+    """Compare pick times (trend_compare.py): the same strong-trend pick backtest once per time, one after another on
+    the bot's replay player at full speed, then side by side. Practice money; never sends an order."""
+    _refuse_desk_replay_in_market()
+    comp = trend_compare.comparer()
+    if comp.running:
+        raise HTTPException(409, "A pick-time comparison is already running. Stop it first.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+        times = trend_compare.clean_times(body.times)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    eng = engine if body.bot == 1 else bot_engines.get(body.bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {body.bot}")
+    cfg = eng.load_config()
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, f"Switch {getattr(cfg, 'bot_name', None) or f'Bot {body.bot}'} to PAPER first.")
+    names = [n for n in dict.fromkeys((s or "").strip().upper() for s in body.universe) if is_nse_symbol(n)]
+    if not names:
+        raise HTTPException(400, "Give at least one stock to pick from.")
+    names = names[: trend_picks.MAX_UNIVERSE]
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the Settings page first.")
+    item = trend_compare.new(
+        day.isoformat(), end_day.isoformat(), times, body.top_n, body.direction, body.minutes, body.bot, len(names),
+        lists=body.lists,
+    )
+    session = replays[body.bot]
+
+    async def start(at: str) -> int | None:
+        h, m = at.split(":")
+        await _start_trend_picks(
+            body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
+            max(SPEEDS),
+        )
+        # The run id is known once the candles are in; wait for it (or for the load to fail).
+        while session.run_id is None and session.status == "LOADING":
+            await asyncio.sleep(1)
+        if session.run_id is None:
+            raise RuntimeError(session.error or f"the replay ended {session.status.lower()} before it started")
+        return session.run_id
+
+    def info() -> tuple[str, int | None]:
+        return session.status, session.run_id
+
+    async def stop() -> None:
+        if session.status in trend_compare.BUSY:
+            await session.stop("REPLAY_STOPPED")
+
+    comp.start(item, start, info, stop)
+    return item
+
+
+def _compare_view(item: dict) -> dict:
+    """A comparison with its side-by-side result (blocking: reads each run's trades)."""
+    runs = {e["run_id"]: get_run(e["run_id"]) for e in item.get("runs") or [] if e.get("run_id") is not None}
+    return {**item, "result": trend_compare.summarize(item, runs)}
+
+
+@app.get("/api/trend-picks/compare")
+async def trend_compare_list():
+    """The saved pick-time comparisons, newest first (no results; open one for them)."""
+    comp = trend_compare.comparer()
+    items = list(reversed(trend_compare.load_all()))
+    running_id = comp.current["id"] if comp.running and comp.current else None
+    return {"running": running_id, "items": items}
+
+
+@app.get("/api/trend-picks/compare/{cid}")
+async def trend_compare_get(cid: int):
+    comp = trend_compare.comparer()
+    item = comp.current if comp.running and comp.current and comp.current["id"] == cid else trend_compare.get(cid)
+    if item is None:
+        raise HTTPException(404, "No such comparison")
+    return await asyncio.to_thread(_compare_view, item)
+
+
+@app.post("/api/trend-picks/compare/stop")
+async def trend_compare_stop():
+    """Stop the running comparison and its replay; the finished times stay."""
+    comp = trend_compare.comparer()
+    if not comp.running:
+        return {"stopped": False}
+    comp.stop()
+    return {"stopped": True}
+
+
+@app.delete("/api/trend-picks/compare/{cid}")
+async def trend_compare_delete(cid: int):
+    """Forget a comparison. Its runs stay in Backtests."""
+    comp = trend_compare.comparer()
+    if comp.running and comp.current and comp.current["id"] == cid:
+        raise HTTPException(409, "Stop the comparison before deleting it.")
+    if not trend_compare.delete(cid):
+        raise HTTPException(404, "No such comparison")
+    return {"deleted": cid}
 
 
 @app.post("/api/replay/start")

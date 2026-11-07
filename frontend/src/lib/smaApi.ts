@@ -816,6 +816,57 @@ export type MorningStudy = {
 
 /** Strong-trend pick backtest and its daily automatic run (backend trend_picks.py). */
 export type TrendPickDirection = "BULLISH" | "BEARISH" | "BOTH";
+/** A pick-time comparison (backend trend_compare.py): one strong-trend pick backtest per time, side by side. */
+export type TrendCompareRun = { time: string; run_id: number | null; status: string; note: string };
+export type TrendCompare = {
+  id: number;
+  created_at: string;
+  status: "RUNNING" | "DONE" | "STOPPED" | "INTERRUPTED" | "ERROR";
+  start_date: string;
+  end_date: string;
+  times: string[];
+  top_n: number;
+  direction: TrendPickDirection;
+  minutes: number;
+  bot: number;
+  universe: number;
+  lists: string[];
+  runs: TrendCompareRun[];
+  note: string;
+};
+export type TrendCompareRow = {
+  time: string;
+  run_id: number | null;
+  status: string;
+  note: string;
+  has_result: boolean;
+  rank?: number;
+  days_played?: number;
+  days_done?: number;
+  days_total?: number;
+  trades?: number;
+  wins?: number;
+  win_rate?: number;
+  gross?: number;
+  net?: number;
+  charges?: number;
+  per_trade?: number;
+  per_day?: number;
+  green_days?: number;
+  red_days?: number;
+  best_day?: number;
+  worst_day?: number;
+  drawdown?: number;
+  stocks_picked?: number;
+  best_days?: number;
+};
+export type TrendCompareResult = {
+  rows: TrendCompareRow[];
+  days: { date: string; by_time: Record<string, number>; best: string | null }[];
+  best: Record<"gross" | "net" | "win_rate" | "green_days" | "drawdown" | "best_days", string | null>;
+  settings_differ: boolean;
+  answer: string[];
+};
 export type TrendPicksAuto = {
   on: boolean;
   run_at: string;
@@ -2538,6 +2589,25 @@ export const smaApi = {
     speed?: number;
   }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   trendPicksAuto: () => request<TrendPicksAuto>("/api/trend-picks/auto", undefined, undefined, false),
+  /** Compare pick times: the same strong-trend pick backtest once per time, one after another (trend_compare.py). */
+  trendCompareStart: (body: {
+    date: string;
+    end_date: string;
+    universe: string[];
+    times: string[];
+    top_n: number;
+    direction: TrendPickDirection;
+    minutes: number;
+    bot: number;
+    lists?: string[];
+  }) => request<TrendCompare>("/api/trend-picks/compare", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  trendCompares: () =>
+    request<{ running: number | null; items: TrendCompare[] }>("/api/trend-picks/compare", undefined, undefined, false),
+  trendCompare: (id: number) =>
+    request<TrendCompare & { result: TrendCompareResult }>(`/api/trend-picks/compare/${id}`, undefined, 30000, false),
+  trendCompareStop: () => request<{ stopped: boolean }>("/api/trend-picks/compare/stop", { method: "POST" }, 20000, false),
+  trendCompareDelete: (id: number) =>
+    request<{ deleted: number }>(`/api/trend-picks/compare/${id}`, { method: "DELETE" }, 20000, false),
   saveTrendPicksAuto: (body: Partial<Omit<TrendPicksAuto, "last_day" | "last_run_id" | "last_note">>) =>
     request<TrendPicksAuto>("/api/trend-picks/auto", { method: "PUT", body: JSON.stringify(body) }, 20000, false),
   /** `symbols` replays those stocks instead of the armed ones (they are not armed); `bot` whose settings (default 1). */

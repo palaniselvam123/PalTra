@@ -4,6 +4,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import { CalendarClock, Loader2, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
+import { TrendPickCompare } from "@/components/Scalp/TrendPickCompare";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { replayActive, smaApi, type TrendPickDirection, type TrendPicksAuto } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
@@ -186,6 +187,8 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
           )}
         </p>
       )}
+
+      <TrendPickCompare armed={armed} lists={lists} days={days} topN={topN} direction={direction} minutes={minutes} bot={bot} />
 
       <div className="rounded-lg border border-slate-800 bg-surface2/40 p-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
