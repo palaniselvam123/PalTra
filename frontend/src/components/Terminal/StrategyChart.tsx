@@ -986,6 +986,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
+  // The trailing stop's next step (dotted): the price at which the stop moves again.
+  const trailLine = useRef<IPriceLine | null>(null);
+  // Each stop / target line glides to its new level (about 450 ms) instead of jumping, like a broker's TSL bracket.
+  const glides = useRef(new Map<object, { shown: number; raf: number }>());
   const pivotLines = useRef<IPriceLine[]>([]);
   const pnlGrossRef = useRef<number | null>(null);
   // Entry, stop and target of the open position, kept in view by autoscale.
@@ -1922,6 +1926,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // refreshes every 15 s, so it is the fallback.
   const slLevel = past || !pos || !stopOn ? null : (pos.sl_trigger ?? chart?.sl_trigger ?? null);
   const targetLevel = past || !pos ? null : (pos.target ?? chart?.target ?? null);
+  // ₹-step trailing stop: the stop moves a step once the price is a step past its best since entry.
+  const trailNext =
+    past || !pos || !stopOn || !pos.tsl_step || pos.tsl_best == null
+      ? null
+      : pos.direction === "LONG"
+        ? pos.tsl_best + pos.tsl_step
+        : pos.tsl_best - pos.tsl_step;
   const slCash = pos && slLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, slLevel) : null;
   const targetCash = pos && targetLevel != null ? pnlAt(pos.direction, pos.entry_price, pos.qty, targetLevel) : null;
   levelsRef.current =
@@ -1930,23 +1941,46 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
+    const glideTo = (ref: { current: IPriceLine | null }, price: number) => {
+      const line = ref.current;
+      if (!line) return;
+      const g = glides.current.get(ref) ?? { shown: line.options().price, raf: 0 };
+      if (g.raf) cancelAnimationFrame(g.raf);
+      const from = g.shown;
+      const start = performance.now();
+      const ms = 450;
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / ms);
+        const eased = 1 - Math.pow(1 - t, 3);
+        g.shown = from + (price - from) * eased;
+        line.applyOptions({ price: g.shown });
+        g.raf = t < 1 ? requestAnimationFrame(step) : 0;
+      };
+      g.raf = requestAnimationFrame(step);
+      glides.current.set(ref, g);
+    };
     const place = (
       ref: { current: IPriceLine | null },
       price: number | null,
-      color: string
+      color: string,
+      style: LineStyle = LineStyle.Dashed
     ) => {
       if (price == null || price <= 0) {
+        const g = glides.current.get(ref);
+        if (g?.raf) cancelAnimationFrame(g.raf);
+        glides.current.delete(ref);
         if (ref.current) series.removePriceLine(ref.current);
         ref.current = null;
         return;
       }
-      // Lines only: no text on the chart (the position box names them).
-      if (ref.current) ref.current.applyOptions({ price });
-      else ref.current = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, title: "" });
+      // Lines only: no text on the chart (the position box names them). A line that already exists glides.
+      if (ref.current) glideTo(ref, price);
+      else ref.current = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, title: "" });
     };
     place(slLine, slLevel, "#F59E0B");
     place(targetLine, targetLevel, "#34D399");
-  }, [slLevel, targetLevel]);
+    place(trailLine, trailNext, "rgba(245, 158, 11, 0.55)", LineStyle.Dotted);
+  }, [slLevel, targetLevel, trailNext]);
 
   // Classic daily pivots from the previous session (pivots.py): P, R1 / S1, R2 / S2 as labelled lines.
   const pv = view?.pivots ?? null;
@@ -2509,7 +2543,18 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
                   )}
                 </dd>
               </div>
+              {trailNext != null && slLevel != null && pos.tsl_step ? (
+                <div className="flex justify-between gap-3" title="The ₹-step trailing stop moves one step once the price is a step past its best since entry">
+                  <dt className="whitespace-nowrap font-sans text-amber-300/80">Next trail</dt>
+                  <dd className="whitespace-nowrap text-right text-slate-300">
+                    {px(trailNext)} → {px(pos.direction === "LONG" ? slLevel + pos.tsl_step : slLevel - pos.tsl_step)}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
+            {slLevel != null && pos.tsl_step && state && state.ltp > 0 ? (
+              <TrailBar direction={pos.direction} stop={slLevel} ltp={state.ltp} target={targetLevel} next={trailNext} />
+            ) : null}
             {onClose || onReverse ? (
               <div className="pointer-events-auto mt-2 flex gap-2">
                 {onClose ? (
@@ -2991,6 +3036,29 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
           {t.charges != null ? row("Charges (not taken off)", inr(t.charges), "text-amber-300") : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** The trailing stop's window in one line: the stop at the left, the target (else twice the stop distance) at the
+ * right, the price between them and a tick where the next trail step fires. Moves with every state refresh. */
+function TrailBar({ direction, stop, ltp, target, next }: { direction: "LONG" | "SHORT"; stop: number; ltp: number; target: number | null; next: number | null }) {
+  const far = target ?? stop + (ltp - stop) * 2;
+  const span = Math.abs(far - stop) || 1;
+  const at = Math.min(100, Math.max(0, (Math.abs(ltp - stop) / span) * 100));
+  const nextAt = next != null ? Math.min(100, Math.max(0, (Math.abs(next - stop) / span) * 100)) : null;
+  const room = (ltp - stop) * (direction === "LONG" ? 1 : -1);
+  return (
+    <div className="mt-1.5" title={`Stop ${px(stop)} · price ${px(ltp)}${target != null ? ` · target ${px(target)}` : ""}${next != null ? ` · next trail at ${px(next)}` : ""}`}>
+      <div className="relative h-1.5 rounded-full bg-slate-700/70">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-amber-400/60 transition-[width] duration-500" style={{ width: `${at}%` }} />
+        {nextAt != null ? <div className="absolute -top-0.5 h-2.5 w-0.5 bg-amber-300/80 transition-[left] duration-500" style={{ left: `${nextAt}%` }} /> : null}
+        <div className="absolute -top-[3px] h-3 w-[3px] rounded bg-sky-300 transition-[left] duration-500" style={{ left: `calc(${at}% - 1px)` }} />
+      </div>
+      <div className="mt-0.5 flex justify-between font-mono text-[10px] text-slate-400">
+        <span>{room >= 0 ? `+₹${room.toFixed(2)} from the stop` : `₹${Math.abs(room).toFixed(2)} through it`}</span>
+        <span>{target != null ? `${px(target)} target` : "no target"}</span>
+      </div>
     </div>
   );
 }

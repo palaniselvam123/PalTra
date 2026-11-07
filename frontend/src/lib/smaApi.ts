@@ -1509,6 +1509,8 @@ export type SmaState = {
     /** Set when this position uses the ₹-step trailing stop. */
     tsl_step?: number | null;
     tsl_points?: number | null;
+    /** The best price since entry the trail is measured from: the stop moves once the price is a step past it. */
+    tsl_best?: number | null;
   };
   active_sl_trigger: number | null;
   unrealized_gross_pnl: number;

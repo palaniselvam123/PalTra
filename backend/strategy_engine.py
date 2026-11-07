@@ -5641,6 +5641,8 @@ class StrategyEngine:
                 "target": pos.target,
                 "tsl_step": pos.tsl_step,
                 "tsl_points": pos.tsl_points,
+                # The best price since entry the trail is measured from, so a screen can show the next step.
+                "tsl_best": pos.tsl_best,
             },
             "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,
