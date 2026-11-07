@@ -1721,7 +1721,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   file there and adding an entry. Topic filter, search, a reader with the PDF embedded, Open in a new tab, Download, and
   "Mark as done" (kept per browser). `/learn/?lesson=<id>` opens one. Lessons now: `sma9-slope` (Turn exit vs V-turn,
   linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
-  anchor `#sma-day-extreme`) and `sideways-test` (the Scalp page's Sideways test, linked from its card).
+  anchor `#sma-day-extreme`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
+  `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it).
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
