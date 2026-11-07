@@ -39,6 +39,7 @@ import day_extreme as day_extreme_mod
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
+import second_candle
 import strategy_lab
 import morning_study
 import trend_picks
@@ -440,6 +441,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
     backtest_server.add_busy_check(lambda: strategy_lab.lab().running)
+    backtest_server.add_busy_check(lambda: second_candle.test().running)
     backtest_server.add_busy_check(lambda: morning_study.study().running)
     backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
     backtest_server.add_busy_check(lambda: stock_rank.jobs().running)
@@ -4800,6 +4802,62 @@ async def morning_study_start(body: MorningStudyStart):
 async def morning_study_stop():
     """Stop after the stock being read; the report covers the stocks read so far."""
     return morning_study.study().stop()
+
+
+class SecondCandleStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=second_candle.MAX_STOCKS)
+    days: int = Field(default=10, ge=second_candle.MIN_DAYS, le=second_candle.MAX_DAYS)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    candle_no: int = Field(default=2, ge=1, le=second_candle.MAX_CANDLE_NO)
+    top_n: int = Field(default=20, ge=0, le=250)
+    target_points: float = Field(default=10.0, ge=0.05, le=500)
+    square_off: str = "15:15"
+    trails: list[float] = Field(default_factory=lambda: list(second_candle.DEFAULT_TRAILS), max_length=second_candle.MAX_TRAILS)
+    min_body_pct: float = Field(default=0.0, ge=0, le=5)
+
+
+@app.get("/api/second-candle")
+async def second_candle_get(rows: bool = True):
+    """The Second candle test (second_candle.py): progress, the last report and its rows. Read-only."""
+    return second_candle.test().view(with_rows=rows)
+
+
+@app.post("/api/second-candle/start")
+async def second_candle_start(body: SecondCandleStart):
+    """Start the Second candle test on past days of the picked stocks (cached Groww 1-minute candles, read-only, no order).
+
+    Same hours rule as the Sideways test: on the main desk in market hours only when the desk runs backtests at any
+    hour; the backtest server runs it any time on its own login."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run the Second candle test on the backtest server, so it never shares the bots' Groww limit.")
+    try:
+        hh, mm = body.square_off.split(":")
+        square_off = dt.time(int(hh), int(mm))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "Square-off must be HH:MM.") from exc
+    if not dt.time(9, 20) <= square_off <= dt.time(15, 30):
+        raise HTTPException(400, "Square-off must be between 09:20 and 15:30.")
+    rule = second_candle.Rule(
+        minutes=body.minutes, candle_no=body.candle_no, top_n=body.top_n, target_points=body.target_points,
+        square_off=square_off, trails=tuple(body.trails), min_body_pct=body.min_body_pct,
+    )
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    try:
+        return second_candle.test().start(body.symbols, fetch, body.days, rule, wait=groww_pressure.wait_for_bots)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/second-candle/stop")
+async def second_candle_stop():
+    """Stop after the stock being read; the report covers the stocks read so far."""
+    return second_candle.test().stop()
 
 
 def _tape_for(symbol: str):
