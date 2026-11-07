@@ -135,6 +135,8 @@ class AutoSettings:
     minutes: int = 5
     bot: int = 1
     lists: list = field(default_factory=lambda: ["fno"])
+    #: Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (handoff_chain.py), like the replay bar.
+    play_handoffs: bool = True
     last_day: str | None = None
     last_run_id: int | None = None
     last_note: str | None = None
@@ -183,6 +185,7 @@ def load() -> AutoSettings:
     s.bot = max(1, min(4, int(s.bot or 1)))
     s.lists = [str(x) for x in (s.lists or ["fno"])] or ["fno"]
     s.on = bool(s.on)
+    s.play_handoffs = bool(s.play_handoffs)
     return s
 
 
