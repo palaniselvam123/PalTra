@@ -52,6 +52,8 @@ def test_settings_and_due():
     assert pnl_alerts.due(-2000, 5000, 2000, set()) == ["loss"]
     assert pnl_alerts.due(4999, 5000, 2000, set()) == []
     assert pnl_alerts.due(6000, 5000, 2000, {"profit"}) == []
+    assert pnl_alerts.due(6000, 5000, 2000, {"profit": {"level": 5000.0}}) == []
+    assert pnl_alerts.due(6000, 4500, 2000, {"profit": {"level": 5000.0}}) == ["profit"]  # the level changed: new
     assert pnl_alerts.due(1e6, 0, 0, set()) == []
 
 
@@ -64,6 +66,10 @@ async def test_profit_level_alerts_once_a_day_and_never_trades():
     text, telegram, call = sent[0]
     assert "+₹5,000.00" in text and "Bot 2 +₹2,100.00" in text and "before charges" in text and telegram and call
     assert await watch.check(bots, cfg(pnl_alert_profit=5000, pnl_alert_loss=2000), day) == []  # once today
+    # The owner lowers the level to ₹4,000: a new level, so it alerts again today (the total is still ₹5,000).
+    assert await watch.check(bots, cfg(pnl_alert_profit=4000, pnl_alert_loss=2000), day) == ["profit"]
+    assert "+₹4,000.00" in sent[-1][0] and watch.sent["profit"]["level"] == 4000.0
+    assert await watch.check(bots, cfg(pnl_alert_profit=4000, pnl_alert_loss=2000), day) == []  # not for the same level twice
     assert await watch.check(bots, cfg(pnl_alert_profit=5000), day + dt.timedelta(days=1)) == ["profit"]  # next day again
     assert all(not b.killed for b in bots) and all(b.status == "RUNNING" for b in bots)
 

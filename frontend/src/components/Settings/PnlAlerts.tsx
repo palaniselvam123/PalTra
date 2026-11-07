@@ -55,7 +55,7 @@ export function PnlAlerts() {
           ? "Saved: off."
           : !(telegram || call)
             ? "Saved, but tick Telegram or Phone call or nothing is sent."
-            : "Saved. Checked every 5 s while NSE is open; each level alerts once a day."
+            : "Saved. Checked every 5 s while NSE is open; each level alerts once a day at its value, and a level you change alerts again."
       );
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "Could not save");
@@ -83,7 +83,7 @@ export function PnlAlerts() {
       <h2 className="text-base font-semibold text-slate-100">All bots: P&amp;L alerts (Telegram / phone call)</h2>
       <p className="mt-1 text-xs text-slate-400">
         Tells you when today&apos;s P&amp;L of Bots 1–4 together (closed trades plus open positions, each bot&apos;s own PAPER or LIVE
-        book) reaches the profit level or falls to minus the loss level. Each level alerts once a day, while NSE is open.
+        book) reaches the profit level or falls to minus the loss level. Each level alerts once a day at its value, while NSE is open; change a level and the new one alerts again when the total reaches it.
         Alerts only: nothing is squared off (use the day target / stop loss above for that). Telegram uses your trade alert
         channel; the call uses the phone-call channel (market hours, at most one call every 5 minutes). 0 = off.
       </p>

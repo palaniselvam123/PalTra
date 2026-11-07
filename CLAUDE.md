@@ -1584,6 +1584,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `boot_engine`, every `POLL_SEC` 5 s) adds bots 1-4's P&L like the all-bots guard (`all_bots_guard.closed_by_bot` /
   `open_by_bot`, `net=` for the basis) and, once per level per IST day (`PnlAlerts.sent`, memory only), sends the text
   through `alert_notifier.send` (trade channel) and / or rings through `place_call` (market hours, 5-minute cooldown).
+  The record keeps the level it alerted at (`already`), so a level the owner changes afterwards is a new level and alerts
+  again the same day; the same level never alerts twice a day.
   `GET/PUT /api/bots/pnl-alerts`, `POST /api/bots/pnl-alerts/test` (test message + call at any time); Settings →
   "All bots: P&L alerts" (`components/Settings/PnlAlerts.tsx`). Never copied by Copy settings (`COPY_SKIP`).
 - `backend/news_entry.py` – news entries (off by default; PAPER and LIVE): the bot picked in `news_entry_bot` (1-4 on
@@ -1891,6 +1893,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 
 The ORB bot (a different strategy) is `backend/app/strategies/orb_strategy.py`,
 driven by `backend/app/services/strategy_runner.py`.
+
+**Panic / square-off** (`StrategyEngine._square_off` → `_square_off_one`): every held stock is closed at the same time,
+`SQUARE_OFF_PARALLEL` (4) at once (each close is its own chain: stop cancel verified, Groww position read, exit, fill
+wait), and `POST /api/bots/kill-all` kills every bot together, so a panic on many stocks takes about as long as one.
+A LIVE exit sent for a square-off reason (`SQUARE_OFF_REASONS`: KILL_SWITCH, EOD_SQUARE_OFF, SQUARE_OFF_CUTOFF) that
+Groww leaves pending is cancelled (`_require_live_fill` → `ExitUnfilled`, nothing left working) and sent once more
+`SQUARE_OFF_RETRY_PCT` (0.8 %) further through the touch; an ordinary exit is still refused after one try.
 
 ## Where Groww orders are placed
 

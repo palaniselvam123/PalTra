@@ -5232,11 +5232,10 @@ async def fast_bot_put(body: FastBotSettings):
 @app.post("/api/bots/kill-all")
 async def kill_all_bots():
     """Panic on every SMA bot at once (main desk and bots 2-4). The research desk is practice only."""
-    out = []
-    for eng in (engine, *bot_engines.values()):
-        await eng.kill("Manual PANIC SQUARE-OFF (all bots)")
-        out.append({"bot": eng.bot_id, "bot_status": eng.status})
-    return out
+    bots = (engine, *bot_engines.values())
+    # Every bot squares off at the same time (each kill is its own chain of Groww calls), not one after another.
+    await asyncio.gather(*(eng.kill("Manual PANIC SQUARE-OFF (all bots)") for eng in bots), return_exceptions=True)
+    return [{"bot": eng.bot_id, "bot_status": eng.status} for eng in bots]
 
 
 @app.get("/api/bots/{bot}/state")

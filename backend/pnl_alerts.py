@@ -10,8 +10,10 @@ after charges). The total is the same one the all-bots guard watches
 last price, each in its own PAPER or LIVE book; not the research desk or replays.
 
 While NSE is open `run` checks every `POLL_SEC` seconds. Each level alerts once
-per IST day (`PnlAlerts.sent`, memory only): the profit level when the total is
-at or above it, the loss level when it is at or below minus it. The message goes
+per IST day at its value (`PnlAlerts.sent`, memory only, the level kept with the
+record): the profit level when the total is at or above it, the loss level when
+it is at or below minus it. A level the owner changes afterwards is a new level
+and alerts again when the total reaches it (`already`). The message goes
 to the trade alert channel (`alert_notifier.send`: Telegram / WhatsApp) and the
 call through the phone-call channel (`alert_notifier.place_call`, market hours
 and its 5-minute cooldown). Alerts only: nothing here trades, stops a bot or
@@ -55,12 +57,24 @@ def settings(cfg) -> dict:
     }
 
 
-def due(total: float, profit: float, loss: float, sent: set[str]) -> list[str]:
-    """The levels reached and not yet alerted today: "profit" and / or "loss"."""
+def already(sent, kind: str, level: float) -> bool:
+    """Whether this level already alerted today. A record keeps the level it alerted at, so a level the owner
+    changed afterwards counts as new and alerts again (the old `set` of kinds still reads as before)."""
+    if isinstance(sent, dict):
+        rec = sent.get(kind)
+        if rec is None:
+            return False
+        at = rec.get("level") if isinstance(rec, dict) else None
+        return at is None or math.isclose(float(at), float(level), rel_tol=0.0, abs_tol=0.005)
+    return kind in sent
+
+
+def due(total: float, profit: float, loss: float, sent) -> list[str]:
+    """The levels reached and not yet alerted today at their current value: "profit" and / or "loss"."""
     out = []
-    if profit > 0 and total >= profit and "profit" not in sent:
+    if profit > 0 and total >= profit and not already(sent, "profit", profit):
         out.append("profit")
-    if loss > 0 and total <= -loss and "loss" not in sent:
+    if loss > 0 and total <= -loss and not already(sent, "loss", loss):
         out.append("loss")
     return out
 
@@ -120,11 +134,11 @@ class PnlAlerts:
         opened = all_bots_guard.open_by_bot(engines, net)
         by_bot = {bot: round(closed.get(bot, 0.0) + opened.get(bot, 0.0), 2) for bot in closed}
         total = round(sum(by_bot.values()), 2)
-        kinds = due(total, conf["profit"], conf["loss"], set(sent))
+        kinds = due(total, conf["profit"], conf["loss"], sent)
         for kind in kinds:
             level = conf["profit"] if kind == "profit" else conf["loss"]
             text = message(kind, total, level, conf["basis"], by_bot)
-            sent[kind] = {"at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "total": total}
+            sent[kind] = {"at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "total": total, "level": level}
             log.warning("%s", text)
             try:
                 await self.deliver(text, conf["telegram"], conf["call"])
