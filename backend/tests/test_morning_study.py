@@ -48,7 +48,8 @@ def test_summary_answers_in_plain_words():
     rep = ms.summarize(samples, "10:30")
     assert rep["groups"]["BEARISH"]["days"] == 1 and rep["groups"]["BEARISH"]["closed_higher_pct"] == 100.0
     assert rep["groups"]["BULLISH"]["closed_higher_pct"] == 100.0
-    assert any("Bearish mornings" in line and "bought back up" in " ".join(rep["answer"]) for line in rep["answer"])
+    text = " ".join(rep["answer"])
+    assert "fell in the morning" in text and "1 of 1 days (100%)" in text and "bought back up" in text
     assert rep["by_stock"][0]["symbol"] == "SBIN" and rep["by_stock"][0]["bearish"]["days"] == 1
 
 

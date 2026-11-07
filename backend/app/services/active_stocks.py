@@ -250,6 +250,8 @@ class ActiveScanner:
         # Called with the full snapshot after each pass with rows (the scan history).
         self.on_done = None
         self.manual_task: asyncio.Task | None = None
+        # The card's Stop: the running pass asks Groww for no more stocks and keeps the last finished rows.
+        self._stop = False
         # Scalp page "Pause scans": no new pass, and a running pass stops asking Groww.
         self.paused = False
         self.auto: AutoSettings | None = None
@@ -341,6 +343,7 @@ class ActiveScanner:
         if self.running:
             return
         self.running = True
+        self._stop = False
         self._last_start = ist_now()
         try:
             names = symbols if symbols is not None else self.universe_symbols()
@@ -358,7 +361,7 @@ class ActiveScanner:
             async def one(symbol: str) -> None:
                 nonlocal failed
                 async with sem:
-                    if self.paused:
+                    if self.paused or self._stop:
                         return
                     await groww_pressure.wait_for_bots()  # bots first on Groww's rate limit
                     try:
@@ -374,6 +377,10 @@ class ActiveScanner:
                         rows.append(row)
 
             await asyncio.gather(*(one(s) for s in names))
+            if self._stop:
+                # Stopped by the person (the card's Stop): the last finished scan stays on screen.
+                self.error = "Stopped by you. The last finished scan is still shown."
+                return
             add_speed(rows, self._prev, self._prev_at, now)
             if rows:
                 self._prev = {r.symbol: r.ltp for r in rows}
@@ -390,6 +397,13 @@ class ActiveScanner:
                     log.exception("could not keep the most-active scan")
         finally:
             self.running = False
+
+    def stop_pass(self) -> bool:
+        """Stop the pass that is running (manual or automatic). True when one was running."""
+        if not self.running:
+            return False
+        self._stop = True
+        return True
 
     def can_scan_now(self) -> bool:
         if self.running:

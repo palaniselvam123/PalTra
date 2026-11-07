@@ -1,5 +1,6 @@
 "use client";
 
+import { StopScan } from "@/components/Scalp/StopScan";
 import { ScanListPicker, cleanLists, resolveScanSymbols, type ScanList } from "@/components/Scalp/ScanLists";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -204,6 +205,11 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        <StopScan
+          running={data?.running}
+          stop={() => smaApi.scanStop("carry")}
+          onStopped={() => void smaApi.carryScan().then(setData).catch(() => undefined)}
+        />
       </div>
       <Explain
         className="mb-3"

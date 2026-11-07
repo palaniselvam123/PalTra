@@ -6,7 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists } from "@/components/Scalp/ScanLists";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
-import { smaApi, type MorningGroup, type MorningLabel, type MorningStudy as Study, type MorningTimes } from "@/lib/smaApi";
+import { TextFilter, matchesText } from "@/components/ui/tableTools";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { smaApi, type MorningGroup, type MorningLabel, type MorningStock, type MorningStockPart, type MorningStudy as Study, type MorningTimes } from "@/lib/smaApi";
 
 /**
  * Morning test (backend morning_study.py): the owner's idea — a stock bullish from the morning keeps going (good for
@@ -29,7 +32,21 @@ const LABELS: { key: MorningLabel; title: string; tone: string; ring: string }[]
 const pct = (v: number | null | undefined, d = 2) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}%`);
 const tone = (v: number | null | undefined) => (v == null || v === 0 ? "text-slate-300" : v > 0 ? "text-emerald-300" : "text-rose-300");
 
-export function MorningStudy({ armed, paused, onStatus }: { armed: Map<string, string[]>; paused?: boolean; onStatus?: OnScanStatus }) {
+export function MorningStudy({
+  armed,
+  arming,
+  onArm,
+  onArmMany,
+  paused,
+  onStatus,
+}: {
+  armed: Map<string, string[]>;
+  arming?: string | null;
+  onArm?: (symbol: string) => void;
+  onArmMany?: (symbols: string[]) => void;
+  paused?: boolean;
+  onStatus?: OnScanStatus;
+}) {
   const [lists, setLists] = useScanLists("sma.morningtest.lists", ["nifty50"]);
   const [days, setDays] = useState(20);
   const [at, setAt] = useState("10:30");
@@ -188,12 +205,13 @@ export function MorningStudy({ armed, paused, onStatus }: { armed: Map<string, s
               ))}
             </ul>
           </div>
+          <HowToRead cut={cut} />
           <div className="grid gap-3 lg:grid-cols-3">
             {LABELS.map((l) => (
               <GroupCard key={l.key} title={l.title} tone={l.tone} ring={l.ring} g={rep.groups[l.key]} cut={cut} kind={l.key} />
             ))}
           </div>
-          <ByStock rows={rep.by_stock} />
+          <ByStock rows={rep.by_stock} cut={cut} armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} />
         </>
       ) : !running ? (
         <p className="text-sm text-slate-400">No result yet. Pick the stocks and press Run the test (it can take a few minutes).</p>
@@ -318,24 +336,27 @@ function GroupCard({ title, tone: t, ring, g, cut, kind }: { title: string; tone
       </div>
       {g.days ? (
         <>
-          <Share label={`Closed higher than at ${cut}`} value={g.closed_higher_pct} />
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-            <span className="text-slate-400">Move {cut} → close</span>
-            <b className={clsx("text-right tabular-nums", tone(g.avg_rest_pct))}>
-              {pct(g.avg_rest_pct)} <span className="font-normal text-slate-500">(median {pct(g.median_rest_pct)})</span>
-            </b>
-            <span className="text-slate-400">Bounce from day&apos;s low</span>
+          {g.days < 5 ? (
+            <p className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+              Only {g.days} day{g.days === 1 ? "" : "s"} — too few to trust. Pick more stocks or more days.
+            </p>
+          ) : null}
+          <Share label={`Days the price ended higher than at ${cut}`} value={g.closed_higher_pct} />
+          <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-xs">
+            <span className="text-slate-400">Average move from {cut} to the close</span>
+            <b className={clsx("text-right tabular-nums", tone(g.avg_rest_pct))}>{pct(g.avg_rest_pct)}</b>
+            <span className="text-slate-400">Average climb from the day&apos;s lowest price to the close</span>
             <b className="text-right tabular-nums text-emerald-300">{pct(g.avg_bounce_pct)}</b>
-            <span className="text-slate-400">Give-back from day&apos;s high</span>
+            <span className="text-slate-400">Average drop from the day&apos;s highest price to the close</span>
             <b className="text-right tabular-nums text-rose-300">{pct(g.avg_giveback_pct)}</b>
           </div>
-          <Share label="Bounced 1% or more from the low" value={g.bounce_big_pct} />
-          <Times label={kind === "BULLISH" ? "When the day's high came" : "When the day's low came"} times={kind === "BULLISH" ? g.high_times : g.low_times} />
+          <Share label="Days it climbed 1% or more off its low" value={g.bounce_big_pct} />
+          <Times label={kind === "BULLISH" ? "What time the day's highest price came (taller bar = more days)" : "What time the day's lowest price came (taller bar = more days)"} times={kind === "BULLISH" ? g.high_times : g.low_times} />
           <div className="rounded-md bg-black/20 p-2 text-xs">
-            <p className="font-semibold text-slate-200">Held overnight (delivery / MTF)</p>
-            <Share label="Next day opened higher" value={g.next_gap_up_pct} />
+            <p className="font-semibold text-slate-200">If you had held it overnight (delivery / MTF)</p>
+            <Share label="Next morning it opened higher" value={g.next_gap_up_pct} />
             <div className="mt-1 flex justify-between text-slate-400">
-              <span>Average gap · next close</span>
+              <span>Next day: average open · average close</span>
               <span className="tabular-nums">
                 <b className={tone(g.avg_next_gap_pct)}>{pct(g.avg_next_gap_pct)}</b> · <b className={tone(g.avg_next_day_pct)}>{pct(g.avg_next_day_pct)}</b>
               </span>
@@ -357,49 +378,182 @@ function GroupCard({ title, tone: t, ring, g, cut, kind }: { title: string; tone
   );
 }
 
-function ByStock({ rows }: { rows: NonNullable<Study["report"]>["by_stock"] }) {
+function HowToRead({ cut }: { cut: string }) {
+  return (
+    <details className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-slate-300">
+      <summary className="cursor-pointer font-semibold text-slate-100">How to read these numbers (an example)</summary>
+      <div className="mt-2 space-y-1.5 text-xs leading-relaxed">
+        <p>
+          Say a stock&apos;s row shows <b className="text-rose-300">Bearish mornings: 3 days</b>, <b>Ended higher: 3 of 3 (100%)</b>,{" "}
+          <b className="text-emerald-300">Average move after: +0.49%</b>. That means:
+        </p>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>On 3 of the past days, this stock fell in the morning (09:15 to {cut}) — a bearish morning.</li>
+          <li>On all 3 of those days (100%), the price at 15:30 was higher than at {cut}: it was bought back up.</li>
+          <li>On average it rose 0.49% from {cut} to the close.</li>
+        </ul>
+        <p>
+          3 days is very few: one more day could change 100% into 75%. Trust a result more when it has 10 or more days. 50% means it
+          is a coin toss — the morning did not tell you anything.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+type StockKey =
+  | "symbol"
+  | "bullDays"
+  | "bullUp"
+  | "bullMove"
+  | "bearDays"
+  | "bearUp"
+  | "bearMove"
+  | "sideDays"
+  | "deliv";
+
+function ByStock({
+  rows,
+  cut,
+  armed,
+  arming,
+  onArm,
+  onArmMany,
+}: {
+  rows: NonNullable<Study["report"]>["by_stock"];
+  cut: string;
+  armed: Map<string, string[]>;
+  arming?: string | null;
+  onArm?: (symbol: string) => void;
+  onArmMany?: (symbols: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [minDays, setMinDays] = useState(0);
+  const ticks = useTicks();
+  const filtered = rows.filter(
+    (r) => matchesText(query, r.symbol) && ticks.shows(r.symbol) && r.bullish.days + r.bearish.days >= minDays
+  );
+  const { sorted, sort, onSort } = useSort<MorningStock, StockKey>(filtered, (r, k) => {
+    switch (k) {
+      case "symbol":
+        return r.symbol;
+      case "bullDays":
+        return r.bullish.days;
+      case "bullUp":
+        return r.bullish.days ? r.bullish.closed_higher_pct : null;
+      case "bullMove":
+        return r.bullish.days ? r.bullish.avg_rest_pct : null;
+      case "bearDays":
+        return r.bearish.days;
+      case "bearUp":
+        return r.bearish.days ? r.bearish.closed_higher_pct : null;
+      case "bearMove":
+        return r.bearish.days ? r.bearish.avg_rest_pct : null;
+      case "sideDays":
+        return r.sideways.days;
+      case "deliv":
+        return r.avg_deliv_pct;
+    }
+  });
   if (!rows.length) return null;
-  const cell = (p: { days: number; closed_higher_pct: number | null; avg_rest_pct: number | null }) =>
+  const ended = (p: MorningStockPart) =>
     p.days ? (
       <span className="tabular-nums">
         <b className={p.closed_higher_pct == null ? "" : p.closed_higher_pct >= 60 ? "text-emerald-300" : p.closed_higher_pct <= 40 ? "text-rose-300" : "text-amber-300"}>
-          {p.closed_higher_pct?.toFixed(0)}%
+          {Math.round(((p.closed_higher_pct ?? 0) * p.days) / 100)} of {p.days}
         </b>{" "}
-        <span className="text-slate-500">of {p.days}</span> <span className={tone(p.avg_rest_pct)}>{pct(p.avg_rest_pct)}</span>
+        <span className="text-slate-500">({p.closed_higher_pct?.toFixed(0)}%)</span>
       </span>
     ) : (
       <span className="text-slate-600">—</span>
     );
+  const move = (p: MorningStockPart) => (p.days ? <span className={clsx("tabular-nums", tone(p.avg_rest_pct))}>{pct(p.avg_rest_pct)}</span> : <span className="text-slate-600">—</span>);
+  const days = (n: number) => (n ? <span className="tabular-nums text-slate-200">{n}</span> : <span className="text-slate-600">0</span>);
   return (
-    <details className="rounded-lg border border-white/10 p-3" open={rows.length <= 25}>
-      <summary className="cursor-pointer text-sm font-semibold text-slate-200">Per stock ({rows.length})</summary>
-      <p className="mt-1 text-xs text-slate-400">Each cell: % of those days it closed higher than at the morning&apos;s end, how many days, and the average move to the close.</p>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-sm">
+    <div className="space-y-2 rounded-lg border border-white/10 p-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-200">Each stock</h3>
+        <p className="mt-0.5 text-xs text-slate-400">
+          <b>Days</b> = how many past days had that kind of morning. <b>Ended higher</b> = on how many of those days the price at
+          15:30 was above the price at {cut}. <b>Move after</b> = the average change from {cut} to the close. Click a header to sort.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <TextFilter value={query} onChange={setQuery} />
+        <label className="block text-xs text-slate-400">
+          <span className="block text-[11px]">Bullish + bearish days at least</span>
+          <select
+            value={minDays}
+            onChange={(e) => setMinDays(Number(e.target.value))}
+            className="mt-0.5 min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+          >
+            {[0, 3, 5, 10].map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Any" : n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="text-xs text-slate-500">{sorted.length} shown</span>
+      </div>
+      {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-sm">
           <thead className="whitespace-nowrap text-xs uppercase text-slate-500">
-            <tr className="[&>th]:px-2 [&>th]:pb-1 [&>th]:text-left">
-              <th>Stock</th>
-              <th>Bullish mornings</th>
-              <th>Bearish mornings</th>
-              <th>Sideways mornings</th>
-              <th>Delivery</th>
+            <tr className="[&>th]:px-2 [&>th]:pb-1">
+              {onArmMany ? <TickHead ticks={ticks} symbols={sorted.map((r) => r.symbol)} /> : null}
+              <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+              <SortTh label={<span className="text-emerald-300">Bullish · days</span>} k="bullDays" sort={sort} onSort={onSort} num />
+              <SortTh label="Ended higher" k="bullUp" sort={sort} onSort={onSort} num />
+              <SortTh label="Move after" k="bullMove" sort={sort} onSort={onSort} num />
+              <SortTh label={<span className="text-rose-300">Bearish · days</span>} k="bearDays" sort={sort} onSort={onSort} num />
+              <SortTh label="Ended higher (bought back)" k="bearUp" sort={sort} onSort={onSort} num />
+              <SortTh label="Move after" k="bearMove" sort={sort} onSort={onSort} num />
+              <SortTh label="Sideways · days" k="sideDays" sort={sort} onSort={onSort} num />
+              <SortTh label="Delivery" k="deliv" sort={sort} onSort={onSort} num title="NSE's average delivery % on these days" />
+              {onArm ? <th className="text-right font-medium">Arm</th> : null}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.symbol} className="whitespace-nowrap border-t border-white/5 [&>td]:px-2 [&>td]:py-1">
-                <td className="font-semibold text-slate-100">
-                  <GrowwLink symbol={r.symbol} />
-                </td>
-                <td>{cell(r.bullish)}</td>
-                <td>{cell(r.bearish)}</td>
-                <td>{cell(r.sideways)}</td>
-                <td className="tabular-nums text-slate-300">{r.avg_deliv_pct != null ? `${r.avg_deliv_pct.toFixed(1)}%` : "—"}</td>
-              </tr>
-            ))}
+            {sorted.map((r) => {
+              const on = armed.get(r.symbol.toUpperCase()) ?? [];
+              return (
+                <tr key={r.symbol} className="whitespace-nowrap border-t border-white/5 [&>td]:px-2 [&>td]:py-1">
+                  {onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null}
+                  <td className="font-semibold text-slate-100">
+                    <GrowwLink symbol={r.symbol} />
+                  </td>
+                  <td className="text-right">{days(r.bullish.days)}</td>
+                  <td className="text-right">{ended(r.bullish)}</td>
+                  <td className="text-right">{move(r.bullish)}</td>
+                  <td className="text-right">{days(r.bearish.days)}</td>
+                  <td className="text-right">{ended(r.bearish)}</td>
+                  <td className="text-right">{move(r.bearish)}</td>
+                  <td className="text-right">{days(r.sideways.days)}</td>
+                  <td className="text-right tabular-nums text-slate-300">{r.avg_deliv_pct != null ? `${r.avg_deliv_pct.toFixed(1)}%` : "—"}</td>
+                  {onArm ? (
+                    <td className="text-right">
+                      <span className="inline-flex items-center justify-end gap-1.5">
+                        {on.length ? <span className="text-[11px] font-semibold text-emerald-300">{on.join(" · ")}</span> : null}
+                        <button
+                          type="button"
+                          disabled={arming === r.symbol}
+                          onClick={() => onArm(r.symbol)}
+                          aria-label={`Arm ${r.symbol} on a bot`}
+                          title="Arm on a bot (asks which). Arming only: the bot orders on its own signal."
+                          className="min-h-8 rounded-md px-2.5 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+                        >
+                          {arming === r.symbol ? "…" : "Arm"}
+                        </button>
+                      </span>
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-    </details>
+    </div>
   );
 }

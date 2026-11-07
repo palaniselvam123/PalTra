@@ -1349,6 +1349,8 @@ export const api = {
   scalpActiveHistoryRun: (id: number) =>
     request<ActiveHistoryRun & { rows: ActiveStock[] }>(`/api/scalp/active/history/${id}`),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
+  /** Stop the Most active pass that is running; the last finished scan stays. */
+  scalpActiveStop: () => request<{ stopped: boolean }>("/api/scalp/active/stop", { method: "POST" }),
   /** The most-active auto scan: on / off and every N minutes (saved on the server). */
   scalpActiveAuto: (body: { on?: boolean; every_min?: number }) =>
     request<ActiveAuto>("/api/scalp/active/auto", { method: "PUT", body: JSON.stringify(body) }),

@@ -2753,6 +2753,25 @@ async def scans_pause(body: ScanPause):
     return {"paused": _scans_paused}
 
 
+@app.post("/api/scan-stop/{kind}")
+async def scan_stop(kind: str):
+    """Stop one running Scalp scan (its card's Stop button); the last finished rows stay. Read-only scans only."""
+    scanners = {
+        "cross": cross_scanner,
+        "chop": chop_scanner,
+        "morning": morning_scanner,
+        "high52": high52_scanner,
+        "carry": carry_scanner,
+        "turn": turn_scanner,
+    }
+    scanner = scanners.get(kind)
+    if scanner is None:
+        raise HTTPException(404, f"No scan called {kind!r}.")
+    was = bool(scanner.snapshot().get("running"))
+    scanner.stop("Stopped by you. The last finished rows are still shown.")
+    return {**scanner.snapshot(), "stopped": was}
+
+
 def _refuse_when_paused() -> None:
     if not server_role.scans_enabled():
         raise HTTPException(409, server_role.SCANS_OFF_TEXT)

@@ -395,6 +395,12 @@ async def most_active_scan():
     return {"started": True}
 
 
+@router.post("/active/stop")
+async def stop_active_scan():
+    """Stop the Most active pass that is running (the card's Stop). The last finished scan stays."""
+    return {"stopped": active_scanner.stop_pass()}
+
+
 # ---- pause every Scalp scan ------------------------------------------------------------------
 
 

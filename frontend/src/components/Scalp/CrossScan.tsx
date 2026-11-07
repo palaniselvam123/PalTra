@@ -1,5 +1,6 @@
 "use client";
 
+import { StopScan } from "@/components/Scalp/StopScan";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
@@ -192,6 +193,7 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
         </h2>
         {!saved && <ScanListPicker value={lists} onChange={setLists} disabled={busy || data?.running} />}
         {!saved && (
+        <>
         <button
           type="button"
           onClick={() => void start(true)}
@@ -201,6 +203,12 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        <StopScan
+          running={data?.running}
+          stop={() => smaApi.scanStop("cross")}
+          onStopped={() => void smaApi.crossScan().then(setData).catch(() => undefined)}
+        />
+        </>
         )}
       </div>
       <Explain

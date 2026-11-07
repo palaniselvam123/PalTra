@@ -253,55 +253,67 @@ def _peak(times: list[dict]) -> str | None:
     if not times:
         return None
     best = max(times, key=lambda t: t["count"])
-    return f"{best['at']} ({best['pct']:.0f}% of days)"
+    return f"around {best['at']} ({best['pct']:.0f}% of those days)"
+
+
+def _of(share: float | None, days: int) -> str:
+    """"7 of 10 days (70%)" from a share and a day count."""
+    if share is None or not days:
+        return "—"
+    return f"{round(share * days / 100)} of {days} days ({share:.0f}%)"
+
+
+def _move(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"rose {v:.2f}%" if v > 0 else f"fell {abs(v):.2f}%" if v < 0 else "did not move"
 
 
 def answer(groups: dict[str, dict], at: str) -> list[str]:
-    """Plain words for the owner's two questions."""
+    """Plain words for the owner's two questions, one short sentence at a time."""
     lines: list[str] = []
     bear, bull = groups.get(BEARISH) or {}, groups.get(BULLISH) or {}
     if bear.get("days"):
         lines.append(
-            f"Bearish mornings ({bear['days']} days): {bear['closed_higher_pct']:.0f}% closed higher than at {at}; "
-            f"the average move from {at} to the close was {bear['avg_rest_pct']:+.2f}%. "
-            f"From the day's low to the close the average bounce was {bear['avg_bounce_pct']:+.2f}% "
-            f"({bear['bounce_big_pct']:.0f}% of days bounced {BOUNCE_BIG:g}% or more); the low came most often at {_peak(bear['low_times'])}."
-        )
-        if bear["closed_higher_pct"] is not None:
-            lines.append(
-                "So a bearish morning was usually bought back up before the close."
-                if bear["closed_higher_pct"] >= 60
-                else "So a bearish morning usually kept falling or stayed down — the idea does not hold on these days."
-                if bear["closed_higher_pct"] <= 40
-                else "So after a bearish morning it was about a coin toss whether the stock got bought back up."
-            )
-    if bull.get("days"):
-        nxt = (
-            f" Next day: opened higher {bull['next_gap_up_pct']:.0f}% of the time (average gap {bull['avg_next_gap_pct']:+.2f}%)"
-            if bull.get("next_gap_up_pct") is not None
-            else ""
-        )
-        nday = (
-            f", and closed above this close {bull['next_day_up_pct']:.0f}% of the time ({bull['avg_next_day_pct']:+.2f}%)."
-            if bull.get("next_day_up_pct") is not None
-            else "."
-            if nxt
-            else ""
+            f"When a stock fell in the morning (09:15 to {at}, {bear['days']} days): it ended the day higher than at {at} on "
+            f"{_of(bear['closed_higher_pct'], bear['days'])}. On average it {_move(bear['avg_rest_pct'])} from {at} to the close."
         )
         lines.append(
-            f"Bullish mornings ({bull['days']} days): {bull['closed_higher_pct']:.0f}% closed higher than at {at}; "
-            f"the average move to the close was {bull['avg_rest_pct']:+.2f}%; the day's high came most often at "
-            f"{_peak(bull['high_times'])}.{nxt}{nday}"
+            f"Its lowest price of the day came most often {_peak(bear['low_times'])}, and from that low it climbed "
+            f"{bear['avg_bounce_pct']:.2f}% by the close on average."
         )
+        share = bear["closed_higher_pct"]
+        if share is not None:
+            lines.append(
+                "So yes: a falling morning was usually bought back up before the close."
+                if share >= 60
+                else "So no: after a falling morning the stock usually stayed down."
+                if share <= 40
+                else "So it is a coin toss: after a falling morning it was bought back up on about half the days."
+            )
+    if bull.get("days"):
+        lines.append(
+            f"When a stock rose in the morning ({bull['days']} days): it ended higher than at {at} on "
+            f"{_of(bull['closed_higher_pct'], bull['days'])}. On average it {_move(bull['avg_rest_pct'])} from {at} to the close."
+        )
+        if bull.get("next_gap_up_pct") is not None:
+            nxt = f"If held overnight, the next morning it opened higher on {bull['next_gap_up_pct']:.0f}% of days"
+            if bull.get("next_day_up_pct") is not None:
+                nxt += f" and closed higher the next day on {bull['next_day_up_pct']:.0f}% of days"
+            lines.append(nxt + ".")
     for lab, g in ((BULLISH, bull), (BEARISH, bear)):
         split = g.get("deliv_split")
         if split and split["high"]["days"] and split["low"]["days"]:
+            word = "rising" if lab == BULLISH else "falling"
             lines.append(
-                f"{WORDS[lab]} with delivery {split['at_pct']:.0f}% or more closed higher {split['high']['closed_higher_pct']:.0f}% of the "
-                f"time, against {split['low']['closed_higher_pct']:.0f}% with less delivery."
+                f"On {word} mornings with high delivery ({split['at_pct']:.0f}% or more), the stock ended higher on "
+                f"{split['high']['closed_higher_pct']:.0f}% of days, against {split['low']['closed_higher_pct']:.0f}% with low delivery."
             )
+    small = [WORDS[lab].lower() for lab, g in ((BULLISH, bull), (BEARISH, bear)) if 0 < g.get("days", 0) < 5]
+    if small:
+        lines.append(f"Careful: only a few {' and '.join(small)} — too few days to trust. Try more stocks or more days.")
     if not lines:
-        lines.append("Not enough days with a clear bullish or bearish morning. Try more days, more stocks or a lower move.")
+        lines.append("Not enough days with a clear rising or falling morning. Try more days, more stocks or a smaller move.")
     return lines
 
 
