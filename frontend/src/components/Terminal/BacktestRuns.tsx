@@ -56,16 +56,37 @@ function dayLabel(iso: string): string {
 
 type ScalpPickInfo = ScalpPickRule & { universe?: number; picks?: Record<string, ScalpPick[]> };
 
-/** The Scalp-pick rule and picks a run recorded, or null for a plain replay. */
+/** The pick rule and picks a run recorded (scalp, strong-trend or Most active picks), or null for a plain replay. */
 export function scalpPickOf(s: Settings): ScalpPickInfo | null {
   const raw = (s as Record<string, unknown>).scalp_pick;
   return raw && typeof raw === "object" ? (raw as ScalpPickInfo) : null;
 }
 
+/** Which backtest made the picks, in words. */
+function pickKindLabel(pick: ScalpPickRule): string {
+  if (pick.kind === "TREND") return "Strong-trend";
+  if (pick.kind === "ACTIVE") return "Most active";
+  return "Scalp";
+}
+
+const ACTIVE_RANK_LABEL: Record<string, string> = {
+  rvol: "volume vs usual",
+  value: "money traded",
+  change: "biggest move",
+  vwap: "furthest from average price",
+  speed: "fastest move now",
+  range: "widest day range",
+};
+
+/** A number with `digits` decimals, or a dash when the run did not record it. */
+function numOr(v: number | null | undefined, digits: number, suffix = ""): string {
+  return typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(digits)}${suffix}` : "—";
+}
+
 /** One line naming the strategy a run used. */
 export function strategyLabel(s: Settings): string {
   const pick = scalpPickOf(s);
-  const parts: string[] = pick ? [`Scalp top ${pick.top_n} @ ${pick.pick_time}`] : [];
+  const parts: string[] = pick ? [`${pickKindLabel(pick)} top ${pick.top_n} @ ${pick.pick_time}`] : [];
   // Runs of bots 2-4 name the bot whose settings they played.
   if (Number(s.bot ?? 1) > 1) parts.push(`${String(s.bot_name ?? `Bot ${s.bot}`)}'s settings`);
   if (String(s.entry_mode ?? "SMA") === "PATTERN") {
@@ -1222,15 +1243,36 @@ dd: <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="R
   );
 }
 
-/** A Scalp-pick run: which stocks each day picked at the pick time, and why. */
+/** A pick run: which stocks each day picked at the pick time, and why. Each kind of pick backtest records its own
+ * fields (scalp score / strong-trend score / volume vs usual), so every number is read by kind and a missing one shows
+ * as a dash: an older run or another kind's rows must never break the Backtests tab. */
 function PickList({ pick }: { pick: ScalpPickInfo }) {
   const days = Object.keys(pick.picks ?? {}).sort();
+  const kind = pick.kind;
+  const rule =
+    kind === "TREND"
+      ? ` · ${pick.direction === "BULLISH" ? "bullish" : pick.direction === "BEARISH" ? "bearish" : "bullish or bearish"} on ${pick.minutes ?? 5}-min candles`
+      : kind === "ACTIVE"
+        ? ` · by ${ACTIVE_RANK_LABEL[String(pick.rank)] ?? String(pick.rank ?? "volume vs usual")} · ≥ ₹${pick.min_value_cr ?? 0} cr · bias ${String(pick.bias ?? "BOTH").toLowerCase()}`
+        : ` · ATR ≥ ${pick.min_atr_pct ?? 0}%/min · ≥ ₹${pick.min_value_cr ?? 0} cr${pick.require_bias ? " · with a bias" : ""} · spread not checked`;
+  const sideOf = (p: ScalpPick): string => {
+    const side = p.side ?? p.bias ?? null;
+    return side === "LONG" || side === "SHORT" ? side : "";
+  };
+  const scoreOf = (p: ScalpPick): string =>
+    kind === "TREND" ? numOr(p.trend_score, 0) : kind === "ACTIVE" ? `${numOr(p.rvol, 1, "×")}` : numOr(p.score, 0);
+  const titleOf = (p: ScalpPick): string =>
+    kind === "TREND"
+      ? `Trend score ${numOr(p.trend_score, 0)} · day move ${numOr(p.day_move_pct, 2, "%")} · ₹${numOr(p.ltp, 2)}`
+      : kind === "ACTIVE"
+        ? `Volume vs usual ${numOr(p.rvol, 2, "×")} · day move ${numOr(p.change_pct, 2, "%")} · ₹${numOr(p.value_cr, 1)} cr · ₹${numOr(p.ltp, 2)}`
+        : `ATR ${numOr(p.atr_pct, 4, "%/min")} · ₹${numOr(p.value_cr, 2)} cr · 5m ${numOr(p.move_5m_pct, 3, "%")}`;
   return (
     <div className="mb-4 px-2">
       <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">
-        Scalp picks · top {pick.top_n} at {pick.pick_time}
-        {pick.universe ? ` from ${pick.universe} stocks` : ""} · ATR ≥ {pick.min_atr_pct}%/min · ≥ ₹{pick.min_value_cr} cr
-        {pick.require_bias ? " · with a bias" : ""} · spread not checked
+        {pickKindLabel(pick)} picks · top {pick.top_n} at {pick.pick_time}
+        {pick.universe ? ` from ${pick.universe} stocks` : ""}
+        {rule}
       </div>
       {days.length === 0 ? (
         <p className="text-xs text-slate-400">No day has been picked yet.</p>
@@ -1244,15 +1286,16 @@ function PickList({ pick }: { pick: ScalpPickInfo }) {
                 {list.length === 0 ? (
                   <span className="text-slate-500">nothing ready at {pick.pick_time} — no trades</span>
                 ) : (
-                  list.map((p) => (
-                    <span key={p.symbol} className="font-mono" title={`ATR ${p.atr_pct ?? "—"}%/min · ₹${p.value_cr ?? "—"} cr · 5m ${p.move_5m_pct ?? "—"}%`}>
-                      <span className="font-semibold text-amber-300">{p.symbol}</span>{" "}
-                      <span className="text-slate-400">{p.score.toFixed(0)}</span>{" "}
-                      <span className={p.bias === "LONG" ? "text-sky-300" : p.bias === "SHORT" ? "text-violet-300" : "text-slate-500"}>
-                        {p.bias === "NONE" ? "" : p.bias}
+                  list.map((p) => {
+                    const side = sideOf(p);
+                    return (
+                      <span key={p.symbol} className="font-mono" title={titleOf(p)}>
+                        <span className="font-semibold text-amber-300">{p.symbol}</span>{" "}
+                        <span className="text-slate-400">{scoreOf(p)}</span>{" "}
+                        <span className={side === "LONG" ? "text-sky-300" : side === "SHORT" ? "text-violet-300" : "text-slate-500"}>{side}</span>
                       </span>
-                    </span>
-                  ))
+                    );
+                  })
                 )}
               </div>
             );
