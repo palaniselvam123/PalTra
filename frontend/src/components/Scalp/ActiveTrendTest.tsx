@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { FlaskConical, Loader2 } from "lucide-react";
+import { BookOpen, FlaskConical, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { api, type ActiveStudy, type ActiveStudyParam } from "@/lib/api";
@@ -116,7 +117,13 @@ export function ActiveTrendTest() {
           each time you tick is read: stocks up on the day count as bullish, down as bearish. Within each side the stocks are
           ranked by every column, and the top ones are followed to see if they kept moving their way an hour later and at
           the close. The more a column&apos;s top beats &quot;all stocks&quot;, the better it finds the trend. Saved scans only:
-          nothing is downloaded and no order is placed.
+          nothing is downloaded and no order is placed.{" "}
+          <Link
+            href="/learn/?lesson=most-active-columns"
+            className="inline-flex items-center gap-1 font-semibold text-sky-300 hover:underline"
+          >
+            <BookOpen size={13} aria-hidden /> Every column explained, with pictures
+          </Link>
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">

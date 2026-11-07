@@ -21,6 +21,24 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "most-active-columns",
+    title: "Which column finds the trend? Every column explained",
+    summary:
+      "How to read the Most active card's \"Which column finds the trend?\" test: what it does (a picture of one day), what \"kept going\" means, the \"Best for …\" grid, each column of the big table (verdict, top kept going, edge vs all, weakest, top − weakest, one hour later, average move, readings) with real numbers as the example, how to read your own results, what to do next and a word list.",
+    topic: "Scalp",
+    file: "/guides/most-active-columns-guide.pdf",
+    pages: 4,
+    minutes: 7,
+    added: "2026-11-07",
+    open: { href: "/scalp/", label: "Open the Scalp page" },
+    points: [
+      "Sort by one column, take the top stocks, and see if they kept moving their way to the close.",
+      "Edge = top kept going minus all stocks: 54% − 36% = +18 points means the column helps (Strong ≥ +10).",
+      "Top − weakest must be positive too: if the weakest do as well as the top, the column is not telling them apart.",
+      "Under 30 readings is too few to judge; re-run as more scans are saved, and prove it with a paper bot.",
+    ],
+  },
+  {
     id: "sideways-test",
     title: "Sideways test: does sideways or trending hold?",
     summary:
