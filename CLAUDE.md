@@ -1207,6 +1207,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   days). Saved in `trend_compare.json` next to the SMA DB (`TREND_COMPARE_FILE`, last 20; a comparison playing at a restart
   becomes `INTERRUPTED`). `POST /api/trend-picks/compare`, `GET /api/trend-picks/compare[/{id}]`,
   `POST /api/trend-picks/compare/stop`, `DELETE /api/trend-picks/compare/{id}` (the runs stay in Backtests).
+- `backend/active_picks.py` – **Most active pick backtest** (practice money, no order path, nothing armed; the Most active
+  card's fourth view "Backtest", `components/Scalp/ActivePickBacktest.tsx`): the strong-trend pick backtest done the Most
+  active way. For each day of a replay range, at `pick_time` every stock of the universe (scan lists, up to `MAX_UNIVERSE`
+  250) is read from its 1-minute candles closed before that minute as the card would have (`read_at`: move from the previous
+  close, money traded so far from the per-minute volume × typical price, volume vs the same minutes of the earlier sessions
+  in the download (`rvol`, needs `MIN_SESSIONS`; Groww's volume is the running session total), distance from today's VWAP,
+  day range, speed over `SPEED_MIN` 10 minutes, bias LONG / SHORT like the live card); stocks under `min_value_cr` are
+  dropped, `bias` keeps BOTH (LONG and SHORT) / LONG / SHORT / ANY, ranked by `rank` (`RANK_KEY`: value, rvol, change,
+  vwap, speed, range; the card's buyers-vs-sellers column is left out, past order books are not kept); the top `top_n`
+  (1-20) are the day's picks (`ActivePickRule` kind `ACTIVE`, dispatched by `scalp_picks.picks_for_day`) and the chosen bot
+  trades them from the pick minute (`main._start_trend_picks(..., active=)`). `POST /api/replay/active-picks` (date,
+  end_date, universe, pick_time, top_n, rank, bias, min_value_cr, bot, speed, play_handoffs). The same view's **Compare pick
+  times** is `trend_compare` with `source: ACTIVE` (+ rank / bias / min_value_cr; `TrendPickCompare` `active` prop lists only
+  its own source's comparisons).
 - `backend/stock_rank.py` – **Stock ranking: which stocks does my strategy win on?** (practice money, no order path,
   nothing armed until the owner presses Arm; the Scalp page's Backtest tab, `components/Scalp/StockRanking.tsx`): the chosen
   bot's own strategy (`bot` 1-4, refused while LIVE; `play_handoffs`, on by default) backtested on the picked stocks (scan
