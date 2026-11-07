@@ -39,6 +39,7 @@ import day_extreme as day_extreme_mod
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
+import strategy_lab
 import morning_study
 import trend_picks
 import active_picks
@@ -438,6 +439,7 @@ def _boot_backtest_server() -> asyncio.Task:
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
+    backtest_server.add_busy_check(lambda: strategy_lab.lab().running)
     backtest_server.add_busy_check(lambda: morning_study.study().running)
     backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
     backtest_server.add_busy_check(lambda: stock_rank.jobs().running)
@@ -4630,6 +4632,128 @@ async def regime_study_start(body: RegimeStudyStart):
 async def regime_study_stop():
     """Stop after the stock being read; the report covers the stocks read so far."""
     return regime_study.study().stop()
+
+
+# ---------------------------------------------------------------------------
+# Strategy lab (strategy_lab.py): which entry checks and exits make the strategy money, in seconds
+# ---------------------------------------------------------------------------
+
+
+class StrategyLabStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=strategy_lab.MAX_STOCKS)
+    date: str
+    end_date: str | None = None
+    bot: int = Field(default=1, ge=1, le=4)
+    label: str = ""
+
+
+class StrategyLabChoice(BaseModel):
+    entries: list[str] = Field(default_factory=list)
+    exits: list[str] = Field(default_factory=list)
+    stop: str = "ATR"
+    targets: list[str] = Field(default_factory=list)
+    entry_from: str = "09:20"
+    entry_to: str = "15:30"
+    qty: int = Field(default=0, ge=0, le=1_000_000)
+
+
+def _lab_job_or_404(job_id: str) -> tuple[dict, list[dict]]:
+    job = strategy_lab.lab().job(job_id)
+    if job is None:
+        raise HTTPException(404, "No such Strategy lab run.")
+    rows = strategy_lab.lab().trades_of(job_id)
+    if rows is None:
+        raise HTTPException(409, "That run has no trades yet (still running, or its file is gone).")
+    return job, rows
+
+
+@app.get("/api/strategy-lab")
+async def strategy_lab_get():
+    """The Strategy lab (strategy_lab.py): the run going now and the saved runs. Read-only."""
+    return {**strategy_lab.lab().view(), "rules": _lab_rules()}
+
+
+def _lab_rules() -> dict:
+    return {
+        "entries": [{"name": k, "label": v} for k, v in strategy_lab.ENTRY_CHECKS.items()],
+        "exits": [{"name": k, "label": v} for k, v in strategy_lab.EXIT_RULES.items()],
+        "stops": [{"name": k, "label": strategy_lab.STOP_LABELS[k]} for k in strategy_lab.STOPS],
+        "targets": [{"name": k, "label": v} for k, v in strategy_lab.TARGETS.items()],
+    }
+
+
+@app.post("/api/strategy-lab/start")
+async def strategy_lab_start(body: StrategyLabStart):
+    """Read the picked stocks' past days once (cached candles, read-only, no order) into a table of base trades.
+
+    On the main desk in market hours it is refused unless the desk runs backtests at any hour (the bots' Groww
+    limit); the backtest server runs it any time on its own login."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run the Strategy lab on the backtest server, so it never shares the bots' Groww limit.")
+    try:
+        first = dt.date.fromisoformat(body.date)
+        last = dt.date.fromisoformat(body.end_date) if body.end_date else first
+    except ValueError as exc:
+        raise HTTPException(400, "Dates must be YYYY-MM-DD.") from exc
+    if last >= dt.datetime.now(IST).date():
+        raise HTTPException(400, "The lab reads finished days only: pick an end date before today.")
+    bot_engine = _bots_by_number().get(body.bot)
+    if bot_engine is None:
+        raise HTTPException(400, "Bot must be 1-4.")
+    cfg = bot_engine.load_config()
+
+    def cfg_for(symbol: str):
+        return _cfg_for(cfg, symbol)
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    try:
+        job = strategy_lab.lab().start(body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**strategy_lab.lab().view(), "job": job, "rules": _lab_rules()}
+
+
+@app.post("/api/strategy-lab/stop")
+async def strategy_lab_stop():
+    """Stop after the stock being read; the table keeps the stocks read so far."""
+    return strategy_lab.lab().stop()
+
+
+@app.get("/api/strategy-lab/{job_id}")
+async def strategy_lab_job(job_id: str):
+    """One run: its settings, the bot's own switches as the starting choice, and that choice evaluated."""
+    job, rows = _lab_job_or_404(job_id)
+    choice = job.get("choice") or {}
+    result = await asyncio.to_thread(strategy_lab.evaluate, rows, choice, job.get("settings"))
+    return {"job": job, "result": result, "rules": _lab_rules()}
+
+
+@app.post("/api/strategy-lab/{job_id}/evaluate")
+async def strategy_lab_evaluate(job_id: str, body: StrategyLabChoice):
+    """Apply a choice of checks / exits / stop to the run's base trades: P&L, per stock, per day, by reason, trades."""
+    job, rows = _lab_job_or_404(job_id)
+    return await asyncio.to_thread(strategy_lab.evaluate, rows, body.model_dump(), job.get("settings"))
+
+
+@app.post("/api/strategy-lab/{job_id}/recommend")
+async def strategy_lab_recommend(job_id: str, body: StrategyLabChoice):
+    """What each rule adds on top of this choice, and the best combination a greedy search finds."""
+    job, rows = _lab_job_or_404(job_id)
+    return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"))
+
+
+@app.delete("/api/strategy-lab/{job_id}")
+async def strategy_lab_delete(job_id: str):
+    if strategy_lab.lab().running and (strategy_lab.lab().current or {}).get("id") == job_id:
+        raise HTTPException(409, "That run is still going. Stop it first.")
+    if not strategy_lab.lab().delete(job_id):
+        raise HTTPException(404, "No such Strategy lab run.")
+    return strategy_lab.lab().view()
 
 
 class MorningStudyStart(BaseModel):

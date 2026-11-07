@@ -1221,6 +1221,40 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   end_date, universe, pick_time, top_n, rank, bias, min_value_cr, bot, speed, play_handoffs). The same view's **Compare pick
   times** is `trend_compare` with `source: ACTIVE` (+ rank / bias / min_value_cr; `TrendPickCompare` `active` prop lists only
   its own source's comparisons).
+- `backend/strategy_lab.py` – **Strategy lab: which checks and exits make money?** (practice money, no order path,
+  nothing armed; the Scalp page's "Strategy lab" tab, `components/Scalp/StrategyLab.tsx`): the owner's filter lab. One
+  run (`StrategyLab.start`, one at a time, `POST /api/strategy-lab/start` with symbols / date / end_date / bot 1-4 /
+  label; the same hours rule as the Sideways test; keeps the backtest server awake) reads each stock's 1-minute Groww
+  candles for the range plus `WARMUP_DAYS` (5) once, kept on disk per day as gzip JSON (`load_tape`, `strategy_lab/candles/
+  <SYMBOL>/<day>.json.gz` next to the SMA DB, `STRATEGY_LAB_DIR`; today is never cached), groups them into the bot's candle
+  and works every indicator out once (`_build_series`: enrich, RSI, session VWAP, Bollinger, EMA, MACD, cumulative delta,
+  Supertrend, SMA 9 slope, per-row counter-candle and CVD-divergence flags), then `analyze_stock` keeps every SMA cross
+  on closed candles of the asked days as a **base trade** (entry at the open of the candle after the cross, 09:20 to the
+  bot's entry cut-off, the stock's own settings via `_cfg_for`) with every rule pre-answered: `checks` (each entry check
+  at the signal candle, `ENTRY_CHECKS`: VWAP, volume, density, RSI, Bollinger, SMA gap, candle direction, EMA, MACD, CVD,
+  Supertrend, level, ADX), `exits` (each exit rule's first firing candle after the entry and its fill at the next
+  candle's open, `EXIT_RULES`: cross, Bollinger band / middle, Supertrend, EMA, MACD, CVD divergence, counter candles,
+  slow SMA, SMA 9 turn / bend / V-turn (the bot's own `slope_exit.judge` / `judge_vturn`), deceleration guard
+  (`decel_guard.early_warning`)), `stops` (ATR, TSL, Supertrend, VWAP on the 1-minute candles' high / low, the stop in
+  force when a minute starts judged on that minute, trailing after: the cautious order), `targets` (TSL target, pivot R1
+  / R2) and the square-off. The base trades are kept per run (`strategy_lab/<id>.json.gz`, meta in `jobs.json`, last
+  `KEEP_JOBS` 20). `evaluate(trades, choice)` (`POST /api/strategy-lab/{id}/evaluate`, `Choice`: entries, exits, stop,
+  targets, entry_from / entry_to, qty 0 = the bot's) is arithmetic on that table: a trade a chosen check refused is
+  skipped, one that starts while the previous kept trade on that stock is open is skipped (crosses only open trades while
+  flat), the trade ends at the earliest of its chosen exits / stop / targets / square-off (same minute: stop, target,
+  exit), P&L before charges and after (`charges.calculate_charges`), per stock, per day (running total), by exit reason,
+  skipped counts, the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
+  (`settings_for_choice`). `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
+  each rule adds", `delta_net`) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found.
+  `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
+  labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE
+  /api/strategy-lab/{id}`. UI: lists / days / bot / name, Read the days, the runs, three rule boxes (Select all / Clear),
+  stop and targets, entry hours, qty, the totals, "What does each rule add?" (table + "Use the best found"), the equity
+  line, By stock / By day / By exit reason / Trades, CSV, and **Backtest this in the replay** (`saveConfigOn(bot,
+  result.settings)` then `replayStart` on the run's stocks and days: the real bot proves it). What it is not: the bot.
+  Candle-close resolution, fills at candle opens, no pullback / candle-extreme / entry-candle waits, gap mode, hand-offs,
+  reviews, fast movers, news, slope candle or Heikin Ashi; only the SMA cross opens trades. `tests/test_strategy_lab.py`
+  compares it with the ReplayEngine on one day: the same trades, minutes and reasons, P&L within the fill minute's walk.
 - `backend/stock_rank.py` – **Stock ranking: which stocks does my strategy win on?** (practice money, no order path,
   nothing armed until the owner presses Arm; the Scalp page's Backtest tab, `components/Scalp/StockRanking.tsx`): the chosen
   bot's own strategy (`bot` 1-4, refused while LIVE; `play_handoffs`, on by default) backtested on the picked stocks (scan
