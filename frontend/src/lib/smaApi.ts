@@ -2434,6 +2434,18 @@ export const smaApi = {
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
     request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
+  /** Strategy lab (backend strategy_lab.py): base trades with every rule's answer, any choice evaluated in seconds. */
+  strategyLab: () => request<StrategyLabView>("/api/strategy-lab", undefined, undefined, false),
+  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string }) =>
+    request<StrategyLabView & { job: StrategyLabJob }>("/api/strategy-lab/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  strategyLabStop: () => request<StrategyLabView>("/api/strategy-lab/stop", { method: "POST" }, 20000, false),
+  strategyLabJob: (id: string) =>
+    request<{ job: StrategyLabJob; result: StrategyLabResult; rules: StrategyLabRules }>(`/api/strategy-lab/${encodeURIComponent(id)}`, undefined, 30000, false),
+  strategyLabEvaluate: (id: string, choice: StrategyLabChoice) =>
+    request<StrategyLabResult>(`/api/strategy-lab/${encodeURIComponent(id)}/evaluate`, { method: "POST", body: JSON.stringify(choice) }, 30000, false),
+  strategyLabRecommend: (id: string, choice: StrategyLabChoice) =>
+    request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify(choice) }, 60000, false),
+  strategyLabDelete: (id: string) => request<StrategyLabView>(`/api/strategy-lab/${encodeURIComponent(id)}`, { method: "DELETE" }, 20000, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
   openPnl: (desk: string, day?: string) =>
@@ -2826,6 +2838,115 @@ export type RegimeBucket = {
   win_pct?: number;
 };
 export type RegimeSignal = { key: string; label: string; buckets: RegimeBucket[]; spread: number; pnl_spread: number; verdict: string };
+/** Strategy lab (backend strategy_lab.py). A rule's name and its label on the screen. */
+export type StrategyLabRule = { name: string; label: string };
+export type StrategyLabRules = { entries: StrategyLabRule[]; exits: StrategyLabRule[]; stops: StrategyLabRule[]; targets: StrategyLabRule[] };
+export type StrategyLabStop = "NONE" | "ATR" | "TSL" | "SUPERTREND" | "VWAP";
+export type StrategyLabChoice = {
+  entries: string[];
+  exits: string[];
+  stop: StrategyLabStop;
+  targets: string[];
+  entry_from?: string;
+  entry_to?: string;
+  qty?: number;
+};
+export type StrategyLabJob = {
+  id: string;
+  status: "RUNNING" | "DONE" | "STOPPED" | "FAILED" | "INTERRUPTED";
+  label: string;
+  bot: number;
+  symbols: string[];
+  first: string;
+  last: string;
+  days: string[];
+  done: number;
+  total: number;
+  errors: { symbol: string; error: string }[];
+  trades: number;
+  started_at: string | null;
+  finished_at: string | null;
+  settings: Record<string, unknown> | null;
+  choice: StrategyLabChoice | null;
+};
+export type StrategyLabView = { running: boolean; current: StrategyLabJob | null; jobs: StrategyLabJob[]; rules: StrategyLabRules };
+export type StrategyLabTotals = {
+  trades: number;
+  gross: number;
+  net: number;
+  charges: number;
+  wins: number;
+  win_pct: number;
+  per_trade: number;
+  profit_factor: number | null;
+  days: number;
+  green_days: number;
+  green_pct: number;
+  per_day: number;
+  best_trade: number;
+  worst_trade: number;
+  best_day: number;
+  worst_day: number;
+  drawdown: number;
+  stocks: number;
+};
+export type StrategyLabTrade = {
+  symbol: string;
+  day: string;
+  side: "LONG" | "SHORT";
+  entry_ts: number;
+  entry_price: number;
+  exit_ts: number;
+  exit_price: number;
+  reason: string;
+  qty: number;
+  gross: number;
+  net: number;
+  charges: number;
+  best: number;
+  worst: number;
+};
+export type StrategyLabResult = {
+  totals: StrategyLabTotals;
+  per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
+  per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
+  by_reason: { reason: string; trades: number; gross: number; wins: number }[];
+  skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number };
+  base_trades: number;
+  choice: Required<StrategyLabChoice>;
+  settings: Record<string, unknown>;
+  trades?: StrategyLabTrade[];
+  trades_cut?: number;
+};
+export type StrategyLabRecommendRow = {
+  kind: "entry" | "exit" | "stop" | "target";
+  name: string;
+  label: string;
+  on: boolean;
+  gross_now: number;
+  gross_changed: number;
+  net_now: number;
+  net_changed: number;
+  delta_gross: number;
+  delta_net: number;
+  trades_now: number;
+  trades_changed: number;
+  win_pct_now: number;
+  win_pct_changed: number;
+  profit_factor_changed: number | null;
+  green_pct_changed: number;
+};
+export type StrategyLabRecommend = {
+  now: StrategyLabTotals;
+  rows: StrategyLabRecommendRow[];
+  best: {
+    choice: Required<StrategyLabChoice>;
+    totals: StrategyLabTotals;
+    steps: { kind: string; name: string; net_before: number; net_after: number; trades: number }[];
+    settings: Record<string, unknown>;
+  };
+};
+
 export type RegimeReport = {
   samples: number;
   stocks?: number;

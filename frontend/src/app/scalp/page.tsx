@@ -15,6 +15,7 @@ import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { TrendPickBacktest } from "@/components/Scalp/TrendPickBacktest";
 import { StockRanking } from "@/components/Scalp/StockRanking";
+import { StrategyLab } from "@/components/Scalp/StrategyLab";
 import { ScanHistory } from "@/components/Scalp/ScanHistory";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
@@ -78,6 +79,7 @@ const TABS = [
   { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
   { id: "backtest", label: "Backtest" },
+  { id: "lab", label: "Strategy lab" },
   { id: "sideways", label: "Sideways test" },
   { id: "morningtest", label: "Morning test" },
   { id: "history", label: "History" },
@@ -372,6 +374,7 @@ export default function ScalpPage() {
     high52: high52Status,
     active: activeStatus,
     backtest: null,
+    lab: null,
     sideways: sidewaysStatus,
     morningtest: morningTestStatus,
     history: null,
@@ -763,6 +766,9 @@ export default function ScalpPage() {
             <StockRanking armed={armed} arming={arming} onArm={(s) => arm(s, "Stock ranking")} onArmMany={(list) => armSeveral(list, "Stock ranking")} />
             <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
           </div>
+        </div>
+        <div hidden={tab !== "lab"}>
+          <StrategyLab armed={armed} />
         </div>
         <div hidden={tab !== "sideways"}>
           <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />
