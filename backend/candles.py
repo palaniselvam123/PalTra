@@ -26,6 +26,13 @@ def candle_minutes(cfg, own: dict | None = None) -> int:
     mode = own.get("entry_mode", getattr(cfg, "entry_mode", None))
     if str(mode or "SMA").upper() in ("PATTERN", "COLOUR"):
         return 1
+    if str(mode or "SMA").upper() == "NTH_CANDLE":
+        # Second candle entries (nth_candle.py): the bot trades on the second-candle size itself.
+        try:
+            value = int(own.get("nth_candle_minutes", getattr(cfg, "nth_candle_minutes", None)) or 5)
+        except (TypeError, ValueError):
+            return 5
+        return value if value in CANDLE_MINUTES else 5
     try:
         value = int(own.get("candle_minutes", getattr(cfg, "candle_minutes", None)) or DEFAULT_MINUTES)
     except (TypeError, ValueError):

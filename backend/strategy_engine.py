@@ -51,7 +51,8 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
-from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_patterns
+from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_nth, uses_patterns
+import nth_candle
 from candles import bucket_start, candle_minutes, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
@@ -153,6 +154,7 @@ ENTRY_REASONS = (
     "COUNTER_REENTRY",
     "CANDLE_PATTERN",
     "CANDLE_COLOUR",
+    "NTH_CANDLE",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
     "NEWS",
@@ -355,6 +357,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "chop_losses",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
+    "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
     "slope_minutes",
@@ -1082,6 +1085,8 @@ class StrategyEngine:
         self._turn_seen: dict[str, int] = {}
         self._turn_hit: dict[str, tuple[int, str, str]] = {}
         self._turn_done: dict[str, int] = {}
+        # Second candle entries (nth_candle.py): the day each stock's Nth candle was read, so it orders once a day.
+        self._nth_done: dict[str, dt.date] = {}
         # The last turn alerted per stock (direction, candle ts): a V right after a U the same way is the same turn.
         self._turn_last: dict[str, tuple[str, int]] = {}
         # A turn against the open trade waiting for a candle of the other colour (turn_exit_candle):
@@ -1639,7 +1644,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse,
+            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse, self._nth_done,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1699,6 +1704,8 @@ class StrategyEngine:
             return await self._pattern_minute(symbol, frame, cfg, now)
         if uses_colour(cfg):
             return await self._colour_minute(symbol, frame, cfg, now)
+        if uses_nth(cfg):
+            return await self._nth_minute(symbol, frame, cfg, now)
         self._warn_upcoming(symbol, frame, cfg, now)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -1781,7 +1788,7 @@ class StrategyEngine:
             self._always_tried.pop(symbol, None)
             if always_in.reverse_on(symbol_cfg) and always_in.lost(self._closed_gross(held[1])):
                 self._always_reverse[symbol] = always_in.opposite(held[0])
-        if uses_gap_mode(symbol_cfg) or uses_patterns(symbol_cfg) or uses_colour(symbol_cfg) or symbol in self._pullback:
+        if uses_gap_mode(symbol_cfg) or per_candle(symbol_cfg) or symbol in self._pullback:
             return
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or self._always_tried.get(symbol) == closed_ts:
@@ -2171,6 +2178,38 @@ class StrategyEngine:
             result = f"{result} — {call.note}"
             self._signals[symbol] = result
             self.last_signal = result
+        return result
+
+    async def _nth_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Second candle entries (nth_candle.py): the day's Nth candle colour, once per stock per day.
+
+        When the Nth candle of the session closes (the bot's own candle is that size in this
+        mode), green buys and red sells at the start of the next candle through apply_signal, so
+        market hours, the cut-off, the Trade list, the caps, the entry filters, the stop and the
+        flip all apply as for a cross. Nothing else opens a trade; the stop, trailing stop,
+        target, the ticked exits and the square-off close it. A doji, a body under the floor or
+        too little volume vs usual means no order that day.
+        """
+        call = nth_candle.call(frame, cfg, self._nth_done.get(symbol))
+        if call.side is None:
+            pos = self.positions.get(symbol)
+            text = f"{symbol} {'holding' if pos is not None else 'no order'} — {call.note}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        self._nth_done[symbol] = call.day
+        signal = "BULLISH" if call.side == "LONG" else "BEARISH"
+        # No Telegram for a refused candle: the fill / refusal line says what happened.
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why=nth_candle.ENTRY_REASON)
+        if result.startswith("blocked — order PENDING"):
+            self._nth_done.pop(symbol, None)
+            return result
+        if result.startswith(("opened", "reversed")):
+            result = f"{result} — {call.note}"
+        else:
+            result = f"{symbol} no order on the {call.note} — {result.split(' — ', 1)[-1]}"
+        self._signals[symbol] = result
+        self.last_signal = result
         return result
 
     async def _gap_minute(

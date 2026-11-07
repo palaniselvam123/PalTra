@@ -415,6 +415,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.
+- `backend/nth_candle.py` – **Second candle entries** (`entry_mode = "NTH_CANDLE"`, per bot and per stock, PAPER and LIVE,
+  replays too): the owner's Most active routine as a bot entry, the rule the Scalp page's Second candle test measures.
+  Once per stock per day, when the day's Nth candle (`nth_candle_no` 1-6, default 2) of `nth_candle_minutes` (1/3/5/10/15,
+  default 5) closes, `StrategyEngine._nth_minute` (in the `on_minute` chain after the colour mode) reads `nth_candle.call`:
+  green buys, red sells at the start of the next candle through `apply_signal(..., alert=False, why="NTH_CANDLE")` (every
+  entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply); a doji, a body under `nth_min_body_pct` (% of
+  the close, 0 = any) or volume vs usual under `nth_min_rvol` (0 = off; `rvol_at`: Groww's running session volume at that
+  candle against the same candle of the earlier sessions in the frame, unknown refuses) means no order that day. Nothing
+  else opens a trade (no cross, no re-entry after a stop-out; `_nth_done` keeps the day read, memory only); the stop,
+  trailing stop, target, the ticked exits and the square-off close it. In this mode the bot's own candle is the
+  second-candle size (`candles.candle_minutes`), so the ATR, exits and chart read it, and it is a `per_candle` mode (no
+  pullback / candle-extreme / entry-candle waits, no 1-minute review, always-in skips it). The 09:20 opening buffer still
+  applies (on 1-minute candles the 6th candle is the first that can order). Settings → 1. When to enter, "Enter on: Second
+  candle" (which candle, candle size, smallest body, volume vs usual at least); the terminal's Strategy card switches it
+  and picks the candle. The stock research baseline keeps `SMA`.
 - Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
   every condition is unchanged, but `StrategyEngine._open` sends the order the
   other way (a buy signal sells, a sell signal buys). The position keeps

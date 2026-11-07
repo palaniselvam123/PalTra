@@ -534,7 +534,7 @@ function whyNoTrade(p: {
     if (filledNext) return `SMA 9 crossed ${side > 0 ? "above" : "below"} SMA 21 here: a ${dir} signal, filled at the start of the next candle.`;
     if (timing) return `A ${dir} cross here, but ${timing}.`;
     if (filters?.entry_mode && filters.entry_mode !== "SMA") {
-      return `A ${dir} cross here, but the entry mode is ${filters.entry_mode === "PATTERN" ? "candle patterns" : "candle colour"}, which does not trade SMA crosses.`;
+      return `A ${dir} cross here, but the entry mode is ${filters.entry_mode === "PATTERN" ? "candle patterns" : filters.entry_mode === "NTH_CANDLE" ? "the second candle" : "candle colour"}, which does not trade SMA crosses.`;
     }
     if (filters?.use_gap_mode) return `A ${dir} cross here. Gap mode is on, so the cross only arms the trade: the order waits for the SMA gap to reach its entry level.`;
     return `A ${dir} cross here the bot did not take: it was not running, the stock was not armed, or the trade cap / loss limit was already hit.`;

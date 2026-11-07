@@ -441,7 +441,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
     max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
-    entry_mode: form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? form.entry_mode : "SMA",
+    entry_mode:
+      form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" || form.entry_mode === "NTH_CANDLE" ? form.entry_mode : "SMA",
+    nth_candle_no: Math.min(6, Math.max(1, Math.round(Number(form.nth_candle_no ?? 2)) || 2)),
+    nth_candle_minutes: ([1, 3, 5, 10, 15].includes(Number(form.nth_candle_minutes)) ? Number(form.nth_candle_minutes) : 5) as 1 | 3 | 5 | 10 | 15,
+    nth_min_body_pct: Math.min(2, Math.max(0, Number(form.nth_min_body_pct ?? 0) || 0)),
+    nth_min_rvol: Math.min(10, Math.max(0, Number(form.nth_min_rvol ?? 0) || 0)),
     pattern_tf: ([1, 3, 5, 10, 15, 30, 60].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15 | 30 | 60,
     colour_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1)),
     colour_min_body: Math.min(2, Math.max(0, Number(form.colour_min_body ?? 0) || 0)),
@@ -796,9 +801,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 skips candles that usually move less than N× those charges for this quantity. Candle colour: each time a candle of
                 the chosen size closes, green buys and red sells at the start of the next candle; the trade is held while the
                 candles keep its colour (a doji holds) and the first candle of the other colour closes it (exit “candle turned
-                the other colour”) and opens the other way at once. The stop, target, filters and square-off still apply; the
-                pullback, candle-extreme and entry-candle waits do not (patterns and colour order at the candle start).
-                Try it in Replay first.
+                the other colour”) and opens the other way at once. Second candle: once a day, when the day&apos;s Nth candle
+                of the chosen size closes (the 2nd 5-minute candle by default, as on the Scalp page&apos;s Second candle test),
+                green buys and red sells at the start of the next candle; nothing else opens a trade that day, and the stop,
+                trailing stop, target, the ticked exits and the square-off close it. The stop, target, filters and square-off
+                apply to every mode; the pullback, candle-extreme and entry-candle waits do not (these modes order at the
+                candle start). Try it in Replay first.
               </InfoTip>
             </div>
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
@@ -812,9 +820,72 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <option value="SMA">SMA cross</option>
                   <option value="PATTERN">Candle patterns</option>
                   <option value="COLOUR">Candle colour (hold until the other colour)</option>
+                  <option value="NTH_CANDLE">Second candle (the day&apos;s Nth candle, once a day)</option>
                 </select>
               </label>
-              <label className="block text-sm text-slate-300">
+              {form.entry_mode === "NTH_CANDLE" ? (
+                <>
+                  <label className="block text-sm text-slate-300">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">
+                      Which candle{isOwn("nth_candle_no") ? " (own)" : ""}
+                    </span>
+                    <select
+                      value={String(form.nth_candle_no ?? 2)}
+                      onChange={(e) => set("nth_candle_no", e.target.value)}
+                      className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                    >
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <option key={n} value={String(n)}>
+                          {n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`} candle of the day
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm text-slate-300">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">
+                      Candle size{isOwn("nth_candle_minutes") ? " (own)" : ""}
+                    </span>
+                    <select
+                      value={String(form.nth_candle_minutes ?? 5)}
+                      onChange={(e) => set("nth_candle_minutes", e.target.value)}
+                      className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                    >
+                      {[1, 3, 5, 10, 15].map((m) => (
+                        <option key={m} value={String(m)}>
+                          {m} minute{m === 1 ? "" : "s"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Field
+                    label="Smallest candle body, % of price (0 = any)"
+                    value={String(form.nth_min_body_pct ?? 0)}
+                    onChange={(v) => set("nth_min_body_pct", v)}
+                    own={isOwn("nth_min_body_pct")}
+                  />
+                  <Field
+                    label="Volume vs usual at least (× usual, 0 = off)"
+                    value={String(form.nth_min_rvol ?? 0)}
+                    onChange={(v) => set("nth_min_rvol", v)}
+                    own={isOwn("nth_min_rvol")}
+                  />
+                  <p className="col-span-2 text-xs text-slate-400">
+                    The Most active routine as a bot: when the{" "}
+                    {Number(form.nth_candle_no ?? 2) === 1 ? "1st" : Number(form.nth_candle_no ?? 2) === 2 ? "2nd" : Number(form.nth_candle_no ?? 2) === 3 ? "3rd" : `${Number(form.nth_candle_no ?? 2)}th`}{" "}
+                    {Number(form.nth_candle_minutes ?? 5)}-minute candle of the day closes (
+                    {(() => {
+                      const end = 9 * 60 + 15 + Number(form.nth_candle_no ?? 2) * Number(form.nth_candle_minutes ?? 5);
+                      return `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+                    })()}
+                    ), a green candle buys and a red one sells at once; a doji, a body under the floor or too little volume
+                    vs usual (Groww&apos;s volume at that candle against the same candle on earlier days) means no order that
+                    day. Each stock orders once a day; after a stop-out nothing re-enters. The bot&apos;s own candle becomes this
+                    size, so the ATR stop, the exits and the chart read it. No order before 09:20 (the opening buffer), so on
+                    1-minute candles pick the 6th candle or later. Measure it first on the Scalp page&apos;s Second candle tab.
+                  </p>
+                </>
+              ) : null}
+              <label className={clsx("block text-sm text-slate-300", form.entry_mode === "NTH_CANDLE" && "hidden")}>
                 <span className="text-xs uppercase tracking-wider text-slate-400">
                   {form.entry_mode === "COLOUR" ? "Colour candle" : "Pattern candle"}
                   {isOwn("pattern_tf") ? " (own)" : ""}
@@ -3112,12 +3183,17 @@ export function activeRules(f: SmaConfig): Rule[] {
   const slow = f.sma_slow ?? 21;
   const pattern = f.entry_mode === "PATTERN";
   const colour = f.entry_mode === "COLOUR";
+  const nth = f.entry_mode === "NTH_CANDLE";
+  const nthNo = Math.min(6, Math.max(1, n(f.nth_candle_no, 2)));
+  const nthWord = nthNo === 1 ? "1st" : nthNo === 2 ? "2nd" : nthNo === 3 ? "3rd" : `${nthNo}th`;
   const medium = f.sma_medium != null && String(f.sma_medium).trim() !== "";
 
   // 1. When to enter
   add(
     pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
+      : nth
+        ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
         ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }

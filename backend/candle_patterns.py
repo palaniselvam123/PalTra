@@ -43,7 +43,7 @@ PATTERN_TFS = (1, 3, 5, 10, 15, 30, 60)
 COLOUR_COUNT_MAX = 5
 COLOUR_BODY_MAX = 2.0
 PATTERN_SETS = ("STRONG", "ALL")
-ENTRY_MODES = ("SMA", "PATTERN", "COLOUR")
+ENTRY_MODES = ("SMA", "PATTERN", "COLOUR", "NTH_CANDLE")
 
 DEFAULTS = {
     "entry_mode": "SMA",
@@ -77,9 +77,15 @@ def uses_colour(cfg) -> bool:
     return str(setting(cfg, "entry_mode")).upper() == "COLOUR"
 
 
+def uses_nth(cfg) -> bool:
+    """The day's Nth candle colour (``entry_mode = "NTH_CANDLE"``, nth_candle.py)."""
+    return str(setting(cfg, "entry_mode")).upper() == "NTH_CANDLE"
+
+
 def per_candle(cfg) -> bool:
-    """Entries judged on candles of ``pattern_tf`` minutes (patterns or colour), not on the SMA cross."""
-    return uses_patterns(cfg) or uses_colour(cfg)
+    """Entries judged on a candle's close (patterns, colour, the day's Nth candle), not on the SMA cross:
+    the order goes at once, so the pullback / candle-extreme / entry-candle waits are skipped."""
+    return uses_patterns(cfg) or uses_colour(cfg) or uses_nth(cfg)
 
 
 # ---- pattern names (port of candlePatterns.ts) ----------------------------------------------------
