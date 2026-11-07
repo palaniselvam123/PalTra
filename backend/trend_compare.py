@@ -140,11 +140,16 @@ def interrupt_running() -> None:
         _save_all(items)
 
 
-async def play(item: dict, start_fn, info_fn, stop_fn=None, poll: float = POLL_SEC, should_stop=lambda: False) -> dict:
-    """Play each time of `item` one after another. Never raises (a refusal is noted on that time).
+async def play(
+    item: dict, start_fn, info_fn, stop_fn=None, poll: float = POLL_SEC, should_stop=lambda: False, key: str = "time",
+    save=None,
+) -> dict:
+    """Play each entry of `item["runs"]` one after another. Never raises (a refusal is noted on that entry).
 
-    `start_fn(time_str)` starts that time's backtest (awaitable, returns the run id; raises on a refusal);
-    `info_fn()` gives the bot's replay player's (status, run_id) now."""
+    `start_fn(entry[key])` starts that entry's backtest (awaitable, returns the run id; raises on a refusal);
+    `info_fn()` gives the bot's replay player's (status, run_id) now; `save(item)` keeps progress (default `put`).
+    Shared with stock_rank.py (one backtest per batch of stocks)."""
+    put = save or globals()["put"]
     try:
         for entry in item["runs"]:
             if entry["status"] not in ("WAITING",):
@@ -158,7 +163,7 @@ async def play(item: dict, start_fn, info_fn, stop_fn=None, poll: float = POLL_S
             if should_stop():
                 raise asyncio.CancelledError
             try:
-                run_id = await start_fn(entry["time"])
+                run_id = await start_fn(entry[key])
             except Exception as exc:  # noqa: BLE001 - a refusal for one time never stops the rest
                 detail = getattr(exc, "detail", None) or str(exc)
                 entry.update(status="SKIPPED", note=f"not started: {detail}")
@@ -345,10 +350,10 @@ class Comparer:
     def running(self) -> bool:
         return self.task is not None and not self.task.done()
 
-    def start(self, item: dict, start_fn, info_fn, stop_fn=None) -> None:
+    def start(self, item: dict, start_fn, info_fn, stop_fn=None, key: str = "time", save=None) -> None:
         self.current, self._stop = item, False
         self.task = asyncio.create_task(
-            play(item, start_fn, info_fn, stop_fn=stop_fn, should_stop=lambda: self._stop)
+            play(item, start_fn, info_fn, stop_fn=stop_fn, should_stop=lambda: self._stop, key=key, save=save)
         )
 
     def stop(self) -> None:
