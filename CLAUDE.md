@@ -1161,6 +1161,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Bot 2 (choppy ≥ 40, or trend ≤ base − 10 with a loss), else Bot 1; under `MIN_STOCK_WINDOWS` (8) windows "not enough
   data". `why` gives every number against its rule (the row's ? button, `RegimeStudy.Why`). Arm / Arm ticked open the usual
   arm prompt (arming only; nothing is moved or unarmed).
+- `backend/morning_study.py` – **Morning test** (read-only research; the Scalp page's "Morning test" tab,
+  `components/Scalp/MorningStudy.tsx`; no order path, nothing in the strategy reads it): the owner's idea that a stock
+  bullish from the morning keeps going (intraday, delivery, MTF) and one bearish from the morning is bought back up before
+  the close. For past trading days (`days` 3-30, `regime_study.trading_days`) of the picked stocks (scan lists, up to
+  `MAX_STOCKS` 200), `analyze_stock` labels each morning (09:15 to `at`: 10:00 / 10:30 / 11:00 / 12:00, the owner's choice
+  each run) `BULLISH` / `BEARISH` / `SIDEWAYS` (`label`: move from the open ≥ `min_move` % (0.5) its way, SMA fast vs slow on
+  the last closed candle of `minutes` agreeing, morning efficiency ≥ `MIN_EFFICIENCY` 0.3) and measures from the price at
+  `at`: the move to the close, the low / high after and when, the day's low / high times, the bounce from the day's low and
+  give-back from the high, the next session's gap and close (`next_day_pct` only once it closed), and NSE's delivery % that
+  day (`app.services.delivery.load_day`, skipped when unreadable). `summarize`: per label `_group` (closed-higher %, average /
+  median move, bounce, % bouncing ≥ `BOUNCE_BIG` 1 %, half-hour low / high times, next-day gap and close, delivery and a
+  closed-higher split at the median delivery), plain-words `answer` lines and `by_stock`. `MorningStudy` mirrors
+  `RegimeStudy` (one at a time, after `groww_pressure.wait_for_bots`, last report in `morning_study.json` next to the SMA DB,
+  `MORNING_STUDY_FILE`, keeps the backtest server awake). `GET /api/morning-study`, `POST /api/morning-study/start` (symbols,
+  days, at, minutes, min_move, delivery; same hours rule as the Sideways test), `POST /api/morning-study/stop`.
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
