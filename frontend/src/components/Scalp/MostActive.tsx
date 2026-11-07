@@ -1,10 +1,11 @@
 "use client";
 
 import { StopScan } from "@/components/Scalp/StopScan";
+import { ActiveTrendTest } from "@/components/Scalp/ActiveTrendTest";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, Flame, History, Loader2, RefreshCw, Target } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, Loader2, RefreshCw, Target } from "lucide-react";
 import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
@@ -133,7 +134,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [adding, setAdding] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // History: any saved scan (kept on the server for about 90 days), shown in the same table.
-  const [view, setView] = useState<"live" | "history">("live");
+  const [view, setView] = useState<"live" | "history" | "test">("live");
   const [hist, setHist] = useState<ActiveHistoryResponse | null>(null);
   const [histDay, setHistDay] = useState("");
   const [runId, setRunId] = useState<number | null>(null);
@@ -374,7 +375,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           <Flame size={15} className="text-amber-400" /> Where traders are now — most active F&amp;O stocks
         </h2>
         <div className="ml-auto inline-flex overflow-hidden rounded-md ring-1 ring-inset ring-slate-700" role="group" aria-label="Live or saved scans">
-          {(["live", "history"] as const).map((v) => (
+          {(["live", "history", "test"] as const).map((v) => (
             <button
               key={v}
               type="button"
@@ -385,8 +386,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                 view === v ? "bg-accentSky/15 text-accentSky" : "text-slate-300 hover:bg-white/5"
               )}
             >
-              {v === "live" ? <Flame size={13} /> : <History size={13} />}
-              {v === "live" ? "Live" : "History"}
+              {v === "live" ? <Flame size={13} /> : v === "history" ? <History size={13} /> : <FlaskConical size={13} />}
+              {v === "live" ? "Live" : v === "history" ? "History" : "Which column finds the trend?"}
             </button>
           ))}
         </div>
@@ -397,13 +398,17 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           title={paused ? "Scans are paused at the top of the page" : undefined}
           className={clsx(
             "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50",
-            view === "history" && "hidden"
+            view !== "live" && "hidden"
           )}
         >
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
         {view === "live" ? <StopScan running={data?.running} stop={() => api.scalpActiveStop()} onStopped={() => void load()} /> : null}
       </div>
+      {view === "test" ? (
+        <ActiveTrendTest />
+      ) : (
+        <>
       {view === "live" && auto ? (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-slate-300">
           <label className="inline-flex min-h-9 items-center gap-2 font-semibold text-slate-200">
@@ -768,6 +773,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           </table>
           <Pager p={paged} className="mt-2" />
         </div>
+      )}
+        </>
       )}
     </section>
   );

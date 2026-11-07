@@ -608,6 +608,37 @@ export type ActiveHistoryRun = {
   meta: { universe?: number; scanned?: number };
 };
 
+/** The Most active trend test (backend active_study.py): which column's top stocks kept trending. */
+export type ActiveStudyStats = {
+  n: number;
+  hour_n: number;
+  hour_hit: number | null;
+  hour_avg: number | null;
+  close_n: number;
+  close_hit: number | null;
+  close_avg: number | null;
+};
+export type ActiveStudyParam = {
+  key: string;
+  label: string;
+  help: string;
+  top: ActiveStudyStats;
+  bottom: ActiveStudyStats;
+  edge_close: number | null;
+  edge_hour: number | null;
+  spread_close: number | null;
+  spread_hour: number | null;
+  verdict: "strong" | "some" | "weak" | "none" | "few";
+};
+export type ActiveStudy = {
+  days: { day: string; scans: number; closed: boolean }[];
+  times: string[];
+  top: number;
+  samples: number;
+  tolerance_min: number;
+  tables: { time: string; side: "BOTH" | "LONG" | "SHORT"; base: ActiveStudyStats; params: ActiveStudyParam[] }[];
+  answer: string[];
+};
 export type ActiveHistoryResponse = {
   days: { day: string; runs: number }[];
   day: string | null;
@@ -1348,6 +1379,13 @@ export const api = {
     request<ActiveHistoryResponse>(`/api/scalp/active/history${day ? `?day=${day}` : ""}`),
   scalpActiveHistoryRun: (id: number) =>
     request<ActiveHistoryRun & { rows: ActiveStock[] }>(`/api/scalp/active/history/${id}`),
+  /** Which Most active column finds the trend, from the saved scans (read-only). */
+  scalpActiveStudy: (params: { days: number; times: string[]; top: number }) =>
+    request<ActiveStudy>(
+      `/api/scalp/active/study?days=${params.days}&times=${encodeURIComponent(params.times.join(","))}&top=${params.top}`,
+      undefined,
+      60000
+    ),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
   /** Stop the Most active pass that is running; the last finished scan stays. */
   scalpActiveStop: () => request<{ stopped: boolean }>("/api/scalp/active/stop", { method: "POST" }),

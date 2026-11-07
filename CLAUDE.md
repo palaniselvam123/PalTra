@@ -1235,6 +1235,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   and `SCANS=off` stop it). On by default on the desk and scanner (the old fixed 5-minute loop), off on the backtest
   server, where while on in market hours it keeps the machine awake. `GET /api/scalp/active` carries `auto`; `PUT
   /api/scalp/active/auto` (`on`, `every_min`). The card's "Auto scan … every N min" row (`MostActive.tsx`).
+  **Which column finds the trend?** (`backend/active_study.py`, the card's third view, `components/Scalp/ActiveTrendTest.tsx`;
+  read-only, saved scans only, no Groww call): for the last `days` (1-60) days with saved Most active scans, at each check
+  time (09:20-14:30, default 10:00-14:00) the scan within `TOLERANCE_MIN` (10) minutes is read; each stock is bullish (up
+  on the day) or bearish; within each day / time / side the stocks are ranked by each column (`PARAMS`: volume vs usual,
+  day move, distance from the average price and buyer / seller imbalance signed its way, speed its way, day range, money
+  traded, bias agrees (a yes / no split), plus `combined` = average place over the numeric ones; a column where every stock
+  reads the same picks nobody) and the top / bottom `top` (3-50) are followed in later saved scans: about an hour later
+  (`HOUR_MIN`) and the day's last scan from `CLOSE_FROM` 15:10 (none = no close result), signed the stock's way.
+  `summarize` per time (and all) × side: each column's top / bottom "kept going" % and average move, `edge` (points above
+  all stocks), `spread` (top − bottom), verdict strong ≥ 10 / some ≥ 5 / weak / none / few (< 30 readings), plain-words
+  `answer`. Desk `GET /api/scalp/active/study?days=&times=&top=` (cached per choice and newest saved scan).
   `summarize` gives hit rates per group (all, quiet runners, strong trend, trending; about to
   cross / just crossed); saved with the run. On the desk it is refused in market hours (the
   bots' Groww limit) and with `SCANS=off`. No order path; nothing in the strategy reads it.

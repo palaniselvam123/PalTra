@@ -288,6 +288,24 @@ async def most_active_history(day: str | None = Query(None, pattern=r"^\d{4}-\d{
     return {"days": days, "day": pick, "runs": runs, "keep_days": scan_history.keep_days()}
 
 
+@router.get("/active/study")
+async def most_active_study(
+    days: int = Query(20, ge=1, le=60),
+    times: str = Query("10:00,11:00,12:00,13:00,14:00"),
+    top: int = Query(10, ge=3, le=50),
+):
+    """Which Most active column finds the trend (active_study.py): from the saved scans of the last `days` days, at each
+    check time, each column's strongest `top` bullish / bearish stocks against the rest, an hour later and at the close.
+    Read-only: the saved scans only, no Groww call."""
+    import active_study
+
+    try:
+        picked = active_study.clean_times(times.split(","))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return await asyncio.to_thread(active_study.run, days, picked, top)
+
+
 @router.get("/active/history/{run_id}")
 async def most_active_history_run(run_id: int):
     """One saved most-active scan with every row as it was ranked then. Read-only."""
