@@ -563,6 +563,13 @@ class BotConfig(Base):
     # (1-5), and the smallest body in % of the close that counts as a colour (0 = any).
     colour_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     colour_min_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Second candle (entry_mode NTH_CANDLE, nth_candle.py): which candle of the day (1-6), its size in
+    # minutes (1/3/5/10/15; the bot's own candle in this mode), the smallest body in % of the close
+    # (0 = any) and the least volume vs usual at its close (0 = off).
+    nth_candle_no: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    nth_candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
+    nth_min_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    nth_min_rvol: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)

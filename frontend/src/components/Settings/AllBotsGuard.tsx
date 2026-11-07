@@ -74,6 +74,10 @@ export function AllBotsGuard() {
         change the settings so they are no longer hit. Backtests use them too: each replayed day stops when that bot&apos;s own
         P&amp;L for the day hits the target or stop, or the replay clock reaches the square-off time. 0 or empty = off.
       </p>
+      <p className="mt-1 text-xs text-slate-400">
+        After a limit trips, every bot is halted for the day. Raise the limit (or set it to 0) and press Start on the bots to
+        trade again today; the next hit alerts and squares off again.
+      </p>
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Day target (₹)

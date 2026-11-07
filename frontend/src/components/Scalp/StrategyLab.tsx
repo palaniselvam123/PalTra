@@ -30,6 +30,7 @@ import { lastClosedWeekdays } from "@/lib/tradingDays";
 const POLL_MS = 2500;
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const BOTS = [1, 2, 3, 4];
+const LAB_CANDLES = [1, 2, 3, 5, 10, 15];
 const TIMES = ["09:20", "09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"];
 const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0 };
 
@@ -44,6 +45,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
   const [days, setDays] = useState(10);
   const [bot, setBot] = useState(1);
   const [label, setLabel] = useState("");
+  const [minutes, setMinutes] = useState(0);
   const [view, setView] = useState<StrategyLabView | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [job, setJob] = useState<StrategyLabJob | null>(null);
@@ -150,13 +152,13 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
     try {
       const symbols = (await resolveScanSymbols(lists as ScanList[], armed.keys())).slice(0, 250);
       if (!symbols.length) throw new Error("No stocks in the picked lists.");
-      const v = await smaApi.strategyLabStart({ symbols, date: range[0], end_date: range[range.length - 1], bot, label });
+      const v = await smaApi.strategyLabStart({ symbols, date: range[0], end_date: range[range.length - 1], bot, label, minutes: minutes || undefined });
       setView(v);
       setOpenId(null);
       lastDone.current = null;
       setNote({
         ok: true,
-        text: `Reading ${symbols.length} stock(s), ${range[0]} → ${range[range.length - 1]}, with Bot ${bot}'s numbers. The first read of a day downloads its candles (a second or two a stock); days read before come from the cache.`,
+        text: `Reading ${symbols.length} stock(s), ${range[0]} → ${range[range.length - 1]}, with Bot ${bot}'s numbers${minutes ? ` on ${minutes}-minute candles` : ""}. The first read of a day downloads its candles (a second or two a stock); days read before come from the cache.`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start" });
@@ -279,6 +281,17 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
           </select>
         </label>
         <label className="flex flex-col gap-1">
+          Candle
+          <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className={select} disabled={running} title="The candle every stock is read on. Bot's own = the bot's candle setting.">
+            <option value={0}>Bot&apos;s own</option>
+            {LAB_CANDLES.map((m) => (
+              <option key={m} value={m}>
+                {m} minute{m === 1 ? "" : "s"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
           Name (optional)
           <input value={label} onChange={(e) => setLabel(e.target.value)} className={clsx(select, "w-40")} placeholder="e.g. Nifty 50, 5-min" maxLength={60} />
         </label>
@@ -307,6 +320,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
             <span key={j.id} className={clsx("inline-flex items-center gap-1 rounded-md border px-2 py-1", openId === j.id ? "border-accentSky text-accentSky" : "border-slate-700 text-slate-300")}>
               <button type="button" onClick={() => j.status !== "RUNNING" && setOpenId(j.id)} className="hover:underline" title={`${j.symbols.length} stocks, Bot ${j.bot}, ${j.trades} trades, ${j.status}`}>
                 {j.label || `${j.symbols.length} stocks`} · {j.first === j.last ? j.first : `${j.first} → ${j.last}`} · Bot {j.bot}
+                {j.minutes ? ` · ${j.minutes}-min` : ""}
                 {j.status !== "DONE" && <span className="ml-1 text-slate-500">({j.status.toLowerCase()})</span>}
               </button>
               {j.status !== "RUNNING" && (

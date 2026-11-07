@@ -51,7 +51,8 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
-from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_patterns
+from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_nth, uses_patterns
+import nth_candle
 from candles import bucket_start, candle_minutes, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
@@ -108,6 +109,19 @@ class SlCancelFailed(Exception):
     pass
 
 
+class ExitUnfilled(SlCancelFailed):
+    """A LIVE exit that Groww never filled and that was then cancelled: nothing is working on Groww, so the exit
+    may be sent again (a square-off does, a step further through the touch)."""
+
+
+# Exits that must get out whatever it takes: a square-off / panic retries an unfilled limit a step further through
+# the touch (SQUARE_OFF_RETRY_PCT) before giving up, instead of leaving the position open.
+SQUARE_OFF_REASONS = frozenset({"KILL_SWITCH", "EOD_SQUARE_OFF", "SQUARE_OFF_CUTOFF"})
+SQUARE_OFF_RETRY_PCT = 0.8
+# How many stocks a square-off closes at once (each close is a few Groww calls).
+SQUARE_OFF_PARALLEL = 4
+
+
 class ForceRefused(Exception):
     """A manual force-order was refused before a broker request."""
 
@@ -153,6 +167,7 @@ ENTRY_REASONS = (
     "COUNTER_REENTRY",
     "CANDLE_PATTERN",
     "CANDLE_COLOUR",
+    "NTH_CANDLE",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
     "NEWS",
@@ -355,6 +370,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "chop_losses",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "candle_minutes",
+    "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
     "slope_minutes",
@@ -1082,6 +1098,8 @@ class StrategyEngine:
         self._turn_seen: dict[str, int] = {}
         self._turn_hit: dict[str, tuple[int, str, str]] = {}
         self._turn_done: dict[str, int] = {}
+        # Second candle entries (nth_candle.py): the day each stock's Nth candle was read, so it orders once a day.
+        self._nth_done: dict[str, dt.date] = {}
         # The last turn alerted per stock (direction, candle ts): a V right after a U the same way is the same turn.
         self._turn_last: dict[str, tuple[str, int]] = {}
         # A turn against the open trade waiting for a candle of the other colour (turn_exit_candle):
@@ -1639,7 +1657,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse,
+            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse, self._nth_done,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -1699,6 +1717,8 @@ class StrategyEngine:
             return await self._pattern_minute(symbol, frame, cfg, now)
         if uses_colour(cfg):
             return await self._colour_minute(symbol, frame, cfg, now)
+        if uses_nth(cfg):
+            return await self._nth_minute(symbol, frame, cfg, now)
         self._warn_upcoming(symbol, frame, cfg, now)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -1781,7 +1801,7 @@ class StrategyEngine:
             self._always_tried.pop(symbol, None)
             if always_in.reverse_on(symbol_cfg) and always_in.lost(self._closed_gross(held[1])):
                 self._always_reverse[symbol] = always_in.opposite(held[0])
-        if uses_gap_mode(symbol_cfg) or uses_patterns(symbol_cfg) or uses_colour(symbol_cfg) or symbol in self._pullback:
+        if uses_gap_mode(symbol_cfg) or per_candle(symbol_cfg) or symbol in self._pullback:
             return
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or self._always_tried.get(symbol) == closed_ts:
@@ -2171,6 +2191,38 @@ class StrategyEngine:
             result = f"{result} — {call.note}"
             self._signals[symbol] = result
             self.last_signal = result
+        return result
+
+    async def _nth_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str:
+        """Second candle entries (nth_candle.py): the day's Nth candle colour, once per stock per day.
+
+        When the Nth candle of the session closes (the bot's own candle is that size in this
+        mode), green buys and red sells at the start of the next candle through apply_signal, so
+        market hours, the cut-off, the Trade list, the caps, the entry filters, the stop and the
+        flip all apply as for a cross. Nothing else opens a trade; the stop, trailing stop,
+        target, the ticked exits and the square-off close it. A doji, a body under the floor or
+        too little volume vs usual means no order that day.
+        """
+        call = nth_candle.call(frame, cfg, self._nth_done.get(symbol))
+        if call.side is None:
+            pos = self.positions.get(symbol)
+            text = f"{symbol} {'holding' if pos is not None else 'no order'} — {call.note}"
+            self._signals[symbol] = text
+            self.last_signal = text
+            return text
+        self._nth_done[symbol] = call.day
+        signal = "BULLISH" if call.side == "LONG" else "BEARISH"
+        # No Telegram for a refused candle: the fill / refusal line says what happened.
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why=nth_candle.ENTRY_REASON)
+        if result.startswith("blocked — order PENDING"):
+            self._nth_done.pop(symbol, None)
+            return result
+        if result.startswith(("opened", "reversed")):
+            result = f"{result} — {call.note}"
+        else:
+            result = f"{symbol} no order on the {call.note} — {result.split(' — ', 1)[-1]}"
+        self._signals[symbol] = result
+        self.last_signal = result
         return result
 
     async def _gap_minute(
@@ -3630,7 +3682,7 @@ class StrategyEngine:
             if seen:
                 ack.fill_price = seen
             return ack
-        raise SlCancelFailed(
+        raise ExitUnfilled(
             "That order was still pending at Groww, so it was cancelled. It will not fill later."
         )
 
@@ -4813,6 +4865,8 @@ class StrategyEngine:
             await self._stop_for_loss(cfg)
 
     async def _square_off(self, reason: str, symbols: list[str] | None = None) -> None:
+        """Close every held stock (or `symbols`), SQUARE_OFF_PARALLEL at a time, so a panic on five stocks takes as
+        long as one: each close is its own chain of Groww calls (stop cancel, position read, exit, fill wait)."""
         async with self.lock:
             if self.inflight:
                 return
@@ -4820,41 +4874,46 @@ class StrategyEngine:
             saved_focus, saved_ltp = self._focus, self.ltp
             try:
                 cfg = self.load_config()
-                for symbol in list(self.positions):
-                    if symbols is not None and symbol not in symbols:
-                        continue
-                    self._focus = symbol
-                    if self.position is None:
-                        continue
-                    try:
-                        await self._cancel_sl_verified(self.position)
-                    except SlCancelFailed:
-                        # SL may have filled as we tried to cancel — book whatever
-                        # position is left at LTP if we still have one.
-                        pass
-                    if self.position is None:
-                        continue
-                    px = self._exit_price(symbol, self.position)
-                    self.ltp = px
-                    try:
-                        await self._close_position(
-                            self.position, px, reason, self._now(), _cfg_for(cfg, symbol)
-                        )
-                    except SlCancelFailed as exc:
-                        self.last_error = str(exc)
-                        self.last_signal = f"blocked — {exc}"
-                        self._signals[symbol] = self.last_signal
-                        self._order_refused(symbol, str(exc))
-                        if _intraday_is_shut(str(exc)):
-                            self.status = "DAY_COMPLETED"
-                            self.halt_reason = str(exc)
-                            self._announce_down("DAY_COMPLETED", self.halt_reason)
-                            return
-                        continue
-                    self.position = None
+                names = [s for s in list(self.positions) if symbols is None or s in symbols]
+                gate = asyncio.Semaphore(SQUARE_OFF_PARALLEL)
+
+                async def one(symbol: str) -> str | None:
+                    async with gate:
+                        return await self._square_off_one(symbol, reason, cfg)
+
+                shut = [r for r in await asyncio.gather(*(one(s) for s in names), return_exceptions=False) if r]
+                if shut:
+                    self.status = "DAY_COMPLETED"
+                    self.halt_reason = shut[0]
+                    self._announce_down("DAY_COMPLETED", self.halt_reason)
             finally:
                 self.inflight = None
                 self._focus, self.ltp = saved_focus, saved_ltp
+
+    async def _square_off_one(self, symbol: str, reason: str, cfg: BotConfig) -> str | None:
+        """Close one held stock. Returns the "market shut" text when Groww says the session is over, else None."""
+        pos = self.positions.get(symbol)
+        if pos is None:
+            return None
+        try:
+            await self._cancel_sl_verified(pos)
+        except SlCancelFailed:
+            # SL may have filled as we tried to cancel — book whatever position is left at LTP if we still have one.
+            pass
+        pos = self.positions.get(symbol)
+        if pos is None:
+            return None
+        px = self._exit_price(symbol, pos)
+        try:
+            await self._close_position(pos, px, reason, self._now(), _cfg_for(cfg, symbol))
+        except SlCancelFailed as exc:
+            self.last_error = str(exc)
+            self.last_signal = f"blocked — {exc}"
+            self._signals[symbol] = self.last_signal
+            self._order_refused(symbol, str(exc))
+            return str(exc) if _intraday_is_shut(str(exc)) else None
+        self.positions.pop(symbol, None)
+        return None
 
     async def kill(self, reason: str) -> None:
         self._pullback.clear()
@@ -4898,18 +4957,38 @@ class StrategyEngine:
                     f"Groww's {cfg.symbol} position does not match this {pos.direction}. No order was sent."
                 )
             qty = min(pos.qty, abs(int(net)))
-            try:
-                ack = await self.broker.place_exit(cfg.symbol, exit_side, qty, px)
-            except Exception as exc:  # noqa: BLE001
-                raise SlCancelFailed(str(exc) or "Groww did not accept the exit") from exc
-            try:
-                ack = await self._require_live_fill(ack, cfg)
-            except SlCancelFailed:
-                # The exit may have filled while it was being cancelled.
-                net_after = await self._groww_net(cfg.symbol)
-                if net_after != 0:
+            # A square-off that Groww did not fill at the usual limit is sent once more, a step further through the
+            # touch (SQUARE_OFF_RETRY_PCT): a panic must get out, not leave the position open for the owner to find.
+            tries = [px]
+            if reason in SQUARE_OFF_REASONS:
+                wider = px * (1 - SQUARE_OFF_RETRY_PCT / 100) if exit_side == "SELL" else px * (1 + SQUARE_OFF_RETRY_PCT / 100)
+                tries.append(round_price(cfg.symbol, wider))
+            ack = None
+            for attempt, ask in enumerate(tries):
+                try:
+                    ack = await self.broker.place_exit(cfg.symbol, exit_side, qty, ask)
+                except Exception as exc:  # noqa: BLE001
+                    raise SlCancelFailed(str(exc) or "Groww did not accept the exit") from exc
+                try:
+                    ack = await self._require_live_fill(ack, cfg)
+                    break
+                except ExitUnfilled:
+                    # Cancelled unfilled: nothing is working on Groww. A square-off tries once more, wider.
+                    net_after = await self._groww_net(cfg.symbol)
+                    if net_after == 0:
+                        ack = None
+                        break
+                    if attempt + 1 < len(tries):
+                        logger.warning("%s square-off exit unfilled at %s; sending again %.1f%% further through", cfg.symbol, ask, SQUARE_OFF_RETRY_PCT)
+                        continue
                     raise
-                ack = None
+                except SlCancelFailed:
+                    # The exit may have filled while it was being cancelled.
+                    net_after = await self._groww_net(cfg.symbol)
+                    if net_after != 0:
+                        raise
+                    ack = None
+                    break
             if ack is not None and ack.fill_price:
                 px = round_price(cfg.symbol, ack.fill_price)
         elif send_exit:
@@ -5602,6 +5681,8 @@ class StrategyEngine:
                 "target": pos.target,
                 "tsl_step": pos.tsl_step,
                 "tsl_points": pos.tsl_points,
+                # The best price since entry the trail is measured from, so a screen can show the next step.
+                "tsl_best": pos.tsl_best,
             },
             "active_sl_trigger": pos.sl_trigger if pos and pos.stop_active else None,
             "unrealized_gross_pnl": unreal["gross"] if unreal else 0.0,

@@ -95,6 +95,13 @@ export function strategyLabel(s: Settings): string {
         s.pattern_trend ? ", with SMA trend" : ""
       })`
     );
+  } else if (String(s.entry_mode ?? "SMA") === "NTH_CANDLE") {
+    const n = Number(s.nth_candle_no ?? 2);
+    parts.push(
+      `Second candle: the ${n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`} ${s.nth_candle_minutes ?? 5}m candle${
+        Number(s.nth_min_body_pct ?? 0) > 0 ? `, body ≥ ${s.nth_min_body_pct}%` : ""
+      }${Number(s.nth_min_rvol ?? 0) > 0 ? `, volume ≥ ${s.nth_min_rvol}× usual` : ""}`
+    );
   } else if (String(s.entry_mode ?? "SMA") === "COLOUR") {
     parts.push(
       `Candle colour ${s.pattern_tf ?? 1}m (hold while the colour holds${

@@ -75,6 +75,9 @@ export function LivePositionCard({ state, pending }: { state: SmaState | null; p
         />
         <Row label="ADX 14" value={state?.adx14 == null ? "—" : state.adx14.toFixed(1)} />
       </dl>
+      {pos?.tsl_step && !stopOff && state?.active_sl_trigger != null && state.ltp > 0 ? (
+        <TrailWindow pos={pos} stop={state.active_sl_trigger} ltp={state.ltp} />
+      ) : null}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <Meter label="Unrealized P&L" value={state?.unrealized_gross_pnl ?? 0} hint="before charges" />
         <Meter label="Est. charges" value={-(state?.estimated_charges ?? 0)} hint="not taken off the P&L" />
@@ -165,6 +168,68 @@ function Meter({ label, value, hint }: { label: string; value: number; hint?: st
       <div className="text-xs uppercase tracking-wider text-slate-400">{label}</div>
       <div className={clsx("font-mono text-base font-semibold", up ? "text-[#10B981]" : "text-[#F43F5E]")}>{inr(value)}</div>
       {hint && <div className="text-xs text-slate-400">{hint}</div>}
+    </div>
+  );
+}
+
+/**
+ * The trailing stop's window, as a broker's TSL bracket draws it: the stop at one end, the target (or the same
+ * distance the other way) at the other, the price between them, and the next step: once the price reaches X the
+ * stop moves to Y. The bar and the lines on the chart move with every state refresh (each second in a replay).
+ * Display only; every number is the engine's.
+ */
+function TrailWindow({ pos, stop, ltp }: { pos: NonNullable<SmaState["position"]>; stop: number; ltp: number }) {
+  const long = pos.direction === "LONG";
+  const sign = long ? 1 : -1;
+  const step = pos.tsl_step ?? 0;
+  const target = pos.target ?? null;
+  const best = pos.tsl_best ?? null;
+  const next = step > 0 && best != null ? (long ? best + step : best - step) : null;
+  const nextStop = next != null ? (long ? stop + step : stop - step) : null;
+  const room = (ltp - stop) * sign; // ₹ a share between the price and the stop
+  const roomPct = ltp > 0 ? (room / ltp) * 100 : 0;
+  const locked = (stop - pos.entry_price) * sign * pos.qty; // the P&L before charges if the stop fills now
+  const toTarget = target != null ? (target - ltp) * sign : null;
+  const far = target ?? stop + (ltp - stop) * 2; // the bar's far end: the target, else twice the stop distance
+  const span = Math.abs(far - stop) || 1;
+  const at = Math.min(100, Math.max(0, (Math.abs(ltp - stop) / span) * 100));
+  const nextAt = next != null ? Math.min(100, Math.max(0, (Math.abs(next - stop) / span) * 100)) : null;
+  return (
+    <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs" aria-label="Trailing stop window">
+      <div className="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wider text-slate-400">
+        <span>Trailing stop window</span>
+        <span>
+          {long ? "long" : "short"} · trail every ₹{step}
+        </span>
+      </div>
+      <div className="relative mt-2 h-2 rounded-full bg-slate-700/60" title={`Stop ${px(stop)} · price ${px(ltp)}${target != null ? ` · target ${px(target)}` : ""}`}>
+        <div className="absolute inset-y-0 left-0 rounded-full bg-amber-400/60 transition-[width] duration-500" style={{ width: `${at}%` }} />
+        {nextAt != null ? (
+          <div className="absolute -top-0.5 h-3 w-0.5 bg-amber-300/80 transition-[left] duration-500" style={{ left: `${nextAt}%` }} title={`Next trail at ${px(next)}`} />
+        ) : null}
+        <div className="absolute -top-1 h-4 w-1 rounded bg-sky-300 transition-[left] duration-500" style={{ left: `calc(${at}% - 2px)` }} title={`Price ${px(ltp)}`} />
+      </div>
+      <div className="mt-1 flex justify-between gap-2 font-mono">
+        <span className="text-amber-300">Stop {px(stop)}</span>
+        <span className="text-sky-300">{px(ltp)}</span>
+        <span className="text-emerald-300">{target != null ? `Target ${px(target)}` : "No target"}</span>
+      </div>
+      <div className="mt-1 space-y-0.5 text-slate-300">
+        <div>
+          {room >= 0
+            ? `₹${room.toFixed(2)} (${roomPct.toFixed(2)}%) ${long ? "above" : "below"} the stop`
+            : `₹${Math.abs(room).toFixed(2)} through the stop`}
+          {" · "}
+          {locked >= 0 ? `+${inr(locked)} locked in if the stop fills` : `${inr(locked)} if the stop fills`}
+        </div>
+        {next != null && nextStop != null ? (
+          <div>
+            Next trail: when the price reaches {px(next)} the stop moves to {px(nextStop)}
+            {best != null ? ` (best so far ${px(best)})` : ""}
+          </div>
+        ) : null}
+        {toTarget != null ? <div>{toTarget > 0 ? `₹${toTarget.toFixed(2)} a share to the target` : "Target reached"}</div> : null}
+      </div>
     </div>
   );
 }

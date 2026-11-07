@@ -415,6 +415,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.
+- `backend/nth_candle.py` – **Second candle entries** (`entry_mode = "NTH_CANDLE"`, per bot and per stock, PAPER and LIVE,
+  replays too): the owner's Most active routine as a bot entry, the rule the Scalp page's Second candle test measures.
+  Once per stock per day, when the day's Nth candle (`nth_candle_no` 1-6, default 2) of `nth_candle_minutes` (1/3/5/10/15,
+  default 5) closes, `StrategyEngine._nth_minute` (in the `on_minute` chain after the colour mode) reads `nth_candle.call`:
+  green buys, red sells at the start of the next candle through `apply_signal(..., alert=False, why="NTH_CANDLE")` (every
+  entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply); a doji, a body under `nth_min_body_pct` (% of
+  the close, 0 = any) or volume vs usual under `nth_min_rvol` (0 = off; `rvol_at`: Groww's running session volume at that
+  candle against the same candle of the earlier sessions in the frame, unknown refuses) means no order that day. Nothing
+  else opens a trade (no cross, no re-entry after a stop-out; `_nth_done` keeps the day read, memory only); the stop,
+  trailing stop, target, the ticked exits and the square-off close it. In this mode the bot's own candle is the
+  second-candle size (`candles.candle_minutes`), so the ATR, exits and chart read it, and it is a `per_candle` mode (no
+  pullback / candle-extreme / entry-candle waits, no 1-minute review, always-in skips it). The 09:20 opening buffer still
+  applies (on 1-minute candles the 6th candle is the first that can order). Settings → 1. When to enter, "Enter on: Second
+  candle" (which candle, candle size, smallest body, volume vs usual at least); the terminal's Strategy card switches it
+  and picks the candle. The stock research baseline keeps `SMA`.
 - Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
   every condition is unchanged, but `StrategyEngine._open` sends the order the
   other way (a buy signal sells, a sell signal buys). The position keeps
@@ -1569,6 +1584,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `boot_engine`, every `POLL_SEC` 5 s) adds bots 1-4's P&L like the all-bots guard (`all_bots_guard.closed_by_bot` /
   `open_by_bot`, `net=` for the basis) and, once per level per IST day (`PnlAlerts.sent`, memory only), sends the text
   through `alert_notifier.send` (trade channel) and / or rings through `place_call` (market hours, 5-minute cooldown).
+  The record keeps the level it alerted at (`already`), so a level the owner changes afterwards is a new level and alerts
+  again the same day; the same level never alerts twice a day.
   `GET/PUT /api/bots/pnl-alerts`, `POST /api/bots/pnl-alerts/test` (test message + call at any time); Settings →
   "All bots: P&L alerts" (`components/Settings/PnlAlerts.tsx`). Never copied by Copy settings (`COPY_SKIP`).
 - `backend/news_entry.py` – news entries (off by default; PAPER and LIVE): the bot picked in `news_entry_bot` (1-4 on
@@ -1876,6 +1893,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
 
 The ORB bot (a different strategy) is `backend/app/strategies/orb_strategy.py`,
 driven by `backend/app/services/strategy_runner.py`.
+
+**Panic / square-off** (`StrategyEngine._square_off` → `_square_off_one`): every held stock is closed at the same time,
+`SQUARE_OFF_PARALLEL` (4) at once (each close is its own chain: stop cancel verified, Groww position read, exit, fill
+wait), and `POST /api/bots/kill-all` kills every bot together, so a panic on many stocks takes about as long as one.
+A LIVE exit sent for a square-off reason (`SQUARE_OFF_REASONS`: KILL_SWITCH, EOD_SQUARE_OFF, SQUARE_OFF_CUTOFF) that
+Groww leaves pending is cancelled (`_require_live_fill` → `ExitUnfilled`, nothing left working) and sent once more
+`SQUARE_OFF_RETRY_PCT` (0.8 %) further through the touch; an ordinary exit is still refused after one try.
 
 ## Where Groww orders are placed
 

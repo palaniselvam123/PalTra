@@ -27,9 +27,17 @@ export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND" | "VWAP";
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
   bot_name?: string | null;
-  /** "SMA" (cross, default), "PATTERN" (candle-pattern entries closed at the candle's end) or
-   * "COLOUR" (ride the candle colour: green buys, red sells, reverse on the other colour). */
-  entry_mode?: "SMA" | "PATTERN" | "COLOUR";
+  /** "SMA" (cross, default), "PATTERN" (candle-pattern entries closed at the candle's end),
+   * "COLOUR" (ride the candle colour: green buys, red sells, reverse on the other colour) or
+   * "NTH_CANDLE" (the day's Nth candle colour, once a day: green buys, red sells, then the stop /
+   * target / exits run the trade; backend nth_candle.py). */
+  entry_mode?: EntryMode;
+  /** Second candle entries: which candle of the day (1-6), its size in minutes (the bot's own candle in
+   * that mode), the smallest body in % of the close that orders (0 = any), the least volume vs usual (0 = off). */
+  nth_candle_no?: number;
+  nth_candle_minutes?: NthCandleMinutes;
+  nth_min_body_pct?: number;
+  nth_min_rvol?: number;
   /** Pattern / colour candle size in minutes. */
   pattern_tf?: 1 | 3 | 5 | 10 | 15 | 30 | 60;
   /** Candle colour: candles of one colour in a row needed to enter or turn (1-5). */
@@ -1501,6 +1509,8 @@ export type SmaState = {
     /** Set when this position uses the ₹-step trailing stop. */
     tsl_step?: number | null;
     tsl_points?: number | null;
+    /** The best price since entry the trail is measured from: the stop moves once the price is a step past it. */
+    tsl_best?: number | null;
   };
   active_sl_trigger: number | null;
   unrealized_gross_pnl: number;
@@ -1612,7 +1622,7 @@ export type ChartFilters = {
   /** For the chart's "why no trade here" line. */
   entry_cutoff_time?: string;
   square_off_time?: string;
-  entry_mode?: "SMA" | "PATTERN" | "COLOUR";
+  entry_mode?: EntryMode;
   use_gap_mode?: boolean;
   /** Always in a trade (always_in.py) and its reverse-after-a-loss option, for the chart's "why" line. */
   always_in?: boolean;
@@ -1681,6 +1691,9 @@ export type WalletEntry = {
 };
 
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
+export type EntryMode = "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE";
+export type NthCandleMinutes = 1 | 3 | 5 | 10 | 15;
+export const NTH_CANDLE_MINUTES: NthCandleMinutes[] = [1, 3, 5, 10, 15];
 export type CandleMinutes = 1 | 2 | 3 | 5 | 10 | 15;
 export const CANDLE_MINUTES: CandleMinutes[] = [1, 2, 3, 5, 10, 15];
 /** Exit candle sizes for mixed candles (exit_candle.py); 0 = the entry candle. */
@@ -2561,7 +2574,7 @@ export const smaApi = {
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
   /** Strategy lab (backend strategy_lab.py): base trades with every rule's answer, any choice evaluated in seconds. */
   strategyLab: () => request<StrategyLabView>("/api/strategy-lab", undefined, undefined, false),
-  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string }) =>
+  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number }) =>
     request<StrategyLabView & { job: StrategyLabJob }>("/api/strategy-lab/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   strategyLabStop: () => request<StrategyLabView>("/api/strategy-lab/stop", { method: "POST" }, 20000, false),
   strategyLabJob: (id: string) =>
@@ -2981,6 +2994,8 @@ export type StrategyLabJob = {
   status: "RUNNING" | "DONE" | "STOPPED" | "FAILED" | "INTERRUPTED";
   label: string;
   bot: number;
+  /** The candle the run read every stock on (null = the bot's own). */
+  minutes?: number | null;
   symbols: string[];
   first: string;
   last: string;

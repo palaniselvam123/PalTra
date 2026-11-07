@@ -347,15 +347,21 @@ export function StrategySummary({
           "Entry",
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              {segmented<"SMA" | "PATTERN" | "COLOUR">(
+              {segmented<"SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE">(
                 "Enter on",
-                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN" | "COLOUR",
-                ["SMA", "PATTERN", "COLOUR"],
-                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns", COLOUR: "Candle colour" },
+                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE",
+                ["SMA", "PATTERN", "COLOUR", "NTH_CANDLE"],
+                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns", COLOUR: "Candle colour", NTH_CANDLE: "Second candle" },
                 (v) =>
                   save(
                     { entry_mode: v },
-                    v === "PATTERN" ? "Entry on candle patterns" : v === "COLOUR" ? "Ride the candle colour" : "Entry on the SMA cross"
+                    v === "PATTERN"
+                      ? "Entry on candle patterns"
+                      : v === "COLOUR"
+                        ? "Ride the candle colour"
+                        : v === "NTH_CANDLE"
+                          ? "Second candle: the day's Nth candle colour, once a day"
+                          : "Entry on the SMA cross"
                   )
               )}
             </div>
@@ -367,6 +373,33 @@ export function StrategySummary({
                   ["1", "2", "3", "5", "10", "15"],
                   { "1": "1m", "2": "2m", "3": "3m", "5": "5m", "10": "10m", "15": "15m" },
                   (v) => save({ candle_minutes: Number(v) as CandleMinutes }, `${v}-minute candles`)
+                )}
+              </div>
+            ) : null}
+            {(c.entry_mode ?? "SMA") === "NTH_CANDLE" ? (
+              <div className="space-y-2 rounded-lg p-2 ring-1 ring-inset ring-white/10 sm:col-span-2">
+                <div className="flex items-center gap-1 text-xs text-slate-400">
+                  <InfoTip label="About second candle entries">
+                    Once a day, when the day&apos;s Nth candle of this size closes, a green candle buys and a red one sells at
+                    the start of the next candle (the Scalp page&apos;s Second candle test, traded). Nothing else opens a trade
+                    that day; the stop, trailing stop, target, the ticked exits and the square-off close it. The body floor and
+                    the volume-vs-usual check are on the Settings page.
+                  </InfoTip>
+                  How second candle trades work
+                </div>
+                {segmented<"1" | "2" | "3" | "4" | "5" | "6">(
+                  "Which candle",
+                  String(Math.min(6, Math.max(1, Number(c.nth_candle_no ?? 2)))) as "1" | "2" | "3" | "4" | "5" | "6",
+                  ["1", "2", "3", "4", "5", "6"],
+                  { "1": "1st", "2": "2nd", "3": "3rd", "4": "4th", "5": "5th", "6": "6th" },
+                  (v) => save({ nth_candle_no: Number(v) }, `Read the day's candle ${v}`)
+                )}
+                {segmented<"1" | "3" | "5" | "10" | "15">(
+                  "Candle",
+                  String(c.nth_candle_minutes ?? 5) as "1" | "3" | "5" | "10" | "15",
+                  ["1", "3", "5", "10", "15"],
+                  { "1": "1m", "3": "3m", "5": "5m", "10": "10m", "15": "15m" },
+                  (v) => save({ nth_candle_minutes: Number(v) as 1 | 3 | 5 | 10 | 15 }, `Second candle size ${v} min`)
                 )}
               </div>
             ) : null}
@@ -524,7 +557,9 @@ export function StrategySummary({
                 ? "Always: the trade closes at the end of its candle"
                 : (c.entry_mode ?? "SMA") === "COLOUR"
                   ? "A candle of the other colour closes the trade and opens the other way"
-                  : crossExitOn
+                  : (c.entry_mode ?? "SMA") === "NTH_CANDLE"
+                    ? "Second candle: only the stop, target, the ticked exits and the square-off close the trade"
+                    : crossExitOn
                   ? "The opposite cross closes the trade"
                   : "An opposite cross does not close the trade"}
               {c.use_gap_mode ? ` · gap fades back to ${c.gap_exit_long ?? 0.02}% / ${c.gap_exit_short ?? -0.02}%` : ""}

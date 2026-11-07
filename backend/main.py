@@ -116,6 +116,7 @@ from scalp_picks import MAX_UNIVERSE, PickRule
 from database import init_db, session_factory
 from models import BotConfig
 import candle_patterns
+import nth_candle
 import paper_wallet
 import review
 import tick_store
@@ -798,7 +799,7 @@ class ConfigUpdate(BaseModel):
     or_volume_ratio: float | None = Field(default=None, ge=0, le=20)
     or_spread_pct: float | None = Field(default=None, ge=0, le=5)
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
-    entry_mode: Literal["SMA", "PATTERN", "COLOUR"] | None = None
+    entry_mode: Literal["SMA", "PATTERN", "COLOUR", "NTH_CANDLE"] | None = None
     pattern_tf: Literal[1, 3, 5, 10, 15, 30, 60] | None = None
     candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
@@ -815,6 +816,11 @@ class ConfigUpdate(BaseModel):
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
     colour_count: int | None = Field(default=None, ge=1, le=5)
     colour_min_body: float | None = Field(default=None, ge=0, le=2)
+    # Second candle entries (nth_candle.py).
+    nth_candle_no: int | None = Field(default=None, ge=1, le=nth_candle.CANDLE_NO_MAX)
+    nth_candle_minutes: Literal[1, 3, 5, 10, 15] | None = None
+    nth_min_body_pct: float | None = Field(default=None, ge=0, le=nth_candle.BODY_MAX)
+    nth_min_rvol: float | None = Field(default=None, ge=0, le=nth_candle.RVOL_MAX)
     review_on: bool | None = None
     review_gap_pct: float | None = Field(default=None, gt=0, le=2)
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
@@ -1800,6 +1806,7 @@ def _gap_dict(row) -> dict:
         "small_exit_agree": small_candles.agree(row),
         "slope_minutes": slope_mod.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
+        **{key: nth_candle.setting(row, key) for key in nth_candle.DEFAULTS},
         "review_on": review.review_on(row),
         "review_gap_pct": review.gap_band(row),
         "review_cooldown_min": int(review.cooldown(row).total_seconds() // 60),
@@ -4647,6 +4654,8 @@ class StrategyLabStart(BaseModel):
     end_date: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
     label: str = ""
+    # The candle to read every stock on (0 / None = the bot's own).
+    minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
 
 
 class StrategyLabChoice(BaseModel):
@@ -4712,7 +4721,9 @@ async def strategy_lab_start(body: StrategyLabStart):
         return await fetch_frame(_scan_broker(), name, start, end)
 
     try:
-        job = strategy_lab.lab().start(body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label)
+        job = strategy_lab.lab().start(
+            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label, minutes=body.minutes or None
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -5221,11 +5232,10 @@ async def fast_bot_put(body: FastBotSettings):
 @app.post("/api/bots/kill-all")
 async def kill_all_bots():
     """Panic on every SMA bot at once (main desk and bots 2-4). The research desk is practice only."""
-    out = []
-    for eng in (engine, *bot_engines.values()):
-        await eng.kill("Manual PANIC SQUARE-OFF (all bots)")
-        out.append({"bot": eng.bot_id, "bot_status": eng.status})
-    return out
+    bots = (engine, *bot_engines.values())
+    # Every bot squares off at the same time (each kill is its own chain of Groww calls), not one after another.
+    await asyncio.gather(*(eng.kill("Manual PANIC SQUARE-OFF (all bots)") for eng in bots), return_exceptions=True)
+    return [{"bot": eng.bot_id, "bot_status": eng.status} for eng in bots]
 
 
 @app.get("/api/bots/{bot}/state")
