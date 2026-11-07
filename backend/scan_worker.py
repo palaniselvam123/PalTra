@@ -170,6 +170,16 @@ def carry_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
     return read(_frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now, symbol=symbol)
 
 
+def turn_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, count, rule, need_fast):
+    """One stock's turning read: candles against the SMA trend before the cross (turn_scan.py)."""
+    from turn_scan import read
+
+    return read(
+        _frame(token, symbol, start, end), sma_fast, sma_slow, minutes, now,
+        symbol=symbol, count=count, rule=rule, need_fast=need_fast,
+    )
+
+
 def high52_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):
     """One stock's 52-week reading from Groww's daily candles (high52.py)."""
     from candle_history import HistoryError

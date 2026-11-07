@@ -756,6 +756,51 @@ export type CarryScan = {
   paused?: boolean;
 };
 
+/** Turning scan (backend turn_scan.py): candles turning against the SMA trend before the cross. Read-only. */
+export type TurnRule = "COLOUR" | "CLOSES" | "BOTH";
+export type TurnRow = {
+  symbol: string;
+  trend: "BULLISH" | "BEARISH";
+  turn: "LONG" | "SHORT";
+  trend_since: string | null;
+  trend_candles: number;
+  counter_candles: number;
+  counter_since: string;
+  close: number;
+  sma_fast: number;
+  sma_slow: number;
+  gap_pct: number;
+  gap_at_turn_pct: number | null;
+  gap_closed_pct: number | null;
+  candles_to_cross: number | null;
+  minutes_to_cross: number | null;
+  move_since_turn_pct: number | null;
+  day_move_pct: number | null;
+  candle_ts: number;
+  volume: number | null;
+  speed_pct_per_min: number | null;
+};
+export type TurnScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  minutes: number;
+  minutes_choices: number[];
+  count: number;
+  rule: TurnRule;
+  need_fast: boolean;
+  alert?: boolean;
+  sma_fast: number;
+  sma_slow: number;
+  as_of: string | null;
+  finished_at: string | null;
+  market_open: boolean;
+  rows: TurnRow[];
+  paused?: boolean;
+};
+
 /** P&L dashboard (backend pnl_dashboard.py): the bots' P&L by time of day, across days or backtest runs. */
 export type PnlDashRun = {
   run_id: number;
@@ -2191,6 +2236,10 @@ export const smaApi = {
   carryScanStart: (symbols: string[], minutes: number, force = false) =>
     request<CarryScan>("/api/carry-scan/start", { method: "POST", body: JSON.stringify({ symbols, minutes, force }) }, 20000, false),
   carryScan: () => request<CarryScan>("/api/carry-scan", undefined, undefined, false),
+  /** Start the Turning scan (read-only; candles only). Returns at once; poll `turnScan`. */
+  turnScanStart: (body: { symbols: string[]; minutes: number; count: number; rule: TurnRule; need_fast: boolean; alert: boolean; force?: boolean }) =>
+    request<TurnScan>("/api/turn-scan/start", { method: "POST", body: JSON.stringify({ force: true, ...body }) }, 20000, false),
+  turnScan: () => request<TurnScan>("/api/turn-scan", undefined, undefined, false),
   /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
   high52ScanStart: (symbols: string[], force = false) =>
     request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),

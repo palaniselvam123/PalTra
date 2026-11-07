@@ -1077,6 +1077,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   pass at a time, scanner process via `scan_worker.carry_job`, stopped by Pause scans). `POST /api/carry-scan/start`
   (symbols, minutes, force), `GET /api/carry-scan`. Filters: status, yesterday's side, gap with / against, deviation at
   least, stock lists; tick boxes, Arm / Arm ticked.
+- `backend/turn_scan.py` – **Turning** scan (read-only; the Scalp page's "Turning" tab, `components/Scalp/TurnScan.tsx`; no
+  order path, nothing in the strategy reads it): candles turning against the SMA trend before the SMAs cross (owner's ICICI
+  Bank example: SMA 9 under SMA 21 since the morning, green candles from 14:15 closing back above SMA 9, the cross at 14:40).
+  Per stock, on the picked candle (`minutes` 1/3/5/10/15; `cross_scan.closed_bars`, `enrich` with the main desk's SMA
+  periods, `WARMUP_DAYS` 4), `read`: the trend (`trend` BULLISH / BEARISH from SMA fast vs slow on the last closed candle,
+  since the last cross across days, `trend_candles`), the counter run on today's session (`counter_candles` ≥ `count`, default
+  3, max 10; `rule` COLOUR / CLOSES / BOTH; with `need_fast`, on, the last close beyond SMA fast on the turn's side), the SMA
+  gap now and at the turn, how much has closed and the minutes to the cross at that pace (`minutes_to_cross`), the move since
+  the turn and today's move, plus `cross_scan.activity`. Soonest cross first (`sort_key`). `TurnScanner` mirrors
+  `CarryScanner` (one pass at a time, scanner process via `scan_worker.turn_job`, stopped by Pause scans).
+  `POST /api/turn-scan/start` (symbols, minutes, count, rule, need_fast, alert, force), `GET /api/turn-scan`. **Alert**
+  (`alert`, the tab's "Telegram me new ones"): after a pass in market hours, the stocks newly turning (each stock and way once
+  per IST day, `AlertMemory`, memory only) go out as one Telegram through the quiet-runner channel (`main._turn_done` →
+  `_chop_alert`, `alert_text`). Filters: way, trend at least N candles, cross within N min, stock lists; tick boxes, Arm /
+  Arm ticked. The bot's own "Early reversal entry" (`counter_candles.py`) trades the same picture when ticked.
 - `backend/cross_scan.py` – Cross scan (read-only; the Scalp page's "Cross scan"
   section): F&O stocks whose SMA fast / slow are about to cross on the N-minute
   candle (1/2/3/5/10/15, default 5), soonest first, plus the ones that just
