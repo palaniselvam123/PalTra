@@ -1193,6 +1193,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `main._start_trend_picks_loop`, every `CHECK_SEC` 60 s) once each weekday after `run_at` (15:31-23:59, default 15:45)
   backtests that day's picks (`main._trend_picks_daily`, full speed, waits while that bot's player is busy; `last_day`,
   `last_run_id`, `last_note`). `GET/PUT /api/trend-picks/auto`. To paper-trade the picks live during the day, Scan & arm.
+  **Compare pick times** (`backend/trend_compare.py`, the tab's "Compare pick times" panel,
+  `components/Scalp/TrendPickCompare.tsx`): 2-8 pick times (09:20-14:30) played one after another as ordinary strong-trend
+  pick runs with the same days, stocks, bot, settings, direction, top N and candle (`play`: waits while the bot's player is
+  busy, a refused time is `SKIPPED`, a replay that takes the player marks it `INTERRUPTED`; `Comparer`, one at a time,
+  keeps the backtest server awake), then side by side (`summarize`: P&L before / after charges, trades, win %, green days,
+  per day, best / worst day, biggest drop of the running total on gross, days each time did best, stocks picked, rank by
+  gross then green days, plain-words `answer`, a warning when the bot's settings changed between the runs or under 10
+  days). Saved in `trend_compare.json` next to the SMA DB (`TREND_COMPARE_FILE`, last 20; a comparison playing at a restart
+  becomes `INTERRUPTED`). `POST /api/trend-picks/compare`, `GET /api/trend-picks/compare[/{id}]`,
+  `POST /api/trend-picks/compare/stop`, `DELETE /api/trend-picks/compare/{id}` (the runs stay in Backtests).
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
