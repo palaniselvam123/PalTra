@@ -457,3 +457,109 @@ textarea:focus-visible,
 .board-panel[data-sized] [data-panel-sized] {
   height: var(--panel-h) !important;
 }
+
+/* --- One colour per server (blueprint section 3) --------------------------
+   The desk keeps violet. On the backtest server the page root carries data-server="backtest" (set before
+   first paint from the last answer of /api/role, then kept fresh by ServerAccent) and every violet becomes blue;
+   the scanner server becomes teal. Tokens first (the brand gradient, the page glow and the accentViolet /
+   accentIndigo classes follow them), then the hard-coded violet-* utilities. Green / red never change. */
+[data-server="backtest"], [data-server="backtest"][data-theme="dark"] { --c-violet: 96 165 250; --c-indigo: 59 130 246; }
+[data-server="backtest"][data-theme="light"] { --c-violet: 29 78 216; --c-indigo: 37 99 235; }
+[data-server="backtest"] .text-violet-50 { color: #eff6ff; }
+[data-server="backtest"] .text-violet-100 { color: #dbeafe; }
+[data-server="backtest"] .text-violet-200 { color: #bfdbfe; }
+[data-server="backtest"] .text-violet-300 { color: #93c5fd; }
+[data-server="backtest"] .text-violet-200\/80 { color: rgb(191 219 254 / 0.8); }
+[data-server="backtest"][data-theme="light"] .text-violet-300, [data-server="backtest"][data-theme="light"] .text-violet-200, [data-server="backtest"][data-theme="light"] .text-violet-100, [data-server="backtest"][data-theme="light"] .text-violet-50, [data-server="backtest"][data-theme="light"] .terminal-dark .text-violet-300, [data-server="backtest"][data-theme="light"] .terminal-dark .text-violet-200, [data-server="backtest"][data-theme="light"] .terminal-dark .text-violet-100, [data-server="backtest"][data-theme="light"] .terminal-dark .text-violet-50 { color: #1d4ed8; }
+[data-server="backtest"] .bg-violet-400 { background-color: #60a5fa; }
+[data-server="backtest"] .bg-violet-500 { background-color: #3b82f6; }
+[data-server="backtest"] .bg-violet-500\/10 { background-color: rgb(59 130 246 / 0.1); }
+[data-server="backtest"] .bg-violet-500\/15 { background-color: rgb(59 130 246 / 0.15); }
+[data-server="backtest"] .bg-violet-500\/20 { background-color: rgb(59 130 246 / 0.2); }
+[data-server="backtest"] .bg-violet-500\/30 { background-color: rgb(59 130 246 / 0.3); }
+[data-server="backtest"] .bg-violet-400\/10 { background-color: rgb(96 165 250 / 0.1); }
+[data-server="backtest"] .bg-violet-400\/15 { background-color: rgb(96 165 250 / 0.15); }
+[data-server="backtest"] .bg-violet-400\/20 { background-color: rgb(96 165 250 / 0.2); }
+[data-server="backtest"] .bg-violet-400\/30 { background-color: rgb(96 165 250 / 0.3); }
+[data-server="backtest"] .border-violet-400\/40 { border-color: rgb(96 165 250 / 0.4); }
+[data-server="backtest"] .border-violet-400\/50 { border-color: rgb(96 165 250 / 0.5); }
+[data-server="backtest"] .border-violet-400\/60 { border-color: rgb(96 165 250 / 0.6); }
+[data-server="backtest"] .border-violet-500\/40 { border-color: rgb(59 130 246 / 0.4); }
+[data-server="backtest"] .border-violet-500\/60 { border-color: rgb(59 130 246 / 0.6); }
+[data-server="backtest"] .ring-violet-400\/30 { --tw-ring-color: rgb(96 165 250 / 0.3); }
+[data-server="backtest"] .ring-violet-400\/35 { --tw-ring-color: rgb(96 165 250 / 0.35); }
+[data-server="backtest"] .ring-violet-400\/40 { --tw-ring-color: rgb(96 165 250 / 0.4); }
+[data-server="backtest"] .ring-violet-400\/50 { --tw-ring-color: rgb(96 165 250 / 0.5); }
+[data-server="backtest"] .ring-violet-400\/60 { --tw-ring-color: rgb(96 165 250 / 0.6); }
+[data-server="backtest"] .ring-violet-300\/30 { --tw-ring-color: rgb(147 197 253 / 0.3); }
+[data-server="backtest"] .ring-violet-300\/40 { --tw-ring-color: rgb(147 197 253 / 0.4); }
+[data-server="backtest"] .hover\:bg-violet-400:hover { background-color: #60a5fa; }
+[data-server="backtest"] .hover\:bg-violet-600:hover { background-color: #2563eb; }
+[data-server="backtest"] .hover\:bg-violet-400\/10:hover { background-color: rgb(96 165 250 / 0.1); }
+[data-server="backtest"] .hover\:bg-violet-400\/15:hover { background-color: rgb(96 165 250 / 0.15); }
+[data-server="backtest"] .hover\:bg-violet-500\/10:hover { background-color: rgb(59 130 246 / 0.1); }
+[data-server="backtest"] .hover\:bg-violet-500\/30:hover { background-color: rgb(59 130 246 / 0.3); }
+[data-server="backtest"] .accent-violet-400 { accent-color: #60a5fa; }
+
+[data-server="scanner"], [data-server="scanner"][data-theme="dark"] { --c-violet: 45 212 191; --c-indigo: 20 184 166; }
+[data-server="scanner"][data-theme="light"] { --c-violet: 15 118 110; --c-indigo: 13 148 136; }
+[data-server="scanner"] .text-violet-50 { color: #f0fdfa; }
+[data-server="scanner"] .text-violet-100 { color: #ccfbf1; }
+[data-server="scanner"] .text-violet-200 { color: #99f6e4; }
+[data-server="scanner"] .text-violet-300 { color: #5eead4; }
+[data-server="scanner"] .text-violet-200\/80 { color: rgb(153 246 228 / 0.8); }
+[data-server="scanner"][data-theme="light"] .text-violet-300, [data-server="scanner"][data-theme="light"] .text-violet-200, [data-server="scanner"][data-theme="light"] .text-violet-100, [data-server="scanner"][data-theme="light"] .text-violet-50, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-300, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-200, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-100, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-50 { color: #0f766e; }
+[data-server="scanner"] .bg-violet-400 { background-color: #2dd4bf; }
+[data-server="scanner"] .bg-violet-500 { background-color: #14b8a6; }
+[data-server="scanner"] .bg-violet-500\/10 { background-color: rgb(20 184 166 / 0.1); }
+[data-server="scanner"] .bg-violet-500\/15 { background-color: rgb(20 184 166 / 0.15); }
+[data-server="scanner"] .bg-violet-500\/20 { background-color: rgb(20 184 166 / 0.2); }
+[data-server="scanner"] .bg-violet-500\/30 { background-color: rgb(20 184 166 / 0.3); }
+[data-server="scanner"] .bg-violet-400\/10 { background-color: rgb(45 212 191 / 0.1); }
+[data-server="scanner"] .bg-violet-400\/15 { background-color: rgb(45 212 191 / 0.15); }
+[data-server="scanner"] .bg-violet-400\/20 { background-color: rgb(45 212 191 / 0.2); }
+[data-server="scanner"] .bg-violet-400\/30 { background-color: rgb(45 212 191 / 0.3); }
+[data-server="scanner"] .border-violet-400\/40 { border-color: rgb(45 212 191 / 0.4); }
+[data-server="scanner"] .border-violet-400\/50 { border-color: rgb(45 212 191 / 0.5); }
+[data-server="scanner"] .border-violet-400\/60 { border-color: rgb(45 212 191 / 0.6); }
+[data-server="scanner"] .border-violet-500\/40 { border-color: rgb(20 184 166 / 0.4); }
+[data-server="scanner"] .border-violet-500\/60 { border-color: rgb(20 184 166 / 0.6); }
+[data-server="scanner"] .ring-violet-400\/30 { --tw-ring-color: rgb(45 212 191 / 0.3); }
+[data-server="scanner"] .ring-violet-400\/35 { --tw-ring-color: rgb(45 212 191 / 0.35); }
+[data-server="scanner"] .ring-violet-400\/40 { --tw-ring-color: rgb(45 212 191 / 0.4); }
+[data-server="scanner"] .ring-violet-400\/50 { --tw-ring-color: rgb(45 212 191 / 0.5); }
+[data-server="scanner"] .ring-violet-400\/60 { --tw-ring-color: rgb(45 212 191 / 0.6); }
+[data-server="scanner"] .ring-violet-300\/30 { --tw-ring-color: rgb(94 234 212 / 0.3); }
+[data-server="scanner"] .ring-violet-300\/40 { --tw-ring-color: rgb(94 234 212 / 0.4); }
+[data-server="scanner"] .hover\:bg-violet-400:hover { background-color: #2dd4bf; }
+[data-server="scanner"] .hover\:bg-violet-600:hover { background-color: #0d9488; }
+[data-server="scanner"] .hover\:bg-violet-400\/10:hover { background-color: rgb(45 212 191 / 0.1); }
+[data-server="scanner"] .hover\:bg-violet-400\/15:hover { background-color: rgb(45 212 191 / 0.15); }
+[data-server="scanner"] .hover\:bg-violet-500\/10:hover { background-color: rgb(20 184 166 / 0.1); }
+[data-server="scanner"] .hover\:bg-violet-500\/30:hover { background-color: rgb(20 184 166 / 0.3); }
+[data-server="scanner"] .accent-violet-400 { accent-color: #2dd4bf; }
+
+
+/* The rest of the violet utilities in use (the replay bar's bg-violet-700, the status bar's bg-violet-600/30, hairline borders). */
+[data-server="backtest"] .bg-violet-300 { background-color: #93c5fd; }
+[data-server="backtest"] .bg-violet-700 { background-color: #1d4ed8; }
+[data-server="backtest"] .bg-violet-600\/30 { background-color: rgb(37 99 235 / 0.3); }
+[data-server="backtest"] .border-violet-400\/20 { border-color: rgb(96 165 250 / 0.2); }
+[data-server="backtest"] .border-violet-400\/25 { border-color: rgb(96 165 250 / 0.25); }
+[data-server="backtest"] .border-violet-400\/30 { border-color: rgb(96 165 250 / 0.3); }
+[data-server="backtest"] .accent-violet-500 { accent-color: #3b82f6; }
+[data-server="scanner"] .bg-violet-300 { background-color: #5eead4; }
+[data-server="scanner"] .bg-violet-700 { background-color: #0f766e; }
+[data-server="scanner"] .bg-violet-600\/30 { background-color: rgb(13 148 136 / 0.3); }
+[data-server="scanner"] .border-violet-400\/20 { border-color: rgb(45 212 191 / 0.2); }
+[data-server="scanner"] .border-violet-400\/25 { border-color: rgb(45 212 191 / 0.25); }
+[data-server="scanner"] .border-violet-400\/30 { border-color: rgb(45 212 191 / 0.3); }
+[data-server="scanner"] .accent-violet-500 { accent-color: #14b8a6; }
+[data-server="backtest"] .bg-violet-400\/\[0\.06\] { background-color: rgb(96 165 250 / 0.06); }
+[data-server="backtest"] .bg-violet-500\/\[0\.08\] { background-color: rgb(59 130 246 / 0.08); }
+[data-server="backtest"] .bg-violet-500\/\[0\.10\] { background-color: rgb(59 130 246 / 0.10); }
+[data-server="backtest"] .bg-violet-500\/\[0\.12\] { background-color: rgb(59 130 246 / 0.12); }
+[data-server="scanner"] .bg-violet-400\/\[0\.06\] { background-color: rgb(45 212 191 / 0.06); }
+[data-server="scanner"] .bg-violet-500\/\[0\.08\] { background-color: rgb(20 184 166 / 0.08); }
+[data-server="scanner"] .bg-violet-500\/\[0\.10\] { background-color: rgb(20 184 166 / 0.10); }
+[data-server="scanner"] .bg-violet-500\/\[0\.12\] { background-color: rgb(20 184 166 / 0.12); }

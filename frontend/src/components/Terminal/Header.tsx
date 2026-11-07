@@ -15,6 +15,8 @@ import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState, type StockRegime } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
 import { NAV } from "@/components/Navbar";
+import { serverBadge } from "@/components/ServerAccent";
+import { useServerRole } from "@/hooks/useServerRole";
 import { Skeleton } from "./ui";
 import { StockCard } from "./StockCard";
 import { ControlBar } from "./ControlBar";
@@ -187,6 +189,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   // The browser tab names the desk: "Bot 3 · SMA Terminal · PalTra".
   const deskName = desk === "research" ? "Research" : state?.bot_name || (desk === "live" ? "Bot 1" : `Bot ${desk.slice(3)}`);
   useTitle(`${deskName} · SMA Terminal · PalTra`);
+  const badge = serverBadge(useServerRole()?.role);
   // The stock list shows the armed (and held) stocks only, unless switched off; kept per browser.
   const [armedOnly, setArmedOnly] = useState(true);
   useEffect(() => {
@@ -788,6 +791,11 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
               <span className="hidden truncate text-sm font-semibold tracking-tight text-slate-100 sm:inline">
                 SMA × ATR Terminal
               </span>
+              {badge && (
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${badge.className}`} title="Which server this page is on">
+                  {badge.text}
+                </span>
+              )}
               {onDeskChange ? <DeskSwitch desk={desk} onChange={onDeskChange} /> : null}
               <ThemeToggle />
               <PinToggle pinned={pinned} onChange={setPinned} what="the terminal header" />

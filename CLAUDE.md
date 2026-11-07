@@ -1749,6 +1749,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `NEUTRAL`, `AFTER_CLOSE`, `PENDING`, `NO_DATA`. `summarize`: per positive / negative × high / medium / low (hit rate, average
   signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a run. Desk
   `GET /api/news-impact/validate?date=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
+- **One colour per server** (display only; `frontend/src/components/ServerAccent.tsx`, `app/globals.css` "One colour per
+  server"): the desk keeps violet; the backtest server is **blue** and the scanner **teal** (owner's choice, so the three
+  are told apart at a glance). `ServerAccent` (in the root layout) reads `/api/role` once and puts `data-server="backtest"`
+  / `"scanner"` on `<html>` (none on the desk), keeping it in `localStorage` (`orb.server`) so the layout's inline script
+  paints it before the first load; the theme file swaps `--c-violet` / `--c-indigo` under that attribute (the brand
+  gradient, the page glow and `accentViolet` follow) and remaps every hard-coded `violet-*` utility in use, both themes.
+  `serverBadge` gives the "Backtest server" / "Scanner" chip next to the logo (Navbar) and the terminal title. Green / red
+  never change. Add a new `violet-*` class and add its line to that block.
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the
