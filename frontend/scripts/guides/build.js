@@ -1,13 +1,13 @@
 // Renders every lesson in ./lessons (the Scalp page's beginner guides) to a PDF in frontend/public/guides and prints
 // each one's id, file and page count; the HTML goes to ./out. Needs Playwright with Chromium on the NODE_PATH:
-//   NODE_PATH=$(npm root -g) node scripts/guides/build.js [lessonId ...]
+//   cd frontend && NODE_PATH=$(npm root -g) node scripts/guides/build.js [lessonId ...]
 // Then set the page counts in frontend/src/lib/lessons.ts from out/summary.json.
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 
 const OUT_HTML = path.join(__dirname, "out");
-const PDF_DIR = path.resolve(__dirname, "../../frontend/public/guides");
+const PDF_DIR = path.resolve(__dirname, "../../public/guides");
 
 function pageCount(buf) {
   const s = buf.toString("latin1");

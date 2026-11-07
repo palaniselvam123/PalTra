@@ -1819,8 +1819,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
   `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
   `scalp-morning-test`, `scalp-history`, `scalp-alerts`; `sideways-test` covers that tab). They are written as small
-  JavaScript modules in `scripts/guides/lessons/` (shared pieces and drawn SVG figures in `scripts/guides/lib.js`)
-  and rendered to the PDFs by `scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
+  JavaScript modules in `frontend/scripts/guides/lessons/` (shared pieces and drawn SVG figures in `frontend/scripts/guides/lib.js`)
+  and rendered to the PDFs by `frontend/scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
   page count in `lessons.ts`. Every Scalp tab shows `components/Scalp/GuideBar.tsx` under its heading: "Guide (PDF)"
   opens that tab's lesson and "What do these words mean?" opens the plain-words panel, whose entries live in
   `frontend/src/lib/plainWords.ts` (term, meaning, example, why it matters; add a key there and list it in the tab's

@@ -90,7 +90,7 @@ export function PnlAlerts() {
         <>
         Tells you when today&apos;s P&amp;L of Bots 1–4 together (closed trades plus open positions, each bot&apos;s own PAPER or LIVE
         book) reaches the profit level or falls to minus the loss level. Each level alerts once a day at its value, while NSE is open; change a level and the new one alerts again when the total reaches it.
-        Alerts only: nothing is squared off (use the day target / stop loss above for that). Telegram uses your trade alert
+        Alerts only: nothing is squared off (the all-bots day target / stop loss on the Bots tab does that). Telegram uses your trade alert
         channel; the call uses the phone-call channel (market hours, at most one call every 5 minutes). 0 = off.
         </>
       }
