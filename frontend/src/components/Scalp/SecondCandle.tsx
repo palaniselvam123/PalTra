@@ -10,6 +10,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { smaApi, type SecondCandleRow, type SecondCandleView as View } from "@/lib/smaApi";
+import { GuideBar } from "./GuideBar";
 
 /**
  * Second candle test (backend second_candle.py): the owner's Most active routine, measured on every stock and past
@@ -298,6 +299,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           you first (so you know where a stop survives), when, and what a target, a stop or a trailing stop would have
           made. Every number below follows the filters. Practice arithmetic only; nothing is ordered.
         </p>
+          <GuideBar lesson="scalp-second-candle" terms={["second_candle", "rvol", "candle", "target", "stop", "trail", "square_off", "pnl_before", "arm"]} className="mt-2" />
       </div>
 
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">

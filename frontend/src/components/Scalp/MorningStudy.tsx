@@ -10,6 +10,7 @@ import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { smaApi, type MorningGroup, type MorningLabel, type MorningStock, type MorningStockPart, type MorningStudy as Study, type MorningTimes } from "@/lib/smaApi";
+import { GuideBar } from "./GuideBar";
 
 /**
  * Morning test (backend morning_study.py): the owner's idea — a stock bullish from the morning keeps going (good for
@@ -114,6 +115,7 @@ export function MorningStudy({
           hold, even as delivery or MTF), and a stock that falls from the morning gets bought back up before the close. This
           checks it on past days of your stocks. Nothing is bought or sold.
         </p>
+          <GuideBar lesson="scalp-morning-test" terms={["trend", "sma", "efficiency", "delivery", "candle", "pullback"]} className="mt-2" />
       </div>
 
       <ol className="grid gap-2 sm:grid-cols-3">

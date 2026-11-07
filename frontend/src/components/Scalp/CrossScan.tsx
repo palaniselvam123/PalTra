@@ -16,6 +16,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { useFirstSeen } from "@/components/Scalp/useFirstSeen";
 import { ScanListPicker, listsLabel, resolveScanSymbols, useScanLists } from "@/components/Scalp/ScanLists";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { GuideBar } from "./GuideBar";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 const POLL_MS = 3_000;
@@ -211,9 +212,10 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
         </>
         )}
       </div>
+      <GuideBar lesson="scalp-cross-scan" terms={["sma", "cross", "gap_pct", "candle", "closed_candle", "speed", "volume", "arm", "fno"]} className="mb-2" />
       <Explain
         className="mb-3"
-        lead={`Stocks whose ${label} are closing in on each other, soonest first. Candles only — nothing here places an order.`}
+        lead={`Stocks whose two average lines (${label}) are about to cross, soonest first. A cross is the bot's buy or sell signal, so these are the stocks that may signal next. Watch only — nothing here places an order.`}
       >
         Groww has no indicator feed, so the averages are worked out here from Groww&apos;s 1-minute candles, grouped into {minutes}
         -minute candles from 09:15 and averaged exactly as the bot does it, on closed candles only (the candle still forming is

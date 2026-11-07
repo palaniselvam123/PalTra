@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { inr, smaApi, type AllBotsGuard as Guard } from "@/lib/smaApi";
 
 /**
@@ -64,20 +65,26 @@ export function AllBotsGuard() {
 
   const total = guard?.total ?? 0;
   return (
-    <section id="all-bots-guard" aria-label="All bots day target and stop loss" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="text-base font-semibold text-slate-100">All bots: day target, stop loss and square-off time</h2>
-      <p className="mt-1 text-xs text-slate-400">
-        Today&apos;s P&amp;L of Bots 1–4 together (closed trades plus open positions, before charges, each bot&apos;s own PAPER or
-        LIVE book; not the research desk or replays). When it reaches the target, or falls to minus the stop loss, every bot is
-        panic squared off and stays stopped for the rest of the day. The square-off time does the same at that time of day
-        (IST, 09:15–15:30), whatever the P&amp;L; each bot&apos;s own square-off time still applies too. To start again today,
-        change the settings so they are no longer hit. Backtests use them too: each replayed day stops when that bot&apos;s own
-        P&amp;L for the day hits the target or stop, or the replay clock reaches the square-off time. 0 or empty = off.
-      </p>
-      <p className="mt-1 text-xs text-slate-400">
-        After a limit trips, every bot is halted for the day. Raise the limit (or set it to 0) and press Start on the bots to
-        trade again today; the next hit alerts and squares off again.
-      </p>
+    <SettingsCard
+      id="all-bots-guard"
+      title="All bots: day target, stop loss and square-off time"
+      tier="start"
+      status={guard ? { on: Boolean(guard.target || guard.stop || guard.squareoff) } : null}
+      summary="One safety net over every bot together: when today's total profit reaches the target, or the loss reaches the stop loss, or the clock reaches the square-off time, every bot closes everything and stays stopped for the day. To trade again after it trips, raise the limit (or set it to 0) and press Start on the bots; the next hit squares off and alerts again."
+      help={
+        <>
+          Today&apos;s P&amp;L of Bots 1–4 together (closed trades plus open positions, before charges, each bot&apos;s own PAPER or
+          LIVE book; not the research desk or replays). When it reaches the target, or falls to minus the stop loss, every bot is
+          panic squared off and stays stopped for the rest of the day. The square-off time does the same at that time of day
+          (IST, 09:15–15:30), whatever the P&amp;L; each bot&apos;s own square-off time still applies too. To start again today,
+          change the settings so they are no longer hit. Backtests use them too: each replayed day stops when that bot&apos;s own
+          P&amp;L for the day hits the target or stop, or the replay clock reaches the square-off time. 0 or empty = off.
+          <br />
+          After a limit trips, every bot is halted for the day. Raise the limit (or set it to 0) and press Start on the bots to
+          trade again today; the next hit alerts and squares off again.
+        </>
+      }
+    >
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Day target (₹)
@@ -138,6 +145,6 @@ export function AllBotsGuard() {
           {guard.reason || "The all-bots limit was hit"} (Bots {guard.halted_bots.join(", ")}).
         </p>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { inr, smaApi, type PnlAlertSettings } from "@/lib/smaApi";
 
 /**
@@ -79,14 +80,21 @@ export function PnlAlerts() {
   const total = view?.total ?? 0;
   const sent = Object.entries(view?.sent ?? {});
   return (
-    <section id="pnl-alerts" aria-label="All bots P&L alerts" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="text-base font-semibold text-slate-100">All bots: P&amp;L alerts (Telegram / phone call)</h2>
-      <p className="mt-1 text-xs text-slate-400">
+    <SettingsCard
+      id="pnl-alerts"
+      title="All bots: P&L alerts (Telegram / phone call)"
+      tier="start"
+      status={view ? { on: Number(view.profit) > 0 || Number(view.loss) > 0 } : null}
+      summary="A Telegram message or a phone call when today's total profit or loss across the bots reaches a level you set. Alerts only: nothing is closed. Change a level and it alerts again at the new level."
+      help={
+        <>
         Tells you when today&apos;s P&amp;L of Bots 1–4 together (closed trades plus open positions, each bot&apos;s own PAPER or LIVE
         book) reaches the profit level or falls to minus the loss level. Each level alerts once a day at its value, while NSE is open; change a level and the new one alerts again when the total reaches it.
-        Alerts only: nothing is squared off (use the day target / stop loss above for that). Telegram uses your trade alert
+        Alerts only: nothing is squared off (the all-bots day target / stop loss on the Bots tab does that). Telegram uses your trade alert
         channel; the call uses the phone-call channel (market hours, at most one call every 5 minutes). 0 = off.
-      </p>
+        </>
+      }
+    >
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Alert at profit (₹)
@@ -160,6 +168,6 @@ export function PnlAlerts() {
             .join("; ")}
         </p>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

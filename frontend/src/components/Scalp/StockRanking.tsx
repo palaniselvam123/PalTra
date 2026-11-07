@@ -9,6 +9,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { smaApi, type StockRankJob, type StockRankRow, type StockRankVerdict, type StockRankView } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { GuideBar } from "./GuideBar";
 
 const DAYS = [5, 10, 15, 20, 30];
 const BOTS = [1, 2, 3, 4];
@@ -140,6 +141,7 @@ export function StockRanking({
           Keep the strong ones and arm them; re-run it every week or two, since a stock that worked last month may not this
           month. Practice money only — nothing is armed until you press Arm, and no order is sent.
         </p>
+          <GuideBar lesson="scalp-backtest" terms={["backtest", "win_pct", "green_days", "profit_factor", "per_trade", "drawdown", "pnl_before", "arm"]} className="mt-2" />
       </div>
 
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">

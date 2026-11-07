@@ -4,7 +4,7 @@ import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, BellRing, Crosshair, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, BookOpen, Crosshair, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
@@ -32,6 +32,7 @@ import { Pager, usePaged } from "@/components/ui/pagination";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { GuideBar } from "@/components/Scalp/GuideBar";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -504,6 +505,7 @@ export default function ScalpPage() {
               {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
             </button>
           </section>
+          <GuideBar lesson="scalp-monitor" terms={["scalp_ready", "atr_pct_min", "spread", "value_cr", "bias", "ltp", "arm", "paper", "fno"]} note="Scalp-ready = a stock that moves enough each minute, is cheap to trade (tight spread) and has plenty of money flowing." className="mb-2" />
           {simulated && (
             <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
               The desk is on the simulated feed, so these prices are invented and alerts are off. Switch the data source
@@ -795,6 +797,7 @@ export default function ScalpPage() {
               at least the minimum. Each stock alerts at most once per cooldown. Watch only — no order is placed. Uses
               the alert channel set up on Settings. Turns off again if the server restarts.
             </p>
+            <GuideBar lesson="scalp-alerts" terms={["scalp_ready", "paper"]} className="mb-2" />
             <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
               <label className="flex flex-col gap-1">
                 Min score
@@ -1074,6 +1077,13 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
           </button>
         );
       })}
+      <Link
+        href="/learn/?lesson=scalp-start-here"
+        className="ml-auto inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
+        title="New to this page? A short guide to every tab, in plain words (PDF on the Learn page)"
+      >
+        <BookOpen size={13} aria-hidden /> Start here (guide)
+      </Link>
     </div>
   );
 }

@@ -1796,6 +1796,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   gradient, the page glow and `accentViolet` follow) and remaps every hard-coded `violet-*` utility in use, both themes.
   `serverBadge` gives the "Backtest server" / "Scanner" chip next to the logo (Navbar) and the terminal title. Green / red
   never change. Add a new `violet-*` class and add its line to that block.
+- **Settings page** (desk `/settings`, `app/settings/page.tsx`; display only, every control saves through the same routes as
+  before): one tab at a time (Strategy, Bots, Alerts & news, Account), each tab with an icon, a one-line hint and a plain
+  intro line. A header ("Settings", the Learn page link, "What do these words mean?" opening the plain-words panel with the
+  settings terms), a dismissible "New here? Three things to set first" strip (broker keys, stop and daily loss, Telegram;
+  `settings.starthere.v1` in the browser) and pill jump links. Every card is `components/Settings/SettingsCard.tsx`
+  (`SettingsCard` / `CardHeader`: title, an On / Off `StatusChip`, a "Start here" / "Advanced" `TierTag`, one plain
+  `summary` line always shown, the long explanation folded under "How it works", then the controls); the Account cards
+  (broker keys, AI key, live data check, ORB risk) share the same frame. The strategy form (`StrategyConfigPanel`) opens
+  with "Settings for" (shared / one stock, with an ⓘ), tags groups 1, 5, 6 "Start here" and 4, 7 "Advanced"
+  (`GROUP_INTRO`), and shows a plain intro line inside each open group; the bot tabs show each bot's PAPER / LIVE chip and a
+  running dot. Add a card by wrapping it in `SettingsCard` with a one-line `summary` and the explanation as `help`.
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the
@@ -1803,7 +1814,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   "Mark as done" (kept per browser). `/learn/?lesson=<id>` opens one. Lessons now: `sma9-slope` (Turn exit vs V-turn,
   linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
   anchor `#sma-day-extreme`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
-  `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it).
+  `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it),
+  and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
+  `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
+  `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
+  `scalp-morning-test`, `scalp-history`, `scalp-alerts`; `sideways-test` covers that tab). They are written as small
+  JavaScript modules in `frontend/scripts/guides/lessons/` (shared pieces and drawn SVG figures in `frontend/scripts/guides/lib.js`)
+  and rendered to the PDFs by `frontend/scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
+  page count in `lessons.ts`. Every Scalp tab shows `components/Scalp/GuideBar.tsx` under its heading: "Guide (PDF)"
+  opens that tab's lesson and "What do these words mean?" opens the plain-words panel, whose entries live in
+  `frontend/src/lib/plainWords.ts` (term, meaning, example, why it matters; add a key there and list it in the tab's
+  `terms`). The tab bar has a "Start here (guide)" link. Display only.
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's

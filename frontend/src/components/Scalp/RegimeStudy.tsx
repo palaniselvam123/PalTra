@@ -1,8 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { BookOpen, CheckCircle2, FastForward, HelpCircle, Loader2, Pause, Play, Search, Square, XCircle } from "lucide-react";
-import Link from "next/link";
+import { CheckCircle2, FastForward, HelpCircle, Loader2, Pause, Play, Search, Square, XCircle } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists } from "@/components/Scalp/ScanLists";
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
@@ -11,6 +10,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { smaApi, type RegimeSignal, type RegimeStock, type RegimeStudy as Study } from "@/lib/smaApi";
+import { GuideBar } from "./GuideBar";
 
 /**
  * Sideways test (backend regime_study.py): does a "sideways" or "trending" reading hold for the next hour? For past
@@ -104,12 +104,7 @@ export function RegimeStudy({
             and past days, so you know which stocks to skip or give to the sideways bot (Bot 2).
           </p>
         </div>
-        <Link
-          href="/learn/?lesson=sideways-test"
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
-        >
-          <BookOpen size={14} aria-hidden /> Full guide
-        </Link>
+        <GuideBar lesson="sideways-test" terms={["chop", "trend", "efficiency", "adx", "cross", "slope", "gap_pct", "bot"]} className="shrink-0" />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

@@ -1,8 +1,7 @@
 "use client";
 
-import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
-import clsx from "clsx";
+import { CardHeader } from "@/components/Settings/SettingsCard";
 import { CheckCircle2, XCircle, Loader2, LogIn } from "lucide-react";
 import { api } from "@/lib/api";
 import { istStamp, markIst } from "@/lib/format";
@@ -88,24 +87,30 @@ export function ApiKeyForm() {
   };
 
   return (
-    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium text-slate-200">Broker API Keys &amp; Authentication Vault</h2>
-        <span
-          className={clsx(
-            "text-[10px] px-1.5 py-0.5 rounded ml-auto",
-            saved?.configured ? "bg-profit/15 text-profit" : "bg-slate-700/40 text-slate-400"
-          )}
-        >
-          {check === "loading"
-            ? "CHECKING…"
+    <section id="broker-keys" aria-labelledby="broker-keys-title" className="terminal-dark scroll-mt-24 rounded-xl border border-white/10 bg-[#151921] p-4 sm:p-5 space-y-4">
+      <CardHeader
+        id="broker-keys"
+        title="Broker keys (Groww)"
+        tier="start"
+        status={
+          check === "loading"
+            ? { on: false, text: "Checking…" }
             : check === "error"
-              ? "COULD NOT CHECK"
+              ? { on: false, text: "Could not check" }
               : saved?.configured
-                ? "KEYS SAVED"
-                : "NOT CONFIGURED"}
-        </span>
-      </div>
+                ? { on: true, text: saved.token_valid ? "Keys saved · connected" : "Keys saved" }
+                : { on: false, text: "Not set up" }
+        }
+        summary="Your Groww API key, secret and TOTP secret. They let the app read live prices and your balance; orders stay on the practice book until you switch a bot to LIVE yourself. Saved encrypted and never shown again."
+        help={
+          <>
+            Get the key and secret from Groww&apos;s API settings and the TOTP secret from its two-step login QR code. Press
+            Save, then Connect Live Data: the status chip turns green when the session works. Without keys the desk runs on
+            made-up (simulated) prices, which is fine for learning the screens but not for judging a strategy. Groww is the only
+            broker with a live connection; Zerodha and Angel One keys are stored but not used yet.
+          </>
+        }
+      />
 
       {check === "error" && (
         <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
@@ -136,22 +141,6 @@ export function ApiKeyForm() {
           </div>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1">
-          How keys are kept
-          <InfoTip label="About how broker keys are kept">
-            Credentials are encrypted at rest (Fernet) before being written to the local database. Groww is the only broker
-            with a live adapter — Zerodha/Angel One store credentials but have no login implementation yet.
-          </InfoTip>
-        </span>
-        <span className="inline-flex items-center gap-1">
-          What these keys do
-          <InfoTip label="About what broker keys do">
-            These keys read market data and the Groww cash balance. Orders stay on the practice book until you confirm Send
-            orders to Groww on the Trade page, and a real order still waits until 09:15 IST.
-          </InfoTip>
-        </span>
-      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs text-slate-400 flex flex-col gap-1">
@@ -238,6 +227,6 @@ export function ApiKeyForm() {
           {testResult}
         </div>
       )}
-    </div>
+    </section>
   );
 }

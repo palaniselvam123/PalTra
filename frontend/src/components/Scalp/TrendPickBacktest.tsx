@@ -8,6 +8,7 @@ import { TrendPickCompare } from "@/components/Scalp/TrendPickCompare";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { replayActive, smaApi, type TrendPickDirection, type TrendPicksAuto } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { GuideBar } from "./GuideBar";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const PICK_TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "13:00", "14:00"];
@@ -103,6 +104,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
           The bot you choose trades only those, from the pick time to the square-off, with its own settings. Practice money
           only — nothing is armed and no order is sent.
         </p>
+          <GuideBar lesson="scalp-backtest" terms={["backtest", "strong_trend", "bot", "handoff", "pnl_before", "win_pct", "green_days", "drawdown", "profit_factor", "per_trade", "paper"]} className="mt-2" />
       </div>
 
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">

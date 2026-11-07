@@ -107,9 +107,10 @@ export function SmaStrategySettings() {
         )}
       >
         <div>
-          <h2 className="text-base font-semibold text-slate-100">SMA terminal strategy</h2>
+          <h2 className="text-base font-semibold text-slate-100">How this bot trades</h2>
           <p className="text-xs text-slate-400">
-            Entry, filters, gap mode, exits, stop and daily limits. The terminal shows a summary.
+            Pick a bot, then set when it enters, the checks, when it exits, the stop, the size and the daily limits. Press Save at
+            the bottom; the bot uses the new settings from its next trade.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -126,10 +127,28 @@ export function SmaStrategySettings() {
                 desk === d ? "bg-sky-500/25 font-semibold text-sky-100" : "text-slate-300 hover:bg-white/5"
               )}
             >
-              {d === "research"
-                ? "Research"
-                : bots.find((b) => b.bot === (d === "live" ? 1 : Number(d.slice(3))))?.name ??
-                  (d === "live" ? "Bot 1" : `Bot ${d.slice(3)}`)}
+              {(() => {
+                const b = d === "research" ? null : bots.find((x) => x.bot === (d === "live" ? 1 : Number(d.slice(3))));
+                const label = d === "research" ? "Research" : b?.name ?? (d === "live" ? "Bot 1" : `Bot ${d.slice(3)}`);
+                return (
+                  <span className="flex items-center gap-1.5">
+                    {b?.status === "RUNNING" ? <span aria-hidden title="Running" className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> : null}
+                    {label}
+                    {d === "research" ? (
+                      <span className="rounded bg-white/10 px-1 text-[10px] font-semibold text-slate-300">practice</span>
+                    ) : b ? (
+                      <span
+                        className={clsx(
+                          "rounded px-1 text-[10px] font-semibold",
+                          b.mode === "LIVE" ? "bg-rose-500/20 text-rose-200" : "bg-emerald-500/15 text-emerald-200"
+                        )}
+                      >
+                        {b.mode}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })()}
             </button>
           ))}
         </div>

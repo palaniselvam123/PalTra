@@ -1,8 +1,8 @@
 "use client";
 
-import { InfoTip } from "@/components/ui/InfoTip";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { CardHeader } from "@/components/Settings/SettingsCard";
 import { Brain, CheckCircle2, Loader2, Trash2, XCircle } from "lucide-react";
 import { api, type AiStatus } from "@/lib/api";
 
@@ -117,40 +117,23 @@ export function AiKeyForm() {
   };
 
   return (
-    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <Brain size={16} className="text-bot" />
-        <h2 className="text-sm font-medium text-slate-200">AI Trading Expert (OpenAI)</h2>
-        {status && (
-          <span
-            className={clsx(
-              "text-[10px] px-1.5 py-0.5 rounded ml-auto",
-              status.configured ? "bg-profit/15 text-profit" : "bg-slate-700/40 text-slate-400"
-            )}
-          >
-            {status.configured ? "KEY SAVED" : "NOT CONFIGURED"}
-          </span>
-        )}
-      </div>
+    <section id="ai-key" aria-labelledby="ai-key-title" className="terminal-dark scroll-mt-24 rounded-xl border border-white/10 bg-[#151921] p-4 sm:p-5 space-y-4">
+      <CardHeader
+        id="ai-key"
+        title="AI expert (OpenAI key)"
+        icon={<Brain size={16} aria-hidden />}
+        status={status ? (status.configured ? { on: true, text: "Key saved" } : { on: false, text: "Optional · not set up" }) : null}
+        summary="Optional. An OpenAI key lets the app read the news for you and answer questions in plain words (the Ask the bot widget). It can never place an order."
+        help={
+          <>
+            The expert is asked for the read the engine cannot produce: news flow, results and guidance, analyst actions, sector
+            read-across, macro and policy, flows and retail sentiment. It is told not to analyse the chart, because the bots already
+            do that. The key is encrypted at rest, in the same vault as the broker keys, and is never sent back to the browser. It
+            buys analysis only: there is no path from a model&apos;s answer to an order.
+          </>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1">
-          What the expert does
-          <InfoTip label="About the AI expert">
-            The expert is asked for the read your ORB engine cannot produce: news flow, results and guidance, analyst
-            actions, sector read-across, macro and policy, flows, and retail sentiment. It is explicitly instructed not to
-            analyse the stock&apos;s price behaviour — no chart patterns, levels or indicators — because the engine already
-            owns that and running it twice would just double-count the same signal.
-          </InfoTip>
-        </span>
-        <span className="inline-flex items-center gap-1">
-          How the key is kept
-          <InfoTip label="About how the AI key is kept">
-            The key is Fernet-encrypted at rest, same vault as your broker credentials, and is never returned by any endpoint
-            after you save it. It buys analysis only: there is no path from a model response to an order.
-          </InfoTip>
-        </span>
-      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="text-xs text-slate-400 flex flex-col gap-1">
@@ -314,6 +297,6 @@ export function AiKeyForm() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

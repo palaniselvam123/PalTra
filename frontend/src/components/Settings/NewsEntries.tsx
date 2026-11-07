@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
+import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { smaApi, type BotSummary, type NewsEntrySettings } from "@/lib/smaApi";
 
 const IMPACTS: { value: NewsEntrySettings["impact"]; label: string }[] = [
@@ -86,10 +87,14 @@ export function NewsEntries() {
   const field = "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
   const recent = view?.recent ?? [];
   return (
-    <section id="news-entries" aria-label="News entries" className="terminal-dark mb-4 scroll-mt-20 rounded-xl border border-white/10 p-4">
-      <h2 className="text-base font-semibold text-slate-100">
-        News entries: trade at once on a news alert
-        {view?.bot ? (
+    <SettingsCard
+      id="news-entries"
+      title="News entries: trade at once on a news alert"
+      tier="advanced"
+      status={view ? { on: Boolean(view.bot) } : null}
+      summary="Lets one bot buy or sell straight away on a strong, fresh headline, without waiting for a cross. Headlines can be misread, so try it on a PAPER bot first. Off by default."
+      badge={
+        view?.bot ? (
           <span
             className={clsx(
               "ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold",
@@ -98,9 +103,11 @@ export function NewsEntries() {
           >
             Bot {view.bot} · {view.mode ?? "PAPER"}
           </span>
-        ) : null}
-      </h2>
-      <p className="mt-1 text-xs text-slate-400">
+        ) : null
+      }
+      help={
+        <>
+
         When a fresh headline qualifies, the bot you pick orders straight away: good news buys, bad news shorts. No SMA cross,
         candle pattern or entry filter is checked. From then on that bot&apos;s own settings run the trade: its stop loss /
         trailing stop / target, the SMA cross or candle-colour exit, the other exits and the square-off. Market hours, the
@@ -108,7 +115,9 @@ export function NewsEntries() {
         company are read once a minute (09:15–15:30); Google News headlines of armed / held stocks on the News alerts interval.
         Each headline trades once. Headlines are scored by rules (or AI when on) and can be misread, so try it on a PAPER bot
         first.
-      </p>
+        </>
+      }
+    >
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Bot
@@ -198,6 +207,6 @@ export function NewsEntries() {
           </table>
         </div>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

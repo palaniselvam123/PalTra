@@ -17,6 +17,7 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
+import { GuideBar } from "./GuideBar";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 
@@ -518,9 +519,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         </>
         )}
       </div>
+      <GuideBar lesson="scalp-trend-quality" terms={["cross", "chop", "trend", "strong_trend", "phase", "vwap", "gap_pct", "speed", "rvol", "arm", "handoff"]} className="mb-2" />
       <Explain
         className="mb-3"
-        lead={`Information only. Each stock's ${label} crosses on today's closed candles are counted, with the longest run since the last one and the average time and move between them.`}
+        lead={`How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`}
       >
         <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>

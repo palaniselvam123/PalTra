@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import clsx from "clsx";
+import { CardHeader } from "@/components/Settings/SettingsCard";
 import { Stethoscope, Loader2, CheckCircle2, XCircle, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -31,12 +32,20 @@ export function MarketDataDiagnostics() {
   const verdict = result ? VERDICT_COPY[result.verdict] ?? VERDICT_COPY.MARKET_DATA_ERROR : null;
 
   return (
-    <div className="rounded-card border border-border bg-surface p-5 space-y-4">
-      <h2 className="text-sm font-medium text-slate-200">Live Data Diagnostics</h2>
-      <p className="text-xs text-slate-500">
-        Checks each Groww capability separately, so you can tell a credential problem from a missing market-data
-        subscription. Account access and market data are billed and permissioned independently.
-      </p>
+    <section id="diagnostics" aria-labelledby="diagnostics-title" className="terminal-dark scroll-mt-24 rounded-xl border border-white/10 bg-[#151921] p-4 sm:p-5 space-y-4">
+      <CardHeader
+        id="diagnostics"
+        title="Live data check"
+        icon={<Stethoscope size={16} aria-hidden />}
+        summary="Press Run to test each part of the Groww connection on its own, so you can tell a wrong key from a missing market-data subscription."
+        help={
+          <>
+            Checks each Groww capability separately: the login, the account read, and the market-data calls. Account access and
+            market data are billed and permissioned by Groww independently, so one can work while the other is refused. A red
+            row names the call that failed and why.
+          </>
+        }
+      />
 
       <button
         onClick={run}
@@ -87,6 +96,6 @@ export function MarketDataDiagnostics() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
