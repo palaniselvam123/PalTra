@@ -1178,6 +1178,28 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `RegimeStudy` (one at a time, after `groww_pressure.wait_for_bots`, last report in `morning_study.json` next to the SMA DB,
   `MORNING_STUDY_FILE`, keeps the backtest server awake). `GET /api/morning-study`, `POST /api/morning-study/start` (symbols,
   days, at, minutes, min_move, delivery; same hours rule as the Sideways test), `POST /api/morning-study/stop`.
+- `backend/second_candle.py` – **Second candle test** (read-only research; the Scalp page's "Second candle" tab,
+  `components/Scalp/SecondCandle.tsx`; no order path, nothing in the strategy reads it): the owner's Most active routine
+  measured on every stock and past day: sort by volume vs usual, read the day's Nth candle (`candle_no` 1-6, default 2;
+  `minutes` 1/3/5/10/15, default 5), buy on green / sell on red at its close (the next candle's open; a doji or a body
+  under `min_body_pct` is skipped). Per stock and day (`analyze_day`, on the same cached 1-minute candles as the Strategy
+  lab, `strategy_lab.load_tape`, `WARMUP_DAYS` 5): `rvol` at the signal candle's close (`active_picks._cum_at`) and the
+  day's `rank` by it (`rank_days`; `top_n`, 0 = all, picks the rows the summary reads), `best_pts` / `best_at` (the most
+  the price went with the trade, ₹ and %), `worst_pts` / `worst_at` (against), `hit` / `target_at` / `minutes_to_target`
+  for `target_points` (₹10) and `against_before_target` (the stop a winner needed), `close_pts` at `square_off` (15:15),
+  `trail` (₹ a trailing stop `trails` % of the entry behind the best price made, judged on the 1-minute candles, the stop
+  in force when a minute starts tested on that minute: the cautious order) and `fav_min` / `adv_min` (the minute each ₹
+  `LEVELS` 2-50 was first reached with / against the trade, so `target_stop_outcome` judges any target / stop pair later:
+  target first, stop first (the same minute = the stop), else the square-off). `summarize`: hit rate, averages, by side,
+  by rank bucket, by day, the trailing-stop table (`best_trail`), the target + stop table over `DEFAULT_STOPS`
+  (`best_stop`), when the target / best / worst came per half hour (`by_half_hour`), plain-words `answer`; `by_stock` per
+  stock. `SecondCandle` (one at a time, after `groww_pressure.wait_for_bots`, last report + rows in `second_candle.json`
+  next to the SMA DB, `SECOND_CANDLE_FILE`, keeps the backtest server awake). `GET /api/second-candle[?rows=false]`,
+  `POST /api/second-candle/start` (symbols, days 1-30, minutes, candle_no, top_n, target_points, square_off, trails,
+  min_body_pct; same hours rule as the Sideways test), `POST /api/second-candle/stop`. The tab recomputes everything
+  from the rows in the browser, so the filters (place by volume, side, day, reached, target / best time window, search,
+  ticked only) change every number, and the target + stop test takes any level without a new run; sortable per
+  stock-day and per-stock tables, CSV, Arm / Arm ticked (arming only).
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
   strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the

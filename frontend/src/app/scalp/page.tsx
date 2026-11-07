@@ -24,6 +24,7 @@ import { MorningScan } from "@/components/Scalp/MorningScan";
 import { CarryScan } from "@/components/Scalp/CarryScan";
 import { TurnScan } from "@/components/Scalp/TurnScan";
 import { MorningStudy } from "@/components/Scalp/MorningStudy";
+import { SecondCandle } from "@/components/Scalp/SecondCandle";
 import { High52Scan } from "@/components/Scalp/High52Scan";
 import { RegimeStudy } from "@/components/Scalp/RegimeStudy";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
@@ -78,6 +79,7 @@ const TABS = [
   { id: "trend", label: "Trend quality" },
   { id: "high52", label: "52-week high" },
   { id: "active", label: "Most active" },
+  { id: "second", label: "Second candle" },
   { id: "backtest", label: "Backtest" },
   { id: "lab", label: "Strategy lab" },
   { id: "sideways", label: "Sideways test" },
@@ -134,6 +136,8 @@ export default function ScalpPage() {
   const onSidewaysStatus = useCallback((st: ScanStatus) => setSidewaysStatus(st), []);
   const [morningTestStatus, setMorningTestStatus] = useState<ScanStatus | null>(null);
   const onMorningTestStatus = useCallback((st: ScanStatus) => setMorningTestStatus(st), []);
+  const [secondStatus, setSecondStatus] = useState<ScanStatus | null>(null);
+  const onSecondStatus = useCallback((st: ScanStatus) => setSecondStatus(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -377,6 +381,7 @@ export default function ScalpPage() {
     lab: null,
     sideways: sidewaysStatus,
     morningtest: morningTestStatus,
+    second: secondStatus,
     history: null,
     alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
   };
@@ -772,6 +777,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "sideways"}>
           <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />
+        </div>
+        <div hidden={tab !== "second"}>
+          <SecondCandle armed={armed} arming={arming} onArm={(s) => arm(s, "Second candle test")} onArmMany={(list) => armSeveral(list, "Second candle test")} paused={paused} onStatus={onSecondStatus} />
         </div>
         <div hidden={tab !== "morningtest"}>
           <MorningStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Morning test")} onArmMany={(list) => armSeveral(list, "Morning test")} paused={paused} onStatus={onMorningTestStatus} />
