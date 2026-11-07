@@ -1207,6 +1207,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   days). Saved in `trend_compare.json` next to the SMA DB (`TREND_COMPARE_FILE`, last 20; a comparison playing at a restart
   becomes `INTERRUPTED`). `POST /api/trend-picks/compare`, `GET /api/trend-picks/compare[/{id}]`,
   `POST /api/trend-picks/compare/stop`, `DELETE /api/trend-picks/compare/{id}` (the runs stay in Backtests).
+- `backend/stock_rank.py` – **Stock ranking: which stocks does my strategy win on?** (practice money, no order path,
+  nothing armed until the owner presses Arm; the Scalp page's Backtest tab, `components/Scalp/StockRanking.tsx`): the chosen
+  bot's own strategy (`bot` 1-4, refused while LIVE; `play_handoffs`, on by default) backtested on the picked stocks (scan
+  lists, up to `MAX_STOCKS` 250) over the same past days, `batch` (10-50, default 25) stocks per run, one run after another
+  on the bot's replay player at full speed (`trend_compare.play`, shared: `key="symbols"`, `save=stock_rank.put`;
+  `main.replay_start` with `symbols`; one job at a time, never next to a pick-time comparison; keeps the backtest server
+  awake). `rank` reads every closed trade of the job's runs (`trades_for_runs`; with `earlier_days` also the bot's other
+  FINISHED runs ending in that window, `earlier_runs`; a stock-day played twice counts once, the newest run's) and gives each
+  stock trades, win %, green days, P&L before / after charges, per trade / day, average return per trade in % of qty × entry
+  price, profit factor, best / worst trade and day, and a verdict (`STRONG` profit factor ≥ 1.5 and ≥ 55 % green days, `GOOD`
+  ≥ 1.2, `WEAK`, `AVOID` lost money, `FEW` under `MIN_TRADES` 5 trades or `MIN_DAYS` 3 days), sorted by verdict then P&L;
+  `summary` gives plain-words lines (what trading only the strong and good ones would have made). Jobs in `stock_rank.json`
+  next to the SMA DB (`STOCK_RANK_FILE`, last 20; a job playing at a restart becomes `INTERRUPTED`). `POST /api/stock-rank`,
+  `GET /api/stock-rank[/{id}?earlier_days=]`, `POST /api/stock-rank/stop`, `DELETE /api/stock-rank/{id}`. The table has
+  sorting, Show (keep / per verdict), search, tick boxes, Arm / Arm ticked (the usual arm prompt).
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,

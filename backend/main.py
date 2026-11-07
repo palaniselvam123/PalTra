@@ -42,6 +42,7 @@ import regime_study
 import morning_study
 import trend_picks
 import trend_compare
+import stock_rank
 import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
@@ -362,6 +363,7 @@ def boot_engine() -> asyncio.Task | None:
     # A deploy or restart mid-replay: those runs can be resumed where they stopped.
     close_orphan_replay_rows(interrupted=True)
     trend_compare.interrupt_running()
+    stock_rank.interrupt_running()
     if server_role.is_backtest():
         return _boot_backtest_server()
     cfg = engine.load_config()
@@ -437,6 +439,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(lambda: regime_study.study().running)
     backtest_server.add_busy_check(lambda: morning_study.study().running)
     backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
+    backtest_server.add_busy_check(lambda: stock_rank.jobs().running)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
     # so it does not stop itself between two passes.
     chop_autos.reload()
@@ -2626,6 +2629,8 @@ async def trend_compare_start(body: TrendCompareStart):
     comp = trend_compare.comparer()
     if comp.running:
         raise HTTPException(409, "A pick-time comparison is already running. Stop it first.")
+    if stock_rank.jobs().running:
+        raise HTTPException(409, "A stock ranking is running on the replay player. Stop it first or wait for it.")
     try:
         day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
         times = trend_compare.clean_times(body.times)
@@ -2720,6 +2725,112 @@ async def trend_compare_delete(cid: int):
     if not trend_compare.delete(cid):
         raise HTTPException(404, "No such comparison")
     return {"deleted": cid}
+
+
+class StockRankStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The stocks to test (the card's scan lists), at most stock_rank.MAX_STOCKS.
+    universe: list[str]
+    bot: int = Field(default=1, ge=1, le=4)
+    batch: Literal[10, 15, 20, 25, 30, 40, 50] = 25
+    play_handoffs: bool = True
+    lists: list[str] = Field(default_factory=list, max_length=5)
+
+
+@app.post("/api/stock-rank")
+async def stock_rank_start(body: StockRankStart):
+    """Stock ranking (stock_rank.py): backtest the bot's own strategy on many stocks, `batch` stocks per run, one run
+    after another on its replay player at full speed, then rank the stocks. Practice money; never sends an order."""
+    _refuse_desk_replay_in_market()
+    jobs = stock_rank.jobs()
+    if jobs.running:
+        raise HTTPException(409, "A stock ranking is already running. Stop it first.")
+    if trend_compare.comparer().running:
+        raise HTTPException(409, "A pick-time comparison is running on the replay player. Stop it first or wait for it.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    eng = engine if body.bot == 1 else bot_engines.get(body.bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {body.bot}")
+    cfg = eng.load_config()
+    if (cfg.trading_mode or "PAPER").upper() == "LIVE":
+        raise HTTPException(409, f"Switch {getattr(cfg, 'bot_name', None) or f'Bot {body.bot}'} to PAPER first.")
+    names = [n for n in dict.fromkeys((s or "").strip().upper() for s in body.universe) if is_nse_symbol(n)]
+    if not names:
+        raise HTTPException(400, "Give at least one stock to test.")
+    names = names[: stock_rank.MAX_STOCKS]
+    if not engine.broker.token:
+        engine.broker.adopt_saved_session()
+    if not engine.broker.token:
+        raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the Settings page first.")
+    item = stock_rank.new(
+        day.isoformat(), end_day.isoformat(), names, body.bot, body.batch, body.play_handoffs, lists=body.lists
+    )
+    session = replays[body.bot]
+
+    async def start(symbols: list[str]) -> int | None:
+        await replay_start(
+            ReplayStart(
+                date=day.isoformat(), end_date=end_day.isoformat(), symbols=symbols, bot=body.bot,
+                speed=max(SPEEDS), play_handoffs=body.play_handoffs,
+            )
+        )
+        while session.run_id is None and session.status == "LOADING":
+            await asyncio.sleep(1)
+        if session.run_id is None:
+            raise RuntimeError(session.error or f"the replay ended {session.status.lower()} before it started")
+        return session.run_id
+
+    def info() -> tuple[str, int | None]:
+        return session.status, session.run_id
+
+    async def stop() -> None:
+        if session.status in trend_compare.BUSY:
+            await session.stop("REPLAY_STOPPED")
+
+    jobs.start(item, start, info, stop, key="symbols", save=stock_rank.put)
+    return item
+
+
+@app.get("/api/stock-rank")
+async def stock_rank_list():
+    """The saved ranking jobs, newest first (no rankings; open one for it)."""
+    jobs = stock_rank.jobs()
+    running_id = jobs.current["id"] if jobs.running and jobs.current else None
+    return {"running": running_id, "items": list(reversed(stock_rank.load_all()))}
+
+
+@app.get("/api/stock-rank/{jid}")
+async def stock_rank_get(jid: int, earlier_days: int = Query(0, ge=0, le=90)):
+    """One job with its stock ranking; `earlier_days` also counts the bot's finished backtests of those last days."""
+    jobs = stock_rank.jobs()
+    item = jobs.current if jobs.running and jobs.current and jobs.current["id"] == jid else stock_rank.get(jid)
+    if item is None:
+        raise HTTPException(404, "No such ranking")
+    return await asyncio.to_thread(stock_rank.view, item, earlier_days)
+
+
+@app.post("/api/stock-rank/stop")
+async def stock_rank_stop():
+    jobs = stock_rank.jobs()
+    if not jobs.running:
+        return {"stopped": False}
+    jobs.stop()
+    return {"stopped": True}
+
+
+@app.delete("/api/stock-rank/{jid}")
+async def stock_rank_delete(jid: int):
+    """Forget a ranking. Its runs stay in Backtests."""
+    jobs = stock_rank.jobs()
+    if jobs.running and jobs.current and jobs.current["id"] == jid:
+        raise HTTPException(409, "Stop the ranking before deleting it.")
+    if not stock_rank.delete(jid):
+        raise HTTPException(404, "No such ranking")
+    return {"deleted": jid}
 
 
 @app.post("/api/replay/start")

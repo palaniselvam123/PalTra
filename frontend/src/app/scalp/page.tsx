@@ -14,6 +14,7 @@ import { useServerRole } from "@/hooks/useServerRole";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ScalpPickBacktest } from "@/components/Scalp/ScalpPickBacktest";
 import { TrendPickBacktest } from "@/components/Scalp/TrendPickBacktest";
+import { StockRanking } from "@/components/Scalp/StockRanking";
 import { ScanHistory } from "@/components/Scalp/ScanHistory";
 import { MostActive } from "@/components/Scalp/MostActive";
 import { ChopScan } from "@/components/Scalp/ChopScan";
@@ -759,6 +760,7 @@ export default function ScalpPage() {
         <div hidden={tab !== "backtest"}>
           <div className="space-y-4">
             <TrendPickBacktest armed={armed} />
+            <StockRanking armed={armed} arming={arming} onArm={(s) => arm(s, "Stock ranking")} onArmMany={(list) => armSeveral(list, "Stock ranking")} />
             <ScalpPickBacktest universe={(data?.rows ?? []).map((r) => r.symbol)} minAtr={minAtr} minValue={minValue} />
           </div>
         </div>
