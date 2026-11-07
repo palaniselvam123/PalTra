@@ -1,5 +1,6 @@
 "use client";
 
+import { StopScan } from "@/components/Scalp/StopScan";
 import { ScanListPicker, cleanLists, resolveScanSymbols, type ScanList } from "@/components/Scalp/ScanLists";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -499,6 +500,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute candle`}
         </h2>
         {!saved && (
+        <>
         <button
           type="button"
           onClick={() => void start(true)}
@@ -508,6 +510,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         >
           {busy || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        <StopScan
+          running={data?.running}
+          stop={() => smaApi.scanStop("chop")}
+          onStopped={() => void smaApi.chopScan().then(setData).catch(() => undefined)}
+        />
+        </>
         )}
       </div>
       <Explain

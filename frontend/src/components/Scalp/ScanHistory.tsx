@@ -15,11 +15,13 @@ import {
   type ScanCheckRow,
   type ScanHistory as ScanHistoryData,
   type ScanKind,
+  type ScanRun,
   type ScanRunDetail,
 } from "@/lib/smaApi";
 import { saveFile } from "@/lib/chartTable";
 import { pdfText } from "@/lib/backtestPdf";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
+import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
@@ -221,6 +223,8 @@ export function ScanHistory({
   const [runId, setRunId] = useState<number | null>(null);
   const [run, setRun] = useState<ScanRunDetail | null>(null);
   const [show, setShow] = useState<"all" | "quiet" | "strong" | "approaching">("all");
+  const [query, setQuery] = useState("");
+  const [runKind, setRunKind] = useState<"all" | "cross" | "chop">("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Desk only: pull the backtest server's saved scans this desk lacks (BACKTEST_URL + the link token).
@@ -322,9 +326,30 @@ export function ScanHistory({
   const shown = useMemo(
     () =>
       merged.filter((r) =>
-        show === "quiet" ? r.quiet_runner : show === "strong" ? !!r.trend : show === "approaching" ? r.state === "APPROACHING" : true
+        (show === "quiet" ? r.quiet_runner : show === "strong" ? !!r.trend : show === "approaching" ? r.state === "APPROACHING" : true) &&
+        matchesText(query, r.symbol)
       ),
-    [merged, show]
+    [merged, show, query]
+  );
+  const runRows = useMemo(() => (hist?.runs ?? []).filter((r) => runKind === "all" || r.kind === runKind), [hist?.runs, runKind]);
+  const { sorted: runsSorted, sort: runSort, onSort: onRunSort } = useSort<ScanRun, "time" | "kind" | "candle" | "stocks" | "how" | "checked">(
+    runRows,
+    (r, k) => {
+      switch (k) {
+        case "time":
+          return r.as_of;
+        case "kind":
+          return r.label;
+        case "candle":
+          return r.minutes ?? null;
+        case "stocks":
+          return r.row_count;
+        case "how":
+          return r.meta.source ?? null;
+        case "checked":
+          return r.checked_at ?? null;
+      }
+    }
   );
   const cols = run ? columns(run.kind, !!run.check) : [];
   const { sorted, sort, onSort } = useSort<Merged, string>(shown, (r, k) => cols.find((c) => c.id === k)?.get(r) ?? null);
@@ -415,6 +440,21 @@ export function ScanHistory({
 
       {error && <p className="mb-2 text-xs text-loss">{error}</p>}
 
+      {(hist?.runs ?? []).length > 0 ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          Scanner
+          <select
+            value={runKind}
+            onChange={(e) => setRunKind(e.target.value as typeof runKind)}
+            className="min-h-8 rounded-md border border-slate-700 bg-transparent px-2 text-slate-200"
+          >
+            <option value="all">All ({hist!.runs.length})</option>
+            <option value="cross">Cross scan</option>
+            <option value="chop">Trend quality</option>
+          </select>
+          <span>{runsSorted.length} saved scans · click a header to sort</span>
+        </div>
+      ) : null}
       {(hist?.runs ?? []).length === 0 ? (
         <p className="py-4 text-center text-xs text-slate-500">
           No saved scans{day ? " on this day" : " yet"}. Scans are saved from now on, each time one finishes.
@@ -424,16 +464,16 @@ export function ScanHistory({
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card text-xs uppercase text-slate-500">
               <tr className="[&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-medium">
-                <th>Time</th>
-                <th>Scanner</th>
-                <th>Candle</th>
-                <th>Stocks</th>
-                <th>How</th>
-                <th>Accuracy</th>
+                <SortTh label="Time" k="time" sort={runSort} onSort={onRunSort} text />
+                <SortTh label="Scanner" k="kind" sort={runSort} onSort={onRunSort} text />
+                <SortTh label="Candle" k="candle" sort={runSort} onSort={onRunSort} />
+                <SortTh label="Stocks" k="stocks" sort={runSort} onSort={onRunSort} />
+                <SortTh label="How" k="how" sort={runSort} onSort={onRunSort} text />
+                <SortTh label="Accuracy" k="checked" sort={runSort} onSort={onRunSort} text />
               </tr>
             </thead>
             <tbody>
-              {hist!.runs.map((r) => (
+              {runsSorted.map((r) => (
                 <tr
                   key={r.id}
                   onClick={() => setRunId(r.id)}
@@ -564,6 +604,9 @@ export function ScanHistory({
                 <option value="approaching">About to cross</option>
               )}
             </select>
+            <div className="w-48">
+              <TextFilter value={query} onChange={setQuery} />
+            </div>
             <span>{sorted.length} shown</span>
           </div>
           <div className="overflow-x-auto" ref={paged.anchor}>

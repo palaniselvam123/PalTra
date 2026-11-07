@@ -8,6 +8,8 @@ import { ScanListPicker, resolveScanSymbols, useScanLists } from "@/components/S
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { TextFilter, matchesText } from "@/components/ui/tableTools";
+import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { smaApi, type RegimeSignal, type RegimeStock, type RegimeStudy as Study } from "@/lib/smaApi";
 
 /**
@@ -508,6 +510,8 @@ function SignalCard({ s, base, minBucket, win }: { s: RegimeSignal; base: number
   );
 }
 
+type StockKey = "symbol" | "armed" | "trend" | "chop" | "follow" | "bot";
+
 const BOT_CHIP: Record<string, { word: string; tone: string }> = {
   "3": { word: "Bot 3 · trend", tone: "bg-emerald-500/20 text-emerald-200 ring-emerald-400/40" },
   "2": { word: "Bot 2 · sideways", tone: "bg-amber-500/20 text-amber-200 ring-amber-400/40" },
@@ -561,7 +565,26 @@ function StockTable({
 }) {
   const [show, setShow] = useState<string>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const ticks = useTicks();
+  const keyOf = (r: RegimeStock) => (r.bot == null ? "none" : String(r.bot));
+  const filtered = (rows ?? []).filter((r) => (show === "all" || keyOf(r) === show) && ticks.shows(r.symbol) && matchesText(query, r.symbol));
+  const { sorted: shown, sort, onSort } = useSort<RegimeStock, StockKey>(filtered, (r, k) => {
+    switch (k) {
+      case "symbol":
+        return r.symbol;
+      case "armed":
+        return (armed.get(r.symbol) ?? []).join(",") || null;
+      case "trend":
+        return r.trend_score;
+      case "chop":
+        return r.chop_score;
+      case "follow":
+        return r.follow_pct;
+      case "bot":
+        return r.bot ?? null;
+    }
+  });
   if (!rows) {
     return (
       <p className="rounded-lg border border-dashed border-white/15 p-3 text-sm text-slate-400">
@@ -570,9 +593,7 @@ function StockTable({
       </p>
     );
   }
-  const keyOf = (r: RegimeStock) => (r.bot == null ? "none" : String(r.bot));
   const counts = rows.reduce<Record<string, number>>((m, r) => ({ ...m, [keyOf(r)]: (m[keyOf(r)] ?? 0) + 1 }), {});
-  const shown = rows.filter((r) => (show === "all" || keyOf(r) === show) && ticks.shows(r.symbol));
   return (
     <div className="space-y-2">
       <div>
@@ -598,6 +619,9 @@ function StockTable({
             {o.word} {o.key === "all" ? rows.length : (counts[o.key] ?? 0)}
           </button>
         ))}
+        <div className="ml-auto w-48">
+          <TextFilter value={query} onChange={setQuery} />
+        </div>
       </div>
       {onArmMany ? <TickBar ticks={ticks} onArm={onArmMany} /> : null}
       <div className="overflow-x-auto">
@@ -605,14 +629,12 @@ function StockTable({
           <thead>
             <tr className="text-left text-slate-500">
               {onArmMany ? <TickHead ticks={ticks} symbols={shown.map((r) => r.symbol)} /> : null}
-              <th className="pb-2 font-normal">Stock</th>
-              <th className="pb-2 font-normal">Armed now</th>
-              <th className="pb-2 font-normal" title="Out of 100 windows, how many moved at least 1 ATR mostly one way">Trend score</th>
-              <th className="pb-2 font-normal" title="Out of 100 windows, how many had 2 or more SMA crosses">Choppy score</th>
-              <th className="pb-2 text-right font-normal" title="Average result of following the SMA side for one window, before charges">
-                SMA-follow
-              </th>
-              <th className="pb-2 pl-4 font-normal">Suggested</th>
+              <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+              <SortTh label="Armed now" k="armed" sort={sort} onSort={onSort} text />
+              <SortTh label="Trend score" k="trend" sort={sort} onSort={onSort} title="Out of 100 windows, how many moved at least 1 ATR mostly one way" />
+              <SortTh label="Choppy score" k="chop" sort={sort} onSort={onSort} title="Out of 100 windows, how many had 2 or more SMA crosses" />
+              <SortTh label="SMA-follow" k="follow" sort={sort} onSort={onSort} num title="Average result of following the SMA side for one window, before charges" />
+              <SortTh label="Suggested" k="bot" sort={sort} onSort={onSort} text className="pl-4" />
               <th className="pb-2 font-normal" />
             </tr>
           </thead>

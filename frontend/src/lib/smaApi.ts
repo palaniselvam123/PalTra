@@ -2298,6 +2298,9 @@ export const smaApi = {
   turnScanStart: (body: { symbols: string[]; minutes: number; count: number; rule: TurnRule; need_fast: boolean; alert: boolean; force?: boolean }) =>
     request<TurnScan>("/api/turn-scan/start", { method: "POST", body: JSON.stringify({ force: true, ...body }) }, 20000, false),
   turnScan: () => request<TurnScan>("/api/turn-scan", undefined, undefined, false),
+  /** Stop one running Scalp scan; the last finished rows stay (backend main.scan_stop). */
+  scanStop: (kind: "cross" | "chop" | "morning" | "high52" | "carry" | "turn") =>
+    request<{ stopped: boolean; running: boolean }>(`/api/scan-stop/${kind}`, { method: "POST" }, 20000, false),
   /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
   high52ScanStart: (symbols: string[], force = false) =>
     request<High52Scan>("/api/high52-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),

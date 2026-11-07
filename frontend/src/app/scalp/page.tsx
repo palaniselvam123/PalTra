@@ -762,7 +762,7 @@ export default function ScalpPage() {
           <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />
         </div>
         <div hidden={tab !== "morningtest"}>
-          <MorningStudy armed={armed} paused={paused} onStatus={onMorningTestStatus} />
+          <MorningStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Morning test")} onArmMany={(list) => armSeveral(list, "Morning test")} paused={paused} onStatus={onMorningTestStatus} />
         </div>
         <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>

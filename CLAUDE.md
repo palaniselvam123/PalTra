@@ -1172,7 +1172,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   give-back from the high, the next session's gap and close (`next_day_pct` only once it closed), and NSE's delivery % that
   day (`app.services.delivery.load_day`, skipped when unreadable). `summarize`: per label `_group` (closed-higher %, average /
   median move, bounce, % bouncing ≥ `BOUNCE_BIG` 1 %, half-hour low / high times, next-day gap and close, delivery and a
-  closed-higher split at the median delivery), plain-words `answer` lines and `by_stock`. `MorningStudy` mirrors
+  closed-higher split at the median delivery), plain-words `answer` lines ("ended higher than at 10:30 on 7 of 10 days (70%)",
+  a warning under 5 days) and `by_stock`. The tab has a "How to read these numbers" example, a per-stock table with sorting,
+  search, "days at least", tick boxes, Arm / Arm ticked (arming only). `MorningStudy` mirrors
   `RegimeStudy` (one at a time, after `groww_pressure.wait_for_bots`, last report in `morning_study.json` next to the SMA DB,
   `MORNING_STUDY_FILE`, keeps the backtest server awake). `GET /api/morning-study`, `POST /api/morning-study/start` (symbols,
   days, at, minutes, min_move, delivery; same hours rule as the Sideways test), `POST /api/morning-study/stop`.
@@ -1274,6 +1276,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stock's candles before today); the main process keeps them in `_PAST` (memory only, keyed by stock and window start,
   cleared when the day changes) and hands them back, so later scans that day download only today
   (`_frame_with_past`). `chop_scan._crosses` counts crosses on whole columns (same result as the old row loop).
+  **Stop one scan** (each card's Stop, shown while it runs; `components/Scalp/StopScan.tsx`): terminal
+  `POST /api/scan-stop/{cross|chop|morning|high52|carry|turn}` (`main.scan_stop` → that scanner's `stop`; the last finished
+  rows stay) and desk `POST /api/scalp/active/stop` (`ActiveScanner.stop_pass`: the running Most active pass reads no more
+  stocks and keeps the last finished scan). The Sideways and Morning tests have their own Stop.
   **Pause all scans** (top of the Scalp page; memory only, a restart resumes): the page sets
   both switches. Terminal `PUT /api/scans/pause` refuses Cross / Trend quality starts (409)
   and stops a running pass (`scanner.stop`, the last rows stay); desk `POST /api/scalp/pause`

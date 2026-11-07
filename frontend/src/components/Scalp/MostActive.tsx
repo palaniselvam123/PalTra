@@ -1,5 +1,6 @@
 "use client";
 
+import { StopScan } from "@/components/Scalp/StopScan";
 import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
@@ -401,6 +402,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         >
           {scanning || data?.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Scan now
         </button>
+        {view === "live" ? <StopScan running={data?.running} stop={() => api.scalpActiveStop()} onStopped={() => void load()} /> : null}
       </div>
       {view === "live" && auto ? (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-slate-300">
