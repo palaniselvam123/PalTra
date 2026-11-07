@@ -82,6 +82,19 @@ def test_quotes_use_the_desk_session_from_the_link(monkeypatch, backtest):
     assert backtest_server.remote_token() == ""
 
 
+def test_without_a_desk_session_its_own_saved_login_is_used(monkeypatch, backtest):
+    import groww_client
+
+    monkeypatch.setattr(groww_client, "_desk_token_cache", None)
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "own-login")
+    backtest_server.state.token = ""
+    backtest_server.state.token_error = "The desk has no Groww session today: log in to Groww on the desk."
+    assert groww_client.desk_session_token() == "own-login"
+    assert "this server's own Groww login is used" in backtest_server._groww_note()
+    backtest_server.state.token = "desk-session"
+    assert groww_client.desk_session_token() == "desk-session"  # the desk's session still comes first
+
+
 # ---- idle stop ----
 
 
