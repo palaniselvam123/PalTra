@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ChatWidget } from "@/components/Chat/ChatWidget";
 import { NotificationProvider } from "@/components/Notifications/NotificationProvider";
+import { ServerAccent } from "@/components/ServerAccent";
 
 export const metadata: Metadata = {
   // Each route's layout names the page ("Scalp · PalTra"); the dashboard is plain "PalTra". The terminal's
@@ -25,6 +26,8 @@ const themeScript = `
       t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
     document.documentElement.setAttribute('data-theme', t);
+    var s = localStorage.getItem('orb.server');
+    if (s === 'backtest' || s === 'scanner') document.documentElement.setAttribute('data-server', s);
   } catch (e) {
     document.documentElement.setAttribute('data-theme', 'light');
   }
@@ -38,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="bg-base text-slate-200 min-h-screen">
+        <ServerAccent />
         <NotificationProvider>
           {children}
           <ChatWidget />

@@ -36,6 +36,8 @@ import clsx from "clsx";
 import { api, type FeedStatus } from "@/lib/api";
 import { useNotificationCenter } from "@/components/Notifications/NotificationProvider";
 import { useTheme } from "@/hooks/useTheme";
+import { useServerRole } from "@/hooks/useServerRole";
+import { serverBadge } from "@/components/ServerAccent";
 import { Badge, Button, StatusDot } from "@/components/ui";
 
 /**
@@ -103,6 +105,7 @@ export function Navbar({
   const pathname = usePathname();
   const notif = useNotificationCenter();
   const { theme, toggle } = useTheme();
+  const badge = serverBadge(useServerRole()?.role);
   const [switching, setSwitching] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -208,6 +211,11 @@ export function Navbar({
           </span>
           <span className="grad-text hidden text-title font-bold sm:inline">ORB Desk</span>
         </Link>
+        {badge && (
+          <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset sm:inline ${badge.className}`} title="Which server this page is on">
+            {badge.text}
+          </span>
+        )}
 
         <nav className="hidden min-w-0 items-center gap-2 self-stretch overflow-x-auto [scrollbar-width:none] xl:flex 2xl:gap-5 [&::-webkit-scrollbar]:hidden">
           {NAV.map(({ href, label }) => {
