@@ -34,6 +34,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
   const [direction, setDirection] = useState<TrendPickDirection>("BOTH");
   const [minutes, setMinutes] = useState(5);
   const [bot, setBot] = useState(1);
+  const [playHandoffs, setPlayHandoffs] = useState(true);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [auto, setAuto] = useState<TrendPicksAuto | null>(null);
@@ -66,10 +67,11 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         direction,
         minutes,
         bot,
+        play_handoffs: playHandoffs,
       });
       setNote({
         ok: true,
-        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} strong trends at ${pickTime} out of ${Math.min(universe.length, 250)} stocks, traded from ${pickTime}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
+        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} strong trends at ${pickTime} out of ${Math.min(universe.length, 250)} stocks, traded from ${pickTime}${playHandoffs ? ", hand-offs to Bot 2 / Bot 3 played inside the run" : ""}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the backtest" });
@@ -168,6 +170,13 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
             ))}
           </select>
         </label>
+        <label
+          className="flex min-h-9 items-center gap-1.5 self-end text-xs text-slate-200"
+          title="When Bot N's own settings move a stock (a recovery or losing V-turn, choppy after N losing trades or a stop-loss to Bot 2; a breakout or strong trend to Bot 3), the stock stays in this backtest and trades from then on with that bot's settings, marked 'as Bot 2' / 'as Bot 3'. The hand-offs happen only if they are switched on in the chosen bot's Settings (7. Advanced). The live Trade lists are not touched."
+        >
+          <input type="checkbox" checked={playHandoffs} onChange={(e) => setPlayHandoffs(e.target.checked)} className="accent-violet-400" />
+          Play hand-offs (Bot 2 / Bot 3)
+        </label>
         <button
           type="button"
           disabled={busy}
@@ -188,7 +197,16 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         </p>
       )}
 
-      <TrendPickCompare armed={armed} lists={lists} days={days} topN={topN} direction={direction} minutes={minutes} bot={bot} />
+      <TrendPickCompare
+        armed={armed}
+        lists={lists}
+        days={days}
+        topN={topN}
+        direction={direction}
+        minutes={minutes}
+        bot={bot}
+        playHandoffs={playHandoffs}
+      />
 
       <div className="rounded-lg border border-slate-800 bg-surface2/40 p-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
@@ -268,6 +286,15 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
             <label className="flex flex-col gap-1">
               Stocks
               <ScanListPicker value={auto.lists as ScanList[]} onChange={(next) => void saveAuto({ lists: next as TrendPicksAuto["lists"] })} />
+            </label>
+            <label className="inline-flex min-h-9 items-center gap-1.5 self-end text-xs text-slate-200" title="When Bot N's own settings move a stock (a recovery or losing V-turn, choppy after N losing trades or a stop-loss to Bot 2; a breakout or strong trend to Bot 3), the stock stays in this backtest and trades from then on with that bot's settings, marked 'as Bot 2' / 'as Bot 3'. The hand-offs happen only if they are switched on in the chosen bot's Settings (7. Advanced). The live Trade lists are not touched.">
+              <input
+                type="checkbox"
+                checked={auto.play_handoffs !== false}
+                onChange={(e) => void saveAuto({ play_handoffs: e.target.checked })}
+                className="accent-violet-400"
+              />
+              Play hand-offs (Bot 2 / Bot 3)
             </label>
           </div>
         ) : (

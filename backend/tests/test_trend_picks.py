@@ -158,3 +158,34 @@ async def test_a_replay_trades_only_the_strong_trend_picks_from_the_pick_time(mo
         trades = s.query(TradeLog).filter(TradeLog.run_id == run.id).all()
     assert all(t.symbol == "UP" and t.entry_time.time() >= dt.time(10, 30) for t in trades)
     database.reset_engine()
+
+
+def test_hand_offs_are_played_by_default_and_can_be_left_out(tmp_path, monkeypatch):
+    """Like the replay bar's "Play hand-offs (Bot 2 / Bot 3)": on by default, so Bot 1's hand-offs play inside the run."""
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/h.db")
+    monkeypatch.setenv("TREND_PICKS_AUTO_FILE", str(tmp_path / "auto.json"))
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+
+    import main
+
+    seen = []
+
+    async def fake_begin(broker, names, day, start, speed, end_day=None, settings=None, rule=None, bot=1, bot_name=None):
+        seen.append(settings)
+
+    monkeypatch.setattr(main.engine.broker, "token", "test-token", raising=False)
+    monkeypatch.setattr(main.replays[1], "begin", fake_begin)
+    monkeypatch.setattr(main, "_refuse_desk_replay_in_market", lambda *a, **k: None)
+    with TestClient(main.app) as client:
+        body = {"date": "2026-10-01", "end_date": "2026-10-02", "universe": ["SBIN"], "pick_time": "10:00"}
+        assert client.post("/api/replay/trend-picks", json=body).status_code == 200
+        assert client.post("/api/replay/trend-picks", json={**body, "play_handoffs": False}).status_code == 200
+        assert client.get("/api/trend-picks/auto").json()["play_handoffs"] is True
+        assert client.put("/api/trend-picks/auto", json={"play_handoffs": False}).json()["play_handoffs"] is False
+    assert seen[0].get("play_handoffs") is True
+    assert "play_handoffs" not in seen[1]
+    database.reset_engine()

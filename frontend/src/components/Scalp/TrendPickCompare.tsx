@@ -66,6 +66,7 @@ export function TrendPickCompare({
   direction,
   minutes,
   bot,
+  playHandoffs,
 }: {
   armed: Map<string, string[]>;
   lists: string[];
@@ -74,6 +75,7 @@ export function TrendPickCompare({
   direction: TrendPickDirection;
   minutes: number;
   bot: number;
+  playHandoffs: boolean;
 }) {
   const [times, setTimes] = useState<string[]>(DEFAULT_TIMES);
   const [items, setItems] = useState<TrendCompare[]>([]);
@@ -148,6 +150,7 @@ export function TrendPickCompare({
         minutes,
         bot,
         lists,
+        play_handoffs: playHandoffs,
       });
       setOpenId(got.id);
       setRunning(got.id);
@@ -279,7 +282,7 @@ function CompareView({ view, running }: { view: TrendCompare & { result: TrendCo
     <div className="mt-3 space-y-3">
       <p className="text-xs text-slate-500">
         {view.start_date} → {view.end_date} · top {view.top_n} {dirText} on {view.minutes}-min candles · {view.universe} stocks
-        · Bot {view.bot}&apos;s settings · P&amp;L before charges unless marked.
+        · Bot {view.bot}&apos;s settings{view.play_handoffs ? " with hand-offs to Bot 2 / Bot 3 played" : ""} · P&amp;L before charges unless marked.
       </p>
       {done.length > 0 && (
         <ul className="list-disc space-y-0.5 pl-5 text-sm text-slate-200">

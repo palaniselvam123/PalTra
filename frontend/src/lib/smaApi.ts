@@ -831,6 +831,7 @@ export type TrendCompare = {
   bot: number;
   universe: number;
   lists: string[];
+  play_handoffs?: boolean;
   runs: TrendCompareRun[];
   note: string;
 };
@@ -876,6 +877,8 @@ export type TrendPicksAuto = {
   minutes: number;
   bot: number;
   lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
+  /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run. */
+  play_handoffs: boolean;
   last_day: string | null;
   last_run_id: number | null;
   last_note: string | null;
@@ -2587,6 +2590,8 @@ export const smaApi = {
     minutes: number;
     bot: number;
     speed?: number;
+    /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (on by default, like the replay bar). */
+    play_handoffs?: boolean;
   }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   trendPicksAuto: () => request<TrendPicksAuto>("/api/trend-picks/auto", undefined, undefined, false),
   /** Compare pick times: the same strong-trend pick backtest once per time, one after another (trend_compare.py). */
@@ -2600,6 +2605,7 @@ export const smaApi = {
     minutes: number;
     bot: number;
     lists?: string[];
+    play_handoffs?: boolean;
   }) => request<TrendCompare>("/api/trend-picks/compare", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   trendCompares: () =>
     request<{ running: number | null; items: TrendCompare[] }>("/api/trend-picks/compare", undefined, undefined, false),

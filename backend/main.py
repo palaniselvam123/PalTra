@@ -2479,11 +2479,13 @@ class TrendPickStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
+    #: Play Bot 1's hand-offs inside the run on Bot 2's / Bot 3's settings (handoff_chain.py), like the replay bar.
+    play_handoffs: bool = True
 
 
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
-    minutes: int, speed: int,
+    minutes: int, speed: int, play_handoffs: bool = True,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player. Raises HTTPException on a refusal."""
     eng = engine if bot == 1 else bot_engines.get(bot)
@@ -2517,7 +2519,13 @@ async def _start_trend_picks(
         pick_time,
         speed,
         end_day=end_day,
-        settings={**settings_snapshot(cfg), "stock_settings": stock_settings(cfg), "bot": bot, "bot_name": bot_label},
+        settings={
+            **settings_snapshot(cfg),
+            "stock_settings": stock_settings(cfg),
+            "bot": bot,
+            "bot_name": bot_label,
+            **({"play_handoffs": True} if play_handoffs else {}),
+        },
         rule=rule,
         bot=bot,
         bot_name=bot_label,
@@ -2541,7 +2549,8 @@ async def replay_trend_picks(body: TrendPickStart):
     if not (dt.time(9, 20) <= pick_time <= dt.time(14, 30)):
         raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
     return await _start_trend_picks(
-        body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed
+        body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
+        play_handoffs=body.play_handoffs,
     )
 
 
@@ -2554,6 +2563,7 @@ class TrendPicksAuto(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] | None = None
     bot: int | None = Field(default=None, ge=1, le=4)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = Field(default=None, max_length=5)
+    play_handoffs: bool | None = None
 
 
 @app.get("/api/trend-picks/auto")
@@ -2583,7 +2593,8 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         names = await _auto_symbols(False, s.lists)
         h, m = s.pick_time.split(":")
         await _start_trend_picks(
-            s.bot, names, day, day, dt.time(int(h), int(m)), s.top_n, s.direction, s.minutes, max(SPEEDS)
+            s.bot, names, day, day, dt.time(int(h), int(m)), s.top_n, s.direction, s.minutes, max(SPEEDS),
+            play_handoffs=s.play_handoffs,
         )
     except HTTPException as exc:
         return None, f"not started: {exc.detail}"
@@ -2604,6 +2615,7 @@ class TrendCompareStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     bot: int = Field(default=1, ge=1, le=4)
     lists: list[str] = Field(default_factory=list, max_length=5)
+    play_handoffs: bool = True
 
 
 @app.post("/api/trend-picks/compare")
@@ -2637,13 +2649,15 @@ async def trend_compare_start(body: TrendCompareStart):
         day.isoformat(), end_day.isoformat(), times, body.top_n, body.direction, body.minutes, body.bot, len(names),
         lists=body.lists,
     )
+    item["play_handoffs"] = body.play_handoffs
+    trend_compare.put(item)
     session = replays[body.bot]
 
     async def start(at: str) -> int | None:
         h, m = at.split(":")
         await _start_trend_picks(
             body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
-            max(SPEEDS),
+            max(SPEEDS), play_handoffs=body.play_handoffs,
         )
         # The run id is known once the candles are in; wait for it (or for the load to fail).
         while session.run_id is None and session.status == "LOADING":

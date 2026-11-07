@@ -1188,7 +1188,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `scalp_picks.picks_for_day` hands it over, read in a worker thread). `ReplaySession`'s Scalp-pick mode trades only them on
   the chosen bot's replay player and settings (`bot` 1-4, refused while LIVE) from the pick minute to the square-off; picks
   saved on the run (`scalp_pick`, `kind: TREND`). `POST /api/replay/trend-picks` (date, end_date, universe, pick_time, top_n,
-  direction, minutes, bot, speed; `main._start_trend_picks`). **Daily run** (`AutoSettings`, `trend_picks_auto.json` next to
+  direction, minutes, bot, speed, `play_handoffs`; `main._start_trend_picks`). **Hand-offs played** (`play_handoffs`, on by
+  default like the replay bar's "Play hand-offs (Bot 2 / Bot 3)"; the tab's tick box, the daily run's and the comparison's
+  too): the run's settings carry `play_handoffs`, so the chosen bot's own hand-offs (recovery, losing V-turn, choppy after
+  losses, stop-loss → Bot 2; breakout / strong trend → Bot 3) play inside the run on that bot's settings
+  (`backend/handoff_chain.py`); off = the old way. **Daily run** (`AutoSettings`, `trend_picks_auto.json` next to
   the SMA DB, `TREND_PICKS_AUTO_FILE`, off by default): `run` (started in `boot_engine` and `_boot_backtest_server`,
   `main._start_trend_picks_loop`, every `CHECK_SEC` 60 s) once each weekday after `run_at` (15:31-23:59, default 15:45)
   backtests that day's picks (`main._trend_picks_daily`, full speed, waits while that bot's player is busy; `last_day`,
