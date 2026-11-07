@@ -15,6 +15,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 3_000;
 const STORE = "sma.turn.filters";
@@ -189,6 +190,7 @@ export function TurnScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           onStopped={() => void smaApi.turnScan().then(setData).catch(() => undefined)}
         />
       </div>
+      <GuideBar lesson="scalp-turning" terms={["sma", "cross", "trend", "gap_pct", "candle", "speed", "arm"]} className="mb-2" />
       <Explain
         className="mb-3"
         lead={`A falling stock (${sma} pointing down) whose last candles turn green and close back above SMA ${data?.sma_fast ?? 9} — before the lines cross. Or the mirror: a rising stock turning red. Candles only — nothing here places an order.`}

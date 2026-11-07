@@ -15,6 +15,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 3_000;
 const STORE = "sma.high52.filters";
@@ -186,6 +187,7 @@ export function High52Scan({ armed, arming, onArm, onArmMany, paused = false, on
           onStopped={() => void smaApi.high52Scan().then(setData).catch(() => undefined)}
         />
       </div>
+      <GuideBar lesson="scalp-52-week-high" terms={["high52", "candle", "arm"]} className="mb-2" />
       <Explain
         className="mb-3"
         lead="Each stock's highest daily high and lowest daily low over the 52 weeks before today, from Groww's daily candles, and how far today's price is from them. A stock whose high today reached the old 52-week high is a breakout. Candles only — nothing here places an order."

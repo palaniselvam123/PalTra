@@ -17,6 +17,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { DeliveryCells, DeliveryHead, DeliveryNote, useDelivery } from "@/components/Scalp/delivery";
 import type { DeliveryRow } from "@/lib/api";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 3_000;
 const STORE = "sma.carry.filters";
@@ -211,6 +212,7 @@ export function CarryScan({ armed, arming, onArm, onArmMany, paused = false, onS
           onStopped={() => void smaApi.carryScan().then(setData).catch(() => undefined)}
         />
       </div>
+      <GuideBar lesson="scalp-carry-over" terms={["sma", "cross", "trend", "gap_pct", "delivery", "arm"]} className="mb-2" />
       <Explain
         className="mb-3"
         lead={`Which way each stock's ${sma} pointed when yesterday closed, and whether that trend carried on today. Candles only — nothing here places an order.`}

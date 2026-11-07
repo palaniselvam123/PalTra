@@ -15,6 +15,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 3_000;
 const STORE = "sma.morning.filters";
@@ -193,6 +194,7 @@ export function MorningScan({ armed, arming, onArm, onArmMany, paused = false, o
           onStopped={() => void smaApi.morningScan().then(setData).catch(() => undefined)}
         />
       </div>
+      <GuideBar lesson="scalp-morning-0930" terms={["orb", "rvol", "vwap", "gap_pct", "candle", "sma", "arm"]} note="Runner = a stock that passes most of five quick checks on its first three candles." className="mb-2" />
       <Explain
         className="mb-3"
         lead={`At 09:30 a stock has only three 5-minute candles, too few for Trend quality. These five checks need only those three. ${runnerMin} or more of 5 is a runner worth arming; fewer stays in the chop zone. Candles only — nothing here places an order.`}

@@ -18,6 +18,7 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { smaApi, type ChopScanRow, type CrossScanMinutes, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -406,6 +407,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         </button>
         {view === "live" ? <StopScan running={data?.running} stop={() => api.scalpActiveStop()} onStopped={() => void load()} /> : null}
       </div>
+        <GuideBar lesson="scalp-most-active" terms={["rvol", "value_cr", "vwap", "speed", "bias", "delivery", "strong_trend", "chop", "arm", "backtest"]} note="Where the money is trading right now: the busiest F&O stocks, ranked by the column you choose." className="mb-2" />
       {view === "test" ? (
         <ActiveTrendTest />
       ) : view === "backtest" ? (

@@ -26,6 +26,7 @@ import { Pager, usePaged } from "@/components/ui/pagination";
 import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { GrowwLink } from "@/components/ui/growwLink";
+import { GuideBar } from "./GuideBar";
 
 const POLL_MS = 3_000;
 
@@ -367,6 +368,7 @@ export function ScanHistory({
         Pick a day and a time to see exactly what that scan showed, download it, or press Check accuracy after the market
         closes to see what each stock did afterwards. Information only: nothing here places an order.
       </p>
+      <GuideBar lesson="scalp-history" terms={["cross", "chop", "strong_trend", "backtest"]} className="mb-2" />
 
       <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
         <label className="flex flex-col gap-1">

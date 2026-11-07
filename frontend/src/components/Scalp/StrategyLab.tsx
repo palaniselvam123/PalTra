@@ -19,6 +19,7 @@ import {
   type StrategyLabView,
 } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { GuideBar } from "./GuideBar";
 
 /**
  * Strategy lab (backend strategy_lab.py): tick the entry checks, exits and stop and watch the P&L change at once.
@@ -252,6 +253,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
           (stops on the minute&apos;s high / low), so it is a sieve, not the bot: find the switches that help here, then press
           &quot;Backtest this in the replay&quot; to prove them through the real bot. Practice money; nothing is armed, no order is sent.
         </p>
+          <GuideBar lesson="scalp-strategy-lab" terms={["cross", "backtest", "stop", "trail", "target", "vwap", "rsi", "adx", "bollinger", "supertrend", "ema", "macd", "cvd", "slope", "pnl_before", "profit_factor", "drawdown"]} className="mt-2" />
       </div>
 
       {/* Run */}

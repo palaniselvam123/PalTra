@@ -1803,7 +1803,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   "Mark as done" (kept per browser). `/learn/?lesson=<id>` opens one. Lessons now: `sma9-slope` (Turn exit vs V-turn,
   linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
   anchor `#sma-day-extreme`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
-  `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it).
+  `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it),
+  and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
+  `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
+  `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
+  `scalp-morning-test`, `scalp-history`, `scalp-alerts`; `sideways-test` covers that tab). They are written as small
+  JavaScript modules in `scripts/guides/lessons/` (shared pieces and drawn SVG figures in `scripts/guides/lib.js`)
+  and rendered to the PDFs by `scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
+  page count in `lessons.ts`. Every Scalp tab shows `components/Scalp/GuideBar.tsx` under its heading: "Guide (PDF)"
+  opens that tab's lesson and "What do these words mean?" opens the plain-words panel, whose entries live in
+  `frontend/src/lib/plainWords.ts` (term, meaning, example, why it matters; add a key there and list it in the tab's
+  `terms`). The tab bar has a "Start here (guide)" link. Display only.
 - `backend/app/services/options.py` – Options page (desk `/options`, `app/api/routes_options.py`, `components/Options/`):
   Groww's option chain for an index (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY on NSE; SENSEX on BSE) or any F&O stock.
   Expiries and lot sizes come from the instrument list (`instrument_master.option_expiries`, CE/PE rows), else Groww's
