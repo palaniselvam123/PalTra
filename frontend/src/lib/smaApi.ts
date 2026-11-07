@@ -756,6 +756,64 @@ export type CarryScan = {
   paused?: boolean;
 };
 
+/** Morning test (backend morning_study.py): a bullish / bearish / sideways morning, then the rest of the day. Read-only. */
+export type MorningLabel = "BULLISH" | "BEARISH" | "SIDEWAYS";
+export type MorningTimes = { at: string; count: number; pct: number }[];
+export type MorningGroup = {
+  days: number;
+  stocks: number;
+  closed_higher_pct: number | null;
+  avg_rest_pct: number | null;
+  median_rest_pct: number | null;
+  avg_low_after_pct: number | null;
+  avg_high_after_pct: number | null;
+  avg_bounce_pct: number | null;
+  bounce_big_pct: number | null;
+  avg_giveback_pct: number | null;
+  low_times: MorningTimes;
+  high_times: MorningTimes;
+  avg_next_gap_pct: number | null;
+  next_gap_up_pct: number | null;
+  avg_next_day_pct: number | null;
+  next_day_up_pct: number | null;
+  next_days: number;
+  avg_deliv_pct: number | null;
+  deliv_days: number;
+  deliv_split?: {
+    at_pct: number;
+    high: { days: number; closed_higher_pct: number | null; avg_rest_pct: number | null };
+    low: { days: number; closed_higher_pct: number | null; avg_rest_pct: number | null };
+  };
+};
+export type MorningStockPart = { days: number; closed_higher_pct: number | null; avg_rest_pct: number | null };
+export type MorningStock = {
+  symbol: string;
+  days: number;
+  bullish: MorningStockPart;
+  bearish: MorningStockPart;
+  sideways: MorningStockPart;
+  avg_deliv_pct: number | null;
+};
+export type MorningStudy = {
+  status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
+  done: number;
+  total: number;
+  errors: { symbol: string; error: string }[];
+  params: { symbols?: number; days?: number; at?: string; minutes?: number; min_move?: number; delivery?: boolean };
+  started_at: string | null;
+  finished_at: string | null;
+  cut_times: string[];
+  sizes: number[];
+  report: null | {
+    samples: number;
+    stocks: number;
+    stopped?: boolean;
+    groups: Record<MorningLabel, MorningGroup>;
+    answer: string[];
+    by_stock: MorningStock[];
+  };
+};
+
 /** Turning scan (backend turn_scan.py): candles turning against the SMA trend before the cross. Read-only. */
 export type TurnRule = "COLOUR" | "CLOSES" | "BOTH";
 export type TurnRow = {
@@ -2246,6 +2304,10 @@ export const smaApi = {
   high52Scan: () => request<High52Scan>("/api/high52-scan", undefined, undefined, false),
   /** Sideways test (read-only research on past candles; backend regime_study.py). */
   regimeStudy: () => request<RegimeStudy>("/api/regime-study", undefined, undefined, false),
+  morningStudy: () => request<MorningStudy>("/api/morning-study", undefined, undefined, false),
+  morningStudyStart: (body: { symbols: string[]; days: number; at: string; minutes: number; min_move: number; delivery: boolean }) =>
+    request<MorningStudy>("/api/morning-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  morningStudyStop: () => request<MorningStudy>("/api/morning-study/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
     request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),

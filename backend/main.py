@@ -39,6 +39,7 @@ import day_extreme as day_extreme_mod
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
+import morning_study
 import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
@@ -420,6 +421,7 @@ def _boot_backtest_server() -> asyncio.Task:
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
+    backtest_server.add_busy_check(lambda: morning_study.study().running)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
     # so it does not stop itself between two passes.
     chop_autos.reload()
@@ -4168,6 +4170,52 @@ async def regime_study_start(body: RegimeStudyStart):
 async def regime_study_stop():
     """Stop after the stock being read; the report covers the stocks read so far."""
     return regime_study.study().stop()
+
+
+class MorningStudyStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=morning_study.MAX_STOCKS)
+    days: int = Field(default=20, ge=morning_study.MIN_DAYS, le=morning_study.MAX_DAYS)
+    at: Literal["10:00", "10:30", "11:00", "12:00"] = "10:30"
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    min_move: float = Field(default=morning_study.DEFAULT_MIN_MOVE, ge=0.1, le=5)
+    delivery: bool = True
+
+
+@app.get("/api/morning-study")
+async def morning_study_get():
+    """The Morning test (morning_study.py): progress and the last report. Read-only."""
+    return morning_study.study().view()
+
+
+@app.post("/api/morning-study/start")
+async def morning_study_start(body: MorningStudyStart):
+    """Start the Morning test: past days of each stock's Groww 1-minute candles (and NSE's delivery file), read-only.
+
+    Same hours rule as the Sideways test: on the main desk in market hours only when the desk runs backtests at any
+    hour; the backtest server runs it any time on its own login."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run the Morning test on the backtest server, so it never shares the bots' Groww limit.")
+    cfg = engine.load_config()
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    try:
+        return morning_study.study().start(
+            body.symbols, fetch, body.days, body.at, body.minutes, int(cfg.sma_fast), int(cfg.sma_slow),
+            min_move=body.min_move, with_delivery=body.delivery, wait=groww_pressure.wait_for_bots,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/morning-study/stop")
+async def morning_study_stop():
+    """Stop after the stock being read; the report covers the stocks read so far."""
+    return morning_study.study().stop()
 
 
 def _tape_for(symbol: str):
