@@ -1942,21 +1942,45 @@ export type ReplayInfo = {
   picks?: Record<string, ScalpPick[]>;
 };
 
+/** The rule a pick run recorded (`scalp_pick` in the run's settings). `kind` says which backtest picked: absent =
+ * the Scalp page's scalp picks (scalp_picks.py), `TREND` = strong-trend picks (trend_picks.py), `ACTIVE` = Most active
+ * picks (active_picks.py); each kind keeps its own fields, so read them by kind. */
 export type ScalpPickRule = {
+  kind?: "TREND" | "ACTIVE";
   pick_time: string;
   top_n: number;
-  min_atr_pct: number;
-  min_value_cr: number;
-  require_bias: boolean;
+  /** Scalp picks only. */
+  min_atr_pct?: number;
+  min_value_cr?: number;
+  require_bias?: boolean;
+  /** Strong-trend picks only. */
+  direction?: TrendPickDirection;
+  minutes?: number;
+  /** Most active picks only. */
+  rank?: ActivePickRank;
+  bias?: ActivePickBias;
 };
 
+/** One day's pick. The fields differ by `ScalpPickRule.kind`, so every number is optional. */
 export type ScalpPick = {
   symbol: string;
-  score: number;
-  bias: "LONG" | "SHORT" | "NONE";
-  atr_pct: number | null;
-  value_cr: number | null;
-  move_5m_pct: number | null;
+  /** Scalp picks: the scalp score and the bias. */
+  score?: number | null;
+  bias?: "LONG" | "SHORT" | "NONE" | null;
+  atr_pct?: number | null;
+  value_cr?: number | null;
+  move_5m_pct?: number | null;
+  /** Strong-trend and Most active picks: the side traded. */
+  side?: "LONG" | "SHORT" | null;
+  /** Strong-trend picks. */
+  trend?: string | null;
+  trend_score?: number | null;
+  day_move_pct?: number | null;
+  /** Most active picks. */
+  rvol?: number | null;
+  change_pct?: number | null;
+  speed_pct_min?: number | null;
+  ltp?: number | null;
 };
 
 export type ReplayDayRow = {
