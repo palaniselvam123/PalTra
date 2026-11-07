@@ -51,6 +51,7 @@ import chop_scan
 import high52
 import morning_scan
 import carry_scan
+import turn_scan
 import groww_pressure
 import open_pnl_log
 import pnl_dashboard
@@ -140,6 +141,23 @@ morning_scanner = morning_scan.MorningScanner()
 high52_scanner = high52.High52Scanner()
 # The Scalp page's Carry-over tab: did yesterday's SMA trend carry on today (carry_scan.py).
 carry_scanner = carry_scan.CarryScanner()
+# The Scalp page's Turning tab: candles turning against the SMA trend before the cross (turn_scan.py).
+turn_scanner = turn_scan.TurnScanner()
+_turn_alert = {"on": False}
+_turn_sent = turn_scan.AlertMemory()
+
+
+def _turn_done(rows: list[dict], minutes: int) -> None:
+    """Telegram the stocks newly turning (each stock and way once a day), in market hours, when asked for."""
+    now = dt.datetime.now(IST)
+    if not _turn_alert["on"] or not rows or not market_is_open(now):
+        return
+    fresh = _turn_sent.fresh(rows, now)
+    if fresh:
+        _chop_alert(turn_scan.alert_text(fresh, minutes))
+
+
+turn_scanner.on_done = _turn_done
 # Trend quality re-scan run by the server every N minutes (chop_auto.py).
 chop_autos = chop_auto.ChopAuto()
 # Scan & arm presets: a Trend quality pass, then arm the matches on a bot, now or at set times (scan_arm.py).
@@ -398,7 +416,7 @@ def _boot_backtest_server() -> asyncio.Task:
     engine.broker.set_mode("PAPER")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
-        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner))
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner, turn_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
@@ -2728,6 +2746,7 @@ async def scans_pause(body: ScanPause):
         morning_scanner.stop("Stopped: scans are paused.")
         high52_scanner.stop("Stopped: scans are paused.")
         carry_scanner.stop("Stopped: scans are paused.")
+        turn_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -3297,6 +3316,51 @@ async def carry_scan_start(body: CarryScanStart):
 @app.get("/api/carry-scan")
 async def carry_scan_status():
     return {**carry_scanner.snapshot(), "paused": _scans_paused}
+
+
+class TurnScanStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    count: int = Field(default=turn_scan.DEFAULT_COUNT, ge=1, le=turn_scan.MAX_COUNT)
+    rule: Literal["COLOUR", "CLOSES", "BOTH"] = "COLOUR"
+    need_fast: bool = True
+    alert: bool = False
+    force: bool = False
+
+
+@app.post("/api/turn-scan/start")
+async def turn_scan_start(body: TurnScanStart):
+    """Start the Turning scan (read-only: candles only, no order). Poll GET /api/turn-scan.
+
+    Per stock, on the picked candle: the SMA trend now and, when the last `count` closed candles in a row went the other
+    way (and, with `need_fast`, closed beyond the fast SMA), how close the cross is (turn_scan.py), with the main desk's
+    SMA periods. `alert` sends the stocks newly turning by Telegram (quiet-runner channel) in market hours."""
+    _refuse_when_paused()
+    cfg = engine.load_config()
+    _turn_alert["on"] = bool(body.alert)
+    try:
+        return turn_scanner.start(
+            body.symbols,
+            lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
+            minutes=body.minutes,
+            count=body.count,
+            rule=body.rule,
+            need_fast=body.need_fast,
+            sma_fast=int(cfg.sma_fast),
+            sma_slow=int(cfg.sma_slow),
+            force=body.force,
+            job=_scan_job(
+                scan_worker.turn_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes,
+                extra=(body.count, body.rule, body.need_fast),
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/turn-scan")
+async def turn_scan_status():
+    return {**turn_scanner.snapshot(), "alert": _turn_alert["on"], "paused": _scans_paused}
 
 
 class High52ScanStart(BaseModel):
