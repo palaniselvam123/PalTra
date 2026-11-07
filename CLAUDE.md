@@ -1178,6 +1178,21 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `RegimeStudy` (one at a time, after `groww_pressure.wait_for_bots`, last report in `morning_study.json` next to the SMA DB,
   `MORNING_STUDY_FILE`, keeps the backtest server awake). `GET /api/morning-study`, `POST /api/morning-study/start` (symbols,
   days, at, minutes, min_move, delivery; same hours rule as the Sideways test), `POST /api/morning-study/stop`.
+- `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
+  Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
+  strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the
+  universe (scan lists, up to `MAX_UNIVERSE` 250) is read as the Trend quality card would have then (`read_at` →
+  `chop_scan.analyze` on the 1-minute candles closed before that minute, `minutes` candles, the bot's SMA periods); the
+  `STRONG_BULLISH` / `STRONG_BEARISH` ones in `direction` (BULLISH / BEARISH / BOTH) ranked by trend score, then the day's
+  move, then the SMA gap; the top `top_n` (1-20) are the day's picks (`picks_for_day`, `TrendPickRule` kind `TREND`;
+  `scalp_picks.picks_for_day` hands it over, read in a worker thread). `ReplaySession`'s Scalp-pick mode trades only them on
+  the chosen bot's replay player and settings (`bot` 1-4, refused while LIVE) from the pick minute to the square-off; picks
+  saved on the run (`scalp_pick`, `kind: TREND`). `POST /api/replay/trend-picks` (date, end_date, universe, pick_time, top_n,
+  direction, minutes, bot, speed; `main._start_trend_picks`). **Daily run** (`AutoSettings`, `trend_picks_auto.json` next to
+  the SMA DB, `TREND_PICKS_AUTO_FILE`, off by default): `run` (started in `boot_engine` and `_boot_backtest_server`,
+  `main._start_trend_picks_loop`, every `CHECK_SEC` 60 s) once each weekday after `run_at` (15:31-23:59, default 15:45)
+  backtests that day's picks (`main._trend_picks_daily`, full speed, waits while that bot's player is busy; `last_day`,
+  `last_run_id`, `last_note`). `GET/PUT /api/trend-picks/auto`. To paper-trade the picks live during the day, Scan & arm.
 - `backend/scan_history.py` – scan history (read-only; the Scalp page's History tab): every
   finished Cross scan / Trend quality pass (`on_done` hook on both scanners, saved off the loop
   by `main._keep_scan`) is kept with its time, choices (`meta`: SMA periods, quiet minutes,
