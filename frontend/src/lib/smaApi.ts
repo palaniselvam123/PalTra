@@ -234,6 +234,7 @@ export type SmaConfig = {
   entry_candle_confirm?: boolean;
   entry_candle_pct?: number;
   entry_candle_max?: number;
+  handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;
   /** Day high/low guard: a buy near today's high (a sell near its low) waits for a pullback (day_extreme.py). */
   day_extreme_guard?: boolean;
   day_extreme_pct?: number;

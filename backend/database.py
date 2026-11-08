@@ -186,6 +186,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "entry_candle_confirm": "BOOLEAN DEFAULT 0",
             "entry_candle_pct": "FLOAT DEFAULT 0.05",
             "entry_candle_max": "INTEGER DEFAULT 2",
+            "handoff_candle": "VARCHAR(8) DEFAULT 'OFF'",
             "slope_exit": "BOOLEAN DEFAULT 0",
             "slope_lookback": "INTEGER DEFAULT 2",
             "slope_bend_pct": "FLOAT DEFAULT 60.0",

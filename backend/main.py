@@ -80,6 +80,7 @@ import supertrend
 import tall_pullback as tall_pb
 import extreme_entry as extreme_mod
 import entry_candle as entry_candle_mod
+import handoff_candle as handoff_candle_mod
 import slope_exit as slope_mod
 import stop_handoff as stop_handoff_mod
 import stop_plan as stop_plan_mod
@@ -754,6 +755,7 @@ class ConfigUpdate(BaseModel):
     entry_candle_confirm: bool | None = None
     entry_candle_pct: float | None = Field(default=None, ge=0, le=entry_candle_mod.MAX_PCT)
     entry_candle_max: int | None = Field(default=None, ge=1, le=entry_candle_mod.MAX_CANDLES)
+    handoff_candle: Literal["OFF", "WAIT", "FOLLOW"] | None = None
     slope_exit: bool | None = None
     slope_lookback: int | None = Field(default=None, ge=1, le=slope_mod.MAX_LOOKBACK)
     slope_bend_pct: float | None = Field(default=None, ge=0, le=100)
@@ -1768,6 +1770,7 @@ def _gap_dict(row) -> dict:
         "entry_candle_confirm": entry_candle_mod.on(row),
         "entry_candle_pct": entry_candle_mod.margin_pct(row),
         "entry_candle_max": entry_candle_mod.max_candles(row),
+        "handoff_candle": handoff_candle_mod.mode(row),
         "slope_exit": slope_mod.on(row),
         "slope_lookback": slope_mod.lookback(row),
         "slope_bend_pct": slope_mod.bend_pct(row),

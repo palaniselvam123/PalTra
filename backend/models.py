@@ -447,6 +447,8 @@ class BotConfig(Base):
     entry_candle_confirm: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     entry_candle_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
     entry_candle_max: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    # Hand-off orders to this bot wait for the forming candle: OFF / WAIT (its way) / FOLLOW (its colour) (handoff_candle.py).
+    handoff_candle: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
     # SMA 9 slope exit (slope_exit.py): close when the fast SMA bends or turns against the trade.
     slope_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     slope_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)

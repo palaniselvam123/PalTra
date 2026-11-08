@@ -785,6 +785,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candles, when the SMAs cross against the signal, at the cut-off or trade cap. The tall-candle pullback, the
   candle-extreme limit and a breakout arrival take over from it. Entry reason suffix `:CANDLE_CONFIRM`. Settings → 1.
   When to enter (How the entry order is placed). The stock research baseline keeps it off.
+- `backend/handoff_candle.py` – hand-off orders wait for the forming candle (`handoff_candle` `OFF` default | `WAIT` |
+  `FOLLOW`, set on the **receiving** bot, per bot and per stock, PAPER and LIVE, replays too; Settings → 1. When to enter,
+  "Hand-off orders to this bot"): a `HANDOFF` order through `StrategyEngine.direct_order` (a trend hand-off's
+  `handoff_order`, Bot 2's `handoff_now`, a backtest's `_chain_order`) no longer goes at once: it waits in
+  `StrategyEngine._handoff_wait` and `_watch_handoff_waits` (every pass, after the pullbacks) orders it once the forming
+  candle (`_frames` last row) is `entry_candle_pct` % past its open: `WAIT` only the hand-off's way (green for a buy, red for
+  a sell), `FOLLOW` either way (green buys, red sells, whatever the hand-off asked); dropped after `entry_candle_max` closed
+  candles, at the cut-off or when unarmed. Sent through `direct_order` again (entry reason `HANDOFF:CANDLE_CONFIRM`), so its
+  rules still apply. News / fast-mover orders never wait.
 - `backend/day_extreme.py` – day high/low guard (`day_extreme_guard`, off by default, per bot and per stock, PAPER and
   LIVE): in a strong trend the signal candle often closes at the day's high (buy) or low (short). With it on, an entry
   `apply_signal` would order at once (not candle patterns or candle colour) whose real side buys within `day_extreme_pct`

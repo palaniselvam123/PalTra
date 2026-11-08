@@ -449,6 +449,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     entry_candle_confirm: Boolean(form.entry_candle_confirm),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
+    handoff_candle: (["WAIT", "FOLLOW"].includes(String(form.handoff_candle ?? "OFF").toUpperCase()) ? String(form.handoff_candle).toUpperCase() : "OFF") as "OFF" | "WAIT" | "FOLLOW",
     day_extreme_guard: Boolean(form.day_extreme_guard),
     day_extreme_pct: Math.min(5, Math.max(0, Number(form.day_extreme_pct ?? 0.15) || 0)),
     day_extreme_pull_pct: Math.min(5, Math.max(0, Number(form.day_extreme_pull_pct ?? 0.15) || 0)),
@@ -1424,7 +1425,25 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               price and take over from it.
             </InfoTip>
           </label>
-          {form.entry_candle_confirm ? (
+          <label className="mt-3 block text-xs text-slate-400">
+            <span className="flex items-center gap-1">
+              Hand-off orders to this bot {isOwn("handoff_candle") && <OwnTag />}
+            </span>
+            <select
+              value={String(form.handoff_candle ?? "OFF").toUpperCase()}
+              onChange={(e) => set("handoff_candle", e.target.value)}
+              className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+            >
+              <option value="OFF">Order at once (as before)</option>
+              <option value="WAIT">Wait for a candle going its way, else skip</option>
+              <option value="FOLLOW">Follow the forming candle: green buys, red sells</option>
+            </select>
+            <span className="mt-1 block text-slate-500">
+              When another bot hands a stock over and this bot should order at once (a trend hand-off, or Bot 2 ordering at
+              once), look at this bot&apos;s forming candle first. Uses the % and candle count below.
+            </span>
+          </label>
+          {form.entry_candle_confirm || String(form.handoff_candle ?? "OFF").toUpperCase() !== "OFF" ? (
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <Field
                 label="Past the candle's open by (%)"
@@ -3346,6 +3365,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.counter_entry) add({ group: "enter", key: "counter_entry", text: "Early reversal: enters before the cross after a run of candles against the trend", off: { counter_entry: false } });
   if (f.tall_pullback) add({ group: "enter", key: "tall_pullback", text: `After a tall candle (≥ ${n(f.tall_atr_mult, 1.5)}× ATR), waits for a pullback before entering`, off: { tall_pullback: false } });
   if (f.day_extreme_guard) add({ group: "enter", key: "day_extreme_guard", text: `Never buys within ${n(f.day_extreme_pct, 0.15)}% of the day's high (or shorts near its low): waits ${n(f.day_extreme_pull_pct, 0.15)}% back or at the fast SMA, up to ${n(f.day_extreme_candles, 3)} candles`, off: { day_extreme_guard: false } });
+  if (String(f.handoff_candle ?? "OFF").toUpperCase() === "WAIT") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders wait for a candle going their way, else skip", off: { handoff_candle: "OFF" } });
+  if (String(f.handoff_candle ?? "OFF").toUpperCase() === "FOLLOW") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders follow the forming candle: green buys, red sells", off: { handoff_candle: "OFF" } });
   if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
 
