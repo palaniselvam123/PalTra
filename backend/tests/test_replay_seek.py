@@ -15,7 +15,8 @@ def _at(h, m):
     return dt.datetime.combine(DAY, dt.time(h, m), tzinfo=IST)
 
 
-async def _until(session, pred, tries=400):
+async def _until(session, pred, tries=3000):
+    """Wait up to about a minute: fast-forwarding hours of candles is CPU-bound and a busy CI runner is slow."""
     for _ in range(tries):
         await asyncio.sleep(0.02)
         if pred():

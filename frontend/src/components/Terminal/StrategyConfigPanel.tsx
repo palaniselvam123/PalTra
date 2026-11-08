@@ -487,6 +487,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pattern_tf: ([1, 3, 5, 10, 15, 30, 60].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15 | 30 | 60,
     colour_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1)),
     colour_min_body: Math.min(2, Math.max(0, Number(form.colour_min_body ?? 0) || 0)),
+    colour_body_unit: form.colour_body_unit === "ATR" ? "ATR" : "PCT",
+    colour_body_by_tf: String(form.colour_body_by_tf ?? ""),
+    colour_body_atr: Math.min(5, Math.max(0, Number(form.colour_body_atr ?? 0) || 0)),
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -969,12 +972,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                       <option value="5">5 candles</option>
                     </select>
                   </label>
-                  <Field
-                    label="Smallest candle body, % of price (0 = any)"
-                    value={String(form.colour_min_body ?? 0)}
-                    onChange={(v) => set("colour_min_body", v)}
-                    own={isOwn("colour_min_body")}
-                  />
+                  <ColourBodySize form={form} set={set} isOwn={isOwn} />
                   <p className="col-span-2 text-xs text-slate-400">
                     Enters, and turns a trade the other way, only once {Number(form.colour_count ?? 1)} closed candle
                     {Number(form.colour_count ?? 1) > 1 ? "s" : ""} in a row have the new colour. A candle whose body is under the
@@ -4116,3 +4114,105 @@ function TrendChecks({
   );
 }
 
+
+
+const BODY_SIZES = [1, 3, 5, 10, 15, 30, 60] as const;
+
+function parseBodyByTf(text: string | undefined): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const part of String(text ?? "").split(",")) {
+    const [size, value] = part.split(":");
+    const tf = Number(size);
+    if ((BODY_SIZES as readonly number[]).includes(tf) && value !== undefined && value.trim() !== "") out[tf] = value.trim();
+  }
+  return out;
+}
+
+/** Candle colour: the smallest body that counts as a colour, in % of the price per candle size, or in ATRs. */
+function ColourBodySize({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const unit = form.colour_body_unit === "ATR" ? "ATR" : "PCT";
+  const bySize = parseBodyByTf(form.colour_body_by_tf);
+  const chosen = Number(form.pattern_tf ?? 1);
+  const setSize = (tf: number, value: string) => {
+    const next = { ...bySize, [tf]: value };
+    if (value.trim() === "") delete next[tf];
+    set(
+      "colour_body_by_tf",
+      BODY_SIZES.filter((s) => next[s] !== undefined)
+        .map((s) => `${s}:${next[s]}`)
+        .join(",")
+    );
+  };
+  return (
+    <div className="col-span-2 rounded-md border border-white/10 p-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        <span className="text-xs uppercase tracking-wider text-slate-400">
+          Smallest candle body{isOwn("colour_body_unit") ? " (own)" : ""}
+        </span>
+        {(["PCT", "ATR"] as const).map((u) => (
+          <label key={u} className="flex min-h-9 items-center gap-1.5">
+            <input
+              type="radio"
+              name="colour-body-unit"
+              checked={unit === u}
+              onChange={() => set("colour_body_unit", u)}
+              className="accent-[#10B981]"
+            />
+            {u === "PCT" ? "% of price, per candle size" : "× ATR of the colour candles"}
+          </label>
+        ))}
+      </div>
+      {unit === "ATR" ? (
+        <div className="mt-2 grid grid-cols-2 items-end gap-2">
+          <Field
+            label="Smallest body (× ATR, 0 = any)"
+            value={String(form.colour_body_atr ?? 0)}
+            onChange={(v) => set("colour_body_atr", v)}
+            own={isOwn("colour_body_atr")}
+          />
+          <p className="text-xs text-slate-400">
+            The ATR is worked out on the colour candles themselves, so one number fits every candle size and stock. 0.3 = a body
+            under 30% of a usual candle counts as no colour.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-2 grid grid-cols-4 items-end gap-2 sm:grid-cols-8">
+            <Field
+              label="Any size (%)"
+              value={String(form.colour_min_body ?? 0)}
+              onChange={(v) => set("colour_min_body", v)}
+              own={isOwn("colour_min_body")}
+            />
+            {BODY_SIZES.map((tf) => (
+              <label key={tf} className="block text-sm text-slate-300">
+                <span className={clsx("text-xs uppercase tracking-wider", tf === chosen ? "font-semibold text-emerald-300" : "text-slate-400")}>
+                  {tf} min{tf === chosen ? " ✓" : ""}
+                </span>
+                <input
+                  inputMode="decimal"
+                  value={bySize[tf] ?? ""}
+                  placeholder={String(form.colour_min_body ?? 0)}
+                  onChange={(e) => setSize(tf, e.target.value)}
+                  aria-label={`Smallest body for ${tf}-minute colour candles, % of price`}
+                  className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            The box for the colour candle size you picked (✓) is used; an empty box uses &quot;Any size&quot;. 0 = any body counts.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}

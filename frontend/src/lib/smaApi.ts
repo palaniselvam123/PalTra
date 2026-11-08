@@ -44,6 +44,12 @@ export type SmaConfig = {
   colour_count?: number;
   /** Candle colour: smallest body in % of the price that counts as a colour (0 = any). */
   colour_min_body?: number;
+  /** Smallest body set in % of price (per candle size) or in ATRs of the colour candles. */
+  colour_body_unit?: "PCT" | "ATR";
+  /** Smallest body % per colour candle size, e.g. "5:0.05,15:0.15"; other sizes use colour_min_body. */
+  colour_body_by_tf?: string;
+  /** Smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR. */
+  colour_body_atr?: number;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
   candle_minutes?: CandleMinutes;
   /** Mixed candles: the SMA cross exit read on candles of this size (0 = the entry candle). */

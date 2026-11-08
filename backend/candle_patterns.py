@@ -12,7 +12,10 @@ is held while the candles keep its colour and the first candle of the other
 colour closes it (``COLOUR_TURN``) and opens the other way. ``colour_count`` (1-5) asks for
 that many closed candles of a colour in a row before entering or turning, and
 ``colour_min_body`` (% of the price, 0 = off) makes a candle whose body is smaller than that
-count as no colour (held, like a doji).
+count as no colour (held, like a doji). The smallest body can be set per colour candle size
+(``colour_body_by_tf``, "5:0.05,15:0.15" in %; a size not listed uses ``colour_min_body``), or in
+ATRs instead (``colour_body_unit = "ATR"``, ``colour_body_atr`` × the Wilder ATR 14 of the colour
+candles themselves, so one number fits every candle size and stock).
 
 The pattern names follow ``frontend/src/lib/candlePatterns.ts`` (the chart's
 data table), so what the table calls a candle is what the bot acted on.
@@ -42,6 +45,9 @@ SESSION_OPEN_MIN = 9 * 60 + 15
 PATTERN_TFS = (1, 3, 5, 10, 15, 30, 60)
 COLOUR_COUNT_MAX = 5
 COLOUR_BODY_MAX = 2.0
+COLOUR_BODY_ATR_MAX = 5.0
+COLOUR_BODY_UNITS = ("PCT", "ATR")
+COLOUR_ATR_PERIOD = 14
 PATTERN_SETS = ("STRONG", "ALL")
 ENTRY_MODES = ("SMA", "PATTERN", "COLOUR", "NTH_CANDLE")
 
@@ -53,6 +59,9 @@ DEFAULTS = {
     "pattern_min_edge": 1.5,
     "colour_count": 1,
     "colour_min_body": 0.0,
+    "colour_body_unit": "PCT",
+    "colour_body_by_tf": "",
+    "colour_body_atr": 0.0,
 }
 
 # Patterns that order. STRONG: the multi-candle and full-body signals; ALL adds
@@ -351,10 +360,73 @@ def colour_min_body(cfg) -> float:
         return 0.0
 
 
+def colour_body_unit(cfg) -> str:
+    """How the smallest body is set: PCT (% of the price, per candle size) or ATR (× the colour candles' ATR)."""
+    value = str(setting(cfg, "colour_body_unit") or "PCT").upper()
+    return value if value in COLOUR_BODY_UNITS else "PCT"
+
+
+def parse_body_by_tf(text) -> dict[int, float]:
+    """ "5:0.05,15:0.15" → {5: 0.05, 15: 0.15}; sizes outside PATTERN_TFS and bad parts are dropped."""
+    out: dict[int, float] = {}
+    for part in str(text or "").replace(";", ",").split(","):
+        if ":" not in part:
+            continue
+        size, _, value = part.partition(":")
+        try:
+            tf, pct = int(size.strip()), float(value.strip())
+        except ValueError:
+            continue
+        if tf in PATTERN_TFS and 0 <= pct <= COLOUR_BODY_MAX:
+            out[tf] = pct
+    return out
+
+
+def clean_body_by_tf(text) -> str:
+    """The saved form of `colour_body_by_tf` (sizes in order, zeros kept so a size can be switched off)."""
+    parsed = parse_body_by_tf(text)
+    return ",".join(f"{tf}:{parsed[tf]:g}" for tf in sorted(parsed))
+
+
+def colour_min_body_pct(cfg, tf: int) -> float:
+    """Smallest body in % for this colour candle size: its own value, else `colour_min_body`."""
+    own = parse_body_by_tf(setting(cfg, "colour_body_by_tf"))
+    if int(tf) in own:
+        return own[int(tf)]
+    return colour_min_body(cfg)
+
+
+def colour_body_atr(cfg) -> float:
+    """Smallest body in ATRs of the colour candles (0 = any)."""
+    try:
+        return min(max(float(setting(cfg, "colour_body_atr") or 0.0), 0.0), COLOUR_BODY_ATR_MAX)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _atr_series(rows: list[dict], period: int = COLOUR_ATR_PERIOD) -> list[float | None]:
+    """Wilder ATR of the colour candles (real high / low / close), None until two candles exist."""
+    out: list[float | None] = []
+    trs: list[float] = []
+    atr: float | None = None
+    for i, r in enumerate(rows):
+        hi, lo = float(r["high"]), float(r["low"])
+        tr = hi - lo if i == 0 else max(hi - lo, abs(hi - float(rows[i - 1]["close"])), abs(lo - float(rows[i - 1]["close"])))
+        trs.append(tr)
+        if len(trs) < period:
+            atr = sum(trs) / len(trs)
+        elif len(trs) == period:
+            atr = sum(trs) / period
+        else:
+            atr = (atr * (period - 1) + tr) / period  # type: ignore[operator]
+        out.append(atr if i >= 1 else None)
+    return out
+
+
 def _colour(open_: float, close: float, min_body: float) -> str | None:
-    """"G", "R" or None (a doji, or a body under `min_body` % of the close)."""
+    """"G", "R" or None (a doji, or a body under `min_body`, in price units)."""
     body = close - open_
-    if body == 0 or (min_body > 0 and close > 0 and abs(body) / close * 100 < min_body):
+    if body == 0 or (min_body > 0 and abs(body) < min_body):
         return None
     return "G" if body > 0 else "R"
 
@@ -371,7 +443,6 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
     """
     tf = int(setting(cfg, "pattern_tf"))
     need = colour_count(cfg)
-    min_body = colour_min_body(cfg)
     closed = frame.iloc[:-1] if frame is not None and len(frame) >= 2 else None
     if closed is None or closed.empty:
         return PatternCall(None, "", "waiting for candles")
@@ -388,13 +459,25 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
         pairs = [(float(r["open"]), float(r["close"])) for r in rows]
     if len(pairs) < need:
         return PatternCall(None, "", f"waiting for {need} closed {tf}-minute candles")
-    colours = [_colour(o, c, min_body) for o, c in pairs[-need:]]
+    # The smallest body in price units for each of the last `need` candles.
+    if colour_body_unit(cfg) == "ATR":
+        k = colour_body_atr(cfg)
+        atrs = _atr_series(rows) if k > 0 else [None] * len(rows)
+        floors = [(k * a if a else 0.0) for a in atrs[-need:]]
+        floor_word = f"{k:g}× ATR"
+    else:
+        pct = colour_min_body_pct(cfg, tf)
+        floors = [float(r["close"]) * pct / 100 for r in rows[-need:]]
+        floor_word = f"{pct:g}%"
+    colours = [_colour(o, c, f) for (o, c), f in zip(pairs[-need:], floors)]
     last = colours[-1]
     if last is None:
         o, c = pairs[-1]
         if c == o:
             return PatternCall(None, "Doji", f"doji {tf}-minute candle — holding")
-        return PatternCall(None, "Small candle", f"{tf}-minute candle body under {min_body:g}% — holding")
+        return PatternCall(
+            None, "Small candle", f"{tf}-minute candle body {abs(c - o):.2f} under {floor_word} ({floors[-1]:.2f}) — holding"
+        )
     word = "green" if last == "G" else "red"
     if any(col != last for col in colours):
         run = 0
