@@ -199,3 +199,31 @@ def test_api_starts_reports_and_stops(tmp_path, monkeypatch):
         assert view["params"]["trails"] == [0.5, 1.0] and client.get("/api/second-candle?rows=false").json()["rows"] == []
         assert client.post("/api/second-candle/stop").status_code == 200
     database.reset_engine()
+
+
+def test_stop_and_reverse_follows_the_other_side_after_the_stop():
+    trap = sc.analyze_day("TRAP", _tape(_trap), D1, RULE)
+    up = sc.analyze_day("UP", _tape(_rise), D1, RULE)
+    leg = trap["rev"]["5.0"]
+    # stopped ₹5 down on the slide: the reverse sell runs about ₹7 more, then the rise stops it out
+    assert leg[0] > 0 and 5 < leg[1] < 10 and leg[2] >= 5
+    assert sc.reverse_outcome(trap, 10, 5) == ("stop", -5.0)
+    assert sc.reverse_outcome(trap, 5, 5) == ("target", 5.0)  # a ₹5 target on the reverse is reached first
+    assert sc.reverse_outcome(up, 10, 5) is None  # the target came first: no reverse
+    table = {t["stop"]: t for t in sc.stop_reverse_table([up, trap], 5, (5.0,))}
+    assert table[5.0]["stopped"] == 1 and table[5.0]["rev_target"] == 1
+    assert table[5.0]["total"] == table[5.0]["plain_total"] + 5.0
+
+
+def test_several_candles_in_one_run_are_ranked_and_summarized_apart():
+    rule = sc.Rule(minutes=5, candle_nos=(2, 1), top_n=0, target_points=10.0).clean()
+    assert rule.candle_nos == (1, 2) and rule.candle_no == 1
+    rows = sc.analyze_stock("UP", _tape(_rise), [D1], rule) + sc.analyze_stock("DOWN", _tape(_fall), [D1], rule)
+    sc.rank_days(rows)
+    assert {r["candle_no"] for r in rows} == {1, 2}
+    for no in (1, 2):
+        ranks = sorted(r["rank"] for r in rows if r.get("candle_no") == no and not r.get("skipped"))
+        assert ranks == list(range(1, len(ranks) + 1))  # each candle ranked on its own
+    rep = sc.summarize(rows, rule)
+    assert [g["candle_no"] for g in rep["by_candle"]] == [1, 2] and rep["rule"]["candle_nos"] == [1, 2]
+    assert rep["stop_reverse"] and "reverse_stops" in rep

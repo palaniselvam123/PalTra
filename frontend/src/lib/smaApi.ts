@@ -812,6 +812,8 @@ export type MorningStock = {
 export type SecondCandleRow = {
   symbol: string;
   day: string;
+  /** Which candle of the day this trade read (several can be read in one run). */
+  candle_no?: number;
   side: "LONG" | "SHORT" | "DOJI";
   skipped?: string;
   rank?: number;
@@ -840,6 +842,10 @@ export type SecondCandleRow = {
   /** ₹ level (string key) → minutes after the entry it was first reached with / against the trade (null = never). */
   fav_min: Record<string, number | null>;
   adv_min: Record<string, number | null>;
+  /** Stop and reverse, per stop ₹ (string key) the first trade reached: [minute of the reverse entry, best ₹, worst ₹,
+   * ₹ at the square-off, then the minutes each LEVELS target was reached with the reverse, then the minute the same stop
+   * went against it] (null = never). */
+  rev?: Record<string, (number | null)[]>;
 };
 export type SecondCandleGroup = {
   trades: number;
@@ -885,7 +891,7 @@ export type SecondCandleView = {
   done: number;
   total: number;
   errors: { symbol: string; error: string }[];
-  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number };
+  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number };
   started_at: string | null;
   finished_at: string | null;
   report: SecondCandleReport | null;
@@ -2568,6 +2574,7 @@ export const smaApi = {
     days: number;
     minutes: number;
     candle_no: number;
+    candle_nos?: number[];
     top_n: number;
     target_points: number;
     square_off: string;

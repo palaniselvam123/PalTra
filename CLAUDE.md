@@ -1218,6 +1218,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   from the rows in the browser, so the filters (place by volume, side, day, reached, target / best time window, search,
   ticked only) change every number, and the target + stop test takes any level without a new run; sortable per
   stock-day and per-stock tables, CSV, Arm / Arm ticked (arming only).
+  **Several candles in one run** (`Rule.candle_nos`, the tab's 1st-6th chips, `candle_nos` on the start body; empty = just
+  `candle_no`): each candle is its own trade (`analyze_day(..., candle_no=)`, rows carry `candle_no`), ranked by volume vs
+  usual within its own candle (`rank_days` keys on day and candle), `summarize` adds `by_candle`; the tab has a Candle filter, a
+  "By candle" table and a Candle column. **Stop and reverse** (`rev` on each row, `_reverse_legs`, levels `REVERSE_STOPS`):
+  for each stop the first trade reached, the other side entered at the stop price on that minute and followed from the next
+  minute to the square-off ([entry minute, best, worst, square-off ₹, the minute each `LEVELS` target was reached, the minute
+  the same stop went against it]); `reverse_outcome` / `stop_reverse_table` (`summarize` → `stop_reverse`, `best_reverse`) read
+  it with the same target and stop, only for trades whose stop came first; the tab's "After the stop: take the reverse trade"
+  table and "Reverse after stop" column. The tab reads level maps with either key form ("10.0" / "10", `levelMin`).
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
   strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the

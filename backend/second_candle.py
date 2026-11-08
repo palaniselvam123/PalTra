@@ -56,6 +56,9 @@ MAX_TRAILS = 8
 #: target / stop pair from this grid can be judged later without reading the candles again (target_stop_table).
 LEVELS = (2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0)
 DEFAULT_STOPS = (3.0, 5.0, 8.0, 10.0, 15.0, 20.0)
+#: Stop levels (₹) the stop-and-reverse leg is measured for: after the first trade's stop, the other side is entered at the
+#: stop price and followed to the square-off (`rev`).
+REVERSE_STOPS = DEFAULT_STOPS
 HALF_HOURS = ("09:15", "09:45", "10:15", "10:45", "11:15", "11:45", "12:15", "12:45", "13:15", "13:45", "14:15", "14:45", "15:15")
 RANK_BUCKETS = ((1, 5, "Top 5"), (6, 10, "6-10"), (11, 20, "11-20"), (21, 10**6, "21 and after"))
 
@@ -64,6 +67,8 @@ RANK_BUCKETS = ((1, 5, "Top 5"), (6, 10, "6-10"), (11, 20, "11-20"), (21, 10**6,
 class Rule:
     minutes: int = 5
     candle_no: int = 2
+    #: Several candles read in one run (each its own trade, ranked within its own candle); empty = (candle_no,).
+    candle_nos: tuple[int, ...] = ()
     top_n: int = 20
     target_points: float = 10.0
     square_off: dt.time = dt.time(15, 15)
@@ -73,9 +78,11 @@ class Rule:
 
     def clean(self) -> "Rule":
         trails = tuple(sorted({round(float(t), 3) for t in self.trails if 0.05 <= float(t) <= 10}))[:MAX_TRAILS] or DEFAULT_TRAILS
+        nos = tuple(sorted({max(1, min(MAX_CANDLE_NO, int(n))) for n in (self.candle_nos or (self.candle_no,))}))
         return Rule(
             minutes=self.minutes if self.minutes in SIZES else 5,
-            candle_no=max(1, min(MAX_CANDLE_NO, int(self.candle_no))),
+            candle_no=nos[0],
+            candle_nos=nos,
             top_n=max(0, int(self.top_n)),
             target_points=max(0.05, float(self.target_points)),
             square_off=self.square_off,
@@ -87,6 +94,7 @@ class Rule:
         return {
             "minutes": self.minutes,
             "candle_no": self.candle_no,
+            "candle_nos": list(self.candle_nos or (self.candle_no,)),
             "top_n": self.top_n,
             "target_points": self.target_points,
             "square_off": self.square_off.strftime("%H:%M"),
@@ -114,7 +122,91 @@ def _trail_points(side: str, entry: float, high: np.ndarray, low: np.ndarray, m0
     return float(close_pts)
 
 
-def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule) -> dict | None:
+def _reverse_legs(side: str, entry: float, ts: np.ndarray, high: np.ndarray, low: np.ndarray, opn: np.ndarray, cls: np.ndarray,
+                  m0: int, m_sq: int, adv: np.ndarray) -> dict[str, list]:
+    """Stop and reverse: for each REVERSE_STOPS level the first trade's stop reached, the other side entered at the stop
+    price on that minute and followed from the next minute to the square-off.
+
+    Each value is [minute of the reverse entry after the first entry, best ₹ with the reverse, worst ₹ against it, ₹ at the
+    square-off, then for every LEVELS target the minutes after the reverse entry it was first reached with the reverse
+    (None = never), then the minutes it first went the stop's ₹ against the reverse (None = never)]."""
+    out: dict[str, list] = {}
+    long = side == "LONG"
+    if m_sq < len(ts):
+        close_price = float(opn[m_sq])
+    else:
+        close_price = float(cls[m_sq - 1])
+    for stop in REVERSE_STOPS:
+        hit = adv >= stop
+        if not bool(hit.any()):
+            continue
+        k = int(np.argmax(hit))
+        rev_entry = entry - stop if long else entry + stop  # a stopped buy sells there, a stopped sell buys
+        start, end = m0 + k + 1, m_sq
+        at = int((ts[m0 + k] - ts[m0]) // 60)
+        close_pts = (rev_entry - close_price) if long else (close_price - rev_entry)
+        if start >= end:
+            out[str(stop)] = [at, 0.0, 0.0, round(close_pts, 2), *([None] * len(LEVELS)), None]
+            continue
+        fav = (rev_entry - low[start:end]) if long else (high[start:end] - rev_entry)
+        bad = (high[start:end] - rev_entry) if long else (rev_entry - low[start:end])
+        mins = (ts[start:end] - ts[m0 + k]) // 60
+        fav_m = [int(mins[int(np.argmax(fav >= lv))]) if bool((fav >= lv).any()) else None for lv in LEVELS]
+        bad_m = int(mins[int(np.argmax(bad >= stop))]) if bool((bad >= stop).any()) else None
+        out[str(stop)] = [at, round(float(max(fav.max(), 0.0)), 2), round(float(max(bad.max(), 0.0)), 2), round(close_pts, 2), *fav_m, bad_m]
+    return out
+
+
+def reverse_outcome(row: dict, target: float, stop: float) -> tuple[str, float] | None:
+    """The reverse leg after the first trade's stop: ("target" | "stop" | "close", ₹ per share), the reverse taking the same
+    target and stop. None = no reverse (the first trade did not stop out first, or the stop is not a REVERSE_STOPS level)."""
+    first, _ = target_stop_outcome(row, target, stop)
+    if first != "stop":
+        return None
+    s_lv = _nearest_level(stop)
+    leg = (row.get("rev") or {}).get(str(s_lv))
+    if not leg:
+        return None
+    t_lv = _nearest_level(target)
+    t_min = leg[4 + LEVELS.index(t_lv)]
+    s_min = leg[4 + len(LEVELS)]
+    if t_min is not None and (s_min is None or t_min < s_min):
+        return "target", float(t_lv)
+    if s_min is not None:
+        return "stop", -float(s_lv)
+    return "close", float(leg[3])
+
+
+def stop_reverse_table(rows: list[dict], target: float, stops: tuple[float, ...] = REVERSE_STOPS) -> list[dict]:
+    """For the target and each stop: of the trades that stopped out first, how the reverse did, and the total with it."""
+    out = []
+    for stop in stops:
+        plain = [target_stop_outcome(r, target, stop) for r in rows]
+        revs = [reverse_outcome(r, target, stop) for r in rows]
+        taken = [x for x in revs if x is not None]
+        if not plain:
+            continue
+        plain_total = sum(p for _, p in plain)
+        rev_total = sum(p for _, p in taken)
+        best = [((r.get("rev") or {}).get(str(_nearest_level(stop))) or [0, 0])[1] for r, x in zip(rows, revs) if x is not None]
+        out.append(
+            {
+                "target": _nearest_level(target),
+                "stop": _nearest_level(stop),
+                "stopped": len(taken),
+                "rev_target": sum(1 for k, _ in taken if k == "target"),
+                "rev_stop": sum(1 for k, _ in taken if k == "stop"),
+                "rev_neither": sum(1 for k, _ in taken if k == "close"),
+                "rev_total": round(rev_total, 2),
+                "rev_avg_best": _mean(best),
+                "plain_total": round(plain_total, 2),
+                "total": round(plain_total + rev_total, 2),
+            }
+        )
+    return out
+
+
+def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candle_no: int | None = None) -> dict | None:
     """One stock on one day: the Nth candle's call and what the price did after it. None = no trade that day."""
     if tape is None or getattr(tape, "empty", True):
         return None
@@ -123,7 +215,8 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule) -> di
     if len(today) < 5:
         return None
     candles = resample(today, rule.minutes) if rule.minutes > 1 else today
-    n = rule.candle_no - 1
+    candle_no = int(candle_no or rule.candle_no)
+    n = candle_no - 1
     if candles is None or len(candles) <= n + 1:
         return None
     sig = candles.iloc[n]
@@ -136,10 +229,10 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule) -> di
     elif c < o:
         side = "SHORT"
     else:
-        return {"symbol": symbol, "day": day.isoformat(), "side": "DOJI", "skipped": "doji"}
+        return {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "side": "DOJI", "skipped": "doji"}
     body_pct = abs(c - o) / o * 100
     if rule.min_body_pct > 0 and body_pct < rule.min_body_pct:
-        return {"symbol": symbol, "day": day.isoformat(), "side": side, "skipped": "small body", "body_pct": round(body_pct, 3)}
+        return {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "side": side, "skipped": "small body", "body_pct": round(body_pct, 3)}
     entry_ts = int(nxt["ts"])
     entry = float(nxt["open"])
     sign = 1.0 if side == "LONG" else -1.0
@@ -190,6 +283,7 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule) -> di
     return {
         "symbol": symbol,
         "day": day.isoformat(),
+        "candle_no": candle_no,
         "side": side,
         "rvol": round(rvol, 2) if rvol is not None else None,
         "change_pct": round(change_pct, 3) if change_pct is not None else None,
@@ -213,6 +307,7 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule) -> di
         "trail": trail,
         "fav_min": fav_min,
         "adv_min": adv_min,
+        "rev": _reverse_legs(side, entry, ts, high, low, opn, cls, m0, m_sq, adv),
     }
 
 
@@ -222,19 +317,21 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, days: list[dt.date], r
     tape = tape.drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
     out = []
     for day in days:
-        row = analyze_day(symbol, tape, day, rule)
-        if row is not None:
-            out.append(row)
+        for no in rule.candle_nos or (rule.candle_no,):
+            row = analyze_day(symbol, tape, day, rule, candle_no=no)
+            if row is not None:
+                out.append(row)
     return out
 
 
 def rank_days(rows: list[dict]) -> list[dict]:
-    """Each day's trades ranked by volume vs usual (1 = the most), as the card sorted by it would show them."""
-    by_day: dict[str, list[dict]] = {}
+    """Each day's trades ranked by volume vs usual (1 = the most), as the card sorted by it would show them; with several
+    candles, each candle is ranked on its own (the volume at its own close)."""
+    by_day: dict[tuple, list[dict]] = {}
     for r in rows:
         if r.get("skipped"):
             continue
-        by_day.setdefault(r["day"], []).append(r)
+        by_day.setdefault((r["day"], r.get("candle_no")), []).append(r)
     for day_rows in by_day.values():
         day_rows.sort(key=lambda r: -(r.get("rvol") or 0.0))
         for i, r in enumerate(day_rows, start=1):
@@ -375,6 +472,10 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
     best_trail = max(trail, key=lambda t: t["total"]) if trail else None
     target_stop = target_stop_table(kept, rule.target_points)
     best_stop = max(target_stop, key=lambda t: t["total"]) if target_stop else None
+    stop_reverse = stop_reverse_table(kept, rule.target_points)
+    best_reverse = max(stop_reverse, key=lambda t: t["total"]) if stop_reverse else None
+    nos = list(rule.candle_nos or (rule.candle_no,))
+    by_candle = [{"candle_no": no, **_group([r for r in kept if r.get("candle_no", rule.candle_no) == no], rule)} for no in nos]
     hold = all_g["total_close"]
     answer: list[str] = []
     if kept:
@@ -401,6 +502,19 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
                 f"Target ₹{best_stop['target']:g} with a stop: the best stop is ₹{best_stop['stop']:g} a share ({best_stop['hit_target']} hit the target "
                 f"first, {best_stop['hit_stop']} the stop, {best_stop['neither']} neither), ₹{best_stop['total']} a share in all."
             )
+        if best_reverse and best_reverse["stopped"]:
+            answer.append(
+                f"Stop and reverse (target ₹{best_reverse['target']:g}, stop ₹{best_reverse['stop']:g}): {best_reverse['stopped']} trades stopped out, "
+                f"the reverse reached the target on {best_reverse['rev_target']} and stopped on {best_reverse['rev_stop']} "
+                f"(best ₹{best_reverse['rev_avg_best']} on average); ₹{best_reverse['total']} a share in all with the reverse, "
+                f"against ₹{best_reverse['plain_total']} without it."
+            )
+        if len(nos) > 1:
+            for g in by_candle:
+                if g["trades"]:
+                    answer.append(
+                        f"Candle {g['candle_no']}: {g['hits']} of {g['trades']} reached the target ({g['hit_pct']}%), ₹{g['total_close']} a share held to the close."
+                    )
         for s in ("LONG", "SHORT"):
             g = sides[s]
             if g["trades"]:
@@ -424,6 +538,10 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
         "best_trail": best_trail,
         "target_stop": target_stop,
         "best_stop": best_stop,
+        "stop_reverse": stop_reverse,
+        "best_reverse": best_reverse,
+        "by_candle": by_candle,
+        "reverse_stops": list(REVERSE_STOPS),
         "by_half_hour": by_half_hour(kept),
         "levels": list(LEVELS),
         "stops": list(DEFAULT_STOPS),

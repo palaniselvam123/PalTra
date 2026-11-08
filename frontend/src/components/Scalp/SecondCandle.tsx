@@ -29,6 +29,9 @@ const SQUARE_OFFS = ["10:30", "11:00", "12:00", "13:00", "14:00", "15:00", "15:1
 const HALF_HOURS = ["09:15", "09:45", "10:15", "10:45", "11:15", "11:45", "12:15", "12:45", "13:15", "13:45", "14:15", "14:45", "15:15"];
 const LEVELS = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50];
 const STOPS = [3, 5, 8, 10, 15, 20];
+/** The stop levels the backend measures the stop-and-reverse leg for (second_candle.REVERSE_STOPS). */
+const REV_STOPS = STOPS;
+const ordinal = (n: number) => (n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`);
 
 type Props = {
   armed: Map<string, string[]>;
@@ -52,20 +55,39 @@ const halfHour = (hhmm: string | null | undefined) => {
 const nearestLevel = (v: number) => LEVELS.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
+/** A level's minute from a row's level map: the backend keys them like "10.0" (older saves may use "10"). */
+const levelMin = (m: Record<string, number | null> | undefined, lv: number) => m?.[`${lv}.0`] ?? m?.[String(lv)] ?? null;
+
 /** The same reading as the backend's target_stop_outcome: the target first, else the stop, else the square-off. */
 function outcome(r: SecondCandleRow, target: number, stop: number): { kind: "target" | "stop" | "close"; pts: number } {
-  const t = r.fav_min?.[String(nearestLevel(target))] ?? null;
-  const s = r.adv_min?.[String(nearestLevel(stop))] ?? null;
+  const t = levelMin(r.fav_min, nearestLevel(target));
+  const s = levelMin(r.adv_min, nearestLevel(stop));
   if (t != null && (s == null || t < s)) return { kind: "target", pts: nearestLevel(target) };
   if (s != null) return { kind: "stop", pts: -nearestLevel(stop) };
   return { kind: "close", pts: r.close_pts };
+}
+
+/** The reverse after the stop (backend reverse_outcome): the other side entered at the stop price, the same target and
+ * stop. null = no reverse (the first trade did not stop out first, or the stop is not a measured level). */
+function reverseOutcome(r: SecondCandleRow, target: number, stop: number): { kind: "target" | "stop" | "close"; pts: number; best: number } | null {
+  if (outcome(r, target, stop).kind !== "stop") return null;
+  const s = nearestLevel(stop);
+  const leg = r.rev?.[`${s}.0`] ?? r.rev?.[String(s)];
+  if (!leg) return null;
+  const t = nearestLevel(target);
+  const tMin = leg[4 + LEVELS.indexOf(t)];
+  const sMin = leg[4 + LEVELS.length];
+  const best = Number(leg[1] ?? 0);
+  if (tMin != null && (sMin == null || tMin < sMin)) return { kind: "target", pts: t, best };
+  if (sMin != null) return { kind: "stop", pts: -s, best };
+  return { kind: "close", pts: Number(leg[3] ?? 0), best };
 }
 
 export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus }: Props) {
   const [lists, setLists] = useScanLists("sma.second.lists", ["fno"]);
   const [days, setDays] = useState(10);
   const [minutes, setMinutes] = useState(5);
-  const [candleNo, setCandleNo] = useState(2);
+  const [candleNos, setCandleNos] = useState<number[]>([2]);
   const [topN, setTopN] = useState(20);
   const [target, setTarget] = useState(10);
   const [squareOff, setSquareOff] = useState("15:15");
@@ -81,6 +103,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const [targetFrom, setTargetFrom] = useState("");
   const [targetTo, setTargetTo] = useState("");
   const [query, setQuery] = useState("");
+  const [candleF, setCandleF] = useState<number | null>(null);
   // Target + stop test, changed here without a new run.
   const [testTarget, setTestTarget] = useState<number | null>(null);
   const [testStop, setTestStop] = useState(5);
@@ -123,7 +146,8 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           symbols: symbols.slice(0, 250),
           days,
           minutes,
-          candle_no: candleNo,
+          candle_no: candleNos[0] ?? 2,
+          candle_nos: candleNos,
           top_n: topN,
           target_points: target,
           square_off: squareOff,
@@ -162,6 +186,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
     return ranked.filter((r) => {
       if (topLimit > 0 && (r.rank ?? 0) > topLimit) return false;
       if (side !== "ALL" && r.side !== side) return false;
+      if (candleF != null && (r.candle_no ?? params?.candle_no) !== candleF) return false;
       if (day && r.day !== day) return false;
       if (reached === "YES" && !r.hit) return false;
       if (reached === "NO" && r.hit) return false;
@@ -174,7 +199,11 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
       if (ticks.only && !ticks.ticked.has(r.symbol)) return false;
       return matchesText(query, r.symbol);
     });
-  }, [ranked, topLimit, side, day, reached, targetFrom, targetTo, query, ticks.only, ticks.ticked]);
+  }, [ranked, topLimit, side, candleF, params?.candle_no, day, reached, targetFrom, targetTo, query, ticks.only, ticks.ticked]);
+  const runCandles = useMemo(() => {
+    const set = new Set<number>(ranked.map((r) => r.candle_no ?? params?.candle_no ?? 2));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [ranked, params?.candle_no]);
 
   const sum = useMemo(() => {
     const hits = rows.filter((r) => r.hit);
@@ -222,6 +251,50 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   }, [rows, effTarget, testStop]);
   const bestStop = stopTable.length ? stopTable.reduce((a, b) => (b.total > a.total ? b : a)) : null;
 
+  const reverseTable = useMemo(
+    () =>
+      REV_STOPS.map((s) => {
+        const plain = rows.map((r) => outcome(r, effTarget, s).pts).reduce((a, b) => a + b, 0);
+        const revs = rows.map((r) => reverseOutcome(r, effTarget, s)).filter((x): x is NonNullable<typeof x> => x != null);
+        const revTotal = revs.reduce((a, x) => a + x.pts, 0);
+        return {
+          stop: s,
+          stopped: revs.length,
+          revTarget: revs.filter((x) => x.kind === "target").length,
+          revStop: revs.filter((x) => x.kind === "stop").length,
+          revNeither: revs.filter((x) => x.kind === "close").length,
+          revBest: mean(revs.map((x) => x.best)),
+          revTotal,
+          plain,
+          total: plain + revTotal,
+        };
+      }),
+    [rows, effTarget]
+  );
+  const bestReverse = reverseTable.length ? reverseTable.reduce((a, b) => (b.total > a.total ? b : a)) : null;
+
+  const candleTable = useMemo(
+    () =>
+      runCandles.map((no) => {
+        const part = rows.filter((r) => (r.candle_no ?? params?.candle_no) === no);
+        const hits = part.filter((r) => r.hit).length;
+        const ts = part.map((r) => outcome(r, effTarget, testStop).pts).reduce((a, b) => a + b, 0);
+        const rev = part.map((r) => reverseOutcome(r, effTarget, testStop)?.pts ?? 0).reduce((a, b) => a + b, 0);
+        return {
+          no,
+          trades: part.length,
+          hits,
+          hitPct: part.length ? (hits / part.length) * 100 : 0,
+          avgBest: mean(part.map((r) => r.best_pts)),
+          avgWorst: mean(part.map((r) => r.worst_pts)),
+          close: part.reduce((a, r) => a + r.close_pts, 0),
+          ts,
+          withRev: ts + rev,
+        };
+      }),
+    [rows, runCandles, params?.candle_no, effTarget, testStop]
+  );
+
   const whenTable = useMemo(
     () =>
       HALF_HOURS.map((slot) => ({
@@ -258,11 +331,12 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
     });
   }, [rows, effTarget, testStop]);
 
-  type DayKey = "day" | "symbol" | "rank" | "rvol" | "side" | "entry" | "best_pts" | "best_at" | "worst_pts" | "worst_at" | "hit" | "against_before_target" | "close_pts" | "stopPts" | "bestTrail";
+  type DayKey = "day" | "candle_no" | "revPts" | "symbol" | "rank" | "rvol" | "side" | "entry" | "best_pts" | "best_at" | "worst_pts" | "worst_at" | "hit" | "against_before_target" | "close_pts" | "stopPts" | "bestTrail";
   const dayValue = (r: SecondCandleRow, k: DayKey) => {
     if (k === "hit") return r.hit ? 1 : 0;
     if (k === "best_at" || k === "worst_at") return minutesOf(r[k]);
     if (k === "stopPts") return outcome(r, effTarget, testStop).pts;
+    if (k === "revPts") return reverseOutcome(r, effTarget, testStop)?.pts ?? null;
     if (k === "bestTrail") return Math.max(...Object.values(r.trail ?? { x: 0 }));
     return r[k] as number | string | null;
   };
@@ -271,9 +345,9 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const stockSort = useSort<(typeof stockRows)[number], StockKey>(stockRows, (r, k) => r[k]);
 
   const exportCsv = () => {
-    const head = ["day", "stock", "rank", "vol_vs_usual", "side", "signal_at", "entry_at", "entry", "best_pts", "best_pct", "best_at", "worst_pts", "worst_pct", "worst_at", "reached_target", "target_at", "minutes_to_target", "against_before_target", "close_pts", "close_pct", ...Object.keys(rows[0]?.trail ?? {}).map((k) => `trail_${k}pct`)];
+    const head = ["day", "candle", "reverse_after_stop", "stock", "rank", "vol_vs_usual", "side", "signal_at", "entry_at", "entry", "best_pts", "best_pct", "best_at", "worst_pts", "worst_pct", "worst_at", "reached_target", "target_at", "minutes_to_target", "against_before_target", "close_pts", "close_pct", ...Object.keys(rows[0]?.trail ?? {}).map((k) => `trail_${k}pct`)];
     const lines = rows.map((r) =>
-      [r.day, r.symbol, r.rank, r.rvol, r.side, r.signal_at, r.entry_at, r.entry, r.best_pts, r.best_pct, r.best_at, r.worst_pts, r.worst_pct, r.worst_at, r.hit ? "yes" : "no", r.target_at ?? "", r.minutes_to_target ?? "", r.against_before_target ?? "", r.close_pts, r.close_pct, ...Object.keys(rows[0]?.trail ?? {}).map((k) => r.trail[k])].join(",")
+      [r.day, r.candle_no ?? "", reverseOutcome(r, effTarget, testStop)?.pts ?? "", r.symbol, r.rank, r.rvol, r.side, r.signal_at, r.entry_at, r.entry, r.best_pts, r.best_pct, r.best_at, r.worst_pts, r.worst_pct, r.worst_at, r.hit ? "yes" : "no", r.target_at ?? "", r.minutes_to_target ?? "", r.against_before_target ?? "", r.close_pts, r.close_pct, ...Object.keys(rows[0]?.trail ?? {}).map((k) => r.trail[k])].join(",")
     );
     const blob = new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
@@ -327,16 +401,26 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
-          Read the
-          <select value={candleNo} onChange={(e) => setCandleNo(Number(e.target.value))} className={select} disabled={running}>
-            {CANDLES.map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`} candle
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-col gap-1">
+          Read the candle(s)
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Which candles to read">
+            {CANDLES.map((n) => {
+              const on = candleNos.includes(n);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={running}
+                  aria-pressed={on}
+                  onClick={() => setCandleNos((cur) => (on ? (cur.length > 1 ? cur.filter((x) => x !== n) : cur) : [...cur, n].sort((a, b) => a - b)))}
+                  className={clsx("min-h-9 min-w-10 rounded-md px-2 text-xs font-semibold ring-1 ring-inset", on ? "bg-sky-500/20 text-sky-100 ring-sky-400/50" : "text-slate-400 ring-slate-700 hover:bg-white/5")}
+                >
+                  {ordinal(n)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label className="flex flex-col gap-1">
           Top by volume vs usual
           <select value={topN} onChange={(e) => setTopN(Number(e.target.value))} className={select} disabled={running}>
@@ -387,7 +471,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
         <>
           <div className="rounded-lg border border-slate-800 bg-surface2/60 p-3 text-xs text-slate-300">
             <div className="mb-1 font-semibold text-slate-200">
-              Last run: {params.symbols} stocks, {params.days} day(s), the {params.candle_no === 1 ? "1st" : params.candle_no === 2 ? "2nd" : `${params.candle_no}th`} {params.minutes}-minute candle, target ₹{params.target_points}, square-off {params.square_off}, top {params.top_n === 0 ? "all" : params.top_n} by volume vs usual
+              Last run: {params.symbols} stocks, {params.days} day(s), the {(params.candle_nos?.length ? params.candle_nos : [params.candle_no ?? 2]).map(ordinal).join(" + ")} {params.minutes}-minute candle{(params.candle_nos?.length ?? 1) > 1 ? "s (each its own trade)" : ""}, target ₹{params.target_points}, square-off {params.square_off}, top {params.top_n === 0 ? "all" : params.top_n} by volume vs usual
             </div>
             <ul className="list-disc space-y-0.5 pl-5">
               {rep.answer.map((line) => (
@@ -416,6 +500,19 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                 <option value="SHORT">Red candle (sell)</option>
               </select>
             </label>
+            {runCandles.length > 1 ? (
+              <label className="flex flex-col gap-1">
+                Candle
+                <select value={candleF ?? ""} onChange={(e) => setCandleF(e.target.value ? Number(e.target.value) : null)} className={select}>
+                  <option value="">Every candle</option>
+                  {runCandles.map((n) => (
+                    <option key={n} value={n}>
+                      {ordinal(n)} candle
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="flex flex-col gap-1">
               Day
               <select value={day} onChange={(e) => setDay(e.target.value)} className={select}>
@@ -565,6 +662,88 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             </div>
           </div>
 
+          <div className="grid gap-3 lg:grid-cols-2">
+            {/* Stop and reverse */}
+            <div className="rounded-lg border border-slate-800 bg-surface2/60 p-3 text-xs">
+              <div className="mb-1 font-semibold text-slate-200">After the stop: take the reverse trade (target ₹{effTarget})</div>
+              <p className="mb-2 text-slate-500">
+                When the trade hits its stop first, the other side is entered at the stop price and followed to the square-off with the
+                same target and stop. &quot;Best&quot; = the most the reverse went its way, on average. The same minute for target and stop
+                counts as the stop.
+              </p>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className={th}>Stop ₹</th>
+                    <th className={clsx(th, "text-right")}>Stopped</th>
+                    <th className={clsx(th, "text-right")}>Reverse hit target</th>
+                    <th className={clsx(th, "text-right")}>Reverse stopped</th>
+                    <th className={clsx(th, "text-right")}>Neither</th>
+                    <th className={clsx(th, "text-right")}>Reverse best</th>
+                    <th className={clsx(th, "text-right")}>Without reverse</th>
+                    <th className={clsx(th, "text-right")}>With reverse</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reverseTable.map((r) => (
+                    <tr key={r.stop} className={clsx("border-t border-white/5", bestReverse && r.stop === bestReverse.stop && "bg-emerald-500/10")}>
+                      <td className={td}>₹{r.stop}</td>
+                      <td className={clsx(td, "text-right")}>{r.stopped}</td>
+                      <td className={clsx(td, "text-right text-emerald-300")}>
+                        {r.revTarget} {r.stopped ? <span className="text-slate-500">({fmt((r.revTarget / r.stopped) * 100, 0)}%)</span> : null}
+                      </td>
+                      <td className={clsx(td, "text-right text-rose-300")}>{r.revStop}</td>
+                      <td className={clsx(td, "text-right text-slate-400")}>{r.revNeither}</td>
+                      <td className={clsx(td, "text-right")}>{r.revBest == null ? "—" : `₹${fmt(r.revBest)}`}</td>
+                      <td className={clsx(td, "text-right", pos(r.plain))}>{signed(r.plain)}</td>
+                      <td className={clsx(td, "text-right font-semibold", pos(r.total))}>{signed(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* By candle */}
+            <div className="rounded-lg border border-slate-800 bg-surface2/60 p-3 text-xs">
+              <div className="mb-1 font-semibold text-slate-200">By candle</div>
+              <p className="mb-2 text-slate-500">
+                Each candle read in this run on its own (ranked by volume vs usual at its own close). T/S = target ₹{effTarget} with
+                stop ₹{nearestLevel(testStop)}; &quot;+ reverse&quot; adds the reverse after the stop. Pick more candles above and run again
+                to compare them.
+              </p>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className={th}>Candle</th>
+                    <th className={clsx(th, "text-right")}>Trades</th>
+                    <th className={clsx(th, "text-right")}>Reached target</th>
+                    <th className={clsx(th, "text-right")}>Avg with</th>
+                    <th className={clsx(th, "text-right")}>Avg against</th>
+                    <th className={clsx(th, "text-right")}>Square-off</th>
+                    <th className={clsx(th, "text-right")}>T/S</th>
+                    <th className={clsx(th, "text-right")}>T/S + reverse</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {candleTable.map((c) => (
+                    <tr key={c.no} className="border-t border-white/5">
+                      <td className={td}>{ordinal(c.no)}</td>
+                      <td className={clsx(td, "text-right")}>{c.trades}</td>
+                      <td className={clsx(td, "text-right")}>
+                        {c.hits} ({fmt(c.hitPct, 0)}%)
+                      </td>
+                      <td className={clsx(td, "text-right text-emerald-300")}>{c.avgBest == null ? "—" : `+${fmt(c.avgBest)}`}</td>
+                      <td className={clsx(td, "text-right text-rose-300")}>{c.avgWorst == null ? "—" : `−${fmt(c.avgWorst)}`}</td>
+                      <td className={clsx(td, "text-right", pos(c.close))}>{signed(c.close)}</td>
+                      <td className={clsx(td, "text-right", pos(c.ts))}>{signed(c.ts)}</td>
+                      <td className={clsx(td, "text-right font-semibold", pos(c.withRev))}>{signed(c.withRev)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-1 text-xs">
             {(["days", "stocks"] as const).map((k) => (
               <button key={k} type="button" onClick={() => setShow(k)} className={clsx("rounded-md px-2 py-1", show === k ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200")}>
@@ -581,6 +760,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                   <tr>
                     {onArmMany ? <TickHead ticks={ticks} symbols={rows.map((r) => r.symbol)} /> : null}
                     <SortTh label="Day" k="day" sort={daySort.sort} onSort={daySort.onSort} text />
+                    {runCandles.length > 1 ? <SortTh label="Candle" k="candle_no" sort={daySort.sort} onSort={daySort.onSort} num /> : null}
                     <SortTh label="Stock" k="symbol" sort={daySort.sort} onSort={daySort.onSort} text />
                     <SortTh label="Place" k="rank" sort={daySort.sort} onSort={daySort.onSort} num title="Rank by volume vs usual that day" />
                     <SortTh label="Vol vs usual" k="rvol" sort={daySort.sort} onSort={daySort.onSort} num />
@@ -594,6 +774,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                     <SortTh label="Against before" k="against_before_target" sort={daySort.sort} onSort={daySort.onSort} num title="How far it went against you before reaching the target: a stop nearer than this cuts the winner" />
                     <SortTh label="Square-off" k="close_pts" sort={daySort.sort} onSort={daySort.onSort} num />
                     <SortTh label={`T ₹${effTarget} / S ₹${nearestLevel(testStop)}`} k="stopPts" sort={daySort.sort} onSort={daySort.onSort} num title="With the target and stop chosen above" />
+                    <SortTh label="Reverse after stop" k="revPts" sort={daySort.sort} onSort={daySort.onSort} num title="The reverse trade after the stop: its result (T target, S stop, sq square-off) and best ₹" />
                     <SortTh label="Best trail" k="bestTrail" sort={daySort.sort} onSort={daySort.onSort} num />
                     {onArm ? <th className={th} /> : null}
                   </tr>
@@ -601,11 +782,13 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                 <tbody>
                   {daySort.sorted.map((r) => {
                     const o = outcome(r, effTarget, testStop);
+                    const rv = reverseOutcome(r, effTarget, testStop);
                     const bt = Object.entries(r.trail ?? {}).reduce<[string, number] | null>((a, [k, v]) => (a == null || v > a[1] ? [k, v] : a), null);
                     return (
-                      <tr key={`${r.day}-${r.symbol}`} className="border-t border-white/5">
+                      <tr key={`${r.day}-${r.symbol}-${r.candle_no ?? ""}`} className="border-t border-white/5">
                         {onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null}
                         <td className={clsx(td, "text-slate-400")}>{r.day}</td>
+                        {runCandles.length > 1 ? <td className={clsx(td, "text-right")}>{ordinal(r.candle_no ?? params.candle_no ?? 2)}</td> : null}
                         <td className={clsx(td, "font-semibold text-slate-100")}>
                           <GrowwLink symbol={r.symbol} />
                         </td>
@@ -628,6 +811,15 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                         <td className={clsx(td, "text-right", pos(r.close_pts))}>{signed(r.close_pts)}</td>
                         <td className={clsx(td, "text-right", pos(o.pts))} title={o.kind === "target" ? "target first" : o.kind === "stop" ? "stop first" : "neither: square-off"}>
                           {signed(o.pts)} <span className="text-slate-500">{o.kind === "target" ? "T" : o.kind === "stop" ? "S" : "sq"}</span>
+                        </td>
+                        <td className={clsx(td, "text-right", rv ? pos(rv.pts) : "text-slate-500")} title={rv ? `reverse best ₹${fmt(rv.best)}` : "no reverse: the stop was not hit first"}>
+                          {rv ? (
+                            <>
+                              {signed(rv.pts)} <span className="text-slate-500">{rv.kind === "target" ? "T" : rv.kind === "stop" ? "S" : "sq"} · best {fmt(rv.best)}</span>
+                            </>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className={clsx(td, "text-right", pos(bt?.[1] ?? 0))}>{bt ? `${bt[0]}%: ${signed(bt[1])}` : "—"}</td>
                         {onArm ? (
