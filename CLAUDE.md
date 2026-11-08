@@ -1243,6 +1243,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the same stop went against it]); `reverse_outcome` / `stop_reverse_table` (`summarize` → `stop_reverse`, `best_reverse`) read
   it with the same target and stop, only for trades whose stop came first; the tab's "After the stop: take the reverse trade"
   table and "Reverse after stop" column. The tab reads level maps with either key form ("10.0" / "10", `levelMin`).
+  **Per day (all stocks together)** (`components/Scalp/DayTotals.tsx`, display only): each day's filtered trades added up (with
+  Top N, the day's N stocks), in ₹ a share or sized by shares / ₹ per trade (shares = ₹ ÷ entry): held to the square-off,
+  the chosen target / stop, the same + reverse, the best trailing stop; the picked exit drives the running total, green / red
+  days, best / worst day, biggest drop and most capital in a day. Before charges.
   **How far the trades went** (`components/Scalp/MoveBars.tsx`, display only): bar charts from the filtered rows, in ₹ or %
   of the entry: % of trades whose best move reached at least each level, the same for the worst move, and % that closed
   at the square-off at least that much in profit / in loss. Top by volume and Place by volume also offer Top 1 / 2 / 3.

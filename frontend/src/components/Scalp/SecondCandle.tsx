@@ -12,6 +12,7 @@ import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { smaApi, type SecondCandleRow, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
 import { CandleCompare } from "./CandleCompare";
+import { DayTotals } from "./DayTotals";
 import { MoveBars } from "./MoveBars";
 import { LEVELS, REV_STOPS, STOPS, fmt, mean, nearestLevel, ordinal, outcome, reverseOutcome, signed } from "./secondCandleMath";
 
@@ -78,7 +79,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   // Target + stop test, changed here without a new run.
   const [testTarget, setTestTarget] = useState<number | null>(null);
   const [testStop, setTestStop] = useState(5);
-  const [show, setShow] = useState<"days" | "stocks" | "compare">("days");
+  const [show, setShow] = useState<"days" | "perday" | "stocks" | "compare">("days");
   const ticks = useTicks();
 
   const load = useCallback(async () => {
@@ -757,9 +758,9 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           </div>
 
           <div className="flex flex-wrap items-center gap-1 text-xs">
-            {(["days", "stocks", "compare"] as const).map((k) => (
+            {(["days", "perday", "stocks", "compare"] as const).map((k) => (
               <button key={k} type="button" onClick={() => setShow(k)} className={clsx("rounded-md px-2 py-1", show === k ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200")}>
-                {k === "days" ? "Each stock and day" : k === "stocks" ? "Per stock" : "Which candle is best?"}
+                {k === "days" ? "Each stock and day" : k === "perday" ? "Per day (all stocks together)" : k === "stocks" ? "Per stock" : "Which candle is best?"}
               </button>
             ))}
           </div>
@@ -856,6 +857,8 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
               {!rows.length && <p className="p-3 text-xs text-slate-500">No trades match these filters.</p>}
             </div>
           )}
+
+          {show === "perday" && <DayTotals rows={rows} target={effTarget} stop={nearestLevel(testStop)} trailPct={bestTrail?.pct ?? null} />}
 
           {show === "compare" && (
             <CandleCompare rows={allCandleRows} candles={runCandles} candleOf={candleOf} target={effTarget} stop={nearestLevel(testStop)} sideRule={params.side_rule} />
