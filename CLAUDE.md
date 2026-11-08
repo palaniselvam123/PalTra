@@ -1203,7 +1203,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   under `min_body_pct` is skipped). **Which way** (`side_rule`): `NTH` (default, that candle's colour), `MAJORITY` (the way most
   of candles 1..N went, `majority`; a tie is skipped, `no majority`) or `AGREE` (that candle's colour only when most agree,
   else `against the majority`); "most" counted by `majority_by` `COUNT` (green vs red) | `SIZE` (bodies added up). Rows
-  carry `greens` / `reds` / `net_body`, the report `skipped_by`. Per stock and day (`analyze_day`, on the same cached 1-minute candles as the Strategy
+  carry `greens` / `reds` / `net_body`, the report `skipped_by`. **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
+  arithmetic in `secondCandleMath.ts`): with several candles in a run, each candle side by side (reached %, average with /
+  against, held to the square-off, the best trailing stop, the best target + stop, the best stop and reverse, the best way per
+  trade), each column's best boxed, a verdict naming the best candle, and each stock's best candle; follows every filter but
+  the Candle one. Display only. Per stock and day (`analyze_day`, on the same cached 1-minute candles as the Strategy
   lab, `strategy_lab.load_tape`, `WARMUP_DAYS` 5): `rvol` at the signal candle's close (`active_picks._cum_at`) and the
   day's `rank` by it (`rank_days`; `top_n`, 0 = all, picks the rows the summary reads), `best_pts` / `best_at` (the most
   the price went with the trade, ₹ and %), `worst_pts` / `worst_at` (against), `hit` / `target_at` / `minutes_to_target`

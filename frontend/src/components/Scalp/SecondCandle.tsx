@@ -11,6 +11,8 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { smaApi, type SecondCandleRow, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
+import { CandleCompare } from "./CandleCompare";
+import { LEVELS, REV_STOPS, STOPS, fmt, mean, nearestLevel, ordinal, outcome, reverseOutcome, signed } from "./secondCandleMath";
 
 /**
  * Second candle test (backend second_candle.py): the owner's Most active routine, measured on every stock and past
@@ -27,11 +29,6 @@ const CANDLES = [1, 2, 3, 4, 5, 6];
 const TOP_N = [0, 5, 10, 15, 20, 30, 50, 100];
 const SQUARE_OFFS = ["10:30", "11:00", "12:00", "13:00", "14:00", "15:00", "15:15", "15:25"];
 const HALF_HOURS = ["09:15", "09:45", "10:15", "10:45", "11:15", "11:45", "12:15", "12:45", "13:15", "13:45", "14:15", "14:45", "15:15"];
-const LEVELS = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50];
-const STOPS = [3, 5, 8, 10, 15, 20];
-/** The stop levels the backend measures the stop-and-reverse leg for (second_candle.REVERSE_STOPS). */
-const REV_STOPS = STOPS;
-const ordinal = (n: number) => (n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`);
 
 type Props = {
   armed: Map<string, string[]>;
@@ -42,8 +39,6 @@ type Props = {
   onStatus?: OnScanStatus;
 };
 
-const fmt = (v: number | null | undefined, d = 2) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
-const signed = (v: number | null | undefined, d = 2) => (v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`);
 const minutesOf = (hhmm: string | null | undefined) => (hhmm ? Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)) : null);
 const halfHour = (hhmm: string | null | undefined) => {
   const m = minutesOf(hhmm);
@@ -52,36 +47,9 @@ const halfHour = (hhmm: string | null | undefined) => {
   for (const slot of HALF_HOURS) if (m >= minutesOf(slot)!) label = slot;
   return label;
 };
-const nearestLevel = (v: number) => LEVELS.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
-const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-/** A level's minute from a row's level map: the backend keys them like "10.0" (older saves may use "10"). */
-const levelMin = (m: Record<string, number | null> | undefined, lv: number) => m?.[`${lv}.0`] ?? m?.[String(lv)] ?? null;
 
-/** The same reading as the backend's target_stop_outcome: the target first, else the stop, else the square-off. */
-function outcome(r: SecondCandleRow, target: number, stop: number): { kind: "target" | "stop" | "close"; pts: number } {
-  const t = levelMin(r.fav_min, nearestLevel(target));
-  const s = levelMin(r.adv_min, nearestLevel(stop));
-  if (t != null && (s == null || t < s)) return { kind: "target", pts: nearestLevel(target) };
-  if (s != null) return { kind: "stop", pts: -nearestLevel(stop) };
-  return { kind: "close", pts: r.close_pts };
-}
 
-/** The reverse after the stop (backend reverse_outcome): the other side entered at the stop price, the same target and
- * stop. null = no reverse (the first trade did not stop out first, or the stop is not a measured level). */
-function reverseOutcome(r: SecondCandleRow, target: number, stop: number): { kind: "target" | "stop" | "close"; pts: number; best: number } | null {
-  if (outcome(r, target, stop).kind !== "stop") return null;
-  const s = nearestLevel(stop);
-  const leg = r.rev?.[`${s}.0`] ?? r.rev?.[String(s)];
-  if (!leg) return null;
-  const t = nearestLevel(target);
-  const tMin = leg[4 + LEVELS.indexOf(t)];
-  const sMin = leg[4 + LEVELS.length];
-  const best = Number(leg[1] ?? 0);
-  if (tMin != null && (sMin == null || tMin < sMin)) return { kind: "target", pts: t, best };
-  if (sMin != null) return { kind: "stop", pts: -s, best };
-  return { kind: "close", pts: Number(leg[3] ?? 0), best };
-}
 
 export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus }: Props) {
   const [lists, setLists] = useScanLists("sma.second.lists", ["fno"]);
@@ -109,7 +77,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   // Target + stop test, changed here without a new run.
   const [testTarget, setTestTarget] = useState<number | null>(null);
   const [testStop, setTestStop] = useState(5);
-  const [show, setShow] = useState<"days" | "stocks">("days");
+  const [show, setShow] = useState<"days" | "stocks" | "compare">("days");
   const ticks = useTicks();
 
   const load = useCallback(async () => {
@@ -184,13 +152,12 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const ruleTarget = params?.target_points ?? target;
   const effTarget = testTarget ?? nearestLevel(ruleTarget);
 
-  const rows = useMemo(() => {
+  const allCandleRows = useMemo(() => {
     const from = minutesOf(targetFrom || null);
     const to = minutesOf(targetTo || null);
     return ranked.filter((r) => {
       if (topLimit > 0 && (r.rank ?? 0) > topLimit) return false;
       if (side !== "ALL" && r.side !== side) return false;
-      if (candleF != null && (r.candle_no ?? params?.candle_no) !== candleF) return false;
       if (day && r.day !== day) return false;
       if (reached === "YES" && !r.hit) return false;
       if (reached === "NO" && r.hit) return false;
@@ -203,7 +170,10 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
       if (ticks.only && !ticks.ticked.has(r.symbol)) return false;
       return matchesText(query, r.symbol);
     });
-  }, [ranked, topLimit, side, candleF, params?.candle_no, day, reached, targetFrom, targetTo, query, ticks.only, ticks.ticked]);
+  }, [ranked, topLimit, side, day, reached, targetFrom, targetTo, query, ticks.only, ticks.ticked]);
+  const candleOf = useCallback((r: SecondCandleRow) => r.candle_no ?? params?.candle_no ?? 2, [params?.candle_no]);
+  // Every table but "Which candle is best?" also follows the Candle filter.
+  const rows = useMemo(() => (candleF == null ? allCandleRows : allCandleRows.filter((r) => candleOf(r) === candleF)), [allCandleRows, candleF, candleOf]);
   const runCandles = useMemo(() => {
     const set = new Set<number>(ranked.map((r) => r.candle_no ?? params?.candle_no ?? 2));
     return Array.from(set).sort((a, b) => a - b);
@@ -769,9 +739,9 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           </div>
 
           <div className="flex flex-wrap items-center gap-1 text-xs">
-            {(["days", "stocks"] as const).map((k) => (
+            {(["days", "stocks", "compare"] as const).map((k) => (
               <button key={k} type="button" onClick={() => setShow(k)} className={clsx("rounded-md px-2 py-1", show === k ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200")}>
-                {k === "days" ? "Each stock and day" : "Per stock"}
+                {k === "days" ? "Each stock and day" : k === "stocks" ? "Per stock" : "Which candle is best?"}
               </button>
             ))}
           </div>
@@ -867,6 +837,10 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
               </table>
               {!rows.length && <p className="p-3 text-xs text-slate-500">No trades match these filters.</p>}
             </div>
+          )}
+
+          {show === "compare" && (
+            <CandleCompare rows={allCandleRows} candles={runCandles} candleOf={candleOf} target={effTarget} stop={nearestLevel(testStop)} sideRule={params.side_rule} />
           )}
 
           {show === "stocks" && (
