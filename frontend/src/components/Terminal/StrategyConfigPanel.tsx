@@ -490,6 +490,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     colour_body_unit: form.colour_body_unit === "ATR" ? "ATR" : "PCT",
     colour_body_by_tf: String(form.colour_body_by_tf ?? ""),
     colour_body_atr: Math.min(5, Math.max(0, Number(form.colour_body_atr ?? 0) || 0)),
+    colour_body_seq: String(form.colour_body_seq ?? ""),
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -3240,7 +3241,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
@@ -4213,6 +4214,70 @@ function ColourBodySize({
           </p>
         </>
       )}
+      <ColourBodySeq form={form} set={set} isOwn={isOwn} unit={unit} />
+    </div>
+  );
+}
+
+/** Each candle of the colour run's own smallest body (colour_body_seq, oldest first, in the unit picked above). */
+function ColourBodySeq({
+  form,
+  set,
+  isOwn,
+  unit,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+  unit: "PCT" | "ATR";
+}) {
+  const count = Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1));
+  const seq = String(form.colour_body_seq ?? "").split(",");
+  const usual = unit === "ATR" ? String(form.colour_body_atr ?? 0) : String(form.colour_min_body ?? 0);
+  const setAt = (i: number, value: string) => {
+    const next = Array.from({ length: Math.max(count, seq.length) }, (_, k) => (k === i ? value.trim() : (seq[k] ?? "").trim()));
+    while (next.length && next[next.length - 1] === "") next.pop();
+    set("colour_body_seq", next.join(","));
+  };
+  const on = seq.slice(0, count).some((v) => v.trim() !== "");
+  const ord = (n: number) => (n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`);
+  if (count < 2) {
+    return (
+      <p className="mt-2 text-xs text-slate-500">
+        Set &quot;Candles in a row&quot; to 2 or more to give each candle of the run its own smallest size.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-3 border-t border-white/10 pt-2">
+      <div className="text-xs uppercase tracking-wider text-slate-400">
+        Each candle&apos;s own size{isOwn("colour_body_seq") ? " (own)" : ""}{" "}
+        <span className="normal-case tracking-normal text-slate-500">
+          ({unit === "ATR" ? "× ATR" : "% of price"}; {on ? "on" : "off, all empty"})
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-3 items-end gap-2 sm:grid-cols-5">
+        {Array.from({ length: count }, (_, i) => (
+          <label key={i} className="block text-sm text-slate-300">
+            <span className="text-xs text-slate-400">
+              {ord(i + 1)} candle{i === count - 1 ? " (newest)" : i === 0 ? " (oldest)" : ""}
+            </span>
+            <input
+              inputMode="decimal"
+              value={(seq[i] ?? "").trim()}
+              placeholder={usual}
+              onChange={(e) => setAt(i, e.target.value)}
+              aria-label={`Smallest body of the ${ord(i + 1)} candle of the run, ${unit === "ATR" ? "times ATR" : "% of price"}`}
+              className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+            />
+          </label>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        The trade turns only when every candle of the run is the new colour <b>and</b> at least its own size. Example with 2 in a
+        row and × ATR: 1st 0.1, 2nd 0.5 = a small then a big candle turns the trade; a big then a small one does not (the 2nd is
+        under 0.5). An empty box uses the usual smallest body ({usual}). It is read for entries while flat too.
+      </p>
     </div>
   );
 }

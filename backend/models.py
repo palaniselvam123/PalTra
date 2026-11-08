@@ -568,6 +568,8 @@ class BotConfig(Base):
     colour_body_unit: Mapped[str | None] = mapped_column(String, nullable=True, default="PCT")
     colour_body_by_tf: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     colour_body_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Each candle of the colour run's own smallest body, oldest first, in the unit above ("0.1,0.5"; "" = off).
+    colour_body_seq: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     # Second candle (entry_mode NTH_CANDLE, nth_candle.py): which candle of the day (1-6), its size in
     # minutes (1/3/5/10/15; the bot's own candle in this mode), the smallest body in % of the close
     # (0 = any) and the least volume vs usual at its close (0 = off).

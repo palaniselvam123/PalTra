@@ -699,6 +699,14 @@ class ConfigUpdate(BaseModel):
 
         return None if value is None else candle_patterns.clean_body_by_tf(value)
 
+    @field_validator("colour_body_seq", mode="before")
+    @classmethod
+    def _colour_body_seq(cls, value):
+        """Each colour candle's own smallest body, oldest first (candle_patterns.clean_body_seq): "0.1,0.5"."""
+        import candle_patterns
+
+        return None if value is None else candle_patterns.clean_body_seq(value)
+
     @field_validator("exit_group", mode="before")
     @classmethod
     def _exit_group_keys(cls, value):
@@ -826,6 +834,7 @@ class ConfigUpdate(BaseModel):
     colour_min_body: float | None = Field(default=None, ge=0, le=2)
     colour_body_unit: Literal["PCT", "ATR"] | None = None
     colour_body_by_tf: str | None = Field(default=None, max_length=120)
+    colour_body_seq: str | None = Field(default=None, max_length=60)
     colour_body_atr: float | None = Field(default=None, ge=0, le=5)
     # Second candle entries (nth_candle.py).
     nth_candle_no: int | None = Field(default=None, ge=1, le=nth_candle.CANDLE_NO_MAX)

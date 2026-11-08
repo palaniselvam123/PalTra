@@ -414,7 +414,11 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candles can be 1, 3, 5, 10, 15, 30 or 60 minutes (`PATTERN_TFS`). The smallest body can be set **per colour candle size** (`colour_body_by_tf`, "5:0.05,15:0.15" in %,
   `parse_body_by_tf` / `clean_body_by_tf`; a size not listed uses `colour_min_body`) or **in ATRs** (`colour_body_unit` `PCT` default
   | `ATR`, `colour_body_atr` 0-5 × the Wilder ATR 14 of the colour candles themselves, `_atr_series`, real candles; no ATR yet = any
-  body counts). Settings: `StrategyConfigPanel.ColourBodySize` (unit switch, a box per size, the picked size ticked).
+  body counts). **Each candle of the run its own size** (`colour_body_seq`, "0.1,0.5" oldest first in the unit picked, a blank
+  place = the usual floor; `parse_body_seq` / `clean_body_seq`): with 2 in a row and 0.1 / 0.5 × ATR a small then a big candle
+  turns the trade, a big then a small one is held ("candle 2 of 2 body … under its …"); entries while flat read it too.
+  Settings: `StrategyConfigPanel.ColourBodySize` (unit switch, a box per size, the picked size ticked; `ColourBodySeq`, one
+  box per candle in a row).
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.

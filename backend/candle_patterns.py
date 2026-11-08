@@ -15,7 +15,10 @@ that many closed candles of a colour in a row before entering or turning, and
 count as no colour (held, like a doji). The smallest body can be set per colour candle size
 (``colour_body_by_tf``, "5:0.05,15:0.15" in %; a size not listed uses ``colour_min_body``), or in
 ATRs instead (``colour_body_unit = "ATR"``, ``colour_body_atr`` × the Wilder ATR 14 of the colour
-candles themselves, so one number fits every candle size and stock).
+candles themselves, so one number fits every candle size and stock). Each candle of the run can also
+have its own smallest body (``colour_body_seq``, "0.1,0.5" oldest first, in the unit picked; a blank
+place uses the usual one): with 2 in a row and "0.1,0.5" × ATR, a small then a big candle turns the
+trade, a big then a small one does not.
 
 The pattern names follow ``frontend/src/lib/candlePatterns.ts`` (the chart's
 data table), so what the table calls a candle is what the bot acted on.
@@ -62,6 +65,7 @@ DEFAULTS = {
     "colour_body_unit": "PCT",
     "colour_body_by_tf": "",
     "colour_body_atr": 0.0,
+    "colour_body_seq": "",
 }
 
 # Patterns that order. STRONG: the multi-candle and full-body signals; ALL adds
@@ -404,6 +408,27 @@ def colour_body_atr(cfg) -> float:
         return 0.0
 
 
+def parse_body_seq(text) -> list[float | None]:
+    """ "0.1,0.5" → [0.1, 0.5]: the smallest body of each candle of the run, oldest first (``colour_body_seq``).
+    A blank place is None (that candle uses the usual smallest body); at most COLOUR_COUNT_MAX places."""
+    out: list[float | None] = []
+    for part in str(text or "").replace(";", ",").split(",")[:COLOUR_COUNT_MAX]:
+        part = part.strip()
+        try:
+            value = float(part) if part else None
+        except ValueError:
+            value = None
+        out.append(value if value is None or 0 <= value <= max(COLOUR_BODY_MAX, COLOUR_BODY_ATR_MAX) else None)
+    while out and out[-1] is None:
+        out.pop()
+    return out
+
+
+def clean_body_seq(text) -> str:
+    """The saved form of `colour_body_seq` ("0.1,,0.5": a blank place keeps the usual smallest body)."""
+    return ",".join("" if v is None else f"{v:g}" for v in parse_body_seq(text))
+
+
 def _atr_series(rows: list[dict], period: int = COLOUR_ATR_PERIOD) -> list[float | None]:
     """Wilder ATR of the colour candles (real high / low / close), None until two candles exist."""
     out: list[float | None] = []
@@ -460,25 +485,41 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
     if len(pairs) < need:
         return PatternCall(None, "", f"waiting for {need} closed {tf}-minute candles")
     # The smallest body in price units for each of the last `need` candles.
-    if colour_body_unit(cfg) == "ATR":
+    # Each candle of the run can have its own smallest body (colour_body_seq, oldest first, in the unit picked).
+    seq = parse_body_seq(setting(cfg, "colour_body_seq"))[:need]
+    seq = seq + [None] * (need - len(seq))
+    atr_mode = colour_body_unit(cfg) == "ATR"
+    if atr_mode:
         k = colour_body_atr(cfg)
-        atrs = _atr_series(rows) if k > 0 else [None] * len(rows)
-        floors = [(k * a if a else 0.0) for a in atrs[-need:]]
-        floor_word = f"{k:g}× ATR"
+        wants_atr = k > 0 or any(v for v in seq)
+        atrs = (_atr_series(rows) if wants_atr else [None] * len(rows))[-need:]
+        ks = [min(v, COLOUR_BODY_ATR_MAX) if v is not None else k for v in seq]
+        floors = [(kk * a if a else 0.0) for kk, a in zip(ks, atrs)]
+        words = [f"{kk:g}× ATR" for kk in ks]
     else:
         pct = colour_min_body_pct(cfg, tf)
-        floors = [float(r["close"]) * pct / 100 for r in rows[-need:]]
-        floor_word = f"{pct:g}%"
+        pcts = [min(v, COLOUR_BODY_MAX) if v is not None else pct for v in seq]
+        floors = [float(r["close"]) * p / 100 for r, p in zip(rows[-need:], pcts)]
+        words = [f"{p:g}%" for p in pcts]
     colours = [_colour(o, c, f) for (o, c), f in zip(pairs[-need:], floors)]
     last = colours[-1]
+    place = (lambda i: f"candle {i + 1} of {need}") if need > 1 and any(v is not None for v in seq) else (lambda i: f"{tf}-minute candle")
     if last is None:
         o, c = pairs[-1]
         if c == o:
             return PatternCall(None, "Doji", f"doji {tf}-minute candle — holding")
         return PatternCall(
-            None, "Small candle", f"{tf}-minute candle body {abs(c - o):.2f} under {floor_word} ({floors[-1]:.2f}) — holding"
+            None, "Small candle", f"{place(need - 1)} body {abs(c - o):.2f} under {words[-1]} ({floors[-1]:.2f}) — holding"
         )
     word = "green" if last == "G" else "red"
+    if any(v is not None for v in seq):
+        # A candle of the right colour that is under its own place's size: say which one.
+        for i, ((o, c), col) in enumerate(zip(pairs[-need:], colours)):
+            right_way = (c > o) if last == "G" else (c < o)
+            if col is None and right_way:
+                return PatternCall(
+                    None, "Small candle", f"{place(i)} body {abs(c - o):.2f} under its {words[i]} ({floors[i]:.2f}) — holding"
+                )
     if any(col != last for col in colours):
         run = 0
         for col in reversed(colours):
