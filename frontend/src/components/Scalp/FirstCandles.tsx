@@ -1,0 +1,183 @@
+"use client";
+
+import clsx from "clsx";
+import { CandlestickChart, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { smaApi, type FirstCandleRow, type FirstCandleRule, type SecondCandleSideRule } from "@/lib/smaApi";
+
+/**
+ * First candles on the Most active card (display only; backend first_candles.py): read the day's first N candles of the
+ * stocks the filters show, with the Second candle rule (that candle / most of 1..N / that candle when most agree), so the
+ * colours, how many matched and the call show as columns without opening every chart. No order is placed.
+ */
+export type FirstPick = "ALL" | "CALL" | "LONG" | "SHORT";
+export const FIRST_PICKS: { value: FirstPick; label: string }[] = [
+  { value: "ALL", label: "Any" },
+  { value: "CALL", label: "Has a call" },
+  { value: "LONG", label: "Call: Buy" },
+  { value: "SHORT", label: "Call: Sell" },
+];
+const MAX_STOCKS = 200;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export function firstPasses(pick: FirstPick, row: FirstCandleRow | undefined, read: boolean): boolean {
+  if (!read || pick === "ALL") return true;
+  if (!row?.call) return false;
+  return pick === "CALL" || row.call === pick;
+}
+
+export function FirstCandleControls({
+  symbols,
+  disabled,
+  onRows,
+}: {
+  symbols: string[];
+  disabled?: boolean;
+  onRows: (rows: Map<string, FirstCandleRow>, rule: FirstCandleRule) => void;
+}) {
+  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0 });
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const set = (k: keyof FirstCandleRule, v: number | string) => setRule((r) => ({ ...r, [k]: v }));
+  const sel = "min-h-8 rounded-md border border-slate-700 bg-surface2 px-1 text-xs text-slate-100";
+
+  const run = async () => {
+    const list = symbols.slice(0, MAX_STOCKS);
+    if (!list.length) return;
+    setBusy(true);
+    setNote(`Reading the first ${rule.candle_no} candles of ${list.length} stocks…`);
+    try {
+      await smaApi.firstCandlesStart({ ...rule, symbols: list });
+      const want = new Set(list);
+      for (let i = 0; i < 150; i += 1) {
+        await sleep(2_500);
+        const scan = await smaApi.firstCandles();
+        if (!scan.running) {
+          const rows = scan.rows.filter((r) => want.has(r.symbol));
+          onRows(new Map(rows.map((r) => [r.symbol, r])), rule);
+          const calls = rows.filter((r) => r.call).length;
+          setNote(scan.error ? `First candles: ${scan.error}` : `First candles read: ${calls} of ${rows.length} stocks have a call.`);
+          return;
+        }
+        setNote(`Reading first candles… ${scan.done} of ${scan.total}`);
+      }
+      setNote("Still reading; press the button again in a minute.");
+    } catch (e: unknown) {
+      setNote(e instanceof Error ? e.message : "Could not read the first candles");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy || disabled || symbols.length === 0}
+        title="Read today's first candles of the stocks the filters show now (up to 200). Read-only."
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <CandlestickChart size={13} />} Read first candles
+      </button>
+      <label className="flex items-center gap-1">
+        up to candle
+        <select value={rule.candle_no} onChange={(e) => set("candle_no", Number(e.target.value))} className={sel}>
+          {[1, 2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1">
+        of
+        <select value={rule.minutes} onChange={(e) => set("minutes", Number(e.target.value))} className={sel}>
+          {[1, 3, 5, 10, 15].map((m) => (
+            <option key={m} value={m}>
+              {m} min
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1">
+        trade which way
+        <select value={rule.side_rule} onChange={(e) => set("side_rule", e.target.value as SecondCandleSideRule)} className={sel}>
+          <option value="NTH">That candle&apos;s colour</option>
+          <option value="MAJORITY">Most of candles 1 to N</option>
+          <option value="AGREE">That candle, only if most agree</option>
+        </select>
+      </label>
+      {rule.side_rule !== "NTH" && (
+        <label className="flex items-center gap-1">
+          most by
+          <select value={rule.majority_by} onChange={(e) => set("majority_by", e.target.value)} className={sel}>
+            <option value="COUNT">green vs red</option>
+            <option value="SIZE">body size</option>
+          </select>
+        </label>
+      )}
+      <label className="flex items-center gap-1">
+        smallest body
+        <input
+          type="number"
+          min={0}
+          max={5}
+          step={0.05}
+          value={rule.min_body_pct}
+          onChange={(e) => set("min_body_pct", Number(e.target.value))}
+          className={clsx(sel, "w-16")}
+        />
+        %
+      </label>
+      {note && <span className="text-slate-500">{note}</span>}
+    </div>
+  );
+}
+
+export function FirstCandleHead() {
+  return (
+    <>
+      <th className="pb-2 text-left font-medium" title="Today's first candles, candle 1 first: green, red, or a doji">First candles</th>
+      <th className="pb-2 text-right font-medium" title="How many of those candles went the call's way">Matched</th>
+      <th className="pb-2 text-left font-medium" title="Buy / sell by the rule picked, or why there is no call">Call</th>
+    </>
+  );
+}
+
+export function FirstCandleCells({ row, n }: { row: FirstCandleRow | null; n: number }) {
+  if (!row) {
+    return (
+      <>
+        <td className="py-1.5 text-xs text-slate-600">—</td>
+        <td />
+        <td />
+      </>
+    );
+  }
+  return (
+    <>
+      <td className="py-1.5">
+        <span className="inline-flex gap-0.5" title={row.colours.map((c, i) => `${i + 1}: ${c === "G" ? "green" : c === "R" ? "red" : "doji"} ${row.bodies[i]?.toFixed(2)}%`).join(" · ")}>
+          {row.colours.map((c, i) => (
+            <span
+              key={i}
+              className={clsx("inline-block h-3.5 w-2.5 rounded-sm", c === "G" ? "bg-emerald-500" : c === "R" ? "bg-rose-500" : "bg-slate-500")}
+            />
+          ))}
+        </span>
+      </td>
+      <td className="py-1.5 text-right tabular-nums text-slate-300">{row.matched == null ? "—" : `${row.matched} of ${n}`}</td>
+      <td className="py-1.5 text-xs">
+        {row.call ? (
+          <span className={clsx("font-semibold", row.call === "LONG" ? "text-emerald-300" : "text-rose-300")}>
+            {row.call === "LONG" ? "Buy" : "Sell"}
+            {row.entry_at ? <span className="ml-1 font-normal text-slate-500">at {row.entry_at}</span> : null}
+          </span>
+        ) : (
+          <span className="text-slate-500">{row.why ?? "no call"}</span>
+        )}
+      </td>
+    </>
+  );
+}

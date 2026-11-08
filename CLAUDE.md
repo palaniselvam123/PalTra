@@ -1254,6 +1254,16 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   **No stall while it runs**: the page polls `?rows=false` during a run and loads the rows once at the end; `GET
   /api/second-candle` sends `SecondCandle.view_json` (the rows encoded in a worker thread, cached per finished run), the
   report is saved off the loop, and `strategy_lab.load_tape` reads / writes / joins the cached day files in a thread.
+- `backend/first_candles.py` – **First candles** on the Most active card (read-only; `components/Scalp/FirstCandles.tsx`; no
+  order path, nothing in the strategy reads it): "Read first candles" reads, for the stocks the card's filters show (up to
+  200), the latest session's first N candles (`candle_no` 1-6, `minutes` 1/3/5/10/15, closed candles only) from the 1-minute
+  download (`fetch_frame` on `_scan_broker()`, today plus `DOWNLOAD_DAYS` back for weekends): each candle's colour (G / R /
+  D) and body %, greens / reds / bodies added up, and the call by the Second candle rule (`side_rule` NTH / MAJORITY /
+  AGREE, `majority_by`, `min_body_pct`; `second_candle.majority`), `matched` = candles 1..N that went the call's way, or why
+  there is none (`waiting: candle N closes at HH:MM`, doji, tie, against the majority, small body). `FirstCandleScanner`
+  mirrors the morning scan (one pass, paced, stopped by Pause scans and `POST /api/scan-stop/first`). `POST
+  /api/first-candles/start`, `GET /api/first-candles`. The card adds First candles (coloured squares) / Matched / Call columns
+  and a "First candles" filter (has a call / Buy / Sell).
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
   strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the

@@ -57,6 +57,7 @@ import chop_auto
 import chop_scan
 import high52
 import morning_scan
+import first_candles
 import carry_scan
 import turn_scan
 import groww_pressure
@@ -145,6 +146,7 @@ cross_scanner = CrossScanner()
 chop_scanner = ChopScanner()
 # The Scalp page's 09:30 Morning tab: five opening checks per stock (morning_scan.py).
 morning_scanner = morning_scan.MorningScanner()
+first_candle_scanner = first_candles.FirstCandleScanner()
 # The Scalp page's 52-week high tab: each stock's distance from its 52-week high / low (high52.py).
 high52_scanner = high52.High52Scanner()
 # The Scalp page's Carry-over tab: did yesterday's SMA trend carry on today (carry_scan.py).
@@ -437,7 +439,7 @@ def _boot_backtest_server() -> asyncio.Task:
     engine.broker.set_mode("PAPER")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
-        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner, turn_scanner))
+        lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner, turn_scanner, first_candle_scanner))
     )
     backtest_server.add_busy_check(lambda: scan_arm_runner.busy)
     backtest_server.add_busy_check(lambda: regime_study.study().running)
@@ -3228,6 +3230,7 @@ async def scans_pause(body: ScanPause):
         high52_scanner.stop("Stopped: scans are paused.")
         carry_scanner.stop("Stopped: scans are paused.")
         turn_scanner.stop("Stopped: scans are paused.")
+        first_candle_scanner.stop("Stopped: scans are paused.")
         scan_checker.stop("Stopped: scans are paused.")
     return {"paused": _scans_paused}
 
@@ -3242,6 +3245,7 @@ async def scan_stop(kind: str):
         "high52": high52_scanner,
         "carry": carry_scanner,
         "turn": turn_scanner,
+        "first": first_candle_scanner,
     }
     scanner = scanners.get(kind)
     if scanner is None:
@@ -3781,6 +3785,34 @@ async def morning_scan_start(body: MorningScanStart):
 @app.get("/api/morning-scan")
 async def morning_scan_status():
     return {**morning_scanner.snapshot(), "paused": _scans_paused}
+
+
+class FirstCandleStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    candle_no: int = Field(default=2, ge=1, le=6)
+    side_rule: Literal["NTH", "MAJORITY", "AGREE"] = "NTH"
+    majority_by: Literal["COUNT", "SIZE"] = "COUNT"
+    min_body_pct: float = Field(default=0.0, ge=0, le=5)
+
+
+@app.post("/api/first-candles/start")
+async def first_candles_start(body: FirstCandleStart):
+    """Read the day's first N candles of each stock (the Most active card's "First candles"; read-only, candles only,
+    no order): their colours and the call by the Second candle rule (first_candles.py). Poll GET /api/first-candles."""
+    _refuse_when_paused()
+    rule = first_candles.Rule(body.minutes, body.candle_no, body.side_rule, body.majority_by, body.min_body_pct)
+    try:
+        return first_candle_scanner.start(
+            body.symbols, lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end), rule
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/first-candles")
+async def first_candles_status():
+    return {**first_candle_scanner.snapshot(), "paused": _scans_paused}
 
 
 class CarryScanStart(BaseModel):
