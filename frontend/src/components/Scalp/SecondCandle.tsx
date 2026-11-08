@@ -9,7 +9,7 @@ import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickAr
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
-import { smaApi, type SecondCandleRow, type SecondCandleView as View } from "@/lib/smaApi";
+import { smaApi, type SecondCandleRow, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
 
 /**
@@ -88,6 +88,8 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const [days, setDays] = useState(10);
   const [minutes, setMinutes] = useState(5);
   const [candleNos, setCandleNos] = useState<number[]>([2]);
+  const [sideRule, setSideRule] = useState<SecondCandleSideRule>("NTH");
+  const [majorityBy, setMajorityBy] = useState<"COUNT" | "SIZE">("COUNT");
   const [topN, setTopN] = useState(20);
   const [target, setTarget] = useState(10);
   const [squareOff, setSquareOff] = useState("15:15");
@@ -153,6 +155,8 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           square_off: squareOff,
           trails: trails.length ? trails : [0.25, 0.5, 0.75, 1, 1.5, 2],
           min_body_pct: 0,
+          side_rule: sideRule,
+          majority_by: majorityBy,
         })
       );
       setPlace(null);
@@ -422,6 +426,25 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           </div>
         </div>
         <label className="flex flex-col gap-1">
+          Trade which way
+          <select value={sideRule} onChange={(e) => setSideRule(e.target.value as SecondCandleSideRule)} className={select} disabled={running}
+            title="The Nth candle alone can sell a small pause in a big rise. 'Most candles' looks at candles 1 to N and goes the way most of them went (a tie is skipped).">
+            <option value="NTH">That candle's colour</option>
+            <option value="MAJORITY">Most of candles 1 to N</option>
+            <option value="AGREE">That candle, only if most agree</option>
+          </select>
+        </label>
+        {sideRule !== "NTH" && (
+          <label className="flex flex-col gap-1">
+            Count &quot;most&quot; by
+            <select value={majorityBy} onChange={(e) => setMajorityBy(e.target.value as "COUNT" | "SIZE")} className={select} disabled={running}
+              title="Green vs red candles, or the candle bodies added up (a big green beats two small reds).">
+              <option value="COUNT">Green vs red candles</option>
+              <option value="SIZE">Candle sizes added up</option>
+            </select>
+          </label>
+        )}
+        <label className="flex flex-col gap-1">
           Top by volume vs usual
           <select value={topN} onChange={(e) => setTopN(Number(e.target.value))} className={select} disabled={running}>
             {TOP_N.map((n) => (
@@ -472,6 +495,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           <div className="rounded-lg border border-slate-800 bg-surface2/60 p-3 text-xs text-slate-300">
             <div className="mb-1 font-semibold text-slate-200">
               Last run: {params.symbols} stocks, {params.days} day(s), the {(params.candle_nos?.length ? params.candle_nos : [params.candle_no ?? 2]).map(ordinal).join(" + ")} {params.minutes}-minute candle{(params.candle_nos?.length ?? 1) > 1 ? "s (each its own trade)" : ""}, target ₹{params.target_points}, square-off {params.square_off}, top {params.top_n === 0 ? "all" : params.top_n} by volume vs usual
+              {params.side_rule === "MAJORITY" ? `, way = most of the opening candles (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : params.side_rule === "AGREE" ? `, only when most opening candles agree (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : ""}
             </div>
             <ul className="list-disc space-y-0.5 pl-5">
               {rep.answer.map((line) => (
@@ -794,7 +818,14 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
                         </td>
                         <td className={clsx(td, "text-right")}>{r.rank}</td>
                         <td className={clsx(td, "text-right")}>{r.rvol == null ? "—" : `${fmt(r.rvol, 1)}×`}</td>
-                        <td className={clsx(td, r.side === "LONG" ? "text-emerald-300" : "text-rose-300")}>{r.side === "LONG" ? "Buy" : "Sell"}</td>
+                        <td className={clsx(td, r.side === "LONG" ? "text-emerald-300" : "text-rose-300")}>
+                          {r.side === "LONG" ? "Buy" : "Sell"}
+                          {r.greens != null && params.side_rule && params.side_rule !== "NTH" ? (
+                            <span className="ml-1 text-[10px] text-slate-500" title={`Candles 1 to ${r.candle_no ?? params.candle_no}: ${r.greens} green, ${r.reds} red, bodies added up ₹${fmt(r.net_body ?? 0)}`}>
+                              {r.greens}G·{r.reds}R
+                            </span>
+                          ) : null}
+                        </td>
                         <td className={clsx(td, "text-slate-300")}>
                           {r.entry_at} @ {fmt(r.entry)}
                         </td>

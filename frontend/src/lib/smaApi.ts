@@ -809,13 +809,20 @@ export type MorningStock = {
   avg_deliv_pct: number | null;
 };
 /** Second candle test (backend second_candle.py). One stock on one day: the Nth candle's call and the path after it. */
+/** How the Second candle test picks the side: the Nth candle's colour, most of candles 1..N, or the Nth when most agree. */
+export type SecondCandleSideRule = "NTH" | "MAJORITY" | "AGREE";
+
 export type SecondCandleRow = {
   symbol: string;
   day: string;
   /** Which candle of the day this trade read (several can be read in one run). */
   candle_no?: number;
-  side: "LONG" | "SHORT" | "DOJI";
+  side: "LONG" | "SHORT" | "DOJI" | "TIE";
   skipped?: string;
+  /** Green / red candles among candles 1..N, and their bodies added up in ₹ (the majority side rules). */
+  greens?: number;
+  reds?: number;
+  net_body?: number;
   rank?: number;
   candidates?: number;
   rvol: number | null;
@@ -891,7 +898,7 @@ export type SecondCandleView = {
   done: number;
   total: number;
   errors: { symbol: string; error: string }[];
-  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number };
+  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number; side_rule?: SecondCandleSideRule; majority_by?: "COUNT" | "SIZE" };
   started_at: string | null;
   finished_at: string | null;
   report: SecondCandleReport | null;
@@ -2580,6 +2587,8 @@ export const smaApi = {
     square_off: string;
     trails: number[];
     min_body_pct: number;
+    side_rule?: SecondCandleSideRule;
+    majority_by?: "COUNT" | "SIZE";
   }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>

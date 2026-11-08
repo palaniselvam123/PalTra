@@ -5,7 +5,7 @@ enter its way at its close: green = buy, red = sell. His hand checks say it usua
 stock by hand is slow, so this reads each stock's past days (the same cached 1-minute candles the Strategy lab uses) and,
 for each stock and day, gives:
 
-* the side (the Nth candle's colour; a doji is skipped), the entry (the open of the candle after it), the stock's
+* the side (the Nth candle's colour, a doji skipped; or with `side_rule` the way most of candles 1..N went), the entry (the open of the candle after it), the stock's
   volume vs usual at that moment (`active_picks._cum_at`: today's running volume against the same minutes of the
   earlier sessions) and its rank by it among the stocks read that day;
 * how far the price went **with** the trade (`best_pts`, in ₹ and % of the entry) and when (`best_at`), how far it
@@ -60,7 +60,20 @@ DEFAULT_STOPS = (3.0, 5.0, 8.0, 10.0, 15.0, 20.0)
 #: stop price and followed to the square-off (`rev`).
 REVERSE_STOPS = DEFAULT_STOPS
 HALF_HOURS = ("09:15", "09:45", "10:15", "10:45", "11:15", "11:45", "12:15", "12:45", "13:15", "13:45", "14:15", "14:45", "15:15")
+SIDE_RULES = ("NTH", "MAJORITY", "AGREE")
+MAJORITY_BY = ("COUNT", "SIZE")
 RANK_BUCKETS = ((1, 5, "Top 5"), (6, 10, "6-10"), (11, 20, "11-20"), (21, 10**6, "21 and after"))
+
+
+def majority(candles: pd.DataFrame, upto: int, by: str = "COUNT") -> tuple[str | None, int, int, float]:
+    """The side most of the first `upto` candles went: (LONG / SHORT / None for a tie, greens, reds, net body in ₹).
+    COUNT compares green vs red candles (dojis count for neither); SIZE adds the bodies up, signed."""
+    part = candles.iloc[:upto]
+    body = (part["close"].astype(float) - part["open"].astype(float)).to_numpy()
+    greens, reds, net = int((body > 0).sum()), int((body < 0).sum()), float(np.nansum(body))
+    score = (greens - reds) if by == "COUNT" else net
+    side = "LONG" if score > 0 else "SHORT" if score < 0 else None
+    return side, greens, reds, net
 
 
 @dataclass
@@ -75,6 +88,11 @@ class Rule:
     trails: tuple[float, ...] = DEFAULT_TRAILS
     #: Skip a signal candle whose body is under this % of its open (0 = any body counts; a doji is always skipped).
     min_body_pct: float = 0.0
+    #: How the side is picked (`SIDE_RULES`): NTH = the Nth candle's colour; MAJORITY = the colour most of candles 1..N
+    #: closed (a tie is skipped); AGREE = the Nth candle's colour, only when most of candles 1..N agree with it.
+    side_rule: str = "NTH"
+    #: How "most" is counted for MAJORITY / AGREE: COUNT = green vs red candles; SIZE = the bodies added up (signed).
+    majority_by: str = "COUNT"
 
     def clean(self) -> "Rule":
         trails = tuple(sorted({round(float(t), 3) for t in self.trails if 0.05 <= float(t) <= 10}))[:MAX_TRAILS] or DEFAULT_TRAILS
@@ -88,6 +106,8 @@ class Rule:
             square_off=self.square_off,
             trails=trails,
             min_body_pct=max(0.0, float(self.min_body_pct)),
+            side_rule=self.side_rule if self.side_rule in SIDE_RULES else "NTH",
+            majority_by=self.majority_by if self.majority_by in MAJORITY_BY else "COUNT",
         )
 
     def view(self) -> dict:
@@ -100,6 +120,8 @@ class Rule:
             "square_off": self.square_off.strftime("%H:%M"),
             "trails": list(self.trails),
             "min_body_pct": self.min_body_pct,
+            "side_rule": self.side_rule,
+            "majority_by": self.majority_by,
         }
 
 
@@ -224,15 +246,22 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candl
     o, c = float(sig["open"]), float(sig["close"])
     if not (np.isfinite(o) and np.isfinite(c)) or o <= 0:
         return None
-    if c > o:
-        side = "LONG"
-    elif c < o:
-        side = "SHORT"
+    colour = "LONG" if c > o else "SHORT" if c < o else None
+    most, greens, reds, net_body = majority(candles, candle_no, rule.majority_by)
+    base = {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "greens": greens, "reds": reds}
+    if rule.side_rule == "MAJORITY":
+        if most is None:
+            return {**base, "side": "TIE", "skipped": "no majority"}
+        side = most
     else:
-        return {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "side": "DOJI", "skipped": "doji"}
+        if colour is None:
+            return {**base, "side": "DOJI", "skipped": "doji"}
+        side = colour
+        if rule.side_rule == "AGREE" and most != colour:
+            return {**base, "side": side, "skipped": "against the majority"}
     body_pct = abs(c - o) / o * 100
     if rule.min_body_pct > 0 and body_pct < rule.min_body_pct:
-        return {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "side": side, "skipped": "small body", "body_pct": round(body_pct, 3)}
+        return {**base, "side": side, "skipped": "small body", "body_pct": round(body_pct, 3)}
     entry_ts = int(nxt["ts"])
     entry = float(nxt["open"])
     sign = 1.0 if side == "LONG" else -1.0
@@ -285,6 +314,9 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candl
         "day": day.isoformat(),
         "candle_no": candle_no,
         "side": side,
+        "greens": greens,
+        "reds": reds,
+        "net_body": round(net_body, 2),
         "rvol": round(rvol, 2) if rvol is not None else None,
         "change_pct": round(change_pct, 3) if change_pct is not None else None,
         "body_pct": round(body_pct, 3),
@@ -477,7 +509,16 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
     nos = list(rule.candle_nos or (rule.candle_no,))
     by_candle = [{"candle_no": no, **_group([r for r in kept if r.get("candle_no", rule.candle_no) == no], rule)} for no in nos]
     hold = all_g["total_close"]
+    skip_counts: dict[str, int] = {}
+    for r in skipped:
+        skip_counts[r["skipped"]] = skip_counts.get(r["skipped"], 0) + 1
     answer: list[str] = []
+    if rule.side_rule != "NTH" and skip_counts:
+        how = "most candles" if rule.side_rule == "MAJORITY" else "the candle agreeing with most candles"
+        answer.append(
+            "Side from " + how + f" ({'green vs red count' if rule.majority_by == 'COUNT' else 'bodies added up'}): skipped "
+            + ", ".join(f"{n} {why}" for why, n in sorted(skip_counts.items())) + "."
+        )
     if kept:
         answer.append(
             f"{all_g['hits']} of {all_g['trades']} trades ({all_g['hit_pct']}%) reached ₹{rule.target_points:g} a share; "
@@ -541,6 +582,7 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
         "stop_reverse": stop_reverse,
         "best_reverse": best_reverse,
         "by_candle": by_candle,
+        "skipped_by": skip_counts,
         "reverse_stops": list(REVERSE_STOPS),
         "by_half_hour": by_half_hour(kept),
         "levels": list(LEVELS),
