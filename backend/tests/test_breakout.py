@@ -499,6 +499,57 @@ async def test_a_trade_in_profit_on_the_trend_is_kept_and_bot_3_takes_the_same_s
     assert handoff_chain.moved()["SIMB"]["origin"] == 1
 
 
+def test_smallest_profit_before_a_trend_hand_off():
+    from types import SimpleNamespace as NS
+
+    cfg = NS()
+    assert breakout.profit_short("LONG", 100.0, 100.05, cfg) is None  # 0 = any profit, as before
+    assert breakout.profit_short("LONG", 100.0, 99.9, cfg) == "the trade is not in profit yet"
+    pct = NS(breakout_min_profit_pct=0.5)
+    assert "0.30% of the 0.5% needed" in breakout.profit_short("LONG", 100.0, 100.3, pct)
+    assert breakout.profit_short("LONG", 100.0, 100.5, pct) is None
+    assert breakout.profit_short("SHORT", 100.0, 99.4, pct) is None
+    rs = NS(breakout_min_profit_rs=2)
+    assert "₹1.00 of the ₹2 a share needed" in breakout.profit_short("SHORT", 100.0, 99.0, rs)
+    assert breakout.profit_short("SHORT", 100.0, 98.0, rs) is None
+    both = NS(breakout_min_profit_pct=1, breakout_min_profit_rs=5)
+    assert "₹2.00 of the ₹5" in breakout.profit_short("LONG", 200.0, 202.0, both)  # 1 % reached, ₹5 not
+    assert breakout.profit_short("LONG", 200.0, 205.0, both) is None
+    assert breakout.min_profit_pct(NS(breakout_min_profit_pct=99)) == 20.0
+    assert breakout.min_profit_pct(NS(breakout_min_profit_pct="junk")) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_with_a_smallest_profit_the_stock_waits_until_it_is_reached(db, monkeypatch):  # noqa: F811
+    """Same profitable breakout as the kept-trade test, but the trade must be 20 % up first: nothing moves."""
+    _seed(db)
+    orders: list = []
+    from sma_research.replayer import ResearchEngine
+
+    monkeypatch.setattr(ResearchEngine, "_keeps_both", lambda self: True)
+    real_load = ResearchEngine.load_config
+
+    def load(self):
+        self.handoff = recovery.handoff
+        self.handoff_order = lambda to, sym, d: orders.append((to, sym, d)) or f"Bot {to} orders at once"
+        return real_load(self)
+
+    monkeypatch.setattr(ResearchEngine, "load_config", load)
+    from replay import IST
+
+    until = dt.datetime.combine(DAY, dt.time(9, 15), tzinfo=IST) + dt.timedelta(minutes=LONG_JUMP + 3)
+    _moved, _trades, engine = await _run(
+        db,
+        _frame(spike_volume=True, jump=LONG_JUMP),
+        until=until,
+        breakout_handoff=True,
+        breakout_when="IN_PROFIT",
+        breakout_min_profit_pct=20,
+    )
+    assert engine.positions.get("SIMB") is not None  # still held here
+    assert orders == [] and engine._trend_kept == {}
+
+
 @pytest.mark.asyncio
 async def test_with_in_profit_a_stock_this_bot_is_not_riding_stays(db):  # noqa: F811
     """The breakout comes while this bot's trade is against it: with IN_PROFIT nothing moves and nothing is cut."""
@@ -561,8 +612,13 @@ def test_api_saves_trade_first_then_sort(tmp_path, monkeypatch):
     with TestClient(app) as client:
         got = client.get("/api/config").json()
         assert got["breakout_when"] == "ANY" and got["chop_losses"] == 0
-        body = client.put("/api/config", json={"breakout_when": "IN_PROFIT", "chop_losses": 2}).json()
+        body = client.put(
+            "/api/config",
+            json={"breakout_when": "IN_PROFIT", "chop_losses": 2, "breakout_min_profit_pct": 0.5, "breakout_min_profit_rs": 3},
+        ).json()
         assert body["breakout_when"] == "IN_PROFIT" and body["chop_losses"] == 2
+        assert body["breakout_min_profit_pct"] == 0.5 and body["breakout_min_profit_rs"] == 3
+        assert client.put("/api/config", json={"breakout_min_profit_pct": 25}).status_code == 422
         assert client.put("/api/config", json={"breakout_when": "LATER"}).status_code == 422
         assert client.put("/api/config", json={"chop_losses": 11}).status_code == 422
     database.reset_engine()

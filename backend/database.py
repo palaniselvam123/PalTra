@@ -254,6 +254,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "breakout_trend_checks": "VARCHAR(160) DEFAULT ''",
             "breakout_trend_need": "INTEGER DEFAULT 6",
             "breakout_when": "VARCHAR(12) DEFAULT 'ANY'",
+            "breakout_min_profit_pct": "FLOAT DEFAULT 0",
+            "breakout_min_profit_rs": "FLOAT DEFAULT 0",
             "chop_losses": "INTEGER DEFAULT 0",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",

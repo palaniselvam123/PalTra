@@ -368,7 +368,8 @@ SNAPSHOT_FIELDS = (
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
-    "breakout_trend_checks", "breakout_trend_need", "breakout_when", "chop_losses",
+    "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
+    "breakout_min_profit_rs", "chop_losses",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks",
     "exit_candle_minutes",
@@ -3087,8 +3088,9 @@ class StrategyEngine:
             self._signals[symbol] = f"{symbol} trend — {note}; the {pos.direction.lower()} trade is against it, stays here"
             return False
         price = self._ltps.get(symbol) or self.ltp
-        if not breakout.in_profit(pos.direction, pos.entry_price, price):
-            self._signals[symbol] = f"{symbol} trend — {note}; the trade is not in profit yet, stays here"
+        short = breakout.profit_short(pos.direction, pos.entry_price, price, cfg)
+        if short:
+            self._signals[symbol] = f"{symbol} trend — {note}; {short}, stays here"
             return False
         target = self._breakout_target(symbol)
         live = (pos.mode or "PAPER").upper() == "LIVE"

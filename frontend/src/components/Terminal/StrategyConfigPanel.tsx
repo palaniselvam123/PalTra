@@ -467,6 +467,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_rule: String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? "STRONG" : "CANDLE",
     breakout_cut: Boolean(form.breakout_cut),
     breakout_when: String(form.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? "IN_PROFIT" : "ANY",
+    breakout_min_profit_pct: Math.min(20, Math.max(0, Number(form.breakout_min_profit_pct ?? 0) || 0)),
+    breakout_min_profit_rs: Math.min(10000, Math.max(0, Number(form.breakout_min_profit_rs ?? 0) || 0)),
     chop_losses: Math.min(10, Math.max(0, Math.round(Number(form.chop_losses ?? 0) || 0))),
     breakout_trend_checks: String(form.breakout_trend_checks ?? ""),
     breakout_trend_need: Math.min(7, Math.max(1, Math.round(Number(form.breakout_trend_need ?? 6) || 6))),
@@ -3032,6 +3034,43 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Close an open trade against it at once (off: it runs to its own exit first)
             </label>
             )}
+            {String(form.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? (
+              <>
+                <label className="block text-xs text-slate-400">
+                  <span className="flex items-center gap-1">
+                    Smallest profit before moving, % of entry {isOwn("breakout_min_profit_pct") && <OwnTag />}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    step={0.05}
+                    value={String(form.breakout_min_profit_pct ?? 0)}
+                    onChange={(e) => set("breakout_min_profit_pct", e.target.value)}
+                    className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+                  />
+                </label>
+                <label className="block text-xs text-slate-400">
+                  <span className="flex items-center gap-1">
+                    Smallest profit before moving, ₹ a share {isOwn("breakout_min_profit_rs") && <OwnTag />}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10000}
+                    step={0.5}
+                    value={String(form.breakout_min_profit_rs ?? 0)}
+                    onChange={(e) => set("breakout_min_profit_rs", e.target.value)}
+                    className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+                  />
+                </label>
+                <p className="text-xs text-slate-400 sm:col-span-2">
+                  0 = any profit. With 0.5 % the trade must be at least 0.5 % past its entry (₹5 on a ₹1,000 stock) before
+                  the stock moves; with both set, both must be reached. Below it the stock stays here and is read again on
+                  the next candle.
+                </p>
+              </>
+            ) : null}
           </div>
           {String(form.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? (
             <TrendChecks
@@ -3449,7 +3488,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({
       group: "advanced",
       key: "breakout_handoff",
-      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? `a strong trend (${Number(f.breakout_trend_need ?? 6) || 6} checks)` : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${String(f.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? "only while this bot's trade rides it in profit (the trade is kept)" : f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
+      text: `On ${String(f.breakout_rule ?? "CANDLE").toUpperCase() === "STRONG" ? `a strong trend (${Number(f.breakout_trend_need ?? 6) || 6} checks)` : "a breakout candle"}, the stock moves back where it came from (else to Bot 3); ${String(f.breakout_when ?? "ANY").toUpperCase() === "IN_PROFIT" ? `only while this bot's trade rides it in profit${Number(f.breakout_min_profit_pct ?? 0) > 0 ? ` by at least ${Number(f.breakout_min_profit_pct)}%` : ""}${Number(f.breakout_min_profit_rs ?? 0) > 0 ? `${Number(f.breakout_min_profit_pct ?? 0) > 0 ? " and" : " by at least"} ₹${Number(f.breakout_min_profit_rs)} a share` : ""} (the trade is kept)` : f.breakout_cut ? "a trade against it is cut at once" : "an open trade runs to its own exit first"}`,
       off: { breakout_handoff: false },
     });
   if (Number(f.chop_losses ?? 0) > 0)
