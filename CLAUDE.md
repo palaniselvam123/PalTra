@@ -436,7 +436,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   pullback / candle-extreme / entry-candle waits, no 1-minute review, always-in skips it). The 09:20 opening buffer still
   applies (on 1-minute candles the 6th candle is the first that can order). Settings → 1. When to enter, "Enter on: Second
   candle" (which candle, candle size, smallest body, volume vs usual at least); the terminal's Strategy card switches it
-  and picks the candle. The stock research baseline keeps `SMA`.
+  and picks the candle. **Which way** (`nth_side_rule`: `NTH` default = that candle's colour, `MAJORITY` = the way
+  most of candles 1..N went, a tie = no order, `AGREE` = that candle only when most agree; `nth_majority_by` `COUNT` green vs
+  red | `SIZE` bodies added up; `nth_candle.majority`) and **enter at once** (`nth_skip_checks`, off by default): the call goes
+  through `StrategyEngine.direct_order` (no entry check, ADX or flip; market hours, cut-off, Trade list, caps, loss lock and
+  one LIVE bot per stock still apply). Per bot and per stock, PAPER and LIVE, replays too. The stock research baseline keeps
+  `SMA`.
 - Flip strategy (`flip_orders`, off by default, per-stock, PAPER and LIVE):
   every condition is unchanged, but `StrategyEngine._open` sends the order the
   other way (a buy signal sells, a sell signal buys). The position keeps

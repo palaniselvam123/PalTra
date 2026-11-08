@@ -151,9 +151,50 @@ def test_api_saves_the_mode_and_checks_its_bounds(tmp_path, monkeypatch):
         assert ok.status_code == 200 and body["entry_mode"] == "NTH_CANDLE" and body["nth_candle_no"] == 3
         assert body["nth_candle_minutes"] == 15 and body["nth_min_rvol"] == 2
         assert client.put("/api/config", json={"nth_candle_minutes": 7}).status_code == 422
+        both = client.put("/api/config", json={"nth_side_rule": "MAJORITY", "nth_majority_by": "SIZE", "nth_skip_checks": True}).json()
+        assert (both["nth_side_rule"], both["nth_majority_by"], both["nth_skip_checks"]) == ("MAJORITY", "SIZE", True)
+        assert client.put("/api/config", json={"nth_side_rule": "SOMETIMES"}).status_code == 422
         assert client.put("/api/config", json={"nth_candle_no": 0}).status_code == 422
         assert client.get("/api/config").json()["trading_mode"] == "PAPER"
         # The per-stock form takes the same fields.
         own = client.put("/api/config/stock/TCS", json={"nth_candle_no": 1, "nth_candle_minutes": 5})
         assert own.status_code == 200
     database.reset_engine()
+
+
+def test_majority_of_the_first_candles_picks_the_side():
+    # Three 5-minute candles: green, green, then a small red 3rd.
+    run = _five(DAY, [(1000.0, 1001.0), (1001.0, 1002.0), (1002.0, 1001.8), (1001.8, 1001.9)])
+    nth = nth_candle.call(run, _cfg(nth_candle_no=3))
+    assert nth.side == "SHORT"  # the 3rd candle alone sells
+    most = nth_candle.call(run, _cfg(nth_candle_no=3, nth_side_rule="MAJORITY"))
+    assert most.side == "LONG" and "2 green, 1 red" in most.note
+    agree = nth_candle.call(run, _cfg(nth_candle_no=3, nth_side_rule="AGREE"))
+    assert agree.side is None and "against the majority" in agree.note
+    # Counted by size: one big green beats two small reds.
+    sized = _five(DAY, [(1000.0, 1003.0), (1003.0, 1002.5), (1002.5, 1002.0), (1002.0, 1002.1)])
+    assert nth_candle.call(sized, _cfg(nth_candle_no=3, nth_side_rule="MAJORITY")).side == "SHORT"
+    assert nth_candle.call(sized, _cfg(nth_candle_no=3, nth_side_rule="MAJORITY", nth_majority_by="SIZE")).side == "LONG"
+    # A tie (2 candles, one each way) by count: no order.
+    tie = _five(DAY, [(1000.0, 1001.0), (1001.0, 1000.5), (1000.5, 1000.6)])
+    call = nth_candle.call(tie, _cfg(nth_candle_no=2, nth_side_rule="MAJORITY"))
+    assert call.side is None and "no majority" in call.note
+    assert nth_candle.side_rule(_cfg(nth_side_rule="X")) == "NTH" and not nth_candle.skip_checks(_cfg())
+
+
+@pytest.mark.asyncio
+async def test_replay_enters_at_once_without_the_entry_checks(db):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+
+    # 09:15-09:29: up, up, a small dip; most of the first three 5-minute candles went up → buy at 09:30.
+    day = [(1000.0 + 0.2 * k, 1000.2 + 0.2 * k) for k in range(10)] + [(1002.0, 1001.9)] * 5 + _quiet(360, 1003.0)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, day))
+    settings = _settings(
+        db, entry_mode="NTH_CANDLE", nth_candle_no=3, nth_candle_minutes=5, nth_side_rule="MAJORITY", qty=1, use_stop=False,
+        use_rsi=True, rsi_long_min=99.0, rsi_long_max=100.0,
+    )
+    # RSI 99+ refuses the buy through the normal entry checks …
+    assert await replay_symbol(frame, "NTH", [DAY], settings) == []
+    # … and "enter at once" skips them.
+    trades = await replay_symbol(frame, "NTH", [DAY], {**settings, "nth_skip_checks": True})
+    assert [(t["direction"], t["entry_time"].strftime("%H:%M"), t["entry_reason"]) for t in trades] == [("LONG", "09:30", "NTH_CANDLE")]

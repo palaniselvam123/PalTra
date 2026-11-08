@@ -370,7 +370,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "chop_losses",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "candle_minutes",
-    "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol",
+    "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
     "slope_minutes",
@@ -2212,6 +2212,20 @@ class StrategyEngine:
             return text
         self._nth_done[symbol] = call.day
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
+        if nth_candle.skip_checks(cfg):
+            # "Enter at once": no entry check, ADX or flip is read (direct_order); the safety rules still apply.
+            try:
+                result = await self.direct_order(symbol, signal, why=nth_candle.ENTRY_REASON, note=call.note)
+            except ForceRefused as exc:
+                result = f"{symbol} no order on the {call.note} — {exc}"
+                self._signals[symbol] = result
+                self.last_signal = result
+                return result
+            if result.startswith(("opened", "reversed")):
+                result = f"{result} — {call.note}"
+            self._signals[symbol] = result
+            self.last_signal = result
+            return result
         # No Telegram for a refused candle: the fill / refusal line says what happened.
         result = await self.apply_signal(signal, frame, cfg, now, alert=False, why=nth_candle.ENTRY_REASON)
         if result.startswith("blocked — order PENDING"):

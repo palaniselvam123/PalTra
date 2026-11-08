@@ -577,6 +577,11 @@ class BotConfig(Base):
     nth_candle_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
     nth_min_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     nth_min_rvol: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Which way (NTH that candle / MAJORITY most of candles 1..N / AGREE that candle when most agree), how "most" is
+    # counted (COUNT green vs red / SIZE bodies added up), and whether to enter at once without the entry checks.
+    nth_side_rule: Mapped[str | None] = mapped_column(String, nullable=True, default="NTH")
+    nth_majority_by: Mapped[str | None] = mapped_column(String, nullable=True, default="COUNT")
+    nth_skip_checks: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     gap_entry_delay_min: Mapped[int] = mapped_column(Integer, default=0)
     gap_entry_window_min: Mapped[int] = mapped_column(Integer, default=0)
     max_daily_loss: Mapped[float] = mapped_column(Float, default=5000.0)
