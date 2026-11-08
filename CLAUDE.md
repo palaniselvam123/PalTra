@@ -1238,6 +1238,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the same stop went against it]); `reverse_outcome` / `stop_reverse_table` (`summarize` → `stop_reverse`, `best_reverse`) read
   it with the same target and stop, only for trades whose stop came first; the tab's "After the stop: take the reverse trade"
   table and "Reverse after stop" column. The tab reads level maps with either key form ("10.0" / "10", `levelMin`).
+  **How far the trades went** (`components/Scalp/MoveBars.tsx`, display only): bar charts from the filtered rows, in ₹ or %
+  of the entry: % of trades whose best move reached at least each level, the same for the worst move, and % that closed
+  at the square-off at least that much in profit / in loss. Top by volume and Place by volume also offer Top 1 / 2 / 3.
+  **No stall while it runs**: the page polls `?rows=false` during a run and loads the rows once at the end; `GET
+  /api/second-candle` sends `SecondCandle.view_json` (the rows encoded in a worker thread, cached per finished run), the
+  report is saved off the loop, and `strategy_lab.load_tape` reads / writes / joins the cached day files in a thread.
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
   strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the

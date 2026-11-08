@@ -637,6 +637,8 @@ class SecondCandle:
         self.stocks: list[dict] = []
         self._task: asyncio.Task | None = None
         self._stop = False
+        self._rows_json: bytes | None = None
+        self._rows_key: tuple | None = None
         self._load()
 
     def _load(self) -> None:
@@ -679,6 +681,24 @@ class SecondCandle:
             "sizes": list(SIZES),
             "default_trails": list(DEFAULT_TRAILS),
         }
+
+    async def view_json(self, with_rows: bool = True) -> bytes:
+        """The view as JSON bytes. The rows of a finished run can be tens of MB, so the encoding runs in a worker
+        thread and is kept until the next run finishes: a page polling the test never stalls the shared event loop."""
+        if not with_rows or not self.rows:
+            return json.dumps(self.view(with_rows=False), default=str).encode()
+        key = (self.finished_at, len(self.rows))
+        if self._rows_key != key or self._rows_json is None:
+            rows = self.rows
+            self._rows_json = await asyncio.to_thread(lambda: json.dumps(rows, default=str).encode())
+            self._rows_key = key
+        head = json.dumps(self.view(with_rows=False), default=str).encode()
+        # Splice the cached rows into the view: {..., "rows": []} → {..., "rows": <cached>}.
+        marker = b'"rows": []'
+        at = head.rfind(marker)
+        if at < 0:
+            return json.dumps(self.view(with_rows=True), default=str).encode()
+        return head[:at] + b'"rows": ' + self._rows_json + head[at + len(marker):]
 
     def start(self, symbols: list[str], fetch, days: int, rule: Rule, wait=None) -> dict:
         if self.running:
@@ -734,7 +754,7 @@ class SecondCandle:
         finally:
             self.finished_at = dt.datetime.now(IST).isoformat(timespec="seconds")
             if self.status == "DONE":
-                self._save()
+                await asyncio.to_thread(self._save)
 
 
 def _last_trading_days(today: dt.date, count: int) -> list[dt.date]:
