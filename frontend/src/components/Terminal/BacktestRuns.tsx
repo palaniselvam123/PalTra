@@ -116,7 +116,7 @@ export function strategyLabel(s: Settings): string {
             : Number(s.colour_min_body ?? 0) > 0
               ? `, bodies ≥ ${s.colour_min_body}%`
               : ""
-      })`
+      }${String(s.colour_body_seq ?? "") ? `, each candle ≥ ${s.colour_body_seq}${String(s.colour_body_unit ?? "PCT") === "ATR" ? "× ATR" : "%"}` : ""})`
     );
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);

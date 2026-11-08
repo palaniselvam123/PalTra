@@ -193,3 +193,41 @@ def test_api_saves_the_body_settings(tmp_path, monkeypatch):
         assert body["colour_body_by_tf"] == "5:0.05,15:0.15"
         assert client.put("/api/config", json={"colour_body_unit": "TICKS"}).status_code == 422
         assert client.get("/api/config").json()["trading_mode"] == "PAPER"
+
+
+def test_each_candle_of_the_run_has_its_own_size():
+    from candle_patterns import clean_body_seq, parse_body_seq
+
+    assert parse_body_seq("0.1, 0.5") == [0.1, 0.5] and parse_body_seq("0.1,,0.5,") == [0.1, None, 0.5]
+    assert clean_body_seq(" 0.10 ,, 0.5 ,,") == "0.1,,0.5" and clean_body_seq("x,") == ""
+    # Candles about 1.0 tall (ATR ≈ 1.1). Two red in a row: 1st ≥ 0.1× ATR, 2nd ≥ 0.5× ATR.
+    base = [(1000.0 + (0.5 if k % 2 else 0), 1000.0 + (0.0 if k % 2 else 0.5)) for k in range(20)]
+    small_then_big = pd.DataFrame(_rows(DAY, base + [(1000.5, 1000.3), (1000.3, 999.4), (999.4, 999.4)]))
+    big_then_small = pd.DataFrame(_rows(DAY, base + [(1000.5, 999.6), (999.6, 999.4), (999.4, 999.4)]))
+    cfg = _cfg(entry_mode="COLOUR", colour_count=2, colour_body_unit="ATR", colour_body_atr=0, colour_body_seq="0.1,0.5")
+    assert colour_call(small_then_big, cfg).side == "SHORT"
+    held = colour_call(big_then_small, cfg)
+    assert held.side is None and "candle 2 of 2" in held.note and "0.5× ATR" in held.note
+    # In % too: 1st any body, 2nd ≥ 0.05 % of the price.
+    pct = _cfg(entry_mode="COLOUR", colour_count=2, colour_min_body=0, colour_body_seq="0,0.05")
+    assert colour_call(small_then_big, pct).side == "SHORT" and colour_call(big_then_small, pct).side is None
+    # Off: both turn.
+    off = _cfg(entry_mode="COLOUR", colour_count=2, colour_body_unit="ATR", colour_body_atr=0)
+    assert colour_call(small_then_big, off).side == "SHORT" and colour_call(big_then_small, off).side == "SHORT"
+
+
+def test_api_saves_the_body_per_candle(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+
+    with TestClient(app) as client:
+        ok = client.put("/api/config", json={"entry_mode": "COLOUR", "colour_count": 2, "colour_body_seq": " 0.10, 0.5 "})
+        assert ok.status_code == 200 and ok.json()["colour_body_seq"] == "0.1,0.5"
+        assert client.get("/api/config").json()["trading_mode"] == "PAPER"
+    database.reset_engine()

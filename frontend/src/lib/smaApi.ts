@@ -48,6 +48,8 @@ export type SmaConfig = {
   colour_body_unit?: "PCT" | "ATR";
   /** Smallest body % per colour candle size, e.g. "5:0.05,15:0.15"; other sizes use colour_min_body. */
   colour_body_by_tf?: string;
+  /** Each candle of the colour run's own smallest body, oldest first, in colour_body_unit ("0.1,0.5"; "" = off). */
+  colour_body_seq?: string;
   /** Smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR. */
   colour_body_atr?: number;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
