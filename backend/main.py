@@ -691,6 +691,14 @@ class ConfigUpdate(BaseModel):
         rules = breakout_mod.parse_trend_rules(value)
         return ",".join(f"{k}:{v}" for k, v in rules.items())
 
+    @field_validator("colour_body_by_tf", mode="before")
+    @classmethod
+    def _colour_body_by_tf(cls, value):
+        """Smallest candle-colour body per candle size (candle_patterns.clean_body_by_tf): "5:0.05,15:0.15"."""
+        import candle_patterns
+
+        return None if value is None else candle_patterns.clean_body_by_tf(value)
+
     @field_validator("exit_group", mode="before")
     @classmethod
     def _exit_group_keys(cls, value):
@@ -816,6 +824,9 @@ class ConfigUpdate(BaseModel):
     pattern_min_edge: float | None = Field(default=None, ge=0, le=10)
     colour_count: int | None = Field(default=None, ge=1, le=5)
     colour_min_body: float | None = Field(default=None, ge=0, le=2)
+    colour_body_unit: Literal["PCT", "ATR"] | None = None
+    colour_body_by_tf: str | None = Field(default=None, max_length=120)
+    colour_body_atr: float | None = Field(default=None, ge=0, le=5)
     # Second candle entries (nth_candle.py).
     nth_candle_no: int | None = Field(default=None, ge=1, le=nth_candle.CANDLE_NO_MAX)
     nth_candle_minutes: Literal[1, 3, 5, 10, 15] | None = None

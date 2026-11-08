@@ -106,7 +106,17 @@ export function strategyLabel(s: Settings): string {
     parts.push(
       `Candle colour ${s.pattern_tf ?? 1}m (hold while the colour holds${
         Number(s.colour_count ?? 1) > 1 ? `, ${s.colour_count} in a row to turn` : ""
-      }${Number(s.colour_min_body ?? 0) > 0 ? `, bodies ≥ ${s.colour_min_body}%` : ""})`
+      }${
+        String(s.colour_body_unit ?? "PCT") === "ATR"
+          ? Number(s.colour_body_atr ?? 0) > 0
+            ? `, bodies ≥ ${s.colour_body_atr}× ATR`
+            : ""
+          : String(s.colour_body_by_tf ?? "")
+            ? `, bodies ≥ ${s.colour_body_by_tf} (min:%)`
+            : Number(s.colour_min_body ?? 0) > 0
+              ? `, bodies ≥ ${s.colour_min_body}%`
+              : ""
+      })`
     );
   } else {
     parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_slow ?? 21}`);

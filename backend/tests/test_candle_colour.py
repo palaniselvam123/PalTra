@@ -144,3 +144,52 @@ def test_api_saves_colour_count_and_body(tmp_path, monkeypatch):
         assert ok.status_code == 200 and body["pattern_tf"] == 60 and body["colour_count"] == 3 and body["colour_min_body"] == 0.1
         assert client.put("/api/config", json={"colour_count": 6}).status_code == 422
         assert client.get("/api/config").json()["trading_mode"] == "PAPER"
+
+
+def test_smallest_body_per_candle_size():
+    from candle_patterns import clean_body_by_tf, colour_min_body_pct, parse_body_by_tf
+
+    assert parse_body_by_tf("5:0.05, 15:0.15,7:1,bad,30:x") == {5: 0.05, 15: 0.15}
+    assert clean_body_by_tf("15:0.15,5:0.05") == "5:0.05,15:0.15"
+    cfg = _cfg(entry_mode="COLOUR", colour_min_body=0.02, colour_body_by_tf="15:0.15")
+    assert colour_min_body_pct(cfg, 15) == 0.15 and colour_min_body_pct(cfg, 5) == 0.02
+    # 1-minute colour candles: a 0.02 % red body is held under 1:0.05, counts under 1:0.01.
+    small = _frame([(1000.0, 1000.5), (1000.5, 1000.3)])
+    held = colour_call(small, _cfg(entry_mode="COLOUR", colour_min_body=0.0, colour_body_by_tf="1:0.05"))
+    assert held.side is None and "0.05%" in held.note
+    assert colour_call(small, _cfg(entry_mode="COLOUR", colour_min_body=0.5, colour_body_by_tf="1:0.01")).side == "SHORT"
+
+
+def test_smallest_body_in_atrs():
+    # Candles about 1.0 tall (ATR ≈ 1.1): a 0.2 body is under 0.5× ATR, a 0.9 body is over it.
+    base = [(1000.0 + (0.5 if k % 2 else 0), 1000.0 + (0.0 if k % 2 else 0.5)) for k in range(20)]
+    small = pd.DataFrame(_rows(DAY, base + [(1000.5, 1000.3), (1000.3, 1000.3)]))
+    big = pd.DataFrame(_rows(DAY, base + [(1000.5, 999.6), (999.6, 999.6)]))
+    cfg = _cfg(entry_mode="COLOUR", colour_body_unit="ATR", colour_body_atr=0.5)
+    held = colour_call(small, cfg)
+    assert held.side is None and "ATR" in held.note
+    assert colour_call(big, cfg).side == "SHORT"
+    # 0 = any body counts.
+    assert colour_call(small, _cfg(entry_mode="COLOUR", colour_body_unit="ATR", colour_body_atr=0)).side == "SHORT"
+
+
+def test_api_saves_the_body_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+
+    with TestClient(app) as client:
+        ok = client.put(
+            "/api/config",
+            json={"entry_mode": "COLOUR", "colour_body_unit": "ATR", "colour_body_atr": 0.3, "colour_body_by_tf": "15:0.15, 5:0.05"},
+        )
+        body = ok.json()
+        assert ok.status_code == 200 and body["colour_body_unit"] == "ATR" and body["colour_body_atr"] == 0.3
+        assert body["colour_body_by_tf"] == "5:0.05,15:0.15"
+        assert client.put("/api/config", json={"colour_body_unit": "TICKS"}).status_code == 422
+        assert client.get("/api/config").json()["trading_mode"] == "PAPER"
