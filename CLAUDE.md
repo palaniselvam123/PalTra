@@ -1200,7 +1200,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `components/Scalp/SecondCandle.tsx`; no order path, nothing in the strategy reads it): the owner's Most active routine
   measured on every stock and past day: sort by volume vs usual, read the day's Nth candle (`candle_no` 1-6, default 2;
   `minutes` 1/3/5/10/15, default 5), buy on green / sell on red at its close (the next candle's open; a doji or a body
-  under `min_body_pct` is skipped). Per stock and day (`analyze_day`, on the same cached 1-minute candles as the Strategy
+  under `min_body_pct` is skipped). **Which way** (`side_rule`): `NTH` (default, that candle's colour), `MAJORITY` (the way most
+  of candles 1..N went, `majority`; a tie is skipped, `no majority`) or `AGREE` (that candle's colour only when most agree,
+  else `against the majority`); "most" counted by `majority_by` `COUNT` (green vs red) | `SIZE` (bodies added up). Rows
+  carry `greens` / `reds` / `net_body`, the report `skipped_by`. **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
+  arithmetic in `secondCandleMath.ts`): with several candles in a run, each candle side by side (reached %, average with /
+  against, held to the square-off, the best trailing stop, the best target + stop, the best stop and reverse, the best way per
+  trade), each column's best boxed, a verdict naming the best candle, and each stock's best candle; follows every filter but
+  the Candle one. Display only. Per stock and day (`analyze_day`, on the same cached 1-minute candles as the Strategy
   lab, `strategy_lab.load_tape`, `WARMUP_DAYS` 5): `rvol` at the signal candle's close (`active_picks._cum_at`) and the
   day's `rank` by it (`rank_days`; `top_n`, 0 = all, picks the rows the summary reads), `best_pts` / `best_at` (the most
   the price went with the trade, ₹ and %), `worst_pts` / `worst_at` (against), `hit` / `target_at` / `minutes_to_target`
@@ -1218,6 +1225,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   from the rows in the browser, so the filters (place by volume, side, day, reached, target / best time window, search,
   ticked only) change every number, and the target + stop test takes any level without a new run; sortable per
   stock-day and per-stock tables, CSV, Arm / Arm ticked (arming only).
+  **Several candles in one run** (`Rule.candle_nos`, the tab's 1st-6th chips, `candle_nos` on the start body; empty = just
+  `candle_no`): each candle is its own trade (`analyze_day(..., candle_no=)`, rows carry `candle_no`), ranked by volume vs
+  usual within its own candle (`rank_days` keys on day and candle), `summarize` adds `by_candle`; the tab has a Candle filter, a
+  "By candle" table and a Candle column. **Stop and reverse** (`rev` on each row, `_reverse_legs`, levels `REVERSE_STOPS`):
+  for each stop the first trade reached, the other side entered at the stop price on that minute and followed from the next
+  minute to the square-off ([entry minute, best, worst, square-off ₹, the minute each `LEVELS` target was reached, the minute
+  the same stop went against it]); `reverse_outcome` / `stop_reverse_table` (`summarize` → `stop_reverse`, `best_reverse`) read
+  it with the same target and stop, only for trades whose stop came first; the tab's "After the stop: take the reverse trade"
+  table and "Reverse after stop" column. The tab reads level maps with either key form ("10.0" / "10", `levelMin`).
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,
   strong bullish / bearish, top N, backtest). For each day of a replay range, at `pick_time` (09:20-14:30) every stock of the

@@ -4831,11 +4831,16 @@ class SecondCandleStart(BaseModel):
     days: int = Field(default=10, ge=second_candle.MIN_DAYS, le=second_candle.MAX_DAYS)
     minutes: Literal[1, 3, 5, 10, 15] = 5
     candle_no: int = Field(default=2, ge=1, le=second_candle.MAX_CANDLE_NO)
+    #: Several candles in one run (each its own trade); empty = just candle_no.
+    candle_nos: list[int] = Field(default_factory=list, max_length=second_candle.MAX_CANDLE_NO)
     top_n: int = Field(default=20, ge=0, le=250)
     target_points: float = Field(default=10.0, ge=0.05, le=500)
     square_off: str = "15:15"
     trails: list[float] = Field(default_factory=lambda: list(second_candle.DEFAULT_TRAILS), max_length=second_candle.MAX_TRAILS)
     min_body_pct: float = Field(default=0.0, ge=0, le=5)
+    #: NTH = the Nth candle's colour, MAJORITY = most of candles 1..N, AGREE = the Nth candle only when most agree.
+    side_rule: Literal["NTH", "MAJORITY", "AGREE"] = "NTH"
+    majority_by: Literal["COUNT", "SIZE"] = "COUNT"
 
 
 @app.get("/api/second-candle")
@@ -4861,8 +4866,11 @@ async def second_candle_start(body: SecondCandleStart):
     if not dt.time(9, 20) <= square_off <= dt.time(15, 30):
         raise HTTPException(400, "Square-off must be between 09:20 and 15:30.")
     rule = second_candle.Rule(
-        minutes=body.minutes, candle_no=body.candle_no, top_n=body.top_n, target_points=body.target_points,
+        minutes=body.minutes, candle_no=body.candle_no,
+        candle_nos=tuple(n for n in body.candle_nos if 1 <= n <= second_candle.MAX_CANDLE_NO), top_n=body.top_n,
+        target_points=body.target_points,
         square_off=square_off, trails=tuple(body.trails), min_body_pct=body.min_body_pct,
+        side_rule=body.side_rule, majority_by=body.majority_by,
     )
 
     async def fetch(name, start, end):

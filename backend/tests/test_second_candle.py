@@ -199,3 +199,58 @@ def test_api_starts_reports_and_stops(tmp_path, monkeypatch):
         assert view["params"]["trails"] == [0.5, 1.0] and client.get("/api/second-candle?rows=false").json()["rows"] == []
         assert client.post("/api/second-candle/stop").status_code == 200
     database.reset_engine()
+
+
+def test_stop_and_reverse_follows_the_other_side_after_the_stop():
+    trap = sc.analyze_day("TRAP", _tape(_trap), D1, RULE)
+    up = sc.analyze_day("UP", _tape(_rise), D1, RULE)
+    leg = trap["rev"]["5.0"]
+    # stopped ₹5 down on the slide: the reverse sell runs about ₹7 more, then the rise stops it out
+    assert leg[0] > 0 and 5 < leg[1] < 10 and leg[2] >= 5
+    assert sc.reverse_outcome(trap, 10, 5) == ("stop", -5.0)
+    assert sc.reverse_outcome(trap, 5, 5) == ("target", 5.0)  # a ₹5 target on the reverse is reached first
+    assert sc.reverse_outcome(up, 10, 5) is None  # the target came first: no reverse
+    table = {t["stop"]: t for t in sc.stop_reverse_table([up, trap], 5, (5.0,))}
+    assert table[5.0]["stopped"] == 1 and table[5.0]["rev_target"] == 1
+    assert table[5.0]["total"] == table[5.0]["plain_total"] + 5.0
+
+
+def test_several_candles_in_one_run_are_ranked_and_summarized_apart():
+    rule = sc.Rule(minutes=5, candle_nos=(2, 1), top_n=0, target_points=10.0).clean()
+    assert rule.candle_nos == (1, 2) and rule.candle_no == 1
+    rows = sc.analyze_stock("UP", _tape(_rise), [D1], rule) + sc.analyze_stock("DOWN", _tape(_fall), [D1], rule)
+    sc.rank_days(rows)
+    assert {r["candle_no"] for r in rows} == {1, 2}
+    for no in (1, 2):
+        ranks = sorted(r["rank"] for r in rows if r.get("candle_no") == no and not r.get("skipped"))
+        assert ranks == list(range(1, len(ranks) + 1))  # each candle ranked on its own
+    rep = sc.summarize(rows, rule)
+    assert [g["candle_no"] for g in rep["by_candle"]] == [1, 2] and rep["rule"]["candle_nos"] == [1, 2]
+    assert rep["stop_reverse"] and "reverse_stops" in rep
+
+
+def test_majority_picks_the_side_most_opening_candles_went():
+    # The DRREDDY day: a big green first candle, then a small red pause, then up all day.
+    def gap_up(i, p):
+        if i < 5:
+            return 1000.0 + i * 3.0  # candle 1 green, +12
+        if i < 10:
+            return 1012.0 - (i - 4) * 0.2  # candle 2 small red
+        if i < 15:
+            return p + 0.3  # candle 3 green
+        return p + 0.1
+
+    tape = _tape(gap_up)
+    nth = sc.analyze_day("GAP", tape, D1, RULE)
+    assert nth["side"] == "SHORT"  # the Nth candle alone sells into the rise
+    tie = sc.analyze_day("GAP", tape, D1, sc.Rule(candle_no=2, side_rule="MAJORITY"))
+    assert tie["skipped"] == "no majority" and tie["greens"] == 1 and tie["reds"] == 1
+    by_size = sc.analyze_day("GAP", tape, D1, sc.Rule(candle_no=2, side_rule="MAJORITY", majority_by="SIZE"))
+    assert by_size["side"] == "LONG" and by_size["net_body"] > 0 and by_size["best_pts"] > 10
+    three = sc.analyze_day("GAP", tape, D1, sc.Rule(candle_no=3, side_rule="MAJORITY"))
+    assert three["side"] == "LONG" and (three["greens"], three["reds"]) == (2, 1) and three["entry_at"] == "09:30"
+    agree = sc.analyze_day("GAP", tape, D1, sc.Rule(candle_no=2, side_rule="AGREE", majority_by="SIZE"))
+    assert agree["skipped"] == "against the majority"
+    rep = sc.summarize([tie, three], sc.Rule(candle_nos=(2, 3), side_rule="MAJORITY", top_n=0))
+    assert rep["skipped_by"] == {"no majority": 1} and any("skipped 1 no majority" in a for a in rep["answer"])
+    assert sc.Rule(side_rule="X", majority_by="Y").clean().side_rule == "NTH"
