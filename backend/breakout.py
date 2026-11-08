@@ -115,6 +115,37 @@ def in_profit(direction: str, entry: float | None, price: float | None) -> bool:
     return price > entry if direction == "LONG" else price < entry
 
 
+def min_profit_pct(cfg) -> float:
+    """Smallest profit, in % of the entry price, a trade needs before an IN_PROFIT trend hand-off moves the stock
+    (0 = any profit, as before)."""
+    return _num(cfg, "breakout_min_profit_pct", 0.0, 0.0, 20.0)
+
+
+def min_profit_rs(cfg) -> float:
+    """Smallest profit, in ₹ a share past the entry, a trade needs before an IN_PROFIT trend hand-off moves the stock
+    (0 = any profit, as before)."""
+    return _num(cfg, "breakout_min_profit_rs", 0.0, 0.0, 10000.0)
+
+
+def profit_short(direction: str, entry: float | None, price: float | None, cfg) -> str | None:
+    """Why a trade is not far enough in profit for an IN_PROFIT trend hand-off, or None when it is. The trade must be
+    in profit and, when set, at least `breakout_min_profit_pct` % and `breakout_min_profit_rs` ₹ a share past its
+    entry (both, when both are set)."""
+    if not in_profit(direction, entry, price):
+        return "the trade is not in profit yet"
+    move = (price - entry) if direction == "LONG" else (entry - price)
+    pct = move / entry * 100.0
+    want_pct, want_rs = min_profit_pct(cfg), min_profit_rs(cfg)
+    short = []
+    if want_pct > 0 and pct < want_pct:
+        short.append(f"{pct:.2f}% of the {want_pct:g}% needed")
+    if want_rs > 0 and move < want_rs:
+        short.append(f"₹{move:.2f} of the ₹{want_rs:g} a share needed")
+    if short:
+        return "the trade is only " + " and ".join(short) + " in profit"
+    return None
+
+
 def atr_mult(cfg) -> float:
     return _num(cfg, "breakout_atr_mult", DEFAULT_ATR_MULT, 0.5, 10.0)
 

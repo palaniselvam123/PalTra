@@ -538,6 +538,9 @@ class BotConfig(Base):
     # When a breakout moves the stock: ANY (as before) or IN_PROFIT (only while this bot holds a trade on the trend's side
     # that is in profit; the trade is kept and the target bot opens the same side at once, breakout.py).
     breakout_when: Mapped[str | None] = mapped_column(String(12), nullable=True, default="ANY")
+    # With IN_PROFIT: the smallest profit before the stock moves, in % of the entry and in ₹ a share (0 = any profit).
+    breakout_min_profit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    breakout_min_profit_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Move a stock to Bot 2 after this many losing trades on it today on this bot (0 = off, recovery.py).
     chop_losses: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.

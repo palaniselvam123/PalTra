@@ -308,6 +308,8 @@ export type SmaConfig = {
   /** Close an open trade against the breakout at once; off = it runs to its own exits, then the stock moves. */
   breakout_cut?: boolean;
   breakout_when?: "ANY" | "IN_PROFIT" | string;
+  breakout_min_profit_pct?: number;
+  breakout_min_profit_rs?: number;
   chop_losses?: number;
   /** The strong-trend rule's checks ("stack:must,vwap:use,run:off,…") and how many must pass (1-7). */
   breakout_trend_checks?: string;

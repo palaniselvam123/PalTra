@@ -201,6 +201,8 @@ export const SETTING_LABELS: Record<string, string> = {
   breakout_rule: "what counts as a breakout",
   breakout_cut: "breakout closes an open trade at once",
   breakout_when: "when a breakout moves the stock",
+  breakout_min_profit_pct: "smallest profit before a trend hand-off (% of entry)",
+  breakout_min_profit_rs: "smallest profit before a trend hand-off (₹ a share)",
   chop_losses: "losing trades before moving to Bot 2",
   breakout_trend_checks: "strong-trend checks (breakout)",
   breakout_trend_need: "strong-trend checks needed (breakout)",

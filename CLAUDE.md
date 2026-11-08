@@ -886,7 +886,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   **Trade first, then sort** (owner's request: Bot 1 trades a stock first, then sends the trenders to Bot 3 and the choppy
   ones to Bot 2). **When to move it** (`breakout_when` `ANY` default | `IN_PROFIT`, per bot and per stock; `breakout.when`):
   with `IN_PROFIT` a breakout / strong trend moves the stock only while this bot holds a trade on its side that is in profit
-  (`breakout.in_profit` on the last price; `StrategyEngine._trend_on_trade`, once a day per stock, `_trend_sent`): the trade is
+  (`breakout.in_profit` on the last price, and with **smallest profit** `breakout_min_profit_pct` (% of the entry, 0-20) / `breakout_min_profit_rs` (₹ a share, 0-10000), 0 = any profit, both when both set: `breakout.profit_short`, below it the stock stays and is read again; `StrategyEngine._trend_on_trade`, once a day per stock, `_trend_sent`): the trade is
   **kept** (owner's choice), `recovery.handoff(..., keep_source=True)` arms the stock on the target (`_breakout_target`) too
   and `handoff_order` (`recovery.order_now`, live bots) has it open the same side at once (`direct_order`, entry reason
   `HANDOFF`; one LIVE bot per stock applies); once this bot's trade closes, `_leave_after_trend` takes it off this bot's Trade
