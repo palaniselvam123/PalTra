@@ -649,6 +649,43 @@ export type ChopScan = {
 };
 
 /** One minute of a desk's open P&L (the Stocks bar's "Open" figure), from the open P&L log. */
+/** First candles (backend first_candles.py): the day's first N candles and the Second candle call. */
+export type FirstCandleRule = {
+  minutes: number;
+  candle_no: number;
+  side_rule: SecondCandleSideRule;
+  majority_by: "COUNT" | "SIZE";
+  min_body_pct: number;
+};
+export type FirstCandleRow = {
+  symbol: string;
+  day: string;
+  /** G green / R red / D doji, candle 1 first. */
+  colours: ("G" | "R" | "D")[];
+  bodies: number[];
+  closed: number;
+  greens?: number;
+  reds?: number;
+  net_body?: number;
+  call: "LONG" | "SHORT" | null;
+  why: string | null;
+  matched: number | null;
+  entry_at?: string;
+  last?: number | null;
+};
+export type FirstCandleScan = {
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  as_of: string | null;
+  finished_at: string | null;
+  rule: Partial<FirstCandleRule>;
+  rows: FirstCandleRow[];
+  paused?: boolean;
+};
+
 export type OpenPnlStock = { symbol: string; side: string; qty: number; entry: number | null; ltp: number | null; gross: number; net: number };
 /** One minute of the P&L log: open (gross / net), today's closed P&L, and the day total (closed + open). */
 export type OpenPnlPoint = {
@@ -2562,6 +2599,10 @@ export const smaApi = {
   morningScanStart: (symbols: string[], force = false) =>
     request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
+  /** Read the day's first N candles of each stock (Most active "First candles"; read-only). Poll `firstCandles`. */
+  firstCandlesStart: (body: FirstCandleRule & { symbols: string[] }) =>
+    request<FirstCandleScan>("/api/first-candles/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  firstCandles: () => request<FirstCandleScan>("/api/first-candles", undefined, undefined, false),
   /** Start the carry-over scan (read-only; candles only). Returns at once; poll `carryScan`. */
   carryScanStart: (symbols: string[], minutes: number, force = false) =>
     request<CarryScan>("/api/carry-scan/start", { method: "POST", body: JSON.stringify({ symbols, minutes, force }) }, 20000, false),
@@ -2571,7 +2612,7 @@ export const smaApi = {
     request<TurnScan>("/api/turn-scan/start", { method: "POST", body: JSON.stringify({ force: true, ...body }) }, 20000, false),
   turnScan: () => request<TurnScan>("/api/turn-scan", undefined, undefined, false),
   /** Stop one running Scalp scan; the last finished rows stay (backend main.scan_stop). */
-  scanStop: (kind: "cross" | "chop" | "morning" | "high52" | "carry" | "turn") =>
+  scanStop: (kind: "cross" | "chop" | "morning" | "high52" | "carry" | "turn" | "first") =>
     request<{ stopped: boolean; running: boolean }>(`/api/scan-stop/${kind}`, { method: "POST" }, 20000, false),
   /** Start the 52-week high scan (read-only; Groww daily candles). Returns at once; poll `high52Scan`. */
   high52ScanStart: (symbols: string[], force = false) =>

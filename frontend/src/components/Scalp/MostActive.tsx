@@ -17,8 +17,9 @@ import { DeliveryCells, DeliveryHead, DeliveryNote, useDelivery } from "./delive
 import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
-import { smaApi, type ChopScanRow, type CrossScanMinutes, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
+import { smaApi, type ChopScanRow, type CrossScanMinutes, type FirstCandleRow, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
+import { FIRST_PICKS, FirstCandleCells, FirstCandleControls, FirstCandleHead, firstPasses, type FirstPick } from "./FirstCandles";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -121,6 +122,9 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [tqBusy, setTqBusy] = useState(false);
   const [tqNote, setTqNote] = useState<string | null>(null);
   const [trendPick, setTrendPick] = useState<TrendPick>("ALL");
+  const [fc, setFc] = useState<Map<string, FirstCandleRow>>(new Map());
+  const [fcN, setFcN] = useState(3);
+  const [fcPick, setFcPick] = useState<FirstPick>("ALL");
   // A saved scan's accuracy check (the same check as the History tab's).
   const [detail, setDetail] = useState<ScanRunDetail | null>(null);
   const [checkNote, setCheckNote] = useState<string | null>(null);
@@ -305,9 +309,10 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           (priceMax <= 0 || r.ltp <= priceMax) &&
           (minRvol <= 0 || (r.rvol ?? 0) >= minRvol) &&
           trendPasses(trendPick, tq.get(r.symbol)) &&
+          firstPasses(fcPick, fc.get(r.symbol), fc.size > 0) &&
           ticks.shows(r.symbol)
       ),
-    [source, query, minSpeed, priceMin, priceMax, minRvol, trendPick, tq, ticks]
+    [source, query, minSpeed, priceMin, priceMax, minRvol, trendPick, tq, fcPick, fc, ticks]
   );
 
   // Read trend quality: run the Trend quality scan on the stocks the filters show (read-only, candles only).
@@ -581,9 +586,20 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           options={TREND_PICKS}
           className="w-36"
         />
+        {fc.size > 0 && (
+          <SelectFilter label="First candles" value={fcPick} onChange={(v) => setFcPick(v as FirstPick)} options={FIRST_PICKS} className="w-32" />
+        )}
         <TextFilter value={query} onChange={setQuery} />
       </FilterRow>
 
+      <FirstCandleControls
+        symbols={found.map((r) => r.symbol)}
+        disabled={paused}
+        onRows={(rows, rule) => {
+          setFc(rows);
+          setFcN(rule.candle_no);
+        }}
+      />
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
         <button
           type="button"
@@ -744,6 +760,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                     <th className="pb-2 text-left font-medium" title="Trend phase now">Phase</th>
                   </>
                 )}
+                {fc.size > 0 && <FirstCandleHead />}
                 {checkBy && (
                   <>
                     <th className="pb-2 text-left font-medium" title="The call checked: the row's Bias, else its day move">Call</th>
@@ -772,6 +789,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   trend={tq.size > 0 ? tq.get(r.symbol) ?? null : undefined}
                   deliv={deliv.rows.get(r.symbol.toUpperCase())}
                   check={checkBy ? checkBy.get(r.symbol) ?? null : undefined}
+                  first={fc.size > 0 ? fc.get(r.symbol) ?? null : undefined}
+                  firstN={fcN}
                 />
               ))}
             </tbody>
@@ -799,7 +818,12 @@ function ActiveRowView({
   trend,
   check,
   deliv,
+  first,
+  firstN = 3,
 }: {
+  /** The stock's first candles (undefined = the columns are not shown). */
+  first?: FirstCandleRow | null;
+  firstN?: number;
   tick?: ReactNode;
   /** NSE's delivery % of the stock (latest published day). */
   deliv?: DeliveryRow;
@@ -952,6 +976,7 @@ function ActiveRowView({
           </td>
         </>
       )}
+      {first !== undefined && <FirstCandleCells row={first} n={firstN} />}
       {check !== undefined && (
         <>
           <td className="py-1.5 text-xs">
