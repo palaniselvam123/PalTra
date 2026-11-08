@@ -38,6 +38,11 @@ export type SmaConfig = {
   nth_candle_minutes?: NthCandleMinutes;
   nth_min_body_pct?: number;
   nth_min_rvol?: number;
+  /** Second candle entry: which way (that candle / most of candles 1..N / that candle when most agree). */
+  nth_side_rule?: "NTH" | "MAJORITY" | "AGREE";
+  nth_majority_by?: "COUNT" | "SIZE";
+  /** Second candle entry: enter at once without the entry checks. */
+  nth_skip_checks?: boolean;
   /** Pattern / colour candle size in minutes. */
   pattern_tf?: 1 | 3 | 5 | 10 | 15 | 30 | 60;
   /** Candle colour: candles of one colour in a row needed to enter or turn (1-5). */

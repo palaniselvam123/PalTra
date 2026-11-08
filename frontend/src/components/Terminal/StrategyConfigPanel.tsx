@@ -484,6 +484,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     nth_candle_minutes: ([1, 3, 5, 10, 15].includes(Number(form.nth_candle_minutes)) ? Number(form.nth_candle_minutes) : 5) as 1 | 3 | 5 | 10 | 15,
     nth_min_body_pct: Math.min(2, Math.max(0, Number(form.nth_min_body_pct ?? 0) || 0)),
     nth_min_rvol: Math.min(10, Math.max(0, Number(form.nth_min_rvol ?? 0) || 0)),
+    nth_side_rule: form.nth_side_rule === "MAJORITY" || form.nth_side_rule === "AGREE" ? form.nth_side_rule : "NTH",
+    nth_majority_by: form.nth_majority_by === "SIZE" ? "SIZE" : "COUNT",
+    nth_skip_checks: Boolean(form.nth_skip_checks),
     pattern_tf: ([1, 3, 5, 10, 15, 30, 60].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15 | 30 | 60,
     colour_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1)),
     colour_min_body: Math.min(2, Math.max(0, Number(form.colour_min_body ?? 0) || 0)),
@@ -920,6 +923,51 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                     onChange={(v) => set("nth_min_rvol", v)}
                     own={isOwn("nth_min_rvol")}
                   />
+                  <label className="block text-sm text-slate-300">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">
+                      Trade which way{isOwn("nth_side_rule") ? " (own)" : ""}
+                    </span>
+                    <select
+                      value={String(form.nth_side_rule ?? "NTH")}
+                      onChange={(e) => set("nth_side_rule", e.target.value)}
+                      className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                    >
+                      <option value="NTH">That candle&apos;s colour</option>
+                      <option value="MAJORITY">Most of candles 1 to {Number(form.nth_candle_no ?? 2)}</option>
+                      <option value="AGREE">That candle, only if most agree</option>
+                    </select>
+                  </label>
+                  {String(form.nth_side_rule ?? "NTH") !== "NTH" ? (
+                    <label className="block text-sm text-slate-300">
+                      <span className="text-xs uppercase tracking-wider text-slate-400">
+                        Count &quot;most&quot; by{isOwn("nth_majority_by") ? " (own)" : ""}
+                      </span>
+                      <select
+                        value={String(form.nth_majority_by ?? "COUNT")}
+                        onChange={(e) => set("nth_majority_by", e.target.value)}
+                        className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                      >
+                        <option value="COUNT">Green vs red candles (a tie = no order)</option>
+                        <option value="SIZE">Candle sizes added up</option>
+                      </select>
+                    </label>
+                  ) : null}
+                  <label className="col-span-2 flex min-h-9 items-start gap-2 text-sm text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.nth_skip_checks)}
+                      onChange={(e) => set("nth_skip_checks", e.target.checked)}
+                      className="mt-1 accent-[#10B981]"
+                    />
+                    <span>
+                      Enter at once, skip the entry checks{isOwn("nth_skip_checks") ? " (own)" : ""}
+                      <span className="block text-xs text-slate-400">
+                        VWAP, RSI, ADX, EMA, Supertrend and the other checks in &quot;2. Checks before entering&quot; are not read, and the
+                        flip is not applied. Market hours, the cut-off, the Trade list, the trade caps, the loss limit and one LIVE bot per
+                        stock still apply. The smallest body and volume vs usual above still count when set.
+                      </span>
+                    </span>
+                  </label>
                   <p className="col-span-2 text-xs text-slate-400">
                     The Most active routine as a bot: when the{" "}
                     {Number(form.nth_candle_no ?? 2) === 1 ? "1st" : Number(form.nth_candle_no ?? 2) === 2 ? "2nd" : Number(form.nth_candle_no ?? 2) === 3 ? "3rd" : `${Number(form.nth_candle_no ?? 2)}th`}{" "}
@@ -3239,7 +3287,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
       : nth
-        ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
         ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }

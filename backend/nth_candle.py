@@ -19,8 +19,16 @@ Checks, all settings (per bot and per stock):
   Groww's running session volume at the Nth candle against the same candle of the earlier
   sessions in the frame. Unknown (no earlier session, no volume) refuses while the check is on.
 
+* ``nth_side_rule`` — which way: ``NTH`` (that candle's colour, default), ``MAJORITY`` (the way most of
+  candles 1..N went, a tie = no order) or ``AGREE`` (that candle only when most agree); "most" by
+  ``nth_majority_by`` ``COUNT`` (green vs red) or ``SIZE`` (bodies added up). With MAJORITY the body
+  floor is read on the winning side's move (the Nth candle when it agrees, else the net body).
+
 Entry filters (VWAP, RSI, …), the stop, the flip, market hours, the cut-off, the caps and one
 LIVE bot per stock all apply through ``StrategyEngine.apply_signal`` like any entry. With
+``nth_skip_checks`` on, the order goes at once through ``StrategyEngine.direct_order`` instead: no entry
+check, ADX or flip is read; market hours, the cut-off, the Trade list, the caps, the loss lock and one
+LIVE bot per stock still apply. With
 Heikin Ashi colours on, the Heikin Ashi colour is read.
 """
 from __future__ import annotations
@@ -46,7 +54,12 @@ DEFAULTS = {
     "nth_candle_minutes": 5,
     "nth_min_body_pct": 0.0,
     "nth_min_rvol": 0.0,
+    "nth_side_rule": "NTH",
+    "nth_majority_by": "COUNT",
+    "nth_skip_checks": False,
 }
+SIDE_RULES = ("NTH", "MAJORITY", "AGREE")
+MAJORITY_BY = ("COUNT", "SIZE")
 
 
 def setting(cfg, name: str):
@@ -86,6 +99,34 @@ def min_rvol(cfg) -> float:
         return min(max(float(setting(cfg, "nth_min_rvol") or 0.0), 0.0), RVOL_MAX)
     except (TypeError, ValueError):
         return 0.0
+
+
+def side_rule(cfg) -> str:
+    """How the side is picked: NTH = the Nth candle's colour; MAJORITY = the way most of candles 1..N went
+    (a tie = no order); AGREE = the Nth candle's colour, only when most of candles 1..N agree with it."""
+    value = str(setting(cfg, "nth_side_rule") or "NTH").upper()
+    return value if value in SIDE_RULES else "NTH"
+
+
+def majority_by(cfg) -> str:
+    """How "most" is counted: COUNT = green vs red candles; SIZE = the bodies added up (signed, in rupees)."""
+    value = str(setting(cfg, "nth_majority_by") or "COUNT").upper()
+    return value if value in MAJORITY_BY else "COUNT"
+
+
+def skip_checks(cfg) -> bool:
+    """Enter at once on the call: no entry check (VWAP, RSI, ADX, …) is read (StrategyEngine.direct_order)."""
+    return bool(setting(cfg, "nth_skip_checks"))
+
+
+def majority(opens, closes, by: str = "COUNT") -> tuple[str | None, int, int, float]:
+    """The side most of these candles went: (LONG / SHORT / None for a tie, greens, reds, net body in rupees)."""
+    bodies = [float(c) - float(o) for o, c in zip(opens, closes)]
+    greens = sum(1 for b in bodies if b > 0)
+    reds = sum(1 for b in bodies if b < 0)
+    net = sum(bodies)
+    score = (greens - reds) if by == "COUNT" else net
+    return ("LONG" if score > 0 else "SHORT" if score < 0 else None), greens, reds, net
 
 
 def ordinal(n: int) -> str:
@@ -145,15 +186,31 @@ def call(frame: pd.DataFrame | None, cfg, done_for: dt.date | None = None) -> Ca
         return Call(None, today, f"waiting for the {label} to close ({count} of {n} closed)")
     if count > n:
         return Call(None, today, f"the {label} closed earlier — no order after it")
-    candle = closed.iloc[-1]
+    session = closed[days == today].reset_index(drop=True)
     if heikin_ashi.on(cfg):
-        ha = heikin_ashi.view(closed[days == today].reset_index(drop=True), cfg)
-        open_, close = float(ha["open"].iloc[-1]), float(ha["close"].iloc[-1])
+        session = heikin_ashi.view(session, cfg)
+    opens = session["open"].astype(float).tolist()
+    closes = session["close"].astype(float).tolist()
+    open_, close = opens[-1], closes[-1]
+    rule = side_rule(cfg)
+    most, greens, reds, net = majority(opens[:n], closes[:n], majority_by(cfg))
+    tally = f"candles 1-{n}: {greens} green, {reds} red" if majority_by(cfg) == "COUNT" else f"candles 1-{n} add up to {net:+.2f}"
+    if rule == "MAJORITY":
+        if most is None:
+            return Call(None, today, f"{tally} — no majority, no order today")
+        # The move the body floor reads: the Nth candle when it went the majority's way (counting), else the net body.
+        sign = 1 if most == "LONG" else -1
+        nth_body = close - open_
+        move = abs(nth_body) if majority_by(cfg) == "COUNT" and nth_body * sign > 0 else abs(net)
+        body = move * sign
     else:
-        open_, close = float(candle["open"]), float(candle["close"])
-    body = close - open_
+        body = close - open_
+        if body == 0:
+            return Call(None, today, f"{label} is a doji — no order today")
+        if rule == "AGREE" and most != ("LONG" if body > 0 else "SHORT"):
+            return Call(None, today, f"{label} is {'green' if body > 0 else 'red'} but {tally} — against the majority, no order today")
     if body == 0:
-        return Call(None, today, f"{label} is a doji — no order today")
+        return Call(None, today, f"{tally} — no move, no order today")
     body_pct = round(abs(body) / close * 100, 4) if close > 0 else 0.0
     floor = min_body_pct(cfg)
     if floor > 0 and body_pct < floor:
@@ -165,7 +222,10 @@ def call(frame: pd.DataFrame | None, cfg, done_for: dt.date | None = None) -> Ca
             return Call(None, today, f"{label}: volume vs usual not known (no earlier session) — no order today", body_pct=body_pct)
         if rvol < need:
             return Call(None, today, f"{label}: volume {rvol:g}× usual is under {need:g}× — no order today", rvol, body_pct)
-    colour = "green" if body > 0 else "red"
     side = "LONG" if body > 0 else "SHORT"
     vol = f", volume {rvol:g}× usual" if rvol is not None else ""
-    return Call(side, today, f"{colour} {label} (body {body_pct:.2f}%{vol})", rvol, body_pct)
+    if rule == "MAJORITY":
+        return Call(side, today, f"most of the first {n} {size}-minute candles {'up' if side == 'LONG' else 'down'} ({tally}{vol})", rvol, body_pct)
+    colour = "green" if body > 0 else "red"
+    agree = f", {tally}" if rule == "AGREE" else ""
+    return Call(side, today, f"{colour} {label} (body {body_pct:.2f}%{agree}{vol})", rvol, body_pct)

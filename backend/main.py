@@ -841,6 +841,9 @@ class ConfigUpdate(BaseModel):
     nth_candle_minutes: Literal[1, 3, 5, 10, 15] | None = None
     nth_min_body_pct: float | None = Field(default=None, ge=0, le=nth_candle.BODY_MAX)
     nth_min_rvol: float | None = Field(default=None, ge=0, le=nth_candle.RVOL_MAX)
+    nth_side_rule: Literal["NTH", "MAJORITY", "AGREE"] | None = None
+    nth_majority_by: Literal["COUNT", "SIZE"] | None = None
+    nth_skip_checks: bool | None = None
     review_on: bool | None = None
     review_gap_pct: float | None = Field(default=None, gt=0, le=2)
     review_cooldown_min: int | None = Field(default=None, ge=0, le=375)
