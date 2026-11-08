@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { useMemo, useState } from "react";
 import type { SecondCandleRow } from "@/lib/smaApi";
-import { fmt, mean, outcome, reverseOutcome, signed } from "./secondCandleMath";
+import { fmt, levelMin, mean, nearestLevel, outcome, reverseOutcome, signed } from "./secondCandleMath";
 
 /**
  * The day's trades added up (the Second candle tab's "Per day" view; display only, from the filtered rows): with Top N
@@ -53,9 +53,14 @@ export function DayTotals({
         let trail = 0;
         let capital = 0;
         let wins = 0;
+        let reached = 0;
+        let targetFirst = 0;
         for (const r of part) {
           const q = qtyOf(r);
-          const t = outcome(r, target, stop).pts;
+          const o = outcome(r, target, stop);
+          const t = o.pts;
+          if (levelMin(r.fav_min, nearestLevel(target)) != null) reached += 1;
+          if (o.kind === "target") targetFirst += 1;
           const rv = reverseOutcome(r, target, stop)?.pts ?? 0;
           const tr = trailKey ? r.trail?.[trailKey] ?? 0 : 0;
           close += r.close_pts * q;
@@ -73,6 +78,8 @@ export function DayTotals({
           trades: part.length,
           stocks: part.map((r) => r.symbol).join(", "),
           wins,
+          reached,
+          targetFirst,
           close,
           ts,
           rev,
@@ -105,6 +112,17 @@ export function DayTotals({
       drop,
       maxCapital: days.length ? Math.max(...days.map((d) => d.capital)) : 0,
     };
+  }, [days]);
+
+  const hitDays = useMemo(() => {
+    const most = days.length ? Math.max(...days.map((d) => d.trades)) : 0;
+    return Array.from({ length: most + 1 }, (_, k) => ({
+      k,
+      reached: days.filter((d) => d.reached === k).length,
+      reachedAtLeast: days.filter((d) => d.reached >= k).length,
+      first: days.filter((d) => d.targetFirst === k).length,
+      firstAtLeast: days.filter((d) => d.targetFirst >= k).length,
+    })).reverse();
   }, [days]);
 
   if (!rows.length) return <p className="p-3 text-xs text-slate-500">No trades match these filters.</p>;
@@ -166,12 +184,58 @@ export function DayTotals({
         <Tile label="Most capital in a day" value={money ? `₹${fmt(summary.maxCapital, 0)}` : "—"} />
       </div>
 
+      <div className="rounded-lg border border-slate-800 p-2">
+        <div className="mb-1 font-semibold text-slate-200">
+          Days by how many stocks reached the target (₹{target}, stop ₹{stop})
+        </div>
+        <p className="mb-2 text-slate-500">
+          Of the {days.length} days: on how many days 0, 1, 2… of that day&apos;s stocks reached ₹{target} with the trade, and on how
+          many they reached it before the ₹{stop} stop. &quot;At least&quot; adds the rows above.
+        </p>
+        <table className="text-xs">
+          <thead>
+            <tr>
+              <th className={head}>Stocks that day</th>
+              <th className={clsx(head, "text-right")}>Reached ₹{target}</th>
+              <th className={clsx(head, "text-right")}>At least</th>
+              <th className={clsx(head, "text-right")}>Before the stop</th>
+              <th className={clsx(head, "text-right")}>At least</th>
+            </tr>
+          </thead>
+          <tbody>
+            {hitDays.map((h) => (
+              <tr key={h.k} className="border-t border-white/5">
+                <td className={cell}>{h.k}</td>
+                <td className={clsx(cell, "text-right")}>
+                  {h.reached} <span className="text-slate-500">({fmt(days.length ? (h.reached / days.length) * 100 : 0, 0)}%)</span>
+                </td>
+                <td className={clsx(cell, "text-right text-slate-300")}>
+                  {h.reachedAtLeast} <span className="text-slate-500">({fmt(days.length ? (h.reachedAtLeast / days.length) * 100 : 0, 0)}%)</span>
+                </td>
+                <td className={clsx(cell, "text-right")}>
+                  {h.first} <span className="text-slate-500">({fmt(days.length ? (h.first / days.length) * 100 : 0, 0)}%)</span>
+                </td>
+                <td className={clsx(cell, "text-right text-slate-300")}>
+                  {h.firstAtLeast} <span className="text-slate-500">({fmt(days.length ? (h.firstAtLeast / days.length) * 100 : 0, 0)}%)</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-800">
         <table className="min-w-full text-xs">
           <thead className="sticky top-0 bg-surface">
             <tr>
               <th className={head}>Day</th>
               <th className={clsx(head, "text-right")}>Trades</th>
+              <th className={clsx(head, "text-right")} title={`Stocks that day whose price went at least ₹${target} with the trade at any time`}>
+                Reached ₹{target}
+              </th>
+              <th className={clsx(head, "text-right")} title={`Stocks that day that reached ₹${target} before the ₹${stop} stop`}>
+                Target before stop
+              </th>
               <th className={clsx(head, "text-right")}>In profit</th>
               <th className={clsx(head, "text-right")}>Square-off</th>
               <th className={clsx(head, "text-right")}>
@@ -188,6 +252,12 @@ export function DayTotals({
               <tr key={d.day} className="border-t border-white/5">
                 <td className={clsx(cell, "text-slate-300")}>{d.day}</td>
                 <td className={clsx(cell, "text-right")}>{d.trades}</td>
+                <td className={clsx(cell, "text-right", d.reached === d.trades ? "font-semibold text-emerald-300" : d.reached === 0 ? "text-rose-300" : "")}>
+                  {d.reached} of {d.trades}
+                </td>
+                <td className={clsx(cell, "text-right", d.targetFirst === d.trades ? "font-semibold text-emerald-300" : d.targetFirst === 0 ? "text-rose-300" : "")}>
+                  {d.targetFirst} of {d.trades}
+                </td>
                 <td className={clsx(cell, "text-right")}>
                   {d.wins} <span className="text-slate-500">({fmt((d.wins / d.trades) * 100, 0)}%)</span>
                 </td>

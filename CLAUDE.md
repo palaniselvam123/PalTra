@@ -1246,7 +1246,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   **Per day (all stocks together)** (`components/Scalp/DayTotals.tsx`, display only): each day's filtered trades added up (with
   Top N, the day's N stocks), in ₹ a share or sized by shares / ₹ per trade (shares = ₹ ÷ entry): held to the square-off,
   the chosen target / stop, the same + reverse, the best trailing stop; the picked exit drives the running total, green / red
-  days, best / worst day, biggest drop and most capital in a day. Before charges.
+  days, best / worst day, biggest drop and most capital in a day; per day how many of its stocks reached the chosen target
+  and how many before the stop ("3 of 5"), and a table of days by that count (0, 1, 2… and at least). Before charges.
   **How far the trades went** (`components/Scalp/MoveBars.tsx`, display only): bar charts from the filtered rows, in ₹ or %
   of the entry: % of trades whose best move reached at least each level, the same for the worst move, and % that closed
   at the square-off at least that much in profit / in loss. Top by volume and Place by volume also offer Top 1 / 2 / 3.
