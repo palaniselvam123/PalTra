@@ -76,6 +76,7 @@ import late_entry
 import tall_pullback
 import extreme_entry
 import entry_candle
+import handoff_candle
 import decel_guard
 import slope_exit
 import stop_plan
@@ -356,7 +357,7 @@ SNAPSHOT_FIELDS = (
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
     "extreme_entry", "extreme_anchor", "extreme_invalid_pct", "extreme_expiry_candles", "extreme_cancel_on_cross",
-    "entry_candle_confirm", "entry_candle_pct", "entry_candle_max",
+    "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "stop_handoff", "stop_handoff_loss",
@@ -1069,6 +1070,8 @@ class StrategyEngine:
         self._late_pending: dict[str, Pending] = {}
         # Tall-candle pullback (tall_pullback.py): an entry waiting for the price to come back.
         self._pullback: dict[str, PullbackOrder] = {}
+        # Hand-off orders waiting for the forming candle's colour (handoff_candle.py).
+        self._handoff_wait: dict[str, handoff_candle.Wait] = {}
         # Stocks handed here by a breakout, waiting for this bot's entry on its side (breakout.py).
         self._arrivals: dict[str, breakout.Arrival] = {}
         # A breakout while a trade against it was open (breakout_cut off): the stock moves to this bot once flat.
@@ -1561,6 +1564,7 @@ class StrategyEngine:
             await self._watch_pivot_target(symbol_cfg)
 
         await self._watch_pullbacks(cfg, now)
+        await self._watch_handoff_waits(cfg, now)
 
         self._focus = view
         if view in self._ltps:
@@ -3293,6 +3297,42 @@ class StrategyEngine:
             self._signals[symbol] = result
             self.last_signal = result
 
+    async def _watch_handoff_waits(self, cfg: BotConfig, now: dt.datetime) -> None:
+        """Every pass: send a waiting hand-off order once the forming candle goes its way (handoff_candle.py)."""
+        for symbol, wait in list(self._handoff_wait.items()):
+            symbol_cfg = _cfg_for(cfg, symbol)
+            frame = self._frames.get(symbol)
+            closed_ts = _closed_bar_ts(frame)
+            why = None
+            if symbol in self.positions and self.positions[symbol].direction == wait.want and wait.mode == "WAIT":
+                why = f"already {wait.want}"
+            elif not self._still_armed(symbol):
+                why = "taken off the Trade list"
+            elif now.time() >= _entry_cutoff(symbol_cfg):
+                why = f"no new entries after {_entry_cutoff(symbol_cfg).strftime('%H:%M')} IST"
+            elif tall_pullback.expired(wait.signal_ts, closed_ts, wait.span_sec, wait.candles):
+                why = f"no candle went {'its' if wait.mode == 'WAIT' else 'either'} way within {wait.candles} candle(s)"
+            if why:
+                self._handoff_wait.pop(symbol, None)
+                self._signals[symbol] = f"{symbol} hand-off order dropped — {why}"
+                continue
+            forming_open = _finite(frame.iloc[-1].get("open")) if frame is not None and len(frame) else None
+            side = handoff_candle.decide(wait.mode, wait.want, self._ltps.get(symbol), forming_open, wait.pct)
+            if side is None:
+                continue
+            self._handoff_wait.pop(symbol, None)
+            signal = "BULLISH" if side == "LONG" else "BEARISH"
+            colour = "green" if side == "LONG" else "red"
+            turned = "" if side == wait.want else f" (the hand-off asked for {wait.want.lower()})"
+            try:
+                result = await self.direct_order(
+                    symbol, signal, why="HANDOFF" + handoff_candle.CONFIRM_TAG, note=f"{wait.note}; forming candle {colour}{turned}"
+                )
+            except ForceRefused as exc:
+                result = f"not ordered: {exc}"
+            self._signals[symbol] = f"{symbol} hand-off: forming candle {colour}{turned} — {result}"
+            self.last_signal = self._signals[symbol]
+
     def hold_for_next_cross(self, symbols: list[str]) -> None:
         """Remember the closed bar already on the tape. Do not trade that cross."""
         for symbol in symbols:
@@ -3385,6 +3425,24 @@ class StrategyEngine:
             raise ForceRefused(f"no new entries after {_entry_cutoff(cfg).strftime('%H:%M')} IST")
         if name not in trade_names(cfg):
             raise ForceRefused(f"{name} is not on the Trade list")
+        hc = handoff_candle.mode(_cfg_for(cfg, name))
+        if why.startswith("HANDOFF") and handoff_candle.CONFIRM_TAG not in why and hc != "OFF":
+            # Hand-off entries wait for the forming candle's colour (handoff_candle.py).
+            frame = self._frames.get(name)
+            own_cfg = _cfg_for(cfg, name)
+            self._handoff_wait[name] = handoff_candle.Wait(
+                want=want,
+                signal_ts=_closed_bar_ts(frame) or int(clock.timestamp()),
+                span_sec=candle_minutes(own_cfg) * 60,
+                candles=entry_candle.max_candles(own_cfg),
+                pct=entry_candle.margin_pct(own_cfg),
+                mode=hc,
+                note=note,
+            )
+            how = "for a candle going its way" if hc == "WAIT" else "for the forming candle's colour (green buys, red sells)"
+            text = f"{name} hand-off {want.lower()} waits {how}, up to {entry_candle.max_candles(own_cfg)} candle(s)"
+            self._signals[name] = text
+            return text
         enriched, price, reference, atr = await self._manual_ready(name, cfg)
         own = _cfg_for(cfg, name)
         own.flip_orders = False

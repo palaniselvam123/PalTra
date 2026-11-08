@@ -183,6 +183,7 @@ export const SETTING_LABELS: Record<string, string> = {
   entry_candle_confirm: "entry candle must go the trade's way",
   entry_candle_pct: "entry candle margin",
   entry_candle_max: "entry candle wait",
+  handoff_candle: "hand-off orders wait for the forming candle",
   day_extreme_guard: "don't buy at the day's high / short at the day's low",
   day_extreme_pct: "day high/low distance",
   day_extreme_pull_pct: "day high/low pullback",
