@@ -12,6 +12,7 @@ import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { smaApi, type SecondCandleRow, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
 import { CandleCompare } from "./CandleCompare";
+import { MoveBars } from "./MoveBars";
 import { LEVELS, REV_STOPS, STOPS, fmt, mean, nearestLevel, ordinal, outcome, reverseOutcome, signed } from "./secondCandleMath";
 
 /**
@@ -26,7 +27,7 @@ const POLL_MS = 3000;
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const SIZES = [1, 3, 5, 10, 15];
 const CANDLES = [1, 2, 3, 4, 5, 6];
-const TOP_N = [0, 5, 10, 15, 20, 30, 50, 100];
+const TOP_N = [0, 1, 2, 3, 5, 10, 15, 20, 30, 50, 100];
 const SQUARE_OFFS = ["10:30", "11:00", "12:00", "13:00", "14:00", "15:00", "15:15", "15:25"];
 const HALF_HOURS = ["09:15", "09:45", "10:15", "10:45", "11:15", "11:45", "12:15", "12:45", "13:15", "13:45", "14:15", "14:45", "15:15"];
 
@@ -89,14 +90,29 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
       /* the server may be waking up */
     }
   }, [onStatus]);
+  // While a test runs, ask only for its progress (no rows): the full rows can be tens of MB, and sending them every
+  // few seconds froze the page. The rows are loaded once, when the run ends.
+  const poll = useCallback(async () => {
+    try {
+      const v = await smaApi.secondCandle(false);
+      if (v.status === "RUNNING") {
+        setData((cur) => (cur ? { ...cur, status: v.status, done: v.done, total: v.total, errors: v.errors, started_at: v.started_at } : v));
+        onStatus?.({ when: v.finished_at, running: true });
+      } else {
+        await load();
+      }
+    } catch {
+      /* the server may be waking up */
+    }
+  }, [load, onStatus]);
   useEffect(() => {
     void load();
   }, [load]);
   useEffect(() => {
     if (data?.status !== "RUNNING") return;
-    const id = setInterval(() => void load(), POLL_MS);
+    const id = setInterval(() => void poll(), POLL_MS);
     return () => clearInterval(id);
-  }, [data?.status, load]);
+  }, [data?.status, poll]);
 
   const run = async () => {
     setBusy(true);
@@ -551,6 +567,8 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             <Tile label="Held to square-off" value={`₹${signed(sum.totalClose)} a share`} tone={sum.totalClose} />
             <Tile label="Closed in profit" value={`${fmt(sum.closeWinPct, 0)}%`} tone={sum.closeWinPct - 50} />
           </div>
+
+          <MoveBars rows={rows} />
 
           <div className="grid gap-3 lg:grid-cols-3">
             {/* Target + stop test */}

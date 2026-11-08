@@ -396,6 +396,18 @@ async def load_tape(symbol: str, first: dt.date, last: dt.date, fetch, today: dt
     `fetch(symbol, start, end)` downloads (candle_history.fetch_frame). Only days before `today` are cached."""
     today = today or dt.datetime.now(IST).date()
     wanted = [first + dt.timedelta(days=i) for i in range((last - first).days + 1)]
+    # Reading, writing and joining the gzip day files runs in a worker thread, so a long test never stalls the
+    # event loop the bots and every page share.
+    parts, missing = await asyncio.to_thread(_read_cached_days, symbol, wanted, today)
+    if missing:
+        start = dt.datetime.combine(missing[0], dt.time(9, 0), tzinfo=IST)
+        end = dt.datetime.combine(missing[-1], SESSION_END, tzinfo=IST)
+        got = await fetch(symbol, start, end)
+        await asyncio.to_thread(_store_missing_days, symbol, got, missing, today, parts)
+    return await asyncio.to_thread(_join_days, parts, wanted)
+
+
+def _read_cached_days(symbol: str, wanted: list[dt.date], today: dt.date) -> tuple[dict[dt.date, pd.DataFrame], list[dt.date]]:
     parts: dict[dt.date, pd.DataFrame] = {}
     missing: list[dt.date] = []
     for day in wanted:
@@ -407,25 +419,27 @@ async def load_tape(symbol: str, first: dt.date, last: dt.date, fetch, today: dt
             except (OSError, ValueError, KeyError):  # a bad file is downloaded again
                 pass
         missing.append(day)
-    if missing:
-        start = dt.datetime.combine(missing[0], dt.time(9, 0), tzinfo=IST)
-        end = dt.datetime.combine(missing[-1], SESSION_END, tzinfo=IST)
-        got = await fetch(symbol, start, end)
-        got_days = _split_days(got)
-        for day in missing:
-            part = got_days.get(day, pd.DataFrame(columns=list(_COLUMNS)))
-            parts[day] = part
-            if day < today:
-                try:
-                    _write_day(_cache_file(symbol, day), part)
-                except (OSError, ValueError) as exc:
-                    log.warning("strategy lab: could not cache %s %s: %s", symbol, day, exc)
+    return parts, missing
+
+
+def _store_missing_days(symbol: str, got, missing: list[dt.date], today: dt.date, parts: dict) -> None:
+    got_days = _split_days(got)
+    for day in missing:
+        part = got_days.get(day, pd.DataFrame(columns=list(_COLUMNS)))
+        parts[day] = part
+        if day < today:
+            try:
+                _write_day(_cache_file(symbol, day), part)
+            except (OSError, ValueError) as exc:
+                log.warning("strategy lab: could not cache %s %s: %s", symbol, day, exc)
+
+
+def _join_days(parts: dict, wanted: list[dt.date]) -> pd.DataFrame:
     frames = [parts[d] for d in wanted if d in parts and len(parts[d])]
     if not frames:
         return pd.DataFrame(columns=list(_COLUMNS))
     tape = pd.concat(frames, ignore_index=True)
-    tape = tape.drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
-    return tape
+    return tape.drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
 
 
 # ----------------------------------------------------------------------------------------------------------------

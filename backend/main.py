@@ -4854,8 +4854,12 @@ class SecondCandleStart(BaseModel):
 
 @app.get("/api/second-candle")
 async def second_candle_get(rows: bool = True):
-    """The Second candle test (second_candle.py): progress, the last report and its rows. Read-only."""
-    return second_candle.test().view(with_rows=rows)
+    """The Second candle test (second_candle.py): progress, the last report and its rows. Read-only.
+
+    The rows are encoded off the event loop and cached (second_candle.SecondCandle.view_json)."""
+    from fastapi.responses import Response
+
+    return Response(content=await second_candle.test().view_json(with_rows=rows), media_type="application/json")
 
 
 @app.post("/api/second-candle/start")
