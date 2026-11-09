@@ -42,7 +42,17 @@ const RANK_KEY: Record<ActiveSort, (r: ActiveStock) => number> = {
 type ColKey = "symbol" | "ltp" | "change" | "speed" | "value" | "rvol" | "buy" | "vwap" | "bias";
 type Col = "rank" | ColKey | "actions";
 const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "speed", "value", "rvol", "buy", "vwap", "bias", "actions"];
-const TOP = 40;
+/** How many stocks the table shows after ranking (kept per browser); "All" = every stock the scan read. */
+const TOP_CHOICES = [40, 100, 250] as const;
+const TOP_KEY = "scalp.active.top";
+function savedTop(): number {
+  try {
+    const n = Number(window.localStorage.getItem(TOP_KEY));
+    return (TOP_CHOICES as readonly number[]).includes(n) ? n : 40;
+  } catch {
+    return 40;
+  }
+}
 
 const clockIst = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
@@ -132,6 +142,16 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [data, setData] = useState<ActiveStocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<ActiveSort>("value");
+  const [top, setTopState] = useState<number>(40);
+  useEffect(() => setTopState(savedTop()), []);
+  const setTop = (n: number) => {
+    setTopState(n);
+    try {
+      window.localStorage.setItem(TOP_KEY, String(n));
+    } catch {
+      /* per-browser convenience only */
+    }
+  };
   const [bias, setBias] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minValue, setMinValue] = useState(0);
   const [query, setQuery] = useState("");
@@ -151,7 +171,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     try {
       const next = await api.scalpActive({
         sort,
-        top: TOP,
+        top,
         min_value_cr: minValue,
         ...(bias === "ALL" ? {} : { bias }),
       });
@@ -160,7 +180,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not load the most active stocks");
     }
-  }, [sort, bias, minValue]);
+  }, [sort, bias, minValue, top]);
 
   useEffect(() => {
     load();
@@ -245,8 +265,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const source = useMemo(() => {
     if (view === "live") return data?.rows ?? [];
     const kept = (saved?.rows ?? []).filter((r) => r.value_cr >= minValue && (bias === "ALL" || r.bias === bias));
-    return [...kept].sort((a, b) => RANK_KEY[sort](b) - RANK_KEY[sort](a)).slice(0, TOP);
-  }, [view, data?.rows, saved, minValue, bias, sort]);
+    return [...kept].sort((a, b) => RANK_KEY[sort](b) - RANK_KEY[sort](a)).slice(0, top);
+  }, [view, data?.rows, saved, minValue, bias, sort, top]);
 
   // While a scan runs, check back sooner.
   useEffect(() => {
@@ -553,6 +573,17 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           onChange={(v) => setSort(v as ActiveSort)}
           options={(Object.keys(SORT_LABEL) as ActiveSort[]).map((k) => ({ value: k, label: SORT_LABEL[k] }))}
           className="w-40"
+        />
+        <SelectFilter
+          label="Show top"
+          value={String(top)}
+          onChange={(v) => setTop(Number(v))}
+          options={[
+            { value: "40", label: "40" },
+            { value: "100", label: "100" },
+            { value: "250", label: "All" },
+          ]}
+          className="w-24"
         />
         <SelectFilter
           label="Bias"
