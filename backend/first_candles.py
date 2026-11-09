@@ -36,6 +36,7 @@ from second_candle import MAJORITY_BY, SIDE_RULES, majority
 log = logging.getLogger(__name__)
 SIZES = (1, 3, 5, 10, 15)
 MAX_CANDLE_NO = 6
+MAX_LAST = 6
 DOWNLOAD_DAYS = 5  # enough to reach the last session over a weekend / holiday
 MIN_RESCAN_SEC = 20
 Fetch = Callable[[str, dt.datetime, dt.datetime], Awaitable[pd.DataFrame]]
@@ -52,6 +53,8 @@ class Rule:
     dir_rule: str = "COLOUR"
     #: Read Heikin Ashi candles (colour and body from the HA candle; closes stay real), like the bot's `ha_colours`.
     ha: bool = False
+    #: Also the last N closed candles before the read time (0 = off), so a saved scan shows what the chart looked like.
+    last_n: int = 3
 
     def clean(self) -> "Rule":
         self.minutes = self.minutes if self.minutes in SIZES else 5
@@ -61,6 +64,7 @@ class Rule:
         self.min_body_pct = max(0.0, min(5.0, float(self.min_body_pct or 0.0)))
         self.dir_rule = self.dir_rule if self.dir_rule in DIR_RULES else "COLOUR"
         self.ha = bool(self.ha)
+        self.last_n = max(0, min(MAX_LAST, int(self.last_n or 0)))
         return self
 
 
@@ -98,10 +102,21 @@ def _shapes(candles: pd.DataFrame, ha: bool) -> list[list[float]]:
     return [[round(float(a), 2), round(float(b), 2), round(float(x), 2), round(float(d), 2)] for a, b, x, d in zip(o, h, lo, c)]
 
 
+def _last(candles: pd.DataFrame, rule: Rule) -> dict:
+    """The last `last_n` closed candles of the session before the read time, as drawn (HA when `ha`), with the time
+    the last one closed: {"last_ohlc": [...], "last_at": "HH:MM"} (empty when off or nothing has closed)."""
+    if not rule.last_n or candles is None or candles.empty:
+        return {"last_ohlc": [], "last_at": None}
+    shapes = _shapes(candles, rule.ha)[-rule.last_n:]
+    closed_at = int(candles["ts"].iloc[-1]) + rule.minutes * 60
+    return {"last_ohlc": shapes, "last_at": dt.datetime.fromtimestamp(closed_at, IST).strftime("%H:%M")}
+
+
 def read(symbol: str, tape: pd.DataFrame, now: dt.datetime, rule: Rule) -> dict | None:
     candles, day, prev_close = _closed(tape, rule.minutes, now)
     if day is None:
         return None
+    last = _last(candles, rule)
     n = rule.candle_no
     first = candles.iloc[:n]
     shapes = _shapes(first, rule.ha)
@@ -114,7 +129,7 @@ def read(symbol: str, tape: pd.DataFrame, now: dt.datetime, rule: Rule) -> dict 
     moves = candle_moves(first["open"].astype(float), first["close"].astype(float), prev_close, rule.dir_rule)
     dirs = ["U" if m > 0 else "D" if m < 0 else "0" for m in moves]
     row: dict = {"symbol": symbol, "day": day.isoformat(), "colours": colours, "bodies": bodies, "dirs": dirs,
-                 "dir_rule": rule.dir_rule, "ha": rule.ha, "ohlc": shapes, "closed": len(first)}
+                 "dir_rule": rule.dir_rule, "ha": rule.ha, "ohlc": shapes, "closed": len(first), **last}
     if len(first) < n:
         open_at = dt.datetime.combine(day, dt.time(9, 15), IST) + dt.timedelta(minutes=rule.minutes * n)
         row.update(call=None, why=f"waiting: candle {n} closes at {open_at.strftime('%H:%M')}", matched=None)
@@ -176,6 +191,7 @@ class FirstCandleScanner:
         self.status = Status()
         self._task: asyncio.Task | None = None
         self._started_at = 0.0
+        self._at: str | None = None
 
     def stop(self, reason: str) -> None:
         if self._task is not None and not self._task.done():
@@ -196,10 +212,12 @@ class FirstCandleScanner:
         if not names:
             raise ValueError("No stocks to read")
         rule = rule.clean()
-        same = self.status.rule == rule.__dict__
+        when = now.isoformat(timespec="minutes") if now else None
+        same = self.status.rule == rule.__dict__ and self._at == when
         if self.status.running or (same and time.monotonic() - self._started_at < MIN_RESCAN_SEC):
             return self.snapshot()
         self._started_at = time.monotonic()
+        self._at = when
         s = self.status
         s.running, s.done, s.total, s.failed, s.error = True, 0, len(names), 0, None
         s.rule = rule.__dict__.copy()

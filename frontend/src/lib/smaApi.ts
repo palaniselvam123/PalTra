@@ -671,6 +671,8 @@ export type FirstCandleRule = {
   dir_rule: CandleDirRule;
   /** Read Heikin Ashi candles (colour / body); prices stay real. */
   ha: boolean;
+  /** Also the last N closed candles before the read time (0 = off). */
+  last_n: number;
 };
 export type FirstCandleRow = {
   symbol: string;
@@ -683,6 +685,9 @@ export type FirstCandleRow = {
   ha?: boolean;
   /** Each candle as drawn: [open, high, low, close] (Heikin Ashi when `ha`). */
   ohlc?: [number, number, number, number][];
+  /** The last N closed candles before the read time, as drawn, and when the last one closed (HH:MM). */
+  last_ohlc?: [number, number, number, number][];
+  last_at?: string | null;
   bodies: number[];
   closed: number;
   greens?: number;
@@ -2621,7 +2626,7 @@ export const smaApi = {
     request<MorningScan>("/api/morning-scan/start", { method: "POST", body: JSON.stringify({ symbols, force }) }, 20000, false),
   morningScan: () => request<MorningScan>("/api/morning-scan", undefined, undefined, false),
   /** Read the day's first N candles of each stock (Most active "First candles"; read-only). Poll `firstCandles`. */
-  firstCandlesStart: (body: FirstCandleRule & { symbols: string[] }) =>
+  firstCandlesStart: (body: FirstCandleRule & { symbols: string[]; at?: string }) =>
     request<FirstCandleScan>("/api/first-candles/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   firstCandles: () => request<FirstCandleScan>("/api/first-candles", undefined, undefined, false),
   /** Start the carry-over scan (read-only; candles only). Returns at once; poll `carryScan`. */

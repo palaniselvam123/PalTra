@@ -134,6 +134,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [trendPick, setTrendPick] = useState<TrendPick>("ALL");
   const [fc, setFc] = useState<Map<string, FirstCandleRow>>(new Map());
   const [fcN, setFcN] = useState(3);
+  const [fcLast, setFcLast] = useState(0);
   const [fcPick, setFcPick] = useState<FirstPick>("ALL");
   // A saved scan's accuracy check (the same check as the History tab's).
   const [detail, setDetail] = useState<ScanRunDetail | null>(null);
@@ -626,9 +627,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
       <FirstCandleControls
         symbols={found.map((r) => r.symbol)}
         disabled={paused}
+        at={view === "history" ? saved?.as_of ?? null : null}
         onRows={(rows, rule) => {
           setFc(rows);
           setFcN(rule.candle_no);
+          setFcLast(rule.last_n);
         }}
       />
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -791,7 +794,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                     <th className="pb-2 text-left font-medium" title="Trend phase now">Phase</th>
                   </>
                 )}
-                {fc.size > 0 && <FirstCandleHead />}
+                {fc.size > 0 && <FirstCandleHead last={fcLast} />}
                 {checkBy && (
                   <>
                     <th className="pb-2 text-left font-medium" title="The call checked: the row's Bias, else its day move">Call</th>
@@ -822,6 +825,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   check={checkBy ? checkBy.get(r.symbol) ?? null : undefined}
                   first={fc.size > 0 ? fc.get(r.symbol) ?? null : undefined}
                   firstN={fcN}
+                  firstLast={fcLast}
                 />
               ))}
             </tbody>
@@ -851,10 +855,12 @@ function ActiveRowView({
   deliv,
   first,
   firstN = 3,
+  firstLast = 0,
 }: {
   /** The stock's first candles (undefined = the columns are not shown). */
   first?: FirstCandleRow | null;
   firstN?: number;
+  firstLast?: number;
   tick?: ReactNode;
   /** NSE's delivery % of the stock (latest published day). */
   deliv?: DeliveryRow;
@@ -1007,7 +1013,7 @@ function ActiveRowView({
           </td>
         </>
       )}
-      {first !== undefined && <FirstCandleCells row={first} n={firstN} />}
+      {first !== undefined && <FirstCandleCells row={first} n={firstN} last={firstLast} />}
       {check !== undefined && (
         <>
           <td className="py-1.5 text-xs">
