@@ -483,6 +483,18 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   left to that stop) once `small_exit_agree` (1) sizes say so and, with `small_exit_loss_pct` > 0, only while the trade is at
   least that % under water (`losing_pct`). No reverse; entries unchanged. Counts as an exit for `strategyChecks.noExitOn`.
   The stock research baseline keeps it off.
+- `backend/small_colour.py` – **colours on smaller candles** (`sc_minutes` CSV of 1/2/3/5/10 smaller than the bot's candle,
+  "" = off; `sc_count` 1-5 candles in a row, default 2; `sc_join` `ALL` default | `ANY` | `AT_LEAST` `sc_need`; per bot and
+  per stock, PAPER and LIVE, replays too; Settings → 3. When to exit, "Colours on smaller candles",
+  `StrategyConfigPanel.SmallColourCard`): the 1-minute tape (`_tapes`) grouped into each size (`exit_candle.closed_frame`,
+  Heikin Ashi colours with `ha_colours`), each size asked whether its last N closed candles were all green / red
+  (`run_colour`, `agree`). **Entry check** (`sc_entry`, off): read in `StrategyEngine.apply_signal` next to `_entry_block`
+  (signal side: green to buy, red to sell), else refused "smaller candles: …" (chart ✕ "Small candles"; late entry can wait
+  it out). **Confirm a colour turn** (`sc_confirm`, off): `_watch_turn_colour`'s `COLOUR_TURN` (turn / reversed trades' other
+  colour exit) sets `OpenPosition.sc_wait` and `_confirm_colour_turn`, every pass, closes once the smaller candles agree with
+  the turn, drops the wait when they show the trade's own colour (`confirms_turn`: yes / back / wait); candle-colour entry
+  mode keeps its own turns. The smaller-candle exit's counter candles (`small_candles.py`) read Heikin Ashi colours too.
+  No order path of its own. The stock research baseline keeps it off.
 - `backend/late_entry.py` – late entry (`late_entry_min`, 0 = off by default, per bot and
   per stock, PAPER and LIVE): a fresh cross refused only by a ticked entry filter or ADX
   (`late_entry.refused_by_filter`: `… ignored — …` / `closed on … — …`, never the cut-off or

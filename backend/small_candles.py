@@ -12,7 +12,7 @@ groups the stock's 1-minute Groww tape (`_tapes`) into candles of each ticked si
   * `small_exit_slope` (on): the SMA fast slope on that size (`slope_exit.slope`, % per candle over
     `slope_lookback`) is at least `slope_turn_pct` against the trade;
   * `small_exit_counter` (N, 0 = off): the last N closed candles of that size all went against the trade
-    (`indicators._direction_reason`, colour rule).
+    (`indicators._direction_reason`, colour rule; Heikin Ashi colours with the bot's `ha_colours`).
 
 A size "says exit" while its latest closed candle shows any ticked condition (`OpenPosition.small_state`). The trade
 closes (`SMALL_CANDLE_EXIT`, via `_exit_now`, which cancels a LIVE stop first) once at least `small_exit_agree` (1)
@@ -26,6 +26,7 @@ from __future__ import annotations
 import pandas as pd
 
 import exit_candle
+import heikin_ashi
 import indicators
 import slope_exit
 
@@ -138,7 +139,8 @@ def verdict(frame: pd.DataFrame | None, signal_direction: str, cfg, first_after_
     if n > 0 and len(frame) >= n:
         other = "SHORT" if signal_direction == "LONG" else "LONG"
         # No reason against the *other* side = every one of the last n candles went against this trade.
-        if not indicators._direction_reason(frame, other, n, "COLOUR"):  # noqa: SLF001
+        # Heikin Ashi colours (heikin_ashi.py) when the bot reads them.
+        if not indicators._direction_reason(heikin_ashi.view(frame, cfg), other, n, "COLOUR"):  # noqa: SLF001
             size_note.append(f"{n} candle{'s' if n > 1 else ''} in a row against the trade")
     return "; ".join(size_note) if size_note else None
 
