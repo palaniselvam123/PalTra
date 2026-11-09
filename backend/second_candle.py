@@ -39,6 +39,7 @@ import pandas as pd
 
 from active_picks import _cum_at, _day_of
 from candles import resample
+from nth_candle import DIR_RULES, candle_moves
 from strategy_lab import load_tape
 
 log = logging.getLogger(__name__)
@@ -65,11 +66,13 @@ MAJORITY_BY = ("COUNT", "SIZE")
 RANK_BUCKETS = ((1, 5, "Top 5"), (6, 10, "6-10"), (11, 20, "11-20"), (21, 10**6, "21 and after"))
 
 
-def majority(candles: pd.DataFrame, upto: int, by: str = "COUNT") -> tuple[str | None, int, int, float]:
-    """The side most of the first `upto` candles went: (LONG / SHORT / None for a tie, greens, reds, net body in ₹).
-    COUNT compares green vs red candles (dojis count for neither); SIZE adds the bodies up, signed."""
+def majority(candles: pd.DataFrame, upto: int, by: str = "COUNT", dir_rule: str = "COLOUR",
+             prev_close: float | None = None) -> tuple[str | None, int, int, float]:
+    """The side most of the first `upto` candles went: (LONG / SHORT / None for a tie, ups, downs, net move in ₹).
+    COUNT compares up vs down candles (dojis count for neither); SIZE adds the moves up, signed. Each candle is read
+    by `dir_rule` (nth_candle.candle_moves: COLOUR green / red, CLOSES close vs the previous close, BOTH both)."""
     part = candles.iloc[:upto]
-    body = (part["close"].astype(float) - part["open"].astype(float)).to_numpy()
+    body = np.asarray(candle_moves(part["open"].astype(float), part["close"].astype(float), prev_close, dir_rule), dtype=float)
     greens, reds, net = int((body > 0).sum()), int((body < 0).sum()), float(np.nansum(body))
     score = (greens - reds) if by == "COUNT" else net
     side = "LONG" if score > 0 else "SHORT" if score < 0 else None
@@ -93,6 +96,9 @@ class Rule:
     side_rule: str = "NTH"
     #: How "most" is counted for MAJORITY / AGREE: COUNT = green vs red candles; SIZE = the bodies added up (signed).
     majority_by: str = "COUNT"
+    #: What makes a candle up / down (nth_candle.DIR_RULES): COLOUR = green / red; CLOSES = its close vs the previous
+    #: candle's close (candle 1 against the session before); BOTH = green and a higher close (red and a lower one).
+    dir_rule: str = "COLOUR"
 
     def clean(self) -> "Rule":
         trails = tuple(sorted({round(float(t), 3) for t in self.trails if 0.05 <= float(t) <= 10}))[:MAX_TRAILS] or DEFAULT_TRAILS
@@ -108,6 +114,7 @@ class Rule:
             min_body_pct=max(0.0, float(self.min_body_pct)),
             side_rule=self.side_rule if self.side_rule in SIDE_RULES else "NTH",
             majority_by=self.majority_by if self.majority_by in MAJORITY_BY else "COUNT",
+            dir_rule=self.dir_rule if self.dir_rule in DIR_RULES else "COLOUR",
         )
 
     def view(self) -> dict:
@@ -122,6 +129,7 @@ class Rule:
             "min_body_pct": self.min_body_pct,
             "side_rule": self.side_rule,
             "majority_by": self.majority_by,
+            "dir_rule": self.dir_rule,
         }
 
 
@@ -246,8 +254,13 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candl
     o, c = float(sig["open"]), float(sig["close"])
     if not (np.isfinite(o) and np.isfinite(c)) or o <= 0:
         return None
-    colour = "LONG" if c > o else "SHORT" if c < o else None
-    most, greens, reds, net_body = majority(candles, candle_no, rule.majority_by)
+    earlier = tape[days.values < day]
+    prev_close = float(earlier["close"].iloc[-1]) if not earlier.empty else None
+    moves = candle_moves(candles["open"].iloc[:candle_no].astype(float), candles["close"].iloc[:candle_no].astype(float),
+                         prev_close, rule.dir_rule)
+    move = float(moves[n])
+    colour = "LONG" if move > 0 else "SHORT" if move < 0 else None
+    most, greens, reds, net_body = majority(candles, candle_no, rule.majority_by, rule.dir_rule, prev_close)
     base = {"symbol": symbol, "day": day.isoformat(), "candle_no": candle_no, "greens": greens, "reds": reds}
     if rule.side_rule == "MAJORITY":
         if most is None:
@@ -255,11 +268,11 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candl
         side = most
     else:
         if colour is None:
-            return {**base, "side": "DOJI", "skipped": "doji"}
+            return {**base, "side": "DOJI", "skipped": "doji" if rule.dir_rule == "COLOUR" else "no direction"}
         side = colour
         if rule.side_rule == "AGREE" and most != colour:
             return {**base, "side": side, "skipped": "against the majority"}
-    body_pct = abs(c - o) / o * 100
+    body_pct = abs(move if rule.dir_rule == "CLOSES" else c - o) / o * 100
     if rule.min_body_pct > 0 and body_pct < rule.min_body_pct:
         return {**base, "side": side, "skipped": "small body", "body_pct": round(body_pct, 3)}
     entry_ts = int(nxt["ts"])
@@ -513,6 +526,12 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
     for r in skipped:
         skip_counts[r["skipped"]] = skip_counts.get(r["skipped"], 0) + 1
     answer: list[str] = []
+    if rule.dir_rule != "COLOUR":
+        answer.append(
+            "A candle counts as up / down by "
+            + ("its close against the previous candle's close" if rule.dir_rule == "CLOSES" else "colour and close both (green and a higher close, red and a lower one)")
+            + "."
+        )
     if rule.side_rule != "NTH" and skip_counts:
         how = "most candles" if rule.side_rule == "MAJORITY" else "the candle agreeing with most candles"
         answer.append(

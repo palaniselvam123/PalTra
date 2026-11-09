@@ -62,3 +62,14 @@ async def test_scanner_reads_every_stock():
     await sc._task
     calls = {r["symbol"]: r["call"] for r in sc.snapshot()["rows"]}
     assert calls == {"A": "LONG", "B": "SHORT"}
+
+
+def test_up_down_by_closes_or_both():
+    # Blocks open at 100 each: green, green, red by colour; closes 102, 101, 99.5 (candle 1 has no earlier close).
+    tape = _tape([2.0, 1.0, -0.5])
+    closes = fc.read("X", tape, NOW, fc.Rule(candle_no=3, side_rule="MAJORITY", dir_rule="CLOSES").clean())
+    assert closes["dirs"] == ["0", "D", "D"] and closes["call"] == "SHORT" and closes["matched"] == 2
+    both = fc.read("X", tape, NOW, fc.Rule(candle_no=2, dir_rule="BOTH").clean())
+    assert both["dirs"] == ["0", "0"] and both["call"] is None and "neither" in both["why"]
+    assert fc.read("X", tape, NOW, fc.Rule(candle_no=3, dir_rule="BOTH").clean())["call"] == "SHORT"
+    assert fc.Rule(dir_rule="X").clean().dir_rule == "COLOUR"

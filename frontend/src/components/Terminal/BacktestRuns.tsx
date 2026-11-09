@@ -100,7 +100,7 @@ export function strategyLabel(s: Settings): string {
     parts.push(
       `Second candle: the ${n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`} ${s.nth_candle_minutes ?? 5}m candle${
         Number(s.nth_min_body_pct ?? 0) > 0 ? `, body ≥ ${s.nth_min_body_pct}%` : ""
-      }${Number(s.nth_min_rvol ?? 0) > 0 ? `, volume ≥ ${s.nth_min_rvol}× usual` : ""}${s.nth_side_rule === "MAJORITY" ? `, way = most of candles 1-${s.nth_candle_no ?? 2} (${s.nth_majority_by === "SIZE" ? "sizes" : "count"})` : s.nth_side_rule === "AGREE" ? ", only when most agree" : ""}${s.nth_skip_checks ? ", no entry checks" : ""}`
+      }${Number(s.nth_min_rvol ?? 0) > 0 ? `, volume ≥ ${s.nth_min_rvol}× usual` : ""}${s.nth_side_rule === "MAJORITY" ? `, way = most of candles 1-${s.nth_candle_no ?? 2} (${s.nth_majority_by === "SIZE" ? "sizes" : "count"})` : s.nth_side_rule === "AGREE" ? ", only when most agree" : ""}${s.nth_dir_rule === "CLOSES" ? ", up / down by closes" : s.nth_dir_rule === "BOTH" ? ", up / down by colour and closes" : ""}${s.nth_skip_checks ? ", no entry checks" : ""}`
     );
   } else if (String(s.entry_mode ?? "SMA") === "COLOUR") {
     parts.push(

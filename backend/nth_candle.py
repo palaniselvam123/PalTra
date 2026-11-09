@@ -23,6 +23,10 @@ Checks, all settings (per bot and per stock):
   candles 1..N went, a tie = no order) or ``AGREE`` (that candle only when most agree); "most" by
   ``nth_majority_by`` ``COUNT`` (green vs red) or ``SIZE`` (bodies added up). With MAJORITY the body
   floor is read on the winning side's move (the Nth candle when it agrees, else the net body).
+* ``nth_dir_rule`` — what makes a candle up / down (``candle_moves``): ``COLOUR`` (green / red, default),
+  ``CLOSES`` (its close vs the previous candle's close; candle 1 against the session before) or ``BOTH``
+  (green and a higher close / red and a lower close; anything else counts like a doji). The body floor
+  then reads that move (with CLOSES the change from the previous close).
 
 Entry filters (VWAP, RSI, …), the stop, the flip, market hours, the cut-off, the caps and one
 LIVE bot per stock all apply through ``StrategyEngine.apply_signal`` like any entry. With
@@ -57,9 +61,14 @@ DEFAULTS = {
     "nth_side_rule": "NTH",
     "nth_majority_by": "COUNT",
     "nth_skip_checks": False,
+    "nth_dir_rule": "COLOUR",
 }
 SIDE_RULES = ("NTH", "MAJORITY", "AGREE")
 MAJORITY_BY = ("COUNT", "SIZE")
+#: What makes a candle "up" or "down": COLOUR = green / red (close vs its own open); CLOSES = the close vs the previous
+#: candle's close (candle 1 against the last close of the session before); BOTH = green AND a higher close (red AND a
+#: lower close). A candle that is neither counts like a doji.
+DIR_RULES = ("COLOUR", "CLOSES", "BOTH")
 
 
 def setting(cfg, name: str):
@@ -114,14 +123,51 @@ def majority_by(cfg) -> str:
     return value if value in MAJORITY_BY else "COUNT"
 
 
+def dir_rule(cfg) -> str:
+    """What makes a candle up / down (DIR_RULES): its colour, its close vs the previous close, or both."""
+    value = str(setting(cfg, "nth_dir_rule") or "COLOUR").upper()
+    return value if value in DIR_RULES else "COLOUR"
+
+
+def candle_moves(opens, closes, prev_close=None, rule: str = "COLOUR") -> list[float]:
+    """Each candle's signed move under `rule` (> 0 up, < 0 down, 0 neither): COLOUR = close − open; CLOSES = close −
+    the previous candle's close (`prev_close` for the first one; unknown = 0); BOTH = the body when the close also moved
+    the same way against the previous close, else 0."""
+    out: list[float] = []
+    prev = None if prev_close is None else float(prev_close)
+    for o, c in zip(opens, closes):
+        o, c = float(o), float(c)
+        body = c - o
+        change = None if prev is None else c - prev
+        if rule == "CLOSES":
+            move = 0.0 if change is None else change
+        elif rule == "BOTH":
+            move = body if change is not None and body * change > 0 else 0.0
+        else:
+            move = body
+        out.append(move)
+        prev = c
+    return out
+
+
+def dir_words(rule: str) -> tuple[str, str]:
+    """How an up / down candle is called under `rule`."""
+    if rule == "CLOSES":
+        return "closed higher", "closed lower"
+    if rule == "BOTH":
+        return "green and closed higher", "red and closed lower"
+    return "green", "red"
+
+
 def skip_checks(cfg) -> bool:
     """Enter at once on the call: no entry check (VWAP, RSI, ADX, …) is read (StrategyEngine.direct_order)."""
     return bool(setting(cfg, "nth_skip_checks"))
 
 
-def majority(opens, closes, by: str = "COUNT") -> tuple[str | None, int, int, float]:
-    """The side most of these candles went: (LONG / SHORT / None for a tie, greens, reds, net body in rupees)."""
-    bodies = [float(c) - float(o) for o, c in zip(opens, closes)]
+def majority(opens, closes, by: str = "COUNT", rule: str = "COLOUR", prev_close=None) -> tuple[str | None, int, int, float]:
+    """The side most of these candles went: (LONG / SHORT / None for a tie, ups, downs, net move in rupees), each
+    candle read by `rule` (candle_moves)."""
+    bodies = candle_moves(opens, closes, prev_close, rule)
     greens = sum(1 for b in bodies if b > 0)
     reds = sum(1 for b in bodies if b < 0)
     net = sum(bodies)
@@ -186,29 +232,35 @@ def call(frame: pd.DataFrame | None, cfg, done_for: dt.date | None = None) -> Ca
         return Call(None, today, f"waiting for the {label} to close ({count} of {n} closed)")
     if count > n:
         return Call(None, today, f"the {label} closed earlier — no order after it")
+    earlier = closed[days < today]
+    prev_close = float(earlier["close"].iloc[-1]) if not earlier.empty else None
     session = closed[days == today].reset_index(drop=True)
     if heikin_ashi.on(cfg):
         session = heikin_ashi.view(session, cfg)
     opens = session["open"].astype(float).tolist()
     closes = session["close"].astype(float).tolist()
-    open_, close = opens[-1], closes[-1]
+    close = closes[-1]
     rule = side_rule(cfg)
-    most, greens, reds, net = majority(opens[:n], closes[:n], majority_by(cfg))
-    tally = f"candles 1-{n}: {greens} green, {reds} red" if majority_by(cfg) == "COUNT" else f"candles 1-{n} add up to {net:+.2f}"
+    how = dir_rule(cfg)
+    up_word, down_word = dir_words(how)
+    moves = candle_moves(opens[:n], closes[:n], prev_close, how)
+    most, greens, reds, net = majority(opens[:n], closes[:n], majority_by(cfg), how, prev_close)
+    tally = f"candles 1-{n}: {greens} {up_word}, {reds} {down_word}" if majority_by(cfg) == "COUNT" else f"candles 1-{n} add up to {net:+.2f}"
     if rule == "MAJORITY":
         if most is None:
             return Call(None, today, f"{tally} — no majority, no order today")
         # The move the body floor reads: the Nth candle when it went the majority's way (counting), else the net body.
         sign = 1 if most == "LONG" else -1
-        nth_body = close - open_
+        nth_body = moves[-1]
         move = abs(nth_body) if majority_by(cfg) == "COUNT" and nth_body * sign > 0 else abs(net)
         body = move * sign
     else:
-        body = close - open_
+        body = moves[-1]
         if body == 0:
-            return Call(None, today, f"{label} is a doji — no order today")
+            what = "a doji" if how == "COLOUR" else f"neither {up_word} nor {down_word}"
+            return Call(None, today, f"{label} is {what} — no order today")
         if rule == "AGREE" and most != ("LONG" if body > 0 else "SHORT"):
-            return Call(None, today, f"{label} is {'green' if body > 0 else 'red'} but {tally} — against the majority, no order today")
+            return Call(None, today, f"{label} {up_word if body > 0 else down_word} but {tally} — against the majority, no order today")
     if body == 0:
         return Call(None, today, f"{tally} — no move, no order today")
     body_pct = round(abs(body) / close * 100, 4) if close > 0 else 0.0
@@ -226,6 +278,7 @@ def call(frame: pd.DataFrame | None, cfg, done_for: dt.date | None = None) -> Ca
     vol = f", volume {rvol:g}× usual" if rvol is not None else ""
     if rule == "MAJORITY":
         return Call(side, today, f"most of the first {n} {size}-minute candles {'up' if side == 'LONG' else 'down'} ({tally}{vol})", rvol, body_pct)
-    colour = "green" if body > 0 else "red"
+    colour = up_word if body > 0 else down_word
     agree = f", {tally}" if rule == "AGREE" else ""
-    return Call(side, today, f"{colour} {label} (body {body_pct:.2f}%{agree}{vol})", rvol, body_pct)
+    what = f"{colour} {label} (body" if how == "COLOUR" else f"{label} {colour} (move"
+    return Call(side, today, f"{what} {body_pct:.2f}%{agree}{vol})", rvol, body_pct)

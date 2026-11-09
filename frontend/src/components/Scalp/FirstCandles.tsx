@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { CandlestickChart, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { smaApi, type FirstCandleRow, type FirstCandleRule, type SecondCandleSideRule } from "@/lib/smaApi";
+import { smaApi, type CandleDirRule, type FirstCandleRow, type FirstCandleRule, type SecondCandleSideRule } from "@/lib/smaApi";
 
 /**
  * First candles on the Most active card (display only; backend first_candles.py): read the day's first N candles of the
@@ -35,7 +35,7 @@ export function FirstCandleControls({
   disabled?: boolean;
   onRows: (rows: Map<string, FirstCandleRow>, rule: FirstCandleRule) => void;
 }) {
-  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0 });
+  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0, dir_rule: "COLOUR" });
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const set = (k: keyof FirstCandleRule, v: number | string) => setRule((r) => ({ ...r, [k]: v }));
@@ -108,6 +108,19 @@ export function FirstCandleControls({
           <option value="AGREE">That candle, only if most agree</option>
         </select>
       </label>
+      <label className="flex items-center gap-1">
+        up / down by
+        <select
+          value={rule.dir_rule}
+          onChange={(e) => set("dir_rule", e.target.value as CandleDirRule)}
+          title="Colour = green / red. Closes = its close above / below the previous candle's close (candle 1 against yesterday's last close). Both = green and a higher close, red and a lower close."
+          className={sel}
+        >
+          <option value="COLOUR">colour</option>
+          <option value="CLOSES">closes</option>
+          <option value="BOTH">colour and closes</option>
+        </select>
+      </label>
       {rule.side_rule !== "NTH" && (
         <label className="flex items-center gap-1">
           most by
@@ -130,6 +143,7 @@ export function FirstCandleControls({
         />
         %
       </label>
+      <span className="text-slate-600">Changed a setting? Press Read first candles again.</span>
       {note && <span className="text-slate-500">{note}</span>}
     </div>
   );
@@ -158,13 +172,29 @@ export function FirstCandleCells({ row, n }: { row: FirstCandleRow | null; n: nu
   return (
     <>
       <td className="py-1.5">
-        <span className="inline-flex gap-0.5" title={row.colours.map((c, i) => `${i + 1}: ${c === "G" ? "green" : c === "R" ? "red" : "doji"} ${row.bodies[i]?.toFixed(2)}%`).join(" · ")}>
-          {row.colours.map((c, i) => (
-            <span
-              key={i}
-              className={clsx("inline-block h-3.5 w-2.5 rounded-sm", c === "G" ? "bg-emerald-500" : c === "R" ? "bg-rose-500" : "bg-slate-500")}
-            />
-          ))}
+        <span
+          className="inline-flex items-end gap-0.5"
+          title={row.colours
+            .map((c, i) => {
+              const d = row.dirs?.[i];
+              const close = row.dir_rule && row.dir_rule !== "COLOUR" ? `, ${d === "U" ? "up" : d === "D" ? "down" : "no direction"} by ${row.dir_rule === "CLOSES" ? "closes" : "colour and closes"}` : "";
+              return `${i + 1}: ${c === "G" ? "green" : c === "R" ? "red" : "doji"} ${row.bodies[i]?.toFixed(2)}%${close}`;
+            })
+            .join(" · ")}
+        >
+          {row.colours.map((c, i) => {
+            const d = row.dir_rule && row.dir_rule !== "COLOUR" ? row.dirs?.[i] : undefined;
+            return (
+              <span key={i} className="inline-flex flex-col items-center">
+                <span className={clsx("inline-block h-3.5 w-2.5 rounded-sm", c === "G" ? "bg-emerald-500" : c === "R" ? "bg-rose-500" : "bg-slate-500")} />
+                {d ? (
+                  <span className={clsx("text-[9px] leading-none", d === "U" ? "text-emerald-400" : d === "D" ? "text-rose-400" : "text-slate-500")}>
+                    {d === "U" ? "▲" : d === "D" ? "▼" : "·"}
+                  </span>
+                ) : null}
+              </span>
+            );
+          })}
         </span>
       </td>
       <td className="py-1.5 text-right tabular-nums text-slate-300">{row.matched == null ? "—" : `${row.matched} of ${n}`}</td>
