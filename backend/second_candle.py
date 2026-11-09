@@ -39,7 +39,9 @@ import pandas as pd
 
 from active_picks import _cum_at, _day_of
 from candles import resample
+import heikin_ashi
 from nth_candle import DIR_RULES, candle_moves
+from types import SimpleNamespace
 from strategy_lab import load_tape
 
 log = logging.getLogger(__name__)
@@ -99,6 +101,8 @@ class Rule:
     #: What makes a candle up / down (nth_candle.DIR_RULES): COLOUR = green / red; CLOSES = its close vs the previous
     #: candle's close (candle 1 against the session before); BOTH = green and a higher close (red and a lower one).
     dir_rule: str = "COLOUR"
+    #: Read Heikin Ashi candles for the colour, body and "most" (the bot's `ha_colours`); prices and closes stay real.
+    ha: bool = False
 
     def clean(self) -> "Rule":
         trails = tuple(sorted({round(float(t), 3) for t in self.trails if 0.05 <= float(t) <= 10}))[:MAX_TRAILS] or DEFAULT_TRAILS
@@ -115,6 +119,7 @@ class Rule:
             side_rule=self.side_rule if self.side_rule in SIDE_RULES else "NTH",
             majority_by=self.majority_by if self.majority_by in MAJORITY_BY else "COUNT",
             dir_rule=self.dir_rule if self.dir_rule in DIR_RULES else "COLOUR",
+            ha=bool(self.ha),
         )
 
     def view(self) -> dict:
@@ -130,6 +135,7 @@ class Rule:
             "side_rule": self.side_rule,
             "majority_by": self.majority_by,
             "dir_rule": self.dir_rule,
+            "ha": self.ha,
         }
 
 
@@ -249,8 +255,11 @@ def analyze_day(symbol: str, tape: pd.DataFrame, day: dt.date, rule: Rule, candl
     n = candle_no - 1
     if candles is None or len(candles) <= n + 1:
         return None
-    sig = candles.iloc[n]
     nxt = candles.iloc[n + 1]
+    if rule.ha:
+        # Heikin Ashi colours: `open` moved so close − open is the HA body (the close stays real), seeded on the session.
+        candles = heikin_ashi.view(candles, SimpleNamespace(ha_colours=True))
+    sig = candles.iloc[n]
     o, c = float(sig["open"]), float(sig["close"])
     if not (np.isfinite(o) and np.isfinite(c)) or o <= 0:
         return None
@@ -526,6 +535,8 @@ def summarize(rows: list[dict], rule: Rule) -> dict:
     for r in skipped:
         skip_counts[r["skipped"]] = skip_counts.get(r["skipped"], 0) + 1
     answer: list[str] = []
+    if rule.ha:
+        answer.append("Candles read as Heikin Ashi (colour and body from the smoothed candle; prices stay real).")
     if rule.dir_rule != "COLOUR":
         answer.append(
             "A candle counts as up / down by "

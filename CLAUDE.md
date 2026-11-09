@@ -1224,7 +1224,9 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   of candles 1..N went, `majority`; a tie is skipped, `no majority`) or `AGREE` (that candle's colour only when most agree,
   else `against the majority`); "most" counted by `majority_by` `COUNT` (green vs red) | `SIZE` (bodies added up). Rows
   carry `greens` / `reds` / `net_body`, the report `skipped_by`. **Up / down by** (`dir_rule`, the same `COLOUR` / `CLOSES` /
-`BOTH` as the bot's `nth_dir_rule`, `nth_candle.candle_moves`; a candle that is neither is skipped as `no direction`). **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
+`BOTH` as the bot's `nth_dir_rule`, `nth_candle.candle_moves`; a candle that is neither is skipped as `no direction`).
+**Heikin Ashi** (`ha`, the tab's tick box): colour, body and "most" read from the Heikin Ashi candles of the session
+(`heikin_ashi.view`, like the bot's `ha_colours`); entry and every price stay real. **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
   arithmetic in `secondCandleMath.ts`): with several candles in a run, each candle side by side (reached %, average with /
   against, held to the square-off, the best trailing stop, the best target + stop, the best stop and reverse, the best way per
   trade), each column's best boxed, a verdict naming the best candle, and each stock's best candle; follows every filter but
@@ -1272,10 +1274,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   download (`fetch_frame` on `_scan_broker()`, today plus `DOWNLOAD_DAYS` back for weekends): each candle's colour (G / R /
   D) and body %, greens / reds / bodies added up, and the call by the Second candle rule (`side_rule` NTH / MAJORITY /
   AGREE, `majority_by`, `min_body_pct`, `dir_rule` colour / closes / both, `dirs` U / D / 0; `second_candle.majority`; a
-changed rule reads again at once, the same rule within 20 s returns the last read), `matched` = candles 1..N that went the call's way, or why
+changed rule reads again at once, the same rule within 20 s returns the last read; `ha` reads Heikin Ashi candles of the
+session like the bot's `ha_colours`; `ohlc` = each candle as drawn, real or HA, `_shapes`), `matched` = candles 1..N that went the call's way, or why
   there is none (`waiting: candle N closes at HH:MM`, doji, tie, against the majority, small body). `FirstCandleScanner`
   mirrors the morning scan (one pass, paced, stopped by Pause scans and `POST /api/scan-stop/first`). `POST
-  /api/first-candles/start`, `GET /api/first-candles`. The card adds First candles (coloured squares) / Matched / Call columns
+  /api/first-candles/start`, `GET /api/first-candles`. The card adds First candles (tiny candles drawn to scale, body and wicks, one price scale per row at least 0.6 % of the
+price, `FirstCandles.MiniCandles`; hover gives each candle's type (`candleType`: doji, marubozu, hammer, shooting star,
+spinning top), body and range) / Matched / Call columns
   and a "First candles" filter (has a call / Buy / Sell).
 - `backend/trend_picks.py` – **Strong-trend pick backtest** (practice money, no order path, nothing armed; the Scalp page's
   Backtest tab, `components/Scalp/TrendPickBacktest.tsx`): the owner's routine automated (Trend quality history at a time,

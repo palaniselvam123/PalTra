@@ -662,6 +662,8 @@ export type FirstCandleRule = {
   majority_by: "COUNT" | "SIZE";
   min_body_pct: number;
   dir_rule: CandleDirRule;
+  /** Read Heikin Ashi candles (colour / body); prices stay real. */
+  ha: boolean;
 };
 export type FirstCandleRow = {
   symbol: string;
@@ -671,6 +673,9 @@ export type FirstCandleRow = {
   /** Up / down / neither by the rule's dir_rule, candle 1 first. */
   dirs?: ("U" | "D" | "0")[];
   dir_rule?: CandleDirRule;
+  ha?: boolean;
+  /** Each candle as drawn: [open, high, low, close] (Heikin Ashi when `ha`). */
+  ohlc?: [number, number, number, number][];
   bodies: number[];
   closed: number;
   greens?: number;
@@ -953,7 +958,7 @@ export type SecondCandleView = {
   done: number;
   total: number;
   errors: { symbol: string; error: string }[];
-  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number; side_rule?: SecondCandleSideRule; majority_by?: "COUNT" | "SIZE"; dir_rule?: CandleDirRule };
+  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number; side_rule?: SecondCandleSideRule; majority_by?: "COUNT" | "SIZE"; dir_rule?: CandleDirRule; ha?: boolean };
   started_at: string | null;
   finished_at: string | null;
   report: SecondCandleReport | null;
@@ -2649,6 +2654,7 @@ export const smaApi = {
     side_rule?: SecondCandleSideRule;
     majority_by?: "COUNT" | "SIZE";
     dir_rule?: CandleDirRule;
+    ha?: boolean;
   }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>

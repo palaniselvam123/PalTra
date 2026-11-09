@@ -22,12 +22,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+import numpy as np
 import pandas as pd
 
 from candles import resample
 from cross_scan import CALL_GAP_SEC, CONCURRENCY, GIVE_UP_AFTER, clean_symbols
 from groww_client import IST
+import heikin_ashi
 from nth_candle import DIR_RULES, candle_moves, dir_words
+from types import SimpleNamespace
 from second_candle import MAJORITY_BY, SIDE_RULES, majority
 
 log = logging.getLogger(__name__)
@@ -47,6 +50,8 @@ class Rule:
     min_body_pct: float = 0.0
     #: What makes a candle up / down (nth_candle.DIR_RULES): COLOUR green / red, CLOSES close vs the previous close, BOTH.
     dir_rule: str = "COLOUR"
+    #: Read Heikin Ashi candles (colour and body from the HA candle; closes stay real), like the bot's `ha_colours`.
+    ha: bool = False
 
     def clean(self) -> "Rule":
         self.minutes = self.minutes if self.minutes in SIZES else 5
@@ -55,6 +60,7 @@ class Rule:
         self.majority_by = self.majority_by if self.majority_by in MAJORITY_BY else "COUNT"
         self.min_body_pct = max(0.0, min(5.0, float(self.min_body_pct or 0.0)))
         self.dir_rule = self.dir_rule if self.dir_rule in DIR_RULES else "COLOUR"
+        self.ha = bool(self.ha)
         return self
 
 
@@ -75,21 +81,40 @@ def _closed(tape: pd.DataFrame, minutes: int, now: dt.datetime) -> tuple[pd.Data
     return closed, day, prev
 
 
+def _shapes(candles: pd.DataFrame, ha: bool) -> list[list[float]]:
+    """Each candle as [open, high, low, close] to draw: the real one, or the Heikin Ashi one (HA open / close, its high
+    and low stretched to cover them), seeded on the session's first candle like the bot's `ha_colours`."""
+    if candles is None or candles.empty:
+        return []
+    o = candles["open"].astype(float).to_numpy()
+    h = candles["high"].astype(float).to_numpy()
+    lo = candles["low"].astype(float).to_numpy()
+    c = candles["close"].astype(float).to_numpy()
+    if ha:
+        ho, hc = heikin_ashi.candles(candles)
+        o, c = ho.to_numpy(dtype=float), hc.to_numpy(dtype=float)
+        h = np.maximum.reduce([h, o, c])
+        lo = np.minimum.reduce([lo, o, c])
+    return [[round(float(a), 2), round(float(b), 2), round(float(x), 2), round(float(d), 2)] for a, b, x, d in zip(o, h, lo, c)]
+
+
 def read(symbol: str, tape: pd.DataFrame, now: dt.datetime, rule: Rule) -> dict | None:
     candles, day, prev_close = _closed(tape, rule.minutes, now)
     if day is None:
         return None
     n = rule.candle_no
     first = candles.iloc[:n]
+    shapes = _shapes(first, rule.ha)
+    if rule.ha and not first.empty:
+        first = heikin_ashi.view(first, SimpleNamespace(ha_colours=True))
     colours, bodies = [], []
-    for _, c in first.iterrows():
-        o, cl = float(c["open"]), float(c["close"])
+    for (o, _h, _l, cl) in shapes:
         colours.append("G" if cl > o else "R" if cl < o else "D")
         bodies.append(round(abs(cl - o) / o * 100, 3) if o > 0 else 0.0)
     moves = candle_moves(first["open"].astype(float), first["close"].astype(float), prev_close, rule.dir_rule)
     dirs = ["U" if m > 0 else "D" if m < 0 else "0" for m in moves]
     row: dict = {"symbol": symbol, "day": day.isoformat(), "colours": colours, "bodies": bodies, "dirs": dirs,
-                 "dir_rule": rule.dir_rule, "closed": len(first)}
+                 "dir_rule": rule.dir_rule, "ha": rule.ha, "ohlc": shapes, "closed": len(first)}
     if len(first) < n:
         open_at = dt.datetime.combine(day, dt.time(9, 15), IST) + dt.timedelta(minutes=rule.minutes * n)
         row.update(call=None, why=f"waiting: candle {n} closes at {open_at.strftime('%H:%M')}", matched=None)

@@ -266,3 +266,11 @@ def test_up_down_can_be_read_by_closes_or_both():
 
     assert sc.analyze_day("FLAT", _tape(flat), D1, closes)["skipped"] == "no direction"
     assert closes.view()["dir_rule"] == "CLOSES" and sc.Rule(dir_rule="X").clean().dir_rule == "COLOUR"
+
+
+def test_heikin_ashi_candles_can_be_read():
+    ha = sc.Rule(minutes=5, candle_no=2, top_n=0, target_points=10.0, ha=True).clean()
+    up = sc.analyze_day("UP", _tape(_rise), D1, ha)
+    assert up["side"] == "LONG" and ha.view()["ha"] is True
+    real = sc.analyze_day("UP", _tape(_rise), D1, RULE)
+    assert up["entry"] == real["entry"]  # the entry price stays real
