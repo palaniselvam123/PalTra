@@ -68,6 +68,7 @@ import reverse_exit
 import exit_join
 import exit_candle
 import small_candles
+import small_colour
 import vwap_stop
 import supertrend
 import opening_range
@@ -257,6 +258,8 @@ class OpenPosition:
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
     small_bars: dict = field(default_factory=dict)
     small_state: dict = field(default_factory=dict)
+    # Smaller-candle colours (small_colour.py): a colour-turn exit waiting for the smaller candles to agree.
+    sc_wait: bool = False
     # Supertrend exit (supertrend.py): the last closed candle read.
     st_bar: int | None = None
     # SMA 9 slope exit (slope_exit.py): the last closed candle read and the steepest slope.
@@ -375,6 +378,7 @@ SNAPSHOT_FIELDS = (
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
+    "sc_minutes", "sc_count", "sc_join", "sc_need", "sc_entry", "sc_confirm",
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
     "review_check_minutes", "review_check_mode", "review_default_answer",
@@ -695,6 +699,8 @@ def _short_block_label(reason: str) -> str:
         elif low.startswith("sma gap"):
             words = part.split()
             parts.append(f"Gap {words[2]}" if len(words) > 2 and words[2][:1] in "+-" else "Gap")
+        elif low.startswith("smaller candles"):
+            parts.append("Small candles")
         elif low.startswith("candle direction"):
             parts.append("Candles")
         elif low.startswith("ema"):
@@ -2608,6 +2614,14 @@ class StrategyEngine:
         adx = _finite(curr.get("adx_14"))
         adx_blocks_entry = bool(cfg.use_adx_filter) and (adx is None or adx < float(cfg.adx_threshold))
         entry_block = _entry_block(frame, "LONG" if signal == "BULLISH" else "SHORT", cfg)
+        if small_colour.entry_on(cfg):
+            # Smaller-candle colours (small_colour.py): the last N smaller candles must be the trade's colour.
+            small = small_colour.entry_reason(
+                self._tapes.get(self._focus), "LONG" if signal == "BULLISH" else "SHORT", cfg,
+                candle_minutes(cfg, stock_overrides(cfg, self._focus)),
+            )
+            if small:
+                entry_block = f"{entry_block}; {small}" if entry_block else small
 
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
@@ -4793,6 +4807,11 @@ class StrategyEngine:
         if not (turn_trade or reversed_trade):
             return
         symbol = (cfg.symbol or self._focus or "").upper()
+        if pos.sc_wait:
+            if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+                return  # restored after a restart without its stop id: left to that stop
+            await self._confirm_colour_turn(cfg, symbol)
+            return
         frame = self._frames.get(symbol)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.tc_bar == closed_ts:
@@ -4809,7 +4828,30 @@ class StrategyEngine:
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
         what = "SMA 9 turn" if turn_trade else "reversed"
+        if small_colour.confirm_on(cfg) and small_colour.watched(cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))):
+            pos.sc_wait = True
+            await self._confirm_colour_turn(cfg, symbol, f"{what} trade: {colour} candle")
+            return
         self._signals[symbol] = f"{symbol} {what} trade closed on a {colour} candle"
+        await self._exit_now(cfg, self.ltp, turn_entry.COLOUR_EXIT)
+
+    async def _confirm_colour_turn(self, cfg: BotConfig, symbol: str, what: str = "colour turn") -> None:
+        """A colour-turn exit waiting on the smaller candles (sc_confirm, small_colour.py): close once they agree with
+        the turn, drop the wait once they show the trade's own colour, else keep waiting (read every pass)."""
+        pos = self.position
+        if pos is None or not pos.sc_wait:
+            return
+        verdict, note = small_colour.confirms_turn(
+            self._tapes.get(symbol), pos.signal_direction, cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))
+        )
+        if verdict == "wait":
+            self._signals[symbol] = f"{symbol} {what} — waiting for the smaller candles: {note}"
+            return
+        pos.sc_wait = False
+        if verdict == "back":
+            self._signals[symbol] = f"{symbol} {what} — not closed, the smaller candles turned back: {note}"
+            return
+        self._signals[symbol] = f"{symbol} {what} — closed, the smaller candles agree: {note}"
         await self._exit_now(cfg, self.ltp, turn_entry.COLOUR_EXIT)
 
     def _pivots(self, symbol: str, day: dt.date) -> dict | None:

@@ -302,6 +302,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     small_exit_counter: Math.min(10, Math.max(0, Math.round(Number(form.small_exit_counter ?? 0)) || 0)),
     small_exit_loss_pct: Math.min(50, Math.max(0, Number(form.small_exit_loss_pct ?? 0) || 0)),
     small_exit_agree: Math.min(5, Math.max(1, Math.round(Number(form.small_exit_agree ?? 1)) || 1)),
+    sc_minutes: String(form.sc_minutes ?? ""),
+    sc_count: Math.min(5, Math.max(1, Math.round(Number(form.sc_count ?? 2)) || 2)),
+    sc_join: form.sc_join === "ANY" || form.sc_join === "AT_LEAST" ? form.sc_join : "ALL",
+    sc_need: Math.min(5, Math.max(1, Math.round(Number(form.sc_need ?? 1)) || 1)),
+    sc_entry: Boolean(form.sc_entry),
+    sc_confirm: Boolean(form.sc_confirm),
     atr_period: Number(form.atr_period),
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
@@ -2031,6 +2037,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </select>
           </div>
           <SmallCandlesCard form={form} set={set} isOwn={isOwn} />
+          <SmallColourCard form={form} set={set} isOwn={isOwn} />
           {noExitOn(form) ? (
             <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
               No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
@@ -3432,6 +3439,11 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.bb_exit && f.bb_exit !== "OFF")
     add({ group: "exit", key: "bb_exit", text: `Bollinger exit: ${f.bb_exit === "BAND" ? "book profit at the far band" : f.bb_exit === "MIDDLE" ? "close back across the middle band" : "far band or middle band"}`, off: { bb_exit: "OFF" } });
   if (f.slow_sma_exit) add({ group: "exit", key: "slow_sma_exit", text: `Close when a candle closes beyond SMA ${slow} against the trade`, off: { slow_sma_exit: false } });
+  const scSizes = String(f.sc_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
+  if (scSizes.length && f.sc_entry)
+    add({ group: "check", key: "sc_entry", text: `Before entering, the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles must be green to buy / red to sell (${f.sc_join === "ANY" ? "any one size" : f.sc_join === "AT_LEAST" ? `at least ${n(f.sc_need, 1)} sizes` : "every size"})`, off: { sc_entry: false } });
+  if (scSizes.length && f.sc_confirm)
+    add({ group: "exit", key: "sc_confirm", text: `A colour-turn exit waits until the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles agree`, off: { sc_confirm: false } });
   const smallSizes = String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
   if (smallSizes.length)
     add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}`, off: { small_exit_minutes: "" } });
@@ -3894,6 +3906,112 @@ function SmallCandlesCard({
   );
 }
 
+
+/**
+ * Colours on smaller candles (backend small_colour.py): sizes, N candles in a row, how the sizes combine, and two uses:
+ * an entry check (green to buy, red to sell) and a confirm for the colour-turn exit. Saves through the normal Save.
+ */
+function SmallColourCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = Number(form.candle_minutes ?? 1) || 1;
+  const picked = String(form.sc_minutes ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => (SMALL_SIZES as readonly number[]).includes(n));
+  const watched = picked.filter((n) => n < own);
+  const used = Boolean(form.sc_entry) || Boolean(form.sc_confirm);
+  const on = watched.length > 0 && used;
+  const toggle = (m: number, next: boolean) => {
+    const list = next ? Array.from(new Set([...picked, m])) : picked.filter((n) => n !== m);
+    set("sc_minutes", list.sort((a, b) => a - b).join(","));
+  };
+  const join = String(form.sc_join ?? "ALL");
+  return (
+    <div id="sma-small-colour" className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
+      <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
+        {isOwn("sc_minutes") && <OwnTag />}
+        <b className="text-slate-100">Colours on smaller candles</b>
+        <span className={clsx("ml-auto font-mono text-xs", on ? "text-emerald-300" : "text-slate-500")}>
+          {on ? `ON · ${watched.join(" / ")} min` : "off"}
+        </span>
+        <InfoTip label="About colours on smaller candles">
+          The bot reads a candle&apos;s colour once every {own} minutes. Tick smaller sizes and it also reads the last N candles
+          of each size, built from the stock&apos;s 1-minute candles (Heikin Ashi colours when that switch is on). Entry check: a
+          buy needs them green, a sell red, else the entry is refused like any other check (late entry can wait it out). Confirm
+          a colour turn: when a turn trade or a reversed trade would close on a candle of the other colour, it first waits until
+          the smaller candles agree; if they turn back to the trade&apos;s colour the trade stays. Sizes at or above the bot&apos;s
+          candle are ignored.
+        </InfoTip>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Smaller candle sizes for colours">
+        <span className="text-slate-400">Read colours on:</span>
+        {SMALL_SIZES.map((m) => (
+          <label
+            key={m}
+            className={clsx(
+              "flex items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset",
+              m >= own ? "opacity-40" : picked.includes(m) ? "bg-emerald-500/15 text-slate-100 ring-emerald-400/50" : "ring-white/15 hover:bg-white/5"
+            )}
+            title={m >= own ? `Not smaller than the bot's ${own}-minute candle` : undefined}
+          >
+            <input type="checkbox" checked={picked.includes(m)} disabled={m >= own} onChange={(e) => toggle(m, e.target.checked)} className="accent-emerald-400" aria-label={`Read ${m}-minute candle colours`} />
+            {m} min
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs uppercase tracking-wider text-slate-400">Candles in a row{isOwn("sc_count") ? " (own)" : ""}</span>
+          <select
+            value={String(form.sc_count ?? 2)}
+            onChange={(e) => set("sc_count", e.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            {[1, 2, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs uppercase tracking-wider text-slate-400">Sizes{isOwn("sc_join") ? " (own)" : ""}</span>
+          <select
+            value={join}
+            onChange={(e) => set("sc_join", e.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            <option value="ALL">All ticked sizes agree</option>
+            <option value="ANY">Any one size</option>
+            <option value="AT_LEAST">At least N sizes</option>
+          </select>
+        </label>
+        {join === "AT_LEAST" ? (
+          <Field label="N sizes" value={String(form.sc_need ?? 1)} onChange={(v) => set("sc_need", v)} own={isOwn("sc_need")} />
+        ) : null}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-4 text-sm text-slate-300">
+        <label className="flex min-h-9 items-center gap-2">
+          <input type="checkbox" checked={Boolean(form.sc_entry)} onChange={(e) => set("sc_entry", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("sc_entry") && <OwnTag />}
+          Entry check: green to buy, red to sell
+        </label>
+        <label className="flex min-h-9 items-center gap-2">
+          <input type="checkbox" checked={Boolean(form.sc_confirm)} onChange={(e) => set("sc_confirm", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("sc_confirm") && <OwnTag />}
+          Confirm a colour-turn exit on them first
+        </label>
+      </div>
+    </div>
+  );
+}
 
 /**
  * ATR-multiple trailing stop (tsl_mode ATR): sliders and boxes for the stop, trail step and target as multiples of the

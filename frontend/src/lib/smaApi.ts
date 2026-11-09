@@ -43,6 +43,13 @@ export type SmaConfig = {
   nth_majority_by?: "COUNT" | "SIZE";
   /** What makes a candle up / down: COLOUR green / red, CLOSES close vs the previous close, BOTH. */
   nth_dir_rule?: CandleDirRule;
+  /** Colours on smaller candles (backend small_colour.py). */
+  sc_minutes?: string;
+  sc_count?: number;
+  sc_join?: "ALL" | "ANY" | "AT_LEAST";
+  sc_need?: number;
+  sc_entry?: boolean;
+  sc_confirm?: boolean;
   /** Second candle entry: enter at once without the entry checks. */
   nth_skip_checks?: boolean;
   /** Pattern / colour candle size in minutes. */

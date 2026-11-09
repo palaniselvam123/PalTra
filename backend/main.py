@@ -94,6 +94,7 @@ from join_trend import MAX_AFTER_MIN as JOIN_AFTER_MAX
 import late_entry
 import exit_candle
 import small_candles
+import small_colour
 from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
@@ -832,6 +833,19 @@ class ConfigUpdate(BaseModel):
     small_exit_counter: int | None = Field(default=None, ge=0, le=small_candles.MAX_COUNTER)
     small_exit_loss_pct: float | None = Field(default=None, ge=0, le=50)
     small_exit_agree: int | None = Field(default=None, ge=1, le=small_candles.MAX_AGREE)
+    # Smaller-candle colours (small_colour.py): sizes (CSV, "" = off), N in a row, how sizes combine, and the two uses.
+    sc_minutes: str | None = Field(default=None, max_length=32)
+    sc_count: int | None = Field(default=None, ge=1, le=small_colour.MAX_COUNT)
+    sc_join: Literal["ALL", "ANY", "AT_LEAST"] | None = None
+    sc_need: int | None = Field(default=None, ge=1, le=small_colour.MAX_NEED)
+    sc_entry: bool | None = None
+    sc_confirm: bool | None = None
+
+    @field_validator("sc_minutes", mode="before")
+    @classmethod
+    def _sc_sizes(cls, value):
+        return None if value is None else small_colour.clean_sizes(value)
+
     slope_minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
     pattern_trend: bool | None = None
     pattern_set: Literal["STRONG", "ALL"] | None = None
@@ -1837,6 +1851,12 @@ def _gap_dict(row) -> dict:
         "small_exit_counter": small_candles.counter(row),
         "small_exit_loss_pct": small_candles.loss_pct(row),
         "small_exit_agree": small_candles.agree(row),
+        "sc_minutes": ",".join(str(s) for s in small_colour.sizes(row)),
+        "sc_count": small_colour.count(row),
+        "sc_join": small_colour.join(row),
+        "sc_need": small_colour.need(row),
+        "sc_entry": small_colour.entry_on(row),
+        "sc_confirm": small_colour.confirm_on(row),
         "slope_minutes": slope_mod.minutes(row),
         **{key: candle_patterns.setting(row, key) for key in candle_patterns.DEFAULTS},
         **{key: nth_candle.setting(row, key) for key in nth_candle.DEFAULTS},

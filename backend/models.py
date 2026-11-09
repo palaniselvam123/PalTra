@@ -371,6 +371,13 @@ class BotConfig(Base):
     small_exit_counter: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     small_exit_loss_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     small_exit_agree: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Smaller-candle colours (small_colour.py): entry check and colour-turn confirm, off by default.
+    sc_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    sc_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    sc_join: Mapped[str | None] = mapped_column(String(8), nullable=True, default="ALL")
+    sc_need: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    sc_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    sc_confirm: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     slope_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Join the morning trend (join_trend.py): once a day, join_after_min after 09:15,
     # enter the side a stock is already trending on when its cross was missed.
