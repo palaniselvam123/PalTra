@@ -35,7 +35,7 @@ export function FirstCandleControls({
   disabled?: boolean;
   onRows: (rows: Map<string, FirstCandleRow>, rule: FirstCandleRule) => void;
 }) {
-  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0, dir_rule: "COLOUR" });
+  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0, dir_rule: "COLOUR", ha: false });
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const set = (k: keyof FirstCandleRule, v: number | string) => setRule((r) => ({ ...r, [k]: v }));
@@ -143,6 +143,13 @@ export function FirstCandleControls({
         />
         %
       </label>
+      <label
+        className="flex items-center gap-1"
+        title="Read each candle's colour and body from its Heikin Ashi candle (smoothed), as the bot does with Heikin Ashi colours on. The icons then draw the Heikin Ashi candles."
+      >
+        <input type="checkbox" checked={rule.ha} onChange={(e) => setRule((r) => ({ ...r, ha: e.target.checked }))} className="accent-[#10B981]" />
+        Heikin Ashi
+      </label>
       <span className="text-slate-600">Changed a setting? Press Read first candles again.</span>
       {note && <span className="text-slate-500">{note}</span>}
     </div>
@@ -152,10 +159,67 @@ export function FirstCandleControls({
 export function FirstCandleHead() {
   return (
     <>
-      <th className="pb-2 text-left font-medium" title="Today's first candles, candle 1 first: green, red, or a doji">First candles</th>
+      <th className="pb-2 text-left font-medium" title="Today's first candles drawn to scale, candle 1 first (body and wicks; hover for each candle's type and size)">First candles</th>
       <th className="pb-2 text-right font-medium" title="How many of those candles went the call's way">Matched</th>
       <th className="pb-2 text-left font-medium" title="Buy / sell by the rule picked, or why there is no call">Call</th>
     </>
+  );
+}
+
+/** What a candle looks like, in plain words: doji, marubozu, hammer, shooting star, spinning top or a normal candle. */
+export function candleType(o: number, h: number, l: number, c: number): string {
+  const range = h - l;
+  if (!(range > 0)) return "flat";
+  const body = Math.abs(c - o);
+  const upper = h - Math.max(o, c);
+  const lower = Math.min(o, c) - l;
+  if (body <= range * 0.1) return "doji";
+  if (body >= range * 0.9) return c > o ? "green marubozu (no wicks)" : "red marubozu (no wicks)";
+  if (lower >= body * 2 && upper <= body) return "hammer (long lower wick)";
+  if (upper >= body * 2 && lower <= body) return "shooting star (long upper wick)";
+  if (body <= range * 0.3) return "spinning top (small body)";
+  return c > o ? "green candle" : "red candle";
+}
+
+function tipFor(row: FirstCandleRow): string {
+  return row.colours
+    .map((c, i) => {
+      const d = row.dirs?.[i];
+      const close = row.dir_rule && row.dir_rule !== "COLOUR" ? `, ${d === "U" ? "up" : d === "D" ? "down" : "no direction"} by ${row.dir_rule === "CLOSES" ? "closes" : "colour and closes"}` : "";
+      const k = row.ohlc?.[i];
+      const shape = k ? `, ${candleType(k[0], k[1], k[2], k[3])}, range ${k[2] > 0 ? (((k[1] - k[2]) / k[2]) * 100).toFixed(2) : "0"}%` : "";
+      return `${i + 1}: ${c === "G" ? "green" : c === "R" ? "red" : "doji"} body ${row.bodies[i]?.toFixed(2)}%${shape}${close}`;
+    })
+    .join("\n") + (row.ha ? "\n(Heikin Ashi candles)" : "");
+}
+
+/** The first candles drawn to scale: body and wicks, one price scale for the row. The scale covers at least 0.6% of the
+ * price, so a quiet stock's candles look small and a busy one's big. Display only. */
+function MiniCandles({ ohlc }: { ohlc: [number, number, number, number][] }) {
+  const H = 24;
+  const W = 6;
+  const GAP = 3;
+  const hi = Math.max(...ohlc.map((k) => k[1]));
+  const lo = Math.min(...ohlc.map((k) => k[2]));
+  const mid = (hi + lo) / 2;
+  const span = Math.max(hi - lo, mid * 0.006) || 1;
+  const top = mid + span / 2;
+  const y = (p: number) => ((top - p) / span) * (H - 2) + 1;
+  return (
+    <svg width={ohlc.length * (W + GAP) - GAP} height={H} className="block" aria-hidden>
+      {ohlc.map(([o, h, l, c], i) => {
+        const x = i * (W + GAP);
+        const colour = c > o ? "#10B981" : c < o ? "#F43F5E" : "#94A3B8";
+        const bodyTop = y(Math.max(o, c));
+        const bodyH = Math.max(1, y(Math.min(o, c)) - bodyTop);
+        return (
+          <g key={i}>
+            <line x1={x + W / 2} x2={x + W / 2} y1={y(h)} y2={y(l)} stroke={colour} strokeWidth={1} />
+            <rect x={x} y={bodyTop} width={W} height={bodyH} fill={colour} rx={0.5} />
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -172,30 +236,23 @@ export function FirstCandleCells({ row, n }: { row: FirstCandleRow | null; n: nu
   return (
     <>
       <td className="py-1.5">
-        <span
-          className="inline-flex items-end gap-0.5"
-          title={row.colours
-            .map((c, i) => {
-              const d = row.dirs?.[i];
-              const close = row.dir_rule && row.dir_rule !== "COLOUR" ? `, ${d === "U" ? "up" : d === "D" ? "down" : "no direction"} by ${row.dir_rule === "CLOSES" ? "closes" : "colour and closes"}` : "";
-              return `${i + 1}: ${c === "G" ? "green" : c === "R" ? "red" : "doji"} ${row.bodies[i]?.toFixed(2)}%${close}`;
-            })
-            .join(" · ")}
-        >
-          {row.colours.map((c, i) => {
-            const d = row.dir_rule && row.dir_rule !== "COLOUR" ? row.dirs?.[i] : undefined;
-            return (
-              <span key={i} className="inline-flex flex-col items-center">
-                <span className={clsx("inline-block h-3.5 w-2.5 rounded-sm", c === "G" ? "bg-emerald-500" : c === "R" ? "bg-rose-500" : "bg-slate-500")} />
-                {d ? (
-                  <span className={clsx("text-[9px] leading-none", d === "U" ? "text-emerald-400" : d === "D" ? "text-rose-400" : "text-slate-500")}>
-                    {d === "U" ? "▲" : d === "D" ? "▼" : "·"}
-                  </span>
-                ) : null}
-              </span>
-            );
-          })}
+        <span className="inline-flex items-end gap-0.5" title={tipFor(row)}>
+          {row.ohlc?.length ? <MiniCandles ohlc={row.ohlc} /> : null}
+          {!row.ohlc?.length &&
+            row.colours.map((c, i) => (
+              <span key={i} className={clsx("inline-block h-3.5 w-2.5 rounded-sm", c === "G" ? "bg-emerald-500" : c === "R" ? "bg-rose-500" : "bg-slate-500")} />
+            ))}
         </span>
+        {row.dir_rule && row.dir_rule !== "COLOUR" && row.dirs?.length ? (
+          <span className="flex gap-[3px] pl-px">
+            {row.dirs.map((d, i) => (
+              <span key={i} className={clsx("w-[6px] text-center text-[9px] leading-none", d === "U" ? "text-emerald-400" : d === "D" ? "text-rose-400" : "text-slate-500")}>
+                {d === "U" ? "▲" : d === "D" ? "▼" : "·"}
+              </span>
+            ))}
+          </span>
+        ) : null}
+        {row.ha ? <span className="text-[9px] text-slate-500">HA</span> : null}
       </td>
       <td className="py-1.5 text-right tabular-nums text-slate-300">{row.matched == null ? "—" : `${row.matched} of ${n}`}</td>
       <td className="py-1.5 text-xs">

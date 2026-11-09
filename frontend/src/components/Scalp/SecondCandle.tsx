@@ -61,6 +61,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const [sideRule, setSideRule] = useState<SecondCandleSideRule>("NTH");
   const [majorityBy, setMajorityBy] = useState<"COUNT" | "SIZE">("COUNT");
   const [dirRule, setDirRule] = useState<CandleDirRule>("COLOUR");
+  const [ha, setHa] = useState(false);
   const [topN, setTopN] = useState(20);
   const [target, setTarget] = useState(10);
   const [squareOff, setSquareOff] = useState("15:15");
@@ -144,6 +145,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           side_rule: sideRule,
           majority_by: majorityBy,
           dir_rule: dirRule,
+          ha,
         })
       );
       setPlace(null);
@@ -432,6 +434,10 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             <option value="BOTH">Both (green and a higher close)</option>
           </select>
         </label>
+        <label className="flex items-center gap-1.5 self-end pb-2" title="Read each candle's colour and body from its Heikin Ashi candle (smoothed: HA close = average of O, H, L, C; HA open = middle of the last HA candle). Entry, stop and target prices stay real.">
+          <input type="checkbox" checked={ha} onChange={(e) => setHa(e.target.checked)} disabled={running} className="accent-[#10B981]" />
+          Heikin Ashi candles
+        </label>
         {sideRule !== "NTH" && (
           <label className="flex flex-col gap-1">
             Count &quot;most&quot; by
@@ -495,6 +501,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
               Last run: {params.symbols} stocks, {params.days} day(s), the {(params.candle_nos?.length ? params.candle_nos : [params.candle_no ?? 2]).map(ordinal).join(" + ")} {params.minutes}-minute candle{(params.candle_nos?.length ?? 1) > 1 ? "s (each its own trade)" : ""}, target ₹{params.target_points}, square-off {params.square_off}, top {params.top_n === 0 ? "all" : params.top_n} by volume vs usual
               {params.side_rule === "MAJORITY" ? `, way = most of the opening candles (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : params.side_rule === "AGREE" ? `, only when most opening candles agree (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : ""}
               {params.dir_rule === "CLOSES" ? ", up / down by closes" : params.dir_rule === "BOTH" ? ", up / down by colour and closes" : ""}
+              {params.ha ? ", Heikin Ashi candles" : ""}
             </div>
             <ul className="list-disc space-y-0.5 pl-5">
               {rep.answer.map((line) => (

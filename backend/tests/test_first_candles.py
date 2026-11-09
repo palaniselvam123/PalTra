@@ -73,3 +73,18 @@ def test_up_down_by_closes_or_both():
     assert both["dirs"] == ["0", "0"] and both["call"] is None and "neither" in both["why"]
     assert fc.read("X", tape, NOW, fc.Rule(candle_no=3, dir_rule="BOTH").clean())["call"] == "SHORT"
     assert fc.Rule(dir_rule="X").clean().dir_rule == "COLOUR"
+
+
+def test_heikin_ashi_and_candle_shapes():
+    # Every 5-minute block opens back at 100 (real: green, green, small red). On Heikin Ashi candle 1 is a doji
+    # (HA open (100+102)/2 = HA close (100+102+100+102)/4 = 101), and the next two open at 101 / 100.75 and close lower.
+    tape = _tape([2.0, 1.0, -0.5])
+    real = fc.read("X", tape, NOW, fc.Rule(candle_no=3).clean())
+    assert real["colours"] == ["G", "G", "R"] and len(real["ohlc"]) == 3 and real["ha"] is False
+    o, h, l, c = real["ohlc"][0]
+    assert (o, c) == (100.0, 102.0) and h >= c and l <= o
+    ha = fc.read("X", tape, NOW, fc.Rule(candle_no=3, ha=True).clean())
+    assert ha["ha"] is True and ha["colours"] == ["D", "R", "R"] and ha["call"] == "SHORT"
+    for o, h, l, c in ha["ohlc"]:
+        assert h >= max(o, c) and l <= min(o, c)
+    assert ha["ohlc"] != real["ohlc"]

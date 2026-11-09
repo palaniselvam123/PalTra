@@ -3799,6 +3799,7 @@ class FirstCandleStart(BaseModel):
     majority_by: Literal["COUNT", "SIZE"] = "COUNT"
     min_body_pct: float = Field(default=0.0, ge=0, le=5)
     dir_rule: Literal["COLOUR", "CLOSES", "BOTH"] = "COLOUR"
+    ha: bool = False
 
 
 @app.post("/api/first-candles/start")
@@ -3806,7 +3807,7 @@ async def first_candles_start(body: FirstCandleStart):
     """Read the day's first N candles of each stock (the Most active card's "First candles"; read-only, candles only,
     no order): their colours and the call by the Second candle rule (first_candles.py). Poll GET /api/first-candles."""
     _refuse_when_paused()
-    rule = first_candles.Rule(body.minutes, body.candle_no, body.side_rule, body.majority_by, body.min_body_pct, body.dir_rule)
+    rule = first_candles.Rule(body.minutes, body.candle_no, body.side_rule, body.majority_by, body.min_body_pct, body.dir_rule, body.ha)
     try:
         return first_candle_scanner.start(
             body.symbols, lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end), rule
@@ -4896,6 +4897,8 @@ class SecondCandleStart(BaseModel):
     majority_by: Literal["COUNT", "SIZE"] = "COUNT"
     #: What makes a candle up / down: COLOUR green / red, CLOSES close vs the previous close, BOTH.
     dir_rule: Literal["COLOUR", "CLOSES", "BOTH"] = "COLOUR"
+    #: Read Heikin Ashi candles (colour / body / "most"); prices stay real.
+    ha: bool = False
 
 
 @app.get("/api/second-candle")
@@ -4929,7 +4932,7 @@ async def second_candle_start(body: SecondCandleStart):
         candle_nos=tuple(n for n in body.candle_nos if 1 <= n <= second_candle.MAX_CANDLE_NO), top_n=body.top_n,
         target_points=body.target_points,
         square_off=square_off, trails=tuple(body.trails), min_body_pct=body.min_body_pct,
-        side_rule=body.side_rule, majority_by=body.majority_by, dir_rule=body.dir_rule,
+        side_rule=body.side_rule, majority_by=body.majority_by, dir_rule=body.dir_rule, ha=body.ha,
     )
 
     async def fetch(name, start, end):
