@@ -198,3 +198,18 @@ async def test_replay_enters_at_once_without_the_entry_checks(db):  # noqa: F811
     # … and "enter at once" skips them.
     trades = await replay_symbol(frame, "NTH", [DAY], {**settings, "nth_skip_checks": True})
     assert [(t["direction"], t["entry_time"].strftime("%H:%M"), t["entry_reason"]) for t in trades] == [("LONG", "09:30", "NTH_CANDLE")]
+
+
+def test_up_down_by_colour_closes_or_both():
+    # Candle 2 gaps up and closes red, but still above candle 1's close.
+    run = _five(DAY, [(1000.0, 1001.0), (1003.0, 1002.0), (1002.0, 1002.1)])
+    assert nth_candle.call(run, _cfg()).side == "SHORT"  # red by colour
+    closes = nth_candle.call(run, _cfg(nth_dir_rule="CLOSES"))
+    assert closes.side == "LONG" and "closed higher" in closes.note
+    both = nth_candle.call(run, _cfg(nth_dir_rule="BOTH"))
+    assert both.side is None and "neither" in both.note
+    # Candle 1 is read against the last close of the session before.
+    first = _five(DAY, [(1000.0, 999.0), (999.0, 999.5)], day0=[(990.0, 995.0)])
+    assert nth_candle.call(first, _cfg(nth_candle_no=1, nth_dir_rule="CLOSES")).side == "LONG"
+    assert nth_candle.candle_moves([1, 2], [2, 1], None, "CLOSES") == [0.0, -1.0]
+    assert nth_candle.dir_rule(_cfg(nth_dir_rule="X")) == "COLOUR"

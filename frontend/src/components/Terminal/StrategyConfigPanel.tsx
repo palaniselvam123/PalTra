@@ -489,6 +489,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     nth_min_rvol: Math.min(10, Math.max(0, Number(form.nth_min_rvol ?? 0) || 0)),
     nth_side_rule: form.nth_side_rule === "MAJORITY" || form.nth_side_rule === "AGREE" ? form.nth_side_rule : "NTH",
     nth_majority_by: form.nth_majority_by === "SIZE" ? "SIZE" : "COUNT",
+    nth_dir_rule: form.nth_dir_rule === "CLOSES" || form.nth_dir_rule === "BOTH" ? form.nth_dir_rule : "COLOUR",
     nth_skip_checks: Boolean(form.nth_skip_checks),
     pattern_tf: ([1, 3, 5, 10, 15, 30, 60].includes(Number(form.pattern_tf)) ? Number(form.pattern_tf) : 1) as 1 | 3 | 5 | 10 | 15 | 30 | 60,
     colour_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_count ?? 1)) || 1)),
@@ -938,6 +939,21 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                       <option value="NTH">That candle&apos;s colour</option>
                       <option value="MAJORITY">Most of candles 1 to {Number(form.nth_candle_no ?? 2)}</option>
                       <option value="AGREE">That candle, only if most agree</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm text-slate-300">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">
+                      A candle is up / down by{isOwn("nth_dir_rule") ? " (own)" : ""}
+                    </span>
+                    <select
+                      value={String(form.nth_dir_rule ?? "COLOUR")}
+                      onChange={(e) => set("nth_dir_rule", e.target.value)}
+                      title="Colour = green / red. Closes = its close above / below the previous candle's close (candle 1 against yesterday's last close). Both = green and a higher close, red and a lower close; anything else counts as no direction."
+                      className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+                    >
+                      <option value="COLOUR">Colour (green / red)</option>
+                      <option value="CLOSES">Closes (higher / lower than the candle before)</option>
+                      <option value="BOTH">Both (green and a higher close)</option>
                     </select>
                   </label>
                   {String(form.nth_side_rule ?? "NTH") !== "NTH" ? (
@@ -3345,7 +3361,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
       : nth
-        ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
         ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }

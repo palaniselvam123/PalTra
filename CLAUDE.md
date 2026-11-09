@@ -438,7 +438,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   candle" (which candle, candle size, smallest body, volume vs usual at least); the terminal's Strategy card switches it
   and picks the candle. **Which way** (`nth_side_rule`: `NTH` default = that candle's colour, `MAJORITY` = the way
   most of candles 1..N went, a tie = no order, `AGREE` = that candle only when most agree; `nth_majority_by` `COUNT` green vs
-  red | `SIZE` bodies added up; `nth_candle.majority`) and **enter at once** (`nth_skip_checks`, off by default): the call goes
+  red | `SIZE` bodies added up; `nth_candle.majority`), **what makes a candle up / down** (`nth_dir_rule` `COLOUR` default = green / red | `CLOSES` = its
+close vs the previous candle's close, candle 1 against the session before | `BOTH` = green and a higher close / red and a
+lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body floor then reads that move) and **enter at once** (`nth_skip_checks`, off by default): the call goes
   through `StrategyEngine.direct_order` (no entry check, ADX or flip; market hours, cut-off, Trade list, caps, loss lock and
   one LIVE bot per stock still apply). Per bot and per stock, PAPER and LIVE, replays too. The stock research baseline keeps
   `SMA`.
@@ -1221,7 +1223,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   under `min_body_pct` is skipped). **Which way** (`side_rule`): `NTH` (default, that candle's colour), `MAJORITY` (the way most
   of candles 1..N went, `majority`; a tie is skipped, `no majority`) or `AGREE` (that candle's colour only when most agree,
   else `against the majority`); "most" counted by `majority_by` `COUNT` (green vs red) | `SIZE` (bodies added up). Rows
-  carry `greens` / `reds` / `net_body`, the report `skipped_by`. **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
+  carry `greens` / `reds` / `net_body`, the report `skipped_by`. **Up / down by** (`dir_rule`, the same `COLOUR` / `CLOSES` /
+`BOTH` as the bot's `nth_dir_rule`, `nth_candle.candle_moves`; a candle that is neither is skipped as `no direction`). **Which candle is best?** (the tab's third view, `components/Scalp/CandleCompare.tsx`, shared
   arithmetic in `secondCandleMath.ts`): with several candles in a run, each candle side by side (reached %, average with /
   against, held to the square-off, the best trailing stop, the best target + stop, the best stop and reverse, the best way per
   trade), each column's best boxed, a verdict naming the best candle, and each stock's best candle; follows every filter but
@@ -1268,7 +1271,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   200), the latest session's first N candles (`candle_no` 1-6, `minutes` 1/3/5/10/15, closed candles only) from the 1-minute
   download (`fetch_frame` on `_scan_broker()`, today plus `DOWNLOAD_DAYS` back for weekends): each candle's colour (G / R /
   D) and body %, greens / reds / bodies added up, and the call by the Second candle rule (`side_rule` NTH / MAJORITY /
-  AGREE, `majority_by`, `min_body_pct`; `second_candle.majority`), `matched` = candles 1..N that went the call's way, or why
+  AGREE, `majority_by`, `min_body_pct`, `dir_rule` colour / closes / both, `dirs` U / D / 0; `second_candle.majority`; a
+changed rule reads again at once, the same rule within 20 s returns the last read), `matched` = candles 1..N that went the call's way, or why
   there is none (`waiting: candle N closes at HH:MM`, doji, tie, against the majority, small body). `FirstCandleScanner`
   mirrors the morning scan (one pass, paced, stopped by Pause scans and `POST /api/scan-stop/first`). `POST
   /api/first-candles/start`, `GET /api/first-candles`. The card adds First candles (coloured squares) / Matched / Call columns

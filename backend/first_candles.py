@@ -4,7 +4,8 @@ so the owner no longer opens every chart to check their colours before the Secon
 For each stock, on the latest session in its 1-minute download (today in market hours, the last session after hours),
 the candles of `minutes` (1/3/5/10/15) from 09:15 are read up to the Nth (`candle_no` 1-6), closed candles only:
 each one's colour (G / R / D for a doji) and body %, how many were green / red and the bodies added up, and the call
-by the same rule as the Second candle test (`second_candle.majority`): `NTH` = the Nth candle's colour, `MAJORITY` =
+by the same rule as the Second candle test (`second_candle.majority`; `dir_rule` COLOUR / CLOSES / BOTH says what makes a
+candle up or down, `dirs`): `NTH` = the Nth candle's colour, `MAJORITY` =
 the way most of candles 1..N went (a tie = no call), `AGREE` = the Nth candle's colour only when most agree;
 `majority_by` COUNT (green vs red) | SIZE (bodies added up); a body under `min_body_pct` = no call. `matched` = how many
 of candles 1..N went the call's way. Before the Nth candle has closed the row says when it will (`waiting`).
@@ -26,6 +27,7 @@ import pandas as pd
 from candles import resample
 from cross_scan import CALL_GAP_SEC, CONCURRENCY, GIVE_UP_AFTER, clean_symbols
 from groww_client import IST
+from nth_candle import DIR_RULES, candle_moves, dir_words
 from second_candle import MAJORITY_BY, SIDE_RULES, majority
 
 log = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ class Rule:
     side_rule: str = "NTH"
     majority_by: str = "COUNT"
     min_body_pct: float = 0.0
+    #: What makes a candle up / down (nth_candle.DIR_RULES): COLOUR green / red, CLOSES close vs the previous close, BOTH.
+    dir_rule: str = "COLOUR"
 
     def clean(self) -> "Rule":
         self.minutes = self.minutes if self.minutes in SIZES else 5
@@ -50,26 +54,29 @@ class Rule:
         self.side_rule = self.side_rule if self.side_rule in SIDE_RULES else "NTH"
         self.majority_by = self.majority_by if self.majority_by in MAJORITY_BY else "COUNT"
         self.min_body_pct = max(0.0, min(5.0, float(self.min_body_pct or 0.0)))
+        self.dir_rule = self.dir_rule if self.dir_rule in DIR_RULES else "COLOUR"
         return self
 
 
-def _closed(tape: pd.DataFrame, minutes: int, now: dt.datetime) -> tuple[pd.DataFrame, dt.date | None]:
-    """The latest session's candles of `minutes`, closed ones only, and that session's date."""
+def _closed(tape: pd.DataFrame, minutes: int, now: dt.datetime) -> tuple[pd.DataFrame, dt.date | None, float | None]:
+    """The latest session's candles of `minutes`, closed ones only, that session's date and the close before it."""
     if tape is None or getattr(tape, "empty", True):
-        return pd.DataFrame(), None
+        return pd.DataFrame(), None, None
     days = pd.to_datetime(tape["ts"], unit="s", utc=True).dt.tz_convert(IST).dt.date
     day = days.max()
     today = tape[days.values == day].reset_index(drop=True)
+    earlier = tape[days.values < day]
+    prev = float(earlier["close"].iloc[-1]) if not earlier.empty else None
     candles = resample(today, minutes) if minutes > 1 else today
     if candles is None or candles.empty:
-        return pd.DataFrame(), day
+        return pd.DataFrame(), day, prev
     cut = now.timestamp()
     closed = candles[candles["ts"].astype("int64") + minutes * 60 <= cut].reset_index(drop=True)
-    return closed, day
+    return closed, day, prev
 
 
 def read(symbol: str, tape: pd.DataFrame, now: dt.datetime, rule: Rule) -> dict | None:
-    candles, day = _closed(tape, rule.minutes, now)
+    candles, day, prev_close = _closed(tape, rule.minutes, now)
     if day is None:
         return None
     n = rule.candle_no
@@ -79,33 +86,40 @@ def read(symbol: str, tape: pd.DataFrame, now: dt.datetime, rule: Rule) -> dict 
         o, cl = float(c["open"]), float(c["close"])
         colours.append("G" if cl > o else "R" if cl < o else "D")
         bodies.append(round(abs(cl - o) / o * 100, 3) if o > 0 else 0.0)
-    row: dict = {"symbol": symbol, "day": day.isoformat(), "colours": colours, "bodies": bodies, "closed": len(first)}
+    moves = candle_moves(first["open"].astype(float), first["close"].astype(float), prev_close, rule.dir_rule)
+    dirs = ["U" if m > 0 else "D" if m < 0 else "0" for m in moves]
+    row: dict = {"symbol": symbol, "day": day.isoformat(), "colours": colours, "bodies": bodies, "dirs": dirs,
+                 "dir_rule": rule.dir_rule, "closed": len(first)}
     if len(first) < n:
         open_at = dt.datetime.combine(day, dt.time(9, 15), IST) + dt.timedelta(minutes=rule.minutes * n)
         row.update(call=None, why=f"waiting: candle {n} closes at {open_at.strftime('%H:%M')}", matched=None)
         return row
-    most, greens, reds, net = majority(first, n, rule.majority_by)
+    most, greens, reds, net = majority(first, n, rule.majority_by, rule.dir_rule, prev_close)
     row.update(greens=greens, reds=reds, net_body=round(net, 2))
-    nth = colours[-1]
-    nth_side = "LONG" if nth == "G" else "SHORT" if nth == "R" else None
+    nth = dirs[-1]
+    nth_side = "LONG" if nth == "U" else "SHORT" if nth == "D" else None
+    up_word, down_word = dir_words(rule.dir_rule)
     call, why = None, None
     if rule.side_rule == "MAJORITY":
         call = most
         why = None if most else "no majority (tie)"
     else:
         if nth_side is None:
-            why = f"candle {n} is a doji"
+            why = f"candle {n} is a doji" if rule.dir_rule == "COLOUR" else f"candle {n} is neither {up_word} nor {down_word}"
         elif rule.side_rule == "AGREE" and most != nth_side:
             why = f"candle {n} is against the majority"
         else:
             call = nth_side
-    if call and rule.min_body_pct > 0 and bodies[-1] < rule.min_body_pct:
-        call, why = None, f"candle {n} body {bodies[-1]:.2f}% under {rule.min_body_pct:g}%"
-    want = "G" if call == "LONG" else "R" if call == "SHORT" else None
+    o_n = float(first["open"].iloc[-1])
+    size = abs(moves[-1]) / o_n * 100 if rule.dir_rule == "CLOSES" and o_n > 0 else bodies[-1]
+    if call and rule.min_body_pct > 0 and size < rule.min_body_pct:
+        word = "move" if rule.dir_rule == "CLOSES" else "body"
+        call, why = None, f"candle {n} {word} {size:.2f}% under {rule.min_body_pct:g}%"
+    want = "U" if call == "LONG" else "D" if call == "SHORT" else None
     row.update(
         call=call,
         why=why,
-        matched=sum(1 for c in colours if c == want) if want else None,
+        matched=sum(1 for d in dirs if d == want) if want else None,
         entry_at=(dt.datetime.combine(day, dt.time(9, 15), IST) + dt.timedelta(minutes=rule.minutes * n)).strftime("%H:%M"),
         last=round(float(candles["close"].iloc[-1]), 2) if not candles.empty else None,
     )
@@ -156,10 +170,11 @@ class FirstCandleScanner:
         names = clean_symbols(symbols)
         if not names:
             raise ValueError("No stocks to read")
-        if self.status.running or time.monotonic() - self._started_at < MIN_RESCAN_SEC:
+        rule = rule.clean()
+        same = self.status.rule == rule.__dict__
+        if self.status.running or (same and time.monotonic() - self._started_at < MIN_RESCAN_SEC):
             return self.snapshot()
         self._started_at = time.monotonic()
-        rule = rule.clean()
         s = self.status
         s.running, s.done, s.total, s.failed, s.error = True, 0, len(names), 0, None
         s.rule = rule.__dict__.copy()

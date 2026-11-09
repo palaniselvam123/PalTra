@@ -41,6 +41,8 @@ export type SmaConfig = {
   /** Second candle entry: which way (that candle / most of candles 1..N / that candle when most agree). */
   nth_side_rule?: "NTH" | "MAJORITY" | "AGREE";
   nth_majority_by?: "COUNT" | "SIZE";
+  /** What makes a candle up / down: COLOUR green / red, CLOSES close vs the previous close, BOTH. */
+  nth_dir_rule?: CandleDirRule;
   /** Second candle entry: enter at once without the entry checks. */
   nth_skip_checks?: boolean;
   /** Pattern / colour candle size in minutes. */
@@ -650,6 +652,8 @@ export type ChopScan = {
 };
 
 /** One minute of a desk's open P&L (the Stocks bar's "Open" figure), from the open P&L log. */
+/** What makes a candle up / down (backend nth_candle.DIR_RULES): its colour, its close vs the previous close, or both. */
+export type CandleDirRule = "COLOUR" | "CLOSES" | "BOTH";
 /** First candles (backend first_candles.py): the day's first N candles and the Second candle call. */
 export type FirstCandleRule = {
   minutes: number;
@@ -657,12 +661,16 @@ export type FirstCandleRule = {
   side_rule: SecondCandleSideRule;
   majority_by: "COUNT" | "SIZE";
   min_body_pct: number;
+  dir_rule: CandleDirRule;
 };
 export type FirstCandleRow = {
   symbol: string;
   day: string;
   /** G green / R red / D doji, candle 1 first. */
   colours: ("G" | "R" | "D")[];
+  /** Up / down / neither by the rule's dir_rule, candle 1 first. */
+  dirs?: ("U" | "D" | "0")[];
+  dir_rule?: CandleDirRule;
   bodies: number[];
   closed: number;
   greens?: number;
@@ -945,7 +953,7 @@ export type SecondCandleView = {
   done: number;
   total: number;
   errors: { symbol: string; error: string }[];
-  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number; side_rule?: SecondCandleSideRule; majority_by?: "COUNT" | "SIZE" };
+  params: { symbols?: number; days?: number; minutes?: number; candle_no?: number; candle_nos?: number[]; top_n?: number; target_points?: number; square_off?: string; trails?: number[]; min_body_pct?: number; side_rule?: SecondCandleSideRule; majority_by?: "COUNT" | "SIZE"; dir_rule?: CandleDirRule };
   started_at: string | null;
   finished_at: string | null;
   report: SecondCandleReport | null;
@@ -2640,6 +2648,7 @@ export const smaApi = {
     min_body_pct: number;
     side_rule?: SecondCandleSideRule;
     majority_by?: "COUNT" | "SIZE";
+    dir_rule?: CandleDirRule;
   }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>

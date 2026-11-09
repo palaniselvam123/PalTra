@@ -46,6 +46,7 @@ export const SETTING_LABELS: Record<string, string> = {
   nth_min_rvol: "second candle: volume vs usual at least",
   nth_side_rule: "second candle: trade which way",
   nth_majority_by: "second candle: count most by",
+  nth_dir_rule: "second candle: a candle counts as up / down by",
   nth_skip_checks: "second candle: enter at once, skip the entry checks",
   pattern_trend: "patterns only with the trend",
   pattern_set: "pattern set",

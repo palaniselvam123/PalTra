@@ -9,7 +9,7 @@ import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickAr
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
-import { smaApi, type SecondCandleRow, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
+import { smaApi, type SecondCandleRow, type CandleDirRule, type SecondCandleSideRule, type SecondCandleView as View } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
 import { CandleCompare } from "./CandleCompare";
 import { DayTotals } from "./DayTotals";
@@ -60,6 +60,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
   const [candleNos, setCandleNos] = useState<number[]>([2]);
   const [sideRule, setSideRule] = useState<SecondCandleSideRule>("NTH");
   const [majorityBy, setMajorityBy] = useState<"COUNT" | "SIZE">("COUNT");
+  const [dirRule, setDirRule] = useState<CandleDirRule>("COLOUR");
   const [topN, setTopN] = useState(20);
   const [target, setTarget] = useState(10);
   const [squareOff, setSquareOff] = useState("15:15");
@@ -142,6 +143,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
           min_body_pct: 0,
           side_rule: sideRule,
           majority_by: majorityBy,
+          dir_rule: dirRule,
         })
       );
       setPlace(null);
@@ -421,6 +423,15 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             <option value="AGREE">That candle, only if most agree</option>
           </select>
         </label>
+        <label className="flex flex-col gap-1">
+          A candle is up / down by
+          <select value={dirRule} onChange={(e) => setDirRule(e.target.value as CandleDirRule)} className={select} disabled={running}
+            title="Colour = green / red. Closes = its close above / below the previous candle's close (candle 1 against yesterday's last close). Both = green and a higher close, red and a lower close; anything else counts as no direction (skipped like a doji).">
+            <option value="COLOUR">Colour (green / red)</option>
+            <option value="CLOSES">Closes (higher / lower than before)</option>
+            <option value="BOTH">Both (green and a higher close)</option>
+          </select>
+        </label>
         {sideRule !== "NTH" && (
           <label className="flex flex-col gap-1">
             Count &quot;most&quot; by
@@ -483,6 +494,7 @@ export function SecondCandle({ armed, arming, onArm, onArmMany, paused, onStatus
             <div className="mb-1 font-semibold text-slate-200">
               Last run: {params.symbols} stocks, {params.days} day(s), the {(params.candle_nos?.length ? params.candle_nos : [params.candle_no ?? 2]).map(ordinal).join(" + ")} {params.minutes}-minute candle{(params.candle_nos?.length ?? 1) > 1 ? "s (each its own trade)" : ""}, target ₹{params.target_points}, square-off {params.square_off}, top {params.top_n === 0 ? "all" : params.top_n} by volume vs usual
               {params.side_rule === "MAJORITY" ? `, way = most of the opening candles (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : params.side_rule === "AGREE" ? `, only when most opening candles agree (${params.majority_by === "SIZE" ? "sizes added up" : "green vs red"})` : ""}
+              {params.dir_rule === "CLOSES" ? ", up / down by closes" : params.dir_rule === "BOTH" ? ", up / down by colour and closes" : ""}
             </div>
             <ul className="list-disc space-y-0.5 pl-5">
               {rep.answer.map((line) => (

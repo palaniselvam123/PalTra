@@ -174,6 +174,7 @@ FIELD_HELP = {
     "nth_min_body_pct": "second candle entry: smallest body in % of the close that orders (0 = any)",
     "nth_side_rule": "second candle entry: which way: NTH that candle's colour, MAJORITY the way most of candles 1..N went (tie = no order), AGREE that candle only when most agree",
     "nth_majority_by": "second candle entry: how 'most' is counted: COUNT green vs red candles, SIZE candle bodies added up",
+    "nth_dir_rule": "second candle entry: what makes a candle up / down: COLOUR green / red, CLOSES its close vs the previous candle's close, BOTH green and a higher close (red and a lower one)",
     "nth_skip_checks": "second candle entry: enter at once, no entry check / ADX / flip read (market hours, cut-off, caps, loss lock, one LIVE bot per stock still apply)",
     "nth_min_rvol": "second candle entry: least volume vs usual at that candle's close (0 = off)",
     "pattern_tf": "candle size in minutes for candle patterns / candle colour (1, 3, 5, 10, 15, 30, 60)",

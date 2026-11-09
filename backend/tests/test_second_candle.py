@@ -254,3 +254,15 @@ def test_majority_picks_the_side_most_opening_candles_went():
     rep = sc.summarize([tie, three], sc.Rule(candle_nos=(2, 3), side_rule="MAJORITY", top_n=0))
     assert rep["skipped_by"] == {"no majority": 1} and any("skipped 1 no majority" in a for a in rep["answer"])
     assert sc.Rule(side_rule="X", majority_by="Y").clean().side_rule == "NTH"
+
+
+def test_up_down_can_be_read_by_closes_or_both():
+    closes = sc.Rule(minutes=5, candle_no=2, top_n=0, target_points=10.0, dir_rule="CLOSES").clean()
+    assert sc.analyze_day("UP", _tape(_rise), D1, closes)["side"] == "LONG"
+    assert sc.analyze_day("DOWN", _tape(_fall), D1, closes)["side"] == "SHORT"
+
+    def flat(i, p):
+        return 1000.0 if i < 10 else p + 0.1
+
+    assert sc.analyze_day("FLAT", _tape(flat), D1, closes)["skipped"] == "no direction"
+    assert closes.view()["dir_rule"] == "CLOSES" and sc.Rule(dir_rule="X").clean().dir_rule == "COLOUR"

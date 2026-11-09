@@ -122,6 +122,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "nth_side_rule": "VARCHAR DEFAULT 'NTH'",
             "nth_majority_by": "VARCHAR DEFAULT 'COUNT'",
             "nth_skip_checks": "BOOLEAN DEFAULT 0",
+            "nth_dir_rule": "VARCHAR(8) DEFAULT 'COLOUR'",
             "flip_orders": "BOOLEAN DEFAULT 0",
             "cross_exit": "BOOLEAN DEFAULT 1",
             "late_entry_min": "INTEGER DEFAULT 0",
