@@ -29,13 +29,16 @@ export function firstPasses(pick: FirstPick, row: FirstCandleRow | undefined, re
 export function FirstCandleControls({
   symbols,
   disabled,
+  at,
   onRows,
 }: {
   symbols: string[];
   disabled?: boolean;
+  /** Read as of this time (a saved scan's time); empty = now. */
+  at?: string | null;
   onRows: (rows: Map<string, FirstCandleRow>, rule: FirstCandleRule) => void;
 }) {
-  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0, dir_rule: "COLOUR", ha: false });
+  const [rule, setRule] = useState<FirstCandleRule>({ minutes: 5, candle_no: 3, side_rule: "AGREE", majority_by: "COUNT", min_body_pct: 0, dir_rule: "COLOUR", ha: false, last_n: 3 });
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const set = (k: keyof FirstCandleRule, v: number | string) => setRule((r) => ({ ...r, [k]: v }));
@@ -47,7 +50,7 @@ export function FirstCandleControls({
     setBusy(true);
     setNote(`Reading the first ${rule.candle_no} candles of ${list.length} stocks…`);
     try {
-      await smaApi.firstCandlesStart({ ...rule, symbols: list });
+      await smaApi.firstCandlesStart({ ...rule, symbols: list, ...(at ? { at } : {}) });
       const want = new Set(list);
       for (let i = 0; i < 150; i += 1) {
         await sleep(2_500);
@@ -150,15 +153,32 @@ export function FirstCandleControls({
         <input type="checkbox" checked={rule.ha} onChange={(e) => setRule((r) => ({ ...r, ha: e.target.checked }))} className="accent-[#10B981]" />
         Heikin Ashi
       </label>
+      <label className="flex items-center gap-1" title="Also draw the last candles that had closed when the scan ran (a saved scan: its time; live: now).">
+        last
+        <select value={rule.last_n} onChange={(e) => set("last_n", Number(e.target.value))} className={sel}>
+          {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>
+              {n === 0 ? "off" : n}
+            </option>
+          ))}
+        </select>
+        candles
+      </label>
+      {at ? <span className="text-slate-500">as of {new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })} IST</span> : null}
       <span className="text-slate-600">Changed a setting? Press Read first candles again.</span>
       {note && <span className="text-slate-500">{note}</span>}
     </div>
   );
 }
 
-export function FirstCandleHead() {
+export function FirstCandleHead({ last = 0 }: { last?: number }) {
   return (
     <>
+      {last > 0 && (
+        <th className="pb-2 text-left font-medium" title="The last candles that had closed when the scan ran (same size), drawn to scale; the time is when the last one closed">
+          Last {last} candles
+        </th>
+      )}
       <th className="pb-2 text-left font-medium" title="Today's first candles drawn to scale, candle 1 first (body and wicks; hover for each candle's type and size)">First candles</th>
       <th className="pb-2 text-right font-medium" title="How many of those candles went the call's way">Matched</th>
       <th className="pb-2 text-left font-medium" title="Buy / sell by the rule picked, or why there is no call">Call</th>
@@ -223,10 +243,29 @@ function MiniCandles({ ohlc }: { ohlc: [number, number, number, number][] }) {
   );
 }
 
-export function FirstCandleCells({ row, n }: { row: FirstCandleRow | null; n: number }) {
+export function FirstCandleCells({ row, n, last = 0 }: { row: FirstCandleRow | null; n: number; last?: number }) {
+  const lastCell =
+    last > 0 ? (
+      <td className="py-1.5">
+        {row?.last_ohlc?.length ? (
+          <span
+            className="inline-flex items-end gap-1"
+            title={row.last_ohlc
+              .map((k, i) => `${i + 1}: ${candleType(k[0], k[1], k[2], k[3])}, body ${k[0] > 0 ? ((Math.abs(k[3] - k[0]) / k[0]) * 100).toFixed(2) : "0"}%`)
+              .join("\n")}
+          >
+            <MiniCandles ohlc={row.last_ohlc} />
+            {row.last_at ? <span className="text-[10px] text-slate-500">to {row.last_at}</span> : null}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-600">—</span>
+        )}
+      </td>
+    ) : null;
   if (!row) {
     return (
       <>
+        {lastCell}
         <td className="py-1.5 text-xs text-slate-600">—</td>
         <td />
         <td />
@@ -235,6 +274,7 @@ export function FirstCandleCells({ row, n }: { row: FirstCandleRow | null; n: nu
   }
   return (
     <>
+      {lastCell}
       <td className="py-1.5">
         <span className="inline-flex items-end gap-0.5" title={tipFor(row)}>
           {row.ohlc?.length ? <MiniCandles ohlc={row.ohlc} /> : null}

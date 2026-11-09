@@ -3820,6 +3820,10 @@ class FirstCandleStart(BaseModel):
     min_body_pct: float = Field(default=0.0, ge=0, le=5)
     dir_rule: Literal["COLOUR", "CLOSES", "BOTH"] = "COLOUR"
     ha: bool = False
+    #: Also the last N closed candles before the read time (0 = off).
+    last_n: int = Field(default=3, ge=0, le=first_candles.MAX_LAST)
+    #: Read as of this time (ISO, e.g. a saved scan's time); empty = now. A future time reads now.
+    at: str | None = Field(default=None, max_length=40)
 
 
 @app.post("/api/first-candles/start")
@@ -3827,10 +3831,19 @@ async def first_candles_start(body: FirstCandleStart):
     """Read the day's first N candles of each stock (the Most active card's "First candles"; read-only, candles only,
     no order): their colours and the call by the Second candle rule (first_candles.py). Poll GET /api/first-candles."""
     _refuse_when_paused()
-    rule = first_candles.Rule(body.minutes, body.candle_no, body.side_rule, body.majority_by, body.min_body_pct, body.dir_rule, body.ha)
+    rule = first_candles.Rule(body.minutes, body.candle_no, body.side_rule, body.majority_by, body.min_body_pct, body.dir_rule, body.ha, body.last_n)
+    when = None
+    if body.at:
+        try:
+            when = dt.datetime.fromisoformat(body.at)
+        except ValueError as exc:
+            raise HTTPException(400, "at must be an ISO date-time") from exc
+        when = when.replace(tzinfo=IST) if when.tzinfo is None else when.astimezone(IST)
+        if when >= dt.datetime.now(IST):
+            when = None
     try:
         return first_candle_scanner.start(
-            body.symbols, lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end), rule
+            body.symbols, lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end), rule, now=when
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

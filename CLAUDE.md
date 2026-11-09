@@ -1287,7 +1287,9 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   D) and body %, greens / reds / bodies added up, and the call by the Second candle rule (`side_rule` NTH / MAJORITY /
   AGREE, `majority_by`, `min_body_pct`, `dir_rule` colour / closes / both, `dirs` U / D / 0; `second_candle.majority`; a
 changed rule reads again at once, the same rule within 20 s returns the last read; `ha` reads Heikin Ashi candles of the
-session like the bot's `ha_colours`; `ohlc` = each candle as drawn, real or HA, `_shapes`), `matched` = candles 1..N that went the call's way, or why
+session like the bot's `ha_colours`; `ohlc` = each candle as drawn, real or HA, `_shapes`; `last_n` (3, 0-6) adds the
+last N closed candles before the read time, `last_ohlc` / `last_at`, `_last`; `at` on the start body reads as of a saved
+scan's time, the card passes the History scan's `as_of`), `matched` = candles 1..N that went the call's way, or why
   there is none (`waiting: candle N closes at HH:MM`, doji, tie, against the majority, small body). `FirstCandleScanner`
   mirrors the morning scan (one pass, paced, stopped by Pause scans and `POST /api/scan-stop/first`). `POST
   /api/first-candles/start`, `GET /api/first-candles`. The card adds First candles (tiny candles drawn to scale, body and wicks, one price scale per row at least 0.6 % of the

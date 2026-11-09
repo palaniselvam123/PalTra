@@ -88,3 +88,12 @@ def test_heikin_ashi_and_candle_shapes():
     for o, h, l, c in ha["ohlc"]:
         assert h >= max(o, c) and l <= min(o, c)
     assert ha["ohlc"] != real["ohlc"]
+
+
+def test_last_candles_as_of_the_read_time():
+    tape = _tape([2.0, 1.0, -0.5, 1.5, -1.0])  # five 5-minute candles 09:15-09:40
+    at = dt.datetime.combine(DAY, dt.time(9, 37), IST)  # 09:35 candle still forming: four have closed
+    row = fc.read("X", tape, at, fc.Rule(candle_no=2, last_n=3).clean())
+    assert len(row["last_ohlc"]) == 3 and row["last_at"] == "09:35"
+    assert [round(k[3] - k[0], 2) for k in row["last_ohlc"]] == [1.0, -0.5, 1.5]
+    assert fc.read("X", tape, at, fc.Rule(candle_no=2, last_n=0).clean())["last_ohlc"] == []
