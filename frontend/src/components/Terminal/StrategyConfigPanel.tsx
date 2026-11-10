@@ -4071,6 +4071,16 @@ const REVERSE_KEYS = [
   { key: "VTURN", label: "SMA 9 V-turn", on: (f: SmaConfig) => Boolean(f.vturn_exit) },
   { key: "TURN", label: "SMA 9 turn", on: (f: SmaConfig) => Boolean(f.slope_exit) && f.slope_turn !== false },
   { key: "CANDLES", label: "counter-candle", on: (f: SmaConfig) => Number(f.counter_exit_count ?? 0) > 0 },
+  {
+    key: "SMALL",
+    label: "smaller-candle",
+    on: (f: SmaConfig) => {
+      const own = Number(f.candle_minutes ?? 1) || 1;
+      return String(f.small_exit_minutes ?? "")
+        .split(",")
+        .some((s) => Number(s.trim()) > 0 && Number(s.trim()) < own);
+    },
+  },
 ] as const;
 
 function ReverseOnExit({

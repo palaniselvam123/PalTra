@@ -20,6 +20,7 @@ class Cfg:
 def test_clean_keeps_known_keys_in_order():
     assert reverse_exit.clean("candles, vturn") == "VTURN,CANDLES"
     assert reverse_exit.clean(["TURN"]) == "TURN"
+    assert reverse_exit.clean("small,vturn") == "VTURN,SMALL"
     assert reverse_exit.clean("") == ""
     with pytest.raises(ValueError):
         reverse_exit.clean("VTURN,STOP")
@@ -31,6 +32,8 @@ def test_on_matches_the_exit_reason():
     assert reverse_exit.on(cfg, "COUNTER_CANDLES")
     assert not reverse_exit.on(cfg, "SMA9_TURN")
     assert not reverse_exit.on(Cfg(reverse_on_exit=""), "SMA9_VTURN")
+    assert reverse_exit.on(Cfg(reverse_on_exit="SMALL"), "SMALL_CANDLE_EXIT")
+    assert not reverse_exit.on(cfg, "SMALL_CANDLE_EXIT")
     assert reverse_exit.opposite_signal("LONG") == "BEARISH"
     assert reverse_exit.opposite_signal("SHORT") == "BULLISH"
 

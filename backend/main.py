@@ -669,7 +669,7 @@ class ConfigUpdate(BaseModel):
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
     cvd_div_lookback: int | None = Field(default=None, ge=cum_delta.MIN_DIV_LOOKBACK, le=cum_delta.MAX_DIV_LOOKBACK)
-    # Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off.
+    # Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES / SMALL, "" = off.
     reverse_on_exit: str | None = Field(default=None, max_length=40)
 
     @field_validator("reverse_on_exit", mode="before")

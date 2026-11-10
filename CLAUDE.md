@@ -481,8 +481,8 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (N, 0 = off; `indicators._direction_reason` colour rule). Each size's verdict sits in `pos.small_state`; `decide` closes the
   trade (`SMALL_CANDLE_EXIT`, via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is
   left to that stop) once `small_exit_agree` (1) sizes say so and, with `small_exit_loss_pct` > 0, only while the trade is at
-  least that % under water (`losing_pct`). No reverse; entries unchanged. Counts as an exit for `strategyChecks.noExitOn`.
-  The stock research baseline keeps it off.
+  least that % under water (`losing_pct`). No reverse unless `reverse_on_exit` has `SMALL` (reverse_exit.py); entries unchanged. Counts as an exit for
+  `strategyChecks.noExitOn`. The stock research baseline keeps it off.
 - `backend/small_colour.py` – **colours on smaller candles** (`sc_minutes` CSV of 1/2/3/5/10 smaller than the bot's candle,
   "" = off; `sc_count` 1-5 candles in a row, default 2; `sc_join` `ALL` default | `ANY` | `AT_LEAST` `sc_need`; per bot and
   per stock, PAPER and LIVE, replays too; Settings → 3. When to exit, "Colours on smaller candles",
@@ -580,9 +580,10 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   delta (strip)" (`chartStyle` key `cvd`, Auto = while either is on) is worked out in the browser (`chartStyle.cvdValues`,
   same arithmetic). The stock research baseline keeps both off.
 - `backend/reverse_exit.py` – reverse a position (PAPER and LIVE). **Reverse instead of only closing** (`reverse_on_exit`,
-  CSV of `VTURN` / `TURN` / `CANDLES`, "" = off by default; per bot and per stock, replays too; validated by
+  CSV of `VTURN` / `TURN` / `CANDLES` / `SMALL`, "" = off by default; per bot and per stock, replays too; validated by
   `ConfigUpdate._reverse_keys` → `clean`): right after the SMA 9 V-turn exit (`SMA9_VTURN`), the SMA 9 turn exit
-  (`SMA9_TURN`) or the counter-candle exit (`COUNTER_CANDLES`) closes a trade, `StrategyEngine._reverse_after_exit` asks for
+  (`SMA9_TURN`), the counter-candle exit (`COUNTER_CANDLES`) or the smaller-candle exit (`SMALL_CANDLE_EXIT`,
+  `_watch_small_candles`) closes a trade, `StrategyEngine._reverse_after_exit` asks for
   the other side of its signal side through `apply_signal(..., alert=False, why="EXIT_REVERSE")` (every check, the stop,
   flip, cut-off, caps, loss lock and one LIVE bot per stock apply; a refusal leaves the stock flat; no V-turn hand-off or
   counter re-entry follows a reverse). The exit itself must be on. Settings → 3. When to exit ("Reverse instead of only
