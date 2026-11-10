@@ -856,6 +856,9 @@ class ConfigUpdate(BaseModel):
     colour_body_by_tf: str | None = Field(default=None, max_length=120)
     colour_body_seq: str | None = Field(default=None, max_length=60)
     colour_body_atr: float | None = Field(default=None, ge=0, le=5)
+    # Inside candles agree (candle_patterns.inside_colour): size 0 = off, body floor in % of the close.
+    colour_inside_minutes: Literal[0, 1, 2, 3, 5, 10] | None = None
+    colour_inside_body: float | None = Field(default=None, ge=0, le=2)
     # Second candle entries (nth_candle.py).
     nth_candle_no: int | None = Field(default=None, ge=1, le=nth_candle.CANDLE_NO_MAX)
     nth_candle_minutes: Literal[1, 3, 5, 10, 15] | None = None

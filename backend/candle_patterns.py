@@ -66,7 +66,13 @@ DEFAULTS = {
     "colour_body_by_tf": "",
     "colour_body_atr": 0.0,
     "colour_body_seq": "",
+    "colour_inside_minutes": 0,
+    "colour_inside_body": 0.0,
 }
+
+# Inside candles (colour_inside_minutes): sizes read inside one colour candle.
+INSIDE_SIZES = (1, 2, 3, 5, 10)
+INSIDE_BODY_MAX = 2.0
 
 # Patterns that order. STRONG: the multi-candle and full-body signals; ALL adds
 # the single-candle shapes and the softer two-candle ones.
@@ -456,6 +462,44 @@ def _colour(open_: float, close: float, min_body: float) -> str | None:
     return "G" if body > 0 else "R"
 
 
+def inside_minutes(cfg, tf: int) -> int:
+    """The inside-candle size (``colour_inside_minutes``) when it is on and fits the colour candle, else 0."""
+    try:
+        n = int(setting(cfg, "colour_inside_minutes") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n in INSIDE_SIZES and n < int(tf) and int(tf) % n == 0 else 0
+
+
+def inside_body_pct(cfg) -> float:
+    try:
+        return max(0.0, min(INSIDE_BODY_MAX, float(setting(cfg, "colour_inside_body") or 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def inside_colour(closed: pd.DataFrame, last_ts: int, tf: int, size: int, cfg) -> str | None:
+    """'G' / 'R' when every `size`-minute candle inside the colour candle that starts at `last_ts` closed that colour
+    (Heikin Ashi colours with ``ha_colours``), else None (mixed, a doji, or not all of them there)."""
+    rows = tf_candles(closed, size)
+    if not rows:
+        return None
+    end = int(last_ts) + int(tf) * 60
+    if heikin_ashi.on(cfg):
+        ha = heikin_ashi.view(pd.DataFrame(rows), cfg)
+        pairs = [(int(t), float(o), float(c)) for t, o, c in zip(ha["ts"], ha["open"], ha["close"])]
+    else:
+        pairs = [(int(r["ts"]), float(r["open"]), float(r["close"])) for r in rows]
+    inside = [(o, c) for t, o, c in pairs if int(last_ts) <= t < end]
+    if len(inside) != int(tf) // int(size):
+        return None
+    if all(c > o for o, c in inside):
+        return "G"
+    if all(c < o for o, c in inside):
+        return "R"
+    return None
+
+
 def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
     """Ride the candle colour (``entry_mode = "COLOUR"``): the side the newest closed candles ask for.
 
@@ -482,6 +526,27 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
         pairs = list(zip(ha["open"].astype(float), ha["close"].astype(float)))
     else:
         pairs = [(float(r["open"]), float(r["close"])) for r in rows]
+    size = inside_minutes(cfg, tf)
+    if size and pairs:
+        # Inside candles agree (colour_inside_minutes): every smaller candle inside the newest colour candle is one
+        # colour, so that candle alone is enough (no run of `need`) with its own smallest body (colour_inside_body).
+        # The inside candles set the colour (with Heikin Ashi a 15-minute HA candle can still read red after a fall while
+        # every smaller HA candle inside it is green); the real colour candle must have closed that way too.
+        own = inside_colour(closed, int(rows[-1]["ts"]), tf, size, cfg)
+        o, c = float(rows[-1]["open"]), float(rows[-1]["close"])
+        if own is not None and ((c > o) if own == "G" else (c < o)):
+            floor = float(rows[-1]["close"]) * inside_body_pct(cfg) / 100
+            word = "green" if own == "G" else "red"
+            if floor <= 0 or abs(c - o) >= floor:
+                side = "LONG" if own == "G" else "SHORT"
+                return PatternCall(
+                    side, f"{word.capitalize()} candle", f"{word} {tf}-minute candle, every {size}-minute candle inside {word}"
+                )
+            return PatternCall(
+                None, "Small candle",
+                f"{word} {tf}-minute candle (all {size}-minute inside {word}) body {abs(c - o):.2f} under "
+                f"{inside_body_pct(cfg):g}% ({floor:.2f}) — holding",
+            )
     if len(pairs) < need:
         return PatternCall(None, "", f"waiting for {need} closed {tf}-minute candles")
     # The smallest body in price units for each of the last `need` candles.

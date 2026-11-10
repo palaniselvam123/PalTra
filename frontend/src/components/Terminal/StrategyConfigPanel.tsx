@@ -504,6 +504,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     colour_body_by_tf: String(form.colour_body_by_tf ?? ""),
     colour_body_atr: Math.min(5, Math.max(0, Number(form.colour_body_atr ?? 0) || 0)),
     colour_body_seq: String(form.colour_body_seq ?? ""),
+    colour_inside_minutes: ([0, 1, 2, 3, 5, 10].includes(Number(form.colour_inside_minutes)) ? Number(form.colour_inside_minutes) : 0) as 0 | 1 | 2 | 3 | 5 | 10,
+    colour_inside_body: Math.min(2, Math.max(0, Number(form.colour_inside_body ?? 0) || 0)),
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -3370,7 +3372,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
@@ -4467,6 +4469,66 @@ function ColourBodySize({
         </>
       )}
       <ColourBodySeq form={form} set={set} isOwn={isOwn} unit={unit} />
+      <ColourInside form={form} set={set} isOwn={isOwn} />
+    </div>
+  );
+}
+
+/** Inside candles agree (colour_inside_minutes / colour_inside_body, candle_patterns.inside_colour). */
+function ColourInside({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const tf = Number(form.pattern_tf ?? 1) || 1;
+  const size = Number(form.colour_inside_minutes ?? 0) || 0;
+  const fits = (m: number) => m < tf && tf % m === 0;
+  const on = size > 0 && fits(size);
+  return (
+    <div className="mt-3 border-t border-white/10 pt-2">
+      <div className="text-xs uppercase tracking-wider text-slate-400">
+        When the smaller candles inside agree{isOwn("colour_inside_minutes") || isOwn("colour_inside_body") ? " (own)" : ""}{" "}
+        <span className="normal-case tracking-normal text-slate-500">({on ? `on · ${size} min` : "off"})</span>
+      </div>
+      <div className="mt-1 grid grid-cols-2 items-end gap-2">
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs text-slate-400">Inside candle size</span>
+          <select
+            value={String(size)}
+            onChange={(e) => set("colour_inside_minutes", e.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            <option value="0">Off</option>
+            {[1, 2, 3, 5, 10].map((m) => (
+              <option key={m} value={String(m)} disabled={!fits(m)}>
+                {m} min{fits(m) ? ` (${tf / m} inside)` : " (does not fit)"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={clsx("block text-sm text-slate-300", !on && "opacity-50")}>
+          <span className="text-xs text-slate-400">Smallest body then (% of price, 0 = any)</span>
+          <input
+            inputMode="decimal"
+            value={String(form.colour_inside_body ?? 0)}
+            onChange={(e) => set("colour_inside_body", e.target.value)}
+            disabled={!on}
+            aria-label="Smallest body when every inside candle agrees, % of price"
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          />
+        </label>
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        When every {size > 0 ? `${size}-minute` : "smaller"} candle inside the newest {tf}-minute colour candle is that colour (all
+        green or all red; Heikin Ashi colours when that switch is on, even while the {tf}-minute HA candle still reads the other
+        colour) and the real {tf}-minute candle closed that way too, that one candle is enough: no run of &quot;Candles in a
+        row&quot;, and this smallest body (on the real candle) instead of the sizes above. Mixed inside candles: the rules above decide as before.
+        Read for turns and for entries while flat.
+      </p>
     </div>
   );
 }

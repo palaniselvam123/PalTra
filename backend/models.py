@@ -582,6 +582,10 @@ class BotConfig(Base):
     colour_body_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Each candle of the colour run's own smallest body, oldest first, in the unit above ("0.1,0.5"; "" = off).
     colour_body_seq: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    # Inside candles (candle_patterns.inside_colour): when every candle of this size (1/2/3/5/10, 0 = off) inside the
+    # newest colour candle is its colour, that candle alone is enough, with its own smallest body in % (0 = any).
+    colour_inside_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    colour_inside_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Second candle (entry_mode NTH_CANDLE, nth_candle.py): which candle of the day (1-6), its size in
     # minutes (1/3/5/10/15; the bot's own candle in this mode), the smallest body in % of the close
     # (0 = any) and the least volume vs usual at its close (0 = off).
