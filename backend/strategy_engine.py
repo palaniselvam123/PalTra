@@ -4701,6 +4701,9 @@ class StrategyEngine:
             return
         self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
         await self._exit_now(cfg, self.ltp, small_candles.REASON)
+        if self.position is None and reverse_exit.on(cfg, small_candles.REASON):
+            # Reverse instead of only closing (reverse_exit.py `SMALL`): the other side at once, every check applying.
+            await self._reverse_after_exit(cfg, symbol, pos.signal_direction, small_candles.REASON)
 
     def _trade_cfg(self, cfg: BotConfig, symbol: str, groups: tuple[str, ...] | None = None) -> BotConfig:
         """The stock's settings, with the reversed trades' own settings on top while a reversed trade is open

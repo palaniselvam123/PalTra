@@ -219,7 +219,7 @@ FIELD_HELP = {
     "use_cvd": "entry check: cumulative delta (volume × body ÷ range, summed from 09:15) rose over cvd_lookback candles for a buy / fell for a sell",
     "cvd_lookback": "cumulative delta check: candles compared", "cvd_div_exit": "exit when price makes a new high (long) / low (short) over cvd_div_lookback candles but cumulative delta does not",
     "cvd_div_lookback": "cumulative delta divergence: candles before the new high / low",
-    "reverse_on_exit": "reverse instead of only closing: CSV of VTURN (SMA 9 V-turn exit), TURN (SMA 9 turn exit), CANDLES (counter-candle exit); after that exit the bot opens the other side at once if every check agrees",
+    "reverse_on_exit": "reverse instead of only closing: CSV of VTURN (SMA 9 V-turn exit), TURN (SMA 9 turn exit), CANDLES (counter-candle exit), SMALL (smaller-candle exit, small_exit_minutes); after that exit the bot opens the other side at once if every check agrees",
     "reverse_settings": "JSON of the reversed trades' own settings (entry checks use_vwap/use_rsi/rsi_*/use_adx_filter/adx_threshold/use_cvd/cvd_lookback, counter-candle exit counter_*, exits bb_exit/st_exit/vturn_exit/cross_exit, trailing stop tsl_*), used only for the reverse order and while that reversed trade is open; a field left out keeps the bot's value",
     "exit_join": "how exits combine: OR = any one exit closes the trade (default); AND = the exits ticked in exit_group must agree",
     "exit_group": "CSV of exits that must agree when exit_join is AND: CROSS, COLOUR, VTURN, TURN, BEND, DECEL, COUNTER, SMALL, XCANDLE, ST, BB, EMA, MACD, CVD, SLOW; stops, targets and the square-off always close on their own",

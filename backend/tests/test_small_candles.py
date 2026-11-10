@@ -97,8 +97,10 @@ def test_api_saves_the_small_candle_settings(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_engine_exits_a_15_minute_long_on_the_1_minute_turn(tmp_path, monkeypatch):
-    """A 15-minute bot holds a long; the 1-minute tape turns down: the trade closes with SMALL_CANDLE_EXIT."""
+@pytest.mark.parametrize("reverse", ["", "SMALL"])
+async def test_engine_exits_a_15_minute_long_on_the_1_minute_turn(tmp_path, monkeypatch, reverse):
+    """A 15-minute bot holds a long; the 1-minute tape turns down: the trade closes with SMALL_CANDLE_EXIT, and with
+    `reverse_on_exit` SMALL the other side is asked for at once (reverse_exit.py)."""
     import datetime as dt
     from zoneinfo import ZoneInfo
 
@@ -121,6 +123,7 @@ async def test_engine_exits_a_15_minute_long_on_the_1_minute_turn(tmp_path, monk
         row = db.get(BotConfig, cfg.id)
         row.candle_minutes, row.small_exit_minutes, row.small_exit_slope, row.sma_fast, row.sma_slow = 15, "1", False, 2, 3
         row.trade_symbols = "ACME"
+        row.reverse_on_exit = reverse
         db.commit()
     cfg = eng.load_config()
     ist = ZoneInfo("Asia/Kolkata")
@@ -141,7 +144,14 @@ async def test_engine_exits_a_15_minute_long_on_the_1_minute_turn(tmp_path, monk
         closed.append((cfg_.symbol, price, reason))
         eng.position = None
 
+    reversed_: list[tuple] = []
+
+    async def fake_reverse(cfg_, symbol, side, reason):
+        reversed_.append((symbol, side, reason))
+
     monkeypatch.setattr(eng, "_exit_now", fake_exit)
+    monkeypatch.setattr(eng, "_reverse_after_exit", fake_reverse)
     await eng._watch_small_candles(_cfg_for(cfg, "ACME"))
     assert closed == [("ACME", 97.0, small_candles.REASON)]
+    assert reversed_ == ([("ACME", "LONG", small_candles.REASON)] if reverse else [])
     database.reset_engine()

@@ -205,7 +205,7 @@ export type SmaConfig = {
   cvd_lookback?: number;
   cvd_div_exit?: boolean;
   cvd_div_lookback?: number;
-  /** Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES, "" = off. */
+  /** Reverse instead of only closing (reverse_exit.py): CSV of VTURN / TURN / CANDLES / SMALL, "" = off. */
   reverse_on_exit?: string;
   reverse_colour_exit?: boolean;
   /** Reversed trades' own entry checks / exits / stop (backend reverse_exit.FIELDS); {} = the bot's own. */

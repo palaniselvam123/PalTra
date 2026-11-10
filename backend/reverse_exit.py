@@ -1,6 +1,6 @@
 """Reverse instead of only closing (reverse_exit.py), and the manual Reverse button.
 
-**Setting** (`reverse_on_exit`, CSV of `VTURN` / `TURN` / `CANDLES`, "" = off by default; per bot and per stock, PAPER
+**Setting** (`reverse_on_exit`, CSV of `VTURN` / `TURN` / `CANDLES` / `SMALL`, "" = off by default; per bot and per stock, PAPER
 and LIVE, replays too). Some exits only close the trade. With a key ticked, the exit closes the trade as before and the
 bot then asks for the other side at once through `apply_signal` (entry reason `EXIT_REVERSE`, alert off), so every entry
 check, the stop, flip, market hours, the cut-off, the caps, the loss lock and one LIVE bot per stock still apply:
@@ -8,6 +8,7 @@ check, the stop, flip, market hours, the cut-off, the caps, the loss lock and on
 * `VTURN`   – the SMA 9 V-turn exit (`SMA9_VTURN`, slope_exit.py)
 * `TURN`    – the SMA 9 turn exit (`SMA9_TURN`, slope_exit.py)
 * `CANDLES` – the counter-candle exit (`COUNTER_CANDLES`, counter_candles.py)
+* `SMALL`   – the smaller-candle exit (`SMALL_CANDLE_EXIT`, small_candles.py: "Watch smaller candles while in a trade")
 
 The other side is the opposite of the closed trade's signal side, so a flipped stock stays flipped. A refusal leaves
 the stock flat; the bot's own signals take over from there.
@@ -41,6 +42,7 @@ KEYS: dict[str, str] = {
     "VTURN": "SMA9_VTURN",
     "TURN": "SMA9_TURN",
     "CANDLES": "COUNTER_CANDLES",
+    "SMALL": "SMALL_CANDLE_EXIT",
 }
 ENTRY_REASON = "EXIT_REVERSE"
 MANUAL_REASON = "MANUAL_REVERSE"
