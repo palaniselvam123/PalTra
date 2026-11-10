@@ -2188,6 +2188,20 @@ class StrategyEngine:
             self._signals[symbol] = text
             self.last_signal = text
             return text
+        if pos is not None and recovery.on(cfg):
+            # Recovery hold in candle-colour mode (recovery.py): a turn against a losing (or flat) trade holds it for its
+            # recovery, judged on the colour candles; a winner turns as usual.
+            if pos.recovery_loss is not None:
+                text = f"{symbol} holding {pos.direction} — recovery hold since the earlier colour turn ({call.note})"
+                self._signals[symbol] = text
+                return text
+            loss = recovery.loss_per_share(pos.direction, pos.entry_price, self._exit_price(symbol, pos))
+            if loss >= 0:
+                self._focus = symbol
+                text = f"{symbol} {self._enter_recovery(pos, cfg, max(loss, 0.0), bar=_closed_bar_ts(self._recovery_frame(symbol, cfg)))} ({call.note})"
+                self._signals[symbol] = text
+                self.last_signal = text
+                return text
         if pos is not None:
             self._focus = symbol
             await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN", gate=False)
@@ -2801,11 +2815,11 @@ class StrategyEngine:
             f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
         )
 
-    def _enter_recovery(self, pos: OpenPosition, cfg: BotConfig, loss: float) -> str:
-        """The adverse cross came while the trade was losing: hold it for its recovery (recovery.py)."""
+    def _enter_recovery(self, pos: OpenPosition, cfg: BotConfig, loss: float, bar: int | None = None) -> str:
+        """The adverse cross (or colour turn) came while the trade was losing: hold it for its recovery (recovery.py)."""
         symbol = (cfg.symbol or "").upper()
         pos.recovery_loss = round(loss, 4)
-        pos.recovery_bar = _closed_bar_ts(self._frames.get(symbol))
+        pos.recovery_bar = bar if bar is not None else _closed_bar_ts(self._frames.get(symbol))
         pos.rec_bar = pos.recovery_bar
         # Saved so a restart keeps the hold and its emergency floor.
         with session_factory()() as db:
@@ -2814,10 +2828,25 @@ class StrategyEngine:
                 row.recovery_loss = pos.recovery_loss
                 row.recovery_bar = pos.recovery_bar
                 db.commit()
+        where = "the colour turn" if bar is not None else "the cross"
         return (
-            f"holding {pos.direction} — recovery hold: loss {loss:.2f} a share at the cross; waits up to "
+            f"holding {pos.direction} — recovery hold: loss {loss:.2f} a share at {where}; waits up to "
             f"{recovery.max_candles(cfg)} candles for the price to come back"
         )
+
+    def _recovery_frame(self, symbol: str, cfg: BotConfig) -> pd.DataFrame | None:
+        """The candles the recovery hold is judged on: the bot's own, or in candle-colour mode (whose own candle is
+        1 minute) the colour candles of `pattern_tf` minutes from 09:15, the forming one last."""
+        frame = self._frames.get(symbol)
+        if frame is None or not uses_colour(cfg):
+            return frame
+        tf = int(pattern_setting(cfg, "pattern_tf") or 1)
+        return resample(frame, tf) if tf > 1 else frame
+
+    def _recovery_minutes(self, symbol: str, cfg: BotConfig) -> int:
+        if uses_colour(cfg):
+            return int(pattern_setting(cfg, "pattern_tf") or 1)
+        return candle_minutes(cfg, stock_overrides(cfg, symbol))
 
     async def _watch_slow_sma(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit on a close beyond the slow SMA against the trade (recovery.py)."""
@@ -2861,7 +2890,7 @@ class StrategyEngine:
             self._signals[symbol] = f"{symbol} recovery hold closed at the {_entry_cutoff(cfg).strftime('%H:%M')} cut-off"
             await self._exit_now(cfg, self.ltp, recovery.CUTOFF_EXIT)
             return
-        frame = self._frames.get(symbol)
+        frame = self._recovery_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.rec_bar == closed_ts:
             return
@@ -2870,7 +2899,7 @@ class StrategyEngine:
         pos.rec_bar = closed_ts
         enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         bar = enriched.iloc[-2]
-        span = candle_minutes(cfg, stock_overrides(cfg, symbol)) * 60
+        span = self._recovery_minutes(symbol, cfg) * 60
         held = int((closed_ts - pos.recovery_bar) // span) if pos.recovery_bar is not None else 1
         verdict, note = recovery.judge(
             pos.direction,
