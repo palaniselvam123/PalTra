@@ -659,6 +659,11 @@ run: <td className="px-2 py-2 align-top">
                           {shortDate(run.start_date)}
                           {run.end_date !== run.start_date ? ` → ${shortDate(run.end_date)}` : ""}
                         </div>
+                        {run.created_at ? (
+                          <div className="text-slate-500" title="When this backtest was started (IST)">
+                            run {runAt(run.created_at)}
+                          </div>
+                        ) : null}
                         <button
                           type="button"
                           aria-expanded={on}
@@ -968,7 +973,7 @@ function RunDetailBody({
           <span className="ml-2 font-normal text-slate-400">
             {subheading ??
               (run.start_date
-                ? `${dayLabel(run.start_date)}${run.end_date !== run.start_date ? ` → ${dayLabel(run.end_date)}` : ""} · start ${run.start_time}`
+                ? `${dayLabel(run.start_date)}${run.end_date !== run.start_date ? ` → ${dayLabel(run.end_date)}` : ""} · start ${run.start_time}${run.created_at ? ` · run ${runAt(run.created_at)} IST` : ""}`
                 : "")}
           </span>
         </h3>
@@ -1321,4 +1326,12 @@ function PickList({ pick }: { pick: ScalpPickInfo }) {
       )}
     </div>
   );
+}
+
+/** When a backtest was started: the server saves it in IST without a zone ("2026-11-10T18:02:11"). */
+function runAt(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(m[3])} ${months[Number(m[2]) - 1] ?? m[2]}, ${m[4]}:${m[5]}`;
 }
