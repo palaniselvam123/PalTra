@@ -302,3 +302,27 @@ def test_api_saves_the_inside_candle_settings(tmp_path, monkeypatch):
         assert client.put("/api/config", json={"colour_inside_minutes": 4}).status_code == 422
         assert client.put("/api/config", json={"colour_inside_body": 3}).status_code == 422
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+async def test_recovery_hold_in_colour_mode(db):  # noqa: F811
+    """Candle-colour mode with recovery hold: a turn against a losing trade holds it, judged on the colour candles,
+    and it closes as a recovery target once the price comes back; a winner still turns as usual."""
+    from sma_research.replayer import replay_symbol
+
+    up = [(1000.0 + 0.1 * k, 1000.1 + 0.1 * k) for k in range(5)]  # 09:45-09:49 green: buy at 09:50 (~1000.5)
+    down = [(1000.5 - 0.1 * k, 1000.4 - 0.1 * k) for k in range(5)]  # 09:50-09:54 red: the long is losing
+    back = [(1000.0 + 0.1 * k, 1000.1 + 0.1 * k) for k in range(5)]  # 09:55-09:59 green: back to the entry
+    day2 = _quiet(30) + up + down + back + _quiet(330, 1000.5)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, day2))
+    base = dict(entry_mode="COLOUR", pattern_tf=5, qty=1, use_stop=False)
+
+    plain = await replay_symbol(frame, "COL", [DAY], _settings(db, **base))
+    assert plain[0]["exit_reason"] == "COLOUR_TURN" and plain[0]["exit_time"].strftime("%H:%M") == "09:55"
+
+    held = await replay_symbol(frame, "COL", [DAY], _settings(db, **base, recovery_hold=True))
+    first = held[0]
+    assert first["direction"] == "LONG" and first["entry_time"].strftime("%H:%M") == "09:50"
+    # Not closed by the red 5-minute candle: held, then closed when the green one brought the price back.
+    assert first["exit_reason"] == "RECOVERY_TARGET_HIT", [(t["exit_reason"], t["exit_time"]) for t in held]
+    assert first["exit_time"].strftime("%H:%M") == "10:00"

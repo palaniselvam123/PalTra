@@ -832,7 +832,11 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   is on, `_apply_locked`; gap mode's `_close_on_cross` and candle patterns are not covered): on an opposite cross a
   trade in profit closes as `PROFITABLE_TREND_EXHAUSTION` and reverses as usual; one at a loss (or flat) is held
   (`_enter_recovery`: `OpenPosition.recovery_loss` per share and `recovery_bar`, saved on `TradeLog.recovery_loss` /
-  `recovery_bar` and restored after a restart). `_watch_recovery`, once per closed candle, runs `recovery.judge`:
+  `recovery_bar` and restored after a restart). **Candle-colour mode too** (`entry_mode = "COLOUR"`): in
+  `StrategyEngine._colour_minute` a colour turn against a losing or flat trade enters the hold instead of closing and
+  reversing (a winner turns as usual, `COLOUR_TURN`; a turn while held only holds), and `_watch_recovery` judges it on the
+  colour candles of `pattern_tf` minutes (`_recovery_frame` / `_recovery_minutes`, the bot's own candle being 1 minute in
+  that mode), so the target, emergency floors, candle count and hand-off to Bot 2 work there as on a cross. `_watch_recovery`, once per closed candle, runs `recovery.judge`:
   loss within `recovery_tolerance_pct` (0.15) % of entry or the candle touched the slow SMA → `RECOVERY_TARGET_HIT`;
   loss ≥ `recovery_emergency_mult` (1.5) × the loss at the cross, ≥ `recovery_atr_mult` (2.5) × ATR, or
   `recovery_max_candles` (6) candles → `EMERGENCY_RECOVERY_ABORT` and the stock is blocked on that bot for the day

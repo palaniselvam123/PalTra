@@ -12,7 +12,9 @@ A trade in recovery hold is judged by the recovery rules instead.
 
 **Recovery hold** (`recovery_hold`, needs the SMA cross exit on): on an opposite SMA
 cross, a trade in profit closes at once (`PROFITABLE_TREND_EXHAUSTION`) and the bot
-reverses as usual. A trade at a loss is not closed: it goes into recovery hold with the
+reverses as usual. In candle-colour mode (`entry_mode = "COLOUR"`) the colour turn plays the
+cross's part: a turn against a winner closes and reverses as usual (`COLOUR_TURN`), one against a
+losing or flat trade holds it, and the rules below are read on the colour candles (`pattern_tf`). A trade at a loss is not closed: it goes into recovery hold with the
 loss at the cross kept as its reference. On each candle close after that, in order:
 
 1. Recovery target (`RECOVERY_TARGET_HIT`): the loss has shrunk to `recovery_tolerance_pct`

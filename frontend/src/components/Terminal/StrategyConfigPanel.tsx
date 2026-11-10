@@ -2909,7 +2909,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Trend defence and recovery (for the trend bot)
             <InfoTip label="About trend defence and recovery">
               Recovery hold (needs the SMA cross exit on): on an opposite cross, a trade in profit closes at once and the bot
-              reverses as usual; a trade at a loss is held instead. Each candle close after that, it closes as a recovery when
+              reverses as usual; a trade at a loss is held instead. In candle-colour entry mode the colour turn plays the
+              cross&apos;s part: a turn against a losing trade holds it, and the rules below are read on the colour candles
+              (e.g. 15-minute ones). Each candle close after that, it closes as a recovery when
               the loss is back within the target % of the entry or the price comes back to the slow SMA, and then (if ticked)
               the stock moves to Bot 2: flipped, SMA gap mode in at ±0.119 % and out at ±0.003 % with the fade confirmed by a
               close past the slow SMA, VWAP check, RSI buy 40–70 / sell 30–60, and the trend breakout back to Bot 3; Bot 2 waits
@@ -2929,7 +2931,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("recovery_hold") && <OwnTag />}
-            Recovery hold: on an opposite cross, close a winner, hold a loser for its recovery
+            Recovery hold: on an opposite cross (or colour turn), close a winner, hold a loser for its recovery
           </label>
           <div className="mt-2 grid grid-cols-2 items-end gap-2">
             <Field
