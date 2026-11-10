@@ -64,6 +64,10 @@ export type SmaConfig = {
   colour_body_by_tf?: string;
   /** Each candle of the colour run's own smallest body, oldest first, in colour_body_unit ("0.1,0.5"; "" = off). */
   colour_body_seq?: string;
+  /** Inside candles agree (candle_patterns.inside_colour): size in minutes, 0 = off. */
+  colour_inside_minutes?: 0 | 1 | 2 | 3 | 5 | 10;
+  /** Smallest body (% of price) for a colour candle whose inside candles all agree; 0 = any. */
+  colour_inside_body?: number;
   /** Smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR. */
   colour_body_atr?: number;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */

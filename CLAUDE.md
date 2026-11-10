@@ -419,6 +419,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   turns the trade, a big then a small one is held ("candle 2 of 2 body … under its …"); entries while flat read it too.
   Settings: `StrategyConfigPanel.ColourBodySize` (unit switch, a box per size, the picked size ticked; `ColourBodySeq`, one
   box per candle in a row).
+  **When the smaller candles inside agree** (`colour_inside_minutes` 1/2/3/5/10 dividing `pattern_tf`, 0 = off;
+  `colour_inside_body` % of the close, 0 = any; per bot and per stock, PAPER and LIVE, replays too; `candle_patterns.
+  inside_colour`): when every candle of that size inside the newest colour candle is one colour (Heikin Ashi colours with
+  `ha_colours`; they set the colour even while the bigger HA candle still reads the other one) and the real colour candle
+  closed that way, that one candle is enough for an entry or a turn (no run of `colour_count`) with this smallest body
+  (on the real candle) instead of the usual sizes; mixed inside candles leave the normal rule to decide. Settings: `StrategyConfigPanel.ColourInside`.
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.

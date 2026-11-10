@@ -187,6 +187,8 @@ FIELD_HELP = {
     "colour_count": "candle colour: candles of one colour in a row needed to enter or turn (1-5)",
     "colour_min_body": "candle colour: smallest body in % of the price that counts as a colour (0 = any)",
     "colour_body_unit": "candle colour: smallest body set in PCT (per candle size) or ATR (x the colour candles' ATR)",
+    "colour_inside_minutes": "candle colour: inside candles size (1/2/3/5/10, 0 = off); when every candle of that size inside the newest colour candle is its colour, that one candle is enough (no run of colour_count) with colour_inside_body as its smallest body",
+    "colour_inside_body": "candle colour: smallest body in % of the close for a colour candle whose inside candles all agree (0 = any body)",
     "colour_body_seq": "candle colour: each candle of the run's own smallest body, oldest first, in colour_body_unit (% or × ATR), e.g. '0.1,0.5' = 1st ≥ 0.1, 2nd ≥ 0.5; blank place = the usual",
     "colour_body_by_tf": "candle colour: smallest body % per colour candle size, e.g. '5:0.05,15:0.15' (others use colour_min_body)",
     "colour_body_atr": "candle colour: smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR",

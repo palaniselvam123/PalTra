@@ -38,6 +38,8 @@ export const SETTING_LABELS: Record<string, string> = {
   colour_min_body: "candle colour: smallest body (%)",
   colour_body_unit: "candle colour: smallest body in",
   colour_body_by_tf: "candle colour: smallest body per candle size (%)",
+  colour_inside_minutes: "candle colour: inside candle size (all agree = one candle is enough)",
+  colour_inside_body: "candle colour: smallest body when the inside candles agree (%)",
   colour_body_seq: "candle colour: each candle's own smallest body (oldest first)",
   colour_body_atr: "candle colour: smallest body (× ATR)",
   nth_candle_no: "second candle: which candle of the day",

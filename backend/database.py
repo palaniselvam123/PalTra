@@ -115,6 +115,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "colour_body_by_tf": "VARCHAR DEFAULT ''",
             "colour_body_atr": "FLOAT DEFAULT 0",
             "colour_body_seq": "VARCHAR DEFAULT ''",
+            "colour_inside_minutes": "INTEGER DEFAULT 0",
+            "colour_inside_body": "FLOAT DEFAULT 0",
             "nth_candle_no": "INTEGER DEFAULT 2",
             "nth_candle_minutes": "INTEGER DEFAULT 5",
             "nth_min_body_pct": "FLOAT DEFAULT 0",

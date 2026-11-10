@@ -231,3 +231,74 @@ def test_api_saves_the_body_per_candle(tmp_path, monkeypatch):
         assert ok.status_code == 200 and ok.json()["colour_body_seq"] == "0.1,0.5"
         assert client.get("/api/config").json()["trading_mode"] == "PAPER"
     database.reset_engine()
+
+
+def _minutes(start: float, steps: list[float]) -> list[tuple[float, float]]:
+    """1-minute candles, each opening at the last close and moving by its step."""
+    out, price = [], start
+    for step in steps:
+        out.append((price, price + step))
+        price += step
+    return out
+
+
+def test_inside_candles_agree_make_one_candle_enough():
+    from candle_patterns import inside_minutes
+
+    # 09:15-09:45 quiet, 09:45-10:00 a red 15-minute candle, 10:00-10:15 a green one, then the 10:15 minute forming.
+    red = _minutes(1000.0, [-0.1] * 15)
+    all_green = _minutes(998.5, [0.1] * 15)  # its three 5-minute candles are all green
+    mixed = _minutes(998.5, [0.2] * 5 + [-0.1] * 5 + [0.2] * 5)  # green, red, green inside: still green overall
+
+    def frame(last):
+        return pd.DataFrame(_rows(DAY, _quiet(30) + red + last + [(last[-1][1], last[-1][1])]))
+
+    base = dict(entry_mode="COLOUR", pattern_tf=15, colour_count=2)
+    # Without the rule: one green after a red is not 2 in a row, so the trade is held.
+    assert colour_call(frame(all_green), _cfg(**base)).side is None
+    on = _cfg(**base, colour_inside_minutes=5)
+    call = colour_call(frame(all_green), on)
+    assert call.side == "LONG" and "every 5-minute candle inside green" in call.note
+    # Mixed inside candles: the normal rule (2 in a row) still decides.
+    assert colour_call(frame(mixed), on).side is None
+    # Its own smallest body: 1.5 on ~1000 is 0.15 %; 0.1 % passes, 0.5 % holds.
+    assert colour_call(frame(all_green), _cfg(**base, colour_inside_minutes=5, colour_inside_body=0.1)).side == "LONG"
+    held = colour_call(frame(all_green), _cfg(**base, colour_inside_minutes=5, colour_inside_body=0.5))
+    assert held.side is None and "under 0.5%" in held.note
+    # Heikin Ashi: the inside candles are read in HA colours and set the colour, even while the 15-minute HA candle is
+    # still red after the fall (the owner's ATHERENERG 11:00 candle): all three 5-minute HA candles green turn it.
+    ha_cfg = _cfg(**base, colour_inside_minutes=5, ha_colours=True)
+    from candle_patterns import inside_colour
+
+    late_green = _minutes(998.5, [0.4] * 15)
+    rows = pd.DataFrame(_rows(DAY, _quiet(30) + red + late_green))
+    start = int(rows["ts"].iloc[45])
+    got = inside_colour(rows, start, 15, 5, ha_cfg)
+    call = colour_call(frame(late_green), ha_cfg)
+    assert got == "G" and call.side == "LONG" and "inside green" in call.note
+    # A size that does not fit inside the colour candle is off.
+    assert inside_minutes(_cfg(pattern_tf=15, colour_inside_minutes=10), 15) == 0
+    assert inside_minutes(_cfg(pattern_tf=15, colour_inside_minutes=15), 15) == 0
+    assert inside_minutes(_cfg(pattern_tf=15, colour_inside_minutes=3), 15) == 3
+
+
+def test_api_saves_the_inside_candle_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert "colour_inside_minutes" in STOCK_FIELDS and "colour_inside_body" in STOCK_FIELDS
+    with TestClient(app) as client:
+        got = client.get("/api/config").json()
+        assert got["colour_inside_minutes"] == 0 and got["colour_inside_body"] == 0
+        ok = client.put("/api/config", json={"colour_inside_minutes": 5, "colour_inside_body": 0.05})
+        assert ok.status_code == 200 and ok.json()["colour_inside_minutes"] == 5 and ok.json()["colour_inside_body"] == 0.05
+        assert client.put("/api/config", json={"colour_inside_minutes": 4}).status_code == 422
+        assert client.put("/api/config", json={"colour_inside_body": 3}).status_code == 422
+    database.reset_engine()
