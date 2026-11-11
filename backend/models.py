@@ -586,6 +586,10 @@ class BotConfig(Base):
     # newest colour candle is its colour, that candle alone is enough, with its own smallest body in % (0 = any).
     colour_inside_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     colour_inside_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Candle-colour entries wait for a pullback (colour_pull.py): OFF | HALF | LOW | SMA9.
+    colour_pull: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
+    colour_pull_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    colour_pull_market: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Second candle (entry_mode NTH_CANDLE, nth_candle.py): which candle of the day (1-6), its size in
     # minutes (1/3/5/10/15; the bot's own candle in this mode), the smallest body in % of the close
     # (0 = any) and the least volume vs usual at its close (0 = off).

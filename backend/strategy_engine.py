@@ -89,6 +89,7 @@ import turn_entry
 import high52
 import level_check
 import day_extreme
+import colour_pull
 import recovery
 import pivots
 import breakout
@@ -203,6 +204,8 @@ class PullbackOrder:
     confirm_pct: float = 0.0
     note: str = "tall candle"
     why: str = "SMA_CROSS"  # entry reason of the signal that armed it (ENTRY_REASONS)
+    # Colour pullback (colour_pull.py): once the wait is over without the price coming back, buy at the market.
+    market_after: bool = False
 
 
 @dataclass
@@ -374,7 +377,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses",
-    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "candle_minutes",
+    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -2183,6 +2186,13 @@ class StrategyEngine:
         """
         call = colour_call(frame, cfg)
         pos = self.positions.get(symbol)
+        waiting = self._pullback.get(symbol)
+        if pos is None and waiting is not None and waiting.note == colour_pull.NOTE and call.side in (None, waiting.direction):
+            # A colour entry already waits for its pullback (colour_pull.py): keep its level and its wait.
+            side = "BUY" if (waiting.side or waiting.direction) == "LONG" else "SELL"
+            text = f"{symbol} waiting to {side} at {waiting.limit:.2f} — colour pullback ({call.note})"
+            self._signals[symbol] = text
+            return text
         if call.side is None or (pos is not None and pos.signal_direction == call.side):
             text = f"{symbol} {'holding' if pos is not None else 'no order'} — {call.note}"
             self._signals[symbol] = text
@@ -2546,8 +2556,29 @@ class StrategyEngine:
         if pullback_at is not None and not flips_orders(cfg):
             pullback = pullback_at
         elif per_candle(cfg):
-            # Candle patterns / colour order at the start of the next candle: no waiting entry.
-            pass
+            # Candle patterns / colour order at the start of the next candle: no waiting entry, unless the colour entry
+            # waits for a pullback inside the colour candle that confirmed it (colour_pull.py).
+            if uses_colour(cfg) and colour_pull.on(cfg):
+                real = _opposite(want) if flips_orders(cfg) else want
+                tf = int(pattern_setting(cfg, "pattern_tf") or 1)
+                found = colour_pull.level(self._exit_frame(self._focus, cfg), real, cfg, int(cfg.sma_fast))
+                if found is not None:
+                    span = tf * 60
+                    pullback = PullbackOrder(
+                        direction=want,
+                        limit=round_price(cfg.symbol, found[0]),
+                        cross_price=cross_price,
+                        atr=atr,
+                        # Expiry is judged on the 1-minute frame: anchored on the signal candle's last minute, so
+                        # `candles` more colour candles must close before the wait is over.
+                        signal_ts=found[1] + span - 60,
+                        span_sec=span,
+                        candles=colour_pull.candles(cfg),
+                        side=real,
+                        note=colour_pull.NOTE,
+                        why=why,
+                        market_after=colour_pull.market_after(cfg),
+                    )
         elif extreme_entry.applies(cfg):
             # Candle-extreme limit (extreme_entry.py), judged on the side the real order goes.
             real = _opposite(want) if flips_orders(cfg) else want
@@ -2810,9 +2841,10 @@ class StrategyEngine:
                 f"limit {side} at {order.limit:.2f} — {order.note}; waiting up to {order.candles} "
                 f"candle{'s' if order.candles != 1 else ''}, cancelled {beyond} {order.invalid_at:.2f}"
             )
+        then = ", then at the market" if order.market_after else ""
         return (
             f"pullback {side} at {order.limit:.2f} — {order.note}; "
-            f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back"
+            f"waiting up to {order.candles} candle{'s' if order.candles != 1 else ''} for the price to come back{then}"
         )
 
     def _enter_recovery(self, pos: OpenPosition, cfg: BotConfig, loss: float, bar: int | None = None) -> str:
@@ -3272,6 +3304,7 @@ class StrategyEngine:
             price = self._ltps.get(symbol)
             closed_ts = _closed_bar_ts(frame)
             why = None
+            expired = False
             if symbol in self.positions:
                 why = "already in a trade"
             elif not self._still_armed(symbol):
@@ -3292,7 +3325,9 @@ class StrategyEngine:
                 )
             ):
                 why = f"{extreme_entry.SMA_CROSS}: the SMAs crossed against the {order.direction.lower()} signal"
-            elif tall_pullback.expired(order.signal_ts, closed_ts, order.span_sec, order.candles):
+            elif (expired := tall_pullback.expired(order.signal_ts, closed_ts, order.span_sec, order.candles)) and not (
+                order.market_after and price is not None and price > 0
+            ):
                 why = (
                     f"no candle went the trade's way within {order.candles} candle(s)"
                     if order.confirm
@@ -3307,7 +3342,10 @@ class StrategyEngine:
                 label = "entry-candle" if order.confirm else "limit" if order.invalid_at is not None else "pullback"
                 self._signals[symbol] = f"{label} {side} {symbol} cancelled — {why}"
                 continue
-            if order.confirm:
+            at_market = bool(expired and order.market_after)
+            if at_market:
+                pass  # the wait is over without a pullback: buy / sell at the market now (colour_pull_market)
+            elif order.confirm:
                 # The level follows the forming candle: its open ± the margin, the trade's way.
                 forming_open = _finite(frame.iloc[-1].get("open")) if frame is not None and len(frame) else None
                 if forming_open is not None:
@@ -3324,11 +3362,21 @@ class StrategyEngine:
                 self.ltp = float(price)
                 self.inflight = "TRANSIT"
                 try:
-                    how = "CANDLE_CONFIRM" if order.confirm else "EXTREME_LIMIT" if order.invalid_at is not None else "PULLBACK"
+                    how = (
+                        colour_pull.MARKET_TAG if at_market
+                        else "CANDLE_CONFIRM" if order.confirm
+                        else "EXTREME_LIMIT" if order.invalid_at is not None
+                        else "PULLBACK"
+                    )
                     await self._open(
                         order.direction, order.cross_price, order.atr, symbol_cfg, now, why=f"{order.why}:{how}"
                     )
-                    if order.confirm:
+                    if at_market:
+                        result = (
+                            f"opened {real} at the market {float(price):.2f} — the price did not come back to "
+                            f"{order.limit:.2f} within {order.candles} candle(s)"
+                        )
+                    elif order.confirm:
                         colour = "green" if real == "LONG" else "red"
                         result = f"opened {real} — the entry candle turned {colour} ({float(price):.2f} past {order.limit:.2f})"
                     else:

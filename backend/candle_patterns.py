@@ -68,6 +68,10 @@ DEFAULTS = {
     "colour_body_seq": "",
     "colour_inside_minutes": 0,
     "colour_inside_body": 0.0,
+    # Colour entries wait for a pullback (colour_pull.py).
+    "colour_pull": "OFF",
+    "colour_pull_candles": 1,
+    "colour_pull_market": False,
 }
 
 # Inside candles (colour_inside_minutes): sizes read inside one colour candle.

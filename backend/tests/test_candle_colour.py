@@ -349,3 +349,65 @@ async def test_exits_read_the_colour_candles_in_colour_mode(db):  # noqa: F811
     first = trades[0]
     assert first["exit_reason"] == "COUNTER_CANDLES", [(t["exit_reason"], t["exit_time"]) for t in trades]
     assert first["exit_time"].strftime("%H:%M") == "10:30"
+
+
+@pytest.mark.asyncio
+async def test_colour_entry_waits_for_a_pullback(db):  # noqa: F811
+    """colour_pull (colour_pull.py): the colour buy waits inside the candle that confirmed it instead of buying at its
+    close; no pullback = no trade, or with colour_pull_market a buy at the market once the wait is over."""
+    from sma_research.replayer import replay_symbol
+
+    up = _minutes(1000.0, [0.02] * 25)  # 09:45-10:09: five green 5-minute candles; the last one 1000.35-1000.55
+    base = dict(entry_mode="COLOUR", pattern_tf=5, colour_count=5, qty=1, use_stop=False)
+
+    def day(after):
+        return pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + up + after))
+
+    # No pullback setting: buys at the market at 10:10, at the top of the move.
+    rising = _minutes(1000.5, [0.05] * 10) + _quiet(310, 1001.0)
+    plain = await replay_symbol(day(rising), "COL", [DAY], _settings(db, **base))
+    assert plain and plain[0]["entry_time"].strftime("%H:%M") == "10:10"
+
+    # Half-way back, and the price never comes back: no trade.
+    missed = await replay_symbol(day(rising), "COL", [DAY], _settings(db, **base, colour_pull="HALF"))
+    assert missed == [], [(t["entry_reason"], t["entry_time"]) for t in missed]
+
+    # The price dips back under the middle (1000.45): bought there, not at the top.
+    dip = _minutes(1000.5, [-0.04, -0.04, -0.04]) + _minutes(1000.38, [0.05] * 10) + _quiet(307, 1000.9)
+    filled = await replay_symbol(day(dip), "COL", [DAY], _settings(db, **base, colour_pull="HALF"))
+    assert filled and filled[0]["entry_reason"].endswith(":PULLBACK"), [(t["entry_reason"], t["entry_time"]) for t in filled]
+    assert filled[0]["entry_price"] <= 1000.45
+
+    # The candle's low (1000.35) is not reached by that dip: no trade.
+    low = await replay_symbol(day(dip), "COL", [DAY], _settings(db, **base, colour_pull="LOW"))
+    assert low == []
+
+    # No pullback within the 1 candle waited, buy at the market after the wait: 10:15.
+    late = await replay_symbol(
+        day(rising), "COL", [DAY], _settings(db, **base, colour_pull="HALF", colour_pull_market=True)
+    )
+    assert late and late[0]["entry_reason"].endswith(":MARKET_AFTER_WAIT"), [(t["entry_reason"], t["entry_time"]) for t in late]
+    assert late[0]["entry_time"].strftime("%H:%M") == "10:15"
+
+
+def test_api_saves_the_colour_pullback(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    from main import app
+    from strategy_engine import STOCK_FIELDS
+
+    assert {"colour_pull", "colour_pull_candles", "colour_pull_market"} <= set(STOCK_FIELDS)
+    with TestClient(app) as client:
+        got = client.get("/api/config").json()
+        assert got["colour_pull"] == "OFF" and got["colour_pull_candles"] == 1 and got["colour_pull_market"] is False
+        body = {"colour_pull": "SMA9", "colour_pull_candles": 2, "colour_pull_market": True}
+        ok = client.put("/api/config", json=body)
+        assert ok.status_code == 200 and all(ok.json()[k] == v for k, v in body.items())
+        assert client.put("/api/config", json={"colour_pull": "TOP"}).status_code == 422
+        assert client.put("/api/config", json={"colour_pull_candles": 4}).status_code == 422
+    database.reset_engine()
