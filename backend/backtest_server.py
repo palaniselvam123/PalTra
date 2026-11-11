@@ -14,10 +14,13 @@ never slows the bots. Same image; this role:
   (owner's choice): a start (deploy, restart, wake from idle) keeps this server's own saved settings
   unless ``auto_sync`` is on (off by default, ``backtest_server.json``, ``PUT /api/backtest/auto-sync``).
   Nothing is ever written back to the desk.
-* **Uses the desk's Groww session** for past candles (``remote_token``): the desk's access
-  token comes from ``GET /api/link/backtest/groww`` every ``TOKEN_EVERY_SEC`` and is kept in
-  memory only, never logged or saved. Logging in again with the same API key here could end
-  the desk's session, so this server never logs in to Groww itself.
+* **Uses its own Groww login** (the one saved on this server's Settings → Broker keys,
+  ``groww_client.desk_session_token``) for replays, scans and practice bots, so they never share
+  the desk's Groww rate limit. Only with no login saved here (or an expired one) does it borrow the
+  desk's session (``remote_token``): the desk's access token comes from
+  ``GET /api/link/backtest/groww`` every ``TOKEN_EVERY_SEC`` and is kept in memory only, never
+  logged or saved. It never logs in to Groww with the desk's API key (that could end the desk's
+  session): this server's key must be its own.
 * **Market hours only** (``market_hours_only``, off by default, saved next to the SMA DB): outside
   09:00 to ``stop_at`` (default 15:45) IST Mon-Fri, page requests no longer keep it up: once no
   backtest or scan is running for ``AFTER_HOURS_MIN`` (5) minutes it stops, so it is only billed in
@@ -291,7 +294,8 @@ def stop_now(reason: str) -> None:
 
 # Practice bots started here (Start bot on this server, main._start_backtest_bots): from then until the
 # process restarts, this server's quotes and candles use its OWN Groww login (groww_client.desk_session_token),
-# so the bots never count against the desk's Groww rate limit. Before that the replays borrow the desk's session.
+# so the bots never count against the desk's Groww rate limit. (Its own saved login is used first anyway; this
+# flag now only marks that the practice bots were started.)
 _own_login = False
 
 
@@ -315,10 +319,10 @@ def _own_saved_login() -> str:
 
 
 def _groww_note() -> str | None:
+    if _own_saved_login():
+        return None  # this server's own login is used; the desk's session is only the fallback
     if state.token or not state.token_error:
         return state.token_error
-    if _own_saved_login():
-        return "The desk has no Groww session today, so this server's own Groww login is used."
     return state.token_error + " Or log in here (Settings → Broker keys) to use this server's own login."
 
 

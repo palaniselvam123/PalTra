@@ -1570,15 +1570,14 @@ spinning top), body and range) / Matched / Call columns
   (`_start_bot` → `main._start_backtest_bots`) runs the bots on today's live prices, PAPER only, and is refused (409)
   until this server's own Groww login is saved (Settings → Broker keys, `groww_client._read_desk_token`); the first
   Start starts every bot's loop (bot 1 in `_bt_bot1_task`, bots 2-5 in `_bot_tasks`) and the fast-mover hand-off, and
-  calls `backtest_server.use_own_login`, after which `groww_client.desk_session_token` returns that own login, not the
-  desk's borrowed one, until the process restarts (replays then use it too), so the desk's Groww rate limit is never
-  used by them. No alert or call is sent (`StrategyEngine._alert` returns on `server_role.no_orders()`), and a running,
+  calls `backtest_server.use_own_login` (now only a marker: its own login is already used first, below), so the desk's
+  Groww rate limit is never used by them. No alert or call is sent (`StrategyEngine._alert` returns on `server_role.no_orders()`), and a running,
   paused or holding bot keeps the machine awake (`main._bot_running_here` busy check). **Scalp scans
   on demand** (`server_role.scans_enabled` is true here; no background most-active loop; the Trend quality auto re-scan,
   off by default, runs here too once turned on (`chop_autos.start_loop` in `_boot_backtest_server`), and while it or a
   scheduled Scan & arm preset is on the machine stays awake in market hours (`main._auto_scans_due` busy check)): they download with **this server's own Groww login** (`scan_session.OwnSession`, the token saved by its own
   Settings → Broker keys in its own trading.db via `groww_client._read_desk_token`; `main._scan_broker`), never the desk's
-  session the replays borrow, so a scan never shares the live bots' rate limit; without a login a scan says to log in here.
+  session, so a scan never shares the live bots' rate limit; without a login a scan says to log in here.
   Three scan workers (`CROSS_SCAN_CONCURRENCY` in `fly.backtest.toml`), and a running Cross / Trend quality / 09:30 pass keeps
   the machine awake like a playing replay (`backtest_server.add_busy_check`). The accuracy check runs here in market hours too
   (only the desk refuses it). Its key must not be the scanner server's: logging one key in on two servers can end the other's
@@ -1592,9 +1591,11 @@ spinning top), body and range) / Matched / Call columns
   (bots are PAPER); an arm waits for the start-up copy (`backtest_server.wait_first_sync`) and is remembered
   (`note_scanner_arm`, `backtest_server.json`), so the start-up copy keeps it, with its own source and per-stock settings,
   on top of the desk's Trade list while it is still armed here (`import_bot_settings(keep=)`); Sync from desk replaces
-  them (`clear_scanner_armed`). Past candles use the **desk's Groww session**: desk `GET /api/link/backtest/groww` every 10 min, memory only
-  (`remote_token`, read by `groww_client.desk_session_token` on this role); it never logs in to Groww itself, so it
-  cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
+  them (`clear_scanner_armed`). Replays (past candles) use **this server's own Groww login first** (owner's choice: `groww_client.desk_session_token`
+  reads the token saved by its own Settings → Broker keys, `_read_desk_token`), so backtests never share the desk's rate
+  limit; only with no login saved here (or an expired one) does it borrow the **desk's Groww session**: desk
+  `GET /api/link/backtest/groww` every 10 min, memory only (`remote_token`). It never logs in with the desk's API key, so
+  it cannot end the desk's session. Both link routes need `BACKTEST_LINK_TOKEN` (not the scanner's token), desk role only.
   **Market hours only** (`backtest_server.market_hours_only` / `stop_at`, off by default, saved in `backtest_server.json`;
   `PUT /api/backtest/hours`, the bar's "Market hours only, stop after"): outside 09:00 to `stop_at` (15:45) IST Mon-Fri
   (`after_hours`) page requests no longer keep it up; it stops once no backtest or scan has run for `AFTER_HOURS_MIN` (5)

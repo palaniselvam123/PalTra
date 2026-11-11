@@ -74,10 +74,12 @@ def test_desk_broker_never_orders_on_the_backtest_server(monkeypatch, backtest):
 
 
 def test_quotes_use_the_desk_session_from_the_link(monkeypatch, backtest):
-    from groww_client import desk_session_token
+    import groww_client
 
+    monkeypatch.setattr(groww_client, "_desk_token_cache", None)
+    monkeypatch.setattr(groww_client, "_read_desk_token", lambda: "")  # no login saved on this server
     backtest_server.state.token = "desk-session"
-    assert desk_session_token() == "desk-session"
+    assert groww_client.desk_session_token() == "desk-session"
     monkeypatch.setenv("PALTRA_ROLE", "desk")
     assert backtest_server.remote_token() == ""
 
@@ -90,9 +92,10 @@ def test_without_a_desk_session_its_own_saved_login_is_used(monkeypatch, backtes
     backtest_server.state.token = ""
     backtest_server.state.token_error = "The desk has no Groww session today: log in to Groww on the desk."
     assert groww_client.desk_session_token() == "own-login"
-    assert "this server's own Groww login is used" in backtest_server._groww_note()
+    assert backtest_server._groww_note() is None  # its own login is in use, nothing to warn about
     backtest_server.state.token = "desk-session"
-    assert groww_client.desk_session_token() == "desk-session"  # the desk's session still comes first
+    monkeypatch.setattr(groww_client, "_desk_token_cache", None)
+    assert groww_client.desk_session_token() == "own-login"  # its own login comes first, the desk's is the fallback
 
 
 # ---- idle stop ----
@@ -621,7 +624,7 @@ def test_first_start_switches_to_its_own_login_and_starts_the_loops(monkeypatch,
     monkeypatch.setattr(backtest_server, "_own_login", False)
     monkeypatch.setattr(groww_client, "_desk_token_cache", None)
     backtest_server.state.token = "DESK-TOKEN"
-    assert groww_client.desk_session_token() == "DESK-TOKEN"  # replays borrow the desk's session until then
+    assert groww_client.desk_session_token() == "OWN-TOKEN"  # its own saved login is used from the start
     started: list[str] = []
 
     async def fake_run(self=None):

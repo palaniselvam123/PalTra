@@ -153,23 +153,20 @@ def desk_session_token() -> str:
     invent a price. The decrypted value is never logged or returned over HTTP.
     """
     global _desk_token_cache
-    if server_role.is_backtest():
-        # The backtest server borrows the desk's session, fetched over its link (backtest_server.py), memory only,
-        # for past candles. Once practice bots are started here it uses its own login instead (the one saved on
-        # this server's Settings → Broker keys), so they never share the desk's Groww rate limit. When the desk has no
-        # session (not logged in today, or the link is down), this server's own saved login is used instead.
-        from backtest_server import own_login_on, remote_token
-
-        if not own_login_on():
-            borrowed = remote_token()
-            if borrowed:
-                return borrowed
     now = time.monotonic()
     if _desk_token_cache is not None and now - _desk_token_cache[0] < _DESK_TOKEN_TTL_SEC:
-        return _desk_token_cache[1]
-    token = _read_desk_token()
-    _desk_token_cache = (now, token)
-    return token
+        token = _desk_token_cache[1]
+    else:
+        token = _read_desk_token()
+        _desk_token_cache = (now, token)
+    if token or not server_role.is_backtest():
+        return token
+    # The backtest server uses its own login first (the one saved on this server's Settings → Broker keys), so its
+    # replays and scans never share the desk's Groww rate limit. Only with no saved login here (or an expired one)
+    # does it borrow the desk's session, fetched over its link (backtest_server.py), memory only, for past candles.
+    from backtest_server import remote_token
+
+    return remote_token()
 
 
 def _read_desk_token() -> str:
