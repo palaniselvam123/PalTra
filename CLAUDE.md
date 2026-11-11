@@ -1918,6 +1918,17 @@ spinning top), body and range) / Matched / Call columns
   with "Settings for" (shared / one stock, with an ⓘ), tags groups 1, 5, 6 "Start here" and 4, 7 "Advanced"
   (`GROUP_INTRO`), and shows a plain intro line inside each open group; the bot tabs show each bot's PAPER / LIVE chip and a
   running dot. Add a card by wrapping it in `SettingsCard` with a one-line `summary` and the explanation as `help`.
+- **What do you want to trade with?** (`components/Settings/StylePicker.tsx`, top of the strategy form; display only, never
+  changes or saves a setting): multi-select cards for the ways of trading (`STYLES`: SMA cross, SMA gap (band), Uptrend /
+  downtrend, Candle colour & patterns, Reversals (SMA 9 turn), Indicator checks, Several bots (hand-offs), Ask me first), each
+  with what it does, when it suits and an "in use" chip (`on(form)`). The form then shows only the basics (averages, candle
+  size, how a trade opens, stop-loss, size and times) plus the ticked styles: parts of `StrategyConfigPanel` are wrapped in
+  `<Only s="trend ind">` (shown while any listed style is ticked, `StyleCtx`; a `display: contents` wrapper, so layout is
+  untouched), and groups 4 / 7 and their chips hide with their style. Uncheck all, Tick what is in use (`detectStyles`),
+  Show every setting; kept per browser (`sma.settings.styles`; until chosen, the styles in use are ticked). A search shows
+  everything; a style that is on but hidden is named with "Show them", and "What's switched on" always lists it. **Ask the
+  assistant to set this up** opens the chat widget with the question typed in (`paltra:ask` window event, `ChatWidget`); the
+  assistant still only proposes. Add a setting to the form inside the matching `<Only>` (or leave it bare to always show).
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the

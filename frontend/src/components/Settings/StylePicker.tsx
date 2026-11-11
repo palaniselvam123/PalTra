@@ -1,0 +1,286 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import clsx from "clsx";
+import { Check, Eye, MessageCircle, Sparkles } from "lucide-react";
+import type { SmaConfig } from "@/lib/smaApi";
+
+/**
+ * "What do you trade with?": tick the ways of trading you use and the strategy form shows only their
+ * settings. Display only: it hides parts of the form, never changes or saves a setting. A setting that is
+ * on stays listed in "What's switched on" whatever is ticked here.
+ */
+
+export type StyleId = "sma" | "gap" | "trend" | "colour" | "turn" | "ind" | "bots" | "review";
+
+export type TradeStyle = {
+  id: StyleId;
+  title: string;
+  /** One plain line: what the bot does. */
+  what: string;
+  /** When it tends to suit. */
+  best: string;
+  /** What the form shows for it. */
+  shows: string;
+  /** Is any of its settings on in this form? */
+  on: (f: SmaConfig) => boolean;
+};
+
+const yes = (v: unknown) => v === true || v === "true";
+const num = (v: unknown) => Number(v ?? 0) || 0;
+const txt = (v: unknown) => String(v ?? "").trim().toUpperCase();
+const picked = (v: unknown, off = "OFF") => txt(v) !== "" && txt(v) !== off;
+
+export const STYLES: TradeStyle[] = [
+  {
+    id: "sma",
+    title: "SMA cross",
+    what: "Buy when the fast average crosses above the slow one, sell when it crosses below.",
+    best: "The base strategy. Works when a stock makes clean moves; loses in sideways chop.",
+    shows: "Late entry, ADX strength check, cross exit on another candle size, slow-SMA exit",
+    on: (f) => txt(f.entry_mode || "SMA") === "SMA",
+  },
+  {
+    id: "gap",
+    title: "SMA gap (band)",
+    what: "Wait until the two averages are a set distance apart before entering; leave when the gap fades.",
+    best: "Skips weak crosses. Suits choppy stocks where most crosses fail.",
+    shows: "SMA gap mode (entry and exit levels, fade rules), the gap range check",
+    on: (f) => yes(f.use_gap_mode) || yes(f.use_gap_long) || yes(f.use_gap_short),
+  },
+  {
+    id: "trend",
+    title: "Uptrend / downtrend",
+    what: "Ride a stock that is already trending up or down, without waiting for a fresh cross.",
+    best: "Strong one-way days and stocks picked from the Scalp page's strong-trend scans.",
+    shows: "Join the morning trend, always in a trade, Supertrend, EMA, 52-week high, price level, opening range, day high/low guard",
+    on: (f) =>
+      yes(f.join_trend) || yes(f.always_in) || yes(f.use_supertrend) || yes(f.st_exit) || yes(f.use_ema) || yes(f.ema_exit) ||
+      yes(f.use_high52) || yes(f.use_level) || yes(f.use_or_volume) || yes(f.use_or_vwap) || yes(f.use_or_spread) || yes(f.use_or_break) ||
+      yes(f.day_extreme_guard) || yes(f.tall_pullback),
+  },
+  {
+    id: "colour",
+    title: "Candle colour & patterns",
+    what: "Trade the candles themselves: green buys, red sells; or candle patterns; or the day's second candle.",
+    best: "Fast scalps on active stocks. Needs a body-size floor so tiny candles do not flip the trade.",
+    shows: "Candle direction check, Heikin Ashi colours, smaller-candle rules, counter candles, entry-candle check",
+    on: (f) =>
+      ["COLOUR", "PATTERN", "NTH_CANDLE"].includes(txt(f.entry_mode)) || yes(f.use_candle_dir) || yes(f.ha_colours) ||
+      txt(f.sc_minutes) !== "" || txt(f.small_exit_minutes) !== "" || num(f.counter_exit_count) > 0 || yes(f.entry_candle_confirm) || yes(f.extreme_entry),
+  },
+  {
+    id: "turn",
+    title: "Reversals (SMA 9 turn)",
+    what: "Act when the fast line bends or makes a V, before the averages actually cross.",
+    best: "Getting out (or in) early at turning points. More trades, more false alarms.",
+    shows: "SMA 9 turn entry and alert, slope / V-turn / deceleration exits, early reversal entry, reverse on exit",
+    on: (f) =>
+      yes(f.turn_entry) || yes(f.turn_alert) || yes(f.counter_entry) || yes(f.slope_exit) || yes(f.vturn_exit) || yes(f.decel_exit) ||
+      txt(f.reverse_on_exit) !== "",
+  },
+  {
+    id: "ind",
+    title: "Indicator checks",
+    what: "Extra yes / no checks before a trade: VWAP, RSI, MACD, Bollinger, volume, cumulative delta.",
+    best: "Filtering bad entries of any strategy above. Start with one or two; each one skips trades.",
+    shows: "VWAP, volume, RSI, Bollinger, MACD, CVD, EMA, Supertrend checks and their exits",
+    on: (f) =>
+      yes(f.use_vwap) || yes(f.use_volume) || yes(f.use_density) || yes(f.use_rsi) || yes(f.use_bollinger) || yes(f.use_macd) ||
+      yes(f.use_cvd) || yes(f.use_adx_filter) || picked(f.bb_exit) || yes(f.macd_exit) || yes(f.cvd_div_exit),
+  },
+  {
+    id: "bots",
+    title: "Several bots (hand-offs)",
+    what: "Move a stock to another bot when it turns choppy, breaks out or hits its stop.",
+    best: "Only when you run Bots 1-3 together. Leave off while learning one bot.",
+    shows: "Recovery hold, hand-off to Bot 2 / Bot 3, trend breakout, stop-loss hand-off",
+    on: (f) =>
+      yes(f.recovery_hold) || yes(f.breakout_handoff) || picked(f.stop_handoff) || num(f.chop_losses) > 0 || yes(f.vturn_handoff) ||
+      picked(f.handoff_candle),
+  },
+  {
+    id: "review",
+    title: "Ask me first (review)",
+    what: "When a trade looks uncertain the bot asks you: exit or wait.",
+    best: "Longer candles (5 minutes and up) while you are watching the screen.",
+    shows: "1-minute review: what counts as uncertain, the default answer",
+    on: (f) => yes(f.review_on),
+  },
+];
+
+/** The styles whose settings are on in this form. */
+export function detectStyles(f: SmaConfig): StyleId[] {
+  return STYLES.filter((s) => s.on(f)).map((s) => s.id);
+}
+
+export type StyleView = { all: boolean; picks: StyleId[] };
+
+const KEY = "sma.settings.styles";
+
+/** The owner's ticks, kept per browser. Until they choose, the styles in use are ticked. */
+export function useStyleView(form: SmaConfig | null): [StyleView, (v: StyleView) => void] {
+  const [saved, setSaved] = useState<StyleView | null>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(KEY);
+      if (raw) {
+        const v = JSON.parse(raw) as StyleView;
+        const ids = new Set(STYLES.map((s) => s.id));
+        setSaved({ all: Boolean(v.all), picks: (v.picks ?? []).filter((p) => ids.has(p)) });
+      }
+    } catch {
+      // No storage: the ticks last for this visit.
+    }
+    setReady(true);
+  }, []);
+  const set = (v: StyleView) => {
+    setSaved(v);
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(v));
+    } catch {
+      // Ignored: see above.
+    }
+  };
+  if (saved) return [saved, set];
+  // Nothing chosen yet: everything shows until the form has loaded, then the styles in use.
+  return [!ready || !form ? { all: true, picks: [] } : { all: false, picks: detectStyles(form) }, set];
+}
+
+/** The set of styles the form shows; null = everything. */
+export const StyleCtx = createContext<Set<string> | null>(null);
+
+/** Shows its children only while one of its styles (space separated) is ticked. Layout is untouched. */
+export function Only({ s, children }: { s: string; children: ReactNode }) {
+  const shown = useContext(StyleCtx);
+  const show = !shown || s.split(" ").some((x) => shown.has(x));
+  return <div className={show ? "contents" : "hidden"}>{children}</div>;
+}
+
+/** Opens the "Ask the bot" widget with a question typed in (the owner still presses Send). */
+function askAssistant(question: string) {
+  window.dispatchEvent(new CustomEvent("paltra:ask", { detail: question }));
+}
+
+export function StylePicker({
+  form,
+  view,
+  onChange,
+  botLabel,
+}: {
+  form: SmaConfig;
+  view: StyleView;
+  onChange: (v: StyleView) => void;
+  /** "Bot 3", "the Research desk", or a stock's name: used in the question for the assistant. */
+  botLabel: string;
+}) {
+  const inUse = detectStyles(form);
+  const picks = new Set(view.picks);
+  const toggle = (id: StyleId) => {
+    const next = new Set(picks);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange({ all: false, picks: STYLES.map((s) => s.id).filter((s) => next.has(s)) });
+  };
+  const hiddenOn = view.all ? [] : STYLES.filter((s) => inUse.includes(s.id) && !picks.has(s.id));
+  const chosen = STYLES.filter((s) => picks.has(s.id));
+  const question = chosen.length
+    ? `On ${botLabel} I want to trade with: ${chosen.map((s) => s.title).join(", ")}. Which settings should be on and which should be off? Give me a simple starting set-up and propose the changes.`
+    : `I am not sure which strategy to use on ${botLabel}. Look at its settings and recent trades and tell me in simple words which way of trading suits it, and propose the changes.`;
+  const small = "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold ring-1 ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
+  return (
+    <div id="sma-styles" className="mt-4 scroll-mt-24 rounded-lg border border-violet-400/30 bg-violet-400/[0.05] p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-slate-100">What do you want to trade with?</h3>
+        <span className="text-xs text-slate-400">Tick one or more. The form below shows only what they need. Nothing is changed or saved by ticking.</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Ways of trading">
+        {STYLES.map((s) => {
+          const ticked = !view.all && picks.has(s.id);
+          const used = inUse.includes(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              aria-pressed={ticked}
+              onClick={() => toggle(s.id)}
+              title={`Shows: ${s.shows}`}
+              className={clsx(
+                "flex flex-col items-start gap-1 rounded-lg p-2.5 text-left ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
+                ticked ? "bg-violet-500/20 ring-violet-400/60" : "bg-white/[0.02] ring-white/10 hover:bg-white/[0.05]"
+              )}
+            >
+              <span className="flex w-full items-center gap-2">
+                <span
+                  aria-hidden
+                  className={clsx(
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded ring-1 ring-inset",
+                    ticked ? "bg-violet-500 text-white ring-violet-300" : "ring-slate-400/70"
+                  )}
+                >
+                  {ticked ? <Check size={12} /> : null}
+                </span>
+                <span className="text-sm font-semibold text-slate-100">{s.title}</span>
+                {used ? (
+                  <span className="ml-auto shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">in use</span>
+                ) : null}
+              </span>
+              <span className="text-xs leading-snug text-slate-300">{s.what}</span>
+              <span className="text-[11px] leading-snug text-slate-400">{s.best}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => onChange({ all: false, picks: [] })} className={clsx(small, "text-slate-200 ring-white/15 hover:bg-white/5")}>
+          Uncheck all
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange({ all: false, picks: inUse })}
+          title="Tick the ways of trading whose settings are switched on now"
+          className={clsx(small, "text-slate-200 ring-white/15 hover:bg-white/5")}
+        >
+          <Sparkles size={13} aria-hidden /> Tick what is in use
+        </button>
+        <button
+          type="button"
+          aria-pressed={view.all}
+          onClick={() => onChange({ all: !view.all, picks: view.picks })}
+          className={clsx(small, view.all ? "bg-sky-400/20 text-sky-100 ring-sky-400/50" : "text-slate-200 ring-white/15 hover:bg-white/5")}
+        >
+          <Eye size={13} aria-hidden /> Show every setting
+        </button>
+        <button
+          type="button"
+          onClick={() => askAssistant(question)}
+          title="Opens the assistant with this question typed in. It can only propose changes; you apply them."
+          className={clsx(small, "ml-auto bg-violet-500/20 text-violet-100 ring-violet-400/50 hover:bg-violet-500/30")}
+        >
+          <MessageCircle size={13} aria-hidden /> Ask the assistant to set this up
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-slate-400" role="status">
+        {view.all
+          ? "Showing every setting."
+          : chosen.length
+            ? `Showing: the basics (averages, candle size, how a trade opens, stop-loss, size and times) plus ${chosen.map((s) => s.title).join(", ")}.`
+            : "Nothing ticked: showing only the basics (averages, candle size, how a trade opens, stop-loss, size and times)."}
+      </p>
+      {hiddenOn.length ? (
+        <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-400/[0.08] p-2 text-xs leading-snug text-amber-100">
+          Still switched on but hidden from the form: <b>{hiddenOn.map((s) => s.title).join(", ")}</b>. They keep working; see
+          &quot;What&apos;s switched on&quot; below to turn them off.{" "}
+          <button
+            type="button"
+            onClick={() => onChange({ all: false, picks: STYLES.map((s) => s.id).filter((id) => picks.has(id) || inUse.includes(id)) })}
+            className="font-semibold underline hover:text-white"
+          >
+            Show them
+          </button>
+        </p>
+      ) : null}
+    </div>
+  );
+}
