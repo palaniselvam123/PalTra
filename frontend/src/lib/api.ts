@@ -1386,6 +1386,9 @@ export const api = {
       undefined,
       60000
     ),
+  /** Buyers / sellers test on the saved Most active scans (pressure_study.py; read-only). */
+  scalpPressureTest: (params: { days: number; pct: number; gap_min: number }) =>
+    request<PressureTest>(`/api/scalp/active/pressure-test?days=${params.days}&pct=${params.pct}&gap_min=${params.gap_min}`, undefined, 90000),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
   /** Stop the Most active pass that is running; the last finished scan stays. */
   scalpActiveStop: () => request<{ stopped: boolean }>("/api/scalp/active/stop", { method: "POST" }),
@@ -1655,3 +1658,42 @@ export type DeliveryRow = {
   history: { day: string; pct: number | null }[];
 };
 export type DeliveryReport = { day: string | null; days: string[]; rows: Record<string, DeliveryRow>; errors: string[] };
+
+/** One row of the buyers / sellers test: what the price did `after` (minutes, or "close") a signal. */
+export type PressureAfter = {
+  after: string;
+  signals: number;
+  right_pct: number | null;
+  avg_pct: number | null;
+  median_pct: number | null;
+  base_right_pct: number | null;
+  edge: number | null;
+  verdict: "strong" | "some" | "weak" | "none" | "few";
+};
+
+export type PressureSignal = {
+  day: string;
+  time: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  share_pct: number;
+  price: number;
+  best: number | null;
+  worst: number | null;
+  close: number | null;
+  [after: string]: string | number | null;
+};
+
+/** Buyers / sellers test (backend/pressure_study.py): saved Most active scans only, no order. */
+export type PressureTest = {
+  days: { day: string; scans: number }[];
+  pct: number;
+  gap_min: number;
+  horizons: number[];
+  tolerance_min: number;
+  sides: { side: "BUY" | "SELL"; signals: number; after: PressureAfter[]; avg_best_pct: number | null; avg_worst_pct: number | null }[];
+  by_threshold: { pct: number; side: "BUY" | "SELL"; signals: number; right_pct: number | null; avg_pct: number | null; edge: number | null; verdict: PressureAfter["verdict"] }[];
+  answer: string[];
+  signals: PressureSignal[];
+  total_signals: number;
+};

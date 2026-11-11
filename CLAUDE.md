@@ -1519,6 +1519,17 @@ spinning top), body and range) / Matched / Call columns
   all waiting orders) is ≥ that % (buyers) or ≤ 100 − that % (sellers), with price, share, day move and volume vs usual. Each
   stock and side once per IST day per alert (`_SENT`, memory), at most `MAX_NAMES` 15 a message, through
   `alert_notifier.send_quiet`. `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`).
+- `backend/pressure_study.py` – **Buyers / sellers test** (read-only; the Most active card's "Buyers / sellers test" view,
+  `components/Scalp/PressureTest.tsx`; saved scans only, no Groww call, no order; nothing in the strategy reads it): the
+  owner's idea that buyers (sellers) holding 75 % of the waiting orders send the price up (down). From the saved Most active
+  scans of the last `days` (1-60): a **signal** is the scan in which a stock's `buy_share` first reaches `pct` % (55-95,
+  default 75) for a side after a scan in which it did not (never the day's first scan; the same stock and side again only
+  after `gap_min`, 30); the real `ltp` is read again `HORIZONS` 5 / 15 / 30 / 60 minutes later (the scan nearest, within
+  `TOLERANCE_MIN` 4) and at the close (the day's last scan from 15:10), signed the idea's way, plus the best / worst within
+  an hour. `_side_stats`: per horizon right %, average / median move, the **base rate** (how often any stock at every 3rd
+  scan went that way, `base_moves`), `edge` = right − base and a verdict (strong ≥ 10 / some ≥ 5 / weak / none / few under
+  `MIN_SIGNALS` 30); `by_threshold` runs the same at 60-90 %; plain-words `answer`. Desk
+  `GET /api/scalp/active/pressure-test?days=&pct=&gap_min=` (cached per choice and newest saved scan).
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the
