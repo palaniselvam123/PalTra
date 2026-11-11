@@ -89,6 +89,19 @@ export function ChatWidget() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pathname = usePathname();
 
+  // Another part of the page (the Settings style picker) can open the widget with a question typed in.
+  useEffect(() => {
+    const ask = (e: Event) => {
+      const q = (e as CustomEvent<string>).detail;
+      if (typeof q !== "string" || !q.trim()) return;
+      setOpen(true);
+      setDraft(q);
+      window.setTimeout(() => inputRef.current?.focus(), 50);
+    };
+    window.addEventListener("paltra:ask", ask);
+    return () => window.removeEventListener("paltra:ask", ask);
+  }, []);
+
   useEffect(() => {
     if (open && !status) api.getChatStatus().then(setStatus).catch(() => {});
   }, [open, status]);

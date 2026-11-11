@@ -7,6 +7,7 @@ import { SlopeEditor } from "@/components/Settings/SlopeEditor";
 import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { TierTag } from "@/components/Settings/SettingsCard";
+import { Only, SidewaysGuard, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
@@ -23,6 +24,11 @@ type Props = {
   /** Full page width (the Settings page): two columns on wide screens and a save bar that stays in view. */
   wide?: boolean;
 };
+
+function deskLabel(): string {
+  const d = currentDesk();
+  return d === "research" ? "the Research desk" : d === "live" ? "Bot 1" : `Bot ${d.replace("bot", "")}`;
+}
 
 /** "" edits the shared settings; a symbol edits that stock's own. */
 const ALL = "";
@@ -213,6 +219,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const withOwn = Object.keys(config?.stock_settings ?? {});
   const scopes = Array.from(new Set([...armed, ...withOwn, ...(scope ? [scope] : [])])).sort();
   const stockScope = scope !== ALL;
+  const [styleView, setStyleView] = useStyleView(form);
+  /** The styles whose settings show; null = all (also while searching, so a match is never hidden). */
+  const shownStyles = styleView.all || searching ? null : new Set<string>(styleView.picks);
+  const groupShown = (id: string) =>
+    !shownStyles || (id === "gap" ? shownStyles.has("gap") : id === "advanced" ? shownStyles.has("bots") || shownStyles.has("review") : true);
 
   useEffect(() => {
     if (!dirty.current && !stockScope) setForm(config);
@@ -733,12 +744,15 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </p>
           ) : null}
       </div>
+      <StylePicker form={form} view={styleView} onChange={setStyleView} botLabel={scope || deskLabel()} />
+      <SidewaysGuard form={form} onFill={turnOff} />
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
       {!stockScope ? <StrategyPresets current={strategyBody()} labels={LABELS} refreshKey={savedCount} onLoad={loadPreset} /> : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">
         {GROUP_CHIPS.map((g) => {
           const on = g.id === "risk" ? 0 : onCount(g.id as RuleGroup);
           const active = isOpen(g.id);
+          if (!groupShown(g.id)) return null;
           return (
             <button
               key={g.id}
@@ -798,6 +812,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           &quot;Start here&quot;); 4 and 7 are advanced.
         </p>
       ) : null}
+      <StyleCtx.Provider value={shownStyles}>
       <FieldGroup id="enter" open={isOpen("enter")} onToggle={toggleGroup} title="1. When to enter" hint="The signal that opens a trade, and extra ways in" on={onCount("enter")} wide={wide}>
         <div className="min-w-0">
           <SectionTitle>Moving averages</SectionTitle>
@@ -1121,7 +1136,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
         <div className="min-w-0">
+          <Only s="sma trend turn colour">
           <SectionTitle>Extra ways in (all off by default)</SectionTitle>
+          </Only>
+          <Only s="trend">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1160,6 +1178,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               reason &quot;Reversed after loss&quot;.
             </InfoTip>
           </label>
+          </Only>
+          <Only s="trend">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1183,6 +1203,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             onChange={(v) => set("join_after_min", v)}
             own={isOwn("join_after_min")}
           />
+          </Only>
+          <Only s="sma">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Late entry
             <InfoTip label="About late entry">
@@ -1202,6 +1224,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           {form.use_gap_mode ? (
             <p className="mt-1 text-xs text-amber-300">Ignored while SMA gap mode is on (gap mode keeps a refused cross waiting itself).</p>
           ) : null}
+          </Only>
+          <Only s="turn colour">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1217,6 +1241,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               step 3, or 3 when that is 0. Every check, the cut-off, the caps and the stop still apply.
             </InfoTip>
           </label>
+          </Only>
+          <Only s="turn">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1342,7 +1368,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               .
             </p>
           ) : null}
+          </Only>
+          <Only s="trend colour bots">
           <SectionTitle>How the entry order is placed</SectionTitle>
+          </Only>
+          <Only s="trend">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1376,6 +1406,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
           </div>
           <CandleRulesPicture form={form} set={set} parts={["tall"]} />
+          </Only>
+          <Only s="trend colour">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1433,6 +1465,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Cancel if the SMAs cross against it
             </label>
           </div>
+          </Only>
+          <Only s="colour">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1452,6 +1486,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               price and take over from it.
             </InfoTip>
           </label>
+          </Only>
+          <Only s="bots">
           <label className="mt-3 block text-xs text-slate-400">
             <span className="flex items-center gap-1">
               Hand-off orders to this bot {isOwn("handoff_candle") && <OwnTag />}
@@ -1470,6 +1506,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               once), look at this bot&apos;s forming candle first. Uses the % and candle count below.
             </span>
           </label>
+          </Only>
+          <Only s="colour bots">
           {form.entry_candle_confirm || String(form.handoff_candle ?? "OFF").toUpperCase() !== "OFF" ? (
             <div className="mt-2 grid grid-cols-2 items-end gap-2">
               <Field
@@ -1486,6 +1524,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
+          </Only>
+          <Only s="trend">
           <label id="sma-day-extreme" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1531,6 +1571,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
+          </Only>
         </div>
       </FieldGroup>
       <FieldGroup id="check" open={isOpen("check")} onToggle={toggleGroup} title="2. Checks before entering" hint="Every ticked check must agree, or the signal is skipped" on={onCount("check")} wide={wide}>
@@ -1545,6 +1586,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           >
             Main checks
           </SectionTitle>
+          <Only s="sma trend ind">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1558,6 +1600,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
           <Field label="ADX threshold" own={isOwn("adx_threshold")} value={String(form.adx_threshold)} onChange={(v) => set("adx_threshold", v)} />
           <AdxPicture form={form} set={set} />
+          </Only>
+          <Only s="ind">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1642,6 +1686,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             <Field label="Width (σ)" value={String(form.bb_std ?? 2)} onChange={(v) => set("bb_std", v)} own={isOwn("bb_std")} />
             <Field label="Squeeze below" suffix="%" value={String(form.bb_min_width_pct ?? 0.15)} onChange={(v) => set("bb_min_width_pct", v)} own={isOwn("bb_min_width_pct")} />
           </div>
+          </Only>
+          <Only s="gap">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             {form.use_gap_mode ? "Max gap for entry (don't chase a stretched gap)" : "Only when the SMA gap is in a range"}
             <InfoTip label="About the SMA gap range filter">
@@ -1688,9 +1734,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </div>
             </div>
           </div>
+          </Only>
         </div>
         <div className="min-w-0">
+          <Only s="colour trend ind">
           <SectionTitle>More checks</SectionTitle>
+          </Only>
+          <Only s="colour">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1730,6 +1780,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </label>
           </div>
           <CandleRulesPicture form={form} set={set} parts={["direction"]} />
+          </Only>
+          <Only s="trend ind">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             EMA lines (check here; the exit is in step 3)
             <InfoTip label="About the EMA cross">
@@ -1765,6 +1817,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_ema") && <OwnTag />}
             Buy only while the fast EMA is above the slow one, sell only while below
           </label>
+          </Only>
+          <Only s="ind">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             MACD (check here; the exit is in step 3)
             <InfoTip label="About MACD">
@@ -1815,6 +1869,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_cvd") && <OwnTag />}
             Buy only while the cumulative delta is rising, sell only while it is falling
           </label>
+          </Only>
+          <Only s="colour">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1833,6 +1889,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Candle patterns keep the real candles. Off by default; try it on Replay first.
             </InfoTip>
           </label>
+          </Only>
+          <Only s="trend ind">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Supertrend (check here; the exit is in step 3)
             <InfoTip label="About the Supertrend">
@@ -1869,6 +1927,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_supertrend") && <OwnTag />}
             Buy only while it is green, sell only while red
           </label>
+          </Only>
+          <Only s="trend">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1945,6 +2005,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </div>
           ) : null}
+          </Only>
+          <Only s="trend">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Opening range (09:15–09:30, entries only)
             <InfoTip label="About the opening range">
@@ -1986,6 +2048,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               {label}
             </label>
           ))}
+          </Only>
         </div>
       </FieldGroup>
       <FieldGroup id="exit" open={isOpen("exit")} onToggle={toggleGroup} title="3. When to exit" hint="Whichever ticked exit comes first closes the trade" on={onCount("exit")} wide={wide}>
@@ -2014,6 +2077,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </InfoTip>
             </span>
           </label>
+          <Only s="sma">
           <div className={clsx("mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10", !crossExitOn(form) && "opacity-50")}>
             <label htmlFor="sma-exit-candle" className="flex items-center gap-1 text-sm text-slate-300">
               {isOwn("exit_candle_minutes") && <OwnTag />}
@@ -2041,8 +2105,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               ))}
             </select>
           </div>
+          </Only>
+          <Only s="colour">
           <SmallCandlesCard form={form} set={set} isOwn={isOwn} />
           <SmallColourCard form={form} set={set} isOwn={isOwn} />
+          </Only>
           {noExitOn(form) ? (
             <p role="alert" className="mt-2 rounded-md border border-amber-400/60 bg-amber-400/[0.12] p-2 text-[12px] font-semibold leading-snug text-amber-200">
               No exit is selected: the SMA cross exit, stop-loss, gap mode and Bollinger exit are all off. A trade will be
@@ -2059,6 +2126,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </button>
             </p>
           ) : null}
+          <Only s="ind">
           <label className="mt-3 block text-sm text-slate-300">
             <span className="text-xs uppercase tracking-wider text-slate-400">
               Bollinger exit{isOwn("bb_exit") && <OwnTag />}
@@ -2079,6 +2147,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="BOTH">Both — band target or middle band, whichever comes first</option>
             </select>
           </label>
+          </Only>
+          <Only s="sma trend">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2094,6 +2164,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               bot (Bot 3).
             </InfoTip>
           </label>
+          </Only>
+          <Only s="colour turn">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Close after N candles in a row against the trade
             <InfoTip label="About counter candles">
@@ -2181,6 +2253,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </p>
             </div>
           ) : null}
+          </Only>
+          <Only s="trend ind">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2191,6 +2265,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("ema_exit") && <OwnTag />}
             Close when the EMAs cross against the trade (lengths set in step 2)
           </label>
+          </Only>
+          <Only s="ind">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2222,9 +2298,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
             </div>
           )}
+          </Only>
           <ExitJoinCard form={form} set={set} isOwn={isOwn} />
+          <Only s="turn">
           <ReverseOnExit form={form} set={set} own={isOwn("reverse_on_exit")} ownColour={isOwn("reverse_colour_exit")} />
           <ReverseOwnSettings form={form} onChange={setReverse} own={isOwn("reverse_settings")} disabled={!form.reverse_on_exit} />
+          </Only>
+          <Only s="trend ind">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2235,8 +2315,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("st_exit") && <OwnTag />}
             Close when the Supertrend flips against the trade (settings in step 2)
           </label>
+          </Only>
         </div>
         <div className="min-w-0">
+          <Only s="turn">
           <SectionTitle>SMA 9 line exits</SectionTitle>
           <div className="mt-3 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <label htmlFor="sma-slope-candle" className="flex items-center gap-1 text-sm text-slate-300">
@@ -2434,8 +2516,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="RUN">The start of the current run (can act on the first candle)</option>
             </select>
           </label>
+          </Only>
         </div>
       </FieldGroup>
+      <Only s="gap">
       <FieldGroup id="gap" open={isOpen("gap")} onToggle={toggleGroup} title="4. SMA gap mode" hint="Changes both the entry and the exit: waits for the gap to widen, exits when it fades" on={onCount("gap")} wide={wide}>
         <div className="min-w-0">
           {form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" ? (
@@ -2567,6 +2651,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
       </FieldGroup>
+      </Only>
       <FieldGroup id="stop" open={isOpen("stop")} onToggle={toggleGroup} title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
         <div className="min-w-0">
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
@@ -2646,6 +2731,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               used until the line comes under a buy or above a sell. LIVE moves the Groww stop order the same way.
             </p>
           ) : null}
+          <Only s="bots">
           <label className="mt-3 block text-sm text-slate-300">
             <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
               After a stop-loss exit, move the stock to{isOwn("stop_handoff") && <OwnTag />}
@@ -2683,6 +2769,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Only when the stop closed at a loss (a trailing stop in profit leaves the stock here)
             </label>
           ) : null}
+          </Only>
           <label className="mt-3 block text-sm text-slate-300">
             <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-slate-400">
               Pivot target{isOwn("pivot_target") && <OwnTag />}
@@ -2905,7 +2992,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           )}
         </div>
       </FieldGroup>
+      <Only s="bots review">
       <FieldGroup id="advanced" open={isOpen("advanced")} onToggle={toggleGroup} title="7. Advanced: moving stocks between bots, asking me" hint="Recovery hold, hand-offs to Bot 2 / Bot 3, 1-minute review" on={onCount("advanced")} wide={wide}>
+        <Only s="bots">
         <div className="min-w-0">
           <SectionTitle>Recovery hold and hand-offs</SectionTitle>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
@@ -3156,6 +3245,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             />
           </div>
         </div>
+        </Only>
+        <Only s="review">
         <div className="min-w-0">
           <SectionTitle
             info={
@@ -3273,7 +3364,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </select>
           </label>
         </div>
+        </Only>
       </FieldGroup>
+      </Only>
+      </StyleCtx.Provider>
       <div
         className={clsx(
           "mt-3 flex flex-wrap items-center gap-3",

@@ -4,6 +4,7 @@ import { StopScan } from "@/components/Scalp/StopScan";
 import { ActiveTrendTest } from "@/components/Scalp/ActiveTrendTest";
 import { ActivePickBacktest } from "@/components/Scalp/ActivePickBacktest";
 import { Explain } from "@/components/ui/Explain";
+import { BestNow } from "@/components/Scalp/BestNow";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, PlayCircle, Loader2, RefreshCw, Target } from "lucide-react";
@@ -440,6 +441,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         <ActivePickBacktest armed={armed} />
       ) : (
         <>
+      {view === "live" ? <BestNow rows={found} tq={tq} reading={tqBusy} onRead={() => void readTrend()} armed={armed} arming={arming} onArm={onArm} /> : null}
       {view === "live" && auto ? (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-slate-300">
           <label className="inline-flex min-h-9 items-center gap-2 font-semibold text-slate-200">
