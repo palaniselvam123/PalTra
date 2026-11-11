@@ -1,8 +1,8 @@
 """The backtest server's own Groww login, for the Scalp scans only (scan_session.py).
 
-On the backtest server the replays borrow the desk's Groww session (backtest_server.remote_token),
-so a scan there must not: its downloads would count against the same Groww rate limit as the live
-bots. The scans use this server's own login instead, the one saved on its own Settings → Broker keys
+On the backtest server the replays use its own login first and borrow the desk's Groww session only
+without one (backtest_server.remote_token); a scan never borrows it, since its downloads would count
+against the same Groww rate limit as the live bots. The scans use this server's own login, the one saved on its own Settings → Broker keys
 (the encrypted access token in its own trading.db, `groww_client._read_desk_token`). It never logs
 in by itself, so it cannot end any other server's session.
 

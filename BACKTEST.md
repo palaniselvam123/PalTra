@@ -11,7 +11,7 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
   never sends an order, refuses LIVE                       unchanged
   starts on visit, stops itself when idle
         |  bots' settings + armed stocks ← GET /api/link/backtest/settings  (BACKTEST_LINK_TOKEN)
-        |  the desk's Groww session      ← GET /api/link/backtest/groww     (memory only)
+        |  the desk's Groww session      ← GET /api/link/backtest/groww     (memory only; only without its own login)
 ```
 
 ## What the backtest role does
@@ -26,11 +26,12 @@ paltra-backtest.fly.dev  (PALTRA_ROLE=backtest)        paltra.fly.dev  (the desk
   keeps the settings it started with. A deploy, restart or wake from idle keeps this
   server's own saved settings and armed stocks (they live on its volume); tick **Copy from
   desk at every start** on the bar to copy the desk's at each start instead.
-- **The desk's Groww session, not a second login.** Past candles come from Groww with
-  the desk's own access token, fetched over the link every 10 minutes and kept in
-  memory only (never saved, logged or shown). Logging in again with the same API key
-  on another server could end the desk's session, so the backtest server never logs
-  in to Groww itself. Log in to Groww on the desk as usual each morning.
+- **Its own Groww login first.** Backtests, scans and practice bots use the Groww key
+  saved on this server's own Settings → Broker keys, so they never use the desk's Groww
+  rate limit. Use a different API key from the desk's and the scanner's: logging one key
+  in on two servers can end the other's session. Only when no login is saved here (or it
+  has expired) do backtests borrow the desk's access token, fetched over the link every
+  10 minutes and kept in memory only (never saved, logged or shown).
 - **Stops itself when idle.** With no backtest loading or playing and no page open for
   the idle time (30 minutes by default; 10-240, set on the page), the app exits and Fly
   stops the machine. Opening the page starts it again (about 10-20 s). A backtest that
