@@ -7,7 +7,7 @@ import { SlopeEditor } from "@/components/Settings/SlopeEditor";
 import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { TierTag } from "@/components/Settings/SettingsCard";
-import { Only, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
+import { Only, SidewaysGuard, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
@@ -745,6 +745,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           ) : null}
       </div>
       <StylePicker form={form} view={styleView} onChange={setStyleView} botLabel={scope || deskLabel()} />
+      <SidewaysGuard form={form} onFill={turnOff} />
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
       {!stockScope ? <StrategyPresets current={strategyBody()} labels={LABELS} refreshKey={savedCount} onLoad={loadPreset} /> : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">

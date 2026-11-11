@@ -1935,6 +1935,15 @@ spinning top), body and range) / Matched / Call columns
   test), 4 Look back (History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
   `next` (what to do with the answer), shown in a strip under the tabs for the open tab; "Which one do I use?" lists every
   question → tab. Add a tab by adding its `TABS` entry with those three lines and a group.
+- **Best to trade now** (`components/Scalp/BestNow.tsx`, top of the Most active card's Live view; display only, no order):
+  one list joining three tabs for the stocks the card's filters show: busy (`rvol` ≥ `BUSY_RVOL` 1.5), trending or sideways
+  (the card's own "Read trend quality" rows, `tq`; the button "Find the best stocks now" runs that read) and news (the
+  still-valid medium / high NSE filings from `api.newsFeed`). "Good to trade" = busy and strong trend / TRENDING (top 8, with
+  the reasons and Arm); `CHOPPY` ones are named under "Sideways, skip for now"; other stocks with news are listed.
+- **Sideways starting set-up** (`StylePicker.SidewaysGuard`, under the style picker on Settings → Strategy; form-fill only):
+  four existing settings with the form's value now and a tick each: ADX check at least 20, `max_trades_per_stock` 3,
+  `counter_exit_count` 3 with `counter_need_fast`, and (optional, unticked) `chop_losses` 2. "Put the ticked ones in the
+  form" sets them through the form's `turnOff` setter; nothing is saved until Save. No new setting or engine change.
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the

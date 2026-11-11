@@ -284,3 +284,121 @@ export function StylePicker({
     </div>
   );
 }
+
+/**
+ * "Lose less in sideways markets": a starting set of existing settings, shown with the form's values now and put
+ * into the form on request. Nothing is saved until the owner presses Save. Display / form-fill only.
+ */
+type Fill = Partial<Record<keyof SmaConfig, string | boolean>>;
+
+type Step = { id: string; title: string; why: string; now: string; done: boolean; fill: Fill; optional?: boolean };
+
+function sidewaysSteps(f: SmaConfig): Step[] {
+  const adx = num(f.adx_threshold);
+  const cap = num(f.max_trades_per_stock);
+  const counter = num(f.counter_exit_count);
+  const chop = num(f.chop_losses);
+  return [
+    {
+      id: "adx",
+      title: "Only enter when the trend is strong (ADX at least 20)",
+      why: "ADX measures how strongly a stock is moving one way. In a sideways market it is low, so the cross is skipped.",
+      now: yes(f.use_adx_filter) ? `on, at least ${adx}` : "off",
+      done: yes(f.use_adx_filter) && adx >= 20,
+      fill: { use_adx_filter: true, adx_threshold: String(Math.max(adx, 20)) },
+    },
+    {
+      id: "cap",
+      title: "Stop trading a stock after 3 trades in a day",
+      why: "A stock that keeps giving signals is going back and forth. After three tries the bot leaves it alone until tomorrow.",
+      now: cap > 0 ? `${cap} a day` : "no limit",
+      done: cap > 0 && cap <= 3,
+      fill: { max_trades_per_stock: "3" },
+    },
+    {
+      id: "counter",
+      title: "Get out after 3 candles in a row against the trade",
+      why: "Without it the bot waits for the averages to cross back, which is late in a sideways market. This leaves sooner.",
+      now: counter > 0 ? `${counter} candles` : "off",
+      done: counter > 0 && counter <= 3,
+      fill: { counter_exit_count: "3", counter_need_fast: true },
+    },
+    {
+      id: "chop",
+      title: "After 2 losing trades, move the stock to Bot 2",
+      why: "Bot 2 is the sideways bot. Only useful when Bot 2 is running; otherwise leave this unticked.",
+      now: chop > 0 ? `after ${chop} losses` : "off",
+      done: chop > 0 && chop <= 2,
+      fill: { chop_losses: "2" },
+      optional: true,
+    },
+  ];
+}
+
+export function SidewaysGuard({ form, onFill }: { form: SmaConfig; onFill: (values: Fill) => void }) {
+  const steps = sidewaysSteps(form);
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const isTicked = (s: Step) => ticked[s.id] ?? (!s.optional && !s.done);
+  const chosen = steps.filter((s) => !s.done && isTicked(s));
+  const core = steps.filter((s) => !s.optional);
+  const coreDone = core.filter((s) => s.done).length;
+  return (
+    <details id="sma-sideways" className="group/sw mt-3 scroll-mt-24 rounded-lg border border-amber-400/30 bg-amber-400/[0.04]">
+      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
+        Losing money in sideways markets? A starting set-up
+        <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", coreDone === core.length ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300")}>
+          {coreDone} of {core.length} on
+        </span>
+        <span className="text-xs font-normal text-slate-400">— three settings that skip weak signals and leave earlier. Click to open.</span>
+      </summary>
+      <div className="px-3 pb-3">
+        <p className="text-xs leading-relaxed text-slate-300">
+          A sideways market is a stock that goes up and down without getting anywhere. The SMA cross loses there because every small
+          turn looks like a signal. These settings already exist in the form; this box only fills them in for you.
+        </p>
+        <ul className="mt-2 space-y-1.5">
+          {steps.map((s) => (
+            <li key={s.id} className="rounded-md border border-white/10 bg-white/[0.02] p-2">
+              <label className="flex items-start gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={s.done || isTicked(s)}
+                  disabled={s.done}
+                  onChange={(e) => setTicked((t) => ({ ...t, [s.id]: e.target.checked }))}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="font-semibold">{s.title}</span>
+                  {s.optional ? <span className="ml-2 text-[11px] text-slate-400">optional</span> : null}
+                  <span className={clsx("ml-2 text-[11px]", s.done ? "text-emerald-300" : "text-slate-400")}>
+                    {s.done ? `already set (${s.now})` : `now: ${s.now}`}
+                  </span>
+                  <span className="block text-xs leading-snug text-slate-400">{s.why}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!chosen.length}
+            onClick={() => onFill(Object.assign({}, ...chosen.map((s) => s.fill)) as Fill)}
+            className="inline-flex min-h-9 items-center rounded-md bg-amber-500/20 px-3 text-xs font-semibold text-amber-100 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-500/30 disabled:opacity-50"
+          >
+            Put the ticked ones in the form
+          </button>
+          <span className="text-xs text-slate-400">Then press Save at the bottom. Nothing changes until you do.</span>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-slate-400">
+          This is a sensible starting point, not a proven winner: each setting also skips some good trades. Before using it with real
+          money, run a{" "}
+          <a href="/scalp/#backtest" className="text-sky-300 underline hover:text-sky-200">
+            Backtest
+          </a>{" "}
+          with and without it, and use the Scalp page&apos;s Sideways test to see which of your stocks are the sideways ones.
+        </p>
+      </div>
+    </details>
+  );
+}
