@@ -137,13 +137,9 @@ export function ScanTradeTestView() {
         {pick === "PRESSURE" ? (
           <label className="flex flex-col gap-1" title="Buyers at least this share: buy. Sellers at least this share: sell short.">
             Share at least
-            <select className={select} value={share} onChange={(e) => setShare(Number(e.target.value))}>
-              {[60, 65, 70, 75, 80, 85, 90].map((v) => (
-                <option key={v} value={v}>
-                  {v}%
-                </option>
-              ))}
-            </select>
+            <span className="flex items-center gap-1">
+              <input type="number" min={55} max={95} step={1} value={share} onChange={(e) => setShare(Math.min(95, Math.max(55, Number(e.target.value) || 75)))} className={clsx(select, "w-20")} />%
+            </span>
           </label>
         ) : null}
         <label className="flex flex-col gap-1" title="The busiest stocks by money traded">

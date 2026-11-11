@@ -1389,6 +1389,13 @@ export const api = {
   /** Buyers / sellers test on the saved Most active scans (pressure_study.py; read-only). */
   scalpPressureTest: (params: { days: number; pct: number; gap_min: number }) =>
     request<PressureTest>(`/api/scalp/active/pressure-test?days=${params.days}&pct=${params.pct}&gap_min=${params.gap_min}`, undefined, 90000),
+  /** Stocks that reached a buyers / sellers share on a day, and whether the price then moved (pressure_study.reached). */
+  scalpPressureDay: (params: { days: number; pct: number; move_pct: number; day?: string }) =>
+    request<PressureDay>(
+      `/api/scalp/active/pressure-day?days=${params.days}&pct=${params.pct}&move_pct=${params.move_pct}${params.day ? `&day=${params.day}` : ""}`,
+      undefined,
+      90000
+    ),
   scalpActiveScan: () => request<{ started: boolean }>("/api/scalp/active/scan", { method: "POST" }),
   /** Stop the Most active pass that is running; the last finished scan stays. */
   scalpActiveStop: () => request<{ stopped: boolean }>("/api/scalp/active/stop", { method: "POST" }),
@@ -1696,4 +1703,36 @@ export type PressureTest = {
   answer: string[];
   signals: PressureSignal[];
   total_signals: number;
+};
+
+export type PressureDayRow = {
+  day: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  first_at: string;
+  share_pct: number;
+  max_share_pct: number;
+  scans_at: number;
+  price: number;
+  best_pct: number | null;
+  best_at: string | null;
+  worst_pct: number | null;
+  last_pct: number | null;
+  last_price: number;
+  moved: boolean | null;
+  moved_at: string | null;
+  minutes_to_move: number | null;
+};
+
+/** Day list of the buyers / sellers test (backend/pressure_study.reached). */
+export type PressureDay = {
+  days: { day: string; scans: number; stocks: number }[];
+  all_days: string[];
+  day: string | null;
+  pct: number;
+  move_pct: number;
+  stats: { side: "ALL" | "BUY" | "SELL"; label: string; stocks: number; moved: number; correct_pct: number | null; avg_minutes: number | null; avg_best_pct: number | null; ended_right_pct: number | null }[];
+  answer: string[];
+  rows: PressureDayRow[];
+  total_rows: number;
 };

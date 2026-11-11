@@ -92,14 +92,24 @@ export function ScalpAlertsCard() {
             </p>
             <div className="mt-2 flex flex-wrap items-end gap-3 text-xs text-slate-400">
               <label className="flex flex-col gap-1">
-                Share at least
-                <select className={select} value={view.pressure_pct} disabled={busy} onChange={(e) => void save({ pressure_pct: Number(e.target.value) })}>
-                  {[60, 65, 70, 75, 80, 85, 90].map((v) => (
-                    <option key={v} value={v}>
-                      {v}%
-                    </option>
-                  ))}
-                </select>
+                Share at least (type any number, 50-95)
+                <span className="flex items-center gap-1">
+                  <input
+                    key={view.pressure_pct}
+                    type="number"
+                    min={50}
+                    max={95}
+                    step={1}
+                    defaultValue={view.pressure_pct}
+                    disabled={busy}
+                    onBlur={(e) => {
+                      const v = Math.min(95, Math.max(50, Number(e.target.value) || 70));
+                      if (v !== view.pressure_pct) void save({ pressure_pct: v });
+                    }}
+                    className={clsx(select, "w-20")}
+                  />
+                  %
+                </span>
               </label>
               <label className="flex flex-col gap-1">
                 Who

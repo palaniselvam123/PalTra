@@ -336,6 +336,21 @@ async def most_active_pressure_test(
     return await asyncio.to_thread(pressure_study.run, days, pct, gap_min)
 
 
+@router.get("/active/pressure-day")
+async def most_active_pressure_day(
+    days: int = Query(20, ge=1, le=60),
+    pct: float = Query(75, ge=50, le=99),
+    move_pct: float = Query(0.5, ge=0.05, le=20),
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+):
+    """Every stock that reached `pct` % buyers / sellers in a day's saved Most active scans (pressure_study.reached):
+    when it first did, and whether the real price then moved `move_pct` % its way. One `day`, or the last `days`.
+    Read-only: the saved scans only, no Groww call."""
+    import pressure_study
+
+    return await asyncio.to_thread(pressure_study.reached, days, pct, move_pct, day)
+
+
 @router.get("/active/history/{run_id}")
 async def most_active_history_run(run_id: int):
     """One saved most-active scan with every row as it was ranked then. Read-only."""

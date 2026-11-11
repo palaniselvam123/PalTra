@@ -1530,6 +1530,13 @@ spinning top), body and range) / Matched / Call columns
   scan went that way, `base_moves`), `edge` = right − base and a verdict (strong ≥ 10 / some ≥ 5 / weak / none / few under
   `MIN_SIGNALS` 30); `by_threshold` runs the same at 60-90 %; plain-words `answer`. Desk
   `GET /api/scalp/active/pressure-test?days=&pct=&gap_min=` (cached per choice and newest saved scan).
+  **Day list** (`pressure_study.reached` / `reached_for_day`, the same view's first box, `components/Scalp/PressureDay.tsx`;
+  desk `GET /api/scalp/active/pressure-day?day=&days=&pct=&move_pct=`): for one day (or the last `days`), every stock and side
+  whose `buy_share` reached `pct` % (50-99, typed) in any saved scan: the first time, the share then, the highest share and
+  in how many scans, the price then, and what the saved `ltp` did afterwards: whether it moved `move_pct` % (0.05-20, typed)
+  its way before the day's last scan (`moved`, when, minutes), the best / worst move and the move at the end. `_day_stats`:
+  per side and overall how many moved (`correct_pct`), average minutes and best move; plain-words `answer`. The % boxes on
+  the alerts card, this view and "Trade a saved scan" take any typed number.
 - `backend/scan_trade_test.py` – **Trade a saved scan** (arithmetic on real candles; no order, nothing armed; the Most active
   card's "Trade a saved scan" view, `components/Scalp/ScanTradeTest.tsx`): one saved Most active scan gives the day, the time
   and the stocks. `picks` (`pick` `PRESSURE` = buyers ≥ `pct` % buys / sellers ≥ `pct` % sells, `BIAS` = the row's bias, `MOVE`

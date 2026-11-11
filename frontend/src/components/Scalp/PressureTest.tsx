@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { Loader2, RefreshCw } from "lucide-react";
 import { api, type PressureAfter, type PressureTest } from "@/lib/api";
+import { PressureDayView } from "@/components/Scalp/PressureDay";
 
 /**
  * Buyers / sellers test on the Most active card (backend/pressure_study.py): each time buyers or sellers reached the
@@ -53,8 +54,9 @@ export function PressureTestView() {
 
   return (
     <div className="space-y-3">
+      <PressureDayView />
       <div className="rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-3 text-xs leading-relaxed text-slate-300">
-        <p className="text-sm font-semibold text-slate-100">Does the price follow the buyers or sellers?</p>
+        <p className="text-sm font-semibold text-slate-100">Many days at once: does the price follow the buyers or sellers?</p>
         <p className="mt-1">
           Your idea: when buyers hold {share}% or more of the waiting orders the price goes up, and when sellers do it goes down. This
           checks it on the saved Most active scans. Each time a stock <b>newly</b> reached that share, the real traded price is read
@@ -68,13 +70,9 @@ export function PressureTestView() {
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
         <label className="flex flex-col gap-1">
           Buyers / sellers at least
-          <select className={select} value={share} onChange={(e) => setShare(Number(e.target.value))}>
-            {[60, 65, 70, 75, 80, 85, 90].map((v) => (
-              <option key={v} value={v}>
-                {v}%
-              </option>
-            ))}
-          </select>
+          <span className="flex items-center gap-1">
+            <input type="number" min={55} max={95} step={1} value={share} onChange={(e) => setShare(Math.min(95, Math.max(55, Number(e.target.value) || 75)))} className={clsx(select, "w-20")} />%
+          </span>
         </label>
         <label className="flex flex-col gap-1">
           Days of saved scans

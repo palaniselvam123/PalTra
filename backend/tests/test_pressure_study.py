@@ -88,3 +88,39 @@ def test_a_new_signal_only_after_the_gap():
     pressure_study._cache.clear()
     long = pressure_study.run(days=5, pct=75, gap_min=60, history=build(lambda s, t: 100.0, share))
     assert short["total_signals"] > long["total_signals"] > 0
+
+
+def test_day_list_of_stocks_that_reached_and_whether_the_price_moved():
+    start = minutes((11, 0))
+
+    def price(symbol, t):
+        gone = max(0, minutes(t) - start)
+        if symbol == "UP":
+            return 100.0 + gone * 0.02       # +0.6 % by 11:30, +1 % by 11:50
+        if symbol == "DOWN":
+            return 200.0 + gone * 0.01       # sellers were wrong: it rose
+        return 50.0
+
+    def share(symbol, t):
+        if symbol == "UP":
+            return 0.80 if start <= minutes(t) <= start + 20 else 0.50
+        if symbol == "DOWN":
+            return 0.15 if minutes(t) >= start else 0.50
+        return 0.50
+
+    out = pressure_study.reached(days=5, pct=75, move_pct=1.0, history=build(price, share))
+    rows = {(r["symbol"], r["side"]): r for r in out["rows"]}
+    assert set(rows) == {("UP", "BUY"), ("DOWN", "SELL")}
+    up = rows[("UP", "BUY")]
+    assert (up["first_at"], up["share_pct"], up["scans_at"], up["price"]) == ("11:00", 80.0, 5, 100.0)
+    assert up["moved"] is True and up["moved_at"] == "11:50" and up["minutes_to_move"] == 50
+    down = rows[("DOWN", "SELL")]
+    assert down["moved"] is False and down["best_pct"] < 0
+    all_, buy, sell = out["stats"]
+    assert (all_["stocks"], all_["moved"], all_["correct_pct"]) == (2, 1, 50.0)
+    assert buy["correct_pct"] == 100.0 and sell["correct_pct"] == 0.0
+    assert any("right 50% of the time at a 1% move" in line for line in out["answer"])
+    # A smaller move is reached sooner; one day can be picked.
+    quick = pressure_study.reached(days=5, pct=75, move_pct=0.2, day="2026-11-10", history=build(price, share))
+    assert next(r for r in quick["rows"] if r["symbol"] == "UP")["moved_at"] == "11:10"
+    assert pressure_study.reached(days=5, pct=75, move_pct=0.2, day="2026-01-01", history=build(price, share))["total_rows"] == 0

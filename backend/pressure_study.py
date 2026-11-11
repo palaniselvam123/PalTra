@@ -230,3 +230,101 @@ def run(days: int = 20, pct: float = 75.0, gap_min: int = 30, history=None) -> d
             _cache.clear()
         _cache[key] = out
     return out
+
+
+# ---- Day list: every stock that reached the share on a day, and whether the price then moved enough -------------
+
+def reached_for_day(series: dict, pct: float, move_pct: float, day: str) -> list[dict]:
+    """Each stock and side that reached `pct` % at any saved scan of the day (the first time counts), and what the
+    real price did afterwards: the furthest it went its way, whether it reached `move_pct` %, and when."""
+    need = pct / 100.0
+    rows = []
+    for symbol, (times, prices, shares) in series.items():
+        for side in ("BUY", "SELL"):
+            held = [None if s is None else (s if side == "BUY" else 1.0 - s) for s in shares]
+            hits = [i for i, h in enumerate(held) if h is not None and h >= need]
+            if not hits:
+                continue
+            i, sign, entry = hits[0], (1 if side == "BUY" else -1), prices[hits[0]]
+            after = [((prices[j] - entry) / entry * 100 * sign, j) for j in range(i + 1, len(times))]
+            best = max(after, default=None)
+            worst = min(after, default=None)
+            got = next(((m, j) for m, j in after if m >= move_pct), None)
+            clock = lambda j: f"{times[j] // 60:02d}:{times[j] % 60:02d}"  # noqa: E731
+            rows.append({
+                "day": day, "symbol": symbol, "side": side, "first_at": clock(i), "share_pct": round(held[i] * 100, 1),
+                "max_share_pct": round(max(held[k] for k in hits) * 100, 1), "scans_at": len(hits), "price": entry,
+                "best_pct": round(best[0], 3) if best else None, "best_at": clock(best[1]) if best else None,
+                "worst_pct": round(worst[0], 3) if worst else None,
+                "last_pct": round(after[-1][0], 3) if after else None, "last_price": prices[-1],
+                "moved": bool(got) if after else None,
+                "moved_at": clock(got[1]) if got else None,
+                "minutes_to_move": (times[got[1]] - times[i]) if got else None,
+            })
+    rows.sort(key=lambda r: (r["day"], r["first_at"], r["symbol"]))
+    return rows
+
+
+def _day_stats(rows: list[dict], move_pct: float) -> list[dict]:
+    out = []
+    for key, label in (("ALL", "Buyers and sellers"), ("BUY", "Buyers → price up"), ("SELL", "Sellers → price down")):
+        mine = [r for r in rows if (key == "ALL" or r["side"] == key) and r["moved"] is not None]
+        right = [r for r in mine if r["moved"]]
+        mins = [r["minutes_to_move"] for r in right]
+        best = [r["best_pct"] for r in mine if r["best_pct"] is not None]
+        ended = [r for r in mine if (r["last_pct"] or 0) > 0]
+        out.append({
+            "side": key, "label": label, "stocks": len(mine), "moved": len(right),
+            "correct_pct": round(len(right) / len(mine) * 100, 1) if mine else None,
+            "avg_minutes": round(statistics.fmean(mins)) if mins else None,
+            "avg_best_pct": round(statistics.fmean(best), 3) if best else None,
+            "ended_right_pct": round(len(ended) / len(mine) * 100, 1) if mine else None,
+        })
+    return out
+
+
+def reached(days: int = 20, pct: float = 75.0, move_pct: float = 0.5, day: str | None = None, history=None) -> dict:
+    """Every stock that reached `pct` % buyers / sellers, per day, and how often the price then moved `move_pct` %
+    its way before the day's last saved scan. `day` limits it to one day. Blocking (reads the scan history)."""
+    if history is None:
+        import scan_history as history  # noqa: PLC0415
+    days = max(MIN_DAYS, min(MAX_DAYS, int(days)))
+    pct = max(50.0, min(99.0, float(pct)))
+    move_pct = max(0.05, min(20.0, float(move_pct)))
+    listed = [d["day"] for d in history.days("active", limit=days)]
+    wanted = [d for d in listed if day in (None, "", d)]
+
+    def rows_of(meta: dict) -> list[dict]:
+        return (history.get(meta["id"]) or {}).get("rows") or []
+
+    rows: list[dict] = []
+    used = []
+    for d in sorted(wanted):
+        metas = history.runs(d, "active")
+        series = day_series(metas, rows_of)
+        if not series:
+            continue
+        got = reached_for_day(series, pct, move_pct, d)
+        used.append({"day": d, "scans": len(metas), "stocks": len(got)})
+        rows += got
+    stats = _day_stats(rows, move_pct)
+    answer = []
+    judged = stats[0]
+    if not rows:
+        answer.append(f"No stock reached {pct:g}% buyers or sellers in the saved scans of {'that day' if day else 'these days'}.")
+    else:
+        for s in stats[1:]:
+            if s["stocks"]:
+                who, way = ("buyers", "up") if s["side"] == "BUY" else ("sellers", "down")
+                answer.append(
+                    f"{s['stocks']} time{'s' if s['stocks'] != 1 else ''} {who} reached {pct:g}%: the price then went {way} "
+                    f"{move_pct:g}% or more {s['moved']} time{'s' if s['moved'] != 1 else ''} ({s['correct_pct']:g}% correct)"
+                    + (f", taking about {s['avg_minutes']} minutes." if s["avg_minutes"] is not None else ".")
+                )
+        answer.append(f"Overall your assumption was right {judged['correct_pct']:g}% of the time at a {move_pct:g}% move ({judged['moved']} of {judged['stocks']}).")
+        if judged["stocks"] < MIN_SIGNALS:
+            answer.append(f"Only {judged['stocks']} cases: too few to trust yet. Add more days.")
+    return {
+        "days": used, "all_days": listed, "day": day or None, "pct": pct, "move_pct": move_pct,
+        "stats": stats, "answer": answer, "rows": rows[-500:], "total_rows": len(rows),
+    }
