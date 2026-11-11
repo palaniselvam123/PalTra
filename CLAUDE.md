@@ -1929,6 +1929,12 @@ spinning top), body and range) / Matched / Call columns
   everything; a style that is on but hidden is named with "Show them", and "What's switched on" always lists it. **Ask the
   assistant to set this up** opens the chat widget with the question typed in (`paltra:ask` window event, `ChatWidget`); the
   assistant still only proposes. Add a setting to the form inside the matching `<Only>` (or leave it bare to always show).
+- **Scalp tabs grouped by use** (`app/scalp/page.tsx` `TAB_GROUPS` / `TABS` / `ScalpTabs`; display only): the tab bar is four
+  boxes in the order of a trading day: 1 At the open (09:30 Morning, Carry-over), 2 During the day (Most active, Trend quality,
+  Cross scan, Turning, 52-week high, Monitor), 3 Test an idea (Second candle, Backtest, Strategy lab, Sideways test, Morning
+  test), 4 Look back (History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
+  `next` (what to do with the answer), shown in a strip under the tabs for the open tab; "Which one do I use?" lists every
+  question → tab. Add a tab by adding its `TABS` entry with those three lines and a group.
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the

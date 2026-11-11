@@ -4,7 +4,7 @@ import { Explain } from "@/components/ui/Explain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, BellRing, BookOpen, Crosshair, FlaskConical, Gauge, Loader2, Pause, Play, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, BookOpen, Crosshair, FlaskConical, Gauge, HelpCircle, Loader2, Pause, Play, RefreshCw } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { useTradingState } from "@/hooks/useTradingState";
 import { api, type ScalpMonitorResponse, type ScalpRow } from "@/lib/api";
@@ -71,23 +71,36 @@ const MONITOR_COLUMNS: readonly MonitorCol[] = [
   "terminal",
 ];
 
-const TABS = [
-  { id: "monitor", label: "Monitor" },
-  { id: "cross", label: "Cross scan" },
-  { id: "morning", label: "09:30 Morning" },
-  { id: "turning", label: "Turning" },
-  { id: "carry", label: "Carry-over" },
-  { id: "trend", label: "Trend quality" },
-  { id: "high52", label: "52-week high" },
-  { id: "active", label: "Most active" },
-  { id: "second", label: "Second candle" },
-  { id: "backtest", label: "Backtest" },
-  { id: "lab", label: "Strategy lab" },
-  { id: "sideways", label: "Sideways test" },
-  { id: "morningtest", label: "Morning test" },
-  { id: "history", label: "History" },
-  { id: "alerts", label: "Alerts" },
+/** What each group of tabs is for, in the order a trading day uses them. */
+const TAB_GROUPS = [
+  { id: "open", label: "1. At the open", when: "09:15 to 10:00", hint: "What is starting strong this morning?" },
+  { id: "now", label: "2. During the day", when: "10:00 to 15:00", hint: "Which stocks are worth trading right now?" },
+  { id: "test", label: "3. Test an idea", when: "after 15:30", hint: "Would this have made money on past days? Practice money only." },
+  { id: "back", label: "4. Look back", when: "any time", hint: "What did the scans say earlier, and were they right?" },
 ] as const;
+
+/**
+ * Every tab in plain words: the question it answers, when to use it, and what to do with the answer.
+ * Display only: this text drives the grouped tab bar and the "Which one do I use?" list.
+ */
+const TABS = [
+  { id: "morning", group: "open", label: "09:30 Morning", ask: "Which stocks started the day strongly?", use: "Run once at 09:30. Five quick checks on the first 15 minutes; 4 of 5 passed = a likely runner.", next: "Arm the runners, or watch them in During the day." },
+  { id: "carry", group: "open", label: "Carry-over", ask: "Is yesterday's trend still going today?", use: "Run in the first hour. Shows stocks that kept yesterday's direction and the ones that turned.", next: "Arm the ones marked Continued if you trade with the trend." },
+  { id: "active", group: "now", label: "Most active", ask: "Where is the money and the volume right now?", use: "The busiest stocks today: most money traded, volume far above normal. Scans by itself every few minutes.", next: "Tick the busy ones that also trend, then Arm ticked." },
+  { id: "trend", group: "now", label: "Trend quality", ask: "Is this stock trending cleanly or just chopping around?", use: "Marks each stock Trending, Mixed or Choppy and flags a strong up or down trend.", next: "Trade the trending ones; skip or hand off the choppy ones." },
+  { id: "cross", group: "now", label: "Cross scan", ask: "Which stocks are about to give the bot a signal?", use: "Lists stocks whose two average lines are about to cross (the bot's entry signal), soonest first.", next: "Arm them before the cross so the bot catches it." },
+  { id: "turning", group: "now", label: "Turning", ask: "Which stocks are starting to reverse?", use: "Finds candles going against the current trend before the averages cross: an early warning.", next: "Watch them; arm if you trade reversals." },
+  { id: "high52", group: "now", label: "52-week high", ask: "Which stocks are at their highest price of the year?", use: "Stocks breaking, or close to, their 52-week high or low.", next: "A new high with volume is a strong-trend candidate to arm." },
+  { id: "monitor", group: "now", label: "Monitor", ask: "Which stocks are easy and cheap to scalp right now?", use: "Live score of every stock: moves enough each minute, tight spread, plenty of money flowing.", next: "Arm the ones marked Scalp-ready." },
+  { id: "second", group: "test", label: "Second candle", ask: "Does buying a green second candle (selling a red one) work?", use: "Tests on past days one simple opening rule: read the day's 2nd candle, trade its colour.", next: "If the numbers look good, switch the bot to 'Enter on: Second candle' in Settings." },
+  { id: "backtest", group: "test", label: "Backtest", ask: "Would my bot have made money on these stocks?", use: "Replays past days with your bot's real settings on the stocks a scan would have picked, and ranks the stocks.", next: "Keep the stocks and pick times that won; drop the rest." },
+  { id: "lab", group: "test", label: "Strategy lab", ask: "Which checks and exits actually help?", use: "Switch each rule on and off and see at once how the profit changes. Much faster than a backtest.", next: "Use the best set, then prove it with a Backtest." },
+  { id: "sideways", group: "test", label: "Sideways test", ask: "Which stocks trend and which stay sideways?", use: "Reads past days per stock and suggests the right bot: trend bot, chop bot or the main one.", next: "Arm each stock on the bot it suggests." },
+  { id: "morningtest", group: "test", label: "Morning test", ask: "Does a strong morning lead to a strong day?", use: "Checks on past days whether stocks up (or down) by mid-morning kept going until the close.", next: "Decide whether to hold morning winners or book early." },
+  { id: "history", group: "back", label: "History", ask: "What did a scan show earlier, and was it right?", use: "Every saved scan with its time. 'Check accuracy' shows how the stocks moved afterwards.", next: "Trust the scans that were right most often." },
+  { id: "alerts", group: "back", label: "Alerts", ask: "Which Scalp alerts went to my phone?", use: "The list of alerts this page sent and the switch for them.", next: "Turn them on or off here." },
+] as const;
+
 type TabId = (typeof TABS)[number]["id"];
 const TAB_STORE = "scalp.tab";
 const isTab = (v: string | null | undefined): v is TabId => TABS.some((t) => t.id === v);
@@ -1042,48 +1055,118 @@ function Empty({ children }: { children: React.ReactNode }) {
 const shortTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 
-/** The Scalp page's scanners as tabs; each shows when it last scanned (or that it is scanning now). */
+/** The Scalp page's tabs, grouped by when they are used; under them, the open tab in plain words. */
 function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => void; times: Record<TabId, ScanStatus | null> }) {
+  const [choosing, setChoosing] = useState(false);
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const group = TAB_GROUPS.find((g) => g.id === current.group) ?? TAB_GROUPS[0];
   return (
-    <div role="tablist" aria-label="Scalp scanners" className="flex flex-wrap gap-1.5 rounded-xl border border-border bg-surface p-1.5 shadow-card">
-      {TABS.map((t) => {
-        const on = tab === t.id;
-        const st = times[t.id];
-        return (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            onClick={() => onTab(t.id)}
-            title={st?.when ? `Last scan ${new Date(st.when).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : undefined}
-            className={clsx(
-              "inline-flex min-h-10 items-center gap-2 rounded-lg border px-3.5 text-sm font-semibold transition-colors",
-              on
-                ? "border-accentSky/60 bg-accentSky/15 text-accentSky shadow-sm"
-                : "border-border bg-surface2 text-slate-400 hover:border-accentSky/40 hover:text-slate-200"
-            )}
-          >
-            {t.label}
-            {st?.running ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-normal text-accentSky">
-                <Loader2 size={11} className="animate-spin" aria-hidden /> scanning
+    <div className="rounded-xl border border-border bg-surface p-2 shadow-card">
+      <div className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-4" role="tablist" aria-label="Scalp tools">
+        {TAB_GROUPS.map((g) => (
+          <div key={g.id} className={clsx("rounded-lg border p-2", g.id === current.group ? "border-accentSky/40 bg-accentSky/[0.04]" : "border-border")}>
+            <div className="flex flex-wrap items-baseline gap-x-2 px-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">{g.label}</span>
+              <span className="text-[11px] text-slate-500">{g.when}</span>
+            </div>
+            <p className="px-1 text-[11px] leading-snug text-slate-500">{g.hint}</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {TABS.filter((t) => t.group === g.id).map((t) => {
+                const on = tab === t.id;
+                const st = times[t.id];
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => onTab(t.id)}
+                    title={`${t.ask} ${st?.when ? `Last scan ${new Date(st.when).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : ""}`}
+                    className={clsx(
+                      "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition-colors",
+                      on
+                        ? "border-accentSky/60 bg-accentSky/15 text-accentSky shadow-sm"
+                        : "border-border bg-surface2 text-slate-400 hover:border-accentSky/40 hover:text-slate-200"
+                    )}
+                  >
+                    {t.label}
+                    {st?.running ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-normal text-accentSky">
+                        <Loader2 size={11} className="animate-spin" aria-hidden /> scanning
+                      </span>
+                    ) : st?.when ? (
+                      <span className="text-[11px] font-normal tabular-nums text-slate-500">{shortTime(st.when)}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-3">
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-slate-100">
+              {current.label}: <span className="font-normal">{current.ask}</span>
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-300">
+              <b className="text-slate-200">What it does:</b> {current.use}
+            </p>
+            <p className="text-xs leading-relaxed text-slate-300">
+              <b className="text-slate-200">Then:</b> {current.next}{" "}
+              <span className="text-slate-500">
+                · Best used {group.when}. Nothing here places an order; Arm only puts a stock on a bot&apos;s list.
               </span>
-            ) : st?.when ? (
-              <span className="text-[11px] font-normal tabular-nums text-slate-500">{shortTime(st.when)}</span>
-            ) : t.id !== "backtest" && t.id !== "history" ? (
-              <span className="text-[11px] font-normal text-slate-600">no scan yet</span>
-            ) : null}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-expanded={choosing}
+            onClick={() => setChoosing((v) => !v)}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10"
+          >
+            <HelpCircle size={13} aria-hidden /> {choosing ? "Hide the list" : "Which one do I use?"}
           </button>
-        );
-      })}
-      <Link
-        href="/learn/?lesson=scalp-start-here"
-        className="ml-auto inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
-        title="New to this page? A short guide to every tab, in plain words (PDF on the Learn page)"
-      >
-        <BookOpen size={13} aria-hidden /> Start here (guide)
-      </Link>
+          <Link
+            href="/learn/?lesson=scalp-start-here"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
+            title="A short guide to every tab, in plain words (PDF on the Learn page)"
+          >
+            <BookOpen size={13} aria-hidden /> Start here (guide)
+          </Link>
+        </div>
+        {choosing ? (
+          <div className="mt-3 grid gap-3 border-t border-white/10 pt-3 md:grid-cols-2 2xl:grid-cols-4">
+            {TAB_GROUPS.map((g) => (
+              <div key={g.id}>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  {g.label} <span className="font-normal normal-case text-slate-500">· {g.when}</span>
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {TABS.filter((t) => t.group === g.id).map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onTab(t.id);
+                          setChoosing(false);
+                        }}
+                        className={clsx(
+                          "w-full rounded-md px-2 py-1.5 text-left text-xs leading-snug hover:bg-white/5",
+                          t.id === tab ? "bg-accentSky/10 text-slate-100" : "text-slate-300"
+                        )}
+                      >
+                        {t.ask} <span className="font-semibold text-accentSky">→ {t.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
