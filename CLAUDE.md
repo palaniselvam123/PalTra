@@ -428,6 +428,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.
+  **Exits read the colour / pattern candles** (`StrategyEngine._exit_frame` / `_exit_minutes`): since the bot's own candle
+  is 1 minute in these modes, every exit, trailing stop and hold that reads "the bot's candle" reads the `pattern_tf`
+  candles instead (grouped from 09:15, forming one last): counter candles, Bollinger, EMA, MACD, CVD divergence,
+  Supertrend exit, SMA 9 slope / V-turn / deceleration (when `slope_minutes` is 0), slow SMA exit, the exit-candle and
+  smaller-candle exits' "own size" (so a 5-minute smaller-candle exit works under 15-minute colour candles), colours on
+  smaller candles (entry check and turn confirm), the turn / reversed trades' colour exit, recovery hold, and the
+  Supertrend, VWAP and stop-plan trailing stops. The ATR stop at entry, the TSL and the per-tick price watch are unchanged.
 - `backend/nth_candle.py` – **Second candle entries** (`entry_mode = "NTH_CANDLE"`, per bot and per stock, PAPER and LIVE,
   replays too): the owner's Most active routine as a bot entry, the rule the Scalp page's Second candle test measures.
   Once per stock per day, when the day's Nth candle (`nth_candle_no` 1-6, default 2) of `nth_candle_minutes` (1/3/5/10/15,
