@@ -2736,6 +2736,10 @@ export const smaApi = {
   /** Turn the server's Trend quality re-scan on/off, how often, and the choices it scans with. */
   chopScanAuto: (body: ChopAutoUpdate) =>
     request<ChopAuto>("/api/chop-scan/auto", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  /** The Scalp page's two Telegram alerts (scalp_alerts.py): strong trend, buyers / sellers in control. */
+  scalpAlerts: () => request<ScalpAlerts>("/api/scalp-alerts", undefined, undefined, false),
+  saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names">>) =>
+    request<ScalpAlerts>("/api/scalp-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   trendAlerts: () => request<TrendAlerts>("/api/chop-scan/trend-alerts", undefined, undefined, false),
   saveTrendAlerts: (body: Partial<Omit<TrendAlerts, "recent">>) =>
     request<TrendAlerts>("/api/chop-scan/trend-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
@@ -3252,4 +3256,19 @@ export type StockRegime = {
   phase_candles: number;
   strong_phases: number;
   phases: { side: "BULL" | "BEAR" | "CHOP"; start: number; end: number }[];
+};
+
+/** Settings and last alerts of the Scalp page's Telegram alerts (information only, never trades). */
+export type ScalpAlerts = {
+  strong_on: boolean;
+  /** How many of the seven strong-trend checks must pass (6 or 7). */
+  strong_min_checks: number;
+  strong_side: "BOTH" | "UP" | "DOWN";
+  pressure_on: boolean;
+  /** Buyers' (or sellers') share of the waiting orders, in %, at or above which the alert goes. */
+  pressure_pct: number;
+  pressure_side: "BOTH" | "BUY" | "SELL";
+  pressure_min_value_cr: number;
+  recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number }[];
+  max_names: number;
 };

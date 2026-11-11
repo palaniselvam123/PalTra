@@ -32,6 +32,7 @@ import all_bots_guard
 import pnl_alerts
 import pivots
 import auto_start
+import scalp_alerts
 import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
@@ -236,6 +237,9 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
     task = loop.create_task(_fast_move_scan(snapshot))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(scalp_alerts.after_trend_scan(snapshot, _send))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
 
@@ -3530,6 +3534,29 @@ async def trend_alerts_put(body: TrendAlertUpdate):
         raise HTTPException(400, "Tick at least one candle size under Trend on first")
     await asyncio.to_thread(trend_rank.save, data)
     return _trend_alerts()
+
+
+class ScalpAlertUpdate(BaseModel):
+    strong_on: bool | None = None
+    strong_min_checks: int | None = Field(default=None, ge=5, le=7)
+    strong_side: Literal["BOTH", "UP", "DOWN"] | None = None
+    pressure_on: bool | None = None
+    pressure_pct: float | None = Field(default=None, ge=50, le=95)
+    pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
+    pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+
+
+@app.get("/api/scalp-alerts")
+async def scalp_alerts_get():
+    """The Scalp page's two Telegram alerts (scalp_alerts.py) and the last ones sent. Information only."""
+    return await asyncio.to_thread(scalp_alerts.view)
+
+
+@app.put("/api/scalp-alerts")
+async def scalp_alerts_put(body: ScalpAlertUpdate):
+    """Save the strong-trend and buyer / seller alerts. Alerts only: nothing is armed or ordered."""
+    await asyncio.to_thread(scalp_alerts.save, body.model_dump(exclude_none=True))
+    return await asyncio.to_thread(scalp_alerts.view)
 
 
 # ---- Scan & arm (scan_arm.py) -------------------------------------------------------------------

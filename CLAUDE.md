@@ -1509,6 +1509,16 @@ spinning top), body and range) / Matched / Call columns
   least `scan_speed` (0.10) %/min either way, one message. Each stock once per `cooldown_min` (15); Telegram through
   `alert_notifier.send`, a call too with `call` (`place_call`: market hours, 5-minute cooldown). `GET/PUT /api/fast-moves`;
   Settings → "Fast-move alerts" (`components/Settings/FastMoveAlerts.tsx`).
+- `backend/scalp_alerts.py` – **Scalp Telegram alerts** (off by default; alerts only, never trades or arms; `scalp_alerts.json`
+  next to the SMA DB, `SCALP_ALERTS_FILE`). **Strong trend** (`strong_on`, `strong_min_checks` 6 or 7, `strong_side` BOTH / UP /
+  DOWN): after each finished Trend quality pass in market hours (`main._chop_done` → `after_trend_scan`) every row with `trend`
+  STRONG_BULLISH / STRONG_BEARISH and that many `trend_checks` passed goes out with its price, the checks passed and the ones
+  missed in plain words (`CHECK_WORDS`). **Buyers or sellers in control** (`pressure_on`, `pressure_pct` 50-95 default 70,
+  `pressure_side` BOTH / BUY / SELL, `pressure_min_value_cr`): after each finished Most active scan
+  (`routes_scalp.keep_active_scan` → `_pressure_alert` → `after_active_scan`) every row whose `buy_share` (waiting buy orders ÷
+  all waiting orders) is ≥ that % (buyers) or ≤ 100 − that % (sellers), with price, share, day move and volume vs usual. Each
+  stock and side once per IST day per alert (`_SENT`, memory), at most `MAX_NAMES` 15 a message, through
+  `alert_notifier.send_quiet`. `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`).
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the

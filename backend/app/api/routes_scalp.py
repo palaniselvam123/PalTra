@@ -275,6 +275,22 @@ def keep_active_scan(snapshot: dict) -> None:
     task = loop.create_task(asyncio.to_thread(_save_active, snap))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(_pressure_alert(snapshot))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+async def _pressure_alert(snapshot: dict) -> None:
+    """Buyer / seller Telegram for a finished most-active pass (scalp_alerts.py). Alerts only; never raises."""
+    try:
+        import scalp_alerts
+        from app.services.alert_notifier import alert_notifier
+
+        await scalp_alerts.after_active_scan(snapshot, alert_notifier.send_quiet)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger("scalp").exception("buyer / seller alert failed")
 
 
 @router.get("/active/history")
