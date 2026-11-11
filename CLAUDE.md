@@ -1559,7 +1559,7 @@ spinning top), body and range) / Matched / Call columns
   background scan does not start, and resuming scans answers 409. CI deploys the scanner only when
   the repo variable `DEPLOY_SCANNER` is `true` (secret `FLY_SCANNER_API_TOKEN`), after the desk's deploy job
   (the two shared the org's remote builder and the scanner's deploy hung after pushing layers), even if that
-  one failed; each `flyctl deploy` attempt is stopped after 8 minutes and retried once (job limit 25 min).
+  one failed; the deploy goes through `scripts/fly_deploy.sh` like the other two (see Deployment; job limit 30 min).
 - `backend/backtest_server.py` – backtest server (`PALTRA_ROLE=backtest`, third Fly app `paltra-backtest`,
   `fly.backtest.toml`, setup in `BACKTEST.md`): replays only, on a performance machine that starts on the first visit
   (`auto_start_machines`) and stops itself when idle (`run`: no replay `LOADING` / `PLAYING` and no page request,
@@ -2160,6 +2160,13 @@ No credentials are needed. The desk starts on the simulated feed.
     by `/api/role` `version`: the backtest server's bar ("This server runs version …", Copy version,
     "Deploy this version to the main desk" link to the workflow page) and the desk's "Desk version …"
     (`components/Terminal/BacktestServerBar.tsx`)
+  - every deploy job (backtest server, main desk, scanner) runs `scripts/fly_deploy.sh <config> <name>`:
+    first on Fly's builder (`--remote-only`, stopped after `REMOTE_TIMEOUT` 480 s), and when that fails or
+    stalls, once more built on the GitHub runner with its own Docker (`--local-only`, `LOCAL_TIMEOUT` 900 s)
+    and pushed to registry.fly.io over the internet, which does not go through Fly's builder or its
+    internal registry address (on 11 Nov every deploy failed for over an hour with "failed to push …
+    `_api.internal:5000` … dial tcp [fdaa::3]:5000: connect: connection refused" while Fly's status page
+    was green). Each job's limit is 30 minutes.
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required

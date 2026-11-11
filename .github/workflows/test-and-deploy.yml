@@ -162,7 +162,7 @@ jobs:
     if: needs.release-gate.outputs.backtest == 'true'
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 25
+    timeout-minutes: 30
     concurrency:
       group: fly-deploy-backtest
       cancel-in-progress: false
@@ -175,17 +175,9 @@ jobs:
           name: frontend-out
           path: frontend/out
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: flyctl deploy (backtest server, retried once if it stalls)
-        run: |
-          for attempt in 1 2; do
-            if timeout 480 flyctl deploy --remote-only -c fly.backtest.toml --build-arg APP_VERSION="$VERSION"; then
-              exit 0
-            fi
-            echo "::warning title=Backtest deploy attempt $attempt failed or stalled::retrying in 30 s"
-            sleep 30
-          done
-          echo "::error title=Backtest deploy failed::two attempts did not finish; the backtest server keeps its previous version"
-          exit 1
+      # Fly's builder first; if it fails or stalls, built on this runner and pushed directly (scripts/fly_deploy.sh).
+      - name: flyctl deploy (backtest server; built on the runner if Fly's builder fails)
+        run: scripts/fly_deploy.sh fly.backtest.toml "Backtest server"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_BACKTEST_API_TOKEN }}
           VERSION: ${{ needs.release-gate.outputs.version }}
@@ -197,6 +189,7 @@ jobs:
     if: needs.release-gate.outputs.desk == 'true'
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 30
     # One deploy at a time; a newer run waits instead of cancelling a rollout.
     concurrency:
       group: fly-deploy
@@ -210,8 +203,10 @@ jobs:
           name: frontend-out
           path: frontend/out
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      # Builds the Dockerfile on Fly's builders and waits for the health check.
-      - run: flyctl deploy --remote-only --build-arg APP_VERSION="$VERSION"
+      # Builds the Dockerfile on Fly's builders and waits for the health check; if Fly's builder fails
+      # or stalls, builds it on this runner and pushes it to Fly's registry directly (scripts/fly_deploy.sh).
+      - name: flyctl deploy (main desk; built on the runner if Fly's builder fails)
+        run: scripts/fly_deploy.sh "" "Main desk"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           VERSION: ${{ needs.release-gate.outputs.version }}
@@ -226,7 +221,7 @@ jobs:
     if: ${{ !cancelled() && needs.release-gate.outputs.desk == 'true' && vars.DEPLOY_SCANNER == 'true' }}
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 25
+    timeout-minutes: 30
     concurrency:
       group: fly-deploy-scanner
       cancel-in-progress: false
@@ -239,19 +234,10 @@ jobs:
           name: frontend-out
           path: frontend/out
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      # A healthy deploy takes about a minute. If one stalls, stop it after 8 minutes
-      # and try once more instead of hanging until someone cancels the run.
-      - name: flyctl deploy (scanner, retried once if it stalls)
-        run: |
-          for attempt in 1 2; do
-            if timeout 480 flyctl deploy --remote-only -c fly.scanner.toml --build-arg APP_VERSION="$VERSION"; then
-              exit 0
-            fi
-            echo "::warning title=Scanner deploy attempt $attempt failed or stalled::retrying in 30 s"
-            sleep 30
-          done
-          echo "::error title=Scanner deploy failed::two attempts did not finish; the scanner keeps running its previous version"
-          exit 1
+      # A healthy deploy takes about a minute. If Fly's builder fails or stalls (stopped after 8 minutes),
+      # the image is built on this runner and pushed to Fly's registry directly (scripts/fly_deploy.sh).
+      - name: flyctl deploy (scanner; built on the runner if Fly's builder fails)
+        run: scripts/fly_deploy.sh fly.scanner.toml "Scanner"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_SCANNER_API_TOKEN }}
           VERSION: ${{ needs.release-gate.outputs.version }}
