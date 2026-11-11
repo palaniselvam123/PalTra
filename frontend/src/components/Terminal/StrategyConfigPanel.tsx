@@ -506,6 +506,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     colour_body_seq: String(form.colour_body_seq ?? ""),
     colour_inside_minutes: ([0, 1, 2, 3, 5, 10].includes(Number(form.colour_inside_minutes)) ? Number(form.colour_inside_minutes) : 0) as 0 | 1 | 2 | 3 | 5 | 10,
     colour_inside_body: Math.min(2, Math.max(0, Number(form.colour_inside_body ?? 0) || 0)),
+    colour_pull: (["OFF", "HALF", "LOW", "SMA9"].includes(String(form.colour_pull)) ? String(form.colour_pull) : "OFF") as "OFF" | "HALF" | "LOW" | "SMA9",
+    colour_pull_candles: Math.min(3, Math.max(1, Math.round(Number(form.colour_pull_candles ?? 1)) || 1)),
+    colour_pull_market: Boolean(form.colour_pull_market),
     pattern_trend: Boolean(form.pattern_trend),
     pattern_set: form.pattern_set === "ALL" ? "ALL" : "STRONG",
     pattern_min_edge: Math.max(0, Number(form.pattern_min_edge ?? 1.5)),
@@ -3374,7 +3377,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}${String(f.colour_pull ?? "OFF") !== "OFF" ? ` (waits for a pullback to the ${f.colour_pull === "HALF" ? "middle" : f.colour_pull === "LOW" ? "low" : "SMA 9 / low"} of the candle for ${f.colour_pull_candles ?? 1} candle(s)${f.colour_pull_market ? ", then at the market" : ""})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
@@ -4392,7 +4395,7 @@ function ColourBodySize({
   isOwn,
 }: {
   form: Partial<SmaConfig>;
-  set: (key: keyof SmaConfig, value: string) => void;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
   isOwn: (key: keyof SmaConfig) => boolean;
 }) {
   const unit = form.colour_body_unit === "ATR" ? "ATR" : "PCT";
@@ -4472,6 +4475,84 @@ function ColourBodySize({
       )}
       <ColourBodySeq form={form} set={set} isOwn={isOwn} unit={unit} />
       <ColourInside form={form} set={set} isOwn={isOwn} />
+      <ColourPull form={form} set={set} isOwn={isOwn} />
+    </div>
+  );
+}
+
+/** Colour entries wait for a pullback (colour_pull / colour_pull_candles / colour_pull_market, backend colour_pull.py). */
+function ColourPull({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const tf = Number(form.pattern_tf ?? 1) || 1;
+  const rule = String(form.colour_pull ?? "OFF");
+  const on = rule !== "OFF";
+  const wait = Number(form.colour_pull_candles ?? 1) || 1;
+  const own = isOwn("colour_pull") || isOwn("colour_pull_candles") || isOwn("colour_pull_market");
+  const where: Record<string, string> = {
+    HALF: "half-way back: the middle of that candle",
+    LOW: "the candle's low (its high for a sell)",
+    SMA9: "the fast SMA when it sits inside the candle on the pullback side, else the candle's low (high for a sell)",
+  };
+  return (
+    <div className="mt-3 border-t border-white/10 pt-2">
+      <div className="text-xs uppercase tracking-wider text-slate-400">
+        Wait for a pullback before entering{own ? " (own)" : ""}{" "}
+        <span className="normal-case tracking-normal text-slate-500">({on ? `on · ${rule === "HALF" ? "half-way" : rule === "LOW" ? "candle's low" : "SMA 9 / low"}` : "off"})</span>
+      </div>
+      <div className="mt-1 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs text-slate-400">Buy at (sell: mirror)</span>
+          <select
+            value={rule}
+            onChange={(e) => set("colour_pull", e.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            <option value="OFF">Off: at the market, next candle</option>
+            <option value="HALF">Half-way back</option>
+            <option value="LOW">Candle&apos;s low</option>
+            <option value="SMA9">SMA 9 or the low</option>
+          </select>
+        </label>
+        <label className={clsx("block text-sm text-slate-300", !on && "opacity-50")}>
+          <span className="text-xs text-slate-400">Wait for</span>
+          <select
+            value={String(wait)}
+            onChange={(e) => set("colour_pull_candles", e.target.value)}
+            disabled={!on}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            {[1, 2, 3].map((c) => (
+              <option key={c} value={String(c)}>
+                {c} colour candle{c > 1 ? "s" : ""} ({c * tf} min)
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={clsx("flex min-h-11 items-center gap-2 text-sm text-slate-300 sm:min-h-9", !on && "opacity-50")}>
+          <input
+            type="checkbox"
+            checked={Boolean(form.colour_pull_market)}
+            onChange={(e) => set("colour_pull_market", e.target.checked)}
+            disabled={!on}
+            className="h-4 w-4"
+          />
+          No pullback: buy at the market after the wait
+        </label>
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Normally a colour entry buys at the market at the start of the next candle, which after a strong green candle is near its
+        top. With this on, the order waits at {on ? where[rule] : "a level inside the candle that confirmed the colour"}, for up to{" "}
+        {wait} {tf}-minute candle{wait > 1 ? "s" : ""}. If the price never comes back:{" "}
+        {form.colour_pull_market ? "it buys at the market once the wait is over." : "no trade; the next colour signal decides again."} The
+        same for a sell (mirror) and for the turn after a colour exit. Every entry check, the stop, flip, cut-off and caps still apply.
+      </p>
     </div>
   );
 }

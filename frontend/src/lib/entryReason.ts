@@ -50,6 +50,7 @@ const FILL: Record<string, [string, string]> = {
   EXTREME_LIMIT: ["limit", "filled at the signal candle's extreme limit"],
   PULLBACK: ["pullback", "filled when the price came back to the pullback level"],
   CANDLE_CONFIRM: ["candle confirmed", "filled once the entry candle went the trade's way (past its open)"],
+  MARKET_AFTER_WAIT: ["at market after wait", "the price did not come back to the pullback level, so it was bought / sold at the market once the wait was over"],
 };
 
 /** A backtest trade played as another bot after a hand-off ends "@B2" / "@B3" (handoff_chain.tag). */

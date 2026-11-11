@@ -425,6 +425,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `ha_colours`; they set the colour even while the bigger HA candle still reads the other one) and the real colour candle
   closed that way, that one candle is enough for an entry or a turn (no run of `colour_count`) with this smallest body
   (on the real candle) instead of the usual sizes; mixed inside candles leave the normal rule to decide. Settings: `StrategyConfigPanel.ColourInside`.
+  **Wait for a pullback** (`backend/colour_pull.py`; `colour_pull` `OFF` default | `HALF` | `LOW` | `SMA9`, `colour_pull_candles`
+  1-3 (1), `colour_pull_market` off; per bot and per stock, PAPER and LIVE, replays too; owner's request: a colour buy went in
+  at the top of a strong green candle): instead of the market at the start of the next candle, `apply_signal` arms a
+  `PullbackOrder` (`note` "colour pullback") at a level in the last closed colour candle (`_exit_frame`, real prices) on the
+  real order's side: `HALF` its middle, `LOW` its low for a buy / high for a sell, `SMA9` the fast SMA on the colour candles
+  when it sits inside the candle on the pullback side, else the low / high. `_watch_pullbacks` fills it on the first price at
+  or past the level (entry reason suffix `:PULLBACK`); after `colour_pull_candles` more colour candles without a fill it is
+  dropped (no trade; the next colour signal decides again) or, with `colour_pull_market`, sent at the market
+  (`PullbackOrder.market_after`, suffix `:MARKET_AFTER_WAIT`). While it waits, `_colour_minute` keeps it (a same-side or
+  no-colour candle does not re-arm it; the other colour replaces it). Turns after a colour exit wait too. Settings:
+  `StrategyConfigPanel.ColourPull`.
   In both modes (`per_candle`) the bot's own candle is 1 minute (`candles.candle_minutes`),
   the order goes at the start of the next candle, and the tall-candle pullback, candle-extreme
   limit and entry-candle wait are skipped; gap mode and the 1-minute review do not apply.

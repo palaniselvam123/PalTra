@@ -859,6 +859,10 @@ class ConfigUpdate(BaseModel):
     # Inside candles agree (candle_patterns.inside_colour): size 0 = off, body floor in % of the close.
     colour_inside_minutes: Literal[0, 1, 2, 3, 5, 10] | None = None
     colour_inside_body: float | None = Field(default=None, ge=0, le=2)
+    # Candle-colour entries wait for a pullback (colour_pull.py).
+    colour_pull: Literal["OFF", "HALF", "LOW", "SMA9"] | None = None
+    colour_pull_candles: int | None = Field(default=None, ge=1, le=3)
+    colour_pull_market: bool | None = None
     # Second candle entries (nth_candle.py).
     nth_candle_no: int | None = Field(default=None, ge=1, le=nth_candle.CANDLE_NO_MAX)
     nth_candle_minutes: Literal[1, 3, 5, 10, 15] | None = None

@@ -68,6 +68,12 @@ export type SmaConfig = {
   colour_inside_minutes?: 0 | 1 | 2 | 3 | 5 | 10;
   /** Smallest body (% of price) for a colour candle whose inside candles all agree; 0 = any. */
   colour_inside_body?: number;
+  /** Colour entries wait for a pullback inside the confirming candle (backend colour_pull.py). */
+  colour_pull?: "OFF" | "HALF" | "LOW" | "SMA9";
+  /** Colour candles to wait for the pullback (1-3). */
+  colour_pull_candles?: number;
+  /** No pullback within the wait: buy / sell at the market. */
+  colour_pull_market?: boolean;
   /** Smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR. */
   colour_body_atr?: number;
   /** Candle interval in minutes the SMA strategy trades on (built from the 1-minute tape). */
