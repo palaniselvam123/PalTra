@@ -1530,6 +1530,19 @@ spinning top), body and range) / Matched / Call columns
   scan went that way, `base_moves`), `edge` = right − base and a verdict (strong ≥ 10 / some ≥ 5 / weak / none / few under
   `MIN_SIGNALS` 30); `by_threshold` runs the same at 60-90 %; plain-words `answer`. Desk
   `GET /api/scalp/active/pressure-test?days=&pct=&gap_min=` (cached per choice and newest saved scan).
+- `backend/scan_trade_test.py` – **Trade a saved scan** (arithmetic on real candles; no order, nothing armed; the Most active
+  card's "Trade a saved scan" view, `components/Scalp/ScanTradeTest.tsx`): one saved Most active scan gives the day, the time
+  and the stocks. `picks` (`pick` `PRESSURE` = buyers ≥ `pct` % buys / sellers ≥ `pct` % sells, `BIAS` = the row's bias, `MOVE`
+  = up / down on the day; the busiest `top_n` by money traded, at most `MAX_STOCKS` 40); `simulate` enters each at the open of
+  the first 1-minute candle after the scan and follows that day's candles (`strategy_lab.load_tape`, cached per day) three
+  ways: **normal candles** (out at the open of the minute after the first closed `minutes` candle of the other colour; a
+  candle already running at the entry is not counted, a doji is not a turn), **Heikin Ashi candles** (the same on
+  `heikin_ashi.candles` colours; prices stay real) and **hold** to `square_off` (which closes all three). Per stock: exit
+  time, reason, points, %, ₹ for `qty`, best / worst; `summarize`: totals, winners / losers, the best way, plain-words
+  `answer`. Terminal `POST /api/scan-trade-test` (`run_id`, pick, pct, top_n, minutes, square_off, qty; same hours rule as the
+  Second candle test; 404 when the scan is not saved on this server). The view's "Replay with this bot's settings" starts the
+  ordinary replay (`/api/replay/start` with the traded stocks, the day, the entry minute and the bot), so a bot's own
+  strategy on the same stocks shows in the Backtests tab.
 - `backend/scan_worker.py` – scanner process: each stock's read for the Cross scan and the
   Trend quality scan (download + `scan_one` / `chop_scan.analyze`) runs in a separate process
   (one `spawn` worker at `nice` 10, started on the first scan, stopped in `stop_engine`), so the

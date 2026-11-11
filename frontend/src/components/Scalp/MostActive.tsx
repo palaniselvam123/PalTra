@@ -6,6 +6,7 @@ import { ActivePickBacktest } from "@/components/Scalp/ActivePickBacktest";
 import { Explain } from "@/components/ui/Explain";
 import { BestNow } from "@/components/Scalp/BestNow";
 import { PressureTestView } from "@/components/Scalp/PressureTest";
+import { ScanTradeTestView } from "@/components/Scalp/ScanTradeTest";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, PlayCircle, Loader2, RefreshCw, Target } from "lucide-react";
@@ -163,7 +164,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [adding, setAdding] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // History: any saved scan (kept on the server for about 90 days), shown in the same table.
-  const [view, setView] = useState<"live" | "history" | "test" | "pressure" | "backtest">("live");
+  const [view, setView] = useState<"live" | "history" | "test" | "trade" | "pressure" | "backtest">("live");
   const [hist, setHist] = useState<ActiveHistoryResponse | null>(null);
   const [histDay, setHistDay] = useState("");
   const [runId, setRunId] = useState<number | null>(null);
@@ -405,7 +406,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           <Flame size={15} className="text-amber-400" /> Where traders are now — most active F&amp;O stocks
         </h2>
         <div className="ml-auto inline-flex overflow-hidden rounded-md ring-1 ring-inset ring-slate-700" role="group" aria-label="Live or saved scans">
-          {(["live", "history", "test", "pressure", "backtest"] as const).map((v) => (
+          {(["live", "history", "trade", "test", "pressure", "backtest"] as const).map((v) => (
             <button
               key={v}
               type="button"
@@ -416,8 +417,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                 view === v ? "bg-accentSky/15 text-accentSky" : "text-slate-300 hover:bg-white/5"
               )}
             >
-              {v === "live" ? <Flame size={13} /> : v === "history" ? <History size={13} /> : v === "test" || v === "pressure" ? <FlaskConical size={13} /> : <PlayCircle size={13} />}
-              {v === "live" ? "Live" : v === "history" ? "History" : v === "test" ? "Which column finds the trend?" : v === "pressure" ? "Buyers / sellers test" : "Backtest"}
+              {v === "live" ? <Flame size={13} /> : v === "history" ? <History size={13} /> : v === "test" || v === "pressure" || v === "trade" ? <FlaskConical size={13} /> : <PlayCircle size={13} />}
+              {v === "live" ? "Live" : v === "history" ? "History" : v === "test" ? "Which column finds the trend?" : v === "pressure" ? "Buyers / sellers test" : v === "trade" ? "Trade a saved scan" : "Backtest"}
             </button>
           ))}
         </div>
@@ -438,6 +439,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         <GuideBar lesson="scalp-most-active" terms={["rvol", "value_cr", "vwap", "speed", "bias", "delivery", "strong_trend", "chop", "arm", "backtest"]} note="Where the money is trading right now: the busiest F&O stocks, ranked by the column you choose." className="mb-2" />
       {view === "test" ? (
         <ActiveTrendTest />
+      ) : view === "trade" ? (
+        <ScanTradeTestView />
       ) : view === "pressure" ? (
         <PressureTestView />
       ) : view === "backtest" ? (

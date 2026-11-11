@@ -33,6 +33,7 @@ import pnl_alerts
 import pivots
 import auto_start
 import scalp_alerts
+import scan_trade_test
 import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
@@ -5017,6 +5018,47 @@ async def second_candle_start(body: SecondCandleStart):
 async def second_candle_stop():
     """Stop after the stock being read; the report covers the stocks read so far."""
     return second_candle.test().stop()
+
+
+class ScanTradeTest(BaseModel):
+    #: A saved Most active scan (scan_history id): its time and stocks are what is traded.
+    run_id: int
+    pick: Literal["PRESSURE", "BIAS", "MOVE"] = "PRESSURE"
+    pct: float = Field(default=75, ge=55, le=95)
+    top_n: int = Field(default=20, ge=1, le=scan_trade_test.MAX_STOCKS)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    square_off: str = "15:15"
+    qty: int = Field(default=100, ge=1, le=100000)
+
+
+@app.post("/api/scan-trade-test")
+async def scan_trade_test_run(body: ScanTradeTest):
+    """Trade one saved Most active scan on that day's real 1-minute candles (scan_trade_test.py): each picked stock from
+    the scan's minute, out on the first candle of the other colour (normal and Heikin Ashi) or at the square-off.
+    Arithmetic only: no order, nothing armed. Same hours rule as the Second candle test."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run this on the backtest server, so it never shares the bots' Groww limit.")
+    try:
+        hh, mm = body.square_off.split(":")
+        square_off = dt.time(int(hh), int(mm))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "Square-off must be HH:MM.") from exc
+    if not dt.time(9, 20) <= square_off <= dt.time(15, 30):
+        raise HTTPException(400, "Square-off must be between 09:20 and 15:30.")
+    scan = await asyncio.to_thread(scan_history.get, body.run_id)
+    if scan is None or scan.get("kind") != "active":
+        raise HTTPException(404, "That saved Most active scan was not found on this server.")
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    async def load(name, day):
+        await groww_pressure.wait_for_bots()
+        return await strategy_lab.load_tape(name, day, day, fetch)
+
+    return await scan_trade_test.run(scan, load, pick=body.pick, pct=body.pct, top_n=body.top_n, minutes=body.minutes,
+                                     square_off=square_off, qty=body.qty)
 
 
 def _tape_for(symbol: str):

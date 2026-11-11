@@ -2736,6 +2736,9 @@ export const smaApi = {
   /** Turn the server's Trend quality re-scan on/off, how often, and the choices it scans with. */
   chopScanAuto: (body: ChopAutoUpdate) =>
     request<ChopAuto>("/api/chop-scan/auto", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
+  /** Trade one saved Most active scan on that day's real candles (scan_trade_test.py; arithmetic only, no order). */
+  scanTradeTest: (body: { run_id: number; pick: ScanTradePick; pct: number; top_n: number; minutes: number; square_off: string; qty: number }) =>
+    request<ScanTradeResult>("/api/scan-trade-test", { method: "POST", body: JSON.stringify(body) }, 600000, false),
   /** The Scalp page's two Telegram alerts (scalp_alerts.py): strong trend, buyers / sellers in control. */
   scalpAlerts: () => request<ScalpAlerts>("/api/scalp-alerts", undefined, undefined, false),
   saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names">>) =>
@@ -3271,4 +3274,62 @@ export type ScalpAlerts = {
   pressure_min_value_cr: number;
   recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number }[];
   max_names: number;
+};
+
+export type ScanTradePick = "PRESSURE" | "BIAS" | "MOVE";
+
+/** One way of trading a picked stock: when it got out and what it made (before charges). */
+export type ScanTradeLeg = {
+  exit: number;
+  exit_at: string;
+  reason: "candle turned" | "square-off";
+  candles: number;
+  points: number;
+  pct: number;
+  rupees: number;
+  best_points: number;
+  worst_points: number;
+  minutes_held: number;
+};
+
+export type ScanTradeRow = {
+  symbol: string;
+  side: "LONG" | "SHORT";
+  why: string;
+  scan_price: number;
+  entry: number;
+  entry_at: string;
+  normal: ScanTradeLeg;
+  ha: ScanTradeLeg;
+  hold: ScanTradeLeg;
+};
+
+/** Trade a saved Most active scan (backend/scan_trade_test.py). */
+export type ScanTradeResult = {
+  scan_id: number;
+  day: string;
+  time: string;
+  pick: ScanTradePick;
+  pct: number;
+  minutes: number;
+  square_off: string;
+  qty: number;
+  picked: number;
+  rows: ScanTradeRow[];
+  errors: { symbol: string; error: string }[];
+  ways: {
+    way: "normal" | "ha" | "hold";
+    label: string;
+    trades: number;
+    winners: number;
+    losers: number;
+    win_pct: number | null;
+    rupees: number;
+    avg_pct: number | null;
+    best_rupees: number | null;
+    worst_rupees: number | null;
+    avg_minutes: number | null;
+  }[];
+  best: "normal" | "ha" | "hold" | null;
+  answer: string[];
 };
