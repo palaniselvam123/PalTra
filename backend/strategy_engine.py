@@ -2198,7 +2198,7 @@ class StrategyEngine:
             loss = recovery.loss_per_share(pos.direction, pos.entry_price, self._exit_price(symbol, pos))
             if loss >= 0:
                 self._focus = symbol
-                text = f"{symbol} {self._enter_recovery(pos, cfg, max(loss, 0.0), bar=_closed_bar_ts(self._recovery_frame(symbol, cfg)))} ({call.note})"
+                text = f"{symbol} {self._enter_recovery(pos, cfg, max(loss, 0.0), bar=_closed_bar_ts(self._exit_frame(symbol, cfg)))} ({call.note})"
                 self._signals[symbol] = text
                 self.last_signal = text
                 return text
@@ -2632,7 +2632,7 @@ class StrategyEngine:
             # Smaller-candle colours (small_colour.py): the last N smaller candles must be the trade's colour.
             small = small_colour.entry_reason(
                 self._tapes.get(self._focus), "LONG" if signal == "BULLISH" else "SHORT", cfg,
-                candle_minutes(cfg, stock_overrides(cfg, self._focus)),
+                self._exit_minutes(self._focus, cfg),
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
@@ -2834,17 +2834,19 @@ class StrategyEngine:
             f"{recovery.max_candles(cfg)} candles for the price to come back"
         )
 
-    def _recovery_frame(self, symbol: str, cfg: BotConfig) -> pd.DataFrame | None:
-        """The candles the recovery hold is judged on: the bot's own, or in candle-colour mode (whose own candle is
-        1 minute) the colour candles of `pattern_tf` minutes from 09:15, the forming one last."""
+    def _exit_frame(self, symbol: str, cfg: BotConfig) -> pd.DataFrame | None:
+        """The candles a trade's exits, trailing stops and recovery hold read: the bot's own, or in candle-colour /
+        candle-pattern mode (whose own candle is 1 minute) the colour / pattern candles of `pattern_tf` minutes from
+        09:15, the forming one last, so "3 candles against" means three of the candles on the chart."""
         frame = self._frames.get(symbol)
-        if frame is None or not uses_colour(cfg):
+        if frame is None or not (uses_colour(cfg) or uses_patterns(cfg)):
             return frame
         tf = int(pattern_setting(cfg, "pattern_tf") or 1)
         return resample(frame, tf) if tf > 1 else frame
 
-    def _recovery_minutes(self, symbol: str, cfg: BotConfig) -> int:
-        if uses_colour(cfg):
+    def _exit_minutes(self, symbol: str, cfg: BotConfig) -> int:
+        """The length of `_exit_frame`'s candles in minutes."""
+        if uses_colour(cfg) or uses_patterns(cfg):
             return int(pattern_setting(cfg, "pattern_tf") or 1)
         return candle_minutes(cfg, stock_overrides(cfg, symbol))
 
@@ -2856,7 +2858,7 @@ class StrategyEngine:
         if pos.recovery_loss is not None:
             return  # the recovery rules judge a held trade
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.slow_bar == closed_ts:
             return
@@ -2864,7 +2866,7 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         if closed_ts + minutes * 60 <= opened.timestamp():
             return
         pos.slow_bar = closed_ts
@@ -2890,7 +2892,7 @@ class StrategyEngine:
             self._signals[symbol] = f"{symbol} recovery hold closed at the {_entry_cutoff(cfg).strftime('%H:%M')} cut-off"
             await self._exit_now(cfg, self.ltp, recovery.CUTOFF_EXIT)
             return
-        frame = self._recovery_frame(symbol, cfg)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.rec_bar == closed_ts:
             return
@@ -2899,7 +2901,7 @@ class StrategyEngine:
         pos.rec_bar = closed_ts
         enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         bar = enriched.iloc[-2]
-        span = self._recovery_minutes(symbol, cfg) * 60
+        span = self._exit_minutes(symbol, cfg) * 60
         held = int((closed_ts - pos.recovery_bar) // span) if pos.recovery_bar is not None else 1
         verdict, note = recovery.judge(
             pos.direction,
@@ -4140,7 +4142,7 @@ class StrategyEngine:
         if pos is None or not pos.st_stop or not pos.stop_active:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or closed_ts == pos.st_stop_bar:
             return
@@ -4165,7 +4167,7 @@ class StrategyEngine:
         if pos is None or not pos.vwap_stop or not pos.stop_active:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or closed_ts == pos.vwap_stop_bar:
             return
@@ -4195,7 +4197,7 @@ class StrategyEngine:
             return
         want = stop_plan.breakeven(pos.direction, pos.entry_price, pos.qty)
         if stage >= 2:
-            frame = self._frames.get(symbol)
+            frame = self._exit_frame(symbol, cfg)
             closed_ts = _closed_bar_ts(frame)
             if closed_ts is not None and closed_ts != pos.plan_bar:
                 pos.plan_bar = closed_ts
@@ -4508,7 +4510,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or mode == "OFF" or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.bb_bar == closed_ts:
             return
@@ -4518,7 +4520,7 @@ class StrategyEngine:
             # fill later and open a reverse. The stop and crosses still close it.
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        if closed_ts + 60 <= opened.timestamp():
+        if closed_ts + self._exit_minutes(symbol, cfg) * 60 <= opened.timestamp():
             # That candle closed before the entry (it is the cross candle).
             return
         pos.bb_bar = closed_ts
@@ -4545,7 +4547,7 @@ class StrategyEngine:
         if recovery.slow_exit_on(cfg):
             return  # the slow SMA exit replaces it: minor candles against the trade are ignored
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.cc_bar == closed_ts:
             return
@@ -4553,13 +4555,14 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        if closed_ts + 60 <= opened.timestamp():
+        minutes = self._exit_minutes(symbol, cfg)
+        if closed_ts + minutes * 60 <= opened.timestamp():
             return
         pos.cc_bar = closed_ts
         enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
         closed = enriched.iloc[:-1]
         # Only candles that closed after the entry count against it.
-        after = closed[closed["ts"].astype("int64") + 60 > int(opened.timestamp())]
+        after = closed[closed["ts"].astype("int64") + minutes * 60 > int(opened.timestamp())]
         if len(after) < count:
             return
         towards = counter_candles.against(pos.signal_direction)
@@ -4593,7 +4596,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not ema_filter.exit_on(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.ema_bar == closed_ts:
             return
@@ -4601,7 +4604,7 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         if closed_ts + minutes * 60 <= opened.timestamp():
             # That candle had closed before the entry: a cross on it is not "after the entry".
             return
@@ -4618,7 +4621,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not macd.exit_on(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.macd_bar == closed_ts:
             return
@@ -4626,7 +4629,7 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         if closed_ts + minutes * 60 <= opened.timestamp():
             # That candle had closed before the entry: a cross on it is not "after the entry".
             return
@@ -4643,7 +4646,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not cum_delta.exit_on(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.cvd_bar == closed_ts:
             return
@@ -4651,7 +4654,7 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         if closed_ts + minutes * 60 <= opened.timestamp():
             # That candle had closed before the entry: a divergence on it is not "after the entry".
             return
@@ -4668,7 +4671,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        if not exit_candle.active(cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))):
+        if not exit_candle.active(cfg, self._exit_minutes(symbol, cfg)):
             return
         size = exit_candle.minutes(cfg)
         frame = exit_candle.closed_frame(self._tapes.get(symbol), size, int(cfg.sma_fast), int(cfg.sma_slow))
@@ -4685,7 +4688,7 @@ class StrategyEngine:
             # That exit candle had closed before the entry: a cross on it is not "after the entry".
             return
         pos.xc_bar = closed_ts
-        own = self._frames.get(symbol)
+        own = self._exit_frame(symbol, cfg)
         own_closed = own.iloc[:-1] if own is not None and len(own) > 1 else None
         hit, note = exit_candle.judge(frame, own_closed, pos.signal_direction, int(cfg.sma_fast), int(cfg.sma_slow))
         if not hit:
@@ -4700,7 +4703,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        own_minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        own_minutes = self._exit_minutes(symbol, cfg)
         watched = small_candles.watched(cfg, own_minutes)
         if not watched:
             return
@@ -4763,14 +4766,14 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not slope_exit.watched(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         size = slope_exit.own_size(cfg, minutes)
         if size:
             # Slope candle (slope_minutes): closed candles of that size from the 1-minute tape.
             closed = exit_candle.closed_frame(self._tapes.get(symbol), size, int(cfg.sma_fast), int(cfg.sma_slow))
             minutes = size
         else:
-            own = self._frames.get(symbol)
+            own = self._exit_frame(symbol, cfg)
             closed = own.iloc[:-1] if own is not None and len(own) > 1 else None
         if closed is None or closed.empty:
             return
@@ -4844,7 +4847,7 @@ class StrategyEngine:
                 return  # restored after a restart without its stop id: left to that stop
             await self._confirm_colour_turn(cfg, symbol)
             return
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.tc_bar == closed_ts:
             return
@@ -4860,7 +4863,7 @@ class StrategyEngine:
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
         what = "SMA 9 turn" if turn_trade else "reversed"
-        if small_colour.confirm_on(cfg) and small_colour.watched(cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))):
+        if small_colour.confirm_on(cfg) and small_colour.watched(cfg, self._exit_minutes(symbol, cfg)):
             pos.sc_wait = True
             await self._confirm_colour_turn(cfg, symbol, f"{what} trade: {colour} candle")
             return
@@ -4874,7 +4877,7 @@ class StrategyEngine:
         if pos is None or not pos.sc_wait:
             return
         verdict, note = small_colour.confirms_turn(
-            self._tapes.get(symbol), pos.signal_direction, cfg, candle_minutes(cfg, stock_overrides(cfg, symbol))
+            self._tapes.get(symbol), pos.signal_direction, cfg, self._exit_minutes(symbol, cfg)
         )
         if verdict == "wait":
             self._signals[symbol] = f"{symbol} {what} — waiting for the smaller candles: {note}"
@@ -4923,7 +4926,7 @@ class StrategyEngine:
         if pos is None or self.status != "RUNNING" or not supertrend.exit_on(cfg) or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
-        frame = self._frames.get(symbol)
+        frame = self._exit_frame(symbol, cfg)
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or pos.st_bar == closed_ts:
             return
@@ -4931,7 +4934,7 @@ class StrategyEngine:
             # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
-        minutes = candle_minutes(cfg, stock_overrides(cfg, symbol))
+        minutes = self._exit_minutes(symbol, cfg)
         if closed_ts + minutes * 60 <= opened.timestamp():
             # That candle had closed before the entry: a flip on it is not "after the entry".
             return

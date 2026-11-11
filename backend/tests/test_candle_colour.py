@@ -326,3 +326,26 @@ async def test_recovery_hold_in_colour_mode(db):  # noqa: F811
     # Not closed by the red 5-minute candle: held, then closed when the green one brought the price back.
     assert first["exit_reason"] == "RECOVERY_TARGET_HIT", [(t["exit_reason"], t["exit_time"]) for t in held]
     assert first["exit_time"].strftime("%H:%M") == "10:00"
+
+
+@pytest.mark.asyncio
+async def test_exits_read_the_colour_candles_in_colour_mode(db):  # noqa: F811
+    """In candle-colour mode the bot's own candle is 1 minute; the exits read the colour candles instead, so three
+    red 1-minute candles inside a green 5-minute candle are not "3 candles against", three red 5-minute ones are."""
+    from sma_research.replayer import replay_symbol
+
+    up = _minutes(1000.0, [0.02] * 25)  # 09:45-10:09: five green 5-minute candles in a row: buy at 10:10
+    dip = _minutes(1000.5, [-0.1, -0.1, -0.1, 0.3, 0.3])  # 10:10-10:14: 3 red minutes, the 5-minute candle green
+    base = dict(entry_mode="COLOUR", pattern_tf=5, colour_count=5, qty=1, use_stop=False,
+                counter_exit_count=3, counter_need_fast=False, counter_min_body=0, counter_rule="COLOUR")
+
+    held = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + up + dip + _quiet(315, 1000.8)))
+    trades = await replay_symbol(held, "COL", [DAY], _settings(db, **base))
+    assert trades and trades[0]["exit_reason"] != "COUNTER_CANDLES", [(t["exit_reason"], t["exit_time"]) for t in trades]
+
+    reds = _minutes(1000.8, [-0.1] * 15)  # 10:15-10:29: three red 5-minute candles (5 in a row would turn it)
+    turned = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + up + dip + reds + _quiet(300, 999.3)))
+    trades = await replay_symbol(turned, "COL", [DAY], _settings(db, **base))
+    first = trades[0]
+    assert first["exit_reason"] == "COUNTER_CANDLES", [(t["exit_reason"], t["exit_time"]) for t in trades]
+    assert first["exit_time"].strftime("%H:%M") == "10:30"
