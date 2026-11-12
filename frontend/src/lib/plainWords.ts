@@ -85,6 +85,13 @@ export const PLAIN_WORDS: Record<string, PlainWord> = {
       "A stock passes most of seven simple checks: price above both averages (for an up trend), above the day's average price (VWAP), both averages rising, the gap wide enough, most recent closes on the right side, higher highs and lows, and no cross for a while. 6 of 7 is a strong trend.",
     why: "It is a stricter test than \"the lines have crossed\": it picks the stocks that are moving cleanly, not just the ones that twitched.",
   },
+  fresh_trend: {
+    term: "Fresh trend",
+    means:
+      "A trend that has only just started: the two averages crossed within the last 3 candles, the price and the fast average are on the right side of the day's average price (VWAP), the gap between the averages is still growing, and volume is at least 1.5 times the usual.",
+    example: "The averages cross up at 11:20 on heavy volume with the price above VWAP: the 11:25 scan shows Fresh ↑.",
+    why: "Strong trend only says yes once a move is old, often near its end. Fresh trend flags the start. In a 30-day test it was the best early signal, but the edge was small, so treat it as a watch list, not a buy order.",
+  },
   phase: {
     term: "Phase (bull / bear / chop)",
     means: "Which kind of stretch the stock is in right now: moving up cleanly (bull), moving down cleanly (bear), or going sideways (chop). The strip shows how the day was split into these stretches.",

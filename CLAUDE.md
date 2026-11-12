@@ -1038,6 +1038,14 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   strong-trend checks, phases, trend age and gap are all the Heikin Ashi read (`analyze(..., ha=)`, `_crosses_on`,
   `scan_worker.chop_job`); the last price, VWAP and day move stay real. Scan & arm, the Most active card's "Read trend
   quality", MCP and the pick backtests keep normal candles. First seen compares only saved scans of the same kind.
+  **Fresh trend** (`trend_strength.fresh`, rows carry `fresh` BULLISH / BEARISH / null, `fresh_checks`, `fresh_rvol`;
+  the Trend column's "Fresh ↑ / ↓" chip, `ChopScan.FreshChip`, and Show → Fresh trend both / up / down; plain word
+  `fresh_trend`): a trend that has only just started, where Strong trend only confirms an old one. All of: `cross` (the
+  SMAs crossed within `FRESH_CANDLES` 3 closed candles), `vwap` (the real last close and the fast SMA on the trend's side
+  of today's VWAP), `gap` (wider than on the candle before), `volume` (today since 09:15 at least `FRESH_MIN_RVOL` 1.5x
+  the same minutes of the earlier sessions, `_opening_rvol`, needs 2), and on Heikin Ashi candles `colour` (the last HA
+  candle is the trend's colour). From the owner's 30-day test (218 F&O stocks, 5-minute candles), where it was the best
+  early signal with a small edge. Information only: nothing in the strategy, an alert or Scan & arm reads it.
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also
   gets `trend` = `STRONG_BULLISH` / `STRONG_BEARISH` / null, `trend_score` (0-100) and
   `trend_checks`, judged on the closed candles for the side of fast vs slow SMA: `stack` (close

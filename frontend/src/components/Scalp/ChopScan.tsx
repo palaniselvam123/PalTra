@@ -88,7 +88,7 @@ type Props = {
   savedTitle?: string;
 };
 
-type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
+type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "FRESH" | "FRESH_BULLISH" | "FRESH_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
 type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
 const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
@@ -413,6 +413,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       if (score === "STRONG" && !isStrong(r)) return false;
       if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
       if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
+      if (score === "FRESH" && !r.fresh) return false;
+      if (score === "FRESH_BULLISH" && r.fresh !== "BULLISH") return false;
+      if (score === "FRESH_BEARISH" && r.fresh !== "BEARISH") return false;
       if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
       if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
       if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
@@ -469,7 +472,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       case "score":
         return r.score === "TRENDING" ? 0 : r.score === "MIXED" ? 1 : 2;
       case "trend":
-        return (isStrong(r) ? 1000 : 0) + (r.trend_score ?? 0);
+        return (isStrong(r) ? 1000 : 0) + (r.fresh ? 500 : 0) + (r.trend_score ?? 0);
       case "phase":
         // Strong phases first, longest-running first; then choppy; too early to tell last.
         return r.phase == null || r.phase_early ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
@@ -525,12 +528,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         </>
         )}
       </div>
-      <GuideBar lesson="scalp-trend-quality" terms={["cross", "chop", "trend", "strong_trend", "phase", "vwap", "gap_pct", "speed", "rvol", "arm", "handoff"]} className="mb-2" />
+      <GuideBar lesson="scalp-trend-quality" terms={["cross", "chop", "trend", "strong_trend", "fresh_trend", "phase", "vwap", "gap_pct", "speed", "rvol", "arm", "handoff"]} className="mb-2" />
       <Explain
         className="mb-3"
         lead={`How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Candles</b>: Normal reads the real candles; <b>Heikin Ashi</b> reads the averaged ones (each candle blends into the one before), so the lines cross less often, small pullbacks do not break a trend, and a turn shows a little later. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Fresh trend</b> (the Fresh ↑ / ↓ chip, and Show → Fresh trend) marks a trend that has only just started: the averages crossed within the last 3 candles, price and the fast average are beyond VWAP, the gap is still widening and volume is at least 1.5× the usual. Strong trend confirms a move that is already old; Fresh trend is the early one. <b>Candles</b>: Normal reads the real candles; <b>Heikin Ashi</b> reads the averaged ones (each candle blends into the one before), so the lines cross less often, small pullbacks do not break a trend, and a turn shows a little later. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -575,6 +578,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               { value: "STRONG", label: "Strong trend (both)" },
               { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
               { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
+              { value: "FRESH", label: "Fresh trend (both)" },
+              { value: "FRESH_BULLISH", label: "Fresh trend up ↑" },
+              { value: "FRESH_BEARISH", label: "Fresh trend down ↓" },
               { value: "PHASE_STRONG", label: "Phase now: strong (both)" },
               { value: "PHASE_BULL", label: "Phase now: strong up ↑" },
               { value: "PHASE_BEAR", label: "Phase now: strong down ↓" },
@@ -1101,7 +1107,10 @@ function Row({
         ),
         trend: (
           <td className="py-1.5">
-            <TrendChip row={r} />
+            <span className="inline-flex flex-wrap items-center gap-1">
+              <TrendChip row={r} />
+              <FreshChip row={r} />
+            </span>
           </td>
         ),
         phase: (
@@ -1179,6 +1188,40 @@ function Row({
         ),
       })}
     </tr>
+  );
+}
+
+const FRESH_TEXT: Record<string, string> = {
+  cross: "The two averages crossed within the last 3 candles",
+  vwap: "Price and the fast average are on the trend's side of VWAP",
+  gap: "The gap between the averages is still widening",
+  volume: "Volume today is at least 1.5× the usual for this time",
+  colour: "The last Heikin Ashi candle is the trend's colour",
+};
+
+/** "Fresh ↑ / ↓": a trend that has only just started (new cross + VWAP + widening gap + volume). */
+function FreshChip({ row: r }: { row: ChopScanRow }) {
+  if (!r.fresh) return null;
+  const up = r.fresh === "BULLISH";
+  const checks = r.fresh_checks ?? {};
+  const title = [
+    `Fresh ${up ? "up" : "down"} trend: it has only just started.`,
+    ...Object.keys(FRESH_TEXT).filter((k) => k in checks).map((k) => `${checks[k] ? "✓" : "✗"} ${FRESH_TEXT[k]}`),
+    r.fresh_rvol != null ? `Volume ${r.fresh_rvol.toFixed(1)}× the usual` : "",
+    "In a 30-day test this was the best early signal, but the edge is small. Watch only.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return (
+    <span
+      className={clsx(
+        "whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
+        up ? "bg-sky-500/10 text-sky-300 ring-sky-400/40" : "bg-amber-500/10 text-amber-300 ring-amber-400/40"
+      )}
+      title={title}
+    >
+      Fresh {up ? "↑" : "↓"}
+    </span>
   );
 }
 

@@ -241,6 +241,63 @@ def _opening_rvol(tape: pd.DataFrame | None, now: dt.datetime) -> tuple[float | 
     return float(today_sum.sum()) / usual, len(earlier_totals)
 
 
+FRESH_CANDLES = 3  # the SMAs crossed within this many closed candles
+FRESH_MIN_RVOL = 1.5
+FRESH_CHECKS = ("cross", "vwap", "gap", "volume")
+
+
+def fresh(closed: pd.DataFrame, vwap: float | None, now: dt.datetime, tape: pd.DataFrame | None,
+          price: float | None = None, colour: bool = False) -> dict:
+    """A trend that has only just started: the "fresh trend" flag of the Trend quality card.
+
+    The strong-trend checks confirm a trend once it is old; this reads its first candles. All must hold on the
+    closed candles (`sma_9`, `sma_21`):
+
+        cross    the SMAs crossed within the last FRESH_CANDLES closed candles and have stayed that way
+        vwap     the price (`price`, the real last close; else the candle's close) and the fast SMA are on the
+                 trend's side of today's VWAP
+        gap      the SMA gap is wider than on the candle before
+        volume   today's volume since 09:15 is at least FRESH_MIN_RVOL x the same minutes of the earlier sessions
+                 (`_opening_rvol`; needs VOLUME_MIN_SESSIONS)
+        colour   only with `colour` (Heikin Ashi candles): the last candle is the trend's colour
+
+    Returns {fresh: BULLISH / BEARISH / None, fresh_checks, fresh_rvol}. Information only; never raises on short data.
+    """
+    out = {"fresh": None, "fresh_checks": {}, "fresh_rvol": None}
+    if closed is None or len(closed) < FRESH_CANDLES + 2 or "sma_9" not in closed or "sma_21" not in closed:
+        return out
+    tail = closed.iloc[-(FRESH_CANDLES + 1):]
+    gaps = [sma_gap_pct(_f(a), _f(b)) if _f(a) is not None and _f(b) is not None else None
+            for a, b in zip(tail["sma_9"], tail["sma_21"])]
+    if any(g is None for g in gaps) or gaps[-1] == 0:
+        return out
+    up = gaps[-1] > 0
+    sign = 1 if up else -1
+    last = closed.iloc[-1]
+    close = price if price is not None else _f(last.get("close"))
+    fast = _f(last.get("sma_9"))
+    checks = {
+        # The other side (or flat) somewhere in the window before the last candle = the cross is that recent.
+        "cross": any(g * sign <= 0 for g in gaps[:-1]),
+        "vwap": vwap is not None and close is not None and fast is not None and (close - vwap) * sign > 0 and (fast - vwap) * sign > 0,
+        "gap": abs(gaps[-1]) > abs(gaps[-2]),
+    }
+    if colour:
+        o, c = _f(last.get("open")), _f(last.get("close"))
+        checks["colour"] = o is not None and c is not None and (c - o) * sign > 0
+    rvol = None
+    if all(checks.values()):  # the volume read walks the whole tape: only when the rest agrees
+        rvol, days = _opening_rvol(tape, now)
+        checks["volume"] = rvol is not None and days >= VOLUME_MIN_SESSIONS and rvol >= FRESH_MIN_RVOL
+    else:
+        checks["volume"] = False
+    out["fresh_checks"] = checks
+    out["fresh_rvol"] = round(rvol, 2) if rvol is not None else None
+    if all(checks.values()):
+        out["fresh"] = "BULLISH" if up else "BEARISH"
+    return out
+
+
 def _midday(closed: pd.DataFrame, vwap: float | None) -> dict:
     empty = _empty(MIDDAY)
     if closed is None or len(closed) < LOOKBACK + SLOPE_BARS:
