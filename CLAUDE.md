@@ -1024,7 +1024,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
   defaults to armed-stocks-only, so only the stocks on the Trade list are downloaded (quick enough to
   run quietly). **Auto re-scan** (`backend/chop_auto.py`, `ChopAuto`): the server itself starts the
-  scan every `every_min` minutes (5/10/15/20/30/45/60, default 30) while NSE is open, no browser
+  scan every `every_min` minutes (1/2/3/4/5/10/15/20/30/45/60, default 30; a pass still running is never doubled, so a short interval just starts the next pass as soon as one ends) while NSE is open, no browser
   needed, with the card's last choices (candle, Armed only read fresh each time: the desk's link on
   the scanner, `armed_lists()` on the desk; quiet minutes, price range, Telegram). Settings in
   `chop_auto.json` next to the terminal's SQLite file (the Fly volume); `PUT /api/chop-scan/auto`,
@@ -1444,7 +1444,7 @@ spinning top), body and range) / Matched / Call columns
   else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
   columns and the per-group summary). Read-only.
   **Auto scan** (`active_stocks.AutoSettings`, `active_auto.json` next to the desk DB, `ACTIVE_AUTO_FILE`): the server runs
-  the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 2-60, default 5) while NSE is open, no browser
+  the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 1-60: 1, 2, 3, 4, 5, 10…, default 5) while NSE is open, no browser
   needed (`ActiveScanner.start_background`, checked every `CHECK_SEC` 15 s; a manual Scan now counts as a run; Pause scans
   and `SCANS=off` stop it). On by default on the desk and scanner (the old fixed 5-minute loop), off on the backtest
   server, where while on in market hours it keeps the machine awake. `GET /api/scalp/active` carries `auto`; `PUT

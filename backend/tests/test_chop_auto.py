@@ -176,3 +176,11 @@ def test_auto_with_nothing_armed_says_so(sma_api, monkeypatch):
     monkeypatch.setattr(main, "armed_lists", lambda: {"bots": [{"armed": []}], "research": []})
     with pytest.raises(RuntimeError, match="armed"):
         asyncio.run(main._chop_auto_start(chop_auto.AutoSettings(on=True)))
+
+
+def test_one_to_four_minute_intervals_are_allowed():
+    """Owner's request: 1, 2, 3, 4 and 5-minute auto scans on Trend quality (and Most active)."""
+    from app.services import active_stocks
+
+    for m in (1, 2, 3, 4, 5):
+        assert m in chop_auto.EVERY_CHOICES and m in active_stocks.EVERY_CHOICES

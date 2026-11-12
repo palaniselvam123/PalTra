@@ -41,7 +41,7 @@ from app.core.market_clock import IST, ist_now, is_market_open
 log = logging.getLogger("active_stocks")
 
 SCAN_EVERY_SEC = 300          # the default auto-scan interval (5 minutes)
-EVERY_CHOICES = (2, 3, 5, 10, 15, 20, 30, 60)
+EVERY_CHOICES = (1, 2, 3, 4, 5, 10, 15, 20, 30, 60)
 DEFAULT_EVERY = 5
 CHECK_SEC = 15                # how often the auto-scan loop looks at the clock
 MIN_MANUAL_GAP_SEC = 60       # "Scan now" at most once a minute
