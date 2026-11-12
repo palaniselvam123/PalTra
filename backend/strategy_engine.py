@@ -6400,6 +6400,8 @@ class StrategyEngine:
         net = 0.0
         wins = 0
         gross_wins = 0
+        gross_profit = 0.0  # winning trades added up, before charges
+        gross_loss = 0.0    # losing trades added up, before charges (negative)
         by_symbol: dict[str, dict] = {}
         breakdown = {
             "brokerage": 0.0,
@@ -6422,6 +6424,9 @@ class StrategyEngine:
                 wins += 1
             if (row.gross_pnl or 0) > 0:
                 gross_wins += 1
+                gross_profit += float(row.gross_pnl)
+            elif (row.gross_pnl or 0) < 0:
+                gross_loss += float(row.gross_pnl)
             per = by_symbol.setdefault((row.symbol or "").upper(), {"net": 0.0, "gross": 0.0, "trades": 0})
             per["net"] += float(row.net_pnl or 0)
             per["gross"] += float(row.gross_pnl or 0)
@@ -6442,6 +6447,9 @@ class StrategyEngine:
             "wins": wins,
             # Wins counted before charges, for screens that show P&L before charges.
             "gross_wins": gross_wins,
+            # The day's winning and losing trades added up, before charges (display only).
+            "gross_profit": gross_profit,
+            "gross_loss": gross_loss,
             "by_symbol": by_symbol,
         }
 
