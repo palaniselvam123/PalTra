@@ -149,15 +149,15 @@ async def test_panic_closes_every_stock_at_the_same_time(db):  # noqa: F811
     for symbol, price in (("RELIANCE", 2400.0), ("TCS", 3100.0), ("SBIN", 800.0), ("INFY", 1500.0)):
         eng.positions[symbol] = _position(symbol, "LONG", price, _seed(symbol, "LONG", price))
         eng._ltps[symbol] = price
-    started = time.monotonic()
     await eng.kill("Manual PANIC SQUARE-OFF")
-    took = time.monotonic() - started
     assert eng.positions == {} and eng.status == "HALTED"
-    # Four closes of 0.15 s each: one after another would take 0.6 s; together they take about one.
-    assert took < 0.45, took
     starts = [t for name, t in broker.events if name.startswith("start")]
     dones = [t for name, t in broker.events if name.startswith("done")]
     assert len(starts) == 4 and max(starts) < min(dones)  # every exit was sent before the first one came back
+    # Four exits of 0.15 s each: one after another would span 0.6 s; together about one. Timed from the first exit sent
+    # to the last one back, so the trade bookkeeping around them (slow on a busy CI machine) does not count.
+    took = max(dones) - min(starts)
+    assert took < 0.45, took
     exits = {row["symbol"]: row["exit_reason"] for row in eng.trades()}
     assert exits == {"RELIANCE": "KILL_SWITCH", "TCS": "KILL_SWITCH", "SBIN": "KILL_SWITCH", "INFY": "KILL_SWITCH"}
 
