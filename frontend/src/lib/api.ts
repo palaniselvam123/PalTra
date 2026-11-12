@@ -1725,6 +1725,8 @@ export type PressureDayRow = {
   side: "BUY" | "SELL";
   first_at: string;
   below_at?: string | null;
+  /** When an order could go: the open of the minute after that read (HH:MM). */
+  trade_at?: string;
   share_pct: number;
   max_share_pct: number;
   scans_at: number;
@@ -1746,6 +1748,8 @@ export type PressureDay = {
   day: string | null;
   pct: number;
   move_pct: number;
+  /** Scans taken after the close (a Scan now in the evening) and days whose prices never moved (a holiday), left out. */
+  left_out?: { day: string; why: "after_hours" | "closed"; scans: number }[];
   stats: { side: "ALL" | "BUY" | "SELL"; label: string; stocks: number; moved: number; correct_pct: number | null; avg_minutes: number | null; avg_best_pct: number | null; ended_right_pct: number | null }[];
   answer: string[];
   rows: PressureDayRow[];

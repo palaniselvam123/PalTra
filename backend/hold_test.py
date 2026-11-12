@@ -7,6 +7,9 @@ price at the time buyers / sellers first reached the share). From the minute aft
 1-minute candles (`strategy_lab.load_tape`, cached per day) are followed through that day and the next `days` trading
 sessions:
 
+* **Entry** (`entry_on`, `entry_at`, `entry_price`): the open of the first 1-minute candle after the scan's time (the
+  trade time; a scan after the close or on a holiday enters at the next session's first candle). The profit % is
+  counted from that price, not from the scan's last price.
 * **Reached** (`on`, `hit_at`): the first minute whose high (a buy) / low (a sell) touches entry × (1 ± `target_pct` / 100). `day_no` 0 =
   the same day, 1 = the next trading session, and so on; with the date and the time.
 * **Worst before**: the furthest the price went against the trade before the target (or over the whole hold when the
@@ -44,17 +47,25 @@ def follow(tape: pd.DataFrame | None, day: dt.date, at: str, side: str, price: f
     """One row's hold from `at` on `day` for the same day plus `days` sessions. `side` BUY / LONG buys, else sells."""
     sign = 1 if side in ("BUY", "LONG") else -1
     out: dict = {"reached": False, "day_no": None, "on": None, "hit_at": None, "worst_before_pct": None, "best_pct": None,
-                 "end_pct": None, "sessions": 0, "target_price": None}
-    if tape is None or tape.empty or not price or price <= 0:
+                 "end_pct": None, "sessions": 0, "target_price": None, "entry_on": None, "entry_at": None, "entry_price": None}
+    if tape is None or tape.empty:
         out["error"] = "no candles"
         return out
-    target = price * (1 + sign * target_pct / 100.0)
-    out["target_price"] = round(target, 2)
     start = int(_parse_at(day, at).timestamp()) + 60  # the minute after the scan saw it
     frame = tape[tape["ts"] >= start].sort_values("ts")
     if frame.empty:
         out["error"] = "no candle after that time"
         return out
+    first = frame.iloc[0]
+    opened = float(first["open"]) if "open" in frame.columns and first["open"] == first["open"] else 0.0
+    price = opened if opened > 0 else float(price or 0)
+    if price <= 0:
+        out["error"] = "no price"
+        return out
+    when0 = dt.datetime.fromtimestamp(int(first["ts"]), IST)
+    out.update(entry_on=when0.date().isoformat(), entry_at=when0.strftime("%H:%M"), entry_price=round(price, 2))
+    target = price * (1 + sign * target_pct / 100.0)
+    out["target_price"] = round(target, 2)
     dates = pd.to_datetime(frame["ts"], unit="s", utc=True).dt.tz_convert(IST).dt.date
     sessions = [d for d in dict.fromkeys(dates) if d >= day]
     keep = sessions[: days + 1] if sessions and sessions[0] == day else sessions[:days]
