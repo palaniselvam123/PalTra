@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.models.database import NewsAlert, async_session
-from app.services import news_impact, news_validation
+from app.services import news_impact, news_validation, results_calendar
 from app.services.news_impact import news_watcher
 
 router = APIRouter(prefix="/api/news-impact", tags=["news"])
@@ -180,6 +180,50 @@ async def watch():
         "stocks": [{"symbol": s, **e, "latest": news_watcher.latest.get(s)} for s, e in watched.items()],
         "status": news_watcher.status.__dict__,
     }
+
+
+@router.get("/results")
+async def results(
+    start: str | None = Query(None, alias="from"),
+    end: str | None = Query(None, alias="to"),
+    scope: str = Query("fno", pattern="^(fno|all|mine)$"),
+    force: bool = False,
+):
+    """Results calendar from NSE (results_calendar.py): every board meeting called for financial results in
+    [from, to] (default: 7 days back to 21 ahead), and, for the days passed, when each company really filed them and
+    whether the market could trade it that day. `scope` fno = F&O stocks, mine = the bots' armed / held stocks and
+    the watch lists, all = every listed stock. Read-only."""
+    today = dt.datetime.now(news_impact.IST).date()
+
+    def parse(raw: str | None, default: dt.date) -> dt.date:
+        if not raw:
+            return default
+        try:
+            return dt.date.fromisoformat(raw)
+        except ValueError as exc:
+            raise HTTPException(400, "Dates must be YYYY-MM-DD") from exc
+
+    a = parse(start, today - dt.timedelta(days=7))
+    b = parse(end, today + dt.timedelta(days=21))
+    if b < a:
+        raise HTTPException(400, "The To date is before the From date.")
+    if (b - a).days >= results_calendar.MAX_RANGE_DAYS:
+        raise HTTPException(400, f"Pick at most {results_calendar.MAX_RANGE_DAYS} days at a time.")
+    out = await results_calendar.calendar(a, b, force=force)
+    rows = out["rows"]
+    mine: dict = {}
+    if scope == "mine":
+        mine = await _watch()
+        rows = [r for r in rows if r["symbol"] in mine]
+    elif scope == "fno":
+        import asyncio
+
+        fno = await asyncio.to_thread(news_impact._fno_set)
+        rows = [r for r in rows if not fno or r["symbol"] in fno]
+    if scope != "mine":
+        mine = await _watch()
+    rows = [{**r, "armed": bool(mine.get(r["symbol"], {}).get("armed") or mine.get(r["symbol"], {}).get("held"))} for r in rows]
+    return {**out, "rows": rows, "scope": scope}
 
 
 @router.get("/feed")
