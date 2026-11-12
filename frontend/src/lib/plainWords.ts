@@ -15,6 +15,26 @@ export type PlainWord = {
 };
 
 export const PLAIN_WORDS: Record<string, PlainWord> = {
+  orders_waiting: {
+    term: "Buy / sell orders waiting",
+    means:
+      "Orders people have placed that have not been filled yet. Buy orders waiting = shares people want to buy at their price; sell orders waiting = shares people want to sell. Groww shows the total of each.",
+    example: "After the close a stock shows 90,000 shares of buy orders waiting and 15,000 of sell orders: buyers waiting are 6× the sellers.",
+    why: "Many more buyers than sellers still waiting after the market shut means people wanted the stock and could not get it.",
+  },
+  short_covering: {
+    term: "Short sellers buying back (short covering)",
+    means:
+      "A short seller sells shares first and buys them back later. In intraday trading they must buy back before about 15:20, when the broker closes it for them. That buying can push the price up at the end of the day without any new real buyer.",
+    example: "A stock falls all day, then jumps 2% between 14:30 and 15:20 on heavy volume, and most of that volume is not taken home (low delivery %).",
+    why: "A jump from short covering often fades the next day; a jump from real demand is more likely to carry on.",
+  },
+  open_interest: {
+    term: "Open interest (OI, F&O stocks)",
+    means: "How many futures and options contracts are still open. It rises when new positions are opened and falls when people close them.",
+    example: "Price up 2% and OI down 6%: people who had sold (short) were closing their positions.",
+    why: "Price up with OI down points to short sellers buying back; price up with OI up points to new buyers.",
+  },
   candle: {
     term: "Candle (1-minute, 5-minute …)",
     means:

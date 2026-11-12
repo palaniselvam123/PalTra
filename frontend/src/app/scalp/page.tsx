@@ -22,6 +22,7 @@ import { ChopScan } from "@/components/Scalp/ChopScan";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { MorningScan } from "@/components/Scalp/MorningScan";
 import { CarryScan } from "@/components/Scalp/CarryScan";
+import { CloseOrders } from "@/components/Scalp/CloseOrders";
 import { TurnScan } from "@/components/Scalp/TurnScan";
 import { MorningStudy } from "@/components/Scalp/MorningStudy";
 import { SecondCandle } from "@/components/Scalp/SecondCandle";
@@ -98,6 +99,7 @@ const TABS = [
   { id: "lab", group: "test", label: "Strategy lab", ask: "Which checks and exits actually help?", use: "Switch each rule on and off and see at once how the profit changes. Much faster than a backtest.", next: "Use the best set, then prove it with a Backtest." },
   { id: "sideways", group: "test", label: "Sideways test", ask: "Which stocks trend and which stay sideways?", use: "Reads past days per stock and suggests the right bot: trend bot, chop bot or the main one.", next: "Arm each stock on the bot it suggests." },
   { id: "morningtest", group: "test", label: "Morning test", ask: "Does a strong morning lead to a strong day?", use: "Checks on past days whether stocks up (or down) by mid-morning kept going until the close.", next: "Decide whether to hold morning winners or book early." },
+  { id: "afterclose", group: "back", label: "After the close", ask: "Was today's end-of-day jump real buying, or short sellers buying back?", use: "Run after 15:30 (best after 18:00). Shows buy orders still waiting vs sell orders, the last hour, delivery % and F&O open interest, and says which it looks like.", next: "Real demand = a candidate for tomorrow. Short sellers buying back = the jump often fades; be careful chasing it." },
   { id: "history", group: "back", label: "History", ask: "What did a scan show earlier, and was it right?", use: "Every saved scan with its time. 'Check accuracy' shows how the stocks moved afterwards.", next: "Trust the scans that were right most often." },
   { id: "alerts", group: "back", label: "Alerts", ask: "Which alerts should come to my Telegram?", use: "Switches for the alerts: a strong up or down trend, buyers or sellers in control, and scalp-ready stocks.", next: "Turn on the ones you want; each stock alerts once a day." },
 ] as const;
@@ -397,6 +399,7 @@ export default function ScalpPage() {
     sideways: sidewaysStatus,
     morningtest: morningTestStatus,
     second: secondStatus,
+    afterclose: null,
     history: null,
     alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
   };
@@ -802,6 +805,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "morningtest"}>
           <MorningStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Morning test")} onArmMany={(list) => armSeveral(list, "Morning test")} paused={paused} onStatus={onMorningTestStatus} />
+        </div>
+        <div hidden={tab !== "afterclose"}>
+          {tab === "afterclose" && <CloseOrders armed={armed} arming={arming} onArm={(s) => arm(s, "After the close")} onArmMany={(list) => armSeveral(list, "After the close")} paused={paused} />}
         </div>
         <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>

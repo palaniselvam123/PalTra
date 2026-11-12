@@ -49,3 +49,20 @@ def test_summary_reports_the_phase_now():
     s = tp.summary(tp.phases(_frame(_shape()), DAY))
     assert s["phase"] == tp.CHOP and s["strong_phases"] == 2 and len(s["phases"]) == 4
     assert tp.summary([])["phase"] is None
+
+
+def test_choppy_early_in_the_day_is_only_too_early():
+    """Fewer than MIN_RUN candles of today closed: a strong phase cannot have formed yet, so "choppy" is marked early."""
+    closes = [100 + (0.8 if i % 2 else -0.8) for i in range(30)]
+    today = DAY + 300 * (30 - (tp.MIN_RUN - 1))  # only MIN_RUN - 1 of the candles are today's
+    found = tp.phases(_frame(closes), today)
+    assert sum(p["candles"] for p in found) == tp.MIN_RUN - 1
+    assert tp.summary(found)["phase_early"] is True
+    later = tp.phases(_frame(closes), today - 300)  # one more of today's candles closed
+    assert tp.summary(later)["phase"] == tp.CHOP and tp.summary(later)["phase_early"] is False
+    assert tp.summary([])["phase_early"] is False
+
+
+def test_a_strong_phase_is_never_marked_early():
+    found = [{"side": tp.BULL, "start_ts": DAY, "end_ts": DAY + 300, "candles": 2, "move_pct": 1.0}]
+    assert tp.summary(found)["phase_early"] is False

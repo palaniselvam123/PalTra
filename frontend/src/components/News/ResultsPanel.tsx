@@ -80,7 +80,7 @@ export function ResultsPanel({ onArm, onNews }: { onArm: (s: string) => void; on
 
   const loadLists = async () => {
     setError(null);
-    const [c, f] = await Promise.allSettled([api.resultsCalendar(7), api.resultsFiled(300)]);
+    const [c, f] = await Promise.allSettled([api.resultsDays(7), api.resultsFiled(300)]);
     if (c.status === "fulfilled") setCal(c.value);
     else setError(String(c.reason));
     if (f.status === "fulfilled") {

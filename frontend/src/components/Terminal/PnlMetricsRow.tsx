@@ -32,8 +32,21 @@ export function PnlMetricsRow({ state }: { state: SmaState | null }) {
 
   return (
     <section aria-label={`Today's results, ${book.toLowerCase()}`} className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
-      <Card label="MA-cross P&L" hint="If filled at the cross">
-        {k ? <span className={pnlTone(k.theoretical_gross)}>{signed(k.theoretical_gross)}</span> : null}
+      <Card
+        label="Gross profit / loss"
+        hint={k?.gross_profit != null ? `Winning ${wins} · losing ${losses} trades, before charges` : "Update the server to see this"}
+      >
+        {k ? (
+          k.gross_profit != null ? (
+            <span className="inline-flex flex-wrap items-baseline gap-x-2 whitespace-normal text-lg leading-7 sm:text-[22px] sm:leading-9">
+              <span className="text-emerald-300" title="Money made on the winning trades, before charges">{signed(k.gross_profit)}</span>
+              <span className="text-sm text-slate-500">/</span>
+              <span className="text-rose-300" title="Money lost on the losing trades, before charges">{k.gross_loss ? inr(k.gross_loss) : inr(0)}</span>
+            </span>
+          ) : (
+            <span className="text-slate-500">—</span>
+          )
+        ) : null}
       </Card>
       <div ref={chargesRef} className="relative">
         <button

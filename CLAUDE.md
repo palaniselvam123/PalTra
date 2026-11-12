@@ -1053,8 +1053,10 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   candles: efficiency ratio |net| / sum |close moves| ≥ `MIN_EFFICIENCY` (0.5) and |net| ≥ `MIN_ATR_MOVE`
   (1) ATR; runs of ≥ `MIN_RUN` (5) such candles (gaps of `BRIDGE` 1 closed) become a phase, backdated to
   the window's turn; shorter bursts stay choppy. Rows carry `phase`, `phase_since_ts`, `phase_move_pct`,
-  `phase_candles`, `phases` (all of today's) and `strong_phases`; the card's Phase column shows the phase
-  now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
+  `phase_candles`, `phases` (all of today's), `strong_phases` and `phase_early` (`too_early`: CHOP only because
+  fewer than `MIN_RUN` of today's candles have closed, e.g. before 10:30 on 15-minute candles; shown as "Not enough
+  candles yet", left out of "Phase now: choppy", and as "Too early" on the terminal's Trend chip via `stock_regime`); the
+  card's Phase column shows the phase now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
   **Crosses today on** (`CROSS_RULES` in `ChopScan.tsx`: None, Exactly 1 / 1 ↑ / 1 ↓ / 2 / 3, At most 1-3,
   2 / 3 / 5 or more; multi-select 1/2/3/5/10/15 min): each row carries
   `crosses_by_minutes`, `side_by_minutes`, `last_cross_ts_by_minutes` and
@@ -1734,7 +1736,8 @@ spinning top), body and range) / Matched / Call columns
   only). `frontend/src/lib/pnlBasis.ts` turns loaded trade lists and backtest
   runs to that basis (a trade's `net_pnl` then holds its gross), and the server
   sends gross figures next to the net ones (`books[].open_gross/closed_gross/
-  day_gross`, `open_gross_total`, `kpis.gross_wins`, `/api/bots` `gross_today`,
+  day_gross`, `open_gross_total`, `kpis.gross_wins`, `kpis.gross_profit` / `gross_loss` (the day's winning and losing
+  trades added up, the terminal's first P&L card "Gross profit / loss", `PnlMetricsRow`), `/api/bots` `gross_today`,
   chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
   daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
 - `backend/all_bots_guard.py` – all-bots day target / stop loss (off by default: `all_bots_target` /
@@ -1961,7 +1964,7 @@ spinning top), body and range) / Matched / Call columns
   (`useNewsLists`; scanner `GET /api/link/desk-news-lists`, `POST /api/link/desk-news-lists/add` → desk `/api/link/news-lists`
   `[/add]`, `SCANNER_LINK_TOKEN`), and "Open their news" opens the desk's News page.
 - `backend/app/services/results.py` – **Quarterly results** (the News page's "Quarterly results" tab,
-  `components/News/ResultsPanel.tsx`, `/news/?tab=results`; read-only, never trades, nothing in the strategy reads it; owner's
+  `components/News/ResultsPanel.tsx`, `/news/?tab=quarterly`, next to the "Results calendar" tab of `results_calendar.py`; read-only, never trades, nothing in the strategy reads it; owner's
   idea from MyAlgoMate's results calendar: companies file with NSE first, before the news channels). **Calendar**
   (`calendar`, desk `GET /api/results/calendar?days=7`): NSE's board meetings (`api/corporate-board-meetings`, else
   `api/event-calendar`) whose purpose is financial results, per day with an F&O flag (`parse_calendar`). **Filed**
@@ -1994,6 +1997,40 @@ spinning top), body and range) / Matched / Call columns
   Indian corporate-news words, kept per browser as `news.check.keywords`) matched as whole words in each title, and
   per word the plain move (not signed by the news) 15 / 30 / 60 min after and to the close, its size, % closed up, the
   average high / low after and how often the news was right; clicking a word filters the headline list.
+- `backend/app/services/results_calendar.py` – **Results calendar** (the News page's "Results calendar" tab,
+  `components/News/ResultsCalendar.tsx`; read-only, no key, no order path, nothing in the strategy reads it): NSE's own event
+  calendar (`api/event-calendar`, else `api/corporate-board-meetings`; `parse_calendar`, results meetings only) joined with
+  the market-wide corporate announcements of the days passed (`api/corporate-announcements` with dates; `results_filings`:
+  the filing's subject decides, "Financial Result…", "Integrated Filing- Financial" or "Outcome of Board Meeting", never
+  delay / intimation notices or a general update). `build`: one row per stock and meeting, `status` UPCOMING / TODAY /
+  FILED / NOT_SEEN, the first filing within `FILED_WITHIN_DAYS` (2) of the meeting as `filed_at` (`filings` = how many that
+  day), `session` BEFORE_OPEN / IN_MARKET / AFTER_CLOSE and `trades_on` (the first session whose prices can carry it); a
+  results filing with no meeting in the range is added (`from_filing`, once per stock and day). Cached `CACHE_SEC` (15 min).
+  Desk `GET /api/news-impact/results?from=&to=&scope=fno|mine|all&force=` (default 7 days back to 21 ahead, at most
+  `MAX_RANGE_DAYS` 62; `mine` = the bots' armed / held stocks and the watch lists; rows carry `armed`). The tab: From / To,
+  quick picks, stocks, Refresh from NSE, counts, Show filter, search, rows grouped by day, the filing link, News (opens the
+  stock's News panel above) and Arm (Trade list only), CSV.
+- `backend/app/services/close_orders.py` – **After the close** (the Scalp page's "After the close" tab, group 4 Look back,
+  `components/Scalp/CloseOrders.tsx`, guide `scalp-after-close`; read-only, no order path, nothing in the strategy reads it):
+  the owner's ALICON case (far more buy orders than sell orders waiting after the close): real demand, or short sellers
+  buying back? Per stock (`CloseOrderScanner.scan`, one pass at a time, up to `MAX_STOCKS` 250, after
+  `groww_pressure.wait_for_bots`, paced `CALL_GAP_SEC`): Groww's quote on the desk's session (`book`: total buy / sell
+  quantity waiting, and the order count at the best five prices when a depth level carries `orders`), the day's 1-minute
+  candles (`tape`: move to 14:30, the last hour, where it closed in the day's range, the end-of-day volume rush after 14:45
+  vs the day's pace; `minute_volumes` turns Groww's running volume into per minute), NSE's delivery % for that day
+  (`delivery.report`, only when its day is the scanned day, about 18:00), NSE's F&O open interest change (`oi_changes`,
+  `api/live-analysis-oi-spurts-underlyings`, live) and NSE's short-selling file (`shorts_for`: `shortselling_DDMMYYYY.csv`,
+  published the next trading day, matched by its trade date). `read` adds plain points: real demand (buy orders waiting ≥
+  `BUY_RATIO_STRONG` 3× / 2× the sell orders, ≥ `BUY_VS_VOLUME` 5 % of the day's volume, closed at the top of the range,
+  delivery ≥ 1.2× usual, OI up with the price) and short sellers buying back (fell to 14:30 then ≥ `LATE_RISE` 0.7 % in the
+  last hour, end rush ≥ 2×, delivery ≤ 0.8× usual, OI down ≥ 2 % with the price up, short sold ≥ 2 % of volume, a late jump
+  with few buyers left waiting); `verdict` DEMAND / SHORT_COVER (≥ `NAME_AT` 3 points and `LEAD_BY` 2 ahead) / MIXED /
+  QUIET, `unusual_buy`, each point's reason (`demand_why` / `cover_why`) and what is not known yet (`missing`); `notes` say
+  when delivery / the short file are not out or the market is still open. Each pass is saved in the scan history as kind
+  `closebook` ("After the close"). Desk `GET /api/scalp/close-orders`, `POST /api/scalp/close-orders/scan` (`symbols`),
+  `POST /api/scalp/close-orders/stop`, `GET /api/scalp/close-orders/history[?day=]`, `GET /api/scalp/close-orders/history/{id}`.
+  The tab: Scan now / Stop, stock lists plus typed stocks, Show (unusual buy orders / each answer), search, saved scans,
+  the table, a Why? row per stock, tick boxes, Arm / Arm ticked.
 - **One colour per server** (display only; `frontend/src/components/ServerAccent.tsx`, `app/globals.css` "One colour per
   server"): the desk keeps violet; the backtest server is **blue** and the scanner **teal** (owner's choice, so the three
   are told apart at a glance). `ServerAccent` (in the root layout) reads `/api/role` once and puts `data-server="backtest"`
@@ -2033,7 +2070,7 @@ spinning top), body and range) / Matched / Call columns
 - **Scalp tabs grouped by use** (`app/scalp/page.tsx` `TAB_GROUPS` / `TABS` / `ScalpTabs`; display only): the tab bar is four
   boxes in the order of a trading day: 1 At the open (09:30 Morning, Carry-over), 2 During the day (Most active, Trend quality,
   Cross scan, Turning, 52-week high, Monitor), 3 Test an idea (Second candle, Backtest, Strategy lab, Sideways test, Morning
-  test), 4 Look back (History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
+  test), 4 Look back (After the close, History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
   `next` (what to do with the answer), shown in a strip under the tabs for the open tab; "Which one do I use?" lists every
   question → tab. Add a tab by adding its `TABS` entry with those three lines and a group.
 - **Best to trade now** (`components/Scalp/BestNow.tsx`, top of the Most active card's Live view; display only, no order):
@@ -2057,7 +2094,7 @@ spinning top), body and range) / Matched / Call columns
   and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
   `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
   `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
-  `scalp-morning-test`, `scalp-history`, `scalp-alerts`; `sideways-test` covers that tab). They are written as small
+  `scalp-morning-test`, `scalp-history`, `scalp-alerts`, `scalp-after-close`; `sideways-test` covers that tab). They are written as small
   JavaScript modules in `frontend/scripts/guides/lessons/` (shared pieces and drawn SVG figures in `frontend/scripts/guides/lib.js`)
   and rendered to the PDFs by `frontend/scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
   page count in `lessons.ts`. Every Scalp tab shows `components/Scalp/GuideBar.tsx` under its heading: "Guide (PDF)"

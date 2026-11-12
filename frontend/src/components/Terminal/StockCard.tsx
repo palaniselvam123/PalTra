@@ -38,22 +38,25 @@ const SCORE_WORD: Record<StockRegime["score"], string> = { TRENDING: "trending",
 /** The phase now (up / down / choppy, since when) and today's cross count, e.g. "Up ↑ 12:10 · 1 cross". */
 export function RegimeChip({ regime }: { regime: StockRegime | null | undefined }) {
   if (!regime) return <span className="text-xs text-slate-500" title="Not enough candles yet">—</span>;
-  const { phase, phase_since, phase_move_pct, crosses, score, minutes, strong_phases } = regime;
+  const { phase, phase_since, phase_move_pct, crosses, score, minutes, strong_phases, phase_early } = regime;
   const up = phase === "BULL";
   const down = phase === "BEAR";
-  const label = up ? "Up ↑" : down ? "Down ↓" : "Choppy";
+  const early = !up && !down && !!phase_early;
+  const label = up ? "Up ↑" : down ? "Down ↓" : early ? "Too early" : "Choppy";
   const move = phase_move_pct == null ? "" : ` (${phase_move_pct > 0 ? "+" : ""}${phase_move_pct.toFixed(2)}%)`;
   const title = [
     `On ${minutes}-minute candles.`,
     up || down
       ? `Strong ${up ? "up" : "down"} phase since ${phase_since ?? "?"}${move}.`
-      : `Choppy since ${phase_since ?? "the open"}: no clean run of 5+ candles now.`,
+      : early
+        ? `Not enough candles yet: a strong phase needs 5 trending candles in a row and fewer than 5 of today's have closed.`
+        : `Choppy since ${phase_since ?? "the open"}: no clean run of 5+ candles now.`,
     `${crosses} SMA cross${crosses === 1 ? "" : "es"} today, so the day reads ${SCORE_WORD[score]}.`,
     `${strong_phases} strong phase${strong_phases === 1 ? "" : "s"} today.`,
   ].join(" ");
   return (
     <span className="inline-flex flex-col items-start gap-0.5" title={title}>
-      <Badge color={up ? "sky" : down ? "violet" : "amber"}>
+      <Badge color={up ? "sky" : down ? "violet" : early ? "slate" : "amber"}>
         {label}
         {phase_since && (up || down) ? <span className="font-mono normal-case opacity-80">{phase_since}</span> : null}
       </Badge>
