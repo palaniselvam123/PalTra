@@ -142,3 +142,93 @@ def test_route_checks_the_day_through_the_terminal(monkeypatch):
         out = client.get("/api/news-impact/validate?date=2026-10-28&symbols=acme&min_move=0.5").json()
         assert out["rows"][0]["verdict"] == "WITH" and out["summary"][0]["group"] == "Positive · High"
         assert client.get("/api/news-impact/validate?alerts=false").status_code == 400
+
+
+def test_a_date_range_reads_each_weekday_and_reuses_the_candles():
+    import asyncio
+
+    seen = []
+
+    async def candles(symbols, day, until=None, cache=None):
+        seen.append((day, until, cache is not None))
+        return {s: {"rows": RISE, "prev_close": 99.0} for s in symbols}
+
+    async def collect(day, symbols, alerts=True):
+        at = dt.datetime.combine(day, dt.time(10, 15), tzinfo=IST).isoformat()
+        return [{"symbol": "ACME", "title": f"ACME wins order {day}", "at": at, "sentiment": "POSITIVE", "impact": "HIGH", "from": "news"}]
+
+    orig = nv.collect
+    nv.collect = collect
+    try:
+        out = asyncio.run(nv.validate(dt.date(2026, 10, 23), ["ACME"], candles, end=dt.date(2026, 10, 28), now=AFTER))
+    finally:
+        nv.collect = orig
+    days = [d for d, _, _ in seen]
+    assert days == [dt.date(2026, 10, 23), dt.date(2026, 10, 26), dt.date(2026, 10, 27), dt.date(2026, 10, 28)]  # no weekend
+    assert all(until == dt.date(2026, 10, 28) and cached for _, until, cached in seen)
+    assert out["days"] == 4 and out["end"] == "2026-10-28" and out["stocks"] == 1
+    assert [r["day"] for r in out["rows"]] == ["2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28"]
+    # A reader without the range options still works, one day at a time.
+    async def plain(symbols, day):
+        return {s: {"rows": RISE, "prev_close": 99.0} for s in symbols}
+
+    nv.collect = collect
+    try:
+        assert asyncio.run(nv.validate(dt.date(2026, 10, 27), ["ACME"], plain, end=dt.date(2026, 10, 28), now=AFTER))["days"] == 2
+    finally:
+        nv.collect = orig
+
+
+def test_route_refuses_a_backwards_or_too_long_range(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_news
+    from app.main import app
+
+    async def candles(symbols, day):
+        return {}
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(routes_news, "_news_candles", lambda: candles)
+        today = dt.datetime.now(IST).date()
+        a, b = (today - dt.timedelta(days=5)).isoformat(), (today - dt.timedelta(days=10)).isoformat()
+        assert client.get(f"/api/news-impact/validate?date={a}&end={b}&symbols=ACME").status_code == 400
+        far = (today - dt.timedelta(days=60)).isoformat()
+        r = client.get(f"/api/news-impact/validate?date={far}&end={a}&symbols=ACME")
+        assert r.status_code == 400 and "31 days" in r.json()["detail"]
+
+
+def test_terminal_news_candles_download_a_range_once(monkeypatch):
+    import asyncio
+
+    import pandas as pd
+
+    import main
+
+    def day_frame(day):
+        base = int(dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST).timestamp())
+        return [[base + i * 60, 100, 100.2, 99.8, 100.1, 0] for i in range(3)]
+
+    frame = pd.DataFrame(
+        sum((day_frame(d) for d in (dt.date(2026, 10, 22), dt.date(2026, 10, 23), dt.date(2026, 10, 26))), []),
+        columns=["ts", "open", "high", "low", "close", "volume"],
+    )
+    calls = []
+
+    async def fetch(broker, symbol, start, end):
+        calls.append((symbol, start.date(), end.date()))
+        return frame
+
+    async def no_wait():
+        return None
+
+    monkeypatch.setattr(main, "fetch_frame", fetch)
+    monkeypatch.setattr(main, "_scan_broker", lambda: None)
+    monkeypatch.setattr(main.groww_pressure, "wait_for_bots", no_wait)
+    monkeypatch.setattr(main.scan_worker, "MIN_GAP_SEC", 0)
+    cache: dict = {}
+    first = asyncio.run(main.news_candles(["ACME"], dt.date(2026, 10, 23), until=dt.date(2026, 10, 26), cache=cache))
+    second = asyncio.run(main.news_candles(["ACME"], dt.date(2026, 10, 26), until=dt.date(2026, 10, 26), cache=cache))
+    assert len(calls) == 1 and calls[0][2] == dt.date(2026, 10, 26)
+    assert len(first["ACME"]["rows"]) == 3 and first["ACME"]["prev_close"] == 100.1
+    assert len(second["ACME"]["rows"]) == 3 and second["ACME"]["rows"][0][0] > first["ACME"]["rows"][-1][0]

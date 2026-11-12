@@ -98,12 +98,18 @@ async def validate(
     alerts: bool = True,
     armed: bool = False,
     min_move: float = Query(news_validation.DEFAULT_MIN_MOVE, ge=0.05, le=10),
+    end: str | None = None,
 ):
     """Did the news move the stock? Each headline of the day (the news alerts saved that day, plus the news of
     `symbols` and, with `armed`, every armed / held stock) against that day's 1-minute candles: the move 15 /
     30 / 60 minutes later and at the close (in market hours: so far), the best and worst move, and a verdict,
     summed up per positive / negative × high / medium / low impact. Read-only."""
     day = _day(date) or dt.datetime.now(news_impact.IST).date()
+    last = (_day(end) or dt.datetime.now(news_impact.IST).date()) if end else day
+    if last < day:
+        raise HTTPException(400, "The end date is before the start date.")
+    if (last - day).days >= news_validation.MAX_RANGE_DAYS:
+        raise HTTPException(400, f"Pick at most {news_validation.MAX_RANGE_DAYS} days at a time.")
     names = [_clean(x) for x in (symbols or "").split(",") if x.strip()]
     if armed:
         names += list((await _watch()).keys())
@@ -113,7 +119,7 @@ async def validate(
     candles = _news_candles()
     if candles is None:
         raise HTTPException(503, "Candles come from the SMA terminal, which is not running in this process.")
-    return await news_validation.validate(day, names, candles, alerts=alerts, min_move=min_move)
+    return await news_validation.validate(day, names, candles, alerts=alerts, min_move=min_move, end=last)
 
 
 async def _watch() -> dict:

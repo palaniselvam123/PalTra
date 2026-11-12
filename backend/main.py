@@ -5104,19 +5104,30 @@ def _tape_for(symbol: str):
     return None
 
 
-async def news_candles(symbols: list[str], day: dt.date) -> dict[str, dict]:
+async def news_candles(symbols: list[str], day: dt.date, until: dt.date | None = None,
+                       cache: dict | None = None) -> dict[str, dict]:
     """1-minute candles of `day` for the desk's news check (app/services/news_validation.py), read-only.
 
     symbol -> {"rows": [[ts, o, h, l, c], ...], "prev_close": x} or {"error": text}. Today's armed stocks come
     from the bots' own 1-minute tapes (no Groww call); the rest are downloaded one at a time, after the bots
-    (groww_pressure.wait_for_bots), on the scans' Groww session."""
+    (groww_pressure.wait_for_bots), on the scans' Groww session. A date range passes `until` (its last day) and a
+    `cache` dict: each stock is then downloaded once, from this day to `until`, and later days reuse it."""
     now = dt.datetime.now(IST)
+    last = until if until and until > day else day
     start = dt.datetime.combine(day - dt.timedelta(days=NEWS_CANDLE_DAYS), dt.time(9, 15), tzinfo=IST)
-    end = min(dt.datetime.combine(day, dt.time(15, 30), tzinfo=IST), now)
+    end = min(dt.datetime.combine(last, dt.time(15, 30), tzinfo=IST), now)
     out: dict[str, dict] = {}
     for symbol in dict.fromkeys(s.upper() for s in symbols if s):
         frame = _tape_for(symbol) if day == now.date() else None
         rows, prev = _day_rows(frame, day)
+        if (not rows or prev is None) and cache is not None and symbol in cache:
+            if isinstance(cache[symbol], str):
+                out[symbol] = {"error": cache[symbol]}
+                continue
+            rows, prev = _day_rows(cache[symbol], day)
+            if rows:
+                out[symbol] = {"rows": rows, "prev_close": prev}
+                continue
         if not rows or prev is None:
             try:
                 await groww_pressure.wait_for_bots()
@@ -5124,7 +5135,11 @@ async def news_candles(symbols: list[str], day: dt.date) -> dict[str, dict]:
                 await asyncio.sleep(scan_worker.MIN_GAP_SEC)
             except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
                 out[symbol] = {"error": str(exc)[:200]}
+                if cache is not None:
+                    cache[symbol] = str(exc)[:200]
                 continue
+            if cache is not None:
+                cache[symbol] = frame
             rows, prev = _day_rows(frame, day)
         out[symbol] = {"rows": rows, "prev_close": prev} if rows else {"error": "No candles for that day."}
     return out
