@@ -28,6 +28,7 @@ OPEN = dt.time(9, 15)
 CLOSE = dt.time(15, 30)
 DEFAULT_MIN_MOVE = 0.5
 MAX_STOCKS = 40
+MAX_RANGE_DAYS = 31        # calendar days in one range check (about 22 trading days)
 STEPS = (15, 30, 60)
 SIGN = {"POSITIVE": 1, "NEGATIVE": -1}
 IMPACTS = ("HIGH", "MEDIUM", "LOW")
@@ -247,29 +248,70 @@ async def collect(day: dt.date, symbols: list[str] | None, alerts: bool = True) 
     return dedupe([it for it in items if for_day(it.get("at"), day)])
 
 
-async def validate(day: dt.date, symbols: list[str] | None, candles, *, alerts: bool = True,
-                   min_move: float = DEFAULT_MIN_MOVE, now: dt.datetime | None = None) -> dict:
-    """Every headline of `day` with its price move, and the summary. `candles(symbols, day)` gives the
-    1-minute rows (the terminal's `news_candles`)."""
-    now = now or dt.datetime.now(IST)
+async def _day_rows(day: dt.date, symbols: list[str] | None, candles, alerts: bool, min_move: float,
+                    now: dt.datetime, candle_opts: dict | None = None) -> tuple[list[dict], list[str], list[str]]:
+    """One day's measured headlines, the stocks checked and the ones left out (over MAX_STOCKS)."""
     items = await collect(day, symbols, alerts=alerts)
     stocks = list(dict.fromkeys(it["symbol"] for it in items))
     skipped = stocks[MAX_STOCKS:]
     stocks = stocks[:MAX_STOCKS]
-    data = await candles(stocks, day) if stocks else {}
+    data = {}
+    if stocks:
+        data = await (candles(stocks, day, **candle_opts) if candle_opts else candles(stocks, day))
     rows = []
     for it in items:
         if it["symbol"] not in stocks:
             continue
         got = data.get(it["symbol"]) or {}
         if got.get("error"):
-            rows.append({**it, "verdict": "NO_DATA", "error": got["error"]})
+            rows.append({**it, "day": day.isoformat(), "verdict": "NO_DATA", "error": got["error"]})
             continue
-        rows.append({**it, **measure(it, got.get("rows") or [], got.get("prev_close"), day, min_move, now)})
+        rows.append({**it, "day": day.isoformat(), **measure(it, got.get("rows") or [], got.get("prev_close"), day, min_move, now)})
+    return rows, stocks, skipped
+
+
+def trading_days(start: dt.date, end: dt.date) -> list[dt.date]:
+    """Weekdays from `start` to `end` (no holiday list: a holiday just has no candles)."""
+    out, d = [], start
+    while d <= end:
+        if d.weekday() < 5:
+            out.append(d)
+        d += dt.timedelta(days=1)
+    return out
+
+
+async def validate(day: dt.date, symbols: list[str] | None, candles, *, alerts: bool = True,
+                   min_move: float = DEFAULT_MIN_MOVE, now: dt.datetime | None = None,
+                   end: dt.date | None = None) -> dict:
+    """Every headline of `day` (to `end` for a range) with its price move, and the summary. `candles(symbols, day)`
+    gives the 1-minute rows (the terminal's `news_candles`); for a range each stock's candles are downloaded once
+    for the whole span (`until`, `cache`) when the reader takes them."""
+    now = now or dt.datetime.now(IST)
+    end = end if end and end > day else day
+    days = trading_days(day, end)
+    opts = None
+    if len(days) > 1:
+        import inspect
+
+        params = inspect.signature(candles).parameters
+        if "cache" in params and "until" in params:
+            opts = {"until": end, "cache": {}}
+    rows: list[dict] = []
+    stocks: list[str] = []
+    skipped: list[str] = []
+    for d in days:
+        got, checked, left = await _day_rows(d, symbols, candles, alerts, min_move, now, opts)
+        rows += got
+        stocks += checked
+        skipped += left
     rows.sort(key=lambda r: (r.get("at") or "", r["symbol"]))
-    in_session = now.date() == day and now < dt.datetime.combine(day, CLOSE, tzinfo=IST)
+    stocks = list(dict.fromkeys(stocks))
+    skipped = [s for s in dict.fromkeys(skipped) if s not in stocks]
+    in_session = now.date() == end and now < dt.datetime.combine(end, CLOSE, tzinfo=IST)
     return {
         "day": day.isoformat(),
+        "end": end.isoformat(),
+        "days": len(days),
         "as_of": now.isoformat(timespec="minutes"),
         "so_far": in_session,
         "min_move": min_move,
