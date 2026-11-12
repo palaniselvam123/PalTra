@@ -291,6 +291,24 @@ export const LESSONS: Lesson[] = [
     ],
   },
   {
+    id: "buyers-sellers",
+    title: "Buyers vs sellers: the % column, the day list, the test and the alert",
+    summary:
+      "What \"buyers 75 %\" means (waiting buy orders against sell orders), how the Most active card's day list decides Yes / No (the price saved with each scan must move your % its way before the day's last scan), every column with real rows as examples, the many-days test (signals, right %, any stock, edge, verdict), the Telegram alert, and how to use it step by step.",
+    topic: "Scalp",
+    file: "/guides/buyers-sellers-guide.pdf",
+    pages: 6,
+    minutes: 8,
+    added: "2026-11-12",
+    open: { href: "/scalp/", label: "Open the Scalp page" },
+    points: [
+      "Buyers % = waiting buy orders ÷ all waiting orders, read at each saved scan; it is not who bought.",
+      "\"Moved\" uses the prices saved with each scan, not the chart's every tick, from the price at the first scan that reached your %.",
+      "Judge it by the Edge (right % minus what any stock did), and over many days, not one.",
+      "Every result is a heads-up, never an order: read Trend quality, then arm on a practice bot.",
+    ],
+  },
+  {
     id: "most-active-columns",
     title: "Which column finds the trend? Every column explained",
     summary:

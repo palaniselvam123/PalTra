@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { Loader2, Search } from "lucide-react";
-import { api, type PressureDay } from "@/lib/api";
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Search } from "lucide-react";
+import { api, type PressureDay, type PressureDayRow } from "@/lib/api";
 import { GrowwLink } from "@/components/ui/growwLink";
 
 /**
@@ -14,12 +14,51 @@ import { GrowwLink } from "@/components/ui/growwLink";
 const signed = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
 const tone = (v: number | null | undefined) => ((v ?? 0) > 0 ? "text-emerald-300" : (v ?? 0) < 0 ? "text-rose-300" : "text-slate-300");
 
+type SortKey = "day" | "symbol" | "side" | "first_at" | "max_share" | "price" | "moved" | "best" | "worst" | "last";
+
+/** The value a column sorts on; null always goes last. "Moved?" sorts Yes (soonest first), then No, then no later scan. */
+function sortValue(r: PressureDayRow, key: SortKey): number | string | null {
+  switch (key) {
+    case "day":
+      return r.day;
+    case "symbol":
+      return r.symbol;
+    case "side":
+      return `${r.side}-${(100 - r.share_pct).toFixed(2).padStart(6, "0")}`;
+    case "first_at":
+      return `${r.day} ${r.first_at}`;
+    case "max_share":
+      return r.max_share_pct;
+    case "price":
+      return r.price;
+    case "moved":
+      return r.moved == null ? null : r.moved ? r.minutes_to_move ?? 0 : 100000;
+    case "best":
+      return r.best_pct;
+    case "worst":
+      return r.worst_pct;
+    case "last":
+      return r.last_pct;
+  }
+}
+
+/** "HH:MM" → minutes after midnight, or null when blank / not a time. */
+function toMinutes(t: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
 export function PressureDayView() {
   const [share, setShare] = useState(75);
   const [move, setMove] = useState(0.5);
   const [day, setDay] = useState("");
   const [side, setSide] = useState<"ALL" | "BUY" | "SELL">("ALL");
   const [show, setShow] = useState<"ALL" | "YES" | "NO">("ALL");
+  const [timeFrom, setTimeFrom] = useState("");
+  const [timeTo, setTimeTo] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [data, setData] = useState<PressureDay | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,19 +90,70 @@ export function PressureDayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = useMemo(
-    () => (data?.rows ?? []).filter((r) => (side === "ALL" || r.side === side) && (show === "ALL" || (show === "YES" ? r.moved === true : r.moved === false))),
-    [data, side, show]
-  );
+  const rows = useMemo(() => {
+    const from = toMinutes(timeFrom);
+    const to = toMinutes(timeTo);
+    const lo = priceMin.trim() ? Number(priceMin) : null;
+    const hi = priceMax.trim() ? Number(priceMax) : null;
+    const kept = (data?.rows ?? []).filter((r) => {
+      if (side !== "ALL" && r.side !== side) return false;
+      if (show !== "ALL" && (show === "YES" ? r.moved !== true : r.moved !== false)) return false;
+      const at = toMinutes(r.first_at);
+      if (from != null && at != null && at < from) return false;
+      if (to != null && at != null && at > to) return false;
+      if (lo != null && Number.isFinite(lo) && lo > 0 && r.price < lo) return false;
+      if (hi != null && Number.isFinite(hi) && hi > 0 && r.price > hi) return false;
+      return true;
+    });
+    if (!sort) return kept;
+    return [...kept].sort((a, b) => {
+      const va = sortValue(a, sort.key);
+      const vb = sortValue(b, sort.key);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
+      return c * sort.dir;
+    });
+  }, [data, side, show, timeFrom, timeTo, priceMin, priceMax, sort]);
+
+  // How the rows on screen did (the cards above count the whole day).
+  const shownMoved = rows.filter((r) => r.moved === true).length;
+  const shownJudged = rows.filter((r) => r.moved != null).length;
+  const filtered = Boolean(timeFrom || timeTo || priceMin || priceMax || side !== "ALL" || show !== "ALL");
+
+  /** Click a header: first click sorts the natural way (A-Z, earliest, biggest move), the second flips it, the third clears. */
+  const toggleSort = (key: SortKey, first: 1 | -1) =>
+    setSort((cur) => (cur?.key !== key ? { key, dir: first } : cur.dir === first ? { key, dir: (first * -1) as 1 | -1 } : null));
+  const SortTh = ({ k, first = 1, left = false, title, children }: { k: SortKey; first?: 1 | -1; left?: boolean; title?: string; children: React.ReactNode }) => {
+    const on = sort?.key === k;
+    const Icon = !on ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
+    return (
+      <th className={clsx("px-2 py-1.5 font-medium", left ? "text-left" : "text-right")} title={title}>
+        <button
+          type="button"
+          onClick={() => toggleSort(k, first)}
+          className={clsx("inline-flex items-center gap-1 hover:text-slate-100", on && "text-emerald-300", !left && "flex-row-reverse")}
+        >
+          {children}
+          <Icon size={11} className={on ? "" : "opacity-40"} />
+        </button>
+      </th>
+    );
+  };
 
   const select = "h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-200";
-  const th = "px-2 py-1.5 text-right font-medium";
   const td = "px-2 py-1.5 text-right tabular-nums";
 
   return (
     <div className="space-y-3 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.03] p-3">
       <div className="text-xs leading-relaxed text-slate-300">
-        <p className="text-sm font-semibold text-slate-100">Which stocks reached it that day, and did the price then move?</p>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-slate-100">
+          <span>Which stocks reached it that day, and did the price then move?</span>
+          <a href="/learn/?lesson=buyers-sellers" className="text-xs font-normal text-emerald-300 underline hover:text-emerald-200">
+            How to read this (guide)
+          </a>
+        </p>
         <p className="mt-1">
           Type your <b>buyers / sellers %</b> and the <b>price move %</b> you expect. Every saved scan of the day is checked: each stock that
           reached your % is listed with the time it first did, and whether the real price then moved your % its way (up after buyers, down
@@ -154,23 +244,85 @@ export function PressureDayView() {
                 <option value="NO">Price did not move (wrong)</option>
               </select>
             </label>
-            <span>{rows.length} shown</span>
+            <label className="flex items-center gap-1.5" title="When the stock first reached your % (IST)">
+              First reached from
+              <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} className={clsx(select, "w-28")} />
+              to
+              <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} className={clsx(select, "w-28")} />
+            </label>
+            <label className="flex items-center gap-1.5" title="The price (LTP) at the scan that first reached your %">
+              Price ₹ from
+              <input type="number" min={0} step={1} inputMode="decimal" placeholder="any" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} className={clsx(select, "w-24")} />
+              to
+              <input type="number" min={0} step={1} inputMode="decimal" placeholder="any" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} className={clsx(select, "w-24")} />
+            </label>
+            {filtered || sort ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSide("ALL");
+                  setShow("ALL");
+                  setTimeFrom("");
+                  setTimeTo("");
+                  setPriceMin("");
+                  setPriceMax("");
+                  setSort(null);
+                }}
+                className="min-h-9 rounded-md px-2 text-xs text-slate-400 underline hover:text-slate-200"
+              >
+                Clear filters and sort
+              </button>
+            ) : null}
+            <span>
+              {rows.length} shown
+              {filtered && shownJudged ? (
+                <>
+                  {" "}
+                  · <b className={shownMoved / shownJudged >= 0.6 ? "text-emerald-300" : shownMoved / shownJudged >= 0.45 ? "text-amber-300" : "text-rose-300"}>
+                    {Math.round((shownMoved / shownJudged) * 100)}% correct
+                  </b>{" "}
+                  ({shownMoved} of {shownJudged} moved)
+                </>
+              ) : null}
+            </span>
           </div>
           {rows.length ? (
             <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-800">
               <table className="w-full min-w-[860px] text-xs">
                 <thead className="sticky top-0 bg-card text-slate-400">
                   <tr>
-                    {data.day ? null : <th className="px-2 py-1.5 text-left font-medium">Day</th>}
-                    <th className="px-2 py-1.5 text-left font-medium">Stock</th>
-                    <th className="px-2 py-1.5 text-left font-medium">Who</th>
-                    <th className={th} title="The first saved scan of the day in which it reached your %">First reached</th>
-                    <th className={th} title="Highest share that day, and in how many scans it was at or above your %">Highest · scans</th>
-                    <th className={th}>Price then</th>
-                    <th className="px-2 py-1.5 text-left font-medium" title="Did the real price move your % its way afterwards?">Moved {data.move_pct}%?</th>
-                    <th className={th} title="The furthest the price went its way afterwards, and when">Best after</th>
-                    <th className={th} title="The furthest it went against">Worst after</th>
-                    <th className={th} title="At the day's last saved scan">At the end</th>
+                    {data.day ? null : (
+                      <SortTh k="day" first={-1} left>
+                        Day
+                      </SortTh>
+                    )}
+                    <SortTh k="symbol" left>
+                      Stock
+                    </SortTh>
+                    <SortTh k="side" left title="Buyers first (highest share first), then sellers">
+                      Who
+                    </SortTh>
+                    <SortTh k="first_at" title="The first saved scan of the day in which it reached your %">
+                      First reached
+                    </SortTh>
+                    <SortTh k="max_share" first={-1} title="Highest share that day, and in how many scans it was at or above your %">
+                      Highest · scans
+                    </SortTh>
+                    <SortTh k="price" first={-1}>
+                      Price then
+                    </SortTh>
+                    <SortTh k="moved" left title="Did the real price move your % its way afterwards? Sorts Yes (soonest first), then No">
+                      Moved {data.move_pct}%?
+                    </SortTh>
+                    <SortTh k="best" first={-1} title="The furthest the price went its way afterwards, and when">
+                      Best after
+                    </SortTh>
+                    <SortTh k="worst" title="The furthest it went against (worst first)">
+                      Worst after
+                    </SortTh>
+                    <SortTh k="last" first={-1} title="At the day's last saved scan">
+                      At the end
+                    </SortTh>
                   </tr>
                 </thead>
                 <tbody>
