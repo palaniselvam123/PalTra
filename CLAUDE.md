@@ -1973,6 +1973,19 @@ spinning top), body and range) / Matched / Call columns
   Indian corporate-news words, kept per browser as `news.check.keywords`) matched as whole words in each title, and
   per word the plain move (not signed by the news) 15 / 30 / 60 min after and to the close, its size, % closed up, the
   average high / low after and how often the news was right; clicking a word filters the headline list.
+- `backend/app/services/results_calendar.py` – **Results calendar** (the News page's "Results calendar" tab,
+  `components/News/ResultsCalendar.tsx`; read-only, no key, no order path, nothing in the strategy reads it): NSE's own event
+  calendar (`api/event-calendar`, else `api/corporate-board-meetings`; `parse_calendar`, results meetings only) joined with
+  the market-wide corporate announcements of the days passed (`api/corporate-announcements` with dates; `results_filings`:
+  the filing's subject decides, "Financial Result…", "Integrated Filing- Financial" or "Outcome of Board Meeting", never
+  delay / intimation notices or a general update). `build`: one row per stock and meeting, `status` UPCOMING / TODAY /
+  FILED / NOT_SEEN, the first filing within `FILED_WITHIN_DAYS` (2) of the meeting as `filed_at` (`filings` = how many that
+  day), `session` BEFORE_OPEN / IN_MARKET / AFTER_CLOSE and `trades_on` (the first session whose prices can carry it); a
+  results filing with no meeting in the range is added (`from_filing`, once per stock and day). Cached `CACHE_SEC` (15 min).
+  Desk `GET /api/news-impact/results?from=&to=&scope=fno|mine|all&force=` (default 7 days back to 21 ahead, at most
+  `MAX_RANGE_DAYS` 62; `mine` = the bots' armed / held stocks and the watch lists; rows carry `armed`). The tab: From / To,
+  quick picks, stocks, Refresh from NSE, counts, Show filter, search, rows grouped by day, the filing link, News (opens the
+  stock's News panel above) and Arm (Trade list only), CSV.
 - **One colour per server** (display only; `frontend/src/components/ServerAccent.tsx`, `app/globals.css` "One colour per
   server"): the desk keeps violet; the backtest server is **blue** and the scanner **teal** (owner's choice, so the three
   are told apart at a glance). `ServerAccent` (in the root layout) reads `/api/role` once and puts `data-server="backtest"`
