@@ -33,6 +33,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { GuideBar } from "@/components/Scalp/GuideBar";
+import { ScalpAlertsCard } from "@/components/Scalp/ScalpAlertsCard";
 
 /** 1 to 30 trading days, one at a time. */
 const BACKTEST_DAYS = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -98,7 +99,7 @@ const TABS = [
   { id: "sideways", group: "test", label: "Sideways test", ask: "Which stocks trend and which stay sideways?", use: "Reads past days per stock and suggests the right bot: trend bot, chop bot or the main one.", next: "Arm each stock on the bot it suggests." },
   { id: "morningtest", group: "test", label: "Morning test", ask: "Does a strong morning lead to a strong day?", use: "Checks on past days whether stocks up (or down) by mid-morning kept going until the close.", next: "Decide whether to hold morning winners or book early." },
   { id: "history", group: "back", label: "History", ask: "What did a scan show earlier, and was it right?", use: "Every saved scan with its time. 'Check accuracy' shows how the stocks moved afterwards.", next: "Trust the scans that were right most often." },
-  { id: "alerts", group: "back", label: "Alerts", ask: "Which Scalp alerts went to my phone?", use: "The list of alerts this page sent and the switch for them.", next: "Turn them on or off here." },
+  { id: "alerts", group: "back", label: "Alerts", ask: "Which alerts should come to my Telegram?", use: "Switches for the alerts: a strong up or down trend, buyers or sellers in control, and scalp-ready stocks.", next: "Turn on the ones you want; each stock alerts once a day." },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -801,6 +802,7 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "history"}>{tab === "history" && <ScanHistory armed={armed} arming={arming} onArm={(s) => arm(s, "Scan history")} onArmMany={(list) => armSeveral(list, "Scan history")} />}</div>
         <div hidden={tab !== "alerts"}>
+          <ScalpAlertsCard />
           <section className="rounded-xl border border-slate-800 bg-card p-4">
             <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
               <BellRing size={15} className="text-bot" /> Telegram scalp alerts

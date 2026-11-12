@@ -32,6 +32,8 @@ import all_bots_guard
 import pnl_alerts
 import pivots
 import auto_start
+import scalp_alerts
+import scan_trade_test
 import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
@@ -236,6 +238,9 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
     task = loop.create_task(_fast_move_scan(snapshot))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(scalp_alerts.after_trend_scan(snapshot, _send))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
 
@@ -3532,6 +3537,29 @@ async def trend_alerts_put(body: TrendAlertUpdate):
     return _trend_alerts()
 
 
+class ScalpAlertUpdate(BaseModel):
+    strong_on: bool | None = None
+    strong_min_checks: int | None = Field(default=None, ge=5, le=7)
+    strong_side: Literal["BOTH", "UP", "DOWN"] | None = None
+    pressure_on: bool | None = None
+    pressure_pct: float | None = Field(default=None, ge=50, le=95)
+    pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
+    pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+
+
+@app.get("/api/scalp-alerts")
+async def scalp_alerts_get():
+    """The Scalp page's two Telegram alerts (scalp_alerts.py) and the last ones sent. Information only."""
+    return await asyncio.to_thread(scalp_alerts.view)
+
+
+@app.put("/api/scalp-alerts")
+async def scalp_alerts_put(body: ScalpAlertUpdate):
+    """Save the strong-trend and buyer / seller alerts. Alerts only: nothing is armed or ordered."""
+    await asyncio.to_thread(scalp_alerts.save, body.model_dump(exclude_none=True))
+    return await asyncio.to_thread(scalp_alerts.view)
+
+
 # ---- Scan & arm (scan_arm.py) -------------------------------------------------------------------
 # A Trend quality pass, then the matching stocks go on one bot's Trade list (arming only, no order).
 # On the desk the bots are armed in-process; on the scanner (and the backtest server with the link
@@ -4990,6 +5018,47 @@ async def second_candle_start(body: SecondCandleStart):
 async def second_candle_stop():
     """Stop after the stock being read; the report covers the stocks read so far."""
     return second_candle.test().stop()
+
+
+class ScanTradeTest(BaseModel):
+    #: A saved Most active scan (scan_history id): its time and stocks are what is traded.
+    run_id: int
+    pick: Literal["PRESSURE", "BIAS", "MOVE"] = "PRESSURE"
+    pct: float = Field(default=75, ge=55, le=95)
+    top_n: int = Field(default=20, ge=1, le=scan_trade_test.MAX_STOCKS)
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    square_off: str = "15:15"
+    qty: int = Field(default=100, ge=1, le=100000)
+
+
+@app.post("/api/scan-trade-test")
+async def scan_trade_test_run(body: ScanTradeTest):
+    """Trade one saved Most active scan on that day's real 1-minute candles (scan_trade_test.py): each picked stock from
+    the scan's minute, out on the first candle of the other colour (normal and Heikin Ashi) or at the square-off.
+    Arithmetic only: no order, nothing armed. Same hours rule as the Second candle test."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run this on the backtest server, so it never shares the bots' Groww limit.")
+    try:
+        hh, mm = body.square_off.split(":")
+        square_off = dt.time(int(hh), int(mm))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "Square-off must be HH:MM.") from exc
+    if not dt.time(9, 20) <= square_off <= dt.time(15, 30):
+        raise HTTPException(400, "Square-off must be between 09:20 and 15:30.")
+    scan = await asyncio.to_thread(scan_history.get, body.run_id)
+    if scan is None or scan.get("kind") != "active":
+        raise HTTPException(404, "That saved Most active scan was not found on this server.")
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    async def load(name, day):
+        await groww_pressure.wait_for_bots()
+        return await strategy_lab.load_tape(name, day, day, fetch)
+
+    return await scan_trade_test.run(scan, load, pick=body.pick, pct=body.pct, top_n=body.top_n, minutes=body.minutes,
+                                     square_off=square_off, qty=body.qty)
 
 
 def _tape_for(symbol: str):
