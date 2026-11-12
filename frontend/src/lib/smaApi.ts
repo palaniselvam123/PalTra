@@ -555,6 +555,11 @@ export type ChopScanRow = {
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
   rvol?: number | null;
   trend_days?: number;
+  /** Fresh trend (trend_strength.fresh): the SMAs crossed in the last 3 candles with price and fast SMA beyond VWAP,
+   * the gap widening and volume 1.5x usual. `fresh_checks` says which held (older servers leave them out). */
+  fresh?: "BULLISH" | "BEARISH" | null;
+  fresh_checks?: Record<string, boolean>;
+  fresh_rvol?: number | null;
   sma_gap_pct?: number | null;
   vwap?: number | null;
   /** Last close vs today's first open, %. */

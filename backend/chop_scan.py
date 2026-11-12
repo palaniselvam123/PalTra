@@ -190,6 +190,11 @@ class ChopRow:
     rvol: float | None = None
     trend_days: int = 0
     day_move_pct: float | None = None  # last close vs today's first open
+    # Fresh trend (`trend_strength.fresh`): BULLISH / BEARISH when the SMAs crossed in the last 3 candles with the price
+    # and fast SMA beyond VWAP, the gap widening and volume 1.5x usual; else None. `fresh_checks` says which held.
+    fresh: str | None = None
+    fresh_checks: dict = field(default_factory=dict)
+    fresh_rvol: float | None = None
     # Today's closed-candle SMA crosses on every candle size (1, 2, 3, 5, 10, 15 min), from the
     # same 1-minute download: the "No cross today on" filter. None = not enough candles yet.
     crosses_by_minutes: dict = field(default_factory=dict)
@@ -291,6 +296,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
         return None
+    real_close = float(bars["close"].iloc[-1])  # before any Heikin Ashi change: the price VWAP is compared with
     if ha:
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
@@ -338,6 +344,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         base,
         **activity(frame_1m),
         **trend,
+        **trend_strength.fresh(enriched, vwap, now, frame_1m, price=real_close, colour=ha),
         **trend_phases.summary(trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)),
         day_move_pct=_day_move(frame_1m),
         crosses_by_minutes={m: r[0] for m, r in by_size.items()},
