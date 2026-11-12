@@ -74,6 +74,56 @@ function sortValue(r: PressureDayRow, key: SortKey): number | string | null {
   }
 }
 
+type DayStat = PressureDay["stats"][number];
+
+/** The three cards' numbers for any set of rows: the same arithmetic as backend/pressure_study._day_stats, so the
+ *  cards and the lines above them follow the time / price filters. */
+function dayStats(rows: PressureDayRow[]): DayStat[] {
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  return (
+    [
+      ["ALL", "Buyers and sellers"],
+      ["BUY", "Buyers → price up"],
+      ["SELL", "Sellers → price down"],
+    ] as const
+  ).map(([key, label]) => {
+    const mine = rows.filter((r) => (key === "ALL" || r.side === key) && r.moved != null);
+    const right = mine.filter((r) => r.moved);
+    const mins = mean(right.map((r) => r.minutes_to_move).filter((m): m is number => m != null));
+    const best = mean(mine.map((r) => r.best_pct).filter((b): b is number => b != null));
+    const ended = mine.filter((r) => (r.last_pct ?? 0) > 0).length;
+    return {
+      side: key,
+      label,
+      stocks: mine.length,
+      moved: right.length,
+      correct_pct: mine.length ? Math.round((right.length / mine.length) * 1000) / 10 : null,
+      avg_minutes: mins == null ? null : Math.round(mins),
+      avg_best_pct: best == null ? null : Math.round(best * 1000) / 1000,
+      ended_right_pct: mine.length ? Math.round((ended / mine.length) * 1000) / 10 : null,
+    };
+  });
+}
+
+/** The plain-words lines above the cards, from `dayStats` (the backend's wording). */
+function answerLines(stats: DayStat[], pct: number, move: number, oneDay: boolean, scope: string): string[] {
+  const all = stats[0];
+  if (!all.stocks) return [`No stock reached ${pct}% buyers or sellers${scope ? ` ${scope}` : ""} in the saved scans of ${oneDay ? "that day" : "these days"}.`];
+  const out: string[] = [];
+  for (const st of stats.slice(1)) {
+    if (!st.stocks) continue;
+    const [who, way] = st.side === "BUY" ? ["buyers", "up"] : ["sellers", "down"];
+    out.push(
+      `${st.stocks} time${st.stocks === 1 ? "" : "s"} ${who} reached ${pct}%${scope ? ` ${scope}` : ""}: the price then went ${way} ` +
+        `${move}% or more ${st.moved} time${st.moved === 1 ? "" : "s"} (${st.correct_pct}% correct)` +
+        (st.avg_minutes != null ? `, taking about ${st.avg_minutes} minutes.` : ".")
+    );
+  }
+  out.push(`Overall your assumption was right ${all.correct_pct}% of the time at a ${move}% move (${all.moved} of ${all.stocks}).`);
+  if (all.stocks < 30) out.push(`Only ${all.stocks} case${all.stocks === 1 ? "" : "s"}: too few to trust yet. Add more days or widen the filters.`);
+  return out;
+}
+
 /** "HH:MM" → minutes after midnight, or null when blank / not a time. */
 function toMinutes(t: string): number | null {
   const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
@@ -131,19 +181,40 @@ export function PressureDayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = useMemo(() => {
+  // The rows inside the time and price filters: the lines and cards above the table are worked out from these, so
+  // "% correct" is the win rate of exactly that window. (Who and Show only narrow the table: Show picks by result, and
+  // the cards already split buyers from sellers.)
+  const scoped = useMemo(() => {
     const from = toMinutes(timeFrom);
     const to = toMinutes(timeTo);
     const lo = priceMin.trim() ? Number(priceMin) : null;
     const hi = priceMax.trim() ? Number(priceMax) : null;
-    const kept = (data?.rows ?? []).filter((r) => {
-      if (side !== "ALL" && r.side !== side) return false;
-      if (show !== "ALL" && (show === "YES" ? r.moved !== true : r.moved !== false)) return false;
+    return (data?.rows ?? []).filter((r) => {
       const at = toMinutes(r.first_at);
       if (from != null && at != null && at < from) return false;
       if (to != null && at != null && at > to) return false;
       if (lo != null && Number.isFinite(lo) && lo > 0 && r.price < lo) return false;
       if (hi != null && Number.isFinite(hi) && hi > 0 && r.price > hi) return false;
+      return true;
+    });
+  }, [data, timeFrom, timeTo, priceMin, priceMax]);
+
+  const scopeWords = [
+    timeFrom || timeTo ? `between ${timeFrom || "09:15"} and ${timeTo || "15:30"}` : "",
+    priceMin || priceMax ? `at ₹${priceMin || "0"}–${priceMax || "any"}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const stats = useMemo(() => dayStats(scoped), [scoped]);
+  const answer = useMemo(
+    () => (data ? answerLines(stats, data.pct, data.move_pct, Boolean(data.day), scopeWords) : []),
+    [stats, data, scopeWords]
+  );
+
+  const rows = useMemo(() => {
+    const kept = scoped.filter((r) => {
+      if (side !== "ALL" && r.side !== side) return false;
+      if (show !== "ALL" && (show === "YES" ? r.moved !== true : r.moved !== false)) return false;
       return true;
     });
     if (!sort) return kept;
@@ -165,7 +236,7 @@ export function PressureDayView() {
       const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
       return c * sort.dir;
     });
-  }, [data, side, show, timeFrom, timeTo, priceMin, priceMax, sort, news, hold]);
+  }, [scoped, side, show, sort, news, hold]);
 
   const holdMap = useMemo(() => new Map((hold?.rows ?? []).map((h) => [holdKey(h), h])), [hold]);
 
@@ -315,27 +386,6 @@ export function PressureDayView() {
       ) : null}
       {data && data.all_days.length > 0 ? (
         <>
-          <ul className="space-y-1 text-sm leading-relaxed text-slate-100">
-            {data.answer.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {data.stats.map((s) => (
-              <div key={s.side} className="rounded-lg border border-slate-800 p-2.5">
-                <p className="text-xs font-semibold text-slate-300">{s.label}</p>
-                <p className={clsx("mt-0.5 text-2xl font-semibold tabular-nums", s.correct_pct == null ? "text-slate-500" : s.correct_pct >= 60 ? "text-emerald-300" : s.correct_pct >= 45 ? "text-amber-300" : "text-rose-300")}>
-                  {s.correct_pct == null ? "—" : `${s.correct_pct.toFixed(0)}% correct`}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {s.moved} of {s.stocks} moved {data.move_pct}%{s.avg_minutes != null ? ` · about ${s.avg_minutes} min` : ""}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Best move on average {signed(s.avg_best_pct)} · ended the right side {s.ended_right_pct == null ? "—" : `${s.ended_right_pct.toFixed(0)}%`}
-                </p>
-              </div>
-            ))}
-          </div>
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <label className="flex items-center gap-1.5">
               Who
@@ -384,7 +434,7 @@ export function PressureDayView() {
             ) : null}
             <span>
               {rows.length} shown
-              {filtered && shownJudged ? (
+              {(side !== "ALL" || show !== "ALL") && shownJudged ? (
                 <>
                   {" "}
                   · <b className={shownMoved / shownJudged >= 0.6 ? "text-emerald-300" : shownMoved / shownJudged >= 0.45 ? "text-amber-300" : "text-rose-300"}>
@@ -394,6 +444,33 @@ export function PressureDayView() {
                 </>
               ) : null}
             </span>
+          </div>
+          {scopeWords ? (
+            <p className="rounded-md border border-sky-400/30 bg-sky-400/[0.06] px-2.5 py-1.5 text-xs text-slate-200">
+              Results for the stocks that reached {data.pct}% <b>{scopeWords}</b>: {stats[0].stocks} of{" "}
+              {(data.rows ?? []).filter((r) => r.moved != null).length} cases {data.day ? "that day" : "in these days"}. Clear the time / price boxes to see the whole day.
+            </p>
+          ) : null}
+          <ul className="space-y-1 text-sm leading-relaxed text-slate-100" aria-live="polite">
+            {answer.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {stats.map((s) => (
+              <div key={s.side} className="rounded-lg border border-slate-800 p-2.5">
+                <p className="text-xs font-semibold text-slate-300">{s.label}</p>
+                <p className={clsx("mt-0.5 text-2xl font-semibold tabular-nums", s.correct_pct == null ? "text-slate-500" : s.correct_pct >= 60 ? "text-emerald-300" : s.correct_pct >= 45 ? "text-amber-300" : "text-rose-300")}>
+                  {s.correct_pct == null ? "—" : `${s.correct_pct.toFixed(0)}% correct`}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {s.moved} of {s.stocks} moved {data.move_pct}%{s.avg_minutes != null ? ` · about ${s.avg_minutes} min` : ""}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Best move on average {signed(s.avg_best_pct)} · ended the right side {s.ended_right_pct == null ? "—" : `${s.ended_right_pct.toFixed(0)}%`}
+                </p>
+              </div>
+            ))}
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="space-y-2 rounded-lg border border-slate-800 p-2.5 text-xs text-slate-400">

@@ -1537,7 +1537,9 @@ spinning top), body and range) / Matched / Call columns
   its way before the day's last scan (`moved`, when, minutes), the best / worst move and the move at the end. `_day_stats`:
   per side and overall how many moved (`correct_pct`), average minutes and best move; plain-words `answer`. The % boxes on
   the alerts card, this view and "Trade a saved scan" take any typed number.
-  The day list also filters by first-reached time and price then, sorts every column, and has two read-only extras:
+  The day list also filters by first-reached time and price then (the plain-words lines and the three "% correct" cards are
+  worked out in the browser from the rows inside those two filters, `PressureDay.dayStats` / `answerLines`, the same
+  arithmetic as `_day_stats`; Who / Show only narrow the table), sorts every column, and has two read-only extras:
   **Read the news** (desk `GET /api/news-impact/day?date=&symbols=&ai=`, per day up to 40 stocks; the "News that day"
   column: overall sentiment / impact, same way as or against the buyers / sellers, the strongest headline with its time,
   "after" when it came out after the share was reached; a split of how many moved by news fit) and **Keep for N days**
