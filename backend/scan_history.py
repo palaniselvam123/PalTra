@@ -25,10 +25,10 @@ from pathlib import Path
 
 log = logging.getLogger("sma.scanhistory")
 
-KINDS = ("cross", "chop", "active")
+KINDS = ("cross", "chop", "active", "closebook")
 # The terminal's History tab lists these; "active" (the desk's Most active scan) has its own history view.
 SCAN_KINDS = ("cross", "chop")
-KIND_LABEL = {"cross": "Cross scan", "chop": "Trend quality", "active": "Most active"}
+KIND_LABEL = {"cross": "Cross scan", "chop": "Trend quality", "active": "Most active", "closebook": "After the close"}
 DEFAULT_KEEP_DAYS = 90
 _lock = threading.Lock()
 
