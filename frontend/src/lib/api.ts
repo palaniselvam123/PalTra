@@ -1086,6 +1086,36 @@ export type NewsCheck = {
   skipped_stocks: string[];
   disclaimer: string;
 };
+/** One results board meeting from NSE's event calendar, joined with the real filing (desk `results_calendar.py`). */
+export type ResultsRow = {
+  symbol: string;
+  company: string | null;
+  meeting_date: string;
+  purpose: string;
+  desc: string | null;
+  status: "UPCOMING" | "TODAY" | "FILED" | "NOT_SEEN";
+  filed_at?: string;
+  /** Whether the market could trade it that day: filed before 09:15, in market hours, or after 15:30 / a weekend. */
+  session?: "BEFORE_OPEN" | "IN_MARKET" | "AFTER_CLOSE";
+  /** The first session whose prices can carry the results. */
+  trades_on?: string;
+  filing_title?: string | null;
+  filing_url?: string | null;
+  filings?: number;
+  /** A results filing with no board meeting in the range. */
+  from_filing?: boolean;
+  /** Armed or held on a bot. */
+  armed?: boolean;
+};
+export type ResultsCalendar = {
+  from: string;
+  to: string;
+  scope: "fno" | "all" | "mine";
+  rows: ResultsRow[];
+  errors: Record<string, string>;
+  fetched_at: string;
+  disclaimer: string;
+};
 export type NewsDayReport = { day: string; window: { from: string; to: string }; stocks: NewsDayRow[]; disclaimer: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {
@@ -1584,6 +1614,13 @@ export const api = {
   newsFeed: (limit = 100, validOnly = false, prices = false) =>
     request<{ items: NewsFeedItem[]; status: NewsWatchSettings["status"] }>(
       `/api/news-impact/feed?limit=${limit}${validOnly ? "&valid_only=true" : ""}${prices ? "&prices=true" : ""}`
+    ),
+  /** NSE's results calendar: board meetings for results and when each was really filed (desk results_calendar.py). */
+  resultsCalendar: (p: { from: string; to: string; scope: "fno" | "all" | "mine"; force?: boolean }) =>
+    request<ResultsCalendar>(
+      `/api/news-impact/results?from=${p.from}&to=${p.to}&scope=${p.scope}${p.force ? "&force=true" : ""}`,
+      undefined,
+      120_000
     ),
   newsLists: () => request<{ lists: NewsWatchList[]; max_lists: number; max_per_list: number }>("/api/news-impact/lists"),
   createNewsList: (name: string, symbols: string[]) =>
