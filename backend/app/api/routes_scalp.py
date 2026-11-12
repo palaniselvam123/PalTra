@@ -275,6 +275,22 @@ def keep_active_scan(snapshot: dict) -> None:
     task = loop.create_task(asyncio.to_thread(_save_active, snap))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(_pressure_alert(snapshot))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+async def _pressure_alert(snapshot: dict) -> None:
+    """Buyer / seller Telegram for a finished most-active pass (scalp_alerts.py). Alerts only; never raises."""
+    try:
+        import scalp_alerts
+        from app.services.alert_notifier import alert_notifier
+
+        await scalp_alerts.after_active_scan(snapshot, alert_notifier.send_quiet)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger("scalp").exception("buyer / seller alert failed")
 
 
 @router.get("/active/history")
@@ -304,6 +320,35 @@ async def most_active_study(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return await asyncio.to_thread(active_study.run, days, picked, top)
+
+
+@router.get("/active/pressure-test")
+async def most_active_pressure_test(
+    days: int = Query(20, ge=1, le=60),
+    pct: float = Query(75, ge=55, le=95),
+    gap_min: int = Query(30, ge=5, le=240),
+):
+    """Buyers / sellers test (pressure_study.py): each time buyers or sellers reached `pct` % of the waiting orders in a
+    saved Most active scan, what the real price did 5 / 15 / 30 / 60 minutes later and at the close, against what any
+    stock does anyway. Read-only: the saved scans only, no Groww call."""
+    import pressure_study
+
+    return await asyncio.to_thread(pressure_study.run, days, pct, gap_min)
+
+
+@router.get("/active/pressure-day")
+async def most_active_pressure_day(
+    days: int = Query(20, ge=1, le=60),
+    pct: float = Query(75, ge=50, le=99),
+    move_pct: float = Query(0.5, ge=0.05, le=20),
+    day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+):
+    """Every stock that reached `pct` % buyers / sellers in a day's saved Most active scans (pressure_study.reached):
+    when it first did, and whether the real price then moved `move_pct` % its way. One `day`, or the last `days`.
+    Read-only: the saved scans only, no Groww call."""
+    import pressure_study
+
+    return await asyncio.to_thread(pressure_study.reached, days, pct, move_pct, day)
 
 
 @router.get("/active/history/{run_id}")
