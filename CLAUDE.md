@@ -1992,6 +1992,27 @@ spinning top), body and range) / Matched / Call columns
   `MAX_RANGE_DAYS` 62; `mine` = the bots' armed / held stocks and the watch lists; rows carry `armed`). The tab: From / To,
   quick picks, stocks, Refresh from NSE, counts, Show filter, search, rows grouped by day, the filing link, News (opens the
   stock's News panel above) and Arm (Trade list only), CSV.
+- `backend/app/services/close_orders.py` – **After the close** (the Scalp page's "After the close" tab, group 4 Look back,
+  `components/Scalp/CloseOrders.tsx`, guide `scalp-after-close`; read-only, no order path, nothing in the strategy reads it):
+  the owner's ALICON case (far more buy orders than sell orders waiting after the close): real demand, or short sellers
+  buying back? Per stock (`CloseOrderScanner.scan`, one pass at a time, up to `MAX_STOCKS` 250, after
+  `groww_pressure.wait_for_bots`, paced `CALL_GAP_SEC`): Groww's quote on the desk's session (`book`: total buy / sell
+  quantity waiting, and the order count at the best five prices when a depth level carries `orders`), the day's 1-minute
+  candles (`tape`: move to 14:30, the last hour, where it closed in the day's range, the end-of-day volume rush after 14:45
+  vs the day's pace; `minute_volumes` turns Groww's running volume into per minute), NSE's delivery % for that day
+  (`delivery.report`, only when its day is the scanned day, about 18:00), NSE's F&O open interest change (`oi_changes`,
+  `api/live-analysis-oi-spurts-underlyings`, live) and NSE's short-selling file (`shorts_for`: `shortselling_DDMMYYYY.csv`,
+  published the next trading day, matched by its trade date). `read` adds plain points: real demand (buy orders waiting ≥
+  `BUY_RATIO_STRONG` 3× / 2× the sell orders, ≥ `BUY_VS_VOLUME` 5 % of the day's volume, closed at the top of the range,
+  delivery ≥ 1.2× usual, OI up with the price) and short sellers buying back (fell to 14:30 then ≥ `LATE_RISE` 0.7 % in the
+  last hour, end rush ≥ 2×, delivery ≤ 0.8× usual, OI down ≥ 2 % with the price up, short sold ≥ 2 % of volume, a late jump
+  with few buyers left waiting); `verdict` DEMAND / SHORT_COVER (≥ `NAME_AT` 3 points and `LEAD_BY` 2 ahead) / MIXED /
+  QUIET, `unusual_buy`, each point's reason (`demand_why` / `cover_why`) and what is not known yet (`missing`); `notes` say
+  when delivery / the short file are not out or the market is still open. Each pass is saved in the scan history as kind
+  `closebook` ("After the close"). Desk `GET /api/scalp/close-orders`, `POST /api/scalp/close-orders/scan` (`symbols`),
+  `POST /api/scalp/close-orders/stop`, `GET /api/scalp/close-orders/history[?day=]`, `GET /api/scalp/close-orders/history/{id}`.
+  The tab: Scan now / Stop, stock lists plus typed stocks, Show (unusual buy orders / each answer), search, saved scans,
+  the table, a Why? row per stock, tick boxes, Arm / Arm ticked.
 - **One colour per server** (display only; `frontend/src/components/ServerAccent.tsx`, `app/globals.css` "One colour per
   server"): the desk keeps violet; the backtest server is **blue** and the scanner **teal** (owner's choice, so the three
   are told apart at a glance). `ServerAccent` (in the root layout) reads `/api/role` once and puts `data-server="backtest"`
@@ -2031,7 +2052,7 @@ spinning top), body and range) / Matched / Call columns
 - **Scalp tabs grouped by use** (`app/scalp/page.tsx` `TAB_GROUPS` / `TABS` / `ScalpTabs`; display only): the tab bar is four
   boxes in the order of a trading day: 1 At the open (09:30 Morning, Carry-over), 2 During the day (Most active, Trend quality,
   Cross scan, Turning, 52-week high, Monitor), 3 Test an idea (Second candle, Backtest, Strategy lab, Sideways test, Morning
-  test), 4 Look back (History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
+  test), 4 Look back (After the close, History, Alerts). Each tab carries `ask` (the question it answers), `use` (what it does, plain words) and
   `next` (what to do with the answer), shown in a strip under the tabs for the open tab; "Which one do I use?" lists every
   question → tab. Add a tab by adding its `TABS` entry with those three lines and a group.
 - **Best to trade now** (`components/Scalp/BestNow.tsx`, top of the Most active card's Live view; display only, no order):
@@ -2055,7 +2076,7 @@ spinning top), body and range) / Matched / Call columns
   and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
   `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
   `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
-  `scalp-morning-test`, `scalp-history`, `scalp-alerts`; `sideways-test` covers that tab). They are written as small
+  `scalp-morning-test`, `scalp-history`, `scalp-alerts`, `scalp-after-close`; `sideways-test` covers that tab). They are written as small
   JavaScript modules in `frontend/scripts/guides/lessons/` (shared pieces and drawn SVG figures in `frontend/scripts/guides/lib.js`)
   and rendered to the PDFs by `frontend/scripts/guides/build.js` (Playwright); edit the module and rebuild, then update the
   page count in `lessons.ts`. Every Scalp tab shows `components/Scalp/GuideBar.tsx` under its heading: "Guide (PDF)"

@@ -458,6 +458,89 @@ async def most_active_scan():
     return {"started": True}
 
 
+# ---- after-close orders (close_orders.py) ------------------------------------------------------------------
+
+
+class CloseScanBody(BaseModel):
+    symbols: list[str] = Field(..., min_length=1, max_length=250)
+
+
+def _keep_close_scan(view: dict) -> None:
+    """Save a finished after-close pass to the scan history (kind closebook), off the event loop. Never raises."""
+    import scan_history
+
+    snap = {**view, "total": view.get("total"), "finished_at": view.get("as_of")}
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(asyncio.to_thread(scan_history.save, "closebook", snap, {"source": "scan", "day": view.get("day")}))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+
+
+def _close_scanner():
+    from app.services.close_orders import close_scanner
+
+    if close_scanner.on_done is None:
+        close_scanner.on_done = _keep_close_scan
+    return close_scanner
+
+
+@router.get("/close-orders")
+async def close_orders():
+    """The last after-close orders pass (close_orders.py): orders waiting, the last hour, delivery, F&O open interest
+    and short selling per stock, with a verdict (real demand / short sellers buying back / mixed / quiet). Read-only."""
+    return _close_scanner().view()
+
+
+@router.post("/close-orders/scan")
+async def close_orders_scan(body: CloseScanBody):
+    """Start an after-close orders pass on these stocks (at most 250). Returns at once; the page polls. Read-only."""
+    scanner = _close_scanner()
+    if scans_paused():
+        raise HTTPException(409, "Scans are paused. Resume them at the top of the Scalp page.")
+    if scanner.running:
+        raise HTTPException(429, "A pass is still running.")
+    client = _groww_session()
+    if client is None:
+        raise HTTPException(428, "Connect Groww in Settings (Connect Live Data) to read the order book.")
+    try:
+        from app.services.instruments import instrument_master
+
+        fno = set(instrument_master.fno_stocks())
+    except Exception:  # noqa: BLE001 - only the F&O label is lost
+        fno = set()
+    scanner.task = asyncio.create_task(scanner.scan(client, body.symbols, fno))
+    return {"started": True, "stocks": min(len(body.symbols), 250)}
+
+
+@router.post("/close-orders/stop")
+async def close_orders_stop():
+    return {"stopped": _close_scanner().stop()}
+
+
+@router.get("/close-orders/history")
+async def close_orders_history(day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """The days with saved after-close passes, and one day's passes (the latest day when none is given)."""
+    import scan_history
+
+    days = await asyncio.to_thread(scan_history.days, "closebook")
+    pick = day or (days[0]["day"] if days else None)
+    runs = await asyncio.to_thread(scan_history.runs, pick, "closebook") if pick else []
+    return {"days": days, "day": pick, "runs": runs}
+
+
+@router.get("/close-orders/history/{run_id}")
+async def close_orders_saved(run_id: int):
+    import scan_history
+
+    run = await asyncio.to_thread(scan_history.get, run_id)
+    if not run or run.get("kind") != "closebook":
+        raise HTTPException(404, "No such saved pass.")
+    return run
+
+
 @router.post("/active/stop")
 async def stop_active_scan():
     """Stop the Most active pass that is running (the card's Stop). The last finished scan stays."""

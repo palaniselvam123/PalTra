@@ -129,6 +129,24 @@ export const LESSONS: Lesson[] = [
     ],
   },
   {
+    id: "scalp-after-close",
+    title: "After the close: real buyers, or short sellers buying back?",
+    summary:
+      "Sometimes a stock jumps at the end of the day and, after the market shuts, Groww shows far more buy orders waiting than sell orders. This tab finds those stocks and says, in plain words, whether it looks like real buyers or short sellers buying back what they sold earlier.",
+    topic: "Scalp",
+    file: "/guides/scalp-after-close-guide.pdf",
+    pages: 4,
+    minutes: 6,
+    added: "2026-11-12",
+    open: { href: "/scalp/#afterclose", label: "Open the After the close tab" },
+    points: [
+      "Many buyers still waiting + shares taken home = real demand.",
+      "A fall all day, a jump in the last hour, shares not taken home = short sellers buying back.",
+      "Run it after 15:30; again after 18:00 when NSE's delivery % is out.",
+      "F&O stocks: price up with open interest down = short sellers closing.",
+    ],
+  },
+  {
     id: "scalp-trend-quality",
     title: "Trend quality: trending or choppy today?",
     summary:

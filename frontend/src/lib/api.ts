@@ -1116,6 +1116,50 @@ export type ResultsCalendar = {
   fetched_at: string;
   disclaimer: string;
 };
+/** One stock of the after-close orders scan (desk `close_orders.py`). */
+export type CloseOrderRow = {
+  symbol: string;
+  ltp: number | null;
+  prev_close: number | null;
+  volume: number | null;
+  day_volume?: number | null;
+  buy_qty: number | null;
+  sell_qty: number | null;
+  buy_orders_top5: number | null;
+  sell_orders_top5: number | null;
+  buy_sell_ratio: number | null;
+  buy_vs_volume_pct: number | null;
+  move_to_1430_pct?: number | null;
+  last_hour_pct?: number | null;
+  day_move_pct?: number | null;
+  close_in_range?: number | null;
+  end_rush?: number | null;
+  end_volume_share_pct?: number | null;
+  delivery_pct?: number | null;
+  delivery_usual_pct?: number | null;
+  fno: boolean;
+  oi_change_pct: number | null;
+  short_qty?: number;
+  short_pct?: number | null;
+  demand_points: number;
+  cover_points: number;
+  verdict: "DEMAND" | "SHORT_COVER" | "MIXED" | "QUIET";
+  demand_why: string[];
+  cover_why: string[];
+  missing: string[];
+  unusual_buy: boolean;
+};
+export type CloseOrders = {
+  running: boolean;
+  done: number;
+  total: number;
+  error: string | null;
+  as_of: string | null;
+  day: string | null;
+  notes: string[];
+  rows: CloseOrderRow[];
+};
+export type CloseOrderRun = { id: number; day: string; as_of: string; row_count?: number };
 export type NewsDayReport = { day: string; window: { from: string; to: string }; stocks: NewsDayRow[]; disclaimer: string };
 export type NewsHolding = { bot: number; name: string; mode: string; side: "LONG" | "SHORT"; qty: number };
 export type NewsAlertRow = {
@@ -1622,6 +1666,16 @@ export const api = {
       undefined,
       120_000
     ),
+  /** After-close orders scan (desk close_orders.py): read-only. */
+  closeOrders: () => request<CloseOrders>("/api/scalp/close-orders"),
+  closeOrdersScan: (symbols: string[]) =>
+    request<{ started: boolean; stocks: number }>("/api/scalp/close-orders/scan", { method: "POST", body: JSON.stringify({ symbols }) }),
+  closeOrdersStop: () => request<{ stopped: boolean }>("/api/scalp/close-orders/stop", { method: "POST" }),
+  closeOrdersHistory: (day?: string) =>
+    request<{ days: { day: string; runs: number }[]; day: string | null; runs: CloseOrderRun[] }>(
+      `/api/scalp/close-orders/history${day ? `?day=${day}` : ""}`
+    ),
+  closeOrdersRun: (id: number) => request<CloseOrderRun & { rows: CloseOrderRow[]; meta?: Record<string, unknown> }>(`/api/scalp/close-orders/history/${id}`),
   newsLists: () => request<{ lists: NewsWatchList[]; max_lists: number; max_per_list: number }>("/api/news-impact/lists"),
   createNewsList: (name: string, symbols: string[]) =>
     request<NewsWatchList>("/api/news-impact/lists", { method: "POST", body: JSON.stringify({ name, symbols }) }),
