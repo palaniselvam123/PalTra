@@ -1710,6 +1710,7 @@ export type PressureDayRow = {
   symbol: string;
   side: "BUY" | "SELL";
   first_at: string;
+  below_at?: string | null;
   share_pct: number;
   max_share_pct: number;
   scans_at: number;

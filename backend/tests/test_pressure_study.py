@@ -124,3 +124,18 @@ def test_day_list_of_stocks_that_reached_and_whether_the_price_moved():
     quick = pressure_study.reached(days=5, pct=75, move_pct=0.2, day="2026-11-10", history=build(price, share))
     assert next(r for r in quick["rows"] if r["symbol"] == "UP")["moved_at"] == "11:10"
     assert pressure_study.reached(days=5, pct=75, move_pct=0.2, day="2026-01-01", history=build(price, share))["total_rows"] == 0
+
+
+def test_first_reached_uses_each_stock_read_time_and_the_read_before():
+    """The scan's as_of is when the pass started; a row's read_at is when that stock's order book was read."""
+    book = {
+        (10, 0): [{"symbol": "UP", "ltp": 100.0, "buy_share": 0.5, "read_at": "2026-11-10T10:01:12+05:30"}],
+        (10, 5): [{"symbol": "UP", "ltp": 101.0, "buy_share": 0.8, "read_at": "2026-11-10T10:07:41+05:30"}],
+        (10, 10): [{"symbol": "UP", "ltp": 102.0, "buy_share": 0.8}],  # an older row: scan start only
+    }
+    out = pressure_study.reached(days=5, pct=75, move_pct=0.5, history=FakeHistory(book))
+    up = out["rows"][0]
+    assert (up["first_at"], up["below_at"]) == ("10:07:41", "10:01:12")
+    assert up["moved_at"] == "10:10"
+    first = pressure_study.reached(days=5, pct=75, history=FakeHistory({(10, 0): [{"symbol": "UP", "ltp": 1.0, "buy_share": 0.9}]}))
+    assert first["rows"][0]["below_at"] is None

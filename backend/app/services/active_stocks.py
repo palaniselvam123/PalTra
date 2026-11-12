@@ -70,6 +70,7 @@ class ActiveRow:
     range_pct: float | None         # today's high-low as % of open
     bias: str                       # LONG / SHORT / NONE
     speed_pct_min: float | None = None  # % per minute since the previous scan (signed)
+    read_at: str | None = None          # IST time this stock's quote (order book) was read; the scan's as_of is its start
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -374,6 +375,7 @@ class ActiveScanner:
                         await asyncio.sleep(CALL_GAP_SEC)
                     row = row_from_quote(symbol, data, self._avg_volume.get(symbol), fraction)
                     if row is not None:
+                        row.read_at = ist_now().isoformat(timespec="seconds")
                         rows.append(row)
 
             await asyncio.gather(*(one(s) for s in names))
