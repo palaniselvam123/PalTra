@@ -405,7 +405,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Flame size={15} className="text-amber-400" /> Where traders are now — most active F&amp;O stocks
         </h2>
-        <div className="ml-auto inline-flex overflow-hidden rounded-md ring-1 ring-inset ring-slate-700" role="group" aria-label="Live or saved scans">
+        <div className="grid w-full grid-cols-2 overflow-hidden rounded-md ring-1 ring-inset ring-slate-700 sm:ml-auto sm:inline-flex sm:w-auto sm:flex-wrap" role="group" aria-label="Live or saved scans">
           {(["live", "history", "trade", "test", "pressure", "backtest"] as const).map((v) => (
             <button
               key={v}
@@ -413,12 +413,19 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
               onClick={() => setView(v)}
               aria-pressed={view === v}
               className={clsx(
-                "inline-flex min-h-9 items-center gap-1.5 px-3 text-xs font-semibold",
+                "inline-flex min-h-11 items-center justify-center gap-1.5 px-3 text-xs font-semibold sm:min-h-9 sm:justify-start",
                 view === v ? "bg-accentSky/15 text-accentSky" : "text-slate-300 hover:bg-white/5"
               )}
             >
               {v === "live" ? <Flame size={13} /> : v === "history" ? <History size={13} /> : v === "test" || v === "pressure" || v === "trade" ? <FlaskConical size={13} /> : <PlayCircle size={13} />}
-              {v === "live" ? "Live" : v === "history" ? "History" : v === "test" ? "Which column finds the trend?" : v === "pressure" ? "Buyers / sellers test" : v === "trade" ? "Trade a saved scan" : "Backtest"}
+              {v === "live" ? "Live" : v === "history" ? "History" : v === "backtest" ? "Backtest" : (
+                <>
+                  <span className="sm:hidden">{v === "test" ? "Which column?" : v === "pressure" ? "Buyers / sellers" : "Trade a scan"}</span>
+                  <span className="hidden sm:inline">
+                    {v === "test" ? "Which column finds the trend?" : v === "pressure" ? "Buyers / sellers test" : "Trade a saved scan"}
+                  </span>
+                </>
+              )}
             </button>
           ))}
         </div>
