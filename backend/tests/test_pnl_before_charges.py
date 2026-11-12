@@ -47,6 +47,8 @@ def test_books_markers_and_kpis_carry_pnl_before_charges(db):  # noqa: F811
     assert book["open_gross"] is None and snap["open_gross_total"] == 0.0
     # One win before charges, none after them; the net figures are untouched.
     assert snap["kpis"]["gross_wins"] == 1 and snap["kpis"]["wins"] == 0
+    # The day's winners and losers added up, before charges (the terminal's "Gross profit / loss" card).
+    assert snap["kpis"]["gross_profit"] == 10.0 and snap["kpis"]["gross_loss"] == -20.0
     assert snap["kpis"]["actual_gross"] == -10.0 and snap["kpis"]["net"] == -60.0 and snap["realized_net_pnl"] == -60.0
 
     markers = eng.chart_payload()["markers"]

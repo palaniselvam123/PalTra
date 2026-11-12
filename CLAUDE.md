@@ -1734,7 +1734,8 @@ spinning top), body and range) / Matched / Call columns
   only). `frontend/src/lib/pnlBasis.ts` turns loaded trade lists and backtest
   runs to that basis (a trade's `net_pnl` then holds its gross), and the server
   sends gross figures next to the net ones (`books[].open_gross/closed_gross/
-  day_gross`, `open_gross_total`, `kpis.gross_wins`, `/api/bots` `gross_today`,
+  day_gross`, `open_gross_total`, `kpis.gross_wins`, `kpis.gross_profit` / `gross_loss` (the day's winning and losing
+  trades added up, the terminal's first P&L card "Gross profit / loss", `PnlMetricsRow`), `/api/bots` `gross_today`,
   chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
   daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
 - `backend/all_bots_guard.py` – all-bots day target / stop loss (off by default: `all_bots_target` /

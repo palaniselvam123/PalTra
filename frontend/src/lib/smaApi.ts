@@ -1635,6 +1635,10 @@ export type SmaState = {
     wins: number;
     /** Wins counted before charges. */
     gross_wins?: number;
+    /** Winning trades added up, before charges. */
+    gross_profit?: number;
+    /** Losing trades added up, before charges (zero or negative). */
+    gross_loss?: number;
   };
 };
 
