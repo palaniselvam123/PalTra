@@ -25,6 +25,7 @@ export function useFirstSeen<R extends { symbol: string }>(
   rows: R[],
   passes: (r: R) => boolean,
   kind: "chop" | "cross" = "chop",
+  candles?: "NORMAL" | "HA",
 ): Map<string, string> {
   const [runs, setRuns] = useState<ScanRunDetail[]>([]);
 
@@ -39,7 +40,7 @@ export function useFirstSeen<R extends { symbol: string }>(
       try {
         const list = await smaApi.scanHistory(istDay(asOf), kind);
         const wanted = list.runs.filter(
-          (r) => r.minutes === minutes && Date.parse(r.as_of) <= until,
+          (r) => r.minutes === minutes && Date.parse(r.as_of) <= until && (!candles || (r.meta?.candles ?? "NORMAL") === candles),
         );
         const out: ScanRunDetail[] = [];
         for (const r of wanted) {
@@ -59,7 +60,7 @@ export function useFirstSeen<R extends { symbol: string }>(
     return () => {
       live = false;
     };
-  }, [asOf, minutes, kind]);
+  }, [asOf, minutes, kind, candles]);
 
   return useMemo(() => {
     const first = new Map<string, string>();

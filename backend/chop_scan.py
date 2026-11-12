@@ -57,6 +57,7 @@ from cross_scan import (
 )
 from groww_client import IST, market_is_open
 from indicators import _session_vwap, enrich, sma_gap_pct
+import heikin_ashi
 import trend_phases
 import trend_strength
 
@@ -262,13 +263,36 @@ def _crosses(closed: pd.DataFrame, today: int) -> list[dict]:
     ]
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT) -> ChopRow | None:
-    """One stock's chop/trend read. None when the tape isn't long enough yet."""
+NORMAL = "NORMAL"
+HEIKIN_ASHI = "HA"
+CANDLE_KINDS = (NORMAL, HEIKIN_ASHI)
+
+
+def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
+    """`bars` as Heikin Ashi candles (heikin_ashi.candles): HA open / close, high and low widened to hold them.
+    Everything read from the result (SMAs, crosses, the strong-trend checks, phases) is then the Heikin Ashi read;
+    prices shown to the person (last price, VWAP, day move) come from the real 1-minute tape."""
+    if bars is None or len(bars) == 0 or not {"open", "high", "low", "close"} <= set(bars.columns):
+        return bars
+    ha_open, ha_close = heikin_ashi.candles(bars)
+    out = bars.copy()
+    high = pd.to_numeric(out["high"], errors="coerce")
+    low = pd.to_numeric(out["low"], errors="coerce")
+    out["open"], out["close"] = ha_open, ha_close
+    out["high"] = pd.concat([high, ha_open, ha_close], axis=1).max(axis=1)
+    out["low"] = pd.concat([low, ha_open, ha_close], axis=1).min(axis=1)
+    return out
+
+
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False) -> ChopRow | None:
+    """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles."""
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
         return None
+    if ha:
+        bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     today = _ist_day(int(now.timestamp()))
     hits = _crosses(enriched, today)
@@ -308,7 +332,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     vwap = _vwap_today(frame_1m, now)
     trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
     by_size = {m: (*_cross_read(hits, enriched), trend["trend"]) if m == minutes
-               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap)
+               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha)
                for m in CANDLE_MINUTES}
     return replace(
         base,
@@ -334,12 +358,14 @@ def _side(enriched: pd.DataFrame) -> str | None:
 
 
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
-                vwap: float | None = None):
+                vwap: float | None = None, ha: bool = False):
     """(crosses today, side, last cross ts, last cross side, run since ts, run candles, gap %, widest gap %,
     strong trend) on `minutes`-long candles; Nones when too short."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
         return (None,) * 9
+    if ha:
+        bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     strong = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)["trend"]
     return (*_cross_read(_crosses(enriched, today), enriched), strong)
@@ -419,6 +445,7 @@ class Status:
     sma_fast: int = 9
     sma_slow: int = 21
     quiet_min: int = QUIET_MIN_DEFAULT
+    candles: str = NORMAL  # NORMAL | HA (Heikin Ashi)
     as_of: str | None = None
     finished_at: str | None = None  # wall-clock time (IST) the last pass ended
     market_open: bool = False
@@ -461,6 +488,7 @@ class ChopScanner:
             "sma_fast": s.sma_fast,
             "sma_slow": s.sma_slow,
             "quiet_min": s.quiet_min,
+            "candles": s.candles,
             "as_of": s.as_of,
             "market_open": s.market_open,
             "rows": s.rows,
@@ -483,14 +511,17 @@ class ChopScanner:
         meta: dict | None = None,
         price_min: float = 0.0,
         price_max: float = 0.0,
+        candles: str = NORMAL,
     ) -> dict:
+        if candles not in CANDLE_KINDS:
+            raise ValueError("Candles must be NORMAL or HA (Heikin Ashi)")
         if minutes not in CANDLE_MINUTES:
             raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
         names = clean_symbols(symbols)
         if not names:
             raise ValueError("No stocks to scan")
         now = now or dt.datetime.now(IST)
-        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names))
+        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names), candles)
         if self.status.running:
             return self.snapshot()
         fresh = self._key == key and self.status.as_of is not None
@@ -508,11 +539,12 @@ class ChopScanner:
         self.status.error = None
         self.status.minutes, self.status.sma_fast, self.status.sma_slow = minutes, sma_fast, sma_slow
         self.status.quiet_min = max(1, int(quiet_min or QUIET_MIN_DEFAULT))
+        self.status.candles = candles
         self._task = asyncio.get_running_loop().create_task(
             self._run(
                 names, fetch, key, minutes, sma_fast, sma_slow, now,
                 alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
-                price_min=price_min, price_max=price_max,
+                price_min=price_min, price_max=price_max, ha=candles == HEIKIN_ASHI,
             )
         )
         return self.snapshot()
@@ -532,6 +564,7 @@ class ChopScanner:
         job: Job | None = None,
         price_min: float = 0.0,
         price_max: float = 0.0,
+        ha: bool = False,
     ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
@@ -554,7 +587,7 @@ class ChopScanner:
                         row = await job(symbol, start, end)
                     else:
                         frame = await fetch(symbol, start, end)
-                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha)
                     ok += 1
                     if row is not None:
                         rows.append(row)

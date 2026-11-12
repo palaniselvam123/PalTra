@@ -148,12 +148,12 @@ def cross_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, past=
     return scan_one(symbol, frame, sma_fast, sma_slow, minutes, now), keep
 
 
-def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min, past=None):
-    """(row, earlier days to keep); see `run_cached`."""
+def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min, ha=False, past=None):
+    """(row, earlier days to keep); see `run_cached`. `ha`: read Heikin Ashi candles."""
     from chop_scan import analyze
 
     frame, keep = _frame_with_past(token, symbol, start, end, past)
-    return analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min), keep
+    return analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min, ha=ha), keep
 
 
 def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
-import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes, type TrendAlerts } from "@/lib/smaApi";
+import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopCandles, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes, type TrendAlerts } from "@/lib/smaApi";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
@@ -160,6 +160,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [data, setData] = useState<ChopScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
+  // Which candles the scan reads: the real ones, or Heikin Ashi (smoother colours; prices shown stay real).
+  const [candles, setCandles] = useState<ChopCandles>("NORMAL");
   const [score, setScore] = useState<ScoreFilter>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -281,6 +283,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             alert_on_quiet: alertOnQuiet,
             price_min: priceMin,
             price_max: priceMax,
+            candles,
           })
         );
       } catch (e: unknown) {
@@ -289,7 +292,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         setBusy(false);
       }
     },
-    [minutes, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
+    [minutes, candles, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
@@ -299,6 +302,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       smaApi
         .chopScanAuto({
           minutes,
+          candles,
           armed_only: armedOnly,
           lists,
           quiet_min: quietMin,
@@ -312,7 +316,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, saved, minutes, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, candles, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -364,6 +368,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     if (!saved) return;
     setData(saved);
     setMinutes(saved.minutes);
+    setCandles(saved.candles === "HA" ? "HA" : "NORMAL");
   }, [saved]);
 
   useEffect(() => {
@@ -377,6 +382,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         if (d.auto) {
           setAuto(d.auto);
           setMinutes(d.auto.minutes);
+          setCandles(d.auto.candles === "HA" ? "HA" : "NORMAL");
         }
       })
       .catch(() => {
@@ -400,7 +406,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     return () => clearInterval(id);
   }, [data?.running]);
 
-  const scannedThisCandle = data?.minutes === minutes;
+  const scannedThisCandle = data?.minutes === minutes && (data?.candles ?? "NORMAL") === candles;
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
     (r: ChopScanRow) => {
@@ -445,7 +451,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     return rankTrends(reads);
   }, [shownRows, passes, trendOn, trendDir, trendKind]);
   // When each stock first showed up in this list (these filters) in today's saved scans.
-  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes);
+  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "chop", data?.candles ?? "NORMAL");
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
       case "symbol":
@@ -497,8 +503,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Activity size={15} className="text-accentSky" />{" "}
           {saved
-            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute candle`
-            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute candle`}
+            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute ${candles === "HA" ? "Heikin Ashi " : ""}candle`
+            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute ${candles === "HA" ? "Heikin Ashi " : ""}candle`}
         </h2>
         {!saved && (
         <>
@@ -524,7 +530,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         className="mb-3"
         lead={`How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Candles</b>: Normal reads the real candles; <b>Heikin Ashi</b> reads the averaged ones (each candle blends into the one before), so the lines cross less often, small pullbacks do not break a trend, and a turn shows a little later. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -546,6 +552,18 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               onChange={(v) => setMinutes(v as CrossScanMinutes)}
               options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
               className="w-28"
+            />
+          )}
+          {!saved && (
+            <SelectFilter
+              label="Candles"
+              value={candles}
+              onChange={(v) => setCandles(v === "HA" ? "HA" : "NORMAL")}
+              options={[
+                { value: "NORMAL", label: "Normal" },
+                { value: "HA", label: "Heikin Ashi" },
+              ]}
+              className="w-32"
             />
           )}
           <SelectFilter

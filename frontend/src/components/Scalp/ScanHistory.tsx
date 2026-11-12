@@ -184,6 +184,7 @@ async function pdf(run: ScanRunDetail, cols: Col[], rows: Merged[]): Promise<voi
     `${run.row_count} stocks listed of ${run.total ?? run.row_count} scanned`,
     m.sma_fast && m.sma_slow ? `SMA ${m.sma_fast}/${m.sma_slow}` : "",
     run.kind === "chop" && m.quiet_min ? `quiet after ${m.quiet_min} min` : "",
+    m.candles === "HA" ? "Heikin Ashi candles" : "",
     m.source === "auto" ? "automatic re-scan" : m.source === "manual" ? "Scan now" : "",
   ].filter(Boolean);
   doc.text(pdfText(facts.join(" · ")), 32, 52);
@@ -320,7 +321,7 @@ export function ScanHistory({
     };
   }, [run]);
   const savedChop: ChopScanData | null =
-    run && savedBase && run.kind === "chop" ? { ...savedBase, quiet_min: run.meta.quiet_min ?? 60, rows: run.rows as ChopScanRow[] } : null;
+    run && savedBase && run.kind === "chop" ? { ...savedBase, quiet_min: run.meta.quiet_min ?? 60, candles: run.meta.candles === "HA" ? "HA" : "NORMAL", rows: run.rows as ChopScanRow[] } : null;
   const savedCross: CrossScanData | null =
     run && savedBase && run.kind === "cross" ? { ...savedBase, rows: run.rows as CrossScanRow[] } : null;
 
@@ -537,6 +538,7 @@ export function ScanHistory({
             {run.row_count} stocks listed of {run.total ?? run.row_count} scanned
             {run.meta.sma_fast && run.meta.sma_slow ? ` · SMA ${run.meta.sma_fast}/${run.meta.sma_slow}` : ""}
             {run.kind === "chop" && run.meta.quiet_min ? ` · quiet after ${run.meta.quiet_min} min` : ""}
+            {run.meta.candles === "HA" ? " · Heikin Ashi candles" : ""}
             {run.finished_at ? ` · finished ${clock(run.finished_at)}` : ""}
             {run.error ? ` · ${run.error}` : ""}
             {!run.can_check ? " · Check accuracy opens after 15:30 that day" : ""}

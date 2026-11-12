@@ -1031,6 +1031,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   and `GET /api/chop-scan` carries `auto` (next_at, last error). On by default only on the scanner
   server; never runs on a desk with `SCANS=off` or while scans are paused. A manual Scan now counts as
   a run.
+  **Candles: Normal / Heikin Ashi** (`candles` `NORMAL` default | `HA` on `POST /api/chop-scan/start`, `ChopAutoUpdate` and
+  `chop_auto.AutoSettings`; the card's "Candles" menu, kept by the auto re-scan; `Status.candles`, saved in the run's
+  `meta.candles`): with `HA`, `chop_scan.ha_bars` turns the closed candles of every size into Heikin Ashi ones
+  (`heikin_ashi.candles`; high / low widened to hold the HA open / close) before `enrich`, so the SMAs, crosses, score,
+  strong-trend checks, phases, trend age and gap are all the Heikin Ashi read (`analyze(..., ha=)`, `_crosses_on`,
+  `scan_worker.chop_job`); the last price, VWAP and day move stay real. Scan & arm, the Most active card's "Read trend
+  quality", MCP and the pick backtests keep normal candles. First seen compares only saved scans of the same kind.
   **Strong trend** (`backend/trend_strength.py`, read by `chop_scan.analyze`): each row also
   gets `trend` = `STRONG_BULLISH` / `STRONG_BEARISH` / null, `trend_score` (0-100) and
   `trend_checks`, judged on the closed candles for the side of fast vs slow SMA: `stack` (close
