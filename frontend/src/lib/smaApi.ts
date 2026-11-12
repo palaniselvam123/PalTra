@@ -3325,6 +3325,10 @@ export type HoldTestRow = {
   end_pct: number | null;
   sessions: number;
   target_price: number | null;
+  /** The trade: the first 1-minute candle after the scan (next session for a scan after the close), at its open. */
+  entry_on?: string | null;
+  entry_at?: string | null;
+  entry_price?: number | null;
   error?: string;
 };
 export type HoldTestResult = {

@@ -139,3 +139,23 @@ def test_first_reached_uses_each_stock_read_time_and_the_read_before():
     assert up["moved_at"] == "10:10"
     first = pressure_study.reached(days=5, pct=75, history=FakeHistory({(10, 0): [{"symbol": "UP", "ltp": 1.0, "buy_share": 0.9}]}))
     assert first["rows"][0]["below_at"] is None
+
+
+def test_after_hours_scans_and_closed_days_are_left_out():
+    """A Scan now at 19:03 is no signal (and no trade); a day whose prices never move (a holiday) is left out."""
+    assert pressure_study.in_session({"as_of": "2026-11-10T09:15:00+05:30"})
+    assert not pressure_study.in_session({"as_of": "2026-11-10T19:03:00+05:30"})
+    assert not pressure_study.in_session({"as_of": "2026-11-10T15:30:00+05:30"})
+    still = {f"S{i}": ([600, 605, 610], [100.0, 100.0, 100.0], [0.9, 0.9, 0.9], ["10:00", "10:05", "10:10"]) for i in range(10)}
+    assert pressure_study.frozen(still)
+    still["S0"] = ([600, 605, 610], [100.0, 100.5, 101.0], [0.9, 0.9, 0.9], ["10:00", "10:05", "10:10"])
+    assert not pressure_study.frozen(still)  # 1 stock in 10 moving (10 %) is an open market
+
+    def share(symbol, t):
+        return 0.9 if symbol == "UP" else 0.5
+
+    holiday = FakeHistory({t: [{"symbol": s, "ltp": 100.0, "buy_share": share(s, t)} for s in ("UP", "A", "B", "C", "D", "E")] for t in times()})
+    closed = pressure_study.reached(days=5, pct=75, move_pct=0.2, history=holiday)
+    assert closed["total_rows"] == 0 and closed["left_out"] == [{"day": "2026-11-10", "why": "closed", "scans": len(times())}]
+    live = pressure_study.reached(days=5, pct=75, move_pct=0.2, history=build(lambda s, t: 100.0 + minutes(t) / 100, share))
+    assert live["rows"][0]["first_at"].startswith("10:00") and live["rows"][0]["trade_at"] == "10:01" and not live["left_out"]

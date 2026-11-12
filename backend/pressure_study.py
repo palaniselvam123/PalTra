@@ -29,12 +29,30 @@ MIN_SIGNALS = 30          # fewer signals than this: "few"
 STRONG, SOME = 10.0, 5.0  # edge in points
 BASE_EVERY = 3            # the base rate reads every 3rd scan of each stock (plenty, and quick)
 KEEP_SIGNALS = 200
+SESSION_FROM, SESSION_TO = 9 * 60 + 15, 15 * 60 + 30  # IST minutes: scans outside the session are left out
+FROZEN_SHARE = 0.05       # a day on which under 5 % of the stocks' prices ever changed: the market was closed
 _lock = threading.Lock()
 _cache: dict[tuple, dict] = {}
 
 
 def _minute(t) -> int:
     return t.hour * 60 + t.minute
+
+
+def in_session(meta: dict) -> bool:
+    """A scan taken while NSE trades (09:15-15:30 IST): a scan after the close (a Scan now in the evening) reads an
+    order book nobody trades against, so it is no signal and its price is no trade."""
+    t = _clock(meta.get("as_of"))
+    return t is not None and SESSION_FROM <= _minute(t) < SESSION_TO
+
+
+def frozen(series: dict) -> bool:
+    """True when hardly any stock's price changed across the day's scans: a holiday (the auto scan has no holiday list,
+    so on such a day it saves Groww's last prices over and over)."""
+    long = [v[1] for v in series.values() if len(v[1]) >= 3]
+    if len(long) < 5:
+        return False
+    return sum(1 for p in long if len(set(p)) > 1) / len(long) < FROZEN_SHARE
 
 
 def day_series(runs: list[dict], rows_of) -> dict[str, tuple[list[int], list[float], list[float | None], list[str]]]:
@@ -45,7 +63,7 @@ def day_series(runs: list[dict], rows_of) -> dict[str, tuple[list[int], list[flo
     out: dict[str, tuple[list[int], list[float], list[float | None], list[str]]] = {}
     for run in sorted(runs, key=lambda r: r.get("as_of") or ""):
         start = _clock(run.get("as_of"))
-        if start is None:
+        if start is None or not in_session(run):
             continue
         for row in rows_of(run):
             price = _f(row.get("ltp"))
@@ -211,9 +229,9 @@ def run(days: int = 20, pct: float = 75.0, gap_min: int = 30, history=None) -> d
     used = []
     for day in sorted(day_list):
         series = day_series(metas[day], rows_of)
-        if not series:
+        if not series or frozen(series):
             continue
-        used.append({"day": day, "scans": len(metas[day])})
+        used.append({"day": day, "scans": sum(1 for m in metas[day] if in_session(m))})
         for t in thresholds:
             by_thr[t] += signals_for(series, t, gap_min, day)
         for k, v in base_moves(series).items():
@@ -259,8 +277,10 @@ def reached_for_day(series: dict, pct: float, move_pct: float, day: str) -> list
             got = next(((m, j) for m, j in after if m >= move_pct), None)
             clock = lambda j: f"{times[j] // 60:02d}:{times[j] % 60:02d}"  # noqa: E731
             below = next((k for k in range(i - 1, -1, -1) if held[k] is not None and held[k] < need), None)
+            trade = times[i] + 1  # the share was read at first_at; an order can go at the open of the next minute
             rows.append({
                 "day": day, "symbol": symbol, "side": side, "first_at": clocks[i],
+                "trade_at": f"{trade // 60:02d}:{trade % 60:02d}",
                 # The share is only read at each scan: it crossed `pct` after the last read below it (`below_at`,
                 # None when the day's first read already had it) and at or before `first_at`.
                 "below_at": clocks[below] if below is not None else None, "share_pct": round(held[i] * 100, 1),
@@ -309,14 +329,20 @@ def reached(days: int = 20, pct: float = 75.0, move_pct: float = 0.5, day: str |
         return (history.get(meta["id"]) or {}).get("rows") or []
 
     rows: list[dict] = []
-    used = []
+    used, left_out = [], []
     for d in sorted(wanted):
         metas = history.runs(d, "active")
+        inside = sum(1 for m in metas if in_session(m))
+        if inside < len(metas):
+            left_out.append({"day": d, "why": "after_hours", "scans": len(metas) - inside})
         series = day_series(metas, rows_of)
         if not series:
             continue
+        if frozen(series):
+            left_out.append({"day": d, "why": "closed", "scans": inside})
+            continue
         got = reached_for_day(series, pct, move_pct, d)
-        used.append({"day": d, "scans": len(metas), "stocks": len(got)})
+        used.append({"day": d, "scans": inside, "stocks": len(got)})
         rows += got
     stats = _day_stats(rows, move_pct)
     answer = []
@@ -339,6 +365,6 @@ def reached(days: int = 20, pct: float = 75.0, move_pct: float = 0.5, day: str |
         if judged["stocks"] < MIN_SIGNALS:
             answer.append(f"Only {judged['stocks']} cases: too few to trust yet. Add more days.")
     return {
-        "days": used, "all_days": listed, "day": day or None, "pct": pct, "move_pct": move_pct,
+        "days": used, "all_days": listed, "day": day or None, "pct": pct, "move_pct": move_pct, "left_out": left_out,
         "stats": stats, "answer": answer, "rows": rows[-500:], "total_rows": len(rows),
     }

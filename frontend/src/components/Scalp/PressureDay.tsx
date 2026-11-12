@@ -379,6 +379,19 @@ export function PressureDayView() {
           </span>
         ) : null}
       </div>
+      {data?.left_out?.length ? (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-200">
+          Left out:{" "}
+          {data.left_out
+            .map((l) =>
+              l.why === "closed"
+                ? `${l.day}: market closed (no price moved in ${l.scans} scans, a holiday)`
+                : `${l.day}: ${l.scans} scan${l.scans === 1 ? "" : "s"} taken outside 09:15–15:30 (nobody can trade on them)`,
+            )
+            .join(" · ")}
+          .
+        </p>
+      ) : null}
       {error ? <p className="text-xs font-semibold text-amber-300">{error}</p> : null}
       {data && data.all_days.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-800 p-4 text-sm text-slate-400">
@@ -479,6 +492,10 @@ export function PressureDayView() {
               <p>
                 Reads each shown stock&apos;s news that day (NSE filings and news headlines, up to 40 stocks a day) and says whether it points the
                 same way as the buyers / sellers. A headline marked <i>after</i> came out after the share was first reached, so it did not cause it.
+              </p>
+              <p className="text-slate-500">
+                How: pick a day (or narrow the table with the filters), press <b>Read the news</b>, then look at the <b>News that day</b> column; sort it to
+                bring news that agrees with the buyers / sellers to the top.
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <button
@@ -624,6 +641,7 @@ export function PressureDayView() {
                       >
                         {r.first_at}
                         <div className="text-[10px] text-slate-500">{r.below_at ? `under at ${r.below_at}` : "at first scan"}</div>
+                        {r.trade_at ? <div className="text-[10px] font-semibold text-sky-300">trade {r.trade_at}</div> : null}
                       </td>
                       <td className={clsx(td, "text-slate-400")}>
                         {r.max_share_pct.toFixed(0)}% · {r.scans_at}
@@ -728,6 +746,13 @@ function HoldCell({ h, days }: { h: HoldTestRow | undefined; days: number }) {
   if (!h) return <span className="text-slate-600">—</span>;
   if (h.error) return <span className="text-slate-500">{h.error}</span>;
   const worst = h.worst_before_pct != null ? <span className="ml-1 text-rose-300/80">worst {signed(h.worst_before_pct)}</span> : null;
+  const entry =
+    h.entry_price != null ? (
+      <span className="block text-[10px] text-slate-500">
+        traded {h.entry_on && h.entry_on !== h.day ? `${h.entry_on.slice(5)} ` : ""}
+        {h.entry_at} at ₹{h.entry_price.toFixed(2)}
+      </span>
+    ) : null;
   if (h.reached) {
     return (
       <span className="whitespace-nowrap tabular-nums">
@@ -736,6 +761,7 @@ function HoldCell({ h, days }: { h: HoldTestRow | undefined; days: number }) {
           {h.day_no === 0 ? h.hit_at : `${(h.on ?? "").slice(5)} ${h.hit_at}`}
         </span>
         {worst}
+        {entry}
       </span>
     );
   }
@@ -744,6 +770,7 @@ function HoldCell({ h, days }: { h: HoldTestRow | undefined; days: number }) {
       <b className="text-rose-300">{h.sessions < days ? `Not yet (${h.sessions} of ${days} days so far)` : `Not in ${days} days`}</b>
       <span className="ml-1 text-slate-400">best {signed(h.best_pct)}</span>
       {worst}
+      {entry}
     </span>
   );
 }

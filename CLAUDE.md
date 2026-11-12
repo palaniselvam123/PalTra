@@ -1530,6 +1530,11 @@ spinning top), body and range) / Matched / Call columns
   scan went that way, `base_moves`), `edge` = right − base and a verdict (strong ≥ 10 / some ≥ 5 / weak / none / few under
   `MIN_SIGNALS` 30); `by_threshold` runs the same at 60-90 %; plain-words `answer`. Desk
   `GET /api/scalp/active/pressure-test?days=&pct=&gap_min=` (cached per choice and newest saved scan).
+  **Only the session counts** (`pressure_study.in_session`, `frozen`): scans taken outside 09:15-15:30 IST (a Scan now in
+  the evening) are left out of the test and the day list, and so is a day on which under `FROZEN_SHARE` 5 % of the stocks'
+  prices ever changed (a holiday: the auto scan has no holiday list); the day list reports them as `left_out`. Rows carry
+  `trade_at` (the minute after the read), and the hold test enters at the open of the first 1-minute candle after the read
+  (`hold_test.follow`: `entry_on` / `entry_at` / `entry_price`; the profit % counts from that price).
   **Day list** (`pressure_study.reached` / `reached_for_day`, the same view's first box, `components/Scalp/PressureDay.tsx`;
   desk `GET /api/scalp/active/pressure-day?day=&days=&pct=&move_pct=`): for one day (or the last `days`), every stock and side
   whose `buy_share` reached `pct` % (50-99, typed) in any saved scan: the first time (the stock's own order-book read time,
