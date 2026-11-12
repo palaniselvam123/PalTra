@@ -1532,7 +1532,9 @@ spinning top), body and range) / Matched / Call columns
   `GET /api/scalp/active/pressure-test?days=&pct=&gap_min=` (cached per choice and newest saved scan).
   **Day list** (`pressure_study.reached` / `reached_for_day`, the same view's first box, `components/Scalp/PressureDay.tsx`;
   desk `GET /api/scalp/active/pressure-day?day=&days=&pct=&move_pct=`): for one day (or the last `days`), every stock and side
-  whose `buy_share` reached `pct` % (50-99, typed) in any saved scan: the first time, the share then, the highest share and
+  whose `buy_share` reached `pct` % (50-99, typed) in any saved scan: the first time (the stock's own order-book read time,
+  `ActiveRow.read_at`, saved on each row since; older scans only have the scan's start `as_of`) and the last read still
+  under it (`below_at`: it crossed between the two, the book is only read at each scan), the share then, the highest share and
   in how many scans, the price then, and what the saved `ltp` did afterwards: whether it moved `move_pct` % (0.05-20, typed)
   its way before the day's last scan (`moved`, when, minutes), the best / worst move and the move at the end. `_day_stats`:
   per side and overall how many moved (`correct_pct`), average minutes and best move; plain-words `answer`. The % boxes on

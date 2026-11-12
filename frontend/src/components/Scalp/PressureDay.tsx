@@ -494,7 +494,7 @@ export function PressureDayView() {
                     <SortTh k="side" left title="Buyers first (highest share first), then sellers">
                       Who
                     </SortTh>
-                    <SortTh k="first_at" title="The first saved scan of the day in which it reached your %">
+                    <SortTh k="first_at" title="When its order book was first read at or above your % (the stock's own read time; older scans only kept the scan's start). Under it: the last read still under your %, so it crossed between the two">
                       First reached
                     </SortTh>
                     <SortTh k="max_share" first={-1} title="Highest share that day, and in how many scans it was at or above your %">
@@ -535,7 +535,17 @@ export function PressureDayView() {
                           {r.side === "BUY" ? "Buyers" : "Sellers"} {r.share_pct.toFixed(0)}%
                         </span>
                       </td>
-                      <td className={td}>{r.first_at}</td>
+                      <td
+                        className={td}
+                        title={
+                          r.below_at
+                            ? `Seen at your % when its order book was read at ${r.first_at}; it was still under your % at the read before (${r.below_at}). It crossed somewhere in between: the order book is only read at each scan.`
+                            : `Already at your % at the day's first read (${r.first_at}); when it got there before that is not known.`
+                        }
+                      >
+                        {r.first_at}
+                        <div className="text-[10px] text-slate-500">{r.below_at ? `under at ${r.below_at}` : "at first scan"}</div>
+                      </td>
                       <td className={clsx(td, "text-slate-400")}>
                         {r.max_share_pct.toFixed(0)}% · {r.scans_at}
                       </td>

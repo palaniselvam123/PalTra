@@ -37,25 +37,31 @@ def _minute(t) -> int:
     return t.hour * 60 + t.minute
 
 
-def day_series(runs: list[dict], rows_of) -> dict[str, tuple[list[int], list[float], list[float | None]]]:
-    """Each stock's (minutes, prices, buyers' shares) over one day's saved scans, in time order."""
-    out: dict[str, tuple[list[int], list[float], list[float | None]]] = {}
+def day_series(runs: list[dict], rows_of) -> dict[str, tuple[list[int], list[float], list[float | None], list[str]]]:
+    """Each stock's (minutes, prices, buyers' shares, read clocks) over one day's saved scans, in time order.
+
+    A row's own `read_at` (when that stock's order book was read) is used when the scan saved it; older scans only
+    have the scan's start (`as_of`), so their clock is HH:MM and the stock may really have been read a little later."""
+    out: dict[str, tuple[list[int], list[float], list[float | None], list[str]]] = {}
     for run in sorted(runs, key=lambda r: r.get("as_of") or ""):
-        t = _clock(run.get("as_of"))
-        if t is None:
+        start = _clock(run.get("as_of"))
+        if start is None:
             continue
-        minute = _minute(t)
         for row in rows_of(run):
             price = _f(row.get("ltp"))
             symbol = row.get("symbol")
             if not symbol or not price:
                 continue
-            times, prices, shares = out.setdefault(symbol, ([], [], []))
+            read = _clock(row.get("read_at")) if row.get("read_at") else None
+            t = read or start
+            minute = _minute(t)
+            times, prices, shares, clocks = out.setdefault(symbol, ([], [], [], []))
             if times and times[-1] >= minute:
                 continue
             times.append(minute)
             prices.append(price)
             shares.append(_f(row.get("buy_share")))
+            clocks.append(t.strftime("%H:%M:%S") if read else t.strftime("%H:%M"))
     return out
 
 
@@ -90,7 +96,7 @@ def signals_for(series: dict, pct: float, gap_min: int, day: str) -> list[dict]:
     """Every fresh buyers / sellers signal of one day at `pct` %."""
     need = pct / 100.0
     found = []
-    for symbol, (times, prices, shares) in series.items():
+    for symbol, (times, prices, shares, *_clocks) in series.items():
         last_at = {"BUY": -10_000, "SELL": -10_000}
         was = {"BUY": True, "SELL": True}  # the day's first scan never starts a signal: nothing came before it
         for i, share in enumerate(shares):
@@ -115,7 +121,7 @@ def base_moves(series: dict) -> dict[str, list[float]]:
     """Unsigned % moves of every stock after every 3rd scan, per horizon: what the price does anyway."""
     out: dict[str, list[float]] = {str(h): [] for h in HORIZONS}
     out["close"] = []
-    for times, prices, _shares in series.values():
+    for times, prices, *_rest in series.values():
         for i in range(0, len(times), BASE_EVERY):
             got = _moves(times, prices, i, 1)
             for key in out:
@@ -239,7 +245,8 @@ def reached_for_day(series: dict, pct: float, move_pct: float, day: str) -> list
     real price did afterwards: the furthest it went its way, whether it reached `move_pct` %, and when."""
     need = pct / 100.0
     rows = []
-    for symbol, (times, prices, shares) in series.items():
+    for symbol, (times, prices, shares, *more) in series.items():
+        clocks = more[0] if more else [f"{m // 60:02d}:{m % 60:02d}" for m in times]
         for side in ("BUY", "SELL"):
             held = [None if s is None else (s if side == "BUY" else 1.0 - s) for s in shares]
             hits = [i for i, h in enumerate(held) if h is not None and h >= need]
@@ -251,8 +258,12 @@ def reached_for_day(series: dict, pct: float, move_pct: float, day: str) -> list
             worst = min(after, default=None)
             got = next(((m, j) for m, j in after if m >= move_pct), None)
             clock = lambda j: f"{times[j] // 60:02d}:{times[j] % 60:02d}"  # noqa: E731
+            below = next((k for k in range(i - 1, -1, -1) if held[k] is not None and held[k] < need), None)
             rows.append({
-                "day": day, "symbol": symbol, "side": side, "first_at": clock(i), "share_pct": round(held[i] * 100, 1),
+                "day": day, "symbol": symbol, "side": side, "first_at": clocks[i],
+                # The share is only read at each scan: it crossed `pct` after the last read below it (`below_at`,
+                # None when the day's first read already had it) and at or before `first_at`.
+                "below_at": clocks[below] if below is not None else None, "share_pct": round(held[i] * 100, 1),
                 "max_share_pct": round(max(held[k] for k in hits) * 100, 1), "scans_at": len(hits), "price": entry,
                 "best_pct": round(best[0], 3) if best else None, "best_at": clock(best[1]) if best else None,
                 "worst_pct": round(worst[0], 3) if worst else None,
@@ -321,7 +332,10 @@ def reached(days: int = 20, pct: float = 75.0, move_pct: float = 0.5, day: str |
                     f"{move_pct:g}% or more {s['moved']} time{'s' if s['moved'] != 1 else ''} ({s['correct_pct']:g}% correct)"
                     + (f", taking about {s['avg_minutes']} minutes." if s["avg_minutes"] is not None else ".")
                 )
-        answer.append(f"Overall your assumption was right {judged['correct_pct']:g}% of the time at a {move_pct:g}% move ({judged['moved']} of {judged['stocks']}).")
+        if judged["correct_pct"] is None:
+            answer.append("No later saved scan that day yet, so whether the price moved is not known.")
+        else:
+            answer.append(f"Overall your assumption was right {judged['correct_pct']:g}% of the time at a {move_pct:g}% move ({judged['moved']} of {judged['stocks']}).")
         if judged["stocks"] < MIN_SIGNALS:
             answer.append(f"Only {judged['stocks']} cases: too few to trust yet. Add more days.")
     return {
