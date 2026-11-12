@@ -76,13 +76,30 @@ export function SettingsTabs({ groups, active, onPick }: { groups: SettingsGroup
       )}
     >
       <PinToggle pinned={pinned} onChange={setPinned} what="these tabs" />
-      <div role="tablist" aria-label="Settings groups" className="flex items-center gap-1.5">
+      <div
+        role="tablist"
+        aria-label="Settings groups"
+        className="flex items-center gap-1.5"
+        onKeyDown={(e) => {
+          // Arrow keys move between the tabs, Home / End jump to the first / last (the usual tab pattern).
+          const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!step && e.key !== "Home" && e.key !== "End") return;
+          e.preventDefault();
+          const at = Math.max(0, groups.findIndex((g) => g.id === active));
+          const next = e.key === "Home" ? 0 : e.key === "End" ? groups.length - 1 : (at + step + groups.length) % groups.length;
+          pick(groups[next]);
+          requestAnimationFrame(() => document.getElementById(`settings-tab-${groups[next].id}`)?.focus());
+        }}
+      >
         {groups.map((g) => (
           <a
             key={g.id}
+            id={`settings-tab-${g.id}`}
             role="tab"
             href={`#${g.id}`}
             aria-selected={active === g.id}
+            aria-controls={g.id}
+            tabIndex={active === g.id ? 0 : -1}
             onClick={(e) => {
               e.preventDefault();
               pick(g);
@@ -90,14 +107,14 @@ export function SettingsTabs({ groups, active, onPick }: { groups: SettingsGroup
             title={g.hint}
             className={clsx(
               "flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl px-3.5 ring-1 ring-inset",
-              active === g.id ? "bg-accentSky text-white ring-accentSky" : "text-slate-300 ring-border hover:bg-white/5"
+              active === g.id ? "bg-accentSky font-semibold text-on-accent shadow-sm ring-accentSky" : "text-slate-300 ring-border hover:bg-white/5 hover:text-slate-100"
             )}
           >
             {g.icon ? <span aria-hidden className="shrink-0 opacity-90">{g.icon}</span> : null}
             <span className="flex flex-col items-start leading-tight">
               <span className="font-semibold">{g.label}</span>
               {g.hint ? (
-                <span className={clsx("hidden text-[10px] font-normal md:block", active === g.id ? "text-white/85" : "text-slate-400")}>
+                <span className={clsx("hidden text-[10px] font-normal md:block", active === g.id ? "opacity-80" : "text-slate-400")}>
                   {g.hint}
                 </span>
               ) : null}

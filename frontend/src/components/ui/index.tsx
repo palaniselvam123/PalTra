@@ -209,7 +209,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-bot text-white hover:bg-bot/85 border-transparent",
   secondary: "bg-white/[0.04] text-slate-200 hover:bg-white/[0.08] border-border",
   ghost: "bg-transparent text-slate-400 hover:text-slate-100 hover:bg-white/[0.05] border-transparent",
-  danger: "bg-loss text-white hover:bg-loss/85 border-transparent",
+  danger: "bg-rose-600 text-white hover:bg-rose-700 border-transparent",  // white on rose-600 is 4.7:1 (rose-500 was 3.7)
 };
 
 export function Button({

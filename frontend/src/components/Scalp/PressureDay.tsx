@@ -75,6 +75,56 @@ function sortValue(r: PressureDayRow, key: SortKey): number | string | null {
   }
 }
 
+type DayStat = PressureDay["stats"][number];
+
+/** The three cards' numbers for any set of rows: the same arithmetic as backend/pressure_study._day_stats, so the
+ *  cards and the lines above them follow the time / price filters. */
+function dayStats(rows: PressureDayRow[]): DayStat[] {
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  return (
+    [
+      ["ALL", "Buyers and sellers"],
+      ["BUY", "Buyers → price up"],
+      ["SELL", "Sellers → price down"],
+    ] as const
+  ).map(([key, label]) => {
+    const mine = rows.filter((r) => (key === "ALL" || r.side === key) && r.moved != null);
+    const right = mine.filter((r) => r.moved);
+    const mins = mean(right.map((r) => r.minutes_to_move).filter((m): m is number => m != null));
+    const best = mean(mine.map((r) => r.best_pct).filter((b): b is number => b != null));
+    const ended = mine.filter((r) => (r.last_pct ?? 0) > 0).length;
+    return {
+      side: key,
+      label,
+      stocks: mine.length,
+      moved: right.length,
+      correct_pct: mine.length ? Math.round((right.length / mine.length) * 1000) / 10 : null,
+      avg_minutes: mins == null ? null : Math.round(mins),
+      avg_best_pct: best == null ? null : Math.round(best * 1000) / 1000,
+      ended_right_pct: mine.length ? Math.round((ended / mine.length) * 1000) / 10 : null,
+    };
+  });
+}
+
+/** The plain-words lines above the cards, from `dayStats` (the backend's wording). */
+function answerLines(stats: DayStat[], pct: number, move: number, oneDay: boolean, scope: string): string[] {
+  const all = stats[0];
+  if (!all.stocks) return [`No stock reached ${pct}% buyers or sellers${scope ? ` ${scope}` : ""} in the saved scans of ${oneDay ? "that day" : "these days"}.`];
+  const out: string[] = [];
+  for (const st of stats.slice(1)) {
+    if (!st.stocks) continue;
+    const [who, way] = st.side === "BUY" ? ["buyers", "up"] : ["sellers", "down"];
+    out.push(
+      `${st.stocks} time${st.stocks === 1 ? "" : "s"} ${who} reached ${pct}%${scope ? ` ${scope}` : ""}: the price then went ${way} ` +
+        `${move}% or more ${st.moved} time${st.moved === 1 ? "" : "s"} (${st.correct_pct}% correct)` +
+        (st.avg_minutes != null ? `, taking about ${st.avg_minutes} minutes.` : ".")
+    );
+  }
+  out.push(`Overall your assumption was right ${all.correct_pct}% of the time at a ${move}% move (${all.moved} of ${all.stocks}).`);
+  if (all.stocks < 30) out.push(`Only ${all.stocks} case${all.stocks === 1 ? "" : "s"}: too few to trust yet. Add more days or widen the filters.`);
+  return out;
+}
+
 /** "HH:MM" → minutes after midnight, or null when blank / not a time. */
 function toMinutes(t: string): number | null {
   const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
@@ -132,19 +182,40 @@ export function PressureDayView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = useMemo(() => {
+  // The rows inside the time and price filters: the lines and cards above the table are worked out from these, so
+  // "% correct" is the win rate of exactly that window. (Who and Show only narrow the table: Show picks by result, and
+  // the cards already split buyers from sellers.)
+  const scoped = useMemo(() => {
     const from = toMinutes(timeFrom);
     const to = toMinutes(timeTo);
     const lo = priceMin.trim() ? Number(priceMin) : null;
     const hi = priceMax.trim() ? Number(priceMax) : null;
-    const kept = (data?.rows ?? []).filter((r) => {
-      if (side !== "ALL" && r.side !== side) return false;
-      if (show !== "ALL" && (show === "YES" ? r.moved !== true : r.moved !== false)) return false;
+    return (data?.rows ?? []).filter((r) => {
       const at = toMinutes(r.first_at);
       if (from != null && at != null && at < from) return false;
       if (to != null && at != null && at > to) return false;
       if (lo != null && Number.isFinite(lo) && lo > 0 && r.price < lo) return false;
       if (hi != null && Number.isFinite(hi) && hi > 0 && r.price > hi) return false;
+      return true;
+    });
+  }, [data, timeFrom, timeTo, priceMin, priceMax]);
+
+  const scopeWords = [
+    timeFrom || timeTo ? `between ${timeFrom || "09:15"} and ${timeTo || "15:30"}` : "",
+    priceMin || priceMax ? `at ₹${priceMin || "0"}–${priceMax || "any"}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const stats = useMemo(() => dayStats(scoped), [scoped]);
+  const answer = useMemo(
+    () => (data ? answerLines(stats, data.pct, data.move_pct, Boolean(data.day), scopeWords) : []),
+    [stats, data, scopeWords]
+  );
+
+  const rows = useMemo(() => {
+    const kept = scoped.filter((r) => {
+      if (side !== "ALL" && r.side !== side) return false;
+      if (show !== "ALL" && (show === "YES" ? r.moved !== true : r.moved !== false)) return false;
       return true;
     });
     if (!sort) return kept;
@@ -166,7 +237,7 @@ export function PressureDayView() {
       const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
       return c * sort.dir;
     });
-  }, [data, side, show, timeFrom, timeTo, priceMin, priceMax, sort, news, hold]);
+  }, [scoped, side, show, sort, news, hold]);
 
   const holdMap = useMemo(() => new Map((hold?.rows ?? []).map((h) => [holdKey(h), h])), [hold]);
 
@@ -316,27 +387,6 @@ export function PressureDayView() {
       ) : null}
       {data && data.all_days.length > 0 ? (
         <>
-          <ul className="space-y-1 text-sm leading-relaxed text-slate-100">
-            {data.answer.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {data.stats.map((s) => (
-              <div key={s.side} className="rounded-lg border border-slate-800 p-2.5">
-                <p className="text-xs font-semibold text-slate-300">{s.label}</p>
-                <p className={clsx("mt-0.5 text-2xl font-semibold tabular-nums", s.correct_pct == null ? "text-slate-500" : s.correct_pct >= 60 ? "text-emerald-300" : s.correct_pct >= 45 ? "text-amber-300" : "text-rose-300")}>
-                  {s.correct_pct == null ? "—" : `${s.correct_pct.toFixed(0)}% correct`}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {s.moved} of {s.stocks} moved {data.move_pct}%{s.avg_minutes != null ? ` · about ${s.avg_minutes} min` : ""}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Best move on average {signed(s.avg_best_pct)} · ended the right side {s.ended_right_pct == null ? "—" : `${s.ended_right_pct.toFixed(0)}%`}
-                </p>
-              </div>
-            ))}
-          </div>
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <label className="flex items-center gap-1.5">
               Who
@@ -385,7 +435,7 @@ export function PressureDayView() {
             ) : null}
             <span>
               {rows.length} shown
-              {filtered && shownJudged ? (
+              {(side !== "ALL" || show !== "ALL") && shownJudged ? (
                 <>
                   {" "}
                   · <b className={shownMoved / shownJudged >= 0.6 ? "text-emerald-300" : shownMoved / shownJudged >= 0.45 ? "text-amber-300" : "text-rose-300"}>
@@ -395,6 +445,33 @@ export function PressureDayView() {
                 </>
               ) : null}
             </span>
+          </div>
+          {scopeWords ? (
+            <p className="rounded-md border border-sky-400/30 bg-sky-400/[0.06] px-2.5 py-1.5 text-xs text-slate-200">
+              Results for the stocks that reached {data.pct}% <b>{scopeWords}</b>: {stats[0].stocks} of{" "}
+              {(data.rows ?? []).filter((r) => r.moved != null).length} cases {data.day ? "that day" : "in these days"}. Clear the time / price boxes to see the whole day.
+            </p>
+          ) : null}
+          <ul className="space-y-1 text-sm leading-relaxed text-slate-100" aria-live="polite">
+            {answer.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {stats.map((s) => (
+              <div key={s.side} className="rounded-lg border border-slate-800 p-2.5">
+                <p className="text-xs font-semibold text-slate-300">{s.label}</p>
+                <p className={clsx("mt-0.5 text-2xl font-semibold tabular-nums", s.correct_pct == null ? "text-slate-500" : s.correct_pct >= 60 ? "text-emerald-300" : s.correct_pct >= 45 ? "text-amber-300" : "text-rose-300")}>
+                  {s.correct_pct == null ? "—" : `${s.correct_pct.toFixed(0)}% correct`}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {s.moved} of {s.stocks} moved {data.move_pct}%{s.avg_minutes != null ? ` · about ${s.avg_minutes} min` : ""}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Best move on average {signed(s.avg_best_pct)} · ended the right side {s.ended_right_pct == null ? "—" : `${s.ended_right_pct.toFixed(0)}%`}
+                </p>
+              </div>
+            ))}
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="space-y-2 rounded-lg border border-slate-800 p-2.5 text-xs text-slate-400">
@@ -479,6 +556,7 @@ export function PressureDayView() {
               ) : null}
             </div>
           </div>
+          {hold ? <CarryBox hold={hold} /> : null}
           {rows.length ? (
             <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-800">
               <table className="w-full min-w-[1180px] text-xs">
@@ -667,5 +745,113 @@ function HoldCell({ h, days }: { h: HoldTestRow | undefined; days: number }) {
       <span className="ml-1 text-slate-400">best {signed(h.best_pct)}</span>
       {worst}
     </span>
+  );
+}
+
+const DAY_MS = 86400000;
+
+/** The owner's question: a buy taken on the buyers' share that did not make the profit the same day (or closed in a
+ *  loss) is carried as delivery / MTF. How many reach the profit on each later day, how deep it dips first, and what
+ *  holding costs. Worked out from the hold test's rows (hold_test.follow); display only. */
+function CarryBox({ hold }: { hold: HoldTestResult }) {
+  const [rate, setRate] = useState(15);
+  const all = hold.rows.filter((h) => !h.error);
+  const buys = all.filter((h) => h.side === "BUY" || h.side === "LONG");
+  const missed = buys.filter((h) => h.day_no !== 0);
+  const sellsMissed = all.filter((h) => (h.side === "SELL" || h.side === "SHORT") && h.day_no !== 0).length;
+  const reached = missed.filter((h) => h.reached);
+  const calDays = (h: HoldTestRow) => (h.on ? Math.max(1, Math.round((Date.parse(h.on) - Date.parse(h.day)) / DAY_MS)) : null);
+  const held = reached.map(calDays).filter((d): d is number => d != null);
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  const avgCal = avg(held);
+  const avgSessions = avg(reached.map((h) => h.day_no ?? 0));
+  const dips = missed.map((h) => h.worst_before_pct).filter((d): d is number => d != null);
+  const neverEnd = avg(missed.filter((h) => !h.reached).map((h) => h.end_pct).filter((d): d is number => d != null));
+  const pct = (n: number) => (missed.length ? Math.round((n / missed.length) * 100) : 0);
+  // Delivery adds STT on the buy and a larger one on the sell (about 0.1% each side) over intraday; MTF adds interest on
+  // the money Groww lends, per calendar day. Rough, before brokerage and GST.
+  const stt = 0.2;
+  const interest = avgCal != null ? (rate / 365) * avgCal : null;
+  const cost = interest != null ? stt + interest : stt;
+  const net = hold.target_pct - cost;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-violet-400/30 bg-violet-400/[0.04] p-3 text-xs text-slate-300">
+      <p className="text-sm font-semibold text-slate-100">If it did not make the profit that day: carry it as delivery / MTF?</p>
+      {!missed.length ? (
+        <p>
+          {buys.length
+            ? `Every buy reached +${hold.target_pct}% the same day, so nothing needed carrying.`
+            : "No buyers rows in this test. Set Who to Buyers (or both) and press Test holding."}
+        </p>
+      ) : (
+        <>
+          <p className="text-slate-200">
+            <b>{missed.length}</b> buy{missed.length === 1 ? "" : "s"} did not reach +{hold.target_pct}% the same day. Carried as delivery / MTF:
+          </p>
+          <ul className="list-disc space-y-0.5 pl-5 text-slate-200">
+            <li>
+              <b className={pct(reached.length) >= 60 ? "text-emerald-300" : pct(reached.length) >= 40 ? "text-amber-300" : "text-rose-300"}>
+                {reached.length} of {missed.length} ({pct(reached.length)}%)
+              </b>{" "}
+              reached +{hold.target_pct}% within {hold.days} trading day{hold.days === 1 ? "" : "s"}
+              {avgSessions != null ? `, on average after ${avgSessions.toFixed(1)} trading days (${avgCal?.toFixed(1)} calendar days held)` : ""}.
+            </li>
+            <li>
+              {missed.length - reached.length} never got there in {hold.days} days
+              {neverEnd != null ? `; held to the end they stood at ${signed(neverEnd)} on average` : ""}.
+            </li>
+            {dips.length ? (
+              <li>
+                On the way they dipped {Math.abs(avg(dips) ?? 0).toFixed(2)}% below your price on average (worst{" "}
+                {Math.abs(Math.min(...dips)).toFixed(2)}%): the drop you sit through, and what an MTF margin call would react to.
+              </li>
+            ) : null}
+          </ul>
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from({ length: hold.days }, (_, i) => i + 1).map((k) => {
+              const n = missed.filter((h) => h.reached && (h.day_no ?? 99) <= k).length;
+              return (
+                <span key={k} className="rounded border border-slate-700 px-1.5 py-0.5 tabular-nums" title={`${n} of ${missed.length} reached it by trading day ${k}`}>
+                  By day {k}: <b>{pct(n)}%</b>
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2">
+            <label className="flex items-center gap-1.5">
+              MTF interest
+              <input
+                type="number"
+                min={0}
+                max={40}
+                step={0.5}
+                value={rate}
+                onChange={(e) => setRate(Math.min(40, Math.max(0, Number(e.target.value) || 0)))}
+                className="h-8 w-16 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-200"
+              />
+              % a year (check Groww&apos;s rate; 0 = paid in full, delivery)
+            </label>
+          </div>
+          <p>
+            Holding cost, roughly: delivery STT about {stt}% (0.1% each side)
+            {interest != null ? ` + MTF interest about ${interest.toFixed(2)}% for ${avgCal?.toFixed(1)} days` : ""} = about{" "}
+            <b>{cost.toFixed(2)}%</b>. So a +{hold.target_pct}% target leaves about{" "}
+            <b className={net > 0 ? "text-emerald-300" : "text-rose-300"}>{signed(net)}</b> after costs (before brokerage and GST). MTF interest
+            is on the part Groww lends, so it is less if you pay part yourself.
+          </p>
+          {sellsMissed ? (
+            <p className="text-amber-300">
+              {sellsMissed} seller trade{sellsMissed === 1 ? "" : "s"} also missed. A short cannot be carried overnight in delivery or MTF (cash
+              shorts are squared off the same day), so those are left out here.
+            </p>
+          ) : null}
+        </>
+      )}
+      <p className="text-slate-500">
+        From the real 1-minute candles of the next trading sessions, from the price at the scan that first reached the share. Past
+        days only; not advice.
+      </p>
+    </div>
   );
 }

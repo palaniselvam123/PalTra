@@ -155,7 +155,7 @@ function StartHere({ onPick }: { onPick: (groupId: string, hash: string) => void
       <ol className="mt-3 grid gap-2 md:grid-cols-3">
         {steps.map((s) => (
           <li key={s.n} className="flex gap-2.5 rounded-lg border border-white/10 bg-black/20 p-3">
-            <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-500 text-xs font-bold text-white">
+            <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accentSky text-xs font-bold text-on-accent">
               {s.n}
             </span>
             <div className="min-w-0">

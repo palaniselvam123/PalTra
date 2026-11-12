@@ -1539,7 +1539,9 @@ spinning top), body and range) / Matched / Call columns
   its way before the day's last scan (`moved`, when, minutes), the best / worst move and the move at the end. `_day_stats`:
   per side and overall how many moved (`correct_pct`), average minutes and best move; plain-words `answer`. The % boxes on
   the alerts card, this view and "Trade a saved scan" take any typed number.
-  The day list also filters by first-reached time and price then, sorts every column, and has two read-only extras:
+  The day list also filters by first-reached time and price then (the plain-words lines and the three "% correct" cards are
+  worked out in the browser from the rows inside those two filters, `PressureDay.dayStats` / `answerLines`, the same
+  arithmetic as `_day_stats`; Who / Show only narrow the table), sorts every column, and has two read-only extras:
   **Read the news** (desk `GET /api/news-impact/day?date=&symbols=&ai=`, per day up to 40 stocks; the "News that day"
   column: overall sentiment / impact, same way as or against the buyers / sellers, the strongest headline with its time,
   "after" when it came out after the share was reached; a split of how many moved by news fit) and **Keep for N days**
@@ -1547,7 +1549,11 @@ spinning top), body and range) / Matched / Call columns
   `target_pct`; same hours rule as the Second candle test): from the price then, the real 1-minute candles
   (`strategy_lab.load_tape`) of that day and the next N trading sessions: the session the high / low first touched the
   profit % (`day_no` 0 = same day, `on`, `hit_at`), the drawdown before it, best and end move; `summarize` gives reached %
-  by each day and plain-words lines). No order path; nothing in the strategy reads it.
+  by each day and plain-words lines). Under it, **carry it as delivery / MTF?** (`PressureDay.CarryBox`, browser only): the
+  buys that missed the profit the same day (`day_no` ≠ 0), how many reached it by each later trading day, average sessions
+  and calendar days held, the dip on the way, where the misses ended, and a rough holding cost (delivery STT about 0.2 % +
+  MTF interest at a typed % a year × calendar days); sellers are left out (a cash short cannot be carried overnight).
+  No order path; nothing in the strategy reads it.
 - `backend/scan_trade_test.py` – **Trade a saved scan** (arithmetic on real candles; no order, nothing armed; the Most active
   card's "Trade a saved scan" view, `components/Scalp/ScanTradeTest.tsx`): one saved Most active scan gives the day, the time
   and the stocks. `picks` (`pick` `PRESSURE` = buyers ≥ `pct` % buys / sellers ≥ `pct` % sells, `BIAS` = the row's bias, `MOVE`
@@ -1975,6 +1981,12 @@ spinning top), body and range) / Matched / Call columns
   gradient, the page glow and `accentViolet` follow) and remaps every hard-coded `violet-*` utility in use, both themes.
   `serverBadge` gives the "Backtest server" / "Scanner" chip next to the logo (Navbar) and the terminal title. Green / red
   never change. Add a new `violet-*` class and add its line to that block.
+- **Accessibility basics** (`frontend/src/app/globals.css` "accessibility"; display only): text on a filled accent uses
+  `text-on-accent` (`--c-on-accent`: near-black in the dark theme, white in the light one; never `text-white` on
+  `bg-accentSky`), dark-theme `text-slate-500` is lifted to 5.3:1, one `:focus-visible` ring for every control, and
+  `prefers-reduced-motion` stops animations. The Scalp tab bar (`ScalpTabs`) and `SettingsTabs` follow the tab pattern:
+  `role="tablist"` per group, the open tab filled and the only one in the Tab order, arrow keys / Home / End move.
+  The `danger` button is `bg-rose-600` (white text 4.7:1). Check a page with axe (WCAG 2 A / AA) in both themes.
 - **Settings page** (desk `/settings`, `app/settings/page.tsx`; display only, every control saves through the same routes as
   before): one tab at a time (Strategy, Bots, Alerts & news, Account), each tab with an icon, a one-line hint and a plain
   intro line. A header ("Settings", the Learn page link, "What do these words mean?" opening the plain-words panel with the
