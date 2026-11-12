@@ -34,6 +34,7 @@ import pivots
 import auto_start
 import scalp_alerts
 import scan_trade_test
+import hold_test
 import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
@@ -5059,6 +5060,40 @@ async def scan_trade_test_run(body: ScanTradeTest):
 
     return await scan_trade_test.run(scan, load, pick=body.pick, pct=body.pct, top_n=body.top_n, minutes=body.minutes,
                                      square_off=square_off, qty=body.qty)
+
+
+class HoldRow(BaseModel):
+    symbol: str = Field(min_length=1, max_length=40)
+    day: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    at: str = Field(default="09:15", pattern=r"^\d{1,2}:\d{2}$")
+    side: Literal["BUY", "SELL", "LONG", "SHORT"]
+    price: float = Field(gt=0)
+
+
+class HoldTest(BaseModel):
+    rows: list[HoldRow] = Field(min_length=1, max_length=hold_test.MAX_ROWS)
+    days: int = Field(default=5, ge=1, le=hold_test.MAX_DAYS)
+    target_pct: float = Field(default=1.0, ge=0.05, le=50)
+
+
+@app.post("/api/hold-test")
+async def hold_test_run(body: HoldTest):
+    """Hold for N days (hold_test.py): for each stock / day / side / price, how many trading days its real 1-minute
+    candles took to reach the profit %, the drawdown on the way, best and end move. Arithmetic only: no order, nothing
+    armed. Same hours rule as the Second candle test."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run this on the backtest server, so it never shares the bots' Groww limit.")
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    async def load(name, first, last):
+        await groww_pressure.wait_for_bots()
+        return await strategy_lab.load_tape(name.upper(), first, last, fetch)
+
+    rows = [r.model_dump() for r in body.rows]
+    return await hold_test.run(rows, load, days=body.days, target_pct=body.target_pct)
 
 
 def _tape_for(symbol: str):

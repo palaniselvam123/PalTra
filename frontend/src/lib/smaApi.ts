@@ -2739,6 +2739,9 @@ export const smaApi = {
   /** Trade one saved Most active scan on that day's real candles (scan_trade_test.py; arithmetic only, no order). */
   scanTradeTest: (body: { run_id: number; pick: ScanTradePick; pct: number; top_n: number; minutes: number; square_off: string; qty: number }) =>
     request<ScanTradeResult>("/api/scan-trade-test", { method: "POST", body: JSON.stringify(body) }, 600000, false),
+  /** Hold for N days (hold_test.py; arithmetic on real candles, no order): days each stock took to reach the profit %. */
+  holdTest: (body: { rows: { symbol: string; day: string; at: string; side: "BUY" | "SELL"; price: number }[]; days: number; target_pct: number }) =>
+    request<HoldTestResult>("/api/hold-test", { method: "POST", body: JSON.stringify(body) }, 600000, false),
   /** The Scalp page's two Telegram alerts (scalp_alerts.py): strong trend, buyers / sellers in control. */
   scalpAlerts: () => request<ScalpAlerts>("/api/scalp-alerts", undefined, undefined, false),
   saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names">>) =>
@@ -3305,6 +3308,39 @@ export type ScanTradeRow = {
 };
 
 /** Trade a saved Most active scan (backend/scan_trade_test.py). */
+/** One stock of the hold test (hold_test.follow). day_no 0 = the same day, 1 = the next trading session, … */
+export type HoldTestRow = {
+  symbol: string;
+  day: string;
+  at: string;
+  side: string;
+  price: number;
+  reached: boolean;
+  day_no: number | null;
+  on: string | null;
+  /** The minute the target was touched (HH:MM). */
+  hit_at: string | null;
+  worst_before_pct: number | null;
+  best_pct: number | null;
+  end_pct: number | null;
+  sessions: number;
+  target_price: number | null;
+  error?: string;
+};
+export type HoldTestResult = {
+  days: number;
+  target_pct: number;
+  rows: HoldTestRow[];
+  errors: { symbol: string; error: string }[];
+  judged: number;
+  reached: number;
+  reached_pct: number | null;
+  avg_days: number | null;
+  median_days: number | null;
+  by_day: { day_no: number; count: number; by_then: number; by_then_pct: number | null }[];
+  answer: string[];
+};
+
 export type ScanTradeResult = {
   scan_id: number;
   day: string;

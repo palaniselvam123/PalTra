@@ -1550,9 +1550,9 @@ export const api = {
     return request<NewsAnalysis>(`/api/news-impact/stock/${encodeURIComponent(symbol.toUpperCase())}${qs ? `?${qs}` : ""}`);
   },
   /** Every armed stock's news on a date (or the symbols given), with what to do flat, long or short. */
-  newsDay: (date: string, symbols?: string[]) =>
+  newsDay: (date: string, symbols?: string[], ai = true) =>
     request<NewsDayReport>(
-      `/api/news-impact/day?date=${encodeURIComponent(date)}${symbols?.length ? `&symbols=${encodeURIComponent(symbols.join(","))}` : ""}`,
+      `/api/news-impact/day?date=${encodeURIComponent(date)}${symbols?.length ? `&symbols=${encodeURIComponent(symbols.join(","))}` : ""}${ai ? "" : "&ai=false"}`,
       undefined,
       120_000
     ),
