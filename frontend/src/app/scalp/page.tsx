@@ -456,9 +456,12 @@ export default function ScalpPage() {
         ) : (
         <section
           className={clsx(
-            "flex flex-wrap items-center gap-3 rounded-xl border p-4 text-sm",
-            paused ? "border-amber-500/40 bg-amber-500/10" : "border-slate-800 bg-card"
+            "flex flex-wrap items-center gap-x-3 gap-y-2",
+            // Paused is a state the owner must notice: a full amber banner. Running is the normal state: one quiet row.
+            paused ? "rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm" : "text-xs"
           )}
+          role={paused ? "status" : undefined}
+          aria-label="Pause or resume every scan"
         >
           <button
             type="button"
@@ -474,7 +477,7 @@ export default function ScalpPage() {
             {pauseBusy ? <Loader2 size={14} className="animate-spin" /> : paused ? <Play size={14} /> : <Pause size={14} />}
             {paused ? "Resume scans" : "Pause all scans"}
           </button>
-          <span className={paused ? "text-amber-300" : "text-slate-400"}>
+          <span className={paused ? "text-amber-300" : "text-slate-500"}>
             {paused
               ? "Scans are paused: no Cross scan, Trend quality, most-active scan, monitor scoring or Scalp alerts, so the bots get the server and Groww to themselves. A restart or deploy resumes them."
               : "Scans compete with the bots for the server and Groww. Pause them while the bots need every second."}
@@ -1063,66 +1066,88 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
   const current = TABS.find((t) => t.id === tab) ?? TABS[0];
   const group = TAB_GROUPS.find((g) => g.id === current.group) ?? TAB_GROUPS[0];
   return (
-    <div className="rounded-xl border border-border bg-surface p-2 shadow-card">
-      <div className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-4" role="tablist" aria-label="Scalp tools">
-        {TAB_GROUPS.map((g) => (
-          <div key={g.id} className={clsx("rounded-lg border p-2", g.id === current.group ? "border-accentSky/40 bg-accentSky/[0.04]" : "border-border")}>
-            <div className="flex flex-wrap items-baseline gap-x-2 px-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">{g.label}</span>
-              <span className="text-[11px] text-slate-500">{g.when}</span>
-            </div>
-            <p className="px-1 text-[11px] leading-snug text-slate-500">{g.hint}</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+    <nav aria-label="Scalp tools" className="rounded-xl border border-border bg-surface p-2 shadow-card">
+      <div
+        className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-4"
+        onKeyDown={(e) => {
+          // Arrow keys walk every tab in order (across the four boxes); Home / End jump to the first / last.
+          const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+          if (!(e.target as HTMLElement).matches('[role="tab"]') || (!step && e.key !== "Home" && e.key !== "End")) return;
+          e.preventDefault();
+          const order = TAB_GROUPS.flatMap((g) => TABS.filter((t) => t.group === g.id));
+          const at = Math.max(0, order.findIndex((t) => t.id === tab));
+          const next = order[e.key === "Home" ? 0 : e.key === "End" ? order.length - 1 : (at + step + order.length) % order.length];
+          onTab(next.id);
+          requestAnimationFrame(() => document.getElementById(`scalp-tab-${next.id}`)?.focus());
+        }}
+      >
+        {TAB_GROUPS.map((g) => {
+          const here = g.id === current.group;
+          return (
+          <div key={g.id} className={clsx("rounded-lg border p-2.5", here ? "border-accentSky/60 bg-accentSky/[0.06]" : "border-border")}>
+            <h2 id={`scalp-group-${g.id}`} className="flex flex-wrap items-baseline gap-x-2 px-0.5">
+              <span className={clsx("text-xs font-bold uppercase tracking-wide", here ? "text-accentSky" : "text-slate-200")}>{g.label}</span>
+              <span className="text-xs font-normal text-slate-400">{g.when}</span>
+            </h2>
+            <p className="px-0.5 text-xs leading-snug text-slate-400">{g.hint}</p>
+            <div role="tablist" aria-labelledby={`scalp-group-${g.id}`} className="mt-2 flex flex-wrap gap-1.5">
               {TABS.filter((t) => t.group === g.id).map((t) => {
                 const on = tab === t.id;
                 const st = times[t.id];
                 return (
                   <button
                     key={t.id}
+                    id={`scalp-tab-${t.id}`}
                     type="button"
                     role="tab"
                     aria-selected={on}
+                    tabIndex={on ? 0 : -1}
                     onClick={() => onTab(t.id)}
                     title={`${t.ask} ${st?.when ? `Last scan ${new Date(st.when).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : ""}`}
                     className={clsx(
-                      "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition-colors",
+                      "inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition-colors sm:min-h-9",
+                      // The open tab is the one filled thing in the bar, so it is found at a glance.
                       on
-                        ? "border-accentSky/60 bg-accentSky/15 text-accentSky shadow-sm"
-                        : "border-border bg-surface2 text-slate-400 hover:border-accentSky/40 hover:text-slate-200"
+                        ? "border-accentSky bg-accentSky text-on-accent shadow-sm"
+                        : "border-border bg-surface2 text-slate-300 hover:border-accentSky/50 hover:text-slate-100"
                     )}
                   >
                     {t.label}
                     {st?.running ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-normal text-accentSky">
+                      <span className={clsx("inline-flex items-center gap-1 text-[11px] font-normal", on ? "opacity-80" : "text-accentSky")}>
                         <Loader2 size={11} className="animate-spin" aria-hidden /> scanning
                       </span>
                     ) : st?.when ? (
-                      <span className="text-[11px] font-normal tabular-nums text-slate-500">{shortTime(st.when)}</span>
+                      <span className={clsx("text-[11px] font-normal tabular-nums", on ? "opacity-80" : "text-slate-400")}>
+                        <span className="sr-only">last scan </span>
+                        {shortTime(st.when)}
+                      </span>
                     ) : null}
                   </button>
                 );
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
-      <div className="mt-2 rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-3">
+      <div id="scalp-tab-about" aria-live="polite" className="mt-2 rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
           <div className="min-w-0 sm:flex-1">
-            <p className="text-sm font-semibold text-slate-100">
-              {current.label}: <span className="font-normal">{current.ask}</span>
+            <p className="text-base font-semibold text-slate-100">
+              {current.label}: <span className="font-normal text-slate-200">{current.ask}</span>
             </p>
             <p className="mt-1 text-xs leading-relaxed text-slate-300">
               <b className="text-slate-200">What it does:</b> {current.use}
             </p>
             <p className="text-xs leading-relaxed text-slate-300">
               <b className="text-slate-200">Then:</b> {current.next}{" "}
-              <span className="text-slate-500">
+              <span className="text-slate-400">
                 · Best used {group.when}. Nothing here places an order; Arm only puts a stock on a bot&apos;s list.
               </span>
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2" aria-live="off">
           <button
             type="button"
             aria-expanded={choosing}
@@ -1171,6 +1196,6 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
           </div>
         ) : null}
       </div>
-    </div>
+    </nav>
   );
 }

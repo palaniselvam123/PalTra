@@ -38,6 +38,9 @@
      stays exclusively green/red so those two keep their meaning. */
   --c-violet: 167 139 250;
   --c-sky: 56 189 248;
+  /* Text that sits ON a filled accent (a selected tab, a step number). The dark theme's accents are light, so
+     the text on them is near-black; the light theme's are dark, so it is white. White on sky-400 was 2.1:1. */
+  --c-on-accent: 6 18 38;
   --c-amber: 251 191 36;
   --c-teal: 45 212 191;
   --c-pink: 244 114 182;
@@ -70,6 +73,7 @@
 
   --c-violet: 124 77 245;
   --c-sky: 7 89 133;
+  --c-on-accent: 255 255 255;
   --c-amber: 146 97 10;
   --c-teal: 15 118 110;
   --c-pink: 219 39 119;
@@ -129,6 +133,37 @@ body::before {
 ::-webkit-scrollbar-thumb {
   background: rgb(var(--c-scrollbar));
   border-radius: 4px;
+}
+
+/* --- accessibility ------------------------------------------------------- */
+
+.text-on-accent { color: rgb(var(--c-on-accent)); }
+
+/* Helper text: Tailwind's slate-500 is 3.4-3.7:1 on the dark surfaces, under the 4.5:1 that small text needs.
+   This value is 5.3:1 on the second surface and still clearly quieter than slate-400. */
+[data-theme="dark"] .text-slate-500,
+:root:not([data-theme]) .text-slate-500 { color: #8b99b3; }
+
+/* One visible keyboard focus ring everywhere (mouse clicks do not show it). */
+:where(a, button, summary, [role="tab"], [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--c-sky));
+  outline-offset: 2px;
+}
+:where(input, select, textarea):focus-visible {
+  outline: 2px solid rgb(var(--c-sky));
+  outline-offset: 1px;
+}
+
+/* People who ask their device for less motion get no spinning, sliding or pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* --- slate scale inversion for light mode -------------------------------- */

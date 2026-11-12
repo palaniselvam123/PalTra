@@ -1957,6 +1957,12 @@ spinning top), body and range) / Matched / Call columns
   gradient, the page glow and `accentViolet` follow) and remaps every hard-coded `violet-*` utility in use, both themes.
   `serverBadge` gives the "Backtest server" / "Scanner" chip next to the logo (Navbar) and the terminal title. Green / red
   never change. Add a new `violet-*` class and add its line to that block.
+- **Accessibility basics** (`frontend/src/app/globals.css` "accessibility"; display only): text on a filled accent uses
+  `text-on-accent` (`--c-on-accent`: near-black in the dark theme, white in the light one; never `text-white` on
+  `bg-accentSky`), dark-theme `text-slate-500` is lifted to 5.3:1, one `:focus-visible` ring for every control, and
+  `prefers-reduced-motion` stops animations. The Scalp tab bar (`ScalpTabs`) and `SettingsTabs` follow the tab pattern:
+  `role="tablist"` per group, the open tab filled and the only one in the Tab order, arrow keys / Home / End move.
+  The `danger` button is `bg-rose-600` (white text 4.7:1). Check a page with axe (WCAG 2 A / AA) in both themes.
 - **Settings page** (desk `/settings`, `app/settings/page.tsx`; display only, every control saves through the same routes as
   before): one tab at a time (Strategy, Bots, Alerts & news, Account), each tab with an icon, a one-line hint and a plain
   intro line. A header ("Settings", the Learn page link, "What do these words mean?" opening the plain-words panel with the
