@@ -1019,6 +1019,8 @@ export type NewsTimingCall = { code: string; label: string; why: string };
 export type NewsTiming = { buy: NewsTimingCall; short: NewsTimingCall; fresh_hours: number | null };
 export type NewsCheckRow = {
   symbol: string;
+  /** The trading day the headline was measured on (YYYY-MM-DD). */
+  day?: string;
   title: string;
   url?: string | null;
   source?: string | null;
@@ -1064,6 +1066,9 @@ export type NewsCheckGroup = {
 };
 export type NewsCheck = {
   day: string;
+  /** Last day of the range (the same as `day` for one day). */
+  end?: string;
+  days?: number;
   as_of: string;
   so_far: boolean;
   min_move: number;
@@ -1557,10 +1562,11 @@ export const api = {
       120_000
     ),
   /** Did the news move the stock? Each headline of the day against its 1-minute candles (news_validation.py). */
-  newsCheck: (p: { date: string; symbols?: string[]; alerts: boolean; armed: boolean; minMove: number }) => {
+  newsCheck: (p: { date: string; end?: string; symbols?: string[]; alerts: boolean; armed: boolean; minMove: number }) => {
     const q = new URLSearchParams({ date: p.date, alerts: String(p.alerts), armed: String(p.armed), min_move: String(p.minMove) });
+    if (p.end && p.end !== p.date) q.set("end", p.end);
     if (p.symbols?.length) q.set("symbols", p.symbols.join(","));
-    return request<NewsCheck>(`/api/news-impact/validate?${q.toString()}`, undefined, 300_000);
+    return request<NewsCheck>(`/api/news-impact/validate?${q.toString()}`, undefined, 1_800_000);
   },
   newsAlerts: (afterId = 0, limit = 30) =>
     request<{ alerts: NewsAlertRow[] }>(`/api/news-impact/alerts?after_id=${afterId}&limit=${limit}`),

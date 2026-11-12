@@ -1947,8 +1947,15 @@ spinning top), body and range) / Matched / Call columns
   15 / 30 / 60 min later and at the close (in market hours: so far, `so_far`), best / worst move and minutes to the best;
   signed the news' way; verdict `WITH` / `AGAINST` (closed `min_move` %, default 0.5, either way), `FADED`, `NO_EFFECT`,
   `NEUTRAL`, `AFTER_CLOSE`, `PENDING`, `NO_DATA`. `summarize`: per positive / negative × high / medium / low (hit rate, average
-  signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a run. Desk
-  `GET /api/news-impact/validate?date=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
+  signed move at 30 min and the close, best, worst, minutes to the best). At most `MAX_STOCKS` 40 stocks a day. Desk
+  `GET /api/news-impact/validate?date=&end=&symbols=&alerts=&armed=&min_move=` (503 without the terminal in the process).
+  **Date range** (`end`, up to `MAX_RANGE_DAYS` 31 calendar days; the tab's From / To and quick picks): each weekday in
+  turn (`trading_days`), rows carry `day`; `main.news_candles(..., until=, cache=)` downloads each stock once for the
+  whole range and later days reuse it. **Which words move the price?** (`frontend/src/lib/newsKeywords.ts`, display
+  only, in the browser on the rows already read): typed keywords (`a|b` = either word, `DEFAULT_KEYWORDS` the usual
+  Indian corporate-news words, kept per browser as `news.check.keywords`) matched as whole words in each title, and
+  per word the plain move (not signed by the news) 15 / 30 / 60 min after and to the close, its size, % closed up, the
+  average high / low after and how often the news was right; clicking a word filters the headline list.
 - **One colour per server** (display only; `frontend/src/components/ServerAccent.tsx`, `app/globals.css` "One colour per
   server"): the desk keeps violet; the backtest server is **blue** and the scanner **teal** (owner's choice, so the three
   are told apart at a glance). `ServerAccent` (in the root layout) reads `/api/role` once and puts `data-server="backtest"`
