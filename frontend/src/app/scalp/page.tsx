@@ -1105,8 +1105,8 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
         ))}
       </div>
       <div className="mt-2 rounded-lg border border-sky-400/25 bg-sky-400/[0.05] p-3">
-        <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-          <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+          <div className="min-w-0 sm:flex-1">
             <p className="text-sm font-semibold text-slate-100">
               {current.label}: <span className="font-normal">{current.ask}</span>
             </p>
@@ -1120,21 +1120,23 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
               </span>
             </p>
           </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
           <button
             type="button"
             aria-expanded={choosing}
             onClick={() => setChoosing((v) => !v)}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/10 sm:min-h-9"
           >
             <HelpCircle size={13} aria-hidden /> {choosing ? "Hide the list" : "Which one do I use?"}
           </button>
           <Link
             href="/learn/?lesson=scalp-start-here"
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 sm:min-h-9"
             title="A short guide to every tab, in plain words (PDF on the Learn page)"
           >
             <BookOpen size={13} aria-hidden /> Start here (guide)
           </Link>
+          </div>
         </div>
         {choosing ? (
           <div className="mt-3 grid gap-3 border-t border-white/10 pt-3 md:grid-cols-2 2xl:grid-cols-4">
