@@ -63,7 +63,12 @@ export function PressureDayView() {
   return (
     <div className="space-y-3 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.03] p-3">
       <div className="text-xs leading-relaxed text-slate-300">
-        <p className="text-sm font-semibold text-slate-100">Which stocks reached it that day, and did the price then move?</p>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-slate-100">
+          <span>Which stocks reached it that day, and did the price then move?</span>
+          <a href="/learn/?lesson=buyers-sellers" className="text-xs font-normal text-emerald-300 underline hover:text-emerald-200">
+            How to read this (guide)
+          </a>
+        </p>
         <p className="mt-1">
           Type your <b>buyers / sellers %</b> and the <b>price move %</b> you expect. Every saved scan of the day is checked: each stock that
           reached your % is listed with the time it first did, and whether the real price then moved your % its way (up after buyers, down

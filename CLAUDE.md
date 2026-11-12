@@ -1993,6 +1993,7 @@ spinning top), body and range) / Matched / Call columns
   linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
   anchor `#sma-day-extreme`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
   `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it),
+  `buyers-sellers` (the buyers / sellers % column, its day list, test and alert, linked from the day list),
   and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
   `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
   `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
