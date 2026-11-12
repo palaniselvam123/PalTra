@@ -14,6 +14,12 @@ A **past day** (`day=`) asks both sources for that day's window instead (`window
 `LOOKBACK_DAYS` days before it up to its 15:30 close; Google's `after:` / `before:`
 operators, NSE's `from_date` / `to_date`), keeps only items inside it and caches it longer.
 
+**Old results stories** (`mark_stale`): Google News dates a story by when that outlet put it up, so a results write-up
+re-posted two weeks after the company filed (e.g. HAVELLS' Q2 filed 22 Oct, a re-post on 7 Nov) looks fresh. When a
+headline reads like a quarterly-results story (`is_results_story`), the company's NSE results filings of the last
+`RESULTS_LOOKBACK_DAYS` are read once (`results_filed`); a story that came out more than `STALE_AFTER_DAYS` after the
+latest filing before it is marked `stale` with `filed_at`. news_impact gives it no weight and never alerts on it.
+
 `stock_news` asks both at once, keeps each source's error to itself, merges the
 items newest first and caches the answer per symbol for `CACHE_SEC`. Read-only:
 no key, no login, no order path; nothing in the strategy reads it.
@@ -47,6 +53,11 @@ NSE_MARKET_PAGE = "https://www.nseindia.com/companies-listing/corporate-filings-
 GOOGLE_RSS = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 _cache: dict[str, tuple[float, dict]] = {}
+RESULTS_LOOKBACK_DAYS = 100
+STALE_AFTER_DAYS = 2
+_QUARTER = re.compile(r"\b(q[1-4]|quarter(?:ly)?|h[12]|half[- ]year(?:ly)?)\b", re.I)
+_RESULT_WORDS = re.compile(r"\b(results?|profit|loss|revenue|earnings|ebitda|pat|margins?|income)\b", re.I)
+_FILED_RESULTS = re.compile(r"financial results?|results? for the (quarter|period|half)|outcome of board meeting", re.I)
 _SUFFIX = re.compile(r"\b(LIMITED|LTD\.?|INDIA LTD|\(INDIA\))\s*$", re.I)
 
 
@@ -204,6 +215,62 @@ def _why(exc: Exception) -> str:
     return str(exc)[:160] or type(exc).__name__
 
 
+def is_results_story(item: dict) -> bool:
+    """A news headline (not an NSE filing) about a quarter's / half-year's results."""
+    if item.get("kind") == "announcement":
+        return False
+    title = item.get("title") or ""
+    return bool(_QUARTER.search(title) and _RESULT_WORDS.search(title))
+
+
+def _when(at: str | None) -> dt.datetime | None:
+    if not at:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(at)
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=IST)
+
+
+def filing_times(filings: list[dict]) -> list[dt.datetime]:
+    """When the company filed results with NSE (its results / board-meeting outcome announcements), oldest first."""
+    out = []
+    for f in filings:
+        text = f"{f.get('title') or ''} {f.get('detail') or ''}"
+        when = _when(f.get("at"))
+        if when is not None and _FILED_RESULTS.search(text):
+            out.append(when)
+    return sorted(out)
+
+
+def mark_stale(items: list[dict], filed: list[dt.datetime]) -> list[dict]:
+    """Results stories that came out more than STALE_AFTER_DAYS after the latest results filing before them get
+    `stale: True` and `filed_at`. With no filing known, nothing is marked."""
+    if not filed:
+        return items
+    out = []
+    for it in items:
+        when = _when(it.get("at"))
+        if when is not None and is_results_story(it):
+            before = [f for f in filed if f <= when + dt.timedelta(hours=1)]
+            if before and when - before[-1] > dt.timedelta(days=STALE_AFTER_DAYS):
+                it = {**it, "stale": True, "filed_at": _iso(before[-1])}
+        out.append(it)
+    return out
+
+
+async def results_filed(symbol: str, client: httpx.AsyncClient, ref: dt.date) -> list[dt.datetime]:
+    """The symbol's NSE results filings in the RESULTS_LOOKBACK_DAYS before `ref` (one request)."""
+    headers = {"User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9"}
+    await client.get(NSE_HOME, headers={**headers, "Accept": "text/html"})
+    start = ref - dt.timedelta(days=RESULTS_LOOKBACK_DAYS)
+    url = NSE_API.format(symbol=quote_plus(symbol)) + f"&from_date={start:%d-%m-%Y}&to_date={ref:%d-%m-%Y}"
+    res = await client.get(url, headers={**headers, "Referer": NSE_PAGE.format(symbol=symbol)})
+    res.raise_for_status()
+    return filing_times(parse_nse(res.json(), symbol))
+
+
 def in_window(item: dict, day: dt.date) -> bool:
     """A dated item inside `day`'s window (an undated one is kept: the search already asked for those dates)."""
     at = item.get("at")
@@ -243,6 +310,15 @@ async def stock_news(symbol: str, force: bool = False, day: dt.date | None = Non
             items.extend(got)
     if day is not None:
         items = [i for i in items if in_window(i, day)]
+    if any(is_results_story(i) for i in items):
+        # The filings already read may hold the results; else ask NSE for the last RESULTS_LOOKBACK_DAYS.
+        filed = filing_times([i for i in items if i.get("kind") == "announcement"])
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+                filed = sorted(set(filed) | set(await results_filed(symbol, client, day or dt.datetime.now(IST).date())))
+        except Exception as exc:  # noqa: BLE001 - without the filings nothing is marked old
+            errors["nse_results"] = _why(exc)
+        items = mark_stale(items, filed)
     items.sort(key=lambda i: i.get("at") or "", reverse=True)
     out = {
         "symbol": symbol,

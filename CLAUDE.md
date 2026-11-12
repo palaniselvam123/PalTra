@@ -1883,7 +1883,13 @@ spinning top), body and range) / Matched / Call columns
   Desk `GET /api/instruments/news/{symbol}[?force=true]`; the chart's **News** button (`StockNewsPanel`); MCP
   `get_stock_news`. A **past day** (`stock_news(..., day=)`, `?date=YYYY-MM-DD` on the news routes): both sources are asked for
   that day's window (`window`: `LOOKBACK_DAYS` 2 days before it up to its 15:30 close; Google's `after:` / `before:`, NSE's
-  `from_date` / `to_date`), items outside it are dropped (`in_window`), cached 6 h. No key, no order path; nothing in the
+  `from_date` / `to_date`), items outside it are dropped (`in_window`), cached 6 h. **Old results stories** (`mark_stale`):
+  Google dates a story by when the outlet put it up, so a results write-up re-posted weeks after the filing looked fresh
+  (owner's HAVELLS case: Q2 filed 22 Oct, a re-post on 7 Nov). When a headline reads like a quarter's results
+  (`is_results_story`), the stock's NSE results filings of the last `RESULTS_LOOKBACK_DAYS` (100) are read once
+  (`results_filed`, `filing_times`); a story more than `STALE_AFTER_DAYS` (2) after the latest filing before it gets
+  `stale` and `filed_at`: no weight in `news_impact.overall`, never alerted, critical or a news entry, left out of the
+  news check, listed last in the day report, shown as "old story · filed …". No key, no order path; nothing in the
   strategy reads it.
 - `backend/app/services/news_impact.py` – news impact and news alerts (information only, never trades): each headline from
   `stock_news` is scored by a rule list (`score_text`: Indian corporate-news phrases with weights, critical phrases such as

@@ -153,6 +153,14 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
                 <ExternalLink size={11} aria-hidden className="ml-1 inline opacity-40 group-hover:opacity-100" />
                 {item.detail ? <span className="mt-0.5 block line-clamp-2 text-xs text-slate-400">{item.detail}</span> : null}
                 <span className="mt-0.5 block text-[11px] text-slate-500">
+                  {item.stale ? (
+                    <span
+                      className="mr-1 rounded bg-amber-500/15 px-1 text-amber-300"
+                      title="A results story put up well after the company filed its results with NSE: it is old news and is not counted"
+                    >
+                      old story · results filed {item.filed_at ? item.filed_at.slice(0, 10) : "earlier"}
+                    </span>
+                  ) : null}
                   {item.valid === false ? <span className="mr-1 text-slate-600 line-through">expired</span> : null}
                   {item.source}
                   {item.at ? ` · ${ago(item.at)}` : ""}

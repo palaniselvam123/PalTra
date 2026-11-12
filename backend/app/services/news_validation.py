@@ -239,7 +239,7 @@ async def collect(day: dt.date, symbols: list[str] | None, alerts: bool = True) 
                 "impact": (it.get("impact") or "").upper(), "critical": bool(it.get("critical")), "from": "news",
             }
             for it in r.get("items", [])
-            if it.get("about", True) is not False
+            if it.get("about", True) is not False and not it.get("stale")
         ]
 
     for found in await asyncio.gather(*(one(s) for s in symbols or [])):

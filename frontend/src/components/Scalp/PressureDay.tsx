@@ -609,7 +609,7 @@ function NewsCell({ row, news }: { row: PressureDayRow; news: NewsDayRow | undef
   const all = news.items
     .map((it) => {
       const w = istParts(it.at);
-      return `${w ? `${w.day} ${w.time}` : ""} · ${it.sentiment} ${it.impact} · ${it.title}${it.why ? ` (${it.why})` : ""}`;
+      return `${w ? `${w.day} ${w.time}` : ""} · ${it.stale ? "OLD STORY · " : ""}${it.sentiment} ${it.impact} · ${it.title}${it.why ? ` (${it.why})` : ""}`;
     })
     .join("\n");
   const sent = news.overall?.sentiment ?? "NEUTRAL";
@@ -629,6 +629,11 @@ function NewsCell({ row, news }: { row: PressureDayRow; news: NewsDayRow | undef
       <a href={top.url || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 text-slate-300 hover:text-slate-100 hover:underline">
         {when ? <span className="mr-1 text-slate-500">{when.day === row.day ? when.time : `${when.day.slice(5)} ${when.time}`}</span> : null}
         {after ? <span className="mr-1 rounded bg-slate-700/60 px-1 text-[10px] text-slate-300">after</span> : null}
+        {top.stale ? (
+          <span className="mr-1 rounded bg-amber-500/15 px-1 text-[10px] text-amber-300" title="A results story put up well after the company filed its results with NSE: old news, not counted">
+            old story · filed {top.filed_at ? top.filed_at.slice(5, 10) : "earlier"}
+          </span>
+        ) : null}
         {top.title}
       </a>
     </div>

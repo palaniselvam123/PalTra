@@ -975,6 +975,9 @@ export type ScoredNewsItem = StockNewsItem & {
   /** False once past its validity: 15:30 IST on the next trading day after it came out (`valid_until`). */
   valid?: boolean;
   valid_until?: string | null;
+  /** An old results story re-posted later: the company filed its results with NSE at `filed_at`. Not counted. */
+  stale?: boolean;
+  filed_at?: string | null;
 };
 export type NewsOverall = {
   score: number;
@@ -1010,7 +1013,7 @@ export type NewsDayRow = {
   /** When to act while flat: buy now / later / don't, and the same for a short (news_impact.timing). */
   timing?: NewsTiming | null;
   count?: number;
-  items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why">)[];
+  items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why" | "stale" | "filed_at">)[];
   method?: "ai" | "rules";
   errors?: Record<string, string>;
   error?: string;
