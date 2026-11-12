@@ -1581,6 +1581,14 @@ export const api = {
   newsSettings: () => request<NewsWatchSettings>("/api/news-impact/settings"),
   saveNewsSettings: (patch: Partial<NewsWatchSettings>) =>
     request<NewsWatchSettings>("/api/news-impact/settings", { method: "PUT", body: JSON.stringify(patch) }),
+  /** Quarterly results: the calendar, NSE's latest filings, one company's numbers and verdict (results.py). */
+  resultsCalendar: (days = 7) => request<ResultCalendar>(`/api/results/calendar?days=${days}`, undefined, 60_000),
+  resultsFiled: (limit = 300) => request<{ rows: ResultFiled[]; error: string | null }>(`/api/results/filed?limit=${limit}`, undefined, 60_000),
+  resultsStock: (symbol: string, force = false) =>
+    request<ResultStock>(`/api/results/stock/${encodeURIComponent(symbol)}${force ? "?force=true" : ""}`, undefined, 60_000),
+  resultsAnalyze: (symbols: string[], force = false) =>
+    request<{ rows: ResultStock[] }>("/api/results/analyze", { method: "POST", body: JSON.stringify({ symbols, force }) }, 180_000),
+  resultsProbe: (symbol = "ALKEM") => request<Record<string, unknown>>(`/api/results/probe?symbol=${encodeURIComponent(symbol)}`, undefined, 90_000),
   newsFeed: (limit = 100, validOnly = false, prices = false) =>
     request<{ items: NewsFeedItem[]; status: NewsWatchSettings["status"] }>(
       `/api/news-impact/feed?limit=${limit}${validOnly ? "&valid_only=true" : ""}${prices ? "&prices=true" : ""}`
@@ -1717,6 +1725,72 @@ export type PressureTest = {
   answer: string[];
   signals: PressureSignal[];
   total_signals: number;
+};
+
+/** Quarterly results (backend app/services/results.py): money in ₹ crore, EPS in ₹. */
+export type ResultQuarter = {
+  start: string | null;
+  end: string;
+  label: string;
+  revenue: number | null;
+  total_income: number | null;
+  pbt: number | null;
+  net_profit: number | null;
+  eps: number | null;
+  audited: boolean | null;
+  consolidated: boolean | null;
+};
+export type ResultAnalysis = {
+  verdict: string;
+  sentiment: "POSITIVE" | "NEGATIVE" | "MIXED" | "NEUTRAL" | "NO_DATA";
+  impact: "HIGH" | "MEDIUM" | "LOW" | null;
+  score: number | null;
+  quarter?: string;
+  compared_yoy?: string | null;
+  compared_qoq?: string | null;
+  growth?: {
+    revenue_yoy: number | null;
+    revenue_qoq: number | null;
+    pbt_yoy: number | null;
+    profit_yoy: number | null;
+    profit_qoq: number | null;
+    eps_yoy: number | null;
+    margin: number | null;
+    margin_yoy_pts: number | null;
+    margin_qoq_pts: number | null;
+  };
+  points?: Record<string, number>;
+  why: string;
+};
+export type ResultStock = {
+  symbol: string;
+  company: string | null;
+  quarters: ResultQuarter[];
+  analysis: ResultAnalysis;
+  unit: string;
+  read_at: string;
+  error: string | null;
+};
+export type ResultCalendarRow = { symbol: string; company: string; date: string; purpose: string; fno: boolean };
+export type ResultCalendar = {
+  from: string;
+  to: string;
+  days: { date: string; count: number; fno: number; rows: ResultCalendarRow[] }[];
+  total: number;
+  fno_total: number;
+  source: string | null;
+  error: string | null;
+};
+export type ResultFiled = {
+  symbol: string;
+  company: string;
+  period_end: string | null;
+  quarter: string | null;
+  filed_at: string | null;
+  consolidated: boolean | null;
+  audited: string | null;
+  xbrl: string | null;
+  fno: boolean;
 };
 
 export type PressureDayRow = {

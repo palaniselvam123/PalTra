@@ -20,6 +20,7 @@ from app.api import (
     routes_marketdata,
     routes_mcp,
     routes_news,
+    routes_results,
     routes_watchlist,
     routes_orders,
     routes_reports,
@@ -371,6 +372,7 @@ app.include_router(routes_movers.router)
 app.include_router(routes_scalp.router)
 app.include_router(routes_options.router)
 app.include_router(routes_news.router)
+app.include_router(routes_results.router)
 app.include_router(routes_us.router)
 app.include_router(routes_link.router)
 app.include_router(routes_mcp.router)
