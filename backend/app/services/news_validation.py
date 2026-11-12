@@ -236,11 +236,14 @@ async def collect(day: dt.date, symbols: list[str] | None, alerts: bool = True) 
         return [
             {
                 "symbol": r["symbol"], "title": it.get("title"), "url": it.get("url"), "source": it.get("source"),
-                "at": it.get("at"), "sentiment": (it.get("sentiment") or "").upper(),
+                # A results write-up that appeared after the NSE filing is measured from the filing: that is when the
+                # market could first trade it (stock_news.mark_stale).
+                "at": it.get("filed_at") or it.get("at"), "story_at": it.get("at") if it.get("filed_at") else None,
+                "late_min": it.get("late_min"), "sentiment": (it.get("sentiment") or "").upper(),
                 "impact": (it.get("impact") or "").upper(), "critical": bool(it.get("critical")), "from": "news",
             }
             for it in r.get("items", [])
-            if it.get("about", True) is not False
+            if it.get("about", True) is not False and not it.get("stale")
         ]
 
     for found in await asyncio.gather(*(one(s) for s in symbols or [])):

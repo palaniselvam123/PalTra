@@ -263,8 +263,8 @@ def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
         age = _age_hours(it.get("at"), now)
         if age is None:
             age = 24.0  # undated: count it, as a day old
-        if not is_valid(it.get("at"), now):
-            continue  # past its validity (the next trading day's close)
+        if not is_valid(it.get("at"), now) or it.get("stale"):
+            continue  # past its validity (the next trading day's close), or an old results story re-posted
         off = it.get("about") is False
         weight = 0.5 ** (age / HALF_LIFE_H) * (1.5 if it.get("impact") == "HIGH" and not off else 1.0)
         # Another company's headline still counts as a headline, but its score only a quarter: it pulls the view
@@ -279,7 +279,7 @@ def overall(items: list[dict], now: dt.datetime | None = None) -> dict:
     signs = {
         it.get("sentiment")
         for it in items
-        if is_valid(it.get("at"), now) and it.get("about") is not False
+        if is_valid(it.get("at"), now) and it.get("about") is not False and not it.get("stale")
     }
     label = sentiment_of(score)
     if label == "NEUTRAL" and {"POSITIVE", "NEGATIVE"} <= signs:
@@ -362,7 +362,7 @@ def _fresh_hours(items: list[dict], now: dt.datetime) -> float | None:
     """Age of the newest headline that moves the stock (|score| >= 0.2, about this company)."""
     ages = [
         a for it in items
-        if it.get("about") is not False and abs(float(it.get("score") or 0)) >= 0.2
+        if it.get("about") is not False and not it.get("stale") and abs(float(it.get("score") or 0)) >= 0.2
         and (a := _age_hours(it.get("at"), now)) is not None and a >= 0
     ]
     return min(ages) if ages else None
@@ -551,6 +551,11 @@ async def analyze(
     items = [{**i, **score_text(i.get("title", ""), i.get("detail")), "by": "rules"} for i in news.get("items", [])]
     items = mark_relevance(items, news["symbol"], news.get("name"))
     items = [with_validity(i, now) for i in items]
+    items = [
+        {**i, "why": f"{i.get('why') or 'no market-moving phrase'} · old results story: filed with NSE {str(i.get('filed_at'))[:10]}"}
+        if i.get("stale") else i
+        for i in items
+    ]
     view = overall(items, now)
     method, ai_error = "rules", None
     if use_ai and items:
@@ -597,8 +602,8 @@ async def day_report(day: dt.date, symbols: dict[str, dict], *, use_ai: bool = T
             except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
                 return {"symbol": symbol, "armed": entry.get("armed", []), "error": str(exc)[:200]}
         items = [
-            {k: it.get(k) for k in ("title", "source", "at", "url", "sentiment", "impact", "critical", "why")}
-            for it in sorted(r["items"], key=lambda i: abs(float(i.get("score") or 0)), reverse=True)[:DAY_ITEMS]
+            {k: it.get(k) for k in ("title", "source", "at", "url", "sentiment", "impact", "critical", "why", "stale", "filed_at", "late_min")}
+            for it in sorted(r["items"], key=lambda i: (bool(i.get("stale")), -abs(float(i.get("score") or 0))))[:DAY_ITEMS]
         ]
         return {
             "symbol": symbol,
@@ -673,7 +678,7 @@ def side_of(entry: dict) -> str | None:
 
 def is_critical(item: dict, side: str | None) -> bool:
     """A phone call: a critical headline, or a HIGH one against the position, on a held stock."""
-    if side is None or item.get("about") is False:
+    if side is None or item.get("about") is False or item.get("stale"):
         return False
     against = (side == "LONG" and item.get("sentiment") == "NEGATIVE") or (
         side == "SHORT" and item.get("sentiment") == "POSITIVE"
@@ -833,7 +838,7 @@ class NewsWatcher:
                     continue
                 self._seen.add(key)
                 age = _age_hours(it.get("at"), now)
-                if age is None or age > ALERT_MAX_AGE_H or it.get("about") is False or not is_valid(it.get("at"), now):
+                if age is None or age > ALERT_MAX_AGE_H or it.get("about") is False or it.get("stale") or not is_valid(it.get("at"), now):
                     continue
                 if IMPACT_LEVELS.index(it["impact"]) < min_level and not is_critical(it, side):
                     continue
@@ -936,7 +941,7 @@ class NewsWatcher:
             age = _age_hours(it.get("at"), now)
             return age is not None and age * 60 <= ENTRY_MAX_AGE_MIN
 
-        recent = [it for it in items if it.get("about") is not False and young(it)]
+        recent = [it for it in items if it.get("about") is not False and not it.get("stale") and young(it)]
         if not recent:
             return
         try:

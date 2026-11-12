@@ -480,3 +480,43 @@ async def test_fresh_filings_reach_the_news_entry_bot_even_without_alerts(db, mo
     made = await watcher._market_pass(cfg, NOW, {}, alerts=False)
     # The 30-hour-old filing is never handed over; no pop-up is made with alerts off.
     assert made == [] and [(s, d) for s, d, _ in got] == [("OTHER", "NEGATIVE")]
+
+
+def test_an_old_results_story_reposted_later_is_marked_stale_and_carries_no_weight():
+    from app.services import news_impact as ni
+    from app.services import stock_news as sn
+
+    filed = sn.filing_times([
+        {"kind": "announcement", "title": "Financial Result Updates", "at": "2026-10-22T13:58:00+05:30"},
+        {"kind": "announcement", "title": "Copy of newspaper publication", "at": "2026-10-25T10:00:00+05:30"},
+    ])
+    assert [f.date().isoformat() for f in filed] == ["2026-10-22"]
+    items = [
+        {"kind": "news", "title": "Havells India Q2 Results: Profit Rises 11% To Rs 353 Crore", "at": "2026-11-07T19:32:00+05:30"},
+        {"kind": "news", "title": "Havells Q2 results: net profit up 11%", "at": "2026-10-22T16:10:00+05:30"},
+        {"kind": "news", "title": "Havells wins large order", "at": "2026-11-07T10:00:00+05:30"},
+    ]
+    out = sn.mark_stale(items, filed)
+    assert out[0]["stale"] is True and out[0]["filed_at"].startswith("2026-10-22")
+    assert not out[1].get("stale") and not out[2].get("stale")  # same-day write-up, and not a results story
+    assert sn.mark_stale(items, []) == items  # no filing known: nothing marked
+    assert sn.is_results_story({"title": "Q2 results: revenue up"}) and not sn.is_results_story({"title": "Board meeting today"})
+    now = dt.datetime(2026, 11, 7, 20, 0, tzinfo=IST)
+    stale = [{**out[0], "score": 0.8, "sentiment": "POSITIVE", "impact": "HIGH"}]
+    assert ni.overall(stale, now)["counted"] == 0 and ni.overall(stale, now)["sentiment"] == "NEUTRAL"
+
+
+def test_results_stories_without_a_quarter_word_are_caught_and_carry_how_late_they_are():
+    from app.services import stock_news as sn
+
+    # HINDALCO: results filed 6 Nov 13:46; TradingView's weekly recap on 9 Nov 06:30 never says "Q2".
+    filed = sn.filing_times([{"kind": "announcement", "title": "Outcome of Board Meeting", "at": "2026-11-06T13:46:00+05:30"}])
+    recap = {"kind": "news", "title": "Weekly Recap: Profit rises 58.8% and ICICI Securities retains Buy rating",
+             "at": "2026-11-09T06:30:00+05:30"}
+    evening = {"kind": "news", "title": "Hindalco net profit jumps 59% on strong aluminium prices", "at": "2026-11-06T16:00:00+05:30"}
+    other = {"kind": "news", "title": "Hindalco shares in focus; profit booking seen", "at": "2026-11-09T07:00:00+05:30"}
+    assert sn.is_results_story(recap) and sn.is_results_story(evening) and not sn.is_results_story(other)
+    out = sn.mark_stale([recap, evening, other], filed)
+    assert out[0]["stale"] is True and out[0]["late_min"] > 2 * 24 * 60
+    assert not out[1].get("stale") and out[1]["late_min"] == 134 and out[1]["filed_at"].startswith("2026-11-06T13:46")
+    assert "filed_at" not in out[2]
