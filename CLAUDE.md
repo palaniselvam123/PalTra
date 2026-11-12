@@ -1547,7 +1547,11 @@ spinning top), body and range) / Matched / Call columns
   `target_pct`; same hours rule as the Second candle test): from the price then, the real 1-minute candles
   (`strategy_lab.load_tape`) of that day and the next N trading sessions: the session the high / low first touched the
   profit % (`day_no` 0 = same day, `on`, `hit_at`), the drawdown before it, best and end move; `summarize` gives reached %
-  by each day and plain-words lines). No order path; nothing in the strategy reads it.
+  by each day and plain-words lines). Under it, **carry it as delivery / MTF?** (`PressureDay.CarryBox`, browser only): the
+  buys that missed the profit the same day (`day_no` ≠ 0), how many reached it by each later trading day, average sessions
+  and calendar days held, the dip on the way, where the misses ended, and a rough holding cost (delivery STT about 0.2 % +
+  MTF interest at a typed % a year × calendar days); sellers are left out (a cash short cannot be carried overnight).
+  No order path; nothing in the strategy reads it.
 - `backend/scan_trade_test.py` – **Trade a saved scan** (arithmetic on real candles; no order, nothing armed; the Most active
   card's "Trade a saved scan" view, `components/Scalp/ScanTradeTest.tsx`): one saved Most active scan gives the day, the time
   and the stocks. `picks` (`pick` `PRESSURE` = buyers ≥ `pct` % buys / sellers ≥ `pct` % sells, `BIAS` = the row's bias, `MOVE`
