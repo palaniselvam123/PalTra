@@ -978,6 +978,8 @@ export type ScoredNewsItem = StockNewsItem & {
   /** An old results story re-posted later: the company filed its results with NSE at `filed_at`. Not counted. */
   stale?: boolean;
   filed_at?: string | null;
+  /** A results story's minutes after the company's NSE results filing (`filed_at`): how late it came. */
+  late_min?: number | null;
 };
 export type NewsOverall = {
   score: number;
@@ -1013,7 +1015,7 @@ export type NewsDayRow = {
   /** When to act while flat: buy now / later / don't, and the same for a short (news_impact.timing). */
   timing?: NewsTiming | null;
   count?: number;
-  items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why" | "stale" | "filed_at">)[];
+  items?: (Pick<ScoredNewsItem, "title" | "source" | "at" | "url" | "sentiment" | "impact" | "critical" | "why" | "stale" | "filed_at" | "late_min">)[];
   method?: "ai" | "rules";
   errors?: Record<string, string>;
   error?: string;
@@ -1024,6 +1026,9 @@ export type NewsCheckRow = {
   symbol: string;
   /** The trading day the headline was measured on (YYYY-MM-DD). */
   day?: string;
+  /** A results write-up measured from its NSE filing (`at`): when the story itself appeared, and how late. */
+  story_at?: string | null;
+  late_min?: number | null;
   title: string;
   url?: string | null;
   source?: string | null;

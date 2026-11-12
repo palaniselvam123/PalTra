@@ -602,7 +602,7 @@ async def day_report(day: dt.date, symbols: dict[str, dict], *, use_ai: bool = T
             except Exception as exc:  # noqa: BLE001 - one stock's failure stays on its row
                 return {"symbol": symbol, "armed": entry.get("armed", []), "error": str(exc)[:200]}
         items = [
-            {k: it.get(k) for k in ("title", "source", "at", "url", "sentiment", "impact", "critical", "why", "stale", "filed_at")}
+            {k: it.get(k) for k in ("title", "source", "at", "url", "sentiment", "impact", "critical", "why", "stale", "filed_at", "late_min")}
             for it in sorted(r["items"], key=lambda i: (bool(i.get("stale")), -abs(float(i.get("score") or 0))))[:DAY_ITEMS]
         ]
         return {

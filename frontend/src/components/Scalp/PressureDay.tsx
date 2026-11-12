@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { lateText } from "@/lib/newsTone";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Loader2, Newspaper, Search } from "lucide-react";
 import { api, type NewsDayRow, type PressureDay, type PressureDayRow } from "@/lib/api";
@@ -632,6 +633,10 @@ function NewsCell({ row, news }: { row: PressureDayRow; news: NewsDayRow | undef
         {top.stale ? (
           <span className="mr-1 rounded bg-amber-500/15 px-1 text-[10px] text-amber-300" title="A results story put up well after the company filed its results with NSE: old news, not counted">
             old story · filed {top.filed_at ? top.filed_at.slice(5, 10) : "earlier"}
+          </span>
+        ) : top.filed_at && top.late_min ? (
+          <span className="mr-1 rounded bg-slate-700/60 px-1 text-[10px] text-slate-300" title="The company filed these results with NSE first; this write-up came later">
+            NSE {top.filed_at.slice(5, 16).replace("T", " ")} · {lateText(top.late_min)} later
           </span>
         ) : null}
         {top.title}

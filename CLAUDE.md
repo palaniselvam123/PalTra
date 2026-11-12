@@ -1888,8 +1888,11 @@ spinning top), body and range) / Matched / Call columns
   (owner's HAVELLS case: Q2 filed 22 Oct, a re-post on 7 Nov). When a headline reads like a quarter's results
   (`is_results_story`), the stock's NSE results filings of the last `RESULTS_LOOKBACK_DAYS` (100) are read once
   (`results_filed`, `filing_times`); a story more than `STALE_AFTER_DAYS` (2) after the latest filing before it gets
-  `stale` and `filed_at`: no weight in `news_impact.overall`, never alerted, critical or a news entry, left out of the
-  news check, listed last in the day report, shown as "old story · filed …". No key, no order path; nothing in the
+  `stale`: no weight in `news_impact.overall`, never alerted, critical or a news entry, left out of the news check,
+  listed last in the day report, shown as "old story · filed …". A results story is also one with no quarter word
+  (`_RESULT_MOVE`: "Profit rises 58.8%", a weekly recap; owner's HINDALCO case: filed 6 Nov 13:46, TradingView's recap
+  9 Nov 06:30). Every matched story carries `filed_at` (when the news really came out) and `late_min`; the screens show
+  "NSE filed … · story Nh later", and the news check measures a late (not stale) one from the filing time (`story_at`). No key, no order path; nothing in the
   strategy reads it.
 - `backend/app/services/news_impact.py` – news impact and news alerts (information only, never trades): each headline from
   `stock_news` is scored by a rule list (`score_text`: Indian corporate-news phrases with weights, critical phrases such as

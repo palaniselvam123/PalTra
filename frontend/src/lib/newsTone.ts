@@ -35,3 +35,11 @@ export function directionClass(code: string | null | undefined): string {
   if (code === "TIGHTEN" || code === "AVOID") return "text-amber-300";
   return "text-slate-300";
 }
+
+/** "2h 14m" / "2d 16h" for a story's minutes after the NSE filing. */
+export function lateText(min: number | null | undefined): string {
+  if (min == null) return "";
+  if (min < 60) return `${min}m`;
+  if (min < 24 * 60) return `${Math.floor(min / 60)}h ${min % 60}m`;
+  return `${Math.floor(min / 1440)}d ${Math.floor((min % 1440) / 60)}h`;
+}

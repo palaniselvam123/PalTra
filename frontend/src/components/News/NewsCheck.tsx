@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { Download, Loader2, Play } from "lucide-react";
 import { api, type NewsCheck, type NewsCheckRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
-import { toneClass, toneWord } from "@/lib/newsTone";
+import { lateText, toneClass, toneWord } from "@/lib/newsTone";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { DEFAULT_KEYWORDS, keywordMatcher, keywordStats, parseKeywords } from "@/lib/newsKeywords";
 
@@ -443,6 +443,11 @@ export function NewsCheckPanel() {
                       <td className="whitespace-nowrap font-mono text-slate-300">
                         {clock(r.at)}
                         {r.timing === "BEFORE_OPEN" ? <div className="text-[10px] text-slate-500">before open</div> : null}
+                        {r.story_at ? (
+                          <div className="text-[10px] text-slate-500" title="Measured from the company's NSE results filing; the write-up came later">
+                            NSE filing · story {lateText(r.late_min)} later
+                          </div>
+                        ) : null}
                       </td>
                       <td className="font-semibold">
                         <GrowwLink symbol={r.symbol} />

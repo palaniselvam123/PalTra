@@ -57,6 +57,15 @@ RESULTS_LOOKBACK_DAYS = 100
 STALE_AFTER_DAYS = 2
 _QUARTER = re.compile(r"\b(q[1-4]|quarter(?:ly)?|h[12]|half[- ]year(?:ly)?)\b", re.I)
 _RESULT_WORDS = re.compile(r"\b(results?|profit|loss|revenue|earnings|ebitda|pat|margins?|income)\b", re.I)
+# A results story without a quarter word: "Profit rises 58.8%", "Q-o-Q revenue", "Results: …", "Weekly recap: profit …".
+_RESULT_MOVE = re.compile(
+    r"\b(net profit|profit|pat|revenue|earnings|ebitda|sales|income)\b[^.]{0,40}?"
+    r"\b(rises?|rose|jumps?|jumped|falls?|fell|surges?|surged|climbs?|climbed|drops?|dropped|declines?|declined|"
+    r"grows?|grew|soars?|soared|slumps?|slumped|plunges?|plunged|slips?|slipped|dips?|dipped|up|down|beats?|misses?|"
+    r"doubles?|doubled|halves|halved|triples?|tripled)\b",
+    re.I,
+)
+_RESULTS_WORD = re.compile(r"\b(results|earnings|recap)\b", re.I)
 _FILED_RESULTS = re.compile(r"financial results?|results? for the (quarter|period|half)|outcome of board meeting", re.I)
 _SUFFIX = re.compile(r"\b(LIMITED|LTD\.?|INDIA LTD|\(INDIA\))\s*$", re.I)
 
@@ -220,7 +229,11 @@ def is_results_story(item: dict) -> bool:
     if item.get("kind") == "announcement":
         return False
     title = item.get("title") or ""
-    return bool(_QUARTER.search(title) and _RESULT_WORDS.search(title))
+    return bool(
+        (_QUARTER.search(title) and _RESULT_WORDS.search(title))
+        or _RESULT_MOVE.search(title)
+        or (_RESULTS_WORD.search(title) and _RESULT_WORDS.search(title))
+    )
 
 
 def _when(at: str | None) -> dt.datetime | None:
@@ -245,8 +258,9 @@ def filing_times(filings: list[dict]) -> list[dt.datetime]:
 
 
 def mark_stale(items: list[dict], filed: list[dt.datetime]) -> list[dict]:
-    """Results stories that came out more than STALE_AFTER_DAYS after the latest results filing before them get
-    `stale: True` and `filed_at`. With no filing known, nothing is marked."""
+    """Each results story matched to the latest results filing before it gets `filed_at` (when the news really came
+    out) and `late_min` (how many minutes after it the story appeared); one more than STALE_AFTER_DAYS late also gets
+    `stale: True`. With no filing known, nothing is marked."""
     if not filed:
         return items
     out = []
@@ -254,8 +268,11 @@ def mark_stale(items: list[dict], filed: list[dt.datetime]) -> list[dict]:
         when = _when(it.get("at"))
         if when is not None and is_results_story(it):
             before = [f for f in filed if f <= when + dt.timedelta(hours=1)]
-            if before and when - before[-1] > dt.timedelta(days=STALE_AFTER_DAYS):
-                it = {**it, "stale": True, "filed_at": _iso(before[-1])}
+            if before:
+                late = max(0, int((when - before[-1]).total_seconds() // 60))
+                it = {**it, "filed_at": _iso(before[-1]), "late_min": late}
+                if when - before[-1] > dt.timedelta(days=STALE_AFTER_DAYS):
+                    it["stale"] = True
         out.append(it)
     return out
 

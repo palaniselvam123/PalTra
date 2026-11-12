@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { AlertTriangle, ExternalLink, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { api, type NewsAnalysis } from "@/lib/api";
-import { directionClass, toneClass, toneWord, urgentAction } from "@/lib/newsTone";
+import { directionClass, lateText, toneClass, toneWord, urgentAction } from "@/lib/newsTone";
 
 const SOURCE_NAMES: Record<string, string> = { nse: "NSE announcements", google_news: "Google News" };
 
@@ -159,6 +159,10 @@ export function StockNewsPanel({ symbol, onClose }: { symbol: string; onClose: (
                       title="A results story put up well after the company filed its results with NSE: it is old news and is not counted"
                     >
                       old story · results filed {item.filed_at ? item.filed_at.slice(0, 10) : "earlier"}
+                    </span>
+                  ) : item.filed_at && item.late_min ? (
+                    <span className="mr-1 rounded bg-slate-700/60 px-1 text-slate-300" title="The company filed these results with NSE first; this write-up came later">
+                      NSE filed {item.filed_at.slice(5, 16).replace("T", " ")} · story {lateText(item.late_min)} later
                     </span>
                   ) : null}
                   {item.valid === false ? <span className="mr-1 text-slate-600 line-through">expired</span> : null}
