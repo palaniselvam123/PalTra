@@ -46,6 +46,8 @@ class AutoSettings:
     price_max: float = 0.0
     # The card's scan lists ("armed", "fno", "nifty50", "nifty100", "niftybank"); empty = armed_only decides.
     lists: list = field(default_factory=list)
+    # The card's candle kind: NORMAL (real candles) or HA (Heikin Ashi).
+    candles: str = "NORMAL"
 
 
 SCAN_LISTS = ("armed", "fno", "nifty50", "nifty100", "niftybank")
@@ -80,6 +82,7 @@ def _clean(raw: dict) -> AutoSettings:
     base.every_min = int(base.every_min) if int(base.every_min) in EVERY_CHOICES else DEFAULT_EVERY
     base.minutes = int(base.minutes) if int(base.minutes) in CANDLE_CHOICES else 5
     base.quiet_min = min(375, max(1, int(base.quiet_min)))
+    base.candles = "HA" if str(base.candles).upper() == "HA" else "NORMAL"
     base.price_min = max(0.0, float(base.price_min))
     base.price_max = max(0.0, float(base.price_max))
     raw_lists = base.lists if isinstance(base.lists, (list, tuple)) else []

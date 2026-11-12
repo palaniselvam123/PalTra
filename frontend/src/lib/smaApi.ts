@@ -661,6 +661,8 @@ export type ChopScan = {
   sma_fast: number;
   sma_slow: number;
   quiet_min: number;
+  /** The candles the scan read: NORMAL (real) or HA (Heikin Ashi); older servers leave it out. */
+  candles?: ChopCandles;
   as_of: string | null;
   /** When the last pass ended (IST); older servers leave it out. */
   finished_at?: string | null;
@@ -1304,6 +1306,7 @@ export type ScanRun = {
     sma_fast?: number;
     sma_slow?: number;
     quiet_min?: number;
+    candles?: "NORMAL" | "HA";
     stocks?: number;
     source?: "manual" | "auto";
     alert_on_quiet?: boolean;
@@ -1390,7 +1393,10 @@ export type ScanRunDetail = ScanRun & {
 };
 
 /** Trend quality re-scan run by the server every `every_min` minutes while NSE is open (no browser needed). */
+/** Trend quality candle kind: the real candles, or Heikin Ashi ones (prices shown stay real). */
+export type ChopCandles = "NORMAL" | "HA";
 export type ChopAuto = {
+  candles?: ChopCandles;
   on: boolean;
   every_min: number;
   minutes: CrossScanMinutes;
@@ -1409,7 +1415,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
@@ -2617,7 +2623,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -2631,6 +2637,7 @@ export const smaApi = {
           alert_on_quiet: opts.alert_on_quiet ?? false,
           price_min: opts.price_min ?? 0,
           price_max: opts.price_max ?? 0,
+          candles: opts.candles ?? "NORMAL",
         }),
       },
       20000,

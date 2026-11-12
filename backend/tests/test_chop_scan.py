@@ -380,3 +380,47 @@ def test_strong_trend_is_read_on_every_candle_size():
     assert all(row.trend_by_minutes[m] == "STRONG_BEARISH" for m in (1, 2, 3, 5)), row.trend_by_minutes
     short = chop_scan.analyze(_minutes([100 + i * 0.1 for i in range(60)]), 9, 21, 1, _at(10, 20), symbol="NEW")
     assert short.trend_by_minutes[15] is None
+
+
+def test_heikin_ashi_bars_keep_the_shape_and_smooth_the_colours():
+    """`ha_bars`: HA open / close, high and low widened to hold them; a pullback candle inside a rise stays green."""
+    import heikin_ashi
+
+    closes = [100, 101, 102, 103, 102.6, 104, 105]
+    opens = [99.5, 100, 101, 102, 103, 102.6, 104]
+    bars = pd.DataFrame({
+        "ts": [1_792_035_900 + 300 * i for i in range(len(closes))], "open": opens, "close": closes,
+        "high": [max(o, c) + 0.2 for o, c in zip(opens, closes)], "low": [min(o, c) - 0.2 for o, c in zip(opens, closes)],
+    })
+    out = chop_scan.ha_bars(bars)
+    ha_open, ha_close = heikin_ashi.candles(bars)
+    assert list(out["open"]) == list(ha_open) and list(out["close"]) == list(ha_close)
+    assert (out["high"] >= out[["open", "close"]].max(axis=1)).all() and (out["low"] <= out[["open", "close"]].min(axis=1)).all()
+    assert bars["close"].iloc[4] < bars["open"].iloc[4]  # the real candle is red
+    assert out["close"].iloc[4] > out["open"].iloc[4]  # its Heikin Ashi candle is still green
+    assert list(bars["close"]) == closes  # the input is not changed
+
+
+def test_scanner_rejects_an_unknown_candle_kind():
+    with pytest.raises(ValueError):
+        chop_scan.ChopScanner().start(["SBIN"], None, candles="RENKO")
+
+
+def test_a_heikin_ashi_scan_reads_fewer_crosses_and_says_which_candles_it_read():
+    """The same choppy tape: Heikin Ashi candles average the back-and-forth, the price shown stays the real one."""
+    async def go(candles):
+        tape = _minutes([100 + ((i // 10) % 2) * 2 for i in range(300)])
+
+        async def fetch(symbol, start, end):
+            return tape
+
+        s = chop_scan.ChopScanner()
+        s.start(["CHOP"], fetch, minutes=5, now=_at(14, 20), force=True, candles=candles)
+        await s._task
+        return s.snapshot(), float(tape["close"].iloc[-1])
+
+    normal, last = asyncio.run(go(chop_scan.NORMAL))
+    ha, _ = asyncio.run(go(chop_scan.HEIKIN_ASHI))
+    assert normal["candles"] == "NORMAL" and ha["candles"] == "HA"
+    assert ha["rows"][0]["crosses_today"] <= normal["rows"][0]["crosses_today"]
+    assert ha["rows"][0]["ltp"] == normal["rows"][0]["ltp"] == round(last, 2)
