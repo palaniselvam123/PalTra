@@ -410,7 +410,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
       if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
       if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
-      if (score === "PHASE_CHOP" && r.phase !== "CHOP") return false;
+      if (score === "PHASE_CHOP" && (r.phase !== "CHOP" || r.phase_early)) return false;
       if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
       if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
       if (noCrossOn.some((m) => !crossRuleMatches(crossCount, r.crosses_by_minutes?.[String(m)], r.last_cross_side_by_minutes?.[String(m)])))
@@ -465,8 +465,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       case "trend":
         return (isStrong(r) ? 1000 : 0) + (r.trend_score ?? 0);
       case "phase":
-        // Strong phases first, longest-running first; then choppy.
-        return r.phase == null ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
+        // Strong phases first, longest-running first; then choppy; too early to tell last.
+        return r.phase == null || r.phase_early ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
       case "dayMove":
         return r.day_move_pct ?? null;
       case "crosses":
@@ -1210,6 +1210,8 @@ const PHASE_LOOK: Record<ChopPhaseSide, { label: string; chip: string; bar: stri
   CHOP: { label: "Choppy", chip: "bg-slate-500/10 text-slate-400 ring-slate-600/40", bar: "bg-slate-600/60" },
 };
 const SESSION_MIN = 375; // 09:15 to 15:30 IST
+/** trend_phases.MIN_RUN: trending candles in a row before a strong phase is named. */
+const PHASE_MIN_RUN = 5;
 
 /** The phase now as a chip, and today's phases as a strip from 09:15 to 15:30. */
 function PhaseCell({ row: r }: { row: ChopScanRow }) {
@@ -1225,6 +1227,18 @@ function PhaseCell({ row: r }: { row: ChopScanRow }) {
   const pct = (ts: number) => Math.max(0, Math.min(100, ((ts - dayStart) / 60 / SESSION_MIN) * 100));
   const move = (m: number | null) => (m == null ? "" : ` ${m >= 0 ? "+" : ""}${m.toFixed(2)}%`);
   const tip = all.map((p) => `${PHASE_LOOK[p.side].label} ${istTime(p.start_ts)}–${istTime(p.end_ts + step)}${move(p.move_pct)}`).join("\n");
+  if (r.phase_early) {
+    // A strong phase needs 5 trending candles in a row; before 5 of today's candles have closed, "choppy" means nothing.
+    const readyAt = dayStart + PHASE_MIN_RUN * step;
+    return (
+      <span
+        className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs text-slate-400 ring-1 ring-inset ring-slate-600/40"
+        title={`Too early to tell: a strong phase needs ${PHASE_MIN_RUN} trending ${r.minutes}-min candles in a row, and fewer than ${PHASE_MIN_RUN} of today's have closed. Readable from about ${istTime(readyAt)}, or use smaller candles.`}
+      >
+        Not enough candles yet
+      </span>
+    );
+  }
   return (
     <div className="min-w-[10rem]" title={`Today's phases (${r.minutes}-min candles):\n${tip}`}>
       <span className={clsx("whitespace-nowrap rounded px-1.5 py-0.5 text-xs ring-1 ring-inset", look.chip)}>

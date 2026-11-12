@@ -218,6 +218,8 @@ class ChopRow:
     phase_candles: int = 0
     phases: list = field(default_factory=list)
     strong_phases: int = 0
+    # CHOP only because fewer than trend_phases.MIN_RUN candles of today have closed ("not enough candles yet").
+    phase_early: bool = False
 
     def as_dict(self) -> dict:
         out = asdict(self)
