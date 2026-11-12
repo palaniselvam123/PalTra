@@ -581,6 +581,8 @@ export type ChopScanRow = {
   phase_candles?: number;
   phases?: ChopPhase[];
   strong_phases?: number;
+  /** CHOP only because fewer than 5 of today's candles have closed: too early to tell, not sideways. */
+  phase_early?: boolean;
 };
 /** Trend-rank alert (backend trend_rank.py): Telegram / call the top ranks after each Trend quality pass. */
 export type TrendAlerts = {
@@ -3261,6 +3263,8 @@ export type StockRegime = {
   phase_move_pct: number | null;
   phase_candles: number;
   strong_phases: number;
+  /** CHOP only because fewer than 5 of today's candles have closed (too early to tell). */
+  phase_early?: boolean;
   phases: { side: "BULL" | "BEAR" | "CHOP"; start: number; end: number }[];
 };
 

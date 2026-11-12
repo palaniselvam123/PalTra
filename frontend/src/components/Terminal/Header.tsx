@@ -41,9 +41,9 @@ function RegimeSummary({
   const reads = armed.map((s) => ({ s, r: bookBySymbol.get(s)?.regime ?? null }));
   const up = reads.filter((x) => x.r?.phase === "BULL").map((x) => x.s);
   const down = reads.filter((x) => x.r?.phase === "BEAR").map((x) => x.s);
-  const chop = reads.filter((x) => x.r?.phase === "CHOP").map((x) => x.s);
-  const none = reads.filter((x) => !x.r?.phase).length;
-  if (!armed.length || up.length + down.length + chop.length === 0) return null;
+  const chop = reads.filter((x) => x.r?.phase === "CHOP" && !x.r?.phase_early).map((x) => x.s);
+  const none = reads.filter((x) => !x.r?.phase || (x.r.phase === "CHOP" && x.r.phase_early)).length;
+  if (!armed.length || up.length + down.length + chop.length + none === 0) return null;
   const list = (names: string[]) => (names.length ? names.join(", ") : "none");
   return (
     <p className="px-2 pb-1 text-xs text-slate-400" aria-label="Armed stocks by trend phase">
@@ -51,7 +51,7 @@ function RegimeSummary({
       <span className="font-semibold text-sky-300" title={`Strong up phase: ${list(up)}`}>{up.length} up ↑</span> ·{" "}
       <span className="font-semibold text-violet-300" title={`Strong down phase: ${list(down)}`}>{down.length} down ↓</span> ·{" "}
       <span className="font-semibold text-amber-300" title={`Choppy: ${list(chop)}`}>{chop.length} choppy</span>
-      {none ? <span title="Not enough candles yet"> · {none} not read yet</span> : null}
+      {none ? <span title="Not enough of today's candles have closed to tell"> · {none} too early to tell</span> : null}
     </p>
   );
 }

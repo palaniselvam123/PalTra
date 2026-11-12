@@ -120,12 +120,21 @@ def phases(enriched: pd.DataFrame, today_start: int) -> list[dict]:
     return out
 
 
+def too_early(found: list[dict]) -> bool:
+    """True while today's phase can only read CHOP because fewer than MIN_RUN candles of today have closed: a strong
+    phase needs MIN_RUN trending candles in a row, so early in the day (until 10:30 on 15-minute candles) "choppy"
+    only means "not enough candles yet"."""
+    return bool(found) and found[-1]["side"] == CHOP and sum(p["candles"] for p in found) < MIN_RUN
+
+
 def summary(found: list[dict]) -> dict:
-    """Row fields for the scan: the phase now, since when, its move, and counts of today's strong phases."""
+    """Row fields for the scan: the phase now, since when, its move, and counts of today's strong phases.
+    `phase_early` marks a CHOP read that is only too early to tell (`too_early`)."""
     if not found:
-        return {"phase": None, "phase_since_ts": None, "phase_move_pct": None, "phase_candles": 0, "phases": [], "strong_phases": 0}
+        return {"phase": None, "phase_since_ts": None, "phase_move_pct": None, "phase_candles": 0, "phases": [], "strong_phases": 0, "phase_early": False}
     now = found[-1]
     return {
+        "phase_early": too_early(found),
         "phase": now["side"],
         "phase_since_ts": now["start_ts"],
         "phase_move_pct": now["move_pct"],

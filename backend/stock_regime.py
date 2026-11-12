@@ -52,6 +52,7 @@ def read(frame_1m: pd.DataFrame | None, sma_fast: int, sma_slow: int, minutes: i
         "phase_move_pct": now_phase["move_pct"] if now_phase else None,
         "phase_candles": now_phase["candles"] if now_phase else 0,
         "strong_phases": sum(1 for p in found if p["side"] != trend_phases.CHOP),
+        "phase_early": trend_phases.too_early(found),
         "phases": [{"side": p["side"], "start": p["start_ts"], "end": p["end_ts"]} for p in found],
     }
 

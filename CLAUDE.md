@@ -1053,8 +1053,10 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   candles: efficiency ratio |net| / sum |close moves| ≥ `MIN_EFFICIENCY` (0.5) and |net| ≥ `MIN_ATR_MOVE`
   (1) ATR; runs of ≥ `MIN_RUN` (5) such candles (gaps of `BRIDGE` 1 closed) become a phase, backdated to
   the window's turn; shorter bursts stay choppy. Rows carry `phase`, `phase_since_ts`, `phase_move_pct`,
-  `phase_candles`, `phases` (all of today's) and `strong_phases`; the card's Phase column shows the phase
-  now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
+  `phase_candles`, `phases` (all of today's), `strong_phases` and `phase_early` (`too_early`: CHOP only because
+  fewer than `MIN_RUN` of today's candles have closed, e.g. before 10:30 on 15-minute candles; shown as "Not enough
+  candles yet", left out of "Phase now: choppy", and as "Too early" on the terminal's Trend chip via `stock_regime`); the
+  card's Phase column shows the phase now plus a 09:15-15:30 strip, and Show has "Phase now: strong / up / down / choppy". Information only.
   **Crosses today on** (`CROSS_RULES` in `ChopScan.tsx`: None, Exactly 1 / 1 ↑ / 1 ↓ / 2 / 3, At most 1-3,
   2 / 3 / 5 or more; multi-select 1/2/3/5/10/15 min): each row carries
   `crosses_by_minutes`, `side_by_minutes`, `last_cross_ts_by_minutes` and
