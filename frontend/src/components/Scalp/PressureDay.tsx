@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Search } from "lucide-react";
-import { api, type PressureDay, type PressureDayRow } from "@/lib/api";
+import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Loader2, Newspaper, Search } from "lucide-react";
+import { api, type NewsDayRow, type PressureDay, type PressureDayRow } from "@/lib/api";
+import { smaApi, type HoldTestResult, type HoldTestRow } from "@/lib/smaApi";
 import { GrowwLink } from "@/components/ui/growwLink";
 
 /**
@@ -14,7 +15,36 @@ import { GrowwLink } from "@/components/ui/growwLink";
 const signed = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
 const tone = (v: number | null | undefined) => ((v ?? 0) > 0 ? "text-emerald-300" : (v ?? 0) < 0 ? "text-rose-300" : "text-slate-300");
 
-type SortKey = "day" | "symbol" | "side" | "first_at" | "max_share" | "price" | "moved" | "best" | "worst" | "last";
+type SortKey = "day" | "symbol" | "side" | "first_at" | "max_share" | "price" | "moved" | "best" | "worst" | "last" | "news" | "hold";
+
+const newsKey = (r: { day: string; symbol: string }) => `${r.day}|${r.symbol}`;
+const holdKey = (r: { day: string; symbol: string; side: string }) => `${r.day}|${r.symbol}|${r.side}`;
+
+/** The news score signed the share's way: + = the news points where the buyers / sellers point. */
+function newsWith(r: PressureDayRow, n: NewsDayRow | undefined): number | null {
+  const score = n?.overall?.score;
+  if (score == null || !n?.count) return null;
+  return r.side === "BUY" ? score : -score;
+}
+
+/** "fits" / "against" / "no news" / "neutral" for a row, from the day's overall news view. */
+function newsFit(r: PressureDayRow, n: NewsDayRow | undefined): "fits" | "against" | "neutral" | "none" | null {
+  if (!n) return null;
+  if (n.error || !n.count) return "none";
+  const s = n.overall?.sentiment;
+  if (s === "POSITIVE") return r.side === "BUY" ? "fits" : "against";
+  if (s === "NEGATIVE") return r.side === "SELL" ? "fits" : "against";
+  return "neutral";
+}
+
+/** "HH:MM" IST and the IST date of an ISO time. */
+function istParts(iso: string | null | undefined): { day: string; time: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const ist = new Date(d.getTime() + 330 * 60000);
+  return { day: ist.toISOString().slice(0, 10), time: ist.toISOString().slice(11, 16) };
+}
 
 /** The value a column sorts on; null always goes last. "Moved?" sorts Yes (soonest first), then No, then no later scan. */
 function sortValue(r: PressureDayRow, key: SortKey): number | string | null {
@@ -39,6 +69,8 @@ function sortValue(r: PressureDayRow, key: SortKey): number | string | null {
       return r.worst_pct;
     case "last":
       return r.last_pct;
+    default:
+      return null;
   }
 }
 
@@ -59,6 +91,15 @@ export function PressureDayView() {
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
+  const [news, setNews] = useState<Record<string, NewsDayRow>>({});
+  const [newsBusy, setNewsBusy] = useState(false);
+  const [newsErr, setNewsErr] = useState<string | null>(null);
+  const [newsAi, setNewsAi] = useState(false);
+  const [holdDays, setHoldDays] = useState(5);
+  const [holdPct, setHoldPct] = useState(1);
+  const [hold, setHold] = useState<HoldTestResult | null>(null);
+  const [holdBusy, setHoldBusy] = useState(false);
+  const [holdErr, setHoldErr] = useState<string | null>(null);
   const [data, setData] = useState<PressureDay | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,16 +147,84 @@ export function PressureDayView() {
       return true;
     });
     if (!sort) return kept;
+    const holdBy = new Map((hold?.rows ?? []).map((h) => [holdKey(h), h]));
+    const value = (r: PressureDayRow) => {
+      if (sort.key === "news") return newsWith(r, news[newsKey(r)]);
+      if (sort.key === "hold") {
+        const h = holdBy.get(holdKey(r));
+        return !h || h.error ? null : h.reached ? h.day_no : 1000 - (h.best_pct ?? 0);
+      }
+      return sortValue(r, sort.key);
+    };
     return [...kept].sort((a, b) => {
-      const va = sortValue(a, sort.key);
-      const vb = sortValue(b, sort.key);
+      const va = value(a);
+      const vb = value(b);
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
       if (vb == null) return -1;
       const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
       return c * sort.dir;
     });
-  }, [data, side, show, timeFrom, timeTo, priceMin, priceMax, sort]);
+  }, [data, side, show, timeFrom, timeTo, priceMin, priceMax, sort, news, hold]);
+
+  const holdMap = useMemo(() => new Map((hold?.rows ?? []).map((h) => [holdKey(h), h])), [hold]);
+
+  /** Read each shown stock's news on its day (desk news reader; rules, or AI when ticked). Up to 40 stocks a day. */
+  const readNews = async () => {
+    setNewsBusy(true);
+    setNewsErr(null);
+    try {
+      const byDay = new Map<string, string[]>();
+      for (const r of rows) {
+        const list = byDay.get(r.day) ?? [];
+        if (!list.includes(r.symbol) && list.length < 40) list.push(r.symbol);
+        byDay.set(r.day, list);
+      }
+      const got: Record<string, NewsDayRow> = {};
+      for (const [d, syms] of byDay) {
+        const rep = await api.newsDay(d, syms, newsAi);
+        for (const n of rep.stocks) got[`${d}|${n.symbol}`] = n;
+      }
+      setNews((cur) => ({ ...cur, ...got }));
+    } catch (e) {
+      setNewsErr(e instanceof Error ? e.message : "Could not read the news");
+    } finally {
+      setNewsBusy(false);
+    }
+  };
+
+  /** Follow each shown stock from the price then for the same day plus N trading days (hold_test.py). Up to 60. */
+  const runHold = async () => {
+    setHoldBusy(true);
+    setHoldErr(null);
+    try {
+      const picked = rows.slice(0, 60).map((r) => ({ symbol: r.symbol, day: r.day, at: r.first_at, side: r.side, price: r.price }));
+      setHold(await smaApi.holdTest({ rows: picked, days: holdDays, target_pct: holdPct }));
+    } catch (e) {
+      setHoldErr(e instanceof Error ? e.message : "Could not run the hold test");
+    } finally {
+      setHoldBusy(false);
+    }
+  };
+
+  // How the shown rows did, split by whether that day's news pointed the same way as the buyers / sellers.
+  const newsSplit = useMemo(() => {
+    const groups: Record<"fits" | "against" | "neutral" | "none", { n: number; moved: number }> = {
+      fits: { n: 0, moved: 0 },
+      against: { n: 0, moved: 0 },
+      neutral: { n: 0, moved: 0 },
+      none: { n: 0, moved: 0 },
+    };
+    let read = 0;
+    for (const r of rows) {
+      const fit = newsFit(r, news[newsKey(r)]);
+      if (!fit || r.moved == null) continue;
+      read += 1;
+      groups[fit].n += 1;
+      if (r.moved) groups[fit].moved += 1;
+    }
+    return read ? groups : null;
+  }, [rows, news]);
 
   // How the rows on screen did (the cards above count the whole day).
   const shownMoved = rows.filter((r) => r.moved === true).length;
@@ -286,9 +395,92 @@ export function PressureDayView() {
               ) : null}
             </span>
           </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="space-y-2 rounded-lg border border-slate-800 p-2.5 text-xs text-slate-400">
+              <p className="text-sm font-semibold text-slate-100">Which news was behind it?</p>
+              <p>
+                Reads each shown stock&apos;s news that day (NSE filings and news headlines, up to 40 stocks a day) and says whether it points the
+                same way as the buyers / sellers. A headline marked <i>after</i> came out after the share was first reached, so it did not cause it.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void readNews()}
+                  disabled={newsBusy || !rows.length}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-sky-500/15 px-3 text-xs font-semibold text-sky-100 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/25 disabled:opacity-50"
+                >
+                  {newsBusy ? <Loader2 size={13} className="animate-spin" /> : <Newspaper size={13} />} Read the news ({Math.min(rows.length, 40)} stocks)
+                </button>
+                <label className="flex items-center gap-1.5" title="Score the headlines with the saved OpenAI key (slower, costs a little); off = the built-in rules">
+                  <input type="checkbox" checked={newsAi} onChange={(e) => setNewsAi(e.target.checked)} /> Read with AI
+                </label>
+              </div>
+              {newsErr ? <p className="font-semibold text-amber-300">{newsErr}</p> : null}
+              {newsSplit ? (
+                <ul className="space-y-0.5 text-slate-300">
+                  {(["fits", "against", "neutral", "none"] as const).map((k) =>
+                    newsSplit[k].n ? (
+                      <li key={k}>
+                        {k === "fits" ? "News the same way" : k === "against" ? "News the other way" : k === "neutral" ? "News, no clear side" : "No news found"}:{" "}
+                        <b>{newsSplit[k].moved}</b> of {newsSplit[k].n} moved {data.move_pct}% ({Math.round((newsSplit[k].moved / newsSplit[k].n) * 100)}%)
+                      </li>
+                    ) : null
+                  )}
+                </ul>
+              ) : null}
+            </div>
+            <div className="space-y-2 rounded-lg border border-slate-800 p-2.5 text-xs text-slate-400">
+              <p className="text-sm font-semibold text-slate-100">If I keep it for N days, when does it reach my profit?</p>
+              <p>
+                From the price then, each shown stock (up to 60) is followed on its real 1-minute candles for the same day and the next N trading
+                days: the day it first touched your profit %, and how far it went against you first. Before charges.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1">
+                  Keep for
+                  <span className="flex items-center gap-1">
+                    <input type="number" min={1} max={20} step={1} value={holdDays} onChange={(e) => setHoldDays(Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 5))))} className={clsx(select, "w-16")} />
+                    trading days
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1">
+                  Profit
+                  <span className="flex items-center gap-1">
+                    <input type="number" min={0.05} max={50} step={0.1} value={holdPct} onChange={(e) => setHoldPct(Math.min(50, Math.max(0.05, Number(e.target.value) || 1)))} className={clsx(select, "w-20")} />%
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void runHold()}
+                  disabled={holdBusy || !rows.length}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-violet-500/15 px-3 text-xs font-semibold text-violet-100 ring-1 ring-inset ring-violet-400/40 hover:bg-violet-500/30 disabled:opacity-50"
+                >
+                  {holdBusy ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Test holding
+                </button>
+              </div>
+              {holdErr ? <p className="font-semibold text-amber-300">{holdErr}</p> : null}
+              {hold ? (
+                <>
+                  <ul className="space-y-0.5 text-slate-200">
+                    {hold.answer.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hold.by_day.map((b) => (
+                      <span key={b.day_no} className="rounded border border-slate-700 px-1.5 py-0.5 tabular-nums text-slate-300" title={`${b.count} reached it on this day`}>
+                        {b.day_no === 0 ? "Same day" : `By day ${b.day_no}`}: <b>{b.by_then_pct == null ? "—" : `${b.by_then_pct.toFixed(0)}%`}</b>
+                      </span>
+                    ))}
+                  </div>
+                  {hold.errors.length ? <p className="text-amber-300">Not read: {hold.errors.map((e) => e.symbol).join(", ")}</p> : null}
+                </>
+              ) : null}
+            </div>
+          </div>
           {rows.length ? (
             <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-800">
-              <table className="w-full min-w-[860px] text-xs">
+              <table className="w-full min-w-[1180px] text-xs">
                 <thead className="sticky top-0 bg-card text-slate-400">
                   <tr>
                     {data.day ? null : (
@@ -322,6 +514,12 @@ export function PressureDayView() {
                     </SortTh>
                     <SortTh k="last" first={-1} title="At the day's last saved scan">
                       At the end
+                    </SortTh>
+                    <SortTh k="news" first={-1} left title="That day's news (press Read the news). Sorts news that agrees with the buyers / sellers first">
+                      News that day
+                    </SortTh>
+                    <SortTh k="hold" left title={`Days to reach +${holdPct}% holding up to ${holdDays} trading days (press Test holding). Sorts the quickest first`}>
+                      Keep {hold?.days ?? holdDays}d: +{hold?.target_pct ?? holdPct}%
                     </SortTh>
                   </tr>
                 </thead>
@@ -359,6 +557,12 @@ export function PressureDayView() {
                       </td>
                       <td className={clsx(td, tone(r.worst_pct))}>{signed(r.worst_pct)}</td>
                       <td className={clsx(td, tone(r.last_pct))}>{signed(r.last_pct)}</td>
+                      <td className="max-w-[22rem] px-2 py-1.5">
+                        <NewsCell row={r} news={news[newsKey(r)]} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <HoldCell h={holdMap.get(holdKey(r))} days={hold?.days ?? holdDays} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -373,5 +577,75 @@ export function PressureDayView() {
         </>
       ) : null}
     </div>
+  );
+}
+
+const SENT_TONE: Record<string, string> = {
+  POSITIVE: "bg-emerald-500/15 text-emerald-300",
+  NEGATIVE: "bg-rose-500/15 text-rose-300",
+  MIXED: "bg-amber-500/15 text-amber-300",
+  NEUTRAL: "bg-slate-700/50 text-slate-300",
+};
+
+/** That day's news for one row: the overall view, whether it fits the buyers / sellers, and the strongest headline. */
+function NewsCell({ row, news }: { row: PressureDayRow; news: NewsDayRow | undefined }) {
+  if (!news) return <span className="text-slate-600">—</span>;
+  if (news.error) return <span className="text-amber-300" title={news.error}>could not read</span>;
+  if (!news.count || !news.items?.length) return <span className="text-slate-500">no news found</span>;
+  const fit = newsFit(row, news);
+  const top = news.items[0];
+  const when = istParts(top.at);
+  const after = when != null && when.day === row.day && when.time > row.first_at;
+  const all = news.items
+    .map((it) => {
+      const w = istParts(it.at);
+      return `${w ? `${w.day} ${w.time}` : ""} · ${it.sentiment} ${it.impact} · ${it.title}${it.why ? ` (${it.why})` : ""}`;
+    })
+    .join("\n");
+  const sent = news.overall?.sentiment ?? "NEUTRAL";
+  return (
+    <div className="space-y-0.5" title={all}>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-semibold", SENT_TONE[sent] ?? SENT_TONE.NEUTRAL)}>
+          {sent.toLowerCase()} · {(news.overall?.impact ?? "LOW").toLowerCase()}
+        </span>
+        {fit === "fits" ? (
+          <span className="text-[10px] font-semibold text-emerald-300">same way as the {row.side === "BUY" ? "buyers" : "sellers"}</span>
+        ) : fit === "against" ? (
+          <span className="text-[10px] font-semibold text-rose-300">against the {row.side === "BUY" ? "buyers" : "sellers"}</span>
+        ) : null}
+        {news.items.length > 1 ? <span className="text-[10px] text-slate-500">+{news.items.length - 1} more</span> : null}
+      </div>
+      <a href={top.url || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 text-slate-300 hover:text-slate-100 hover:underline">
+        {when ? <span className="mr-1 text-slate-500">{when.day === row.day ? when.time : `${when.day.slice(5)} ${when.time}`}</span> : null}
+        {after ? <span className="mr-1 rounded bg-slate-700/60 px-1 text-[10px] text-slate-300">after</span> : null}
+        {top.title}
+      </a>
+    </div>
+  );
+}
+
+/** Days to the profit % for one row (hold_test.follow). */
+function HoldCell({ h, days }: { h: HoldTestRow | undefined; days: number }) {
+  if (!h) return <span className="text-slate-600">—</span>;
+  if (h.error) return <span className="text-slate-500">{h.error}</span>;
+  const worst = h.worst_before_pct != null ? <span className="ml-1 text-rose-300/80">worst {signed(h.worst_before_pct)}</span> : null;
+  if (h.reached) {
+    return (
+      <span className="whitespace-nowrap tabular-nums">
+        <b className="text-emerald-300">{h.day_no === 0 ? "Same day" : `Day ${h.day_no}`}</b>
+        <span className="ml-1 text-slate-400">
+          {h.day_no === 0 ? h.hit_at : `${(h.on ?? "").slice(5)} ${h.hit_at}`}
+        </span>
+        {worst}
+      </span>
+    );
+  }
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      <b className="text-rose-300">{h.sessions < days ? `Not yet (${h.sessions} of ${days} days so far)` : `Not in ${days} days`}</b>
+      <span className="ml-1 text-slate-400">best {signed(h.best_pct)}</span>
+      {worst}
+    </span>
   );
 }

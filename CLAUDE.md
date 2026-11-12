@@ -1537,6 +1537,15 @@ spinning top), body and range) / Matched / Call columns
   its way before the day's last scan (`moved`, when, minutes), the best / worst move and the move at the end. `_day_stats`:
   per side and overall how many moved (`correct_pct`), average minutes and best move; plain-words `answer`. The % boxes on
   the alerts card, this view and "Trade a saved scan" take any typed number.
+  The day list also filters by first-reached time and price then, sorts every column, and has two read-only extras:
+  **Read the news** (desk `GET /api/news-impact/day?date=&symbols=&ai=`, per day up to 40 stocks; the "News that day"
+  column: overall sentiment / impact, same way as or against the buyers / sellers, the strongest headline with its time,
+  "after" when it came out after the share was reached; a split of how many moved by news fit) and **Keep for N days**
+  (`backend/hold_test.py`, terminal `POST /api/hold-test` (rows symbol / day / at / side / price, `days` 1-20,
+  `target_pct`; same hours rule as the Second candle test): from the price then, the real 1-minute candles
+  (`strategy_lab.load_tape`) of that day and the next N trading sessions: the session the high / low first touched the
+  profit % (`day_no` 0 = same day, `on`, `hit_at`), the drawdown before it, best and end move; `summarize` gives reached %
+  by each day and plain-words lines). No order path; nothing in the strategy reads it.
 - `backend/scan_trade_test.py` – **Trade a saved scan** (arithmetic on real candles; no order, nothing armed; the Most active
   card's "Trade a saved scan" view, `components/Scalp/ScanTradeTest.tsx`): one saved Most active scan gives the day, the time
   and the stocks. `picks` (`pick` `PRESSURE` = buyers ≥ `pct` % buys / sellers ≥ `pct` % sells, `BIAS` = the row's bias, `MOVE`
