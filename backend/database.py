@@ -180,6 +180,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "ha_colours": "BOOLEAN DEFAULT 0",
             "use_supertrend": "BOOLEAN DEFAULT 0",
             "use_level": "BOOLEAN DEFAULT 0",
+            "use_fresh": "BOOLEAN DEFAULT 0",
+            "fresh_rvol": "FLOAT DEFAULT 1.5",
             "use_high52": "BOOLEAN DEFAULT 0",
             "high52_side": "VARCHAR DEFAULT 'LONG'",
             "high52_pct": "FLOAT DEFAULT 0",

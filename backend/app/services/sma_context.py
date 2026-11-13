@@ -233,6 +233,8 @@ FIELD_HELP = {
     "reverse_colour_exit": "a trade opened by reverse on exit (EXIT_REVERSE) closes on the first candle of the other colour after its entry (red for a long, green for a short); no reverse",
     "use_supertrend": "entry check: Supertrend on the trade's side", "st_exit": "exit when Supertrend flips against",
     "st_period": "Supertrend ATR length", "st_mult": "Supertrend factor",
+    "use_fresh": "entry check: fresh trend = an SMA cross within the last 3 candles, price and fast SMA beyond VWAP, the gap widening, volume at least fresh_rvol x usual",
+    "fresh_rvol": "fresh trend check: smallest volume vs usual (0 = not checked)",
     "use_level": "entry check: close beyond level_line (BB_MIDDLE | BB_UPPER | PIVOT_P | PIVOT_R1)",
     "use_high52": "entry check: a buy only on a close at the 52-week high (a sell at the 52-week low), from Groww daily candles",
     "high52_side": "52-week check side: LONG (buys only, sells refused) | SHORT | BOTH",

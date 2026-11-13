@@ -87,6 +87,7 @@ import stop_handoff
 import stock_regime
 import turn_entry
 import high52
+import fresh_entry
 import level_check
 import day_extreme
 import colour_pull
@@ -358,7 +359,7 @@ SNAPSHOT_FIELDS = (
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
-    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
@@ -603,6 +604,10 @@ def _entry_block(
         lvl = level_check.entry_reason(frame, direction, cfg)
         if lvl:
             reason = f"{reason}; {lvl}" if reason else lvl
+    if on("fresh"):
+        fr = fresh_entry.entry_reason(frame, direction, cfg)
+        if fr:
+            reason = f"{reason}; {fr}" if reason else fr
     if on("high52"):
         h52 = high52.entry_reason(frame, direction, cfg)
         if h52:
@@ -718,6 +723,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("Open range")
         elif low.startswith("price level"):
             parts.append("Level")
+        elif low.startswith("fresh trend"):
+            parts.append("Fresh")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -779,7 +786,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"), ("fresh", "Fresh trend"),
     ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
@@ -836,6 +843,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return supertrend.passed_text(frame, direction, cfg)
         if name == "level":
             return level_check.passed_text(frame, direction, cfg)
+        if name == "fresh":
+            return fresh_entry.passed_text(frame, direction, cfg)
         if name == "high52":
             return high52.passed_text(frame, direction, cfg)
         if name in opening_range.CHECKS:
@@ -949,7 +958,7 @@ _FILTER_KEYS = (
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
-    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
 
@@ -7018,6 +7027,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("Supertrend")
     if bool(getattr(cfg, "use_level", False)):
         checked.append("price level")
+    if fresh_entry.on(cfg):
+        checked.append("fresh trend")
     if high52.on(cfg):
         checked.append("52-week high")
     if opening_range.any_on(cfg):

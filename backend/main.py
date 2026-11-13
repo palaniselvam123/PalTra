@@ -52,6 +52,7 @@ import stock_rank
 import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
+import fresh_entry
 import level_check
 import news_entry
 import arm_log
@@ -744,6 +745,8 @@ class ConfigUpdate(BaseModel):
     ha_colours: bool | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
+    use_fresh: bool | None = None
+    fresh_rvol: float | None = Field(default=None, ge=0, le=fresh_entry.MAX_RVOL)
     level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
     use_high52: bool | None = None
     high52_side: str | None = Field(default=None, pattern="^(LONG|SHORT|BOTH)$")
@@ -1780,6 +1783,8 @@ def _gap_dict(row) -> dict:
         "ha_colours": heikin_ashi.on(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
+        "use_fresh": fresh_entry.on(row),
+        "fresh_rvol": fresh_entry.min_rvol(row),
         "use_high52": high52.on(row),
         "high52_side": high52.side_of(row),
         "high52_pct": high52.pct_of(row),

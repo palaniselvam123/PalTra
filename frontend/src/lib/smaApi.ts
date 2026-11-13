@@ -231,6 +231,9 @@ export type SmaConfig = {
   use_supertrend?: boolean;
   /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */
   use_level?: boolean;
+  /** Fresh trend entry check (fresh_entry.py): a new cross, beyond VWAP, the gap widening, volume fresh_rvol x usual. */
+  use_fresh?: boolean;
+  fresh_rvol?: number;
   level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1";
   /** 52-week high check (high52.py): a buy only on a close at the 52-week high (a sell at the low), from Groww daily candles. */
   use_high52?: boolean;

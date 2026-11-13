@@ -705,6 +705,19 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   first, then nearest the high (`sort_key`). The Scalp page's "52-week high" tab (`components/Scalp/High52Scan.tsx`: scan
   lists, Show new high / within the band of the high or low / all, band %, tick boxes, Arm / Arm ticked). Nothing in the
   strategy reads the scan.
+- `backend/fresh_entry.py` – **Fresh trend entry check** (`use_fresh`, off by default; `fresh_rvol` 1.5, 0-20, 0 = volume
+  not checked; per bot and per stock, PAPER and LIVE, replays too, entries only): the Trend quality card's Fresh trend flag
+  as a bot rule, so the owner can test "fresh cross + VWAP + volume" as one strategy. Wired through `_entry_block` (check
+  name `fresh`, chart ✕ "Fresh"): on the bot's closed candles, for the signal's side, `cross` (the SMAs crossed to this
+  side within `trend_strength.FRESH_CANDLES` 3 closed candles), `vwap` (the last close and the fast SMA beyond
+  `indicators._session_vwap`), `gap` (wider than on the candle before) and `volume` (Groww's running session volume at
+  the last closed candle at least `fresh_rvol` times the same candle of the earlier sessions in the frame,
+  `nth_candle.rvol_at`; unknown refuses). Read like the other checks, so "Late entry" (15 minutes on 5-minute candles)
+  lets a cross that fails on its own candle enter on the next two. Settings → 2. Checks before entering ("Enter only on a
+  fresh trend"). **One-click set-up** (`StylePicker.FreshSetup`, under the Sideways set-up on Settings → Strategy;
+  form-fill only, nothing saved until Save): 5-minute candles with the SMA cross entry, the check at 1.5x, late entry
+  15 minutes, and the trailing stop in ATR multiples 1.5 / 0.5 with no target. Other checks and exits already on stay on.
+  The Strategy lab does not know this check. The stock research baseline keeps it off.
 - `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
   entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
   `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /

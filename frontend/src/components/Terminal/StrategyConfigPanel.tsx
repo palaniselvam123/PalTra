@@ -7,7 +7,7 @@ import { SlopeEditor } from "@/components/Settings/SlopeEditor";
 import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModePicture } from "@/components/Settings/StrategyPictures";
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { TierTag } from "@/components/Settings/SettingsCard";
-import { Only, SidewaysGuard, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
+import { FreshSetup, Only, SidewaysGuard, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
@@ -421,6 +421,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     ha_colours: Boolean(form.ha_colours),
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
+    use_fresh: Boolean(form.use_fresh),
+    fresh_rvol: Math.min(20, Math.max(0, Number(form.fresh_rvol ?? 1.5) || 0)),
     use_high52: Boolean(form.use_high52),
     high52_side: ["LONG", "SHORT", "BOTH"].includes(String(form.high52_side)) ? (String(form.high52_side) as SmaConfig["high52_side"]) : "LONG",
     high52_pct: Math.min(20, Math.max(0, Number(form.high52_pct ?? 0) || 0)),
@@ -746,6 +748,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       </div>
       <StylePicker form={form} view={styleView} onChange={setStyleView} botLabel={scope || deskLabel()} />
       <SidewaysGuard form={form} onFill={turnOff} />
+      <FreshSetup form={form} onFill={turnOff} />
       <ActiveRules form={form} scope={scope} onOff={turnOff} notes={gapNotes} />
       {!stockScope ? <StrategyPresets current={strategyBody()} labels={LABELS} refreshKey={savedCount} onLoad={loadPreset} /> : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Settings groups">
@@ -1961,6 +1964,39 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <option value="PIVOT_P">Pivot P</option>
                 <option value="PIVOT_R1">R1 for a buy, S1 for a sell</option>
               </select>
+            </label>
+          ) : null}
+          <label id="sma-fresh" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.use_fresh)}
+              onChange={(e) => set("use_fresh", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("use_fresh") && <OwnTag />}
+            Enter only on a fresh trend
+            <InfoTip label="About the fresh trend check">
+              The Trend quality page&apos;s Fresh trend flag as an entry rule. A buy needs all of: the two averages crossed up
+              within the last 3 candles, the price and the fast average are above the day&apos;s average price (VWAP), the gap
+              between the averages is wider than on the candle before, and the stock has traded at least the volume below
+              against its usual for this time of day (0 = volume not checked). A sell is the mirror. With &quot;Late entry&quot;
+              set to three candles (15 minutes on 5-minute candles), a cross that fails on its own candle can still enter on
+              the next two. Until volume vs usual is known (no earlier day in the candles) the entry is refused.
+            </InfoTip>
+          </label>
+          {form.use_fresh ? (
+            <label className="mt-2 flex max-w-xs flex-col gap-1 text-xs text-slate-400">
+              {isOwn("fresh_rvol") && <OwnTag />}
+              Volume at least (× the usual for this time, 0 = any)
+              <input
+                type="number"
+                min={0}
+                max={20}
+                step={0.1}
+                value={String(form.fresh_rvol ?? 1.5)}
+                onChange={(e) => set("fresh_rvol", e.target.value)}
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              />
             </label>
           ) : null}
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
@@ -3521,6 +3557,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       PIVOT_R1: "Price beyond R1 / S1 (buy above R1, sell below S1)",
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
+  check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
   check(
     "use_high52",
     f.use_high52,
