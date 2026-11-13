@@ -69,7 +69,7 @@ const POLL_MS = 3_000;
 // has to be awake. On mobile a backgrounded tab may skip ticks.
 // While the server's re-scan is on, the card fetches the newest result this often.
 const AUTO_POLL_MS = 60_000;
-const EVERY_CHOICES = [5, 10, 15, 20, 30, 45, 60];
+const EVERY_CHOICES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60];
 const QUIET_STORE = "sma.chop.quiet"; // localStorage key for the alert settings
 
 type Props = {

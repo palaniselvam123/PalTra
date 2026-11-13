@@ -1024,7 +1024,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   priced inside it; the card's Price from / to boxes filter the table and pop-up the same way. The Scalp page's Trend quality card
   defaults to armed-stocks-only, so only the stocks on the Trade list are downloaded (quick enough to
   run quietly). **Auto re-scan** (`backend/chop_auto.py`, `ChopAuto`): the server itself starts the
-  scan every `every_min` minutes (5/10/15/20/30/45/60, default 30) while NSE is open, no browser
+  scan every `every_min` minutes (1/2/3/4/5/10/15/20/30/45/60, default 30; a pass still running is never doubled, so a short interval just starts the next pass as soon as one ends) while NSE is open, no browser
   needed, with the card's last choices (candle, Armed only read fresh each time: the desk's link on
   the scanner, `armed_lists()` on the desk; quiet minutes, price range, Telegram). Settings in
   `chop_auto.json` next to the terminal's SQLite file (the Fly volume); `PUT /api/chop-scan/auto`,
@@ -1461,7 +1461,7 @@ spinning top), body and range) / Matched / Call columns
   else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
   columns and the per-group summary). Read-only.
   **Auto scan** (`active_stocks.AutoSettings`, `active_auto.json` next to the desk DB, `ACTIVE_AUTO_FILE`): the server runs
-  the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 2-60, default 5) while NSE is open, no browser
+  the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 1-60: 1, 2, 3, 4, 5, 10…, default 5) while NSE is open, no browser
   needed (`ActiveScanner.start_background`, checked every `CHECK_SEC` 15 s; a manual Scan now counts as a run; Pause scans
   and `SCANS=off` stop it). On by default on the desk and scanner (the old fixed 5-minute loop), off on the backtest
   server, where while on in market hours it keeps the machine awake. `GET /api/scalp/active` carries `auto`; `PUT
@@ -1978,6 +1978,22 @@ spinning top), body and range) / Matched / Call columns
   ticked stocks to a list or a new one, open their news). On the scanner server the lists are the desk's, through the link
   (`useNewsLists`; scanner `GET /api/link/desk-news-lists`, `POST /api/link/desk-news-lists/add` → desk `/api/link/news-lists`
   `[/add]`, `SCANNER_LINK_TOKEN`), and "Open their news" opens the desk's News page.
+- `backend/app/services/results.py` – **Quarterly results** (the News page's "Quarterly results" tab,
+  `components/News/ResultsPanel.tsx`, `/news/?tab=quarterly`, next to the "Results calendar" tab of `results_calendar.py`; read-only, never trades, nothing in the strategy reads it; owner's
+  idea from MyAlgoMate's results calendar: companies file with NSE first, before the news channels). **Calendar**
+  (`calendar`, desk `GET /api/results/calendar?days=7`): NSE's board meetings (`api/corporate-board-meetings`, else
+  `api/event-calendar`) whose purpose is financial results, per day with an F&O flag (`parse_calendar`). **Filed**
+  (`filed`, `GET /api/results/filed`): NSE's latest results filings (`api/corporates-financial-results`) with the filing
+  time (`parse_filed`). **Numbers** (`stock`, `GET /api/results/stock/{symbol}`; `many`, `POST /api/results/analyze` up to
+  `MAX_ANALYZE` 40, one NSE session, `GAP_SEC` apart): NSE's results comparison (`api/results-comparision`) read loosely
+  (`_pick`: NSE renames fields) into quarters (revenue, total income, PBT, net profit in ₹ crore from NSE's ₹ lakh
+  `LAKH_PER_CRORE`, basic EPS, `quarter_label` Indian FY). **Verdict** (`analyze`): the newest quarter against the same
+  quarter a year before and the one before: growth of sales, PBT and net profit, net margin change, a loss turned into a
+  profit (or back) (`_profit_points`), weighted (`WEIGHTS`, `FULL_GROWTH` 25 % / `FULL_MARGIN` 3 pts = a full point) into
+  `score` -1..1: POSITIVE / NEGATIVE ≥ 0.15, MIXED when sales and profit point opposite ways, impact HIGH ≥ 0.5 / MEDIUM ≥
+  0.25 / LOW, and a plain `why` line. NSE down = an `error` message, never a crash. `GET /api/results/probe?symbol=` (the
+  tab's "Check what NSE answers") shows each source's keys and first row, to spot a renamed field. Cached 30 min per stock,
+  10 min for the lists.
 - `backend/app/services/news_validation.py` – news check, "Did it move?" (the News page's tab, `components/News/NewsCheck.tsx`;
   read-only, never trades): for a day, each headline (the `NewsAlert` rows saved that day via `from_alert`, plus the news of
   typed symbols and, with `armed`, every armed / held stock, `news_impact.analyze(use_ai=False, day=)`; out after the previous

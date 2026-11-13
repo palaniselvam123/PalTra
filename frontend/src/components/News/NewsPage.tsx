@@ -10,9 +10,10 @@ import { useArming } from "@/components/Scalp/useArming";
 import { StockNewsPanel, validTill } from "@/components/Terminal/StockNewsPanel";
 import { WatchNewsDialog } from "@/components/News/WatchNewsDialog";
 import { NewsCheckPanel } from "@/components/News/NewsCheck";
+import { ResultsPanel } from "@/components/News/ResultsPanel";
 import { ResultsCalendarPanel } from "@/components/News/ResultsCalendar";
 
-type Tab = { kind: "list"; id: number } | { kind: "bots" } | { kind: "feed" } | { kind: "alerts" } | { kind: "picked" } | { kind: "check" } | { kind: "results" };
+type Tab = { kind: "list"; id: number } | { kind: "bots" } | { kind: "feed" } | { kind: "alerts" } | { kind: "picked" } | { kind: "check" } | { kind: "results" } | { kind: "quarterly" };
 
 const card = "terminal-dark rounded-xl border border-white/10 p-4";
 const field = "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
@@ -74,7 +75,10 @@ export function NewsPage() {
 
   // /news/?symbols=A,B (from the Scalp page's Watch news) opens those stocks.
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("symbols");
+    const params = new URLSearchParams(window.location.search);
+    const want = params.get("tab");
+    if (want === "results" || want === "quarterly") setTab({ kind: want });
+    const q = params.get("symbols");
     const names = q ? symbolsOf(q) : [];
     if (names.length) {
       setPicked(names);
@@ -120,6 +124,7 @@ export function NewsPage() {
     { key: "alerts", label: "Alerts", tab: { kind: "alerts" } },
     { key: "results", label: "Results calendar", tab: { kind: "results" } },
     { key: "check", label: "Did it move?", tab: { kind: "check" } },
+    { key: "quarterly", label: "Quarterly results", tab: { kind: "quarterly" } },
   ];
   const keyOf = (t: Tab) => (t.kind === "list" ? `l${t.id}` : t.kind);
 
@@ -251,6 +256,8 @@ export function NewsPage() {
             onArm={(s) => arm(s, "Results")}
           />
         </>
+      ) : tab.kind === "quarterly" ? (
+        <ResultsPanel onArm={(s) => arm(s, "Results")} onNews={setOpen} />
       ) : tab.kind === "check" ? (
         <NewsCheckPanel />
       ) : tab.kind === "feed" ? (
@@ -275,7 +282,7 @@ export function NewsPage() {
           }
         />
       )}
-      {open && (tab.kind === "feed" || tab.kind === "alerts") ? (
+      {open && (tab.kind === "feed" || tab.kind === "alerts" || tab.kind === "quarterly") ? (
         <div className="overflow-hidden rounded-xl border border-white/10">
           <StockNewsPanel symbol={open} onClose={() => setOpen(null)} />
         </div>

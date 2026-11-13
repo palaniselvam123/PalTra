@@ -1,6 +1,6 @@
 """Trend quality auto re-scan, run by the server (no browser needed).
 
-Every `every_min` minutes (5-60, the owner's choice) while NSE is open, the
+Every `every_min` minutes (1-60, the owner's choice) while NSE is open, the
 server starts the Trend quality scan (`chop_scan`) itself with the card's last
 choices: candle size, Armed only (read fresh each time), quiet minutes, price
 range and the quiet-runner Telegram. The settings are saved next to the SMA
@@ -28,7 +28,7 @@ from groww_client import IST, market_is_open
 
 log = logging.getLogger("sma.chop_auto")
 
-EVERY_CHOICES = (5, 10, 15, 20, 30, 45, 60)
+EVERY_CHOICES = (1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60)
 DEFAULT_EVERY = 30
 CANDLE_CHOICES = (1, 2, 3, 5, 10, 15)
 CHECK_SEC = 20

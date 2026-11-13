@@ -3486,7 +3486,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
 
 class ChopAutoUpdate(BaseModel):
     on: bool | None = None
-    every_min: Literal[5, 10, 15, 20, 30, 45, 60] | None = None
+    every_min: Literal[1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60] | None = None
     minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
     armed_only: bool | None = None
     quiet_min: int | None = Field(default=None, ge=1, le=375)
