@@ -21,6 +21,44 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "settings-entries",
+    title: "Strategy settings 1: getting in (look-alike names told apart)",
+    summary:
+      "The Settings page has many boxes that share a word. This guide takes the first half of a trade (the signal, the checks, how the order is placed) and puts every look-alike side by side with a picture and a worked example on a ₹1,000 stock: the eight candle-size menus, the four \"Enter on\" signals, the six extra ways in, the five waits before an order, the six \"gap\" settings, the candle-colour rules, the five kinds of volume, and the trend and morning settings.",
+    topic: "SMA strategy",
+    file: "/guides/strategy-settings-entries-guide.pdf",
+    pages: 12,
+    minutes: 25,
+    added: "2026-11-13",
+    open: { href: "/settings/", label: "Open the strategy settings" },
+    points: [
+      "First ask which step a setting is in: signal (group 1), check (2), placing the order (1), in the trade (3, 4, 5), after it closes (7).",
+      "The same indicator can be a check, an exit and a stop: three separate switches sharing one set of numbers.",
+      "SMA gap range is a check at the cross; SMA gap mode is a different way to enter and exit; the SMA gap stop is a stop type.",
+      "Late entry waits for a refused cross; Join the morning trend enters when there was no cross today; Early reversal and SMA 9 turn enter before the cross.",
+      "Pullback, limit and day high/low guard wait for a cheaper price; the entry-candle check waits for strength.",
+    ],
+  },
+  {
+    id: "settings-exits",
+    title: "Strategy settings 2: getting out (exits, stops, reverse, hand-offs)",
+    summary:
+      "The second half of a trade, with every look-alike side by side: stop vs target vs exit rule, the five stop types on one chart, the trailing stop step by step, the four places \"ATR ×\" means something different, the five targets, the five cross exits, the four SMA 9 line exits in the order they fire, exits combining with OR / AND, the seven \"flip\" and \"reverse\" settings, which setting moves a stock to which bot, the limits and times that look alike, and who a setting applies to.",
+    topic: "SMA strategy",
+    file: "/guides/strategy-settings-exits-guide.pdf",
+    pages: 11,
+    minutes: 25,
+    added: "2026-11-13",
+    open: { href: "/settings/", label: "Open the strategy settings" },
+    points: [
+      "A stop and a target are prices watched every second; an exit rule is read only when a candle closes. The first to fire wins.",
+      "Each target works only with its own stop type: an ATR target does nothing while the stop type is Trailing.",
+      "Flip changes which way an order goes when it opens; reverse opens a second, opposite trade after one closes.",
+      "Bot 2 takes choppy stocks, Bot 3 trending ones, Bot 5 fast movers: each arrow is its own tick box, off by default.",
+      "Max trades / day stops the bot's entries; per stock / day stops one stock; the daily loss limit closes everything.",
+    ],
+  },
+  {
     id: "scalp-start-here",
     title: "The Scalp page, start here",
     summary:

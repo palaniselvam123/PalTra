@@ -304,6 +304,12 @@ export default function SettingsPage() {
             >
               <BookOpen size={13} aria-hidden /> Guides (Learn page)
             </a>
+            <a
+              href="/learn/?lesson=settings-entries"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2.5 font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10"
+            >
+              <BookOpen size={13} aria-hidden /> Similar names explained (guide)
+            </a>
             <button
               type="button"
               onClick={() => setWords(true)}
