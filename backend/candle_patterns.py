@@ -68,6 +68,11 @@ DEFAULTS = {
     "colour_body_seq": "",
     "colour_inside_minutes": 0,
     "colour_inside_body": 0.0,
+    # A separate rule for closing a trade (colour_exit.py).
+    "colour_exit_on": False,
+    "colour_exit_count": 2,
+    "colour_exit_body": 0.2,
+    "colour_exit_inside": False,
     # Colour entries wait for a pullback (colour_pull.py).
     "colour_pull": "OFF",
     "colour_pull_candles": 1,

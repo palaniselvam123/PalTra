@@ -425,6 +425,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `ha_colours`; they set the colour even while the bigger HA candle still reads the other one) and the real colour candle
   closed that way, that one candle is enough for an entry or a turn (no run of `colour_count`) with this smallest body
   (on the real candle) instead of the usual sizes; mixed inside candles leave the normal rule to decide. Settings: `StrategyConfigPanel.ColourInside`.
+  **A separate rule to close a trade** (`backend/colour_exit.py`; `colour_exit_on` off by default, `colour_exit_count` 1-5 (2),
+  `colour_exit_body` % of the close, 0 = any (0.2), `colour_exit_inside` off; per bot and per stock, PAPER and LIVE, replays
+  too; owner's request: one colour reading used to both open and close, so tightening exits changed entries too): while a
+  trade is open `StrategyEngine._colour_minute` reads `colour_call` on `colour_exit.exit_cfg(cfg)` (that count and % body; no
+  ATR / per-size / per-candle bodies; the smaller-candles rule only with `colour_exit_inside`; candle size and Heikin Ashi
+  colours are the bot's own) instead of the entry rule; recovery hold reads that call too. When it closes a trade
+  (`COLOUR_TURN`) the other side opens only if the entry rule asks for it on that candle, else the stock waits flat. Entries
+  while flat are unchanged. Settings → 1. When to enter, under the candle colour rules (`StrategyConfigPanel.ColourExit`,
+  anchor `#sma-colour-exit`).
   **Wait for a pullback** (`backend/colour_pull.py`; `colour_pull` `OFF` default | `HALF` | `LOW` | `SMA9`, `colour_pull_candles`
   1-3 (1), `colour_pull_market` off; per bot and per stock, PAPER and LIVE, replays too; owner's request: a colour buy went in
   at the top of a strong green candle): instead of the market at the start of the next candle, `apply_signal` arms a

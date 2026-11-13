@@ -518,6 +518,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     colour_body_seq: String(form.colour_body_seq ?? ""),
     colour_inside_minutes: ([0, 1, 2, 3, 5, 10].includes(Number(form.colour_inside_minutes)) ? Number(form.colour_inside_minutes) : 0) as 0 | 1 | 2 | 3 | 5 | 10,
     colour_inside_body: Math.min(2, Math.max(0, Number(form.colour_inside_body ?? 0) || 0)),
+    colour_exit_on: Boolean(form.colour_exit_on),
+    colour_exit_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_exit_count ?? 2)) || 2)),
+    colour_exit_body: Math.min(2, Math.max(0, Number(form.colour_exit_body ?? 0.2) || 0)),
+    colour_exit_inside: Boolean(form.colour_exit_inside),
     colour_pull: (["OFF", "HALF", "LOW", "SMA9"].includes(String(form.colour_pull)) ? String(form.colour_pull) : "OFF") as "OFF" | "HALF" | "LOW" | "SMA9",
     colour_pull_candles: Math.min(3, Math.max(1, Math.round(Number(form.colour_pull_candles ?? 1)) || 1)),
     colour_pull_market: Boolean(form.colour_pull_market),
@@ -3488,7 +3492,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}${String(f.colour_pull ?? "OFF") !== "OFF" ? ` (waits for a pullback to the ${f.colour_pull === "HALF" ? "middle" : f.colour_pull === "LOW" ? "low" : "SMA 9 / low"} of the candle for ${f.colour_pull_candles ?? 1} candle(s)${f.colour_pull_market ? ", then at the market" : ""})` : ""}, then reversed`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}${String(f.colour_pull ?? "OFF") !== "OFF" ? ` (waits for a pullback to the ${f.colour_pull === "HALF" ? "middle" : f.colour_pull === "LOW" ? "low" : "SMA 9 / low"} of the candle for ${f.colour_pull_candles ?? 1} candle(s)${f.colour_pull_market ? ", then at the market" : ""})` : ""}, then reversed${f.colour_exit_on ? ` (closes by its own rule: ${f.colour_exit_count ?? 2} candle(s) of the other colour${Number(f.colour_exit_body ?? 0.2) > 0 ? `, bodies ≥ ${f.colour_exit_body ?? 0.2}%` : ""})` : ""}`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
@@ -4588,6 +4592,7 @@ function ColourBodySize({
       )}
       <ColourBodySeq form={form} set={set} isOwn={isOwn} unit={unit} />
       <ColourInside form={form} set={set} isOwn={isOwn} />
+      <ColourExit form={form} set={set} isOwn={isOwn} />
       <ColourPull form={form} set={set} isOwn={isOwn} />
     </div>
   );
@@ -4724,6 +4729,77 @@ function ColourInside({
         colour) and the real {tf}-minute candle closed that way too, that one candle is enough: no run of &quot;Candles in a
         row&quot;, and this smallest body (on the real candle) instead of the sizes above. Mixed inside candles: the rules above decide as before.
         Read for turns and for entries while flat.
+      </p>
+    </div>
+  );
+}
+
+/** A separate rule for closing a colour trade (colour_exit_on / _count / _body / _inside, backend colour_exit.py). */
+function ColourExit({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const tf = Number(form.pattern_tf ?? 1) || 1;
+  const on = Boolean(form.colour_exit_on);
+  const n = Math.min(5, Math.max(1, Math.round(Number(form.colour_exit_count ?? 2)) || 2));
+  const body = Number(form.colour_exit_body ?? 0.2) || 0;
+  const own = isOwn("colour_exit_on") || isOwn("colour_exit_count") || isOwn("colour_exit_body") || isOwn("colour_exit_inside");
+  const inside = Number(form.colour_inside_minutes ?? 0) > 0;
+  return (
+    <div id="sma-colour-exit" className="mt-3 border-t border-white/10 pt-2">
+      <label className="flex items-center gap-2 text-sm text-slate-200">
+        <input type="checkbox" checked={on} onChange={(e) => set("colour_exit_on", e.target.checked)} />
+        <span>
+          Use a separate rule to close a trade{own ? " (own)" : ""}{" "}
+          <span className="text-xs text-slate-500">({on ? "on" : "off: the entry rule above closes trades too"})</span>
+        </span>
+      </label>
+      <div className={clsx("mt-1 grid grid-cols-2 items-end gap-2", !on && "opacity-50")}>
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs text-slate-400">Candles of the other colour in a row</span>
+          <select
+            value={String(n)}
+            onChange={(e) => set("colour_exit_count", e.target.value)}
+            disabled={!on}
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          >
+            {[1, 2, 3, 4, 5].map((k) => (
+              <option key={k} value={String(k)}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm text-slate-300">
+          <span className="text-xs text-slate-400">Smallest body of each (% of price, 0 = any)</span>
+          <input
+            inputMode="decimal"
+            value={String(form.colour_exit_body ?? 0.2)}
+            onChange={(e) => set("colour_exit_body", e.target.value)}
+            disabled={!on}
+            aria-label="Smallest body of each exit candle, % of price"
+            className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+          />
+        </label>
+      </div>
+      <label className={clsx("mt-2 flex items-center gap-2 text-sm text-slate-300", (!on || !inside) && "opacity-50")}>
+        <input
+          type="checkbox"
+          checked={Boolean(form.colour_exit_inside)}
+          onChange={(e) => set("colour_exit_inside", e.target.checked)}
+          disabled={!on}
+        />
+        Let &quot;When the smaller candles inside agree&quot; close a trade too
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        {on
+          ? `An open trade closes only after ${n} ${tf}-minute candle${n > 1 ? "s" : ""} of the other colour in a row${body > 0 ? `, each with a body of at least ${body}%` : ""}${form.colour_exit_inside ? ", or one candle whose smaller candles all agree" : ""}. Entries keep the rules above. After the close, the other side opens only if the entry rule also asks for it on that candle; otherwise the stock waits flat.`
+          : "Off: the colour rules above both open and close trades (a candle of the other colour turns the trade). Tick it to give closing its own, stricter rule while entries stay as they are."}
       </p>
     </div>
   );
