@@ -114,6 +114,11 @@ export default function TerminalPage() {
   const busy = useRef(false);
   const [replay, setReplay] = useState<ReplayInfo | null>(null);
   const replayOn = useRef(false);
+  // Auto-arm replay: each armed stock's line from the replayed engine (why no order yet), shown on the replay bar.
+  const replayNotes = useMemo(
+    () => (replay?.pick_rule?.kind === "AUTOARM" ? Object.fromEntries((state?.books ?? []).map((b) => [b.symbol, b.note ?? ""])) : undefined),
+    [replay?.pick_rule?.kind, state?.books],
+  );
   // The day, run and stock the replay was last showing, so the chart can stay
   // on that day after the replay ends instead of jumping to today.
   const lastPlayed = useRef<{ date: string; runId: number | null; symbol: string | null } | null>(null);
@@ -566,6 +571,7 @@ export default function TerminalPage() {
               onChanged={onReplay}
               bot={botNo}
               botName={config?.bot_name ?? `Bot ${botNo}`}
+              notes={replayNotes}
             />
             {replay?.follows ? <FastFollow source={replay.follows} log={state?.fast_log ?? []} /> : null}
           </>
@@ -583,6 +589,7 @@ export default function TerminalPage() {
             onChanged={onReplay}
             bot={1}
             botName={config?.bot_name ?? "Bot 1"}
+            notes={replayNotes}
           />
         )}
         </div>

@@ -235,6 +235,8 @@ type Props = {
   /** The desk's bot: its settings and armed stocks are what a replay started here plays. */
   bot?: number;
   botName?: string;
+  /** The replayed engine's per-stock lines (state.books[].note): why an armed stock has no order yet. */
+  notes?: Record<string, string>;
 };
 
 /** Practise on a past day's real Groww candles. Never sends an order. */
@@ -242,7 +244,7 @@ type Props = {
  * Auto-arm replay (backend auto_arm.py): a stock is armed only at the minute the auto-arm would have armed it, so the
  * bar lists the stocks armed by the replay clock (with that minute and why) and counts the ones still to come.
  */
-function AutoArmLine({ info }: { info: ReplayInfo | null }) {
+function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<string, string> }) {
   if (!info || info.status === "LOADING") {
     return <span>Stocks are armed one by one at their own minute as the day plays · practice only — no orders reach Groww</span>;
   }
@@ -255,17 +257,28 @@ function AutoArmLine({ info }: { info: ReplayInfo | null }) {
   const armed = picks.filter((p) => minute(p.at) <= now);
   const waiting = picks.filter((p) => minute(p.at) > now).sort((a, b) => minute(a.at) - minute(b.at));
   return (
-    <span>
-      {armed.length
-        ? `Armed so far: ${armed.map((p) => `${p.symbol} ${p.at}${p.why ? ` (${p.why})` : ""}`).join(", ")}`
-        : "Nothing armed yet"}
-      {waiting.length ? ` · ${waiting.length} more later today (next ${waiting[0].symbol} at ${waiting[0].at})` : picks.length ? "" : " · no stock met the rule this day"}
-      {" · "}practice only — no orders reach Groww
-    </span>
+    <div className="w-full">
+      <p>
+        {armed.length ? `Armed so far (${armed.length}):` : "Nothing armed yet"}
+        {waiting.length ? ` · ${waiting.length} more later today (next ${waiting[0].symbol} at ${waiting[0].at})` : picks.length ? "" : " · no stock met the rule this day"}
+        {" · "}practice only — no orders reach Groww
+      </p>
+      {armed.length ? (
+        <ul className="mt-0.5 max-h-28 space-y-0.5 overflow-y-auto">
+          {armed.map((p) => (
+            <li key={p.symbol} className="truncate" title={notes?.[p.symbol] ?? ""}>
+              <b className="text-violet-50">{p.symbol}</b> armed {p.at}
+              {p.why ? ` (${p.why})` : ""}
+              {notes?.[p.symbol] ? <span className="text-violet-200/70"> · {notes[p.symbol]}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
-export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName }: Props) {
+export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName, notes }: Props) {
   const [day, setDay] = useState(lastTradingDay);
   const [endDay, setEndDay] = useState(lastTradingDay);
   const [start, setStart] = useState("09:15");
@@ -591,9 +604,9 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
           <ReplayScrub info={info} onChanged={onChanged} compact={compact} />
         </div>
       ) : null}
-      <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact ? "hidden" : "flex")}>
+      <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact && !autoArm ? "hidden" : "flex")}>
         {autoArm ? (
-          <AutoArmLine info={info} />
+          <AutoArmLine info={info} notes={notes} />
         ) : (
           <span>
             {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
