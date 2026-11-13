@@ -97,6 +97,10 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: PickRule)
         import trend_picks
 
         return trend_picks.picks_for_day(frames, day, rule)
+    if getattr(rule, "kind", None) == "AUTOARM":
+        import auto_arm
+
+        return auto_arm.picks_for_day(frames, day, rule)
     if getattr(rule, "kind", None) == "ACTIVE":
         import active_picks
 

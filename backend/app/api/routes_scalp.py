@@ -291,6 +291,17 @@ async def _pressure_alert(snapshot: dict) -> None:
         import logging
 
         logging.getLogger("scalp").exception("buyer / seller alert failed")
+    try:
+        # Auto-arm (auto_arm.py) on the same thresholds; PAPER bots only.
+        from app.sma_host import load_terminal
+
+        mod = load_terminal()
+        if mod is not None and hasattr(mod, "auto_arm_after"):
+            await mod.auto_arm_after("pressure", snapshot)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger("scalp").exception("auto-arm after the most-active scan failed")
 
 
 @router.get("/active/history")

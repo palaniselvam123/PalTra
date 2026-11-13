@@ -2773,7 +2773,7 @@ export const smaApi = {
     request<HoldTestResult>("/api/hold-test", { method: "POST", body: JSON.stringify(body) }, 600000, false),
   /** The Scalp page's two Telegram alerts (scalp_alerts.py): strong trend, buyers / sellers in control. */
   scalpAlerts: () => request<ScalpAlerts>("/api/scalp-alerts", undefined, undefined, false),
-  saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names">>) =>
+  saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">>) =>
     request<ScalpAlerts>("/api/scalp-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   trendAlerts: () => request<TrendAlerts>("/api/chop-scan/trend-alerts", undefined, undefined, false),
   saveTrendAlerts: (body: Partial<Omit<TrendAlerts, "recent">>) =>
@@ -2942,6 +2942,22 @@ export const smaApi = {
     /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (on by default, like the replay bar). */
     play_handoffs?: boolean;
   }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  /** Auto-arm replay (backend auto_arm.py): past days played like live ones, each stock armed at the minute the Scalp
+   * auto-arm would have armed it, traded by `bot` from then on. Practice money; nothing is armed for real. */
+  replayAutoArm: (body: {
+    date: string;
+    end_date: string;
+    universe: string[];
+    source: "TREND" | "ACTIVE" | "BOTH";
+    first: string;
+    last: string;
+    every_min: number;
+    minutes: number;
+    bot: number;
+    speed: number;
+    play_handoffs: boolean;
+    max_day?: number;
+  }) => request<ReplayInfo & { notes?: string[] }>("/api/replay/auto-arm", { method: "POST", body: JSON.stringify(body) }, 60000),
   /** Backtest the Most active picks (backend active_picks.py): each day, the top N by the chosen column at the pick
    * time, traded by `bot` from that minute. Practice money; nothing is armed. */
   replayActivePicks: (body: {
@@ -3306,6 +3322,17 @@ export type ScalpAlerts = {
   pressure_pct: number;
   pressure_side: "BOTH" | "BUY" | "SELL";
   pressure_min_value_cr: number;
+  /** Auto-arm (backend auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. */
+  arm_strong_on: boolean;
+  arm_strong_bot: number;
+  arm_pressure_on: boolean;
+  arm_pressure_bot: number;
+  /** At most this many stocks a day per scan. */
+  arm_max_day: number;
+  auto_arm?: {
+    recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
+    today: { strong: string[]; pressure: string[] };
+  };
   recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number }[];
   max_names: number;
 };

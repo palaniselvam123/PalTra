@@ -151,7 +151,8 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, NEWS_LISTS, NEWS_LISTS_ADD
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE,
+        NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
         (STOCK_PREFIX, BACKTEST_EXPORT + "/")
     )
@@ -165,6 +166,8 @@ BACKTEST_SETTINGS = "/api/link/backtest/settings"
 BACKTEST_GROWW = "/api/link/backtest/groww"
 BACKTEST_SCANS = "/api/link/backtest/scan-history"
 BACKTEST_EXPORT = "/api/link/backtest/scan-export"
+# The desk's saved Most active scans of a day, cut down to the stocks an auto-arm replay would arm (auto_arm.py).
+BACKTEST_ACTIVE = "/api/link/backtest/active-scans"
 
 
 def _backtest_authorized(request: Request) -> None:
@@ -189,6 +192,27 @@ async def backtest_settings(request: Request):
     import asyncio
 
     return await asyncio.to_thread(mod.export_bot_settings)
+
+
+@router.get(BACKTEST_ACTIVE)
+async def backtest_active_scans(request: Request, day: str, pct: float = 70.0, side: str = "BOTH",
+                                min_value_cr: float = 0.0):
+    """One day's saved Most active scans reduced to the first time each stock's buyers or sellers reached `pct` % (the
+    auto-arm replay on the backtest server, auto_arm.py). Read-only."""
+    _backtest_authorized(request)
+    import asyncio
+    import datetime as dt
+
+    import auto_arm
+
+    try:
+        when = dt.date.fromisoformat(day)
+    except ValueError as exc:
+        raise HTTPException(400, "day must be YYYY-MM-DD") from exc
+    if side not in ("BOTH", "BUY", "SELL") or not (50.0 <= pct <= 99.0):
+        raise HTTPException(400, "Bad side or percentage")
+    scans = await asyncio.to_thread(auto_arm.saved_scans, when)
+    return {"scans": len(scans), "hits": [list(h) for h in auto_arm.active_hits(scans, pct, side, max(0.0, min_value_cr))]}
 
 
 @router.post(BACKTEST_SCANS)

@@ -1134,6 +1134,27 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `trend_rank.after_scan`, manual or auto re-scan), the top `top_n` ranks inside the limits, each stock and side once
   per IST day (`_SENT`, memory), go out as one Telegram through the quiet-runner channel and / or a phone call
   (`place_call`: market hours, 5-minute cooldown). Information only: nothing in the strategy reads it.
+- `backend/auto_arm.py` – **Auto-arm from the Scalp scans** (owner's request; arming only, no order). **Live** (settings in
+  `scalp_alerts.json` with the alerts: `arm_strong_on` / `arm_strong_bot`, `arm_pressure_on` / `arm_pressure_bot`,
+  `arm_max_day` 10, all off by default; `PUT /api/scalp-alerts`; the Alerts tab's "Also arm them on Bot N" under each
+  alert, `ScalpAlertsCard.ArmRow`): after every finished Trend quality pass (`main._chop_done` → `auto_arm_after("strong")`)
+  and Most active scan (`routes_scalp._pressure_alert` → terminal `auto_arm_after("pressure")`) in market hours, the stocks
+  the alert's thresholds pick (`scalp_alerts.strong_picks` / `pressure_picks(..., alerting=False)`: the alert's own on
+  switch and once-a-day memory do not matter) are armed on that bot (`after_scan`; source chips "Auto-arm: Trend quality" /
+  "Auto-arm: Most active"), each stock once a day per source (`_DONE`, memory only), at most `arm_max_day` a day per source,
+  a stock already armed left alone, nothing unarmed. **PAPER bots only**: a LIVE bot is refused with a note (never
+  `confirm_live`). Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link only from the
+  scanner; the desk and the backtest server arm their own bots). One Telegram per run that armed something (quiet
+  channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Auto-arm replay** (`AutoArmRule`,
+  kind `AUTOARM`, dispatched by `scalp_picks.picks_for_day`; `POST /api/replay/auto-arm`, the Scalp Backtest tab's
+  `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it
+  would have been armed: Trend quality every `every_min` minutes from `first` to `last` (`strong_read`: the same
+  `trend_strength.read` on the candles closed before that minute as the card's Trend column, about 16 ms a read) and Most
+  active from that day's saved scans (`active_hits`, the minute after each read; `saved_scans` on this server, else on the
+  backtest server desk `GET /api/link/backtest/active-scans?day=&pct=&side=&min_value_cr=` behind `BACKTEST_LINK_TOKEN`,
+  `main._auto_arm_scans`); the alert thresholds are the defaults. `ReplaySession` gives the engine `arm_windows`
+  (`auto_arm.arm_windows`, the "as armed" path: a stock armed mid-day waits for a fresh signal) and starts the day at the
+  first arm; speeds 1× (as live) to 300×. The run is a Scalp-pick run (`scalp_pick.kind = AUTOARM`, picks with `at` per day).
 - `backend/scan_arm.py` – **Scan & arm** (arming only, no order; desk, scanner and backtest server): saved recipes
   (`Preset`, `scan_arm.json` next to the SMA DB, `SCAN_ARM_FILE`, at most 20) that run one Trend quality pass on `lists`
   (F&O / Nifty 50 / 100 / Bank / armed, `main._auto_symbols`) through the shared `chop_scanner` (`main._scan_arm_scan`

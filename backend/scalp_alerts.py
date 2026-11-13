@@ -55,6 +55,12 @@ class Settings:
     pressure_pct: float = 70.0
     pressure_side: str = "BOTH"
     pressure_min_value_cr: float = 0.0
+    # Auto-arm (auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. Off by default.
+    arm_strong_on: bool = False
+    arm_strong_bot: int = 1
+    arm_pressure_on: bool = False
+    arm_pressure_bot: int = 1
+    arm_max_day: int = 10
 
 
 def settings_path() -> Path:
@@ -82,7 +88,23 @@ def clean(raw: dict) -> Settings:
     s.pressure_pct = max(50.0, min(95.0, float(raw.get("pressure_pct", s.pressure_pct) or s.pressure_pct)))
     s.pressure_side = raw.get("pressure_side") if raw.get("pressure_side") in PRESSURE_SIDES else s.pressure_side
     s.pressure_min_value_cr = max(0.0, min(100000.0, float(raw.get("pressure_min_value_cr", 0) or 0)))
+    s.arm_strong_on = bool(raw.get("arm_strong_on", s.arm_strong_on))
+    s.arm_pressure_on = bool(raw.get("arm_pressure_on", s.arm_pressure_on))
+    s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
+    s.arm_pressure_bot = _bot(raw.get("arm_pressure_bot"), s.arm_pressure_bot)
+    try:
+        s.arm_max_day = max(1, min(50, int(raw.get("arm_max_day", s.arm_max_day) or s.arm_max_day)))
+    except (TypeError, ValueError):
+        pass
     return s
+
+
+def _bot(raw, default: int) -> int:
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return n if 1 <= n <= 5 else default
 
 
 def load() -> Settings:
@@ -125,11 +147,12 @@ def _num(value) -> float | None:
         return None
 
 
-def strong_picks(rows: list[dict], s: Settings, now: dt.datetime) -> list[dict]:
-    """The strong-trend stocks to alert now: enough checks passed, the side wanted, not sent before today."""
-    if not s.strong_on:
+def strong_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bool = True) -> list[dict]:
+    """The strong-trend stocks to alert now: enough checks passed, the side wanted, not sent before today.
+    `alerting=False` (auto_arm.py): every stock passing the thresholds, whether the alert is on or sent already."""
+    if alerting and not s.strong_on:
         return []
-    sent = _sent("strong", now)
+    sent = _sent("strong", now) if alerting else {}
     out = []
     for r in rows:
         trend = r.get("trend")
@@ -148,7 +171,7 @@ def strong_picks(rows: list[dict], s: Settings, now: dt.datetime) -> list[dict]:
             "of": len(checks), "missed": missed, "minutes": r.get("minutes"), "move_pct": _num(r.get("day_move_pct")),
         })
     out.sort(key=lambda p: (-p["passed"], -abs(p["move_pct"] or 0.0)))
-    return out[:MAX_NAMES]
+    return out[:MAX_NAMES] if alerting else out
 
 
 def strong_text(picks: list[dict]) -> str:
@@ -163,11 +186,12 @@ def strong_text(picks: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime) -> list[dict]:
-    """The stocks whose buyers (or sellers) hold at least `pressure_pct` % of the waiting orders, not sent today."""
-    if not s.pressure_on:
+def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bool = True) -> list[dict]:
+    """The stocks whose buyers (or sellers) hold at least `pressure_pct` % of the waiting orders, not sent today.
+    `alerting=False` (auto_arm.py): every stock passing the thresholds, whether the alert is on or sent already."""
+    if alerting and not s.pressure_on:
         return []
-    sent = _sent("pressure", now)
+    sent = _sent("pressure", now) if alerting else {}
     need = s.pressure_pct / 100.0
     out = []
     for r in rows:
@@ -189,7 +213,7 @@ def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime) -> list[dict
             "change_pct": _num(r.get("change_pct")), "rvol": _num(r.get("rvol")),
         })
     out.sort(key=lambda p: -p["pct"])
-    return out[:MAX_NAMES]
+    return out[:MAX_NAMES] if alerting else out
 
 
 def pressure_text(picks: list[dict], s: Settings) -> str:
@@ -238,4 +262,6 @@ async def after_active_scan(snapshot: dict, send, now: dt.datetime | None = None
 
 
 def view() -> dict:
-    return {**asdict(load()), "recent": recent[:20], "max_names": MAX_NAMES}
+    import auto_arm
+
+    return {**asdict(load()), "recent": recent[:20], "max_names": MAX_NAMES, "auto_arm": auto_arm.view()}

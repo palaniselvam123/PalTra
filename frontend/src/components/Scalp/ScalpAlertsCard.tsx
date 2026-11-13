@@ -22,7 +22,7 @@ export function ScalpAlertsCard() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the alert settings"));
   }, []);
 
-  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names">>) => {
+  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">>) => {
     setBusy(true);
     setError(null);
     try {
@@ -41,11 +41,13 @@ export function ScalpAlertsCard() {
   return (
     <section className="mb-4 rounded-xl border border-slate-800 bg-card p-4">
       <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-        <BellRing size={15} className="text-bot" /> Telegram alerts: strong trend, and buyers or sellers in control
+        <BellRing size={15} className="text-bot" /> Telegram alerts and auto-arm: strong trend, and buyers or sellers in control
       </h2>
       <p className="mb-3 max-w-3xl text-xs text-slate-500">
         Each stock alerts at most once a day per alert, during market hours only, to the Telegram set up on Settings. Information
-        only: nothing is armed or ordered. They ride on the scans, so keep the scan running (its Auto scan / Auto re-scan switch).
+        only: nothing is ordered. Tick &quot;Also arm them&quot; to put the same stocks on a bot&apos;s Trade list by themselves (a PAPER bot
+        only; the bot then trades them on its own next signal). They ride on the scans, so keep the scan running (its Auto scan /
+        Auto re-scan switch). Test the auto-arm on past days in the Backtest tab, &quot;Auto-arm replay&quot;.
       </p>
       {error ? <p className="mb-2 text-xs font-semibold text-amber-300">{error}</p> : null}
       {!view ? (
@@ -79,6 +81,14 @@ export function ScalpAlertsCard() {
                 </select>
               </label>
             </div>
+            <ArmRow
+              label="Trend quality"
+              on={view.arm_strong_on}
+              bot={view.arm_strong_bot}
+              busy={busy}
+              today={view.auto_arm?.today.strong ?? []}
+              onChange={(on, bot) => void save({ arm_strong_on: on, arm_strong_bot: bot })}
+            />
           </div>
           <div className={clsx(box, view.pressure_on ? "border-emerald-400/40 bg-emerald-400/[0.04]" : "border-slate-800")}>
             <label className="flex min-h-9 items-center gap-2 text-sm font-semibold text-slate-100">
@@ -135,7 +145,49 @@ export function ScalpAlertsCard() {
                 />
               </label>
             </div>
+            <ArmRow
+              label="Most active"
+              on={view.arm_pressure_on}
+              bot={view.arm_pressure_bot}
+              busy={busy}
+              today={view.auto_arm?.today.pressure ?? []}
+              onChange={(on, bot) => void save({ arm_pressure_on: on, arm_pressure_bot: bot })}
+            />
           </div>
+          {view.arm_strong_on || view.arm_pressure_on ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
+              Auto-arm at most
+              <input
+                key={view.arm_max_day}
+                type="number"
+                min={1}
+                max={50}
+                defaultValue={view.arm_max_day}
+                disabled={busy}
+                onBlur={(e) => {
+                  const v = Math.min(50, Math.max(1, Math.round(Number(e.target.value)) || 10));
+                  if (v !== view.arm_max_day) void save({ arm_max_day: v });
+                }}
+                className={clsx(select, "w-16")}
+              />
+              stocks a day from each scan. A stock already on the bot&apos;s list stays as it is; nothing is ever taken off.
+            </div>
+          ) : null}
+          {view.auto_arm?.recent.length ? (
+            <div className="lg:col-span-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Auto-arm since the server started</p>
+              <ul className="mt-1 space-y-1 text-xs">
+                {view.auto_arm.recent.map((r, i) => (
+                  <li key={`${r.at}-${i}`} className="text-slate-300">
+                    <span className="tabular-nums text-slate-500">{time(r.at)}</span> {r.source === "strong" ? "Trend quality" : "Most active"} →{" "}
+                    {r.bot_name ?? `Bot ${r.bot}`}:{" "}
+                    {r.error ? <span className="text-amber-300">{r.error}</span> : <b>{r.armed.join(", ") || "nothing new"}</b>}
+                    {r.skipped.length ? <span className="text-slate-500"> · not armed: {r.skipped.map((x) => `${x.symbol} (${x.why})`).join("; ")}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {view.recent.length ? (
             <div className="lg:col-span-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sent since the server started</p>
@@ -153,5 +205,52 @@ export function ScalpAlertsCard() {
         </div>
       )}
     </section>
+  );
+}
+
+/** "Also arm them on Bot N" under an alert (backend auto_arm.py). PAPER bots only: a LIVE bot is refused when the scan arrives. */
+function ArmRow({
+  label,
+  on,
+  bot,
+  busy,
+  today,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  bot: number;
+  busy: boolean;
+  today: string[];
+  onChange: (on: boolean, bot: number) => void;
+}) {
+  return (
+    <div className={clsx("mt-3 rounded-md border px-2 py-2 text-xs", on ? "border-sky-400/40 bg-sky-400/[0.05]" : "border-slate-800")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex min-h-9 items-center gap-2 font-semibold text-slate-200">
+          <input type="checkbox" checked={on} disabled={busy} onChange={(e) => onChange(e.target.checked, bot)} className="accent-[#38BDF8]" />
+          Also arm them on
+        </label>
+        <select
+          value={bot}
+          disabled={busy}
+          onChange={(e) => onChange(on, Number(e.target.value))}
+          aria-label={`Bot to arm from ${label}`}
+          className="h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-200"
+        >
+          {[1, 2, 3, 4, 5].map((n) => (
+            <option key={n} value={n}>
+              Bot {n}
+            </option>
+          ))}
+        </select>
+        <span className={on ? "text-sky-300" : "text-slate-500"}>{on ? "On" : "Off"}</span>
+      </div>
+      <p className="mt-1 text-slate-400">
+        Same thresholds as the alert above (the alert itself can be on or off). After each {label} scan in market hours, each new
+        stock goes on that bot&apos;s Trade list, once a day. <b>PAPER bots only</b>: a LIVE bot is never armed by itself.
+      </p>
+      {on && today.length ? <p className="mt-1 text-slate-300">Armed today: {today.join(", ")}</p> : null}
+    </div>
   );
 }
