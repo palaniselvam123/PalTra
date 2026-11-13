@@ -3337,6 +3337,9 @@ export type ScalpAlerts = {
   arm_pressure_bot: number;
   /** At most this many stocks a day per scan. */
   arm_max_day: number;
+  /** Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay. */
+  arm_price_min: number;
+  arm_price_max: number;
   auto_arm?: {
     recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
     today: { strong: string[]; pressure: string[] };

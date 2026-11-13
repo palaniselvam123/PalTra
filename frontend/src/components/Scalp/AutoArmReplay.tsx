@@ -91,6 +91,9 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
         source !== "TREND"
           ? `${alerts.pressure_side === "BOTH" ? "buyers or sellers" : alerts.pressure_side === "BUY" ? "buyers" : "sellers"} at ${alerts.pressure_pct}% or more${alerts.pressure_min_value_cr ? `, ₹${alerts.pressure_min_value_cr} cr traded` : ""}`
           : null,
+        alerts.arm_price_min || alerts.arm_price_max
+          ? `priced ${alerts.arm_price_min ? `₹${alerts.arm_price_min}` : "any"} to ${alerts.arm_price_max ? `₹${alerts.arm_price_max}` : "any"}`
+          : null,
       ]
         .filter(Boolean)
         .join("; ")

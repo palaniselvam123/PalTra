@@ -175,6 +175,20 @@ export function ScalpAlertsCard() {
               stocks a day from each scan. A stock already on the bot&apos;s list stays as it is; nothing is ever taken off.
             </div>
           ) : null}
+          {view.arm_strong_on || view.arm_pressure_on ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
+              Only stocks priced from ₹
+              <PriceBox value={view.arm_price_min} disabled={busy} label="Lowest price" onSave={(v) => void save({ arm_price_min: v })} />
+              to ₹
+              <PriceBox value={view.arm_price_max} disabled={busy} label="Highest price" onSave={(v) => void save({ arm_price_max: v })} />
+              <span>
+                (0 = no limit). Read on the scan&apos;s last price; the auto-arm replay uses the price at the arm minute.
+                {view.arm_price_min || view.arm_price_max
+                  ? ` Now: ${view.arm_price_min ? `₹${view.arm_price_min}` : "any"} to ${view.arm_price_max ? `₹${view.arm_price_max}` : "any"}.`
+                  : ""}
+              </span>
+            </div>
+          ) : null}
           {view.auto_arm?.recent.length ? (
             <div className="lg:col-span-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Auto-arm since the server started</p>
@@ -235,6 +249,27 @@ function LastCheck({ row, scan }: { row?: ScalpAlertCheck; scan: string }) {
     <p className={clsx("mt-2 text-xs", row.error ? "font-semibold text-amber-300" : "text-slate-400")}>
       Last {scan} scan {at}: {row.rows} stocks read, {row.matched} met the thresholds · {tail}.
     </p>
+  );
+}
+
+/** A ₹ box saved when it loses focus (0 = no bound). */
+function PriceBox({ value, label, disabled, onSave }: { value: number; label: string; disabled: boolean; onSave: (v: number) => void }) {
+  return (
+    <input
+      key={value}
+      type="number"
+      min={0}
+      step="any"
+      inputMode="decimal"
+      aria-label={label}
+      defaultValue={value || 0}
+      disabled={disabled}
+      onBlur={(e) => {
+        const v = Math.max(0, Number(e.target.value) || 0);
+        if (v !== value) onSave(v);
+      }}
+      className="min-h-9 w-24 rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+    />
   );
 }
 

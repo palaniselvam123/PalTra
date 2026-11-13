@@ -2680,6 +2680,9 @@ class AutoArmStart(BaseModel):
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     min_value_cr: float | None = Field(default=None, ge=0, le=100000)
     max_day: int | None = Field(default=None, ge=1, le=auto_arm.MAX_DAY)
+    #: Price range (₹, 0 = no bound); None = the auto-arm's own (arm_price_min / arm_price_max).
+    price_min: float | None = Field(default=None, ge=0, le=1_000_000)
+    price_max: float | None = Field(default=None, ge=0, le=1_000_000)
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
@@ -2690,12 +2693,13 @@ async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[l
     the desk's over the link. Returns (hits, note)."""
     scans = await asyncio.to_thread(auto_arm.saved_scans, day)
     if scans:
-        return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr), None
+        return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr, rule.price_min, rule.price_max), None
     if server_role.is_backtest() and server_role.backtest_link_token():
         from urllib.parse import urlencode
 
         query = urlencode({"day": day.isoformat(), "pct": rule.pct, "side": rule.pressure_side,
-                           "min_value_cr": rule.min_value_cr})
+                           "min_value_cr": rule.min_value_cr, "price_min": rule.price_min,
+                           "price_max": rule.price_max})
         try:
             body = await backtest_server._desk_get(f"/api/link/backtest/active-scans?{query}")
         except Exception as exc:  # noqa: BLE001
@@ -2735,6 +2739,8 @@ async def replay_auto_arm(body: AutoArmStart):
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
         max_day=body.max_day or alerts.arm_max_day,
+        price_min=alerts.arm_price_min if body.price_min is None else body.price_min,
+        price_max=alerts.arm_price_max if body.price_max is None else body.price_max,
     )
     names = list(body.universe)
     notes: list[str] = []
@@ -3680,6 +3686,9 @@ class ScalpAlertUpdate(BaseModel):
     arm_pressure_on: bool | None = None
     arm_pressure_bot: int | None = Field(default=None, ge=1, le=5)
     arm_max_day: int | None = Field(default=None, ge=1, le=50)
+    # Auto-arm price range (₹, 0 = no bound).
+    arm_price_min: float | None = Field(default=None, ge=0, le=1_000_000)
+    arm_price_max: float | None = Field(default=None, ge=0, le=1_000_000)
 
 
 @app.get("/api/scalp-alerts")
