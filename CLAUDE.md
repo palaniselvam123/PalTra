@@ -1161,7 +1161,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   backtest server desk `GET /api/link/backtest/active-scans?day=&pct=&side=&min_value_cr=` behind `BACKTEST_LINK_TOKEN`,
   `main._auto_arm_scans`); the alert thresholds are the defaults. `ReplaySession` gives the engine `arm_windows`
   (`auto_arm.arm_windows`, the "as armed" path: a stock armed mid-day waits for a fresh signal) and starts the day at the
-  first arm; speeds 1× (as live) to 300×. The run is a Scalp-pick run (`scalp_pick.kind = AUTOARM`, picks with `at` per day).
+  first arm; speeds 1× (as live) to 300×. The Trend quality reads stop once the day's `max_day` picks are in (nothing armed later can make the list), each tape is cut to the day once, and `AutoArmRule.on_step` feeds `ReplaySession.finding` ("day 1 of 5 (…): reading 10:35"), shown on the replay bar while the arm minutes are found. The run is a Scalp-pick run (`scalp_pick.kind = AUTOARM`, picks with `at` per day).
 - `backend/scan_arm.py` – **Scan & arm** (arming only, no order; desk, scanner and backtest server): saved recipes
   (`Preset`, `scan_arm.json` next to the SMA DB, `SCAN_ARM_FILE`, at most 20) that run one Trend quality pass on `lists`
   (F&O / Nifty 50 / 100 / Bank / armed, `main._auto_symbols`) through the shared `chop_scanner` (`main._scan_arm_scan`

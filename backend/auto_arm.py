@@ -187,6 +187,8 @@ class AutoArmRule:
     #: {IST day ISO: [(HH:MM, symbol, BUY/SELL, pct)]} from the saved Most active scans, filled before the run.
     active_hits: dict = field(default_factory=dict)
     kind: str = KIND
+    #: Called with "HH:MM" as the Trend quality reads reach each minute (the replay bar's progress). Not saved.
+    on_step: object = field(default=None, repr=False, compare=False)
 
     @property
     def pick_time(self) -> dt.time:
@@ -256,9 +258,20 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                 events.append((at, symbol, {"source": "Most active", "side": "LONG" if side == "BUY" else "SHORT",
                                             "why": f"{'buyers' if side == 'BUY' else 'sellers'} {pct:.0f}%"}))
     if rule.source in ("TREND", "BOTH"):
+        # Only the candles up to that day's end are ever read: cut each tape once, not on every read.
+        end = int(dt.datetime.combine(day + dt.timedelta(days=1), dt.time(0, 0), tzinfo=IST).timestamp())
+        tapes = {s: f[f["ts"].astype("int64") < end] for s, f in frames.items()}
         for t in _times(rule):
             at = t.strftime("%H:%M")
-            for symbol, frame in frames.items():
+            if callable(rule.on_step):
+                try:
+                    rule.on_step(at)
+                except Exception:  # noqa: BLE001 - progress only
+                    pass
+            if len({e[1] for e in events if e[0] < at}) >= rule.max_day:
+                # The day's picks are the first `max_day` by time: nothing armed later can make the list.
+                break
+            for symbol, frame in tapes.items():
                 if symbol in found or any(e[1] == symbol and e[0] <= at for e in events):
                     continue
                 try:

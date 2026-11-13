@@ -1135,6 +1135,8 @@ class ReplaySession:
     rule: PickRule | None = None
     picks: dict[str, list[dict]] = field(default_factory=dict)
     universe: list[str] = field(default_factory=list)
+    #: Auto-arm replay: how far the reads that find each stock's arm minute have got (None when not reading).
+    finding: str | None = None
     #: Stocks a "Recovered" exit moved to Bot 2 during this run (recovery.py); not traded after it.
     handed_off: list[str] = field(default_factory=list)
     #: "Play hand-offs" (handoff_chain.py): which bot each handed-off stock plays as, carried from day to day
@@ -1186,6 +1188,8 @@ class ReplaySession:
             "chain": self._chain_info(),
             "pick_rule": self.rule.as_dict() if self.rule is not None else None,
             "picks": self.picks,
+            # Auto-arm replay: where the reads that find each stock's arm minute have got ("day 1 of 5 (…): reading 10:35").
+            "finding": self.finding,
             # Where a seek is heading (fast-forward or, after a rewind, the restarted day catching up), else None.
             "seeking": (self._rewind or self._seek).isoformat() if (self._rewind or self._seek) else None,
         }
@@ -1217,6 +1221,7 @@ class ReplaySession:
         await self.stop("REPLAY_STOPPED")
         self.bot, self.bot_name = int(bot), bot_name or f"Bot {int(bot)}"
         self.rule, self.picks, self.universe = rule, {}, []
+        self.finding = None
         self.handed_off = []
         self.chain_on, self.chain_log = {}, []
         self.status = "LOADING"
@@ -1394,7 +1399,15 @@ class ReplaySession:
                 # Pick as the live Scalp page would have at the pick time, then
                 # trade only those stocks from that minute on.
                 # In a worker thread: a strong-trend pick reads every stock of the universe.
-                picked = await asyncio.to_thread(picks_for_day, frames, day, self.rule)
+                if getattr(self.rule, "kind", None) == auto_arm.KIND:
+                    # The replay bar shows how far the arm-minute reads have got (auto_arm.picks_for_day).
+                    label = f"day {index + 1} of {len(days)} ({day.isoformat()})"
+                    self.rule.on_step = lambda at, label=label: setattr(self, "finding", f"{label}: reading {at}")
+                    self.finding = f"{label}: starting"
+                try:
+                    picked = await asyncio.to_thread(picks_for_day, frames, day, self.rule)
+                finally:
+                    self.finding = None
                 self.picks[day.isoformat()] = picked
                 self._save_picks()
                 symbols = [p["symbol"] for p in picked]

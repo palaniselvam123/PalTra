@@ -2084,6 +2084,8 @@ export type ReplayInfo = {
   /** Scalp-pick runs: the rule and each day's picks (date -> picks, best first). */
   pick_rule?: ScalpPickRule | null;
   picks?: Record<string, ScalpPick[]>;
+  /** Auto-arm replay: how far the arm-minute reads have got, e.g. "day 1 of 5 (2026-11-13): reading 10:35". */
+  finding?: string | null;
 };
 
 /** The rule a pick run recorded (`scalp_pick` in the run's settings). `kind` says which backtest picked: absent =
