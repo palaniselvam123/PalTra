@@ -33,6 +33,7 @@ import pnl_alerts
 import pivots
 import auto_start
 import scalp_alerts
+import auto_arm
 import scan_trade_test
 import hold_test
 import trend_rank
@@ -243,6 +244,9 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
     task = loop.create_task(scalp_alerts.after_trend_scan(snapshot, _send))
+    _history_tasks.add(task)
+    task.add_done_callback(_history_tasks.discard)
+    task = loop.create_task(auto_arm_after("strong", snapshot))
     _history_tasks.add(task)
     task.add_done_callback(_history_tasks.discard)
 
@@ -2578,7 +2582,7 @@ class TrendPickStart(BaseModel):
 
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
-    minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None,
+    minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2601,7 +2605,9 @@ async def _start_trend_picks(
         engine.broker.adopt_saved_session()
     if not engine.broker.token:
         raise HTTPException(400, "Replay needs Groww candles. Log in to Groww on the Settings page first.")
-    if active is not None:
+    if rule is not None:
+        pass  # given by the caller (the auto-arm replay)
+    elif active is not None:
         rule = active_picks.ActivePickRule(
             pick_time=pick_time, top_n=top_n, rank=active.get("rank", "rvol"), bias=active.get("bias", "BOTH"),
             min_value_cr=float(active.get("min_value_cr", 5.0)),
@@ -2652,6 +2658,105 @@ async def replay_trend_picks(body: TrendPickStart):
         body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
         play_handoffs=body.play_handoffs,
     )
+
+
+class AutoArmStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The stocks the Trend quality rule reads (the card's scan lists); Most active hits are added to them.
+    universe: list[str] = Field(default_factory=list)
+    source: Literal["TREND", "ACTIVE", "BOTH"] = "BOTH"
+    first: str = "09:30"
+    last: str = "14:30"
+    every_min: Literal[1, 2, 3, 5, 10, 15, 30] = 5
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    #: None = the Scalp alerts' own thresholds (scalp_alerts.json), as the live auto-arm reads them.
+    min_checks: int | None = Field(default=None, ge=5, le=7)
+    side: Literal["BOTH", "UP", "DOWN"] | None = None
+    pct: float | None = Field(default=None, ge=50, le=99)
+    pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
+    min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+    max_day: int | None = Field(default=None, ge=1, le=auto_arm.MAX_DAY)
+    bot: int = Field(default=1, ge=1, le=4)
+    speed: int = 300
+    play_handoffs: bool = True
+
+
+async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[list, str | None]:
+    """One day's Most active hits for the auto-arm replay: this server's saved scans, else (on the backtest server)
+    the desk's over the link. Returns (hits, note)."""
+    scans = await asyncio.to_thread(auto_arm.saved_scans, day)
+    if scans:
+        return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr), None
+    if server_role.is_backtest() and server_role.backtest_link_token():
+        from urllib.parse import urlencode
+
+        query = urlencode({"day": day.isoformat(), "pct": rule.pct, "side": rule.pressure_side,
+                           "min_value_cr": rule.min_value_cr})
+        try:
+            body = await backtest_server._desk_get(f"/api/link/backtest/active-scans?{query}")
+        except Exception as exc:  # noqa: BLE001
+            return [], f"{day:%d %b}: the desk's saved Most active scans could not be read ({exc})."
+        hits = [tuple(h) for h in body.get("hits") or [] if isinstance(h, list) and len(h) == 4]
+        if not body.get("scans"):
+            return [], f"{day:%d %b}: no saved Most active scans on the desk."
+        return hits, None
+    return [], f"{day:%d %b}: no saved Most active scans."
+
+
+@app.post("/api/replay/auto-arm")
+async def replay_auto_arm(body: AutoArmStart):
+    """Auto-arm replay (auto_arm.py): past days played like live ones, each stock armed at the minute the Scalp
+    auto-arm would have armed it (strong trend from the candles, buyers / sellers from the saved Most active scans)
+    and traded by the bot only from then on. Practice money; never sends an order, never changes a Trade list."""
+    _refuse_desk_replay_in_market()
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+        first = parse_start(body.first)
+        last = parse_start(body.last)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not (dt.time(9, 15) <= first <= last <= dt.time(15, 0)):
+        raise HTTPException(400, "Arm between 09:15 and 15:00 IST, the first time before the last.")
+    alerts = await asyncio.to_thread(scalp_alerts.load)
+    eng = engine if body.bot == 1 else bot_engines.get(body.bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {body.bot}")
+    cfg = eng.load_config()
+    rule = auto_arm.AutoArmRule(
+        source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes,
+        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow),
+        min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
+        pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
+        min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
+        max_day=body.max_day or alerts.arm_max_day,
+    )
+    names = list(body.universe)
+    notes: list[str] = []
+    if body.source in ("ACTIVE", "BOTH"):
+        d = day
+        while d <= end_day:
+            if d.weekday() < 5:
+                hits, note = await _auto_arm_scans(d, rule)
+                if hits:
+                    rule.active_hits[d.isoformat()] = hits
+                    names += [h[1] for h in hits]
+                if note:
+                    notes.append(note)
+            d += dt.timedelta(days=1)
+        if body.source == "ACTIVE" and not rule.active_hits:
+            raise HTTPException(400, " ".join(notes[:3]) or "No saved Most active scans for those days.")
+    if body.source in ("TREND", "BOTH") and not body.universe:
+        raise HTTPException(400, "Pick the stocks the Trend quality rule should read (the scan lists).")
+    if len(names) > auto_arm.MAX_UNIVERSE:
+        names = names[: auto_arm.MAX_UNIVERSE]
+    info = await _start_trend_picks(
+        body.bot, names, day, end_day, first, rule.max_day, "BOTH", body.minutes, body.speed,
+        play_handoffs=body.play_handoffs, rule=rule,
+    )
+    return {**info, "notes": notes[:10]}
 
 
 class ActivePickStart(BaseModel):
@@ -3566,6 +3671,12 @@ class ScalpAlertUpdate(BaseModel):
     pressure_pct: float | None = Field(default=None, ge=50, le=95)
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+    # Auto-arm (auto_arm.py): PAPER bots only; a LIVE bot is refused when the scan arrives.
+    arm_strong_on: bool | None = None
+    arm_strong_bot: int | None = Field(default=None, ge=1, le=5)
+    arm_pressure_on: bool | None = None
+    arm_pressure_bot: int | None = Field(default=None, ge=1, le=5)
+    arm_max_day: int | None = Field(default=None, ge=1, le=50)
 
 
 @app.get("/api/scalp-alerts")
@@ -3598,8 +3709,8 @@ def _scan_arm_remote() -> bool:
     return server_role.is_scanner() or (server_role.is_backtest() and bool(server_role.link_token()))
 
 
-async def _scan_arm_bots() -> dict[int, dict]:
-    if _scan_arm_remote():
+async def _scan_arm_bots(remote: bool | None = None) -> dict[int, dict]:
+    if _scan_arm_remote() if remote is None else remote:
         from app.api.routes_link import desk_armed
 
         body = await desk_armed()
@@ -3610,9 +3721,9 @@ async def _scan_arm_bots() -> dict[int, dict]:
     return {int(b["bot"]): b for b in body.get("bots", []) if b.get("bot") in (1, *EXTRA_BOTS)}
 
 
-async def _scan_arm_arm(bot: int, symbol: str, source: str, confirm_live: bool) -> str | None:
+async def _scan_arm_arm(bot: int, symbol: str, source: str, confirm_live: bool, remote: bool | None = None) -> str | None:
     """Put one stock on a bot's Trade list. None when armed, else why not."""
-    if _scan_arm_remote():
+    if _scan_arm_remote() if remote is None else remote:
         from app.api import routes_link
 
         try:
@@ -3672,6 +3783,31 @@ async def _scan_arm_scan(symbols: list[str], minutes: int, progress) -> dict:
     if snap.get("as_of") == as_of:
         raise RuntimeError(snap.get("error") or "The scan did not finish.")
     return snap
+
+
+def _auto_arm_remote() -> bool:
+    """Auto-arm (auto_arm.py) arms the bots of the server the scan ran on; the scanner has none, so the desk's."""
+    return server_role.is_scanner()
+
+
+async def _auto_arm_bots() -> dict[int, dict]:
+    return await _scan_arm_bots(remote=_auto_arm_remote())
+
+
+async def _auto_arm_arm(bot: int, symbol: str, source: str) -> str | None:
+    # Never confirm_live: auto-arm refuses a LIVE bot before it gets here, and the desk refuses one without it.
+    return await _scan_arm_arm(bot, symbol, source, False, remote=_auto_arm_remote())
+
+
+async def _auto_arm_notify(message: str) -> None:
+    from app.services.alert_notifier import alert_notifier
+
+    await alert_notifier.send_quiet(message)
+
+
+async def auto_arm_after(kind: str, snapshot: dict) -> dict | None:
+    """Auto-arm after a finished Trend quality pass (`strong`) or Most active scan (`pressure`). Never raises."""
+    return await auto_arm.after_scan(kind, snapshot, bots=_auto_arm_bots, arm=_auto_arm_arm, notify=_auto_arm_notify)
 
 
 def _scan_arm_hooks() -> dict:

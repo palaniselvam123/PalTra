@@ -51,6 +51,7 @@ import handoff_chain
 import handoff_log
 import open_pnl_log
 import recovery
+import auto_arm
 from scalp_picks import PickRule, picks_for_day
 
 SPEEDS = (1, 10, 60, 300)
@@ -1388,6 +1389,7 @@ class ReplaySession:
             self.day_index, self.day = index, day
             start = self.start if index == 0 else SESSION_OPEN
             symbols = self.universe
+            auto_windows = None
             if self.rule is not None:
                 # Pick as the live Scalp page would have at the pick time, then
                 # trade only those stocks from that minute on.
@@ -1397,6 +1399,11 @@ class ReplaySession:
                 self._save_picks()
                 symbols = [p["symbol"] for p in picked]
                 start = self.rule.pick_time
+                if getattr(self.rule, "kind", None) == auto_arm.KIND and picked:
+                    # Auto-arm replay: each stock armed from the minute the rule picked it (auto_arm.py), as live.
+                    auto_windows = auto_arm.arm_windows(day, picked)
+                    first = min(p["at"] for p in picked)
+                    start = dt.time(int(first[:2]), int(first[3:5]))
                 if not symbols:
                     self._mark_run(days_done=index + 1)
                     continue
@@ -1407,6 +1414,8 @@ class ReplaySession:
                 # Each stock only while it was armed live on this bot that day (arm_log.py).
                 windows = arm_log.windows(self.config_id, day)
                 symbols = [s for s in symbols if s in windows]
+            if auto_windows is not None:
+                windows = auto_windows
             if not symbols:
                 self._mark_run(days_done=index + 1)
                 continue
