@@ -60,13 +60,29 @@ def _done(kind: str, now: dt.datetime) -> list[str]:
     return book.setdefault(now.date(), [])
 
 
+def price_ok(price, lo: float, hi: float) -> bool:
+    """Inside the auto-arm price range (₹; 0 = no bound). An unknown price passes only when no range is set."""
+    lo, hi = float(lo or 0.0), float(hi or 0.0)
+    if not lo and not hi:
+        return True
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return False
+    return (not lo or p >= lo) and (not hi or p <= hi)
+
+
 def candidates(kind: str, rows: list[dict], s, now: dt.datetime) -> list[dict]:
-    """The stocks the alert's thresholds pick in this scan (whether the alert itself is on or not)."""
+    """The stocks the alert's thresholds pick in this scan (whether the alert itself is on or not), inside the
+    auto-arm price range (`arm_price_min` / `arm_price_max`)."""
     import scalp_alerts
 
     if kind == "strong":
-        return scalp_alerts.strong_picks(rows, s, now, alerting=False)
-    return scalp_alerts.pressure_picks(rows, s, now, alerting=False)
+        found = scalp_alerts.strong_picks(rows, s, now, alerting=False)
+    else:
+        found = scalp_alerts.pressure_picks(rows, s, now, alerting=False)
+    lo, hi = getattr(s, "arm_price_min", 0.0), getattr(s, "arm_price_max", 0.0)
+    return [p for p in found if price_ok(p.get("price"), lo, hi)]
 
 
 def wanted(kind: str, s) -> tuple[bool, int]:
@@ -184,6 +200,9 @@ class AutoArmRule:
     pressure_side: str = "BOTH"
     min_value_cr: float = 0.0
     max_day: int = 10
+    #: Only stocks priced inside this range when armed (₹, 0 = no bound): the tape's last close before the arm minute.
+    price_min: float = 0.0
+    price_max: float = 0.0
     #: {IST day ISO: [(HH:MM, symbol, BUY/SELL, pct)]} from the saved Most active scans, filled before the run.
     active_hits: dict = field(default_factory=dict)
     kind: str = KIND
@@ -200,6 +219,7 @@ class AutoArmRule:
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
             "minutes": self.minutes, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "max_day": self.max_day,
+            "price_min": self.price_min, "price_max": self.price_max,
             "active_days": sorted(self.active_hits),
         }
 
@@ -280,6 +300,11 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                     log.exception("auto-arm trend read failed for %s", symbol)
                     continue
                 side = _strong_ok(read, rule)
+                if side and (rule.price_min or rule.price_max):
+                    cut = int(dt.datetime.combine(day, t, tzinfo=IST).timestamp())
+                    before = frame[frame["ts"].astype("int64") < cut]
+                    if before.empty or not price_ok(float(before["close"].iloc[-1]), rule.price_min, rule.price_max):
+                        side = None
                 if side:
                     passed = sum(1 for ok in (read.get("trend_checks") or {}).values() if ok)
                     found[symbol] = {"at": at}
@@ -308,7 +333,8 @@ def arm_windows(day: dt.date, picks: list[dict]) -> dict[str, list[tuple[int, in
     return out
 
 
-def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float) -> list[tuple[str, str, str, float]]:
+def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, price_min: float = 0.0,
+                price_max: float = 0.0) -> list[tuple[str, str, str, float]]:
     """(HH:MM armed, symbol, BUY/SELL, %) from one day's saved Most active scans (each {as_of, rows}), first per stock.
 
     A scan read at 10:04:30 arms at 10:05 (the minute after the read), like a live scan that finished then."""
@@ -335,7 +361,7 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float) -
                 value = float(r.get("value_cr") or 0.0)
             except (TypeError, ValueError):
                 continue
-            if value < min_value_cr:
+            if value < min_value_cr or not price_ok(r.get("ltp"), price_min, price_max):
                 continue
             if share >= need:
                 s, p = "BUY", share * 100

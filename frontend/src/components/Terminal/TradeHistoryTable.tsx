@@ -3,11 +3,12 @@
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, Loader2, Sigma } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, LineChart, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
 import { inr, pnlAtPrice, px, smaApi, type SmaState, type TradeBook, type TradeRow } from "@/lib/smaApi";
 import { Badge, Skeleton, pnlTone } from "./ui";
+import { chartHref } from "./StockTabs";
 import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
 import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
@@ -1236,6 +1237,25 @@ function EntryReasonBadge({ trade }: { trade: TradeRow }) {
   );
 }
 
+/** A replayed trade's chart for its day in a new tab, with that run's trades marked (same link as the Backtests tab). */
+function TradeChartLink({ trade }: { trade: TradeRow }) {
+  const date = (trade.entry_time ?? "").slice(0, 10);
+  if (trade.run_id == null || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const bot = Number(trade.bot ?? 1) || 1;
+  return (
+    <a
+      href={chartHref(trade.symbol, { date, runId: trade.run_id, desk: bot === 1 ? "live" : `bot${bot}` })}
+      target="_blank"
+      rel="noreferrer"
+      title={`Chart of ${trade.symbol} on ${date} with this run's trades`}
+      aria-label={`Chart of ${trade.symbol} on ${date}`}
+      className="ml-1.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sky-300 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10"
+    >
+      <LineChart size={13} aria-hidden />
+    </a>
+  );
+}
+
 function ReasonBadge({ trade }: { trade: TradeRow }) {
   if (trade.exit_price == null) return <Badge color="green">Open</Badge>;
   const reason = trade.exit_reason || "";
@@ -1706,7 +1726,10 @@ low: <td className="px-3 py-2 text-right">
       </td>,
 points: <td className={clsx("whitespace-nowrap px-3 py-2 text-right font-mono", pnlTone(points))}>{signedPts(points)}</td>,
 reason: <td className="px-3 py-2">
-        <ReasonBadge trade={t} />
+        <span className="inline-flex items-center">
+          <ReasonBadge trade={t} />
+          <TradeChartLink trade={t} />
+        </span>
         {t.stop_log ? (
           <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-400" title={`Stop moves: ${t.stop_log}`}>
             {t.stop_log.split("; ").map((line) => (

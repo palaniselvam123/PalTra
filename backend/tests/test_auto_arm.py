@@ -246,3 +246,27 @@ def test_the_reads_stop_once_the_days_picks_are_full_and_report_progress():
     after = (dt.datetime.combine(DAY, dt.time(*map(int, got[0]["at"].split(":")))) + dt.timedelta(minutes=15)).strftime("%H:%M")
     assert seen[0] == "10:00" and seen[-1] == after < "14:00"
     assert "on_step" not in rule.as_dict()
+
+
+@pytest.mark.asyncio
+async def test_the_price_range_limits_what_is_armed_live_and_in_the_replay():
+    assert auto_arm.price_ok(None, 0, 0) and not auto_arm.price_ok(None, 100, 0)
+    assert auto_arm.price_ok(150, 100, 200) and not auto_arm.price_ok(250, 100, 200) and auto_arm.price_ok(250, 100, 0)
+    s = scalp_alerts.save({"arm_price_min": 500, "arm_price_max": 100})
+    assert (s.arm_price_min, s.arm_price_max) == (100, 500)  # typed the wrong way round: swapped
+    scalp_alerts.save({"arm_strong_on": True, "strong_min_checks": 6, "arm_price_min": 100, "arm_price_max": 500})
+    rows = [dict(_strong("CHEAP"), ltp=50.0), dict(_strong("MID"), ltp=300.0), dict(_strong("DEAR"), ltp=900.0)]
+    bots, arm, calls = _hooks()
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=NOW, check_market=False)
+    assert rec["armed"] == ["MID"]
+    # Most active (saved scans): the row's last price.
+    scans = [{"as_of": "2026-11-02T09:41:20+05:30", "rows": [
+        {"symbol": "A", "buy_share": 0.9, "value_cr": 9, "ltp": 50.0},
+        {"symbol": "B", "buy_share": 0.9, "value_cr": 9, "ltp": 300.0}]}]
+    assert [h[1] for h in auto_arm.active_hits(scans, 75, "BOTH", 0, 100, 500)] == ["B"]
+    # The replay's trend reads: the tape's price (about 1000 here) is outside ₹100-500, so nothing is armed.
+    frames = {"UP": _frame(0.15)}
+    base = dict(source="TREND", first=dt.time(10, 0), last=dt.time(12, 0), every_min=15, minutes=5, min_checks=6)
+    assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base))
+    assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base, price_min=100, price_max=500)) == []
+    assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base, price_min=500, price_max=5000))

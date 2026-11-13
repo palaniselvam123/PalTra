@@ -1153,6 +1153,23 @@ cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t
 /** The run split by stock. Each row opens that stock's own day-wise P&L. */
 function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Settings }) {
   const [open, setOpen] = useState<string | null>(null);
+  // The whole section folds like a day row; folded by default (owner's request), remembered per browser.
+  const [shown, setShown] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("backtests.byStock.open") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setShown((v) => {
+      try {
+        window.localStorage.setItem("backtests.byStock.open", v ? "0" : "1");
+      } catch {
+        /* per-browser convenience only */
+      }
+      return !v;
+    });
   const base = strategyLabel(settings);
   type StockKey = "symbol" | "trades" | "wins" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
   const stockCols = useColumnOrder<StockColKey>("backtests.cols.stocks", STOCK_COLS);
@@ -1169,8 +1186,16 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
   );
   return (
     <div className="mb-4">
-      <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">By stock</div>
-      <div className="overflow-x-auto">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={shown}
+        className="mb-1 flex min-h-8 items-center gap-1 rounded px-2 text-xs uppercase tracking-wider text-slate-400 hover:text-slate-200"
+      >
+        {shown ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+        By stock ({stocks.length}){shown ? "" : " — show"}
+      </button>
+      <div className={clsx("overflow-x-auto", !shown && "hidden")}>
         <table className="w-full min-w-[760px] whitespace-nowrap text-left text-xs">
           <thead className="text-xs uppercase tracking-wider text-slate-400">
             <tr>
