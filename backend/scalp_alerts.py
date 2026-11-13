@@ -42,8 +42,12 @@ CHECK_WORDS = {
 }
 # {alert: {IST day: {(symbol, side): "HH:MM"}}}
 _SENT: dict[str, dict[dt.date, dict[tuple[str, str], str]]] = {"strong": {}, "pressure": {}}
-# The last alerts sent (newest first), for the card.
+# The last alerts sent (newest first), for the card. Kept in `scalp_alerts_log.json` next to the settings with `last`,
+# so a deploy or restart after the close does not hide what happened during the day.
 recent: list[dict] = []
+# {alert: what the last scan in market hours found and whether Telegram took it} (`_note`).
+last: dict[str, dict] = {}
+_log_loaded = False
 
 
 @dataclass
@@ -125,6 +129,50 @@ def save(raw: dict) -> Settings:
     return s
 
 
+def log_path() -> Path:
+    return settings_path().with_name("scalp_alerts_log.json")
+
+
+def _load_log() -> None:
+    """Read the saved `recent` / `last` once (a restart keeps the day's story). Never raises."""
+    global _log_loaded
+    if _log_loaded:
+        return
+    _log_loaded = True
+    try:
+        data = json.loads(log_path().read_text())
+        recent[:] = list(data.get("recent") or [])[:50] + [r for r in recent if r not in (data.get("recent") or [])]
+        for kind, row in (data.get("last") or {}).items():
+            last.setdefault(kind, row)
+    except FileNotFoundError:
+        return
+    except Exception:  # noqa: BLE001
+        log.exception("could not read the scalp alert log")
+
+
+def _save_log() -> None:
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"recent": recent[:50], "last": last}, default=str))
+    except Exception:  # noqa: BLE001
+        log.exception("could not save the scalp alert log")
+
+
+def _delivery(result) -> tuple[bool, str | None]:
+    """(sent?, why not) from alert_notifier's DeliveryResult; anything without `ok` counts as sent (tests)."""
+    ok = getattr(result, "ok", True)
+    if ok:
+        return True, None
+    why = getattr(result, "skipped_reason", None) or getattr(result, "error", None) or "Telegram refused the message"
+    return False, str(why)[:200]
+
+
+def _note(kind: str, now: dt.datetime, **row) -> None:
+    last[kind] = {"at": now.isoformat(timespec="seconds"), **row}
+    _save_log()
+
+
 def _sent(kind: str, now: dt.datetime) -> dict[tuple[str, str], str]:
     book = _SENT[kind]
     for day in [d for d in book if d != now.date()]:
@@ -132,11 +180,14 @@ def _sent(kind: str, now: dt.datetime) -> dict[tuple[str, str], str]:
     return book.setdefault(now.date(), {})
 
 
-def _mark(kind: str, picks: list[dict], now: dt.datetime) -> None:
+def _mark(kind: str, picks: list[dict], now: dt.datetime, failed: str | None = None) -> None:
+    """Note the picks in `recent`; only a message Telegram took counts as sent for the day (`_SENT`), so a failed
+    one is tried again on the next scan."""
     book = _sent(kind, now)
     for p in picks:
-        book[(p["symbol"], p["side"])] = now.strftime("%H:%M")
-        recent.insert(0, {"at": now.isoformat(timespec="seconds"), "kind": kind, **p})
+        if failed is None:
+            book[(p["symbol"], p["side"])] = now.strftime("%H:%M")
+        recent.insert(0, {"at": now.isoformat(timespec="seconds"), "kind": kind, **p, **({"failed": failed} if failed else {})})
     del recent[50:]
 
 
@@ -234,11 +285,16 @@ async def after_trend_scan(snapshot: dict, send, now: dt.datetime | None = None)
         now = now or dt.datetime.now(IST)
         if not market_is_open(now):
             return []
-        picks = strong_picks(snapshot.get("rows") or [], load(), now)
+        _load_log()
+        s, rows = load(), snapshot.get("rows") or []
+        matched = len(strong_picks(rows, s, now, alerting=False))
+        picks = strong_picks(rows, s, now)
+        sent, why = True, None
         if picks:
-            _mark("strong", picks, now)
-            await send(strong_text(picks))
-        return picks
+            sent, why = _delivery(await send(strong_text(picks)))
+            _mark("strong", picks, now, failed=why)
+        _note("strong", now, on=s.strong_on, rows=len(rows), matched=matched, new=len(picks), sent=bool(picks) and sent, error=why)
+        return picks if sent else []
     except Exception:  # noqa: BLE001
         log.exception("strong-trend alert failed")
         return []
@@ -250,12 +306,16 @@ async def after_active_scan(snapshot: dict, send, now: dt.datetime | None = None
         now = now or dt.datetime.now(IST)
         if not market_is_open(now):
             return []
-        s = load()
-        picks = pressure_picks(snapshot.get("rows") or [], s, now)
+        _load_log()
+        s, rows = load(), snapshot.get("rows") or []
+        matched = len(pressure_picks(rows, s, now, alerting=False))
+        picks = pressure_picks(rows, s, now)
+        sent, why = True, None
         if picks:
-            _mark("pressure", picks, now)
-            await send(pressure_text(picks, s))
-        return picks
+            sent, why = _delivery(await send(pressure_text(picks, s)))
+            _mark("pressure", picks, now, failed=why)
+        _note("pressure", now, on=s.pressure_on, rows=len(rows), matched=matched, new=len(picks), sent=bool(picks) and sent, error=why)
+        return picks if sent else []
     except Exception:  # noqa: BLE001
         log.exception("buyer / seller alert failed")
         return []
@@ -264,4 +324,5 @@ async def after_active_scan(snapshot: dict, send, now: dt.datetime | None = None
 def view() -> dict:
     import auto_arm
 
-    return {**asdict(load()), "recent": recent[:20], "max_names": MAX_NAMES, "auto_arm": auto_arm.view()}
+    _load_log()
+    return {**asdict(load()), "recent": recent[:20], "last": last, "max_names": MAX_NAMES, "auto_arm": auto_arm.view()}

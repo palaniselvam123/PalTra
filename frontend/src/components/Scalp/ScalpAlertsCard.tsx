@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { BellRing } from "lucide-react";
-import { smaApi, type ScalpAlerts } from "@/lib/smaApi";
+import { smaApi, type ScalpAlertCheck, type ScalpAlerts } from "@/lib/smaApi";
 
 /**
  * The Scalp page's two Telegram alerts (backend/scalp_alerts.py): a strong up / down trend with 6-7 checks passed
@@ -89,6 +89,7 @@ export function ScalpAlertsCard() {
               today={view.auto_arm?.today.strong ?? []}
               onChange={(on, bot) => void save({ arm_strong_on: on, arm_strong_bot: bot })}
             />
+            <LastCheck row={view.last?.strong} scan="Trend quality" />
           </div>
           <div className={clsx(box, view.pressure_on ? "border-emerald-400/40 bg-emerald-400/[0.04]" : "border-slate-800")}>
             <label className="flex min-h-9 items-center gap-2 text-sm font-semibold text-slate-100">
@@ -153,6 +154,7 @@ export function ScalpAlertsCard() {
               today={view.auto_arm?.today.pressure ?? []}
               onChange={(on, bot) => void save({ arm_pressure_on: on, arm_pressure_bot: bot })}
             />
+            <LastCheck row={view.last?.pressure} scan="Most active" />
           </div>
           {view.arm_strong_on || view.arm_pressure_on ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
@@ -190,13 +192,14 @@ export function ScalpAlertsCard() {
           ) : null}
           {view.recent.length ? (
             <div className="lg:col-span-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sent since the server started</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Alerts (kept through restarts)</p>
               <ul className="mt-1 flex flex-wrap gap-1.5 text-xs">
                 {view.recent.map((r, i) => (
                   <li key={`${r.at}-${r.symbol}-${i}`} className="rounded-md border border-slate-800 px-2 py-1 text-slate-300">
                     <span className="tabular-nums text-slate-500">{time(r.at)}</span> <b>{r.symbol}</b>{" "}
                     {r.kind === "strong" ? `${r.side === "UP" ? "▲" : "▼"} ${r.passed} of ${r.of} checks` : `${r.side === "BUY" ? "buyers" : "sellers"} ${r.pct?.toFixed(0)}%`}
                     {r.price != null ? ` · ₹${r.price.toFixed(2)}` : ""}
+                    {r.failed ? <span className="text-amber-300"> · not sent: {r.failed}</span> : null}
                   </li>
                 ))}
               </ul>
@@ -205,6 +208,33 @@ export function ScalpAlertsCard() {
         </div>
       )}
     </section>
+  );
+}
+
+/** What the last scan in market hours found for this alert and whether Telegram took it (scalp_alerts.last). */
+function LastCheck({ row, scan }: { row?: ScalpAlertCheck; scan: string }) {
+  if (!row) {
+    return (
+      <p className="mt-2 text-xs text-slate-500">
+        No {scan} scan has finished in market hours on this server since this was added. The alert only reads scans made here while
+        NSE is open.
+      </p>
+    );
+  }
+  const at = new Date(row.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+  const tail = !row.on
+    ? "the alert was off, so nothing was sent"
+    : row.error
+      ? `Telegram did NOT take it: ${row.error}`
+      : row.new
+        ? `${row.new} new sent to Telegram`
+        : row.matched
+          ? "all of them already sent earlier today"
+          : "nothing to send";
+  return (
+    <p className={clsx("mt-2 text-xs", row.error ? "font-semibold text-amber-300" : "text-slate-400")}>
+      Last {scan} scan {at}: {row.rows} stocks read, {row.matched} met the thresholds · {tail}.
+    </p>
   );
 }
 
