@@ -248,6 +248,9 @@ function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<
   if (!info || info.status === "LOADING") {
     return <span>Stocks are armed one by one at their own minute as the day plays · practice only — no orders reach Groww</span>;
   }
+  if (info.finding) {
+    return <span>Finding the next day&apos;s arm minutes — {info.finding} · practice only — no orders reach Groww</span>;
+  }
   const picks = (info.date ? info.picks?.[info.date] : undefined) ?? [];
   const now = clockParts(info.clock ?? null)?.minute ?? 0;
   const minute = (at?: string | null) => {
@@ -531,9 +534,11 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName,
         {info?.status === "LOADING" ? (
           <span className="flex items-center gap-2 text-sm text-violet-100">
             <Loader2 size={14} aria-hidden className="animate-spin" />
-            {info.pick_rule?.kind === "AUTOARM"
-              ? `Reading the candles of ${info.loaded}/${info.total} stocks to find the minute each one would have been armed — none is armed yet`
-              : `Loading Groww candles… ${info.loaded}/${info.total} stocks`}
+            {info.pick_rule?.kind !== "AUTOARM"
+              ? `Loading Groww candles… ${info.loaded}/${info.total} stocks`
+              : info.finding
+                ? `Finding the minute each stock would have been armed — ${info.finding} (stops once the day's picks are full) — none is armed yet`
+                : `Downloading the candles of ${info.loaded}/${info.total} stocks to find the minute each one would have been armed — none is armed yet`}
           </span>
         ) : (
           <span className={clsx("font-mono text-violet-50", compact ? "text-xs" : "text-sm")} aria-live="off">

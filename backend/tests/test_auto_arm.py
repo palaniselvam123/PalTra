@@ -232,3 +232,17 @@ def test_api_starts_and_refuses(tmp_path, monkeypatch):
         bad = client.post("/api/replay/auto-arm", json={"date": "2026-11-02", "universe": ["SBIN"], "first": "15:20"})
         assert bad.status_code == 400
     database.reset_engine()
+
+
+def test_the_reads_stop_once_the_days_picks_are_full_and_report_progress():
+    frames = {"UP": _frame(0.15), "FLAT": _frame(0.0, 0.5)}
+    seen: list[str] = []
+    base = dict(source="TREND", first=dt.time(10, 0), last=dt.time(14, 0), every_min=15, minutes=5, min_checks=6)
+    full = auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base))
+    rule = auto_arm.AutoArmRule(**base, max_day=1, on_step=seen.append)
+    got = auto_arm.picks_for_day(frames, DAY, rule)
+    # Same first pick; the reads stop at the step after it instead of running to 14:00.
+    assert got == full[:1]
+    after = (dt.datetime.combine(DAY, dt.time(*map(int, got[0]["at"].split(":")))) + dt.timedelta(minutes=15)).strftime("%H:%M")
+    assert seen[0] == "10:00" and seen[-1] == after < "14:00"
+    assert "on_step" not in rule.as_dict()
