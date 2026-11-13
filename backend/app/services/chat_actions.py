@@ -56,6 +56,7 @@ class StopProposal(BaseModel):
     stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
+    atr_target_mult: float | None = Field(default=None, ge=0, le=50)
     tsl_mode: Literal["POINTS", "PERCENT"] | None = None
     tsl_sl_points: float | None = Field(default=None, gt=0, le=100000)
     tsl_trail_points: float | None = Field(default=None, gt=0, le=100000)
@@ -196,6 +197,7 @@ TOOLS = [
                 "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"]},
                 "atr_multiplier": {"type": "number"},
                 "vwap_stop_atr": {"type": "number"},
+                "atr_target_mult": {"type": "number", "description": "Target at this x ATR from the entry (0 = no target); with stop type ATR, SUPERTREND or VWAP."},
                 "tsl_mode": {"type": "string", "enum": ["POINTS", "PERCENT"]},
                 "tsl_sl_points": {"type": "number"},
                 "tsl_trail_points": {"type": "number"},

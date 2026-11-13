@@ -18,6 +18,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
 import { GuideBar } from "./GuideBar";
+import { api, type ActiveStock } from "@/lib/api";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 
@@ -89,9 +90,9 @@ type Props = {
 };
 
 type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "FRESH" | "FRESH_BULLISH" | "FRESH_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
-type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -443,16 +444,33 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     [shownRows, query, passes, ticks.only, ticks.ticked]
   );
   // Trend age, gap and rank (1 = fresh and wide) among the stocks that pass every filter but the stock search.
+  // With no Trend on size ticked, the scan's own candle size is read (SMA side, either way), so the columns are never empty.
   const ranks = useMemo(() => {
-    if (trendOn.length === 0) return new Map<string, RankedTrend>();
+    const own = data?.minutes;
+    if (trendOn.length === 0 && !own) return new Map<string, RankedTrend>();
     const reads = new Map<string, TrendRead>();
     for (const r of shownRows) {
       if (!passes(r)) continue;
-      const t = trendRead(r, trendOn, trendDir, trendKind);
+      const t = trendOn.length ? trendRead(r, trendOn, trendDir, trendKind) : trendRead(r, [own as number], "SAME", "SIDE");
       if (t) reads.set(r.symbol, t);
     }
     return rankTrends(reads);
-  }, [shownRows, passes, trendOn, trendDir, trendKind]);
+  }, [shownRows, passes, trendOn, trendDir, trendKind, data?.minutes]);
+  // Buyers vs sellers waiting, from the latest Most active scan (the live card only; read-only).
+  const [buyers, setBuyers] = useState<{ at: string | null; by: Map<string, ActiveStock> }>({ at: null, by: new Map() });
+  useEffect(() => {
+    if (saved) return;
+    let live = true;
+    api
+      .scalpActive({ top: 250 })
+      .then((a) => {
+        if (live) setBuyers({ at: a.as_of, by: new Map(a.rows.map((x) => [x.symbol, x])) });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [saved, data?.as_of]);
   // When each stock first showed up in this list (these filters) in today's saved scans.
   const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "chop", data?.candles ?? "NORMAL");
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
@@ -478,6 +496,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         return r.phase == null || r.phase_early ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
       case "dayMove":
         return r.day_move_pct ?? null;
+      case "buyers":
+        return buyers.by.get(r.symbol)?.buy_share ?? null;
       case "crosses":
         return r.crosses_today;
       case "since":
@@ -894,7 +914,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       sort={sort}
                       onSort={onSort}
                       num
-                      title="With Trend on: 1 = the freshest trend with the widest SMA gap. The average of the stock's place by trend age (youngest first) and by SMA gap (widest first)"
+                      title="1 = the freshest trend with the widest SMA gap. The average of the stock's place by trend age (youngest first) and by SMA gap (widest first). Read on the Trend on sizes, or on this scan's candle when none is ticked"
                       drag={cols.dragProps("rank")}
                     />
                   ),
@@ -905,7 +925,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       sort={sort}
                       onSort={onSort}
                       num
-                      title="With Trend on: market minutes every ticked size has pointed this way (closed candles x size, the shortest), and since when"
+                      title="Market minutes the SMAs have pointed this way (closed candles x size), and since when. On the Trend on sizes (the shortest), or on this scan's candle when none is ticked"
                       drag={cols.dragProps("age")}
                     />
                   ),
@@ -916,7 +936,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       sort={sort}
                       onSort={onSort}
                       num
-                      title="With Trend on: |SMA fast − slow| / slow %, averaged over the ticked sizes. ⚠ fading = on a size the gap is under half its widest in this trend"
+                      title="|SMA fast − slow| / slow %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the gap is under half its widest in this trend"
                       drag={cols.dragProps("gap")}
                     />
                   ),
@@ -935,6 +955,17 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                     />
                   ),
                   dayMove: <SortTh label="Day %" k="dayMove" sort={sort} onSort={onSort} num title="Last price vs today's first open" drag={cols.dragProps("dayMove")} />,
+                  buyers: (
+                    <SortTh
+                      label="Buyers %"
+                      k="buyers"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title={`Waiting buy orders as a share of all waiting orders (the rest are sellers), from the Most active scan${buyers.at ? ` of ${clock(buyers.at)} IST` : ""}. Empty until a Most active scan has read the stock`}
+                      drag={cols.dragProps("buyers")}
+                    />
+                  ),
                   sizes: (
                     <th
                       {...cols.dragProps("sizes")}
@@ -984,7 +1015,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             </thead>
             <tbody>
               {paged.shown.map((r) => (
-                <Row key={r.symbol} order={cols.order} row={r} rank={ranks.get(r.symbol) ?? null} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
+                <Row key={r.symbol} order={cols.order} row={r} buyer={saved ? null : buyers.by.get(r.symbol) ?? null} rank={ranks.get(r.symbol) ?? null} tick={onArmMany ? <TickCell ticks={ticks} symbol={r.symbol} /> : null} firstAt={firstSeen.get(r.symbol) ?? null} armedOn={armed.get(r.symbol.toUpperCase()) ?? []} arming={arming === r.symbol} onArm={() => onArm(r.symbol)} />
               ))}
             </tbody>
           </table>
@@ -1004,7 +1035,10 @@ function Row({
   armedOn,
   arming,
   onArm,
+  buyer,
 }: {
+  /** The stock's row in the latest Most active scan (buyers vs sellers waiting). */
+  buyer: ActiveStock | null;
   order: readonly Col[];
   row: ChopScanRow;
   rank: RankedTrend | null;
@@ -1126,6 +1160,25 @@ function Row({
               <span className={r.day_move_pct >= 0 ? "text-profit" : "text-loss"}>
                 {r.day_move_pct >= 0 ? "+" : ""}
                 {r.day_move_pct.toFixed(2)}%
+              </span>
+            )}
+          </td>
+        ),
+        buyers: (
+          <td className="py-1.5">
+            {buyer?.buy_share == null ? (
+              <span className="text-slate-600" title="No Most active scan has read this stock yet">—</span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`Buy ${buyer.buy_qty?.toLocaleString("en-IN") ?? "?"} · Sell ${buyer.sell_qty?.toLocaleString("en-IN") ?? "?"} waiting`}
+              >
+                <span className="flex h-1.5 w-12 overflow-hidden rounded bg-loss/60">
+                  <span className="h-full bg-profit" style={{ width: `${Math.round(buyer.buy_share * 100)}%` }} />
+                </span>
+                <span className="text-xs tabular-nums text-slate-300">
+                  {Math.round(buyer.buy_share * 100)}% / {100 - Math.round(buyer.buy_share * 100)}%
+                </span>
               </span>
             )}
           </td>

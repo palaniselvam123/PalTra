@@ -278,6 +278,8 @@ class BotConfig(Base):
     tsl_target_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
     # VWAP + ATR buffer stop (stop_type VWAP, vwap_stop.py): stop = VWAP ∓ this × ATR, moved each closed candle.
     vwap_stop_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    # ATR target (atr_target.py): target = entry ± this × ATR with an ATR / Supertrend / VWAP stop. 0 = off.
+    atr_target_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)
     # When false, entries are sent without an exchange stop. Square-off, the
     # panic button, and an opposite crossover still close the position.

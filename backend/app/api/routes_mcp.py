@@ -353,7 +353,7 @@ async def get_backtest_trades(args: dict) -> Any:
 
 
 def _stop_fields(settings: dict) -> dict:
-    keys = ("use_stop", "stop_type", "atr_multiplier", *(k for k in STOP_FIELDS if k.startswith(("tsl_", "gap_"))))
+    keys = ("use_stop", "stop_type", "atr_multiplier", "atr_target_mult", *(k for k in STOP_FIELDS if k.startswith(("tsl_", "gap_"))))
     return {k: settings.get(k) for k in keys if k in settings}
 
 

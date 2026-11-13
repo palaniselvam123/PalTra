@@ -199,6 +199,7 @@ FIELD_HELP = {
     "stop_type": "ATR | TSL (trailing) | SMA_GAP (paper only) | SUPERTREND | VWAP (VWAP ∓ vwap_stop_atr × ATR, tighter each candle)",
     "vwap_stop_atr": "VWAP stop: buffer below / above VWAP in ATRs (0.5)",
     "atr_period": "ATR period", "atr_multiplier": "stop at this x ATR",
+    "atr_target_mult": "ATR target: profit target at this x ATR from the entry (0 = off); with stop type ATR, SUPERTREND or VWAP",
     "tsl_mode": "POINTS (rupees) | PERCENT (% of entry) for the trailing stop",
     "tsl_sl_points": "trailing stop distance in rupees", "tsl_trail_points": "trail step in rupees",
     "tsl_target_points": "target in rupees (0 = none)", "tsl_sl_pct": "trailing stop distance in %",
