@@ -72,6 +72,7 @@ import small_colour
 import vwap_stop
 import atr_target
 import colour_exit
+import colour_force
 import supertrend
 import opening_range
 import join_trend
@@ -380,7 +381,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses",
-    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
+    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -3630,10 +3631,17 @@ class StrategyEngine:
         if name not in trade_names(cfg):
             raise ForceRefused(f"{name} is not on the Trade list. Press Trade on {name} first.")
         enriched, price, reference, atr = await self._manual_ready(name, cfg)
-        side = _live_ma_side(enriched)
-        if side is None:
-            raise ForceRefused(f"{name} has no SMA yet")
         own = _cfg_for(cfg, name)
+        colour_note = ""
+        if colour_force.on(own):
+            # Candle-colour mode with "Force follows the colour" (colour_force.py): the last closed colour candle decides.
+            side, colour_note = colour_force.side(enriched, own)
+            if side is None:
+                raise ForceRefused(f"{name}: no colour to follow — {colour_note}. No order.")
+        else:
+            side = _live_ma_side(enriched)
+            if side is None:
+                raise ForceRefused(f"{name} has no SMA yet")
         # Filters do not stop a Force order. Keep what they would have said
         # for the decision log, so a forced entry can be reviewed later.
         overridden = _entry_block(enriched, "LONG" if side == "BULLISH" else "SHORT", own, price=price)
@@ -3676,7 +3684,8 @@ class StrategyEngine:
             _cfg_for(cfg, name),
             now,
             result,
-            note="Force order. SMA side is read from the forming bar, then the last closed bar. Entry filters are not applied"
+            note=(f"Force order. Side from the last closed colour candle ({colour_note})." if colour_note else "Force order. SMA side is read from the forming bar, then the last closed bar.")
+            + " Entry filters are not applied"
             + (f" (they would have refused: {overridden})." if overridden else "."),
         )
         return result

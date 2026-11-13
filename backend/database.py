@@ -121,6 +121,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "colour_exit_count": "INTEGER DEFAULT 2",
             "colour_exit_body": "FLOAT DEFAULT 0.2",
             "colour_exit_inside": "BOOLEAN DEFAULT 0",
+            "colour_force": "BOOLEAN DEFAULT 0",
             "colour_pull": "VARCHAR(8) DEFAULT 'OFF'",
             "colour_pull_candles": "INTEGER DEFAULT 1",
             "colour_pull_market": "BOOLEAN DEFAULT 0",

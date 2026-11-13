@@ -73,6 +73,8 @@ export type SmaConfig = {
   colour_exit_count?: number;
   colour_exit_body?: number;
   colour_exit_inside?: boolean;
+  /** Force order follows the last closed colour candle instead of the SMAs (backend colour_force.py). */
+  colour_force?: boolean;
   /** Colour entries wait for a pullback inside the confirming candle (backend colour_pull.py). */
   colour_pull?: "OFF" | "HALF" | "LOW" | "SMA9";
   /** Colour candles to wait for the pullback (1-3). */

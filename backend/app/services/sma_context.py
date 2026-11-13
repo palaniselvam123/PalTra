@@ -192,6 +192,7 @@ FIELD_HELP = {
     "colour_exit_on": "candle colour: close an open trade by its own rule (colour_exit_count / colour_exit_body / colour_exit_inside) instead of the entry rule; the other side then opens only if the entry rule agrees",
     "colour_exit_count": "candle colour exit rule: candles of the other colour in a row to close a trade (1-5, default 2)",
     "colour_exit_body": "candle colour exit rule: smallest body of each, % of the close (0 = any)",
+    "colour_force": "candle colour: Force order buys on the last closed green colour candle and sells on a red one (the colour rule: count, body, Heikin Ashi, inside candles) instead of reading SMA fast vs slow; no colour = no order",
     "colour_exit_inside": "candle colour exit rule: let 'when the smaller candles inside agree' close a trade too (off by default)",
     "colour_pull": "candle colour: entries wait for a pullback inside the colour candle that confirmed them instead of buying at the market: OFF, HALF (middle of the candle), LOW (its low for a buy / high for a sell), SMA9 (fast SMA inside the candle, else the low / high)",
     "colour_pull_candles": "candle colour: colour candles to wait for that pullback (1-3)",

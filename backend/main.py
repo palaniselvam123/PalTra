@@ -878,6 +878,8 @@ class ConfigUpdate(BaseModel):
     colour_exit_count: int | None = Field(default=None, ge=1, le=5)
     colour_exit_body: float | None = Field(default=None, ge=0, le=2)
     colour_exit_inside: bool | None = None
+    # Candle colour: Force order follows the last closed colour candle (colour_force.py).
+    colour_force: bool | None = None
     # Candle-colour entries wait for a pullback (colour_pull.py).
     colour_pull: Literal["OFF", "HALF", "LOW", "SMA9"] | None = None
     colour_pull_candles: int | None = Field(default=None, ge=1, le=3)

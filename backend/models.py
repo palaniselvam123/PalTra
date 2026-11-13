@@ -597,6 +597,8 @@ class BotConfig(Base):
     colour_exit_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     colour_exit_body: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
     colour_exit_inside: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Candle colour: Force order follows the last closed colour candle instead of the SMAs (colour_force.py).
+    colour_force: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Candle-colour entries wait for a pullback (colour_pull.py): OFF | HALF | LOW | SMA9.
     colour_pull: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
     colour_pull_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)

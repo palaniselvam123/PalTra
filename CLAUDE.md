@@ -434,6 +434,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`COLOUR_TURN`) the other side opens only if the entry rule asks for it on that candle, else the stock waits flat. Entries
   while flat are unchanged. Settings → 1. When to enter, under the candle colour rules (`StrategyConfigPanel.ColourExit`,
   anchor `#sma-colour-exit`).
+  **Force order follows the colour** (`backend/colour_force.py`; `colour_force`, off by default; per bot and per stock, PAPER
+  and LIVE, replays too): in this mode the bot's own candle is 1 minute, so Force used to read SMA fast vs slow on that
+  candle. With it on, `StrategyEngine.force_order` reads the last *closed* `pattern_tf` colour candle with `colour_call`
+  (`colour_force.side` cuts the tape after that candle's last minute; candles in a row, body, Heikin Ashi, inside candles
+  all apply): green buys, red sells, no colour refuses ("no colour to follow … No order."); the forming candle is never
+  read. Entry checks are skipped as for any Force; market hours, cut-off, Trade list, caps and flip apply. Settings →
+  1. When to enter, under the colour exit rule (`StrategyConfigPanel.ColourForce`, anchor `#sma-colour-force`).
   **Wait for a pullback** (`backend/colour_pull.py`; `colour_pull` `OFF` default | `HALF` | `LOW` | `SMA9`, `colour_pull_candles`
   1-3 (1), `colour_pull_market` off; per bot and per stock, PAPER and LIVE, replays too; owner's request: a colour buy went in
   at the top of a strong green candle): instead of the market at the start of the next candle, `apply_signal` arms a
