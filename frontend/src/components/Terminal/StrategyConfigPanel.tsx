@@ -524,6 +524,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     colour_exit_count: Math.min(5, Math.max(1, Math.round(Number(form.colour_exit_count ?? 2)) || 2)),
     colour_exit_body: Math.min(2, Math.max(0, Number(form.colour_exit_body ?? 0.2) || 0)),
     colour_exit_inside: Boolean(form.colour_exit_inside),
+    colour_force: Boolean(form.colour_force),
     colour_pull: (["OFF", "HALF", "LOW", "SMA9"].includes(String(form.colour_pull)) ? String(form.colour_pull) : "OFF") as "OFF" | "HALF" | "LOW" | "SMA9",
     colour_pull_candles: Math.min(3, Math.max(1, Math.round(Number(form.colour_pull_candles ?? 1)) || 1)),
     colour_pull_market: Boolean(form.colour_pull_market),
@@ -3528,7 +3529,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
       : colour
-        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}${String(f.colour_pull ?? "OFF") !== "OFF" ? ` (waits for a pullback to the ${f.colour_pull === "HALF" ? "middle" : f.colour_pull === "LOW" ? "low" : "SMA 9 / low"} of the candle for ${f.colour_pull_candles ?? 1} candle(s)${f.colour_pull_market ? ", then at the market" : ""})` : ""}, then reversed${f.colour_exit_on ? ` (closes by its own rule: ${f.colour_exit_count ?? 2} candle(s) of the other colour${Number(f.colour_exit_body ?? 0.2) > 0 ? `, bodies ≥ ${f.colour_exit_body ?? 0.2}%` : ""})` : ""}`, off: { entry_mode: "SMA" }, warn: true }
+        ? { group: "enter", key: "entry_mode", text: `Rides the ${f.pattern_tf ?? 1}-min candle colour, not the SMA cross: green buys, red sells, held until ${Number(f.colour_count ?? 1) > 1 ? `${f.colour_count} candles` : "a candle"} of the other colour${Number(f.colour_min_body ?? 0) > 0 ? ` (bodies ≥ ${f.colour_min_body}%)` : ""}${String(f.colour_body_seq ?? "") ? ` (each candle ≥ ${f.colour_body_seq}${f.colour_body_unit === "ATR" ? "× ATR" : "%"})` : ""}${Number(f.colour_inside_minutes ?? 0) > 0 ? ` (one candle is enough when all its ${f.colour_inside_minutes}-min candles agree${Number(f.colour_inside_body ?? 0) > 0 ? `, body ≥ ${f.colour_inside_body}%` : ""})` : ""}${String(f.colour_pull ?? "OFF") !== "OFF" ? ` (waits for a pullback to the ${f.colour_pull === "HALF" ? "middle" : f.colour_pull === "LOW" ? "low" : "SMA 9 / low"} of the candle for ${f.colour_pull_candles ?? 1} candle(s)${f.colour_pull_market ? ", then at the market" : ""})` : ""}, then reversed${f.colour_exit_on ? ` (closes by its own rule: ${f.colour_exit_count ?? 2} candle(s) of the other colour${Number(f.colour_exit_body ?? 0.2) > 0 ? `, bodies ≥ ${f.colour_exit_body ?? 0.2}%` : ""})` : ""}${f.colour_force ? "; Force order follows the colour" : ""}`, off: { entry_mode: "SMA" }, warn: true }
         : { group: "enter", key: "entry_mode", text: `Enters when SMA ${fast} crosses SMA ${slow} on ${f.candle_minutes ?? 1}-min candles` }
   );
   if (medium) add({ group: "enter", key: "sma_medium", text: `Third line SMA ${f.sma_medium}: all three must line up`, off: { sma_medium: "" } });
@@ -4630,6 +4631,7 @@ function ColourBodySize({
       <ColourBodySeq form={form} set={set} isOwn={isOwn} unit={unit} />
       <ColourInside form={form} set={set} isOwn={isOwn} />
       <ColourExit form={form} set={set} isOwn={isOwn} />
+      <ColourForce form={form} set={set} isOwn={isOwn} />
       <ColourPull form={form} set={set} isOwn={isOwn} />
     </div>
   );
@@ -4837,6 +4839,36 @@ function ColourExit({
         {on
           ? `An open trade closes only after ${n} ${tf}-minute candle${n > 1 ? "s" : ""} of the other colour in a row${body > 0 ? `, each with a body of at least ${body}%` : ""}${form.colour_exit_inside ? ", or one candle whose smaller candles all agree" : ""}. Entries keep the rules above. After the close, the other side opens only if the entry rule also asks for it on that candle; otherwise the stock waits flat.`
           : "Off: the colour rules above both open and close trades (a candle of the other colour turns the trade). Tick it to give closing its own, stricter rule while entries stay as they are."}
+      </p>
+    </div>
+  );
+}
+
+/** Force order follows the last closed colour candle (colour_force, backend colour_force.py). */
+function ColourForce({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const tf = Number(form.pattern_tf ?? 1) || 1;
+  const on = Boolean(form.colour_force);
+  return (
+    <div id="sma-colour-force" className="mt-3 border-t border-white/10 pt-2">
+      <label className="flex items-center gap-2 text-sm text-slate-200">
+        <input type="checkbox" checked={on} onChange={(e) => set("colour_force", e.target.checked)} />
+        <span>
+          Force order follows the candle colour{isOwn("colour_force") ? " (own)" : ""}{" "}
+          <span className="text-xs text-slate-500">({on ? "on" : "off: Force reads SMA 9 vs SMA 21"})</span>
+        </span>
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        {on
+          ? `Force reads the last closed ${tf}-minute colour candle with the colour rules above (candles in a row, smallest body, Heikin Ashi, smaller candles inside): green buys, red sells. No colour (a doji, a small body or a mixed run) = no order. The candle still forming is never read. Entry checks are skipped as for any Force order; market hours, cut-off, Trade list, caps and flip still apply.`
+          : "Off: Force buys when SMA 9 is above SMA 21 on the 1-minute candle forming now (the bot's own candle in colour mode) and sells when below, whatever colour the candles are. Tick it to make Force follow the colour candles instead."}
       </p>
     </div>
   );

@@ -45,6 +45,7 @@ export const SETTING_LABELS: Record<string, string> = {
   colour_exit_count: "candle colour exit: candles of the other colour in a row",
   colour_exit_body: "candle colour exit: smallest body of each (%)",
   colour_exit_inside: "candle colour exit: smaller candles agreeing can close a trade",
+  colour_force: "candle colour: Force order follows the last closed colour candle",
   colour_pull: "candle colour: wait for a pullback (off / half-way / candle's low / SMA 9 or low)",
   colour_pull_candles: "candle colour: candles to wait for the pullback",
   colour_pull_market: "candle colour: no pullback, buy at the market after the wait",

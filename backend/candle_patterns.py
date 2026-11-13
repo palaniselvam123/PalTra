@@ -73,6 +73,8 @@ DEFAULTS = {
     "colour_exit_count": 2,
     "colour_exit_body": 0.2,
     "colour_exit_inside": False,
+    # Force order follows the last closed colour candle (colour_force.py).
+    "colour_force": False,
     # Colour entries wait for a pullback (colour_pull.py).
     "colour_pull": "OFF",
     "colour_pull_candles": 1,
