@@ -60,10 +60,12 @@ const CSS = `
 
 const esc = (s) => String(s).replace(/&(?!amp;|lt;|gt;|quot;|#)/g, "&amp;");
 
-function page({ title, lead, kicker = "PalTra · Learn · Scalp page", body }) {
+const SCALP_FOOT = "Practice money and candles only: nothing on the Scalp page places an order. The bots trade only the stocks you arm, in PAPER (practice) mode unless you switch one to LIVE yourself.";
+
+function page({ title, lead, kicker = "PalTra · Learn · Scalp page", body, foot = SCALP_FOOT }) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${CSS}</style></head>
 <body><span class="tag">${kicker}</span><h1>${title}</h1><p class="lead">${lead}</p>${body}
-<div class="foot">Practice money and candles only: nothing on the Scalp page places an order. The bots trade only the stocks you arm, in PAPER (practice) mode unless you switch one to LIVE yourself.</div>
+<div class="foot">${foot}</div>
 </body></html>`;
 }
 
@@ -85,9 +87,10 @@ const chip = (t, on) => `<span class="chip${on ? " on" : ""}">${t}</span>`;
 
 /**
  * A candle chart. candles: [{o,h,l,c}], optional lines {sma9:[], sma21:[], vwap:[]} (values per candle, null = skip),
- * marks: [{i, text, color, y?: "above"|"below"}], levels: [{v, text, color, dash}], width/height in px.
+ * marks: [{i, text, color, y?: "above"|"below", anchor?: "start"|"end", lift?: px}], levels: [{v, text, color, dash}], width/height in px.
+ * styles: {lineName: {color, label, dash, step}} for lines other than sma9 / sma21 / vwap (step = drawn as a staircase).
  */
-function candles({ candles: cs, lines = {}, marks = [], levels = [], width = 720, height = 220, xLabels = [], title = "" }) {
+function candles({ candles: cs, lines = {}, marks = [], levels = [], width = 720, height = 220, xLabels = [], title = "", styles = {} }) {
   const padL = 40, padR = 70, padT = 18, padB = 30;
   const n = cs.length;
   const all = [];
@@ -116,14 +119,21 @@ function candles({ candles: cs, lines = {}, marks = [], levels = [], width = 720
   const lineColor = { sma9: "#d6455d", sma21: "#2f6fd1", vwap: "#0891b2", ema: "#7c3aed" };
   const usedLabelYs = [];
   Object.entries(lines).forEach(([name, arr]) => {
-    const pts = arr.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean);
-    if (pts.length > 1) out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${lineColor[name] || "#64748b"}" stroke-width="1.8"${name === "vwap" ? ' stroke-dasharray="4 3"' : ""}/>`;
+    const st = styles[name] || {};
+    const colr = st.color || lineColor[name] || "#64748b";
+    let pts = [];
+    arr.forEach((v, i) => {
+      if (v == null) return;
+      if (st.step && pts.length) pts.push(`${x(i).toFixed(1)},${pts[pts.length - 1].split(",")[1]}`);
+      pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    });
+    if (pts.length > 1) out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${colr}" stroke-width="1.8"${name === "vwap" || st.dash ? ' stroke-dasharray="4 3"' : ""}/>`;
     const last = arr.map((v, i) => [v, i]).filter(([v]) => v != null).pop();
     if (last) {
       let ly = y(last[0]) + 3;
       while (usedLabelYs.some((u) => Math.abs(u - ly) < 11)) ly += 11;
       usedLabelYs.push(ly);
-      out += `<text x="${width - padR + 4}" y="${ly.toFixed(1)}" font-size="9" fill="${lineColor[name] || "#64748b"}" font-weight="700">${name === "sma9" ? "SMA 9" : name === "sma21" ? "SMA 21" : name.toUpperCase()}</text>`;
+      out += `<text x="${width - padR + 4}" y="${ly.toFixed(1)}" font-size="9" fill="${colr}" font-weight="700">${st.label || (name === "sma9" ? "SMA 9" : name === "sma21" ? "SMA 21" : name.toUpperCase())}</text>`;
     }
   });
   levels.forEach((l) => {
@@ -133,8 +143,9 @@ function candles({ candles: cs, lines = {}, marks = [], levels = [], width = 720
   marks.forEach((m) => {
     const c = cs[m.i];
     const above = m.y !== "below";
-    const yy = above ? y(c.h) - 8 : y(c.l) + 14;
-    out += `<text x="${x(m.i).toFixed(1)}" y="${yy.toFixed(1)}" font-size="9.5" font-weight="700" fill="${m.color || "#0f172a"}" text-anchor="middle">${m.text}</text>`;
+    const yy = above ? y(c.h) - 8 - (m.lift || 0) : y(c.l) + 14 + (m.lift || 0);
+    const tx = x(m.i) + (m.anchor === "start" ? -4 : m.anchor === "end" ? 4 : 0);
+    out += `<text x="${tx.toFixed(1)}" y="${yy.toFixed(1)}" font-size="9.5" font-weight="700" fill="${m.color || "#0f172a"}" text-anchor="${m.anchor || "middle"}" stroke="#fff" stroke-width="3" paint-order="stroke">${m.text}</text>`;
     out += `<line x1="${x(m.i).toFixed(1)}" x2="${x(m.i).toFixed(1)}" y1="${(above ? yy + 2 : yy - 10).toFixed(1)}" y2="${(above ? y(c.h) - 1 : y(c.l) + 1).toFixed(1)}" stroke="${m.color || "#0f172a"}" stroke-width="1"/>`;
   });
   xLabels.forEach(([i, t]) => {

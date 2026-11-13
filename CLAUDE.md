@@ -2174,6 +2174,10 @@ spinning top), body and range) / Matched / Call columns
   anchor `#sma-day-extreme`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
   `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it),
   `buyers-sellers` (the buyers / sellers % column, its day list, test and alert, linked from the day list),
+  `settings-entries` and `settings-exits` (the strategy settings' look-alike names told apart, with pictures: part 1 the
+  signal, checks and how the order is placed; part 2 exits, stops, targets, flip / reverse, hand-offs, limits and scope;
+  linked from the Settings page header "Similar names explained (guide)"; modules `17-settings-entries.js` /
+  `18-settings-exits.js`, their own figures in `frontend/scripts/guides/figs-settings.js`),
   and the **Scalp page's beginner guides** (topic "Scalp", one per tab plus `scalp-start-here`: `scalp-monitor`,
   `scalp-cross-scan`, `scalp-morning-0930`, `scalp-turning`, `scalp-carry-over`, `scalp-trend-quality`,
   `scalp-52-week-high`, `scalp-most-active`, `scalp-second-candle`, `scalp-backtest`, `scalp-strategy-lab`,
