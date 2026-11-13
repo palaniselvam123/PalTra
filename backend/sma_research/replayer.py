@@ -62,6 +62,7 @@ BASELINE_OFF = {
     "exit_need": 0,
     "exit_within": 3,
     "use_level": False,
+    "use_fresh": False,
     "use_high52": False,
     "tall_pullback": False,
     "extreme_entry": False,

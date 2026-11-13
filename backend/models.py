@@ -433,6 +433,10 @@ class BotConfig(Base):
     use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level.
     use_level: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Fresh trend entry check (fresh_entry.py): a new SMA cross with price and fast SMA beyond VWAP, the gap
+    # widening and volume at least fresh_rvol x the usual (0 = volume not checked).
+    use_fresh: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    fresh_rvol: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
     # 52-week high entry check (high52.py): side LONG / SHORT / BOTH, and how far from the level still counts (%).
     use_high52: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     high52_side: Mapped[str | None] = mapped_column(String, nullable=True, default="LONG")

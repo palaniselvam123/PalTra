@@ -56,7 +56,7 @@ export const STYLES: TradeStyle[] = [
     shows: "Join the morning trend, always in a trade, Supertrend, EMA, 52-week high, price level, opening range, day high/low guard",
     on: (f) =>
       yes(f.join_trend) || yes(f.always_in) || yes(f.use_supertrend) || yes(f.st_exit) || yes(f.use_ema) || yes(f.ema_exit) ||
-      yes(f.use_high52) || yes(f.use_level) || yes(f.use_or_volume) || yes(f.use_or_vwap) || yes(f.use_or_spread) || yes(f.use_or_break) ||
+      yes(f.use_high52) || yes(f.use_level) || yes(f.use_fresh) || yes(f.use_or_volume) || yes(f.use_or_vwap) || yes(f.use_or_spread) || yes(f.use_or_break) ||
       yes(f.day_extreme_guard) || yes(f.tall_pullback),
   },
   {
@@ -397,6 +397,116 @@ export function SidewaysGuard({ form, onFill }: { form: SmaConfig; onFill: (valu
             Backtest
           </a>{" "}
           with and without it, and use the Scalp page&apos;s Sideways test to see which of your stocks are the sideways ones.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+/** "Fresh trend" as one strategy to test: every setting it needs, with the form's value now. Form-fill only. */
+function freshSteps(f: SmaConfig): Step[] {
+  const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const candle = num(f.candle_minutes, 1);
+  const late = num(f.late_entry_min, 0);
+  const atrTrail = Boolean(f.use_stop ?? true) && f.stop_type === "TSL" && f.tsl_mode === "ATR";
+  return [
+    {
+      id: "candle",
+      title: "5-minute candles, entries on the SMA cross",
+      why: "The 30-day test read 5-minute candles. The cross itself still opens the trade.",
+      now: `${candle}-minute candles${f.entry_mode && f.entry_mode !== "SMA" ? `, entry ${f.entry_mode}` : ""}`,
+      done: candle === 5 && (f.entry_mode ?? "SMA") === "SMA",
+      fill: { candle_minutes: "5", entry_mode: "SMA" },
+    },
+    {
+      id: "fresh",
+      title: "Enter only on a fresh trend (new cross, beyond VWAP, gap widening, volume 1.5× usual)",
+      why: "This is the rule itself. Every other cross is skipped.",
+      now: f.use_fresh ? `on, volume ${num(f.fresh_rvol, 1.5)}×` : "off",
+      done: Boolean(f.use_fresh) && num(f.fresh_rvol, 1.5) === 1.5,
+      fill: { use_fresh: true, fresh_rvol: "1.5" },
+    },
+    {
+      id: "late",
+      title: "Late entry: 15 minutes",
+      why: "A cross that fails the check on its own candle may still enter on the next two candles, while it is still fresh.",
+      now: late > 0 ? `${late} min` : "off",
+      done: late === 15,
+      fill: { late_entry_min: "15" },
+    },
+    {
+      id: "stop",
+      title: "Trailing stop in ATR multiples: stop 1.5, trail 0.5, no target",
+      why: "The exit that did best in the test on most stocks. The stop fits each stock's own candle size.",
+      now: atrTrail ? `stop ${num(f.tsl_sl_atr, 1.5)} / trail ${num(f.tsl_trail_atr, 0.5)} / target ${num(f.tsl_target_atr, 3)} × ATR` : "another stop",
+      done: atrTrail && num(f.tsl_sl_atr, 1.5) === 1.5 && num(f.tsl_trail_atr, 0.5) === 0.5 && num(f.tsl_target_atr, 3) === 0,
+      fill: { use_stop: true, stop_type: "TSL", tsl_mode: "ATR", tsl_sl_atr: "1.5", tsl_trail_atr: "0.5", tsl_target_atr: "0" },
+    },
+  ];
+}
+
+export function FreshSetup({ form, onFill }: { form: SmaConfig; onFill: (values: Fill) => void }) {
+  const steps = freshSteps(form);
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const isTicked = (s: Step) => ticked[s.id] ?? !s.done;
+  const chosen = steps.filter((s) => !s.done && isTicked(s));
+  const done = steps.filter((s) => s.done).length;
+  return (
+    <details id="sma-fresh-setup" className="group/fr mt-3 scroll-mt-24 rounded-lg border border-sky-400/30 bg-sky-400/[0.04]">
+      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
+        Test the &quot;Fresh trend&quot; strategy: a one-click set-up
+        <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", done === steps.length ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300")}>
+          {done} of {steps.length} set
+        </span>
+        <span className="text-xs font-normal text-slate-400">— fresh cross + VWAP + volume, on its own. Click to open.</span>
+      </summary>
+      <div className="px-3 pb-3">
+        <p className="text-xs leading-relaxed text-slate-300">
+          This fills the form so the bot trades only the Fresh trend signal: a new SMA cross with the price beyond VWAP, the gap
+          widening and heavy volume. Use it on a practice bot, then run a Backtest to see how it does with your real settings.
+          Other entry checks and exits that are already on stay on: switch them off under &quot;What&apos;s switched on&quot; to
+          test this rule alone.
+        </p>
+        <ul className="mt-2 space-y-1.5">
+          {steps.map((s) => (
+            <li key={s.id} className="rounded-md border border-white/10 bg-white/[0.02] p-2">
+              <label className="flex items-start gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={s.done || isTicked(s)}
+                  disabled={s.done}
+                  onChange={(e) => setTicked((t) => ({ ...t, [s.id]: e.target.checked }))}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="font-semibold">{s.title}</span>
+                  <span className={clsx("ml-2 text-[11px]", s.done ? "text-emerald-300" : "text-slate-400")}>
+                    {s.done ? `already set (${s.now})` : `now: ${s.now}`}
+                  </span>
+                  <span className="block text-xs leading-snug text-slate-400">{s.why}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!chosen.length}
+            onClick={() => onFill(Object.assign({}, ...chosen.map((s) => s.fill)) as Fill)}
+            className="inline-flex min-h-9 items-center rounded-md bg-sky-500/20 px-3 text-xs font-semibold text-sky-100 ring-1 ring-inset ring-sky-400/50 hover:bg-sky-500/30 disabled:opacity-50"
+          >
+            Put the ticked ones in the form
+          </button>
+          <span className="text-xs text-slate-400">Then press Save at the bottom. Nothing changes until you do.</span>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-slate-400">
+          In a 30-day test on about 500 stocks this was the best early signal, but the edge was small (about the size of the
+          charges) and mostly in F&amp;O stocks. Prove it with a{" "}
+          <a href="/scalp/#backtest" className="text-sky-300 underline hover:text-sky-200">
+            Backtest
+          </a>{" "}
+          on a practice bot before any real money.
         </p>
       </div>
     </details>
