@@ -8,6 +8,7 @@ export const SETTING_LABELS: Record<string, string> = {
   tsl_trail_atr: "trail step (× ATR)",
   tsl_target_atr: "target (× ATR, 0 = none)",
   vwap_stop_atr: "VWAP stop buffer (× ATR)",
+  atr_target_mult: "ATR target (× ATR, 0 = none)",
   tsl_sl_points: "trailing stop distance (₹)",
   tsl_trail_points: "trail step (₹)",
   tsl_target_points: "target (₹, 0 = none)",

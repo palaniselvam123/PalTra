@@ -70,6 +70,7 @@ import exit_candle
 import small_candles
 import small_colour
 import vwap_stop
+import atr_target
 import supertrend
 import opening_range
 import join_trend
@@ -342,7 +343,7 @@ SNAPSHOT_FIELDS = (
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
-    "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr",
+    "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr", "atr_target_mult",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -1308,7 +1309,7 @@ class StrategyEngine:
             # then the copy saved with the trade at entry (never the shared ones).
             own = None if cfg is None else _cfg_for(cfg, symbol)
             if own is not None:
-                for key in ("use_stop", "stop_type", "tsl_sl_points", "tsl_trail_points", "tsl_target_points"):
+                for key in ("use_stop", "stop_type", "tsl_sl_points", "tsl_trail_points", "tsl_target_points", "atr_target_mult"):
                     if at_entry.get(key) is not None:
                         setattr(own, key, at_entry[key])
             # A practice book on the moving stop keeps trailing from the saved
@@ -1325,6 +1326,10 @@ class StrategyEngine:
                 # so trailing resumes from it with the best price reset to entry.
                 tsl_points, tsl_step, tgt_points = tsl_settings(own, entry_price=entry, atr=atr)
                 _sl, target = tsl_entry_levels(direction, entry, tsl_points, tgt_points)
+            if stop_active and own is not None and not trailing and target is None:
+                # ATR target: the same level as at the entry (entry price and ATR are saved with the trade).
+                tp_atr = atr_target.level(own, direction, entry, atr)
+                target = round_price(symbol, tp_atr) if tp_atr is not None else None
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
             self.positions[symbol] = OpenPosition(
@@ -3992,6 +3997,10 @@ class StrategyEngine:
             sl_tsl, tp_tsl = tsl_entry_levels(direction, fill, tsl_points, tgt_points)
             sl = round_price(cfg.symbol, sl_tsl)
             target = round_price(cfg.symbol, tp_tsl) if tp_tsl is not None else None
+        if target is None and not trailing:
+            # ATR target: a multiple of the same ATR the stop was sized from (ATR / Supertrend / VWAP stops).
+            tp_atr = atr_target.level(cfg, direction, fill, atr)
+            target = round_price(cfg.symbol, tp_atr) if tp_atr is not None else None
         st_stop = supertrend.stop_on(cfg)
         st_bar = None
         if st_stop:
@@ -6582,6 +6591,7 @@ def _stop_points(cfg) -> dict | None:
         "gap_sl_mult": float(getattr(cfg, "gap_sl_mult", 1.0) or 1.0),
         "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
         "vwap_stop_atr": vwap_stop.buffer(cfg),
+        "atr_target_mult": atr_target.mult(cfg),
     }
 
 

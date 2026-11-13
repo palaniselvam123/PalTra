@@ -126,6 +126,8 @@ export type SmaConfig = {
   tsl_target_atr?: number;
   /** VWAP + ATR buffer stop (stop_type "VWAP"): stop = VWAP ∓ this × ATR, tighter only each candle. */
   vwap_stop_atr?: number;
+  /** ATR target: target = entry ± this × ATR with an ATR / Supertrend / VWAP stop (0 = off). */
+  atr_target_mult?: number;
   gap_sl_mult?: number;
   gap_tp_mult?: number;
   gap_min_pct?: number;
@@ -1588,6 +1590,7 @@ export type SmaState = {
     gap_sl_mult: number;
     gap_tp_mult: number;
     vwap_stop_atr?: number;
+    atr_target_mult?: number;
   } | null;
   exchange: string;
   ltp: number;

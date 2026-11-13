@@ -662,6 +662,14 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   no second exit). A restart resumes it from the saved stop (`st_stop` restored from the stock's settings). The chart draws
   it (`stUp` green / `stDown` red rows from `candle_rows`, `chart_filters.st_line`) while either is on; EMA
   lines likewise (`emaFast` / `emaSlow`, `ema_lines`). The stock research baseline keeps both off.
+- `backend/atr_target.py` – ATR target (`atr_target_mult`, 0 = off by default, 0-50; per bot and per stock, PAPER and LIVE,
+  replays too; Settings → 5. Stop-loss and target, "ATR target ×", anchor `#sma-atr-target`): like the ATR stop but on the
+  profit side: target = entry + N × ATR for a buy, entry − N × ATR for a sell, set once in `StrategyEngine._open` from the
+  same ATR the stop was sized from (`level`; no formed ATR = no target) and restored after a restart from the saved entry
+  price and ATR (`restore_open_books`). Applies while the stop is on with stop type ATR, SUPERTREND or VWAP (`on`); the TSL
+  and SMA-gap stops keep their own targets. Hit on the price in `_watch_stop` like any target (`TARGET_HIT`, via `_exit_now`,
+  which cancels a LIVE stop first; a LIVE position restored without its stop id is left to that stop). In `SNAPSHOT_FIELDS` /
+  `STOCK_FIELDS`, `stop_points`, the chat / MCP stop tools (`StopProposal`). The stock research baseline keeps it off.
 - `backend/vwap_stop.py` – VWAP + ATR buffer stop (`stop_type = "VWAP"`, with the stop on; `vwap_stop_atr` buffer 0.5, 0-5;
   per bot and per stock, PAPER and LIVE, replays too; Settings → 5. Stop-loss and target, stop type "VWAP + ATR buffer", a
   slider plus box): the stop sits at the session VWAP (`indicators._session_vwap` on the bot's closed candles) − k × ATR 14

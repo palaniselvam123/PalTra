@@ -325,6 +325,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     use_stop: form.use_stop !== false,
     stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR",
     vwap_stop_atr: Number(form.vwap_stop_atr ?? 0.5),
+    atr_target_mult: Math.max(0, Number(form.atr_target_mult ?? 0) || 0),
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
     tsl_target_points: Number(form.tsl_target_points ?? 0),
@@ -2826,6 +2827,22 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <Field label="ATR period" own={isOwn("atr_period")} value={String(form.atr_period)} onChange={(v) => set("atr_period", v)} />
                 <Field label="ATR stop ×" own={isOwn("atr_multiplier")} value={String(form.atr_multiplier)} onChange={(v) => set("atr_multiplier", v)} />
               </div>
+              {form.stop_type !== "SMA_GAP" ? (
+                <div id="sma-atr-target" className="mt-2 grid grid-cols-2 items-end gap-2">
+                  <Field
+                    label="ATR target × (0 = no target)"
+                    own={isOwn("atr_target_mult")}
+                    value={String(form.atr_target_mult ?? 0)}
+                    onChange={(v) => set("atr_target_mult", v)}
+                  />
+                  <p className="text-[11px] leading-snug text-slate-400">
+                    {Number(form.atr_target_mult) > 0
+                      ? `Books the profit at ${String(form.atr_target_mult)} × ATR from the entry (buy: above, sell: below), using the same ATR as the stop. With the ${String(form.atr_multiplier)} × ATR stop that risks 1 to make ${(Number(form.atr_target_mult) / (Number(form.atr_multiplier) || 1)).toFixed(1)}.`
+                      : "Like the ATR stop, but on the profit side: type 3 to book the profit at 3 × ATR from the entry. 0 = no target (the other exits close the trade)."}
+                    {form.use_stop === false ? " Needs the stop-loss switched on." : ""}
+                  </p>
+                </div>
+              ) : null}
               <AtrPicture form={form} set={set} />
             </>
           ) : null}
@@ -3625,6 +3642,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
   }
+  if (f.use_stop !== false && Number(f.atr_target_mult) > 0 && f.stop_type !== "TSL" && f.stop_type !== "SMA_GAP")
+    add({ group: "stop", key: "atr_target_mult", text: `Target at ${f.atr_target_mult}× ATR from the entry`, off: { atr_target_mult: "0" } });
   if (f.stop_plan && (f.stop_type ?? "ATR") === "ATR")
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
