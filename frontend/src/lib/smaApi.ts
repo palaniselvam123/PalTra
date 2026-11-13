@@ -68,6 +68,11 @@ export type SmaConfig = {
   colour_inside_minutes?: 0 | 1 | 2 | 3 | 5 | 10;
   /** Smallest body (% of price) for a colour candle whose inside candles all agree; 0 = any. */
   colour_inside_body?: number;
+  /** A separate rule for closing a colour trade (backend colour_exit.py): on, candles in a row, smallest body %, inside candles. */
+  colour_exit_on?: boolean;
+  colour_exit_count?: number;
+  colour_exit_body?: number;
+  colour_exit_inside?: boolean;
   /** Colour entries wait for a pullback inside the confirming candle (backend colour_pull.py). */
   colour_pull?: "OFF" | "HALF" | "LOW" | "SMA9";
   /** Colour candles to wait for the pullback (1-3). */

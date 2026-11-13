@@ -237,7 +237,14 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   out.push({ name: `Square-off at ${cfg.square_off_time ?? "15:15"}`, when: "time", code: "EOD_SQUARE_OFF" });
   const mode = String(cfg.entry_mode ?? "SMA").toUpperCase();
   if (mode === "PATTERN") out.push({ name: "Candle pattern: each candle closes the trade", when: candle, code: "CANDLE_END" });
-  if (mode === "COLOUR") out.push({ name: "Candle colour: a candle of the other colour", when: candle, code: "COLOUR_TURN" });
+  if (mode === "COLOUR")
+    out.push({
+      name: cfg.colour_exit_on
+        ? `Candle colour (own exit rule): ${cfg.colour_exit_count ?? 2} candle(s) of the other colour${Number(cfg.colour_exit_body ?? 0.2) > 0 ? `, bodies ≥ ${cfg.colour_exit_body ?? 0.2}%` : ""}`
+        : "Candle colour: a candle of the other colour",
+      when: candle,
+      code: "COLOUR_TURN",
+    });
   if (mode === "NTH_CANDLE") out.push({ name: "Second candle: no exit of its own (the stop, target, ticked exits and square-off close it)", when: "—", code: "" });
   if (cfg.breakout_handoff && cfg.breakout_cut && String(cfg.breakout_when ?? "ANY").toUpperCase() !== "IN_PROFIT") out.push({ name: "Breakout: cut and move the stock on", when: candle, code: "BREAKOUT_STOP" });
   if (mode === "SMA" && crossExitOn(cfg) && !mixed)

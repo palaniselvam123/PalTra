@@ -71,6 +71,7 @@ import small_candles
 import small_colour
 import vwap_stop
 import atr_target
+import colour_exit
 import supertrend
 import opening_range
 import join_trend
@@ -379,7 +380,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses",
-    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
+    "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
@@ -2200,6 +2201,10 @@ class StrategyEngine:
         """
         call = colour_call(frame, cfg)
         pos = self.positions.get(symbol)
+        entry_call = call
+        if pos is not None and colour_exit.on(cfg):
+            # The trade is judged by its own exit rule (colour_exit.py); entries keep the usual one.
+            call = colour_call(frame, colour_exit.exit_cfg(cfg))
         waiting = self._pullback.get(symbol)
         if pos is None and waiting is not None and waiting.note == colour_pull.NOTE and call.side in (None, waiting.direction):
             # A colour entry already waits for its pullback (colour_pull.py): keep its level and its wait.
@@ -2232,6 +2237,12 @@ class StrategyEngine:
             if symbol in self.positions:
                 text = f"{symbol} could not close on the {call.note} — {self.last_signal}"
                 self._signals[symbol] = text
+                return text
+            if colour_exit.on(cfg) and entry_call.side != call.side:
+                # Closed by the exit rule; the other side opens only when the entry rule asks for it too.
+                text = f"{symbol} closed — exit rule: {call.note}; no new entry ({entry_call.note})"
+                self._signals[symbol] = text
+                self.last_signal = text
                 return text
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
         # No Telegram for a refused candle: one closes every few minutes.
