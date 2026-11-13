@@ -1085,6 +1085,12 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (`trend_strength.read`, the same 7 checks as the card's own `trend`) on every candle size (`chop_scan._crosses_on`;
   None without a strong trend or with too few candles). The card keeps only stocks where every ticked size points the
   chosen way, by `side_by_minutes` (SMA side) or `trend_by_minutes` (Strong trend); a size with no read never matches.
+  **Never-empty columns and Buyers %** (display only, `ChopScan.tsx`): with no Trend on size ticked, Rank / Trend age / SMA gap
+  are read on the scan's own candle size (SMA side, either way), so they are filled on every scan. A **Buyers %** column
+  (`buyers`, sortable) shows each stock's waiting buy vs sell orders from the latest Most active scan (`api.scalpActive`, re-read
+  with each Trend quality result; "—" until that scan has read the stock; not on a saved scan). The Most active card shows the
+  last Trend quality scan's Trend / **Trend score** / Crosses / Phase columns by itself in the Live view (`smaApi.chopScan()`,
+  no new scan, refreshed with each Most active scan; "Clear trend columns" hides them until Read trend quality is pressed).
   **Trend age, SMA gap and rank** (`backend/trend_rank.py`, `frontend/src/lib/trendRank.ts`, same arithmetic): each row
   also carries, per size, how long the current SMA side has run (`chop_scan._run_read`, across the download's days:
   `run_since_ts_by_minutes`, `run_candles_by_minutes`) and the signed SMA gap % now and its widest in that run

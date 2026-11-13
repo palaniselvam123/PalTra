@@ -133,6 +133,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [tqMinutes, setTqMinutes] = useState<CrossScanMinutes>(5);
   const [tq, setTq] = useState<Map<string, ChopScanRow>>(new Map());
   const [tqBusy, setTqBusy] = useState(false);
+  // "Clear trend columns" keeps them away until Read trend quality is pressed.
+  const [tqHidden, setTqHidden] = useState(false);
   const [tqNote, setTqNote] = useState<string | null>(null);
   const [trendPick, setTrendPick] = useState<TrendPick>("ALL");
   const [fc, setFc] = useState<Map<string, FirstCandleRow>>(new Map());
@@ -339,11 +341,32 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     [source, query, minSpeed, priceMin, priceMax, minRvol, trendPick, tq, fcPick, fc, ticks]
   );
 
+  // Show the trend score and phase from the last Trend quality scan as it is (no new scan); refreshed with each Most active scan.
+  useEffect(() => {
+    if (view !== "live" || tqBusy || tqHidden) return;
+    let live = true;
+    smaApi
+      .chopScan()
+      .then((scan) => {
+        if (!live || scan.running || !scan.rows.length) return;
+        setTq(new Map(scan.rows.map((row) => [row.symbol, row])));
+        setTqNote(
+          `Trend columns from the Trend quality scan${scan.as_of ? ` of ${clockIst(scan.as_of)} IST` : ""} on ${scan.minutes}-minute candles. "Read trend quality" reads the stocks shown again.`
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, data?.as_of, tqHidden]);
+
   // Read trend quality: run the Trend quality scan on the stocks the filters show (read-only, candles only).
   const readTrend = async () => {
     const symbols = found.map((r) => r.symbol).slice(0, TQ_MAX);
     if (!symbols.length) return;
     setTqBusy(true);
+    setTqHidden(false);
     setTqNote(`Reading trend quality of ${symbols.length} stock${symbols.length === 1 ? "" : "s"} on ${tqMinutes}-minute candles…`);
     try {
       await smaApi.chopScanStart(symbols, tqMinutes, true);
@@ -674,7 +697,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           </select>
         </label>
         {tq.size > 0 && (
-          <button type="button" onClick={() => setTq(new Map())} className="text-slate-500 hover:text-slate-300">
+          <button type="button" onClick={() => {
+            setTq(new Map());
+            setTqNote(null);
+            setTqHidden(true);
+          }} className="text-slate-500 hover:text-slate-300">
             Clear trend columns
           </button>
         )}
@@ -805,6 +832,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                 {tq.size > 0 && (
                   <>
                     <th className="pb-2 text-left font-medium" title="Strong trend, else the Trend quality score (trending / mixed / choppy)">Trend</th>
+                    <th className="pb-2 text-right font-medium" title="Trend score 0-100: how many of the 7 strong-trend checks pass, and which way the SMAs point">Trend score</th>
                     <th className="pb-2 text-right font-medium" title="SMA crosses today on the chosen candle">Crosses</th>
                     <th className="pb-2 text-left font-medium" title="Trend phase now">Phase</th>
                   </>
@@ -1014,6 +1042,16 @@ function ActiveRowView({
               </span>
             ) : (
               <span className={trend.score === "CHOPPY" ? "text-amber-300" : "text-slate-300"}>{trend.score.toLowerCase()}</span>
+            )}
+          </td>
+          <td className="py-1.5 text-right font-mono text-xs">
+            {trend?.trend_score == null ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <span className={trend.trend_side === "BULLISH" ? "text-profit" : trend.trend_side === "BEARISH" ? "text-loss" : "text-slate-300"}>
+                {trend.trend_side === "BULLISH" ? "↑ " : trend.trend_side === "BEARISH" ? "↓ " : ""}
+                {Math.round(trend.trend_score)}
+              </span>
             )}
           </td>
           <td className="py-1.5 text-right font-mono text-xs">{trend?.crosses_today ?? "—"}</td>
