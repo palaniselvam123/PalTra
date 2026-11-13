@@ -562,7 +562,9 @@ def colour_call(frame: pd.DataFrame, cfg) -> PatternCall:
         return PatternCall(None, "", f"waiting for {need} closed {tf}-minute candles")
     # The smallest body in price units for each of the last `need` candles.
     # Each candle of the run can have its own smallest body (colour_body_seq, oldest first, in the unit picked).
-    seq = parse_body_seq(setting(cfg, "colour_body_seq"))[:need]
+    # Only with 2+ candles in a row (the Settings form hides the boxes at 1 and says so): a run of one candle keeps the
+    # usual smallest body, even when sizes typed for a longer run are still saved.
+    seq = parse_body_seq(setting(cfg, "colour_body_seq"))[:need] if need > 1 else []
     seq = seq + [None] * (need - len(seq))
     atr_mode = colour_body_unit(cfg) == "ATR"
     if atr_mode:

@@ -416,7 +416,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   | `ATR`, `colour_body_atr` 0-5 × the Wilder ATR 14 of the colour candles themselves, `_atr_series`, real candles; no ATR yet = any
   body counts). **Each candle of the run its own size** (`colour_body_seq`, "0.1,0.5" oldest first in the unit picked, a blank
   place = the usual floor; `parse_body_seq` / `clean_body_seq`): with 2 in a row and 0.1 / 0.5 × ATR a small then a big candle
-  turns the trade, a big then a small one is held ("candle 2 of 2 body … under its …"); entries while flat read it too.
+  turns the trade, a big then a small one is held ("candle 2 of 2 body … under its …"); entries while flat read it too. Read only with 2+ candles in a row (`need > 1`; the Settings form hides the boxes at 1): sizes left over from a longer run are ignored at 1.
   Settings: `StrategyConfigPanel.ColourBodySize` (unit switch, a box per size, the picked size ticked; `ColourBodySeq`, one
   box per candle in a row).
   **When the smaller candles inside agree** (`colour_inside_minutes` 1/2/3/5/10 dividing `pattern_tf`, 0 = off;

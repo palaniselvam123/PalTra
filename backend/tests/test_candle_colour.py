@@ -214,6 +214,11 @@ def test_each_candle_of_the_run_has_its_own_size():
     # Off: both turn.
     off = _cfg(entry_mode="COLOUR", colour_count=2, colour_body_unit="ATR", colour_body_atr=0)
     assert colour_call(small_then_big, off).side == "SHORT" and colour_call(big_then_small, off).side == "SHORT"
+    # One candle in a row: sizes saved for a longer run are hidden in Settings and not read (owner's Bot 1: "2.5,1.5,1"
+    # left behind with 1 candle in a row blocked every entry). The usual smallest body (0 = any) decides.
+    one = _cfg(entry_mode="COLOUR", colour_count=1, colour_body_unit="ATR", colour_body_atr=0, colour_body_seq="2.5,1.5,1")
+    assert colour_call(big_then_small, one).side == "SHORT"
+    assert colour_call(big_then_small, _cfg(entry_mode="COLOUR", colour_count=1, colour_body_unit="ATR", colour_body_atr=2.5)).side is None
 
 
 def test_api_saves_the_body_per_candle(tmp_path, monkeypatch):
