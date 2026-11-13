@@ -238,6 +238,33 @@ type Props = {
 };
 
 /** Practise on a past day's real Groww candles. Never sends an order. */
+/**
+ * Auto-arm replay (backend auto_arm.py): a stock is armed only at the minute the auto-arm would have armed it, so the
+ * bar lists the stocks armed by the replay clock (with that minute and why) and counts the ones still to come.
+ */
+function AutoArmLine({ info }: { info: ReplayInfo | null }) {
+  if (!info || info.status === "LOADING") {
+    return <span>Stocks are armed one by one at their own minute as the day plays · practice only — no orders reach Groww</span>;
+  }
+  const picks = (info.date ? info.picks?.[info.date] : undefined) ?? [];
+  const now = clockParts(info.clock ?? null)?.minute ?? 0;
+  const minute = (at?: string | null) => {
+    const [h, m] = String(at ?? "99:99").split(":").map(Number);
+    return h * 60 + m;
+  };
+  const armed = picks.filter((p) => minute(p.at) <= now);
+  const waiting = picks.filter((p) => minute(p.at) > now).sort((a, b) => minute(a.at) - minute(b.at));
+  return (
+    <span>
+      {armed.length
+        ? `Armed so far: ${armed.map((p) => `${p.symbol} ${p.at}${p.why ? ` (${p.why})` : ""}`).join(", ")}`
+        : "Nothing armed yet"}
+      {waiting.length ? ` · ${waiting.length} more later today (next ${waiting[0].symbol} at ${waiting[0].at})` : picks.length ? "" : " · no stock met the rule this day"}
+      {" · "}practice only — no orders reach Groww
+    </span>
+  );
+}
+
 export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName }: Props) {
   const [day, setDay] = useState(lastTradingDay);
   const [endDay, setEndDay] = useState(lastTradingDay);
@@ -466,6 +493,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
   }
 
   const clock = clockParts(info?.clock ?? null);
+  const autoArm = info?.pick_rule?.kind === "AUTOARM";
   const daysTotal = info?.days_total ?? 1;
   const multi = daysTotal > 1;
   const dayIndex = info?.day_index ?? 0;
@@ -490,7 +518,9 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
         {info?.status === "LOADING" ? (
           <span className="flex items-center gap-2 text-sm text-violet-100">
             <Loader2 size={14} aria-hidden className="animate-spin" />
-            Loading Groww candles… {info.loaded}/{info.total} stocks
+            {info.pick_rule?.kind === "AUTOARM"
+              ? `Reading the candles of ${info.loaded}/${info.total} stocks to find the minute each one would have been armed — none is armed yet`
+              : `Loading Groww candles… ${info.loaded}/${info.total} stocks`}
           </span>
         ) : (
           <span className={clsx("font-mono text-violet-50", compact ? "text-xs" : "text-sm")} aria-live="off">
@@ -562,9 +592,13 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName 
         </div>
       ) : null}
       <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact ? "hidden" : "flex")}>
-        <span>
-          {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
-        </span>
+        {autoArm ? (
+          <AutoArmLine info={info} />
+        ) : (
+          <span>
+            {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww
+          </span>
+        )}
         <span>{multi && info?.date && info?.end_date ? `${info.days?.[0] ?? info.date} → ${info.end_date}` : "09:15 → 15:30"}</span>
       </div>
       {info?.chain && Object.keys(info.chain.on_bot).length ? (

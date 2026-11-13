@@ -2090,7 +2090,7 @@ export type ReplayInfo = {
  * the Scalp page's scalp picks (scalp_picks.py), `TREND` = strong-trend picks (trend_picks.py), `ACTIVE` = Most active
  * picks (active_picks.py); each kind keeps its own fields, so read them by kind. */
 export type ScalpPickRule = {
-  kind?: "TREND" | "ACTIVE";
+  kind?: "TREND" | "ACTIVE" | "AUTOARM";
   pick_time: string;
   top_n: number;
   /** Scalp picks only. */
@@ -2125,6 +2125,10 @@ export type ScalpPick = {
   change_pct?: number | null;
   speed_pct_min?: number | null;
   ltp?: number | null;
+  /** Auto-arm replay: the minute the stock was armed (HH:MM), which scan found it and why. */
+  at?: string | null;
+  source?: string | null;
+  why?: string | null;
 };
 
 export type ReplayDayRow = {
