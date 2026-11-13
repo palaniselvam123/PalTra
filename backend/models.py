@@ -63,6 +63,9 @@ class TradeLog(Base):
     # Trade number inside its own book: PAPER and LIVE count separately, and
     # each replay / backtest run counts from 1. See trade_ref().
     book_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # LIVE: the id of the exchange stop now working for this trade ("" / NULL = none known). Kept so a restart
+    # can still cancel it before the bot sends its own exit; without it the old stop stayed working on Groww.
+    sl_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 BOOK_PREFIX = {"LIVE": "N", "PAPER": "P", "RESEARCH": "Q"}

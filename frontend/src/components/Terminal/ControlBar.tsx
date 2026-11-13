@@ -62,12 +62,14 @@ export function ControlBar({
     setPicked(new Set(symbol && symbolArmed ? [symbol] : forceChoices.slice(0, 1)));
     setAsk("force");
   };
-  const sideNow =
+  const signalNow =
     state && state.symbol?.toUpperCase() === symbol && state.sma9 != null && state.sma21 != null && state.sma9 !== state.sma21
       ? state.sma9 > state.sma21
         ? "BUY"
         : "SELL"
       : null;
+  // The order Force really sends: the flip strategy turns the SMA side round (it used to show the SMA side only).
+  const sideNow = signalNow && state?.flip_orders ? (signalNow === "BUY" ? "SELL" : "BUY") : signalNow;
   const money = live ? "real Groww" : "practice";
 
   return (
@@ -221,7 +223,8 @@ export function ControlBar({
                     <span className="font-semibold text-amber-300">{s}</span>
                     {s === symbol && sideNow ? (
                       <span className="text-xs text-slate-400">
-                        SMA 9 {sideNow === "BUY" ? "above" : "below"} SMA 21 → <span className="font-semibold text-slate-200">{sideNow}</span>
+                        SMA 9 {signalNow === "BUY" ? "above" : "below"} SMA 21{state?.flip_orders ? " · flip on" : ""} →{" "}
+                        <span className="font-semibold text-slate-200">{sideNow}</span>
                       </span>
                     ) : null}
                     {held ? (

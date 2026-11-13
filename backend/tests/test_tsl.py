@@ -258,7 +258,7 @@ async def test_live_target_cancels_the_exchange_stop_before_the_exit(eng, monkey
 
 @pytest.mark.asyncio
 async def test_live_target_with_a_stop_that_already_filled_books_the_stop(eng, monkeypatch):
-    from strategy_engine import SlCancelFailed
+    from strategy_engine import SlAlreadyFilled as SlCancelFailed  # the "already filled" case of a failed cancel
 
     cfg = _cfg(eng, target=50.0)
     pos = await _open(eng, cfg)

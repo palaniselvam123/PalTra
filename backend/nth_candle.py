@@ -202,10 +202,22 @@ def rvol_at(closed: pd.DataFrame, days: pd.Series, today: dt.date, n: int) -> fl
     if len(mine) < n or pd.isna(mine.iloc[n - 1]) or float(mine.iloc[n - 1]) <= 0:
         return None
     usual = []
-    for day in sorted({d for d in days if d < today}):
-        part = vols[days == day]
-        if len(part) >= n and not pd.isna(part.iloc[n - 1]) and float(part.iloc[n - 1]) > 0:
-            usual.append(float(part.iloc[n - 1]))
+    if "ts" in closed.columns:
+        # The same candle by time of day, not by position: the oldest day of a live frame (now − 5 days) or of a
+        # replay frame starts mid-session, so its "Nth candle" was a later one carrying a much bigger running
+        # total, and volume vs usual read too low (1.5× on a day that was really 2×).
+        ts = pd.to_numeric(closed["ts"], errors="coerce")
+        tod = (ts + 19800) % 86400
+        want = tod.loc[mine.index[n - 1]]
+        for day in sorted({d for d in days if d < today}):
+            hit = vols[(days == day) & (tod == want)]
+            if len(hit) and not pd.isna(hit.iloc[-1]) and float(hit.iloc[-1]) > 0:
+                usual.append(float(hit.iloc[-1]))
+    else:
+        for day in sorted({d for d in days if d < today}):
+            part = vols[days == day]
+            if len(part) >= n and not pd.isna(part.iloc[n - 1]) and float(part.iloc[n - 1]) > 0:
+                usual.append(float(part.iloc[n - 1]))
     if not usual:
         return None
     return round(float(mine.iloc[n - 1]) / (sum(usual) / len(usual)), 2)

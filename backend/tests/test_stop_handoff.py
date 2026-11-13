@@ -38,7 +38,7 @@ async def test_a_losing_stop_moves_the_stock_and_a_winning_one_stays(monkeypatch
     database.init_db()
     eng = StrategyEngine(broker=_FakeBroker())
     asked = []
-    eng.handoff = lambda bot, symbol, live, to_bot=2: asked.append((bot, symbol, to_bot)) or f"moved to Bot {to_bot} — waits"
+    eng.handoff = lambda bot, symbol, live, to_bot=2, **_kw: asked.append((bot, symbol, to_bot)) or f"moved to Bot {to_bot} — waits"
     pos = SimpleNamespace(direction="LONG", entry_price=1087.0, mode="PAPER", trade_id=5)
     await eng._stop_handoff(_cfg(stop_handoff="BOT2"), "ACME", pos, 1076.0)  # a loss
     assert asked == [(1, "ACME", 2)]

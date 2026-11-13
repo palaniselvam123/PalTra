@@ -97,6 +97,9 @@ export function BulkArm({
         if (!alive) return;
         setLoaded(c);
         setF(fieldsOf(c));
+        // A bot whose trailing stop is sized in ATR multiples: these ₹ / % boxes would replace that with a fixed
+        // stop on every stock (₹20 is 20% of a ₹100 stock). Start with "use these numbers" off for it.
+        if (c.tsl_mode === "ATR") setApplyAll(false);
       })
       .catch((e: unknown) => {
         if (!alive) return;
@@ -317,6 +320,12 @@ export function BulkArm({
             </label>
             {!applyAll ? (
               <p className="mb-1 text-xs text-slate-500">Off: each stock is armed with the settings it already has.</p>
+            ) : null}
+            {loaded?.tsl_mode === "ATR" ? (
+              <p className="mb-1 text-xs text-amber-300">
+                This bot sizes its trailing stop in ATR multiples. Ticking the box above replaces that with these ₹ / %
+                numbers on each stock.
+              </p>
             ) : null}
             {f ? (
               <div className="divide-y divide-white/5">

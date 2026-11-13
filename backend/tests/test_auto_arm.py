@@ -19,7 +19,7 @@ NOW = dt.datetime(2026, 11, 2, 11, 0, tzinfo=IST)
 @pytest.fixture(autouse=True)
 def _files(tmp_path, monkeypatch):
     monkeypatch.setenv("SCALP_ALERTS_FILE", str(tmp_path / "alerts.json"))
-    for book in auto_arm._DONE.values():
+    for book in (*auto_arm._DONE.values(), *auto_arm._SEEN.values()):
         book.clear()
     auto_arm.recent.clear()
 
@@ -65,6 +65,7 @@ async def test_strong_trends_on_the_alert_threshold_are_armed_once():
     # Only the side the alert asks for.
     scalp_alerts.save({"strong_side": "DOWN"})
     auto_arm._DONE["strong"].clear()
+    auto_arm._SEEN["strong"].clear()
     bots, arm, calls = _hooks()
     rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=NOW, check_market=False)
     assert rec["armed"] == ["DN"]

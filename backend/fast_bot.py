@@ -290,9 +290,9 @@ def _target_cfg(target, symbol: str):
         return own
 
 
-def ready(target, symbol: str, source_live: bool, paper_to_live: bool = False) -> str | None:
+def ready(target, symbol: str, source_live: bool, paper_to_live: bool = False, source_bot: int | None = None) -> str | None:
     """Why Bot 5 cannot take the stock now, or None when it can (checked before the source trade is cut)."""
-    from strategy_engine import _entry_cutoff, _parse_hhmm
+    from strategy_engine import MAX_TRADE_SYMBOLS, _entry_cutoff, _parse_hhmm, trade_names
 
     if target is None:
         return f"Bot {TARGET_BOT} is not running"
@@ -314,6 +314,32 @@ def ready(target, symbol: str, source_live: bool, paper_to_live: bool = False) -
     if source_live and not target_live:
         # Never close a real trade only to open a practice one in its place.
         return f"this trade is LIVE and Bot {TARGET_BOT} is PAPER (switch Bot {TARGET_BOT} to LIVE, or the source bot to PAPER)"
+    # The hand-off itself would refuse these after the source trade was already cut: check them first.
+    try:
+        names = trade_names(cfg)
+    except Exception:  # noqa: BLE001 - a plain settings object (tests)
+        names = []
+    if symbol not in names and len(names) >= MAX_TRADE_SYMBOLS:
+        return f"Bot {TARGET_BOT}'s Trade list is full ({MAX_TRADE_SYMBOLS})"
+    if target_live:
+        clash = _live_clash(symbol, source_bot)
+        if clash:
+            return clash
+    return None
+
+
+def _live_clash(symbol: str, source_bot: int | None) -> str | None:
+    """A LIVE bot other than the source (which gives the stock up) and Bot 5 that already owns the stock."""
+    try:
+        import bots
+
+        for other in bots.ALL_BOTS:
+            if other in (TARGET_BOT, source_bot):
+                continue
+            if symbol.upper() in bots.live_claims(other):
+                return f"{symbol} is already traded LIVE by {bots.bot_name(other)}"
+    except Exception:  # noqa: BLE001 - no bot registry (tests): nothing to clash with
+        return None
     return None
 
 
@@ -363,14 +389,24 @@ class FastBot:
                 continue
             if target is not None and target.positions.get(name) is not None:
                 continue
-            del self.handed[name]
             if h.get("keep"):
                 # The source bot kept the stock all along: Bot 5 just lets go of it.
                 back = recovery.unarm(TARGET_BOT, name)
                 result = f"Bot {TARGET_BOT} done with it after {h['opened']} trade(s) (Bot {h['from']} kept it): {back}"
+                gone = back.startswith("off Bot")
             else:
                 back = recovery.handoff(TARGET_BOT, name, h["live"], to_bot=h["from"], chop=False)
                 result = f"back to Bot {h['from']} after {h['opened']} Bot {TARGET_BOT} trade(s): {back}"
+                gone = back.startswith(("moved to", "armed on", "already on"))
+            if gone:
+                del self.handed[name]
+            else:
+                # Refused (the source bot's list is full, a LIVE clash): the stock stays on Bot 5, still gated, and
+                # is tried again on a later pass. Forgetting it here let Bot 5 trade it on every cross, for good.
+                h["due"] = True
+                if h.get("refused") == back:
+                    continue  # already said once
+                h["refused"] = back
             self._record(now, symbol=name, from_bot=TARGET_BOT, to_bot=h["from"], live=h["live"], why="trades done", result=result)
             if target is not None:
                 target._signals[name] = f"{name} {result}"  # noqa: SLF001
@@ -451,7 +487,7 @@ class FastBot:
         direction = pos.direction
         side = bot5_side(direction, s)  # the side Bot 5 opens (flip = the other side)
         head = f"{symbol} fast move on Bot {source_bot} ({why})"
-        reason = ready(target, symbol, source_live, s.paper_to_live)
+        reason = ready(target, symbol, source_live, s.paper_to_live, source_bot)
         if reason is None and len(self.moved_today) >= s.max_day:
             reason = f"{s.max_day} hand-offs today already"
         if reason is None and source_live and pos.stop_active and not pos.sl_order_id:
@@ -541,10 +577,16 @@ class FastBot:
         now = time.time() if now is None else now
         self._roll(now)
         s = load()
+        target = engines.get(TARGET_BOT)
         if not s.on:
             self.hist.clear()
-            return []
-        target = engines.get(TARGET_BOT)
+            if not self.handed:
+                return []
+            # Switched off with stocks still on Bot 5: give them back (once Bot 5 is flat on them) instead of
+            # leaving them armed there and refused by the gate, untraded on any bot.
+            for h in self.handed.values():
+                h["due"] = True
+            return self.give_back(target, s, now)
         if target is not None and getattr(target, "entry_gate", None) is None:
             target.entry_gate = self.gate
         done = self.give_back(target, s, now)

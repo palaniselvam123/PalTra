@@ -317,6 +317,15 @@ def _bot5_follows() -> ReplaySession | None:
     own = replays.get(fast_bot.TARGET_BOT)
     if own is not None and own.status in _ACTIVE_REPLAY:
         return None
+    five = bot_engines.get(fast_bot.TARGET_BOT)
+    try:
+        five_live = five is not None and (five.load_config().trading_mode or "PAPER").upper() == "LIVE"
+    except Exception:  # noqa: BLE001 - no settings row to read: follow as before
+        five_live = False
+    if five is not None and (five.positions or five_live):
+        # A LIVE Bot 5 (or one holding positions) keeps its own page: following a replay re-routes its Panic, Close
+        # and Start buttons to a replay it does not have, so they answered 409 while real positions were open.
+        return None
     best = None
     for n, session in replays.items():
         if n == fast_bot.TARGET_BOT or session.status not in _ACTIVE_REPLAY:
@@ -959,10 +968,10 @@ def _config_dict(row: BotConfig) -> dict:
         "use_density": bool(getattr(row, "use_density", False)),
         "density_min_pct": float(getattr(row, "density_min_pct", 50.0) or 50.0),
         "use_rsi": bool(getattr(row, "use_rsi", False)),
-        "rsi_long_min": float(getattr(row, "rsi_long_min", 40.0) or 40.0),
-        "rsi_long_max": float(getattr(row, "rsi_long_max", 70.0) or 70.0),
-        "rsi_short_min": float(getattr(row, "rsi_short_min", 30.0) or 30.0),
-        "rsi_short_max": float(getattr(row, "rsi_short_max", 60.0) or 60.0),
+        "rsi_long_min": float(40.0 if getattr(row, "rsi_long_min", None) is None else getattr(row, "rsi_long_min")),
+        "rsi_long_max": float(70.0 if getattr(row, "rsi_long_max", None) is None else getattr(row, "rsi_long_max")),
+        "rsi_short_min": float(30.0 if getattr(row, "rsi_short_min", None) is None else getattr(row, "rsi_short_min")),
+        "rsi_short_max": float(60.0 if getattr(row, "rsi_short_max", None) is None else getattr(row, "rsi_short_max")),
         "use_bollinger": bool(getattr(row, "use_bollinger", False)),
         "bb_period": int(getattr(row, "bb_period", 20) or 20),
         "bb_std": float(getattr(row, "bb_std", 2.0) or 2.0),
@@ -2107,17 +2116,33 @@ async def _set_mode(eng: StrategyEngine, body: ModeUpdate):
         eng.live_halt_day = _ist_now().date()
     if _open_symbols(eng):
         raise HTTPException(409, "Close the open position before switching execution mode")
-    with session_factory()() as db:
-        row = db.get(BotConfig, eng.config_id)
-        if row is None:
-            raise HTTPException(500, "BotConfig missing")
+    if eng.inflight:
+        # An order is being placed or closed right now under the old mode: switching under it could send a real
+        # order for a trade booked as practice (or leave real shares with a practice stop).
+        raise HTTPException(409, "An order is in progress on this bot. Switch again in a moment.")
+    async with eng.lock:
+        if _open_symbols(eng):
+            raise HTTPException(409, "Close the open position before switching execution mode")
+        with session_factory()() as db:
+            row = db.get(BotConfig, eng.config_id)
+            if row is None:
+                raise HTTPException(500, "BotConfig missing")
+            if mode == "LIVE":
+                why = bots_mod.live_conflict(eng.bot_id, trade_names(row))
+                if why:
+                    raise HTTPException(409, why)
+            row.trading_mode = mode
+            db.commit()
+            armed = trade_names(row)
+        eng.broker.set_mode(mode, _live_token())
         if mode == "LIVE":
-            why = bots_mod.live_conflict(eng.bot_id, trade_names(row))
-            if why:
-                raise HTTPException(409, why)
-        row.trading_mode = mode
-        db.commit()
-    eng.broker.set_mode(mode, _live_token())
+            # Entries armed while practising (a waiting pullback, gap-mode or late entry, a hand-off wait) must not
+            # become real orders on the next price: LIVE starts from the next fresh signal, as Start does.
+            for waits in ("_pullback", "_gap_pending", "_late_pending", "_handoff_wait", "_arrivals", "_reentry"):
+                table = getattr(eng, waits, None)
+                if hasattr(table, "clear"):
+                    table.clear()
+            eng.hold_for_next_cross(armed)
     return {"trading_mode": mode}
 
 

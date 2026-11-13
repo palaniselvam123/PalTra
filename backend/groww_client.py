@@ -35,6 +35,10 @@ _QUOTE_TTL_CLOSED_SEC = 60.0
 _QUOTE_TIMEOUT_SEC = 8.0
 _QUOTE_RETRY_SEC = 20.0
 _SDK_TIMEOUT_SEC = 6
+#: Order-side calls (place, modify, cancel, status, positions) wait at most this long. They had no timeout at all,
+#: so one stalled connection froze that bot's pass (no stop watch, trailing or exits) and held a thread of the pool
+#: every bot shares.
+_ORDER_TIMEOUT_SEC = 8
 # A full candle download on every price check was holding the bot for seconds
 # and letting the displayed price drift from Groww. History is refreshed once
 # a minute. The last trade is fetched on the normal quote interval.
@@ -58,6 +62,12 @@ TERMINAL_CANCELLED = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED"})
 # order. Reading it as a fill booked a position Groww did not hold.
 TERMINAL_FILLED = frozenset({"FILLED", "COMPLETE", "COMPLETED", "EXECUTED", "DELIVERY_AWAITED"})
 _DEAD_ORDER = TERMINAL_CANCELLED | {"REJECTED", "FAILED", "FAILURE"}
+
+
+def _intraday_row(row: dict) -> bool:
+    """A positions row of the bot's own product (MIS). A row without a product field still counts (as before)."""
+    product = str(row.get("product") or "").upper()
+    return product in ("", "MIS", "INTRADAY")
 
 
 class GrowwOrderRejected(RuntimeError):
@@ -764,6 +774,7 @@ class GrowwClient:
             quantity=int(qty),
             price=float(limit),
             trigger_price=float(trigger),
+            timeout=_ORDER_TIMEOUT_SEC,
         )
         order = self._orders.get(order_id)
         if order is not None:
@@ -782,7 +793,7 @@ class GrowwClient:
             return
         server_role.refuse_orders("order cancel")
         sdk = self._require_sdk()
-        await run_bot_call(sdk.cancel_order, groww_order_id=order_id, segment="CASH")
+        await run_bot_call(sdk.cancel_order, groww_order_id=order_id, segment="CASH", timeout=_ORDER_TIMEOUT_SEC)
 
     async def get_order_status(self, order_id: str) -> str:
         status, _price = await self.read_order(order_id)
@@ -804,7 +815,7 @@ class GrowwClient:
             sdk = self._require_sdk()
             if not hasattr(sdk, "get_order_detail"):
                 return ""
-            raw = await run_bot_call(sdk.get_order_detail, segment="CASH", groww_order_id=order_id)
+            raw = await run_bot_call(sdk.get_order_detail, segment="CASH", groww_order_id=order_id, timeout=_ORDER_TIMEOUT_SEC)
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
             return ""
@@ -825,17 +836,18 @@ class GrowwClient:
         local = self._orders.get(order_id)
         if local is not None and (self.mode == "PAPER" or order_id.startswith("PAPER")):
             return local.status, local.fill_price
-        sdk = self._require_sdk()
 
         def _read():
+            # Inside the try below: with no session this used to raise out of the bot's pass instead of UNKNOWN.
+            sdk = self._require_sdk()
             if hasattr(sdk, "get_order_status"):
-                raw = sdk.get_order_status(groww_order_id=order_id, segment="CASH")
+                raw = sdk.get_order_status(groww_order_id=order_id, segment="CASH", timeout=_ORDER_TIMEOUT_SEC)
                 data = raw.get("payload", raw) if isinstance(raw, dict) else raw
                 if isinstance(data, dict):
                     if _remark(data):
                         self.order_remarks[order_id] = _remark(data)
                     return _status_and_price(data)
-            raw = sdk.get_order_list(segment="CASH")
+            raw = sdk.get_order_list(segment="CASH", timeout=_ORDER_TIMEOUT_SEC)
             orders = raw.get("payload", raw) if isinstance(raw, dict) else raw
             for o in orders or []:
                 oid = str(o.get("groww_order_id") or o.get("order_id") or "")
@@ -857,7 +869,10 @@ class GrowwClient:
             return list(self._positions)
         def _pos():
             sdk = self._require_sdk()
-            fn = getattr(sdk, "get_positions_for_user", None) or getattr(sdk, "get_positions", None)
+            fn = getattr(sdk, "get_positions_for_user", None)
+            if fn is not None:
+                return fn(segment="CASH", timeout=4)
+            fn = getattr(sdk, "get_positions", None)
             if fn is None:
                 raise RuntimeError("Groww positions API is unavailable")
             return fn(segment="CASH")
@@ -892,6 +907,8 @@ class GrowwClient:
             bare = sym.split("-")[0]
             if bare != want and sym != want:
                 continue
+            if not _intraday_row(row):
+                continue  # a delivery (CNC) holding of the same stock is not the bot's MIS position
             raw_qty = row.get("net_quantity")
             if raw_qty is None:
                 raw_qty = row.get("quantity") or 0
@@ -923,6 +940,8 @@ class GrowwClient:
                 continue
             sym = str(row.get("trading_symbol") or row.get("symbol") or "").upper()
             if sym.split("-")[0] != want and sym != want:
+                continue
+            if not _intraday_row(row):
                 continue
             for key in keys:
                 price = _as_price(row.get(key))
@@ -966,7 +985,7 @@ class GrowwClient:
             )
             if trigger is not None:
                 kwargs["trigger_price"] = float(trigger)
-            return sdk.place_order(**kwargs)
+            return sdk.place_order(**kwargs, timeout=_ORDER_TIMEOUT_SEC)
 
         raw = await run_bot_call(_place)
         ack = _order_ack_from_response(raw)

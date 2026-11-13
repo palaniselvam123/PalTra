@@ -67,6 +67,22 @@ def test_volume_compares_the_opening_with_earlier_sessions():
     assert opening_range._volume_refusal(quiet, qt, opening_range._window(qt), Cfg(or_volume_ratio=2)) is not None
 
 
+def _rising(i, p):
+    return p + 0.5  # every opening candle closes higher, well above the day's VWAP
+
+
+def test_vwap_check_passes_when_the_opening_held_above_vwap():
+    """The 09:15 candle has no VWAP of its own; the check used to refuse every entry, all day, because of it."""
+    prev = _session(PREV, _flat, 1000.0, lambda i: 1000)
+    today = _session(DAY, _rising, prev[-1]["close"], lambda i: 1000)
+    from indicators import enrich
+
+    frame = enrich(pd.DataFrame(prev + today[:40]))
+    cfg = Cfg(use_or_vwap=True, use_or_volume=False, use_or_spread=False, use_or_break=False)
+    assert opening_range.entry_reason(frame, "LONG", cfg, only="or_vwap") is None
+    assert "below VWAP" in opening_range.entry_reason(frame, "SHORT", cfg, only="or_vwap")
+
+
 def test_spread_needs_the_gap_to_be_wide_and_widening():
     cfg = Cfg(or_spread_pct=0.1)
     def bars(fast, slow):

@@ -18,7 +18,9 @@ Safety invariants
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime as dt
+import functools
 import json
 import logging
 import os
@@ -32,6 +34,7 @@ import pandas as pd
 from sqlalchemy import and_, func, or_, select, true
 
 from charges import calculate_charges, legs_for
+from config import get_settings
 from database import session_factory
 from groww_client import IN_FLIGHT, TERMINAL_CANCELLED, TERMINAL_FILLED, GrowwClient, market_is_open
 from indicators import (
@@ -114,6 +117,14 @@ class OrderBusy(Exception):
 
 class SlCancelFailed(Exception):
     pass
+
+
+class SlAlreadyFilled(SlCancelFailed):
+    """The exchange stop filled while the bot was cancelling it: the stop closed the trade (book Groww's price)."""
+
+
+class ExitUnknown(SlCancelFailed):
+    """Sending a LIVE exit raised: Groww may or may not have taken it, so a new stop is not placed at once."""
 
 
 class ExitUnfilled(SlCancelFailed):
@@ -295,6 +306,22 @@ class OpenPosition:
     tc_bar: int | None = None
     # LIVE: when the exchange stop was first seen cancelled / rejected while Groww still held the shares.
     stop_dead_at: dt.datetime | None = None
+    # LIVE: the bot cancelled the exchange stop to send its own exit (`pending_exit`, the exit's reason). When Groww
+    # then reports that stop cancelled, it is the bot's own cancel, not a dead stop: the exit is sent again.
+    pending_exit: str = ""
+    # LIVE: when the shares were left with no exchange stop (an exit failed after its stop was cancelled and the
+    # stop could not be placed again). While set, the watcher keeps trying to protect or close the position.
+    naked_since: dt.datetime | None = None
+    # True once the bot itself took this position's exchange stop away (a verified cancel for an exit, or Groww
+    # reported it dead): only then may `_reprotect` place a new one. A position restored without its stop id may
+    # still have a stop working on Groww, and a second one could sell twice.
+    stop_cancelled: bool = False
+    naked_alerted: bool = False
+    protect_at: float = 0.0  # time.monotonic() of the last try
+    flat_check_at: float = 0.0  # time.monotonic() of the last "is Groww flat?" read for an unanswered stop status
+    # LIVE: since when the price has been past the stop's limit with the stop not filled (`_stop_slipped`).
+    slip_since: dt.datetime | None = None
+    slip_alerted: bool = False
     # Staged stop plan (stop_plan.py): R per share (None = no plan for this trade), the stage reached,
     # and the Supertrend line of the last closed candle read in stage 2.
     plan_r: float | None = None
@@ -562,6 +589,11 @@ def apply_trade_sources(cfg: BotConfig, updates: dict[str, str | None], current_
     return json.dumps(kept, separators=(",", ":"), sort_keys=True)
 
 
+def _or_default(value, default: float) -> float:
+    """A saved number, or `default` only when none is saved (0 is a real value: `x or default` lost it)."""
+    return float(default if value is None else value)
+
+
 def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
     """This stock's settings: the shared row with the stock's own overrides on top."""
     data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
@@ -635,10 +667,10 @@ def _base_entry_reason(frame, direction, cfg, on, only, price):
         use_rsi=on("rsi"),
         volume_min_ratio=float(getattr(cfg, "volume_min_ratio", 1.0) or 1.0),
         density_min_pct=float(getattr(cfg, "density_min_pct", 50.0) or 50.0),
-        rsi_long_min=float(getattr(cfg, "rsi_long_min", 40.0) or 40.0),
-        rsi_long_max=float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
-        rsi_short_min=float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
-        rsi_short_max=float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        rsi_long_min=float(_or_default(getattr(cfg, "rsi_long_min", None), 40.0)),
+        rsi_long_max=float(_or_default(getattr(cfg, "rsi_long_max", None), 70.0)),
+        rsi_short_min=float(_or_default(getattr(cfg, "rsi_short_min", None), 30.0)),
+        rsi_short_max=float(_or_default(getattr(cfg, "rsi_short_max", None), 60.0)),
         use_bollinger=on("bollinger"),
         bb_period=int(getattr(cfg, "bb_period", 20) or 20),
         bb_std=float(getattr(cfg, "bb_std", 2.0) or 2.0),
@@ -807,9 +839,9 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
         if name == "rsi":
             rsi = float(rsi_wilder(closed["close"], 14).iloc[-1])
             if direction == "LONG":
-                lo, hi = getattr(cfg, "rsi_long_min", 40.0) or 40.0, getattr(cfg, "rsi_long_max", 70.0) or 70.0
+                lo, hi = _or_default(getattr(cfg, "rsi_long_min", None), 40.0), _or_default(getattr(cfg, "rsi_long_max", None), 70.0)
             else:
-                lo, hi = getattr(cfg, "rsi_short_min", 30.0) or 30.0, getattr(cfg, "rsi_short_max", 60.0) or 60.0
+                lo, hi = _or_default(getattr(cfg, "rsi_short_min", None), 30.0), _or_default(getattr(cfg, "rsi_short_max", None), 60.0)
             return f"RSI {rsi:.1f} (inside {float(lo):.0f}–{float(hi):.0f})"
         if name == "volume":
             current, average, _got = minute_volume_stats(closed, 20)
@@ -896,10 +928,10 @@ def chart_filters(cfg) -> dict:
     return {
         "use_vwap": bool(getattr(cfg, "use_vwap", False)),
         "use_rsi": bool(getattr(cfg, "use_rsi", False)),
-        "rsi_long_min": float(getattr(cfg, "rsi_long_min", 40.0) or 40.0),
-        "rsi_long_max": float(getattr(cfg, "rsi_long_max", 70.0) or 70.0),
-        "rsi_short_min": float(getattr(cfg, "rsi_short_min", 30.0) or 30.0),
-        "rsi_short_max": float(getattr(cfg, "rsi_short_max", 60.0) or 60.0),
+        "rsi_long_min": float(_or_default(getattr(cfg, "rsi_long_min", None), 40.0)),
+        "rsi_long_max": float(_or_default(getattr(cfg, "rsi_long_max", None), 70.0)),
+        "rsi_short_min": float(_or_default(getattr(cfg, "rsi_short_min", None), 30.0)),
+        "rsi_short_max": float(_or_default(getattr(cfg, "rsi_short_max", None), 60.0)),
         "use_bollinger": bool(getattr(cfg, "use_bollinger", False)),
         "bb_period": int(getattr(cfg, "bb_period", 20) or 20),
         "bb_std": float(getattr(cfg, "bb_std", 2.0) or 2.0),
@@ -1035,6 +1067,51 @@ def candle_rows(
     return rows
 
 
+#: Each task's own "which stock am I on" for each engine (see `StrategyEngine._focus`). One engine field used to hold it
+#: for every task, so a news / hand-off / Force order running next to the bot's pass moved the pass onto its stock in
+#: the middle of a Groww call: the pass then read the other stock's price as this one's and closed the wrong position.
+_TASK_VIEWS: contextvars.ContextVar[dict | None] = contextvars.ContextVar("sma_engine_views", default=None)
+
+
+def _current_task():
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
+
+
+def _own_view(mirror: bool = False):
+    """Run an engine coroutine with its own focus stock and last price, apart from any other task on the same engine.
+
+    `mirror` (the bot's own pass) also keeps the shared copy up to date, which is what the screens read. A call that
+    is already inside a view of its own task (the pass calling `reverse_position`) carries on in that one."""
+
+    def wrap(fn):
+        @functools.wraps(fn)
+        async def inner(self, *args, **kwargs):
+            task = _current_task()
+            if task is None or self._task_view() is not None:
+                return await fn(self, *args, **kwargs)
+            views = dict(_TASK_VIEWS.get() or {})
+            view = [self._shared_focus, self._shared_ltp, task, mirror]
+            views[id(self)] = view
+            token = _TASK_VIEWS.set(views)
+            self._views_open += 1
+            try:
+                return await fn(self, *args, **kwargs)
+            finally:
+                self._views_open -= 1
+                _TASK_VIEWS.reset(token)
+                if self._views_open <= 0:
+                    # Nobody else is on this engine: leave the focus where this call put it, as before.
+                    self._views_open = 0
+                    self._shared_focus, self._shared_ltp = view[0], view[1]
+
+        return inner
+
+    return wrap
+
+
 class StrategyEngine:
     #: The BotConfig row this engine trades with. The research desk has its own.
     config_id = 1
@@ -1071,6 +1148,15 @@ class StrategyEngine:
         self.status = "STOPPED"  # STOPPED | RUNNING | PAUSED | DAY_COMPLETED | HALTED
         self.halt_reason = ""
         self.positions: dict[str, OpenPosition] = {}
+        self._shared_focus = ""
+        self._shared_ltp = 0.0
+        self._views_open = 0
+        # True while `tick` minds the stops of a bot that is not RUNNING (paused, halted by a cap, or after a
+        # square-off that left a position): stops, targets and trailing stops still work then.
+        self._guarding = False
+        # A square-off (panic, loss limit, end of day) that left a position open: tried again every few seconds.
+        self._squareoff_due = ""
+        self._squareoff_try_at = 0.0
         self._focus = ""
         self._unbound_position: OpenPosition | None = None
         self._frames: dict[str, pd.DataFrame] = {}
@@ -1252,6 +1338,50 @@ class StrategyEngine:
         self._view_cache = (key, enriched)
         return enriched, True
 
+    def _managing(self) -> bool:
+        """Whether the stop watchers act now: a RUNNING bot, or the stop-only pass of a bot that is not."""
+        return self.status == "RUNNING" or self._guarding
+
+    def _task_view(self) -> list | None:
+        """This task's own [focus, last price, task, mirror] on this engine, or None when it has none."""
+        views = _TASK_VIEWS.get()
+        if not views:
+            return None
+        view = views.get(id(self))
+        if view is None or view[2] is not _current_task():
+            return None
+        return view
+
+    @property
+    def _focus(self) -> str:
+        view = self._task_view()
+        return view[0] if view is not None else self._shared_focus
+
+    @_focus.setter
+    def _focus(self, value: str) -> None:
+        view = self._task_view()
+        if view is None:
+            self._shared_focus = value
+            return
+        view[0] = value
+        if view[3]:
+            self._shared_focus = value
+
+    @property
+    def ltp(self) -> float:
+        view = self._task_view()
+        return view[1] if view is not None else self._shared_ltp
+
+    @ltp.setter
+    def ltp(self, value: float) -> None:
+        view = self._task_view()
+        if view is None:
+            self._shared_ltp = value
+            return
+        view[1] = value
+        if view[3]:
+            self._shared_ltp = value
+
     def _position_key(self) -> str:
         if self._focus:
             return self._focus
@@ -1306,6 +1436,7 @@ class StrategyEngine:
                     getattr(row, "recovery_loss", None),
                     getattr(row, "recovery_bar", None),
                     getattr(row, "entry_reason", None) or "",
+                    (getattr(row, "sl_order_id", None) or "") if (row.mode or "").upper() == "LIVE" else "",
                 )
                 for row in rows
             ]
@@ -1313,7 +1444,7 @@ class StrategyEngine:
             cfg = self.load_config()
         except Exception:  # noqa: BLE001
             cfg = None
-        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry, rec_loss, rec_bar, why in pending:
+        for symbol, direction, qty, entry, cross, atr, sl, when, trade_id, mode, stop_active, flipped, at_entry, rec_loss, rec_bar, why, sl_id in pending:
             if not symbol or symbol in self.positions:
                 continue
             # The stop the trade was opened with: this stock's own settings,
@@ -1343,6 +1474,7 @@ class StrategyEngine:
                 target = round_price(symbol, tp_atr) if tp_atr is not None else None
             if when is not None and when.tzinfo is None:
                 when = when.replace(tzinfo=IST)
+            plan_r = _plan_r_restored(own, at_entry, stop_active, trailing, tsl_step, entry, atr, direction)
             self.positions[symbol] = OpenPosition(
                 direction=direction,
                 qty=qty,
@@ -1350,7 +1482,8 @@ class StrategyEngine:
                 ma_cross_price=cross,
                 atr_at_entry=atr,
                 sl_trigger=sl,
-                sl_order_id="",
+                # LIVE: the exchange stop saved with the trade, so it is cancelled before any bot exit.
+                sl_order_id=sl_id if stop_active else "",
                 entry_order_id="",
                 entry_time=when or self._now(),
                 trade_id=trade_id,
@@ -1374,9 +1507,9 @@ class StrategyEngine:
                 rec_bar=int(rec_bar) if rec_bar is not None else None,
                 entry_why=why,
                 # Staged stop plan: R from the ATR stop it was opened with; stages re-read from the price.
-                plan_r=_plan_r_restored(own, at_entry, stop_active, trailing, tsl_step, entry, atr, direction),
+                plan_r=plan_r,
                 # A stop already at or past breakeven was moved by the plan before the restart.
-                plan_stage=1 if (sl is not None and ((direction == "LONG" and sl >= entry) or (direction == "SHORT" and sl <= entry))) else 0,
+                plan_stage=1 if (plan_r is not None and sl is not None and ((direction == "LONG" and sl >= entry) or (direction == "SHORT" and sl <= entry))) else 0,
             )
 
     def _bot_rows(self):
@@ -1421,6 +1554,10 @@ class StrategyEngine:
             self._joined_today.clear()
             self._reentry.clear()
             self._reentry_used.clear()
+            # Always-in memory is per day: yesterday's last trade must not set today's first side.
+            self._always_held.clear()
+            self._always_reverse.clear()
+            self._always_tried.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1457,6 +1594,7 @@ class StrategyEngine:
         self._ticks_retry_at = now_m + 600
         self._ticks_job = asyncio.get_running_loop().run_in_executor(None, tick_sizes.load_from_groww)
 
+    @_own_view(mirror=True)
     async def tick(self, now: dt.datetime) -> None:
         cfg = self.load_config()
         self._roll_session(now)
@@ -1557,36 +1695,27 @@ class StrategyEngine:
         self._expire_reviews()
 
         if self.status != "RUNNING":
+            if self.positions:
+                await self._guard_held(cfg, now)
             return
 
         if self._loss_breached(cfg):
             await self._stop_for_loss(cfg)
             return
 
+        if await self._live_eod_square_off(now, cfg):
+            return
+
         for symbol in list(self.positions):
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, 0.0)
             symbol_cfg = self._trade_cfg(cfg, symbol)
-            self._trail_gap_levels(symbol_cfg)
-            await self._trail_tsl(symbol_cfg)
-            await self._trail_supertrend(symbol_cfg)
-            await self._trail_vwap_stop(symbol_cfg)
-            await self._trail_stop_plan(symbol_cfg)
-            await self._watch_stop(symbol_cfg)
-            await self._watch_bollinger(symbol_cfg)
-            await self._watch_counter_candles(symbol_cfg)
-            await self._watch_ema_exit(symbol_cfg)
-            await self._watch_macd_exit(symbol_cfg)
-            await self._watch_cvd_exit(symbol_cfg)
-            await self._watch_exit_candle(symbol_cfg)
-            await self._watch_small_candles(symbol_cfg)
-            await self._watch_supertrend_exit(symbol_cfg)
-            await self._watch_slope_exit(symbol_cfg)
-            await self._watch_turn_colour(symbol_cfg)
-            await self._watch_slow_sma(symbol_cfg)
-            await self._watch_recovery(symbol_cfg, now)
-            await self._watch_gap_fade(symbol_cfg)
-            await self._watch_pivot_target(symbol_cfg)
+            try:
+                await self._mind_held(symbol_cfg, now)
+            except Exception as exc:  # noqa: BLE001
+                # One stock's failure (a Groww error, an unfilled exit) must not leave the other held stocks
+                # without their stop watch, trailing and exits for this pass.
+                self._held_error(symbol, exc)
 
         await self._watch_pullbacks(cfg, now)
         await self._watch_handoff_waits(cfg, now)
@@ -1707,6 +1836,82 @@ class StrategyEngine:
         if ltp is not None and ltp > 0:
             return float(ltp)
         return float(pos.entry_price)
+
+    async def _mind_held(self, symbol_cfg: BotConfig, now: dt.datetime) -> None:
+        """Every pass, for the focused held stock: move its stops, then its stop / target and the ticked exits."""
+        self._trail_gap_levels(symbol_cfg)
+        await self._trail_tsl(symbol_cfg)
+        await self._trail_supertrend(symbol_cfg)
+        await self._trail_vwap_stop(symbol_cfg)
+        await self._trail_stop_plan(symbol_cfg)
+        await self._watch_stop(symbol_cfg)
+        await self._watch_bollinger(symbol_cfg)
+        await self._watch_counter_candles(symbol_cfg)
+        await self._watch_ema_exit(symbol_cfg)
+        await self._watch_macd_exit(symbol_cfg)
+        await self._watch_cvd_exit(symbol_cfg)
+        await self._watch_exit_candle(symbol_cfg)
+        await self._watch_small_candles(symbol_cfg)
+        await self._watch_supertrend_exit(symbol_cfg)
+        await self._watch_slope_exit(symbol_cfg)
+        await self._watch_turn_colour(symbol_cfg)
+        await self._watch_slow_sma(symbol_cfg)
+        await self._watch_recovery(symbol_cfg, now)
+        await self._watch_gap_fade(symbol_cfg)
+        await self._watch_pivot_target(symbol_cfg)
+
+    def _held_error(self, symbol: str, exc: Exception) -> None:
+        text = f"{symbol}: {exc}"
+        logger.exception("held-stock watch failed for %s", symbol)
+        self.last_error = text
+        self._signals[symbol] = f"{symbol} watch error — {exc}"
+
+    async def _guard_held(self, cfg: BotConfig, now: dt.datetime) -> None:
+        """A bot that is not RUNNING (paused, halted by a trade cap or a refused panic exit, day completed) still
+        holds positions: keep their stops, targets and trailing stops working, retry a square-off that left one
+        open, and square off LIVE positions at the square-off time. No new entry and no candle exit is read."""
+        if self._squareoff_due and time.monotonic() - self._squareoff_try_at >= NAKED_RETRY_SEC:
+            self._squareoff_try_at = time.monotonic()
+            await self._square_off(self._squareoff_due)
+        elif (cfg.trading_mode or "").upper() == "LIVE" and self._past_square_off(now, cfg) and (
+            time.monotonic() - self._squareoff_try_at >= NAKED_RETRY_SEC
+        ):
+            self._squareoff_try_at = time.monotonic()
+            await self._square_off("EOD_SQUARE_OFF")
+        if not self.positions:
+            return
+        self._guarding = True
+        try:
+            for symbol in list(self.positions):
+                self._focus = symbol
+                self.ltp = self._ltps.get(symbol, 0.0)
+                symbol_cfg = self._trade_cfg(cfg, symbol)
+                try:
+                    self._trail_gap_levels(symbol_cfg)
+                    await self._trail_tsl(symbol_cfg)
+                    await self._trail_supertrend(symbol_cfg)
+                    await self._trail_vwap_stop(symbol_cfg)
+                    await self._trail_stop_plan(symbol_cfg)
+                    await self._watch_stop(symbol_cfg)
+                except Exception as exc:  # noqa: BLE001
+                    self._held_error(symbol, exc)
+        finally:
+            self._guarding = False
+
+    async def _live_eod_square_off(self, now: dt.datetime, cfg: BotConfig) -> bool:
+        """LIVE positions close at the square-off time on every pass. It used to run only from a newly closed
+        candle of an armed stock, so a held stock that was no longer armed (or a long candle) missed it and Groww's
+        own auto square-off closed it instead. True when the day is over for this bot."""
+        if not self.positions or (cfg.trading_mode or "").upper() != "LIVE" or not self._past_square_off(now, cfg):
+            return False
+        if now.time() < _parse_hhmm(cfg.square_off_time):
+            return False
+        await self._square_off("EOD_SQUARE_OFF")
+        if not self.positions and self.status == "RUNNING":
+            self.status = "DAY_COMPLETED"
+            self.halt_reason = f"Auto square-off at {cfg.square_off_time} IST"
+            self._announce_down("DAY_COMPLETED", self.halt_reason)
+        return self.status != "RUNNING"
 
     async def on_minute(self, now: dt.datetime, cfg: BotConfig, frame: pd.DataFrame) -> str:
         if self.status != "RUNNING":
@@ -2522,11 +2727,11 @@ class StrategyEngine:
             action = "BUY" if side == "LONG" else "SELL"
             snap = closed_technical_snapshot(frame)
             if side == "LONG":
-                rsi_min = float(getattr(cfg, "rsi_long_min", 40.0) or 40.0)
-                rsi_max = float(getattr(cfg, "rsi_long_max", 70.0) or 70.0)
+                rsi_min = float(_or_default(getattr(cfg, "rsi_long_min", None), 40.0))
+                rsi_max = float(_or_default(getattr(cfg, "rsi_long_max", None), 70.0))
             else:
-                rsi_min = float(getattr(cfg, "rsi_short_min", 30.0) or 30.0)
-                rsi_max = float(getattr(cfg, "rsi_short_max", 60.0) or 60.0)
+                rsi_min = float(_or_default(getattr(cfg, "rsi_short_min", None), 30.0))
+                rsi_max = float(_or_default(getattr(cfg, "rsi_short_max", None), 60.0))
             logger.info(
                 "\n%s",
                 format_signal_report(
@@ -3161,7 +3366,9 @@ class StrategyEngine:
         flat = True
         if live:
             flat = await self._groww_net(symbol) == 0
-        moved = self.handoff(self.bot_id, symbol, live, to_bot=target) if flat else "no handoff: Groww still shows shares"
+        # chop=False: a stock moved on a breakout goes on the target bot's own settings, also when that is Bot 2
+        # (back where it came from); the choppy recipe (flipped orders, gap mode) is only for a stock that chopped.
+        moved = self.handoff(self.bot_id, symbol, live, to_bot=target, chop=False) if flat else "no handoff: Groww still shows shares"
         self._log_handoff(symbol, target, "BREAKOUT", text, moved, cfg, pos.trade_id if pos is not None else None, live)
         if moved.startswith("moved") and target == breakout.TREND_BOT and want is not None and self.breakout_arrival is not None:
             bar = enriched.iloc[-2]
@@ -3209,7 +3416,7 @@ class StrategyEngine:
             if self.positions.get(symbol) is not None:
                 self._signals[symbol] = f"{text} — the exit did not go through"
                 return True
-            moved = self.handoff(self.bot_id, symbol, live, to_bot=target)
+            moved = self.handoff(self.bot_id, symbol, live, to_bot=target, chop=False)
             self._log_handoff(symbol, target, "TREND_PROFIT", text, moved, cfg, pos.trade_id, live)
             if moved.startswith("moved") and self.handoff_order is not None:
                 moved += "; " + self.handoff_order(target, symbol, pos.direction)
@@ -3217,7 +3424,7 @@ class StrategyEngine:
             self._signals[symbol] = text
             self.last_signal = text
             return True
-        moved = self.handoff(self.bot_id, symbol, live, to_bot=target, keep_source=True)
+        moved = self.handoff(self.bot_id, symbol, live, to_bot=target, keep_source=True, chop=False)
         self._log_handoff(symbol, target, "TREND_PROFIT", text, moved, cfg, pos.trade_id, live)
         if moved.startswith("armed"):
             self._trend_kept[symbol] = target
@@ -3512,6 +3719,7 @@ class StrategyEngine:
         """Enter at once on a news headline (news_entry.py): `signal` BULLISH buys, BEARISH shorts."""
         return await self.direct_order(symbol, signal, why="NEWS", note=note)
 
+    @_own_view()
     async def direct_order(self, symbol: str, signal: str, why: str, note: str = "") -> str:
         """Enter at once, `signal` BULLISH buys and BEARISH shorts (a news entry, or a hand-off arrival).
 
@@ -3538,6 +3746,8 @@ class StrategyEngine:
         clock = self._now()
         if not market_is_open(clock):
             raise ForceRefused("market is closed")
+        if clock.time() < OPENING_BUFFER_END:
+            raise ForceRefused("opening auction buffer (09:15–09:20): no new order until 09:20 IST")
         if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"past the {cfg.square_off_time} IST square-off")
         if clock.time() >= _entry_cutoff(cfg):
@@ -3597,6 +3807,7 @@ class StrategyEngine:
         )
         return result
 
+    @_own_view()
     async def force_order(self, symbol: str) -> str:
         """Buy or sell from the live SMA side, then leave the bot running.
 
@@ -3622,7 +3833,7 @@ class StrategyEngine:
             raise ForceRefused(f"{name} is already {direction}. Force does not add a second order.")
         cfg = self.load_config()
         clock = self._now()
-        if not market_is_open(clock):
+        if not market_is_open(clock) or clock.time() < OPENING_BUFFER_END:
             raise ForceRefused("Market is closed. No new order until 09:20 IST.")
         if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. No new order.")
@@ -3690,6 +3901,7 @@ class StrategyEngine:
         )
         return result
 
+    @_own_view()
     async def close_symbol(self, symbol: str, reason: str = "MANUAL_CLOSE", trade_id: int | None = None) -> str:
         """Close one open book. Does not stop the bot or touch the other stocks.
 
@@ -3739,6 +3951,7 @@ class StrategyEngine:
                 self._focus = saved_focus
                 self.ltp = saved_ltp
 
+    @_own_view()
     async def reverse_position(
         self, symbol: str, close_reason: str | None = None, why: str | None = None, trade_id: int | None = None
     ) -> str:
@@ -3763,6 +3976,8 @@ class StrategyEngine:
         clock = self._now()
         if not market_is_open(clock):
             raise ForceRefused("Market is closed. Use Close instead.")
+        if clock.time() < OPENING_BUFFER_END:
+            raise ForceRefused("Opening auction buffer: no new order until 09:20 IST. Use Close instead.")
         if clock.time() >= _parse_hhmm(cfg.square_off_time):
             raise ForceRefused(f"Past {cfg.square_off_time} IST square-off. Use Close instead.")
         if clock.time() >= _entry_cutoff(cfg):
@@ -3924,6 +4139,10 @@ class StrategyEngine:
             pos = self.positions.get(symbol)
             if pos is None or (pos.mode or "").upper() != "LIVE":
                 continue
+            if pos.sl_order_id or pos.naked_since is not None:
+                # Its own stop order (or the no-stop watch) says how it closed: `_watch_stop` books a filled stop at
+                # Groww's price. Booking it here as "not on Groww" wrote a real stop-loss as ₹0 and gave back its slot.
+                continue
             opened = pos.entry_time
             if opened is not None and opened.tzinfo is None:
                 opened = opened.replace(tzinfo=IST)
@@ -3963,6 +4182,12 @@ class StrategyEngine:
             direction = _opposite(direction)
         side = "BUY" if direction == "LONG" else "SELL"
         live = (cfg.trading_mode or "").upper() == "LIVE"
+        broker_mode = getattr(self.broker, "mode", None)
+        if isinstance(broker_mode, str) and broker_mode.upper() == "LIVE" and not live:
+            # The PAPER/LIVE switch moved while this pass was running: the order client already follows LIVE while
+            # this pass still holds the PAPER settings, so a trade booked as practice would send a real order.
+            # (The other way is already safe: a LIVE pass refuses the practice order id it gets back.)
+            raise SlCancelFailed("the PAPER/LIVE switch changed during this pass; no order was sent")
         guard = self.live_guard
         if live and guard is not None:
             # Last check before real money: another LIVE bot may own this stock.
@@ -4077,6 +4302,8 @@ class StrategyEngine:
         self.trades_today += 1
         self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
         self._rejects.pop((cfg.symbol or "").upper(), None)
+        if live and sl_id:
+            self._save_stop_id(SimpleNamespace(mode="LIVE", trade_id=trade_id, sl_order_id=sl_id))
         self._alert(
             fill_alert(
                 mode=(cfg.trading_mode or "PAPER").upper(),
@@ -4128,6 +4355,20 @@ class StrategyEngine:
     async def _held_after_failed_entry(self, symbol: str, direction: str, qty: int) -> int:
         """Shares Groww holds after an entry this bot treated as failed."""
         net = await self._groww_net(symbol)
+        for _ in range(2):
+            if net is not None:
+                break
+            await self._sleep(0.5)
+            net = await self._groww_net(symbol)
+        if net is None:
+            # Groww's book could not be read: the entry may have filled. Say so loudly rather than treat it as flat.
+            self._alert(
+                f"PalTra ALERT\n{symbol}: an entry failed and Groww's position could not be read afterwards. "
+                "Check Groww: if it holds shares, they have no stop from the bot.",
+                critical=True,
+                call=True,
+            )
+            return 0
         if not net:
             return 0
         if (direction == "LONG" and net > 0) or (direction == "SHORT" and net < 0):
@@ -4257,7 +4498,9 @@ class StrategyEngine:
         closed_ts = _closed_bar_ts(frame)
         if closed_ts is None or closed_ts == pos.vwap_stop_bar:
             return
-        line = vwap_stop.stop_level(frame.iloc[:-1], pos.direction, cfg)
+        # Only a level that still guards the position counts (as at the entry); without the price a long bought
+        # under VWAP − k × ATR got a stop above the market and was closed at once.
+        line = vwap_stop.stop_level(frame.iloc[:-1], pos.direction, cfg, price=self.ltp if self.ltp > 0 else None)
         if line is None:
             pos.vwap_stop_bar = closed_ts
             return
@@ -4272,7 +4515,7 @@ class StrategyEngine:
         """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
         +plan_trail_r R. Tighter only; LIVE moves the Groww stop like the trailing stop."""
         pos = self.position
-        if pos is None or pos.plan_r is None or not pos.stop_active or self.status != "RUNNING" or self.ltp <= 0:
+        if pos is None or pos.plan_r is None or not pos.stop_active or not self._managing() or self.ltp <= 0:
             return
         if not stop_plan.on(cfg):
             return
@@ -4359,13 +4602,113 @@ class StrategyEngine:
             status = (await self.broker.get_order_status(pos.sl_order_id)).upper()
             if status in TERMINAL_CANCELLED or status == "":
                 pos.sl_order_id = ""
+                pos.stop_cancelled = True
+                self._save_stop_id(pos)
                 return
             if status in TERMINAL_FILLED:
-                raise SlCancelFailed(
+                raise SlAlreadyFilled(
                     f"SL {pos.sl_order_id} already filled ({status}) — reverse blocked"
                 )
             await self._sleep(0.05)
         raise SlCancelFailed(f"SL {pos.sl_order_id} cancel was not confirmed — reverse blocked")
+
+    def _save_stop_id(self, pos: OpenPosition) -> None:
+        """Keep a LIVE trade's working exchange-stop id on its row, so a restart can still cancel that stop before
+        the bot sends its own exit (it used to come back with no id and sell while the old stop kept working)."""
+        if (pos.mode or "").upper() != "LIVE" or not pos.trade_id:
+            return
+        try:
+            with session_factory()() as db:
+                row = db.get(TradeLog, pos.trade_id)
+                if row is not None and row.exit_time is None and (row.sl_order_id or "") != (pos.sl_order_id or ""):
+                    row.sl_order_id = pos.sl_order_id or None
+                    db.commit()
+        except Exception:  # noqa: BLE001 - bookkeeping only; the order state on Groww is unchanged
+            logger.exception("could not save the stop id of trade %s", pos.trade_id)
+
+    async def _reprotect(self, pos: OpenPosition, cfg: BotConfig, why: str) -> None:
+        """LIVE: an exit failed after this position's exchange stop was cancelled (or found dead). Place the stop
+        again at its level for the shares Groww still holds. When that cannot be done (the price is already through
+        it, Groww refuses it, or Groww's book cannot be read) the position is marked as having no stop: a critical
+        alert with a call, and the watcher keeps trying to protect or close it every few seconds."""
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "").upper() != "LIVE" or not pos.stop_active or pos.sl_order_id:
+            return
+        if not pos.stop_cancelled and pos.naked_since is None:
+            return  # restored without its stop id: that stop may still be working, a second one could sell twice
+        if self.positions.get(symbol) is not pos:
+            return
+        pos.protect_at = time.monotonic()
+        net = await self._groww_net(symbol)
+        held = 0
+        if net is not None and ((pos.direction == "LONG" and net > 0) or (pos.direction == "SHORT" and net < 0)):
+            held = min(int(pos.qty), abs(int(net)))
+        if net is not None and held == 0:
+            return  # Groww holds none of it: the watcher books how it closed, nothing to protect
+        error = "Groww's position could not be read"
+        if held:
+            trigger = round_price(symbol, float(pos.sl_trigger))
+            ltp = float(self._ltps.get(symbol) or 0.0)
+            through = ltp > 0 and ((pos.direction == "LONG" and ltp <= trigger) or (pos.direction == "SHORT" and ltp >= trigger))
+            if through:
+                error = f"the price {ltp:.2f} is already through the stop {trigger:.2f}"
+            else:
+                side = "SELL" if pos.direction == "LONG" else "BUY"
+                try:
+                    ack = await self.broker.place_sl(symbol, side, held, trigger)
+                except Exception as exc:  # noqa: BLE001
+                    error = str(exc) or "Groww refused the stop"
+                else:
+                    if ack.order_id:
+                        pos.sl_order_id = ack.order_id
+                        pos.stop_cancelled = False
+                        pos.naked_since = None
+                        pos.naked_alerted = False
+                        pos.stop_dead_at = None
+                        self._save_stop_id(pos)
+                        text = f"{symbol}: the exit ({why}) did not go through, so the stop was placed again at {trigger:.2f}."
+                        self._signals[symbol] = text
+                        self._alert(text)
+                        return
+                    error = "Groww gave no order id for the stop"
+        self._mark_naked(pos, symbol, why, error)
+
+    def _mark_naked(self, pos: OpenPosition, symbol: str, why: str, error: str) -> None:
+        if pos.naked_since is None:
+            pos.naked_since = self._now()
+            pos.protect_at = time.monotonic()
+        text = (
+            f"{symbol} has NO STOP: the exit ({why}) failed and the stop could not be placed again ({error}). "
+            "The bot keeps trying to protect or close it."
+        )
+        self._signals[symbol] = text
+        self.last_error = text
+        if not pos.naked_alerted:
+            pos.naked_alerted = True
+            self._alert(f"PalTra ALERT\n{text}", critical=True, call=True)
+
+    async def _mind_naked(self, cfg: BotConfig, pos: OpenPosition, symbol: str) -> None:
+        """LIVE position left with no exchange stop (`_reprotect`): every few seconds, book it if Groww is flat,
+        close it at the market once the price is through its stop, else try to place the stop again."""
+        if time.monotonic() - pos.protect_at < NAKED_RETRY_SEC:
+            return
+        pos.protect_at = time.monotonic()
+        net = await self._groww_net(symbol)
+        if net is None:
+            return
+        if net == 0:
+            price = await self._real_exit_price(pos, symbol)
+            pos.naked_since = None
+            await self._exit_now(cfg, price, STOP_SOLD_OUTSIDE, gate=False)
+            return
+        ltp = float(self.ltp or 0.0)
+        through = ltp > 0 and (
+            (pos.direction == "LONG" and ltp <= pos.sl_trigger) or (pos.direction == "SHORT" and ltp >= pos.sl_trigger)
+        )
+        if through:
+            await self._exit_now(cfg, ltp, STOP_LOST, gate=False)
+            return
+        await self._reprotect(pos, cfg, "retry")
 
     async def _groww_net(self, symbol: str) -> int | None:
         fn = getattr(self.broker, "net_quantity", None)
@@ -4428,7 +4771,7 @@ class StrategyEngine:
 
     async def _watch_stop(self, cfg: BotConfig) -> None:
         pos = self.position
-        if pos is None or self.status != "RUNNING":
+        if pos is None or not self._managing():
             return
         # Entered with no stop: nothing to watch. Square-off and an opposite
         # cross still close the position. The position's own flag decides,
@@ -4438,6 +4781,9 @@ class StrategyEngine:
         hit = False
         fill_price = self.ltp
         symbol = (cfg.symbol or self._focus or "").upper()
+        if (cfg.trading_mode or "").upper() == "LIVE" and not pos.sl_order_id and pos.naked_since is not None:
+            await self._mind_naked(cfg, pos, symbol)
+            return
         if (cfg.trading_mode or "").upper() == "LIVE" and not pos.sl_order_id:
             # Restored after a restart: the exchange still holds the stop id.
             # A flat book means that stop filled. Any other read must not exit.
@@ -4452,11 +4798,23 @@ class StrategyEngine:
                 hit = True
                 # Groww's own fill price; the trigger only when Groww gives none.
                 fill_price = await self._real_exit_price(pos, symbol)
+            elif status in STOP_DEAD and pos.pending_exit:
+                # The bot's own cancel for an exit whose cancel was not confirmed at the time: send that exit now.
+                pos.sl_order_id = ""
+                pos.stop_cancelled = True
+                self._save_stop_id(pos)
+                await self._exit_now(cfg, self.ltp, pos.pending_exit, gate=False)
+                return
             elif status in STOP_DEAD:
                 # Groww cancelled or rejected the stop: it will never sell these shares.
                 await self._stop_dead(cfg, pos, symbol, status)
                 return
-            elif status not in IN_FLIGHT:
+            elif await self._stop_slipped(cfg, pos, symbol):
+                return
+            elif status not in IN_FLIGHT and time.monotonic() - pos.flat_check_at >= FLAT_CHECK_SEC:
+                # Throttled: this branch runs for every LIVE stop whose status word is not in IN_FLIGHT (a resting
+                # stop reads TRIGGER_PENDING), and two Groww reads a pass for each one ran into the rate limit.
+                pos.flat_check_at = time.monotonic()
                 # Groww reports a filled stop as EXECUTED. If that word was
                 # missed, a flat MIS book is the same fact: the shares are gone.
                 opened = pos.entry_time
@@ -4466,6 +4824,12 @@ class StrategyEngine:
                 if age >= 20 and await self._groww_net(cfg.symbol) == 0:
                     hit = True
                     fill_price = await self._real_exit_price(pos, symbol)
+                    # Groww is flat but the stop did not say it filled: something else closed the shares. Take the
+                    # stop away too (best effort), or it could later open the other side.
+                    try:
+                        await self.broker.cancel_order(pos.sl_order_id)
+                    except Exception:  # noqa: BLE001 - already filled / already gone
+                        pass
         elif pos.stop_active:
             if pos.direction == "LONG" and self.ltp <= pos.sl_trigger:
                 hit = True
@@ -4473,9 +4837,7 @@ class StrategyEngine:
             elif pos.direction == "SHORT" and self.ltp >= pos.sl_trigger:
                 hit = True
                 fill_price = self.ltp
-        reason = "GAP_SL_HIT" if pos.trailing else ("TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else (vwap_stop.HIT_REASON if pos.vwap_stop else "ATR_SL_HIT")))
-        if pos.plan_stage:
-            reason = stop_plan.HIT_REASON  # the stop the plan moved (breakeven or the Supertrend line)
+        reason = _stop_reason(pos)
         if not hit and pos.target is not None and self.ltp > 0:
             if (pos.direction == "LONG" and self.ltp >= pos.target) or (
                 pos.direction == "SHORT" and self.ltp <= pos.target
@@ -4513,7 +4875,9 @@ class StrategyEngine:
             if live and await self._groww_net(name) != 0:
                 moved = "no handoff: Groww still shows shares"
             else:
-                moved = self.handoff(self.bot_id, name, live, to_bot=to_bot)
+                # The choppy recipe only when the setting picks Bot 2 itself; "back" to an origin of Bot 2 returns
+                # the stock to Bot 2's own settings (it used to arrive flipped, with gap mode, for good).
+                moved = self.handoff(self.bot_id, name, live, to_bot=to_bot, chop=stop_handoff.choice(cfg) == "BOT2")
             self._log_handoff(name, to_bot, stop_handoff.KIND, f"stop-loss exit at {price:.2f}", moved, cfg, pos.trade_id, live)
             text = f"{name} stop-loss exit; {moved}"
             self._alert(text)
@@ -4539,6 +4903,47 @@ class StrategyEngine:
             if price:
                 return float(price)
         return float(pos.sl_trigger or self.ltp)
+
+    async def _stop_slipped(self, cfg: BotConfig, pos: OpenPosition, symbol: str) -> bool:
+        """LIVE: the exchange stop is a stop-limit only a small buffer through its trigger. In a fast move the price
+        can jump past that limit: the stop triggers but never fills, and the position runs with no exit while the
+        status stays open. Once the price has been past the stop's limit for STOP_SLIP_SEC, cancel the stop (checked)
+        and close at the market as STOP_LOST. True when it acted (or is waiting on Groww); False otherwise."""
+        ltp = float(self.ltp or 0.0)
+        buffer = float(get_settings().market_protection_pct) / 100.0
+        if pos.direction == "LONG":
+            limit = float(pos.sl_trigger) * (1 - buffer)
+            past = 0 < ltp < limit
+        else:
+            limit = float(pos.sl_trigger) * (1 + buffer)
+            past = ltp > limit > 0
+        if not past:
+            pos.slip_since = None
+            return False
+        now = self._now()
+        if pos.slip_since is None:
+            pos.slip_since = now
+            return False
+        if (now - pos.slip_since).total_seconds() < STOP_SLIP_SEC:
+            return False
+        text = (
+            f"{symbol}: the price {ltp:.2f} has been past the stop's limit {limit:.2f} for {STOP_SLIP_SEC} s and the "
+            "stop has not filled. Cancelling it and closing at the market."
+        )
+        self._signals[symbol] = text
+        self.last_error = text
+        if not pos.slip_alerted:
+            pos.slip_alerted = True
+            self._alert(f"PalTra ALERT\n{text}", critical=True)
+        try:
+            await self._cancel_sl_verified(pos)
+        except SlAlreadyFilled:
+            await self._exit_now(cfg, await self._real_exit_price(pos, symbol), _stop_reason(pos), gate=False)
+            return True
+        except SlCancelFailed:
+            return True  # not confirmed yet: the next pass reads the stop again
+        await self._exit_now(cfg, ltp, STOP_LOST, gate=False)
+        return True
 
     async def _stop_dead(self, cfg: BotConfig, pos: OpenPosition, symbol: str, status: str) -> None:
         """LIVE: Groww cancelled or rejected the exchange stop (STOP_DEAD).
@@ -4586,6 +4991,8 @@ class StrategyEngine:
         if (now - pos.stop_dead_at).total_seconds() < STOP_DEAD_GRACE_SEC:
             return
         pos.sl_order_id = ""
+        pos.stop_cancelled = True
+        self._save_stop_id(pos)
         self._signals[symbol] = f"{symbol} closed at the market: its Groww stop was {status.lower()}"
         await self._exit_now(cfg, self.ltp, STOP_LOST)
 
@@ -5049,17 +5456,26 @@ class StrategyEngine:
                 return
             self.inflight = "TRANSIT"
             try:
-                if reason in _TAKEN_EXITS and self.position.sl_order_id:
+                if reason not in _STOP_FILLS and self.position.sl_order_id:
                     # The stop is still working on Groww. Cancel it first so
                     # it cannot fill after the exit and open a reverse.
                     try:
                         await self._cancel_sl_verified(self.position)
-                    except SlCancelFailed:
+                    except SlAlreadyFilled:
                         # It filled as we cancelled: the stop closed the trade.
-                        reason = "TSL_HIT" if self.position.tsl_step else ("ST_SL_HIT" if self.position.st_stop else (vwap_stop.HIT_REASON if self.position.vwap_stop else "ATR_SL_HIT"))
-                        if self.position.plan_stage:
-                            reason = stop_plan.HIT_REASON
+                        reason = _stop_reason(self.position)
                         fill_price = await self._real_exit_price(self.position, (cfg.symbol or "").upper())
+                    except SlCancelFailed as exc:
+                        # Not confirmed either way: the stop may still be working, so no exit is sent (it could
+                        # sell twice). The position and its stop stay; when Groww reports the stop cancelled the
+                        # watcher sends this exit again, and if the stop fills it is booked as the stop.
+                        self.position.pending_exit = reason
+                        symbol = (cfg.symbol or self._focus or "").upper()
+                        text = f"{symbol} {reason}: the stop cancel was not confirmed ({exc}). No exit sent yet; the stop stays in charge."
+                        logger.warning(text)
+                        self.last_error = text
+                        self._signals[symbol] = text
+                        return
                 # SL already fired (or paper touch). Do not place a reverse.
                 self.position.sl_order_id = ""
                 await self._close_position(self.position, fill_price, reason, self._now(), cfg)
@@ -5119,6 +5535,9 @@ class StrategyEngine:
                         return await self._square_off_one(symbol, reason, cfg)
 
                 shut = [r for r in await asyncio.gather(*(one(s) for s in names), return_exceptions=False) if r]
+                if symbols is None:
+                    # A full square-off that left a position open is tried again by the stop-only pass (`_guard_held`).
+                    self._squareoff_due = reason if self.positions else ""
                 if shut:
                     self.status = "DAY_COMPLETED"
                     self.halt_reason = shut[0]
@@ -5129,20 +5548,43 @@ class StrategyEngine:
 
     async def _square_off_one(self, symbol: str, reason: str, cfg: BotConfig) -> str | None:
         """Close one held stock. Returns the "market shut" text when Groww says the session is over, else None."""
+        try:
+            return await self._square_off_one_inner(symbol, reason, cfg)
+        except Exception as exc:  # noqa: BLE001
+            # One stock's error must not stop the others' square-off (the gather would end at the first one).
+            logger.exception("square-off of %s failed", symbol)
+            self.last_error = f"{symbol}: square-off failed ({exc})"
+            self._signals[symbol] = self.last_error
+            self._order_refused(symbol, str(exc) or "square-off failed")
+            return None
+
+    async def _square_off_one_inner(self, symbol: str, reason: str, cfg: BotConfig) -> str | None:
         pos = self.positions.get(symbol)
         if pos is None:
             return None
+        own = _cfg_for(cfg, symbol)
         try:
             await self._cancel_sl_verified(pos)
-        except SlCancelFailed:
-            # SL may have filled as we tried to cancel — book whatever position is left at LTP if we still have one.
-            pass
+        except SlAlreadyFilled:
+            # The stop filled as it was being cancelled: the stop closed it. Book Groww's price, send nothing.
+            price = await self._real_exit_price(pos, symbol)
+            await self._close_position(pos, price, _stop_reason(pos), self._now(), own)
+            self.positions.pop(symbol, None)
+            return None
+        except SlCancelFailed as exc:
+            # Not confirmed: the stop may still be working, so no exit now (it could sell twice). The stop keeps
+            # guarding the position; the square-off is tried again on the next pass.
+            text = f"{symbol}: square-off waits — the stop cancel was not confirmed ({exc})"
+            pos.pending_exit = reason
+            self.last_error = text
+            self._signals[symbol] = text
+            return None
         pos = self.positions.get(symbol)
         if pos is None:
             return None
         px = self._exit_price(symbol, pos)
         try:
-            await self._close_position(pos, px, reason, self._now(), _cfg_for(cfg, symbol))
+            await self._close_position(pos, px, reason, self._now(), own)
         except SlCancelFailed as exc:
             self.last_error = str(exc)
             self.last_signal = f"blocked — {exc}"
@@ -5152,6 +5594,7 @@ class StrategyEngine:
         self.positions.pop(symbol, None)
         return None
 
+    @_own_view()
     async def kill(self, reason: str) -> None:
         self._pullback.clear()
         self.halt_reason = reason
@@ -5167,11 +5610,34 @@ class StrategyEngine:
         now: dt.datetime,
         cfg: BotConfig,
     ) -> None:
+        """Close one position (see `_close_position_inner`). A LIVE exit that fails after its exchange stop was
+        cancelled must not leave the shares unprotected: the stop is placed again (or the watcher keeps trying)."""
+        try:
+            await self._close_position_inner(pos, exit_price, reason, now, cfg)
+        except ExitUnknown as exc:
+            # The exit may be working on Groww: no new stop yet. The no-stop watch reads Groww's book in a few
+            # seconds and books it, or places the stop then.
+            if (pos.mode or "").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id and pos.stop_cancelled:
+                self._mark_naked(pos, (cfg.symbol or "").upper(), reason, str(exc) or "the exit's answer was lost")
+            raise
+        except SlCancelFailed:
+            await self._reprotect(pos, cfg, reason)
+            raise
+        pos.pending_exit = ""
+
+    async def _close_position_inner(
+        self,
+        pos: OpenPosition,
+        exit_price: float,
+        reason: str,
+        now: dt.datetime,
+        cfg: BotConfig,
+    ) -> None:
         exit_side = "SELL" if pos.direction == "LONG" else "BUY"
         px = round_price(cfg.symbol, float(exit_price))
         live = (cfg.trading_mode or "").upper() == "LIVE"
         # LIVE ATR hits are filled by the exchange SL; don't send a second exit.
-        send_exit = not (live and reason in ("ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", stop_plan.HIT_REASON, STOP_SOLD_OUTSIDE))
+        send_exit = not (live and reason in _STOP_FILLS and reason not in ("GAP_SL_HIT", STOP_LOST))
         if send_exit and live:
             net = await self._groww_net(cfg.symbol)
             if net is None:
@@ -5205,7 +5671,7 @@ class StrategyEngine:
                 try:
                     ack = await self.broker.place_exit(cfg.symbol, exit_side, qty, ask)
                 except Exception as exc:  # noqa: BLE001
-                    raise SlCancelFailed(str(exc) or "Groww did not accept the exit") from exc
+                    raise ExitUnknown(str(exc) or "Groww did not accept the exit") from exc
                 try:
                     ack = await self._require_live_fill(ack, cfg)
                     break
@@ -5384,7 +5850,10 @@ class StrategyEngine:
         ltp = self.ltp
         for symbol in list(self.positions):
             self._focus = symbol
-            self.ltp = self._ltps.get(symbol, ltp)
+            price = self._ltps.get(symbol) or (ltp if symbol == (view or self._position_key()) else 0.0)
+            if not price:
+                continue  # no price for this stock yet (right after a restart): another stock's price is not its
+            self.ltp = price
             unreal = self._unrealized()
             if unreal:
                 net += unreal["net"]
@@ -5555,7 +6024,7 @@ class StrategyEngine:
         """
         if self.status != "HALTED":
             return False
-        if (self.halt_reason or "") != "Manual PANIC SQUARE-OFF":
+        if (self.halt_reason or "") not in ("Manual PANIC SQUARE-OFF", "Manual PANIC SQUARE-OFF (all bots)"):
             return False
         self.status = "STOPPED"
         self.halt_reason = ""
@@ -6178,6 +6647,7 @@ class StrategyEngine:
         except Exception:  # noqa: BLE001
             logger.exception("auto-exit after a refused reverse failed for %s", symbol)
 
+    @_own_view()
     async def answer_review(self, review_id: int, action: str) -> dict:
         """EXIT or WAIT on a review. Only EXIT ever sends an order, and only for the reviewed trade."""
         action = (action or "").upper()
@@ -7019,8 +7489,30 @@ TURN_COLOUR_GRACE_SEC = 60
 # LIVE stop health (_stop_dead): Groww's words for a stop that will never fill.
 STOP_DEAD = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED", "FAILED", "FAILURE"})
 STOP_DEAD_GRACE_SEC = 5
+#: No new entry before this time, by any path (cross, Force, news / hand-off orders, Reverse).
+OPENING_BUFFER_END = dt.time(9, 20)
+STOP_SLIP_SEC = 5  # price past a LIVE stop's limit this long, stop not filled: cancel it and close at the market
+NAKED_RETRY_SEC = 5  # how often a LIVE position with no exchange stop is re-checked (`_mind_naked`)
+FLAT_CHECK_SEC = 10  # how often an unanswered stop status falls back to reading Groww's book
 STOP_LOST = "STOP_LOST"
 STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
+
+#: Exits the exchange stop itself made (or that find it already gone): the bot sends no exit and cancels nothing.
+#: Every other exit reason is the bot's own decision, so the working exchange stop is cancelled (and checked) first;
+#: an exit that skipped the cancel left the stop working on Groww, where it could later open the other side.
+_STOP_FILLS = frozenset({
+    "ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "GAP_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", "SOLD_ON_GROWW", "STOP_LOST",
+})
+
+
+def _stop_reason(pos: "OpenPosition") -> str:
+    """The exit reason for a stop of this position that filled."""
+    if pos.plan_stage:
+        return stop_plan.HIT_REASON
+    if pos.trailing:
+        return "GAP_SL_HIT"
+    return "TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else (vwap_stop.HIT_REASON if pos.vwap_stop else "ATR_SL_HIT"))
+
 
 _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", cum_delta.EXIT_REASON, "SUPERTREND",

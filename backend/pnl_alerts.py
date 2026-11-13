@@ -131,7 +131,10 @@ class PnlAlerts:
         sent = self.sent_today(today)
         net = conf["basis"] == "NET"
         closed = await asyncio.to_thread(all_bots_guard.closed_by_bot, engines, net)
-        opened = all_bots_guard.open_by_bot(engines, net)
+        try:
+            opened = all_bots_guard.open_by_bot(engines, net, strict=True)
+        except all_bots_guard.PriceMissing:
+            return []  # a held stock has no price yet: the total is unknown, not "closed P&L only"
         by_bot = {bot: round(closed.get(bot, 0.0) + opened.get(bot, 0.0), 2) for bot in closed}
         total = round(sum(by_bot.values()), 2)
         kinds = due(total, conf["profit"], conf["loss"], sent)
