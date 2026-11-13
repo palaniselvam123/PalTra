@@ -1599,7 +1599,11 @@ spinning top), body and range) / Matched / Call columns
   (`routes_scalp.keep_active_scan` → `_pressure_alert` → `after_active_scan`) every row whose `buy_share` (waiting buy orders ÷
   all waiting orders) is ≥ that % (buyers) or ≤ 100 − that % (sellers), with price, share, day move and volume vs usual. Each
   stock and side once per IST day per alert (`_SENT`, memory), at most `MAX_NAMES` 15 a message, through
-  `alert_notifier.send_quiet`. `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`).
+  `alert_notifier.send_quiet`. `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`) **Last check** (`last`, `scalp_alerts_log.json` next to the settings with `recent`, so a restart keeps the
+  day's story): each scan in market hours notes per alert the stocks read, how many met the thresholds, how many were new
+  and whether Telegram took the message (`_delivery` on the `DeliveryResult`; the card's `LastCheck` line, amber with the
+  reason when it did not). A message Telegram refused is not marked sent for the day (`_mark(..., failed=)`), so the next
+  scan tries again.
 - `backend/pressure_study.py` – **Buyers / sellers test** (read-only; the Most active card's "Buyers / sellers test" view,
   `components/Scalp/PressureTest.tsx`; saved scans only, no Groww call, no order; nothing in the strategy reads it): the
   owner's idea that buyers (sellers) holding 75 % of the waiting orders send the price up (down). From the saved Most active

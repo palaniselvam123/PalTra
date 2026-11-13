@@ -3339,9 +3339,13 @@ export type ScalpAlerts = {
     recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
     today: { strong: string[]; pressure: string[] };
   };
-  recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number }[];
+  recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number; failed?: string }[];
+  /** What the last scan in market hours found per alert, and whether Telegram took it (backend scalp_alerts.last). */
+  last?: { strong?: ScalpAlertCheck; pressure?: ScalpAlertCheck };
   max_names: number;
 };
+
+export type ScalpAlertCheck = { at: string; on: boolean; rows: number; matched: number; new: number; sent: boolean; error: string | null };
 
 export type ScanTradePick = "PRESSURE" | "BIAS" | "MOVE";
 

@@ -227,10 +227,11 @@ def _chop_done(snapshot: dict, meta: dict) -> None:
     except RuntimeError:
         return
 
-    async def _send(message: str) -> None:
+    async def _send(message: str):
         from app.services.alert_notifier import alert_notifier
 
-        await alert_notifier.send_quiet(message)
+        # The delivery result goes back, so scalp_alerts can tell a sent Telegram from a refused one.
+        return await alert_notifier.send_quiet(message)
 
     async def _call(message: str) -> None:
         from app.services.alert_notifier import alert_notifier

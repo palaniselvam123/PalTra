@@ -16,6 +16,8 @@ def fresh(tmp_path, monkeypatch):
     scalp_alerts._SENT["strong"].clear()
     scalp_alerts._SENT["pressure"].clear()
     scalp_alerts.recent.clear()
+    scalp_alerts.last.clear()
+    monkeypatch.setattr(scalp_alerts, "_log_loaded", False)
 
 
 def trend_row(symbol, trend, passed, ltp=100.0):
@@ -120,3 +122,48 @@ def test_routes(tmp_path, monkeypatch):
         got = client.put("/api/scalp-alerts", json={"strong_on": True, "strong_min_checks": 7, "pressure_pct": 80}).json()
         assert (got["strong_on"], got["strong_min_checks"], got["pressure_pct"], got["pressure_on"]) == (True, 7, 80, False)
         assert client.put("/api/scalp-alerts", json={"pressure_pct": 20}).status_code == 422
+
+
+def test_a_failed_telegram_is_not_marked_sent_and_the_card_says_why():
+    from types import SimpleNamespace
+
+    scalp_alerts.save({"pressure_on": True, "pressure_pct": 62})
+    tries = []
+
+    async def broken(text):
+        tries.append(text)
+        return SimpleNamespace(ok=False, skipped_reason="No alert channel is enabled")
+
+    rows = [{"symbol": "SBIN", "buy_share": 0.7, "ltp": 800.0}, {"symbol": "TCS", "buy_share": 0.5, "ltp": 1}]
+    assert asyncio.run(scalp_alerts.after_active_scan({"rows": rows}, broken, NOW)) == []
+    last = scalp_alerts.view()["last"]["pressure"]
+    assert (last["rows"], last["matched"], last["new"], last["sent"]) == (2, 1, 1, False)
+    assert last["error"] == "No alert channel is enabled"
+    assert scalp_alerts.recent[0]["failed"] == "No alert channel is enabled"
+    # Tried again on the next scan, and once it goes through it counts as sent for the day.
+    sent = []
+
+    async def ok(text):
+        sent.append(text)
+
+    assert [p["symbol"] for p in asyncio.run(scalp_alerts.after_active_scan({"rows": rows}, ok, NOW))] == ["SBIN"]
+    assert len(tries) == 1 and len(sent) == 1
+    assert scalp_alerts.view()["last"]["pressure"]["sent"] is True
+    # The day's story survives a restart (memory cleared, the log file read back).
+    scalp_alerts.recent.clear()
+    scalp_alerts.last.clear()
+    scalp_alerts._log_loaded = False
+    view = scalp_alerts.view()
+    assert view["last"]["pressure"]["matched"] == 1 and view["recent"][0]["symbol"] == "SBIN"
+
+
+def test_last_check_records_matches_while_the_alert_is_off():
+    scalp_alerts.save({"strong_on": False, "strong_min_checks": 6})
+
+    async def send(text):
+        raise AssertionError("nothing is sent while off")
+
+    rows = [trend_row("SBIN", "STRONG_BULLISH", 7)]
+    asyncio.run(scalp_alerts.after_trend_scan({"rows": rows}, send, NOW))
+    last = scalp_alerts.view()["last"]["strong"]
+    assert last["on"] is False and last["matched"] == 1 and last["new"] == 0
