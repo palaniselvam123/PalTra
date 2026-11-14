@@ -299,6 +299,27 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`reentry_wait.ready_at`: the exit's own candle counts only within `GRACE_MAX_SEC` 90 s, at most half a candle, of its
   open, i.e. an exit on the previous candle's close processed late). The exit itself is never held back. The Strategy lab
   does not know it.
+- `backend/backtest_compare.py` – **Compare backtests** (read-only; owner's request: which strategy, which stocks, which
+  days, one run against many). The blotter's Backtests tab has a tick box per run (`BacktestRuns`, `COMPARE_MAX` 8, in the
+  order ticked: the first is the base) and "Compare N runs" opens `/terminal/compare/?runs=&base=&basis=`
+  (`components/Terminal/BacktestCompare.tsx`). `GET /api/replay/compare?runs=&base=&basis=gross|net` (2-8 runs,
+  `MAX_RUNS`; 400 on a bad list) → `compare` → `load` (the runs and their closed trades) + `analyze`: every run measured on
+  the **common ground** (the days all of them finished, `ReplayRun.days[:days_done]`, and the stocks all of them replayed;
+  a played day or stock without a trade is ₹0; a filter is dropped with a note when nothing is common, e.g. pick runs);
+  `REPLAY_STOPPED` rows and unfinished days are left out. `metrics` per run (P&L, wins, profit factor, per trade / day,
+  green days, the day-by-day biggest drop, best / worst day) on the common ground and over everything it finished;
+  ranking = average place over `WEIGHTS` (P&L ×2, green days %, biggest drop, profit factor, per trade, days won; a run
+  without trades is last on the safety measures); `_verdict`: best, runner-up, lead, day-by-day `head_to_head` and
+  `confidence` (clear / likely / close / too_few), most money / steadiest / best per trade, profit leaning on one stock or
+  day (`LEAN_SHARE`), all lost; by stock (each run's P&L, best run, verdict ALL_WIN / ALL_LOSE / DEPENDS…, stocks another
+  run beat the best on with ≥ `SUGGEST_MIN_TRADES` trades as per-stock setting hints, the hindsight each-stock-best total);
+  by day (best run, days every run lost / won); by exit reason; settings that differ (`setting_differences`: snapshot
+  fields with missing = column default, pick rules, the fast-mover hand-off, each stock's own settings; `in_use` marks a
+  setting whose switch is off in a run as not used, e.g. trailing numbers without the trailing stop), what each run changed
+  against the base, and (3+ runs) each differing setting's runs grouped with their average P&L (a hint, not proof). The
+  page: the answer in plain words, the ranking (common ground / everything), the running total chart (one colour per run
+  by its place, `.cmp-series` in globals.css, end labels up to 4 runs), the differences, by stock (filters, search, CSV), by
+  day (CSV), by exit reason; base picker and before / after charges. Nothing is changed or ordered.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills

@@ -2333,6 +2333,135 @@ export type HandoffRow = {
   regime: import("./trendAtEntry").TradeRegime | null;
 };
 
+/** One run's numbers in a backtest comparison (GET /api/replay/compare), on the basis asked (before / after charges). */
+export type CompareMetrics = {
+  trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  pnl: number;
+  profit: number;
+  loss: number;
+  charges: number;
+  /** Profit ÷ loss; null with no losing trade (`no_loss` then says there was profit and no loss). */
+  profit_factor: number | null;
+  no_loss: boolean;
+  avg_trade: number | null;
+  days: number;
+  avg_day: number | null;
+  green_days: number;
+  red_days: number;
+  green_pct: number | null;
+  /** The biggest fall of the day-by-day running total (≤ 0). */
+  max_drawdown: number;
+  best_day: { date: string; pnl: number } | null;
+  worst_day: { date: string; pnl: number } | null;
+  stocks: number;
+  stocks_profitable: number;
+};
+
+export type CompareHeadToHead = { won: number; lost: number; tied: number; days: number };
+
+export type CompareRank = {
+  run_id: number;
+  /** On the common ground (the days and stocks every run played). */
+  metrics: CompareMetrics;
+  /** Over everything this run finished. */
+  metrics_all: CompareMetrics;
+  days_won: number;
+  stocks_won: number;
+  /** 1 = best on that measure (pnl, green_pct, max_drawdown, profit_factor, avg_trade, days_won). */
+  places: Record<string, number>;
+  avg_place: number | null;
+  rank: number | null;
+  vs_base: { pnl_diff: number; trades_diff: number; head_to_head: CompareHeadToHead };
+};
+
+export type CompareCell = { pnl: number; trades: number; wins?: number } | null;
+
+export type CompareVerdict = {
+  best: number | null;
+  runner_up?: number | null;
+  lead?: number | null;
+  head_to_head?: CompareHeadToHead | null;
+  /** How clearly the best beat the runner-up day by day. */
+  confidence?: "clear" | "likely" | "close" | "too_few";
+  most_pnl?: number | null;
+  steadiest?: number | null;
+  smallest_drop?: number | null;
+  best_per_trade?: number | null;
+  most_days_won?: number | null;
+  lean?: {
+    stock: { symbol: string; pnl: number; share: number } | null;
+    day: { date: string; pnl: number; share: number } | null;
+  };
+  /** all_lost, leans_on_stock, leans_on_day, few_days, few_trades, nothing_to_compare. */
+  warnings: string[];
+  good_on_all?: string[];
+  bad_on_all?: string[];
+};
+
+export type BacktestCompare = {
+  basis: "gross" | "net";
+  base: number;
+  made_at?: string;
+  runs: {
+    id: number;
+    status: string;
+    start_date: string;
+    end_date: string;
+    created_at: string | null;
+    days_total: number;
+    days_done: number;
+    finished_days: number;
+    symbols: string[];
+    bot: number;
+    bot_name: string;
+    /** The settings the run played (without the big lists it keeps for Resume and the hand-offs). */
+    settings: Record<string, string | number | boolean | null>;
+  }[];
+  ground: {
+    days: string[];
+    stocks: string[];
+    days_filtered: boolean;
+    stocks_filtered: boolean;
+    notes: { code: "no_finished_day" | "no_common_days" | "different_days" | "no_common_stocks" | "different_stocks"; runs?: number[]; days?: number; stocks?: number }[];
+  };
+  /** Ranked best first. */
+  overall: CompareRank[];
+  verdict: CompareVerdict;
+  curve: { days: string[]; runs: Record<string, (number | null)[]> };
+  by_stock: {
+    rows: {
+      symbol: string;
+      cells: Record<string, CompareCell>;
+      best: number | null;
+      worst: number | null;
+      spread: number | null;
+      verdict: "ALL_WIN" | "ALL_LOSE" | "DEPENDS" | "MIXED" | "NO_TRADES" | "ONLY_ONE";
+    }[];
+    /** Each stock on whichever run did best on it (hindsight) vs the best run on the same stocks. */
+    each_best_total: number | null;
+    best_run_total: number | null;
+    uplift: number | null;
+    suggestions: { symbol: string; run_id: number; pnl: number; best_run_pnl: number; gain: number; trades: number }[];
+  };
+  by_day: {
+    rows: { date: string; cells: Record<string, CompareCell>; best: number | null; worst: number | null; all_red: boolean; all_green: boolean }[];
+    all_red: string[];
+    all_green: string[];
+  };
+  differences: {
+    /** `unused`: runs in which the setting did nothing (its switch was off, e.g. trailing numbers without the trailing stop). */
+    fields: { key: string; values: Record<string, unknown>; unused?: number[] }[];
+    stock_fields: { symbol: string; key: string; values: Record<string, unknown> }[];
+    vs_base: { run_id: number; changed: string[]; changed_stocks: string[]; pnl_diff: number; head_to_head: CompareHeadToHead }[];
+    /** 3+ runs: runs grouped by each differing setting's value, their average P&L (other settings may differ too). */
+    effects: { key: string; groups: { value: unknown; runs: number[]; avg_pnl: number }[]; spread: number }[];
+  };
+  by_reason: { reason: string; cells: Record<string, { count: number; pnl: number } | null>; count: number }[];
+};
+
 /** A replay run cut short with days still to play (GET /api/replay/resumable). */
 export type ResumableRun = {
   id: number;
@@ -3175,6 +3304,14 @@ export const smaApi = {
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
+  /** Compare 2-8 runs on the days and stocks they all played: ranking, verdict, by stock / day / exit reason, settings. */
+  replayCompare: (runIds: number[], base?: number | null, basis: "gross" | "net" = "gross") =>
+    request<BacktestCompare>(
+      `/api/replay/compare?runs=${runIds.join(",")}${base ? `&base=${base}` : ""}&basis=${basis}`,
+      undefined,
+      60000,
+      false
+    ),
   /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */
   replayControl: (action: "play" | "pause" | "stop" | "speed" | "seek", speed?: number, at?: string) =>
     request<ReplayInfo>(replayPath("/api/replay/control"), { method: "POST", body: JSON.stringify({ action, speed, at }) }, 20000),
