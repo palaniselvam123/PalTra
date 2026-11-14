@@ -265,6 +265,9 @@ class OpenPosition:
     smart: bool = False
     smart_room: float | None = None
     smart_info: dict = field(default_factory=dict)
+    # Live re-size (smart_live): the last closed candle the room was worked out on, and when (HH:MM).
+    smart_bar: int | None = None
+    smart_resized_at: str = ""
     # Bollinger exit: the last closed candle read, and whether a close has
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
@@ -380,7 +383,7 @@ SNAPSHOT_FIELDS = (
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
     "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr", "atr_target_mult",
-    "smart_pct", "smart_days", "smart_min_pct", "smart_max_pct", "smart_follow",
+    "smart_pct", "smart_days", "smart_min_pct", "smart_max_pct", "smart_follow", "smart_live",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -4560,6 +4563,8 @@ class StrategyEngine:
             )
             pos.smart_info = info
             pos.smart_room = float(info["rs"])
+        if smart_stop.settings(cfg)["live"]:
+            self._resize_smart(pos, symbol, cfg)
         room_rs = float(pos.smart_room or 0.0)
         if room_rs <= 0:
             return
@@ -4578,6 +4583,40 @@ class StrategyEngine:
             return  # the price is already at or through it: the stop watch closes the trade at the old stop
         if await self._move_stop(pos, symbol, moved, "Smart stop"):
             self._signals[symbol] = f"{symbol} smart stop → {moved:.2f} (best {float(best):.2f}, room {room_rs:.2f})"
+
+    def _resize_smart(self, pos: OpenPosition, symbol: str, cfg: BotConfig) -> None:
+        """Live re-size (smart_live): once per newly closed candle of the trade, the stock's room is worked out again
+        from its own candles up to now (the trade's own swings included), at the price now. A wider room only stops
+        the stop from moving up for a while (it never moves back); a narrower one lets it follow closer."""
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0:
+            return
+        minutes = self._exit_minutes(symbol, cfg)
+        closed_ts = _closed_bar_ts(self._exit_frame(symbol, cfg))
+        if closed_ts is None or closed_ts == pos.smart_bar:
+            return
+        if pos.smart_bar is None and closed_ts + minutes * 60 <= int(pos.entry_time.timestamp()):
+            pos.smart_bar = closed_ts  # no candle of the trade has closed yet: the entry's room stands
+            return
+        pos.smart_bar = closed_ts
+        info = smart_stop.room(
+            tape, pos.direction, float(self.ltp), cfg,
+            before_ts=closed_ts + minutes * 60, fallback=pos.smart_room, minutes=minutes,
+        )
+        new = float(info["rs"])
+        if new <= 0:
+            return
+        old = pos.smart_room
+        pos.smart_info = info
+        pos.smart_room = new
+        pos.smart_resized_at = self._now().strftime("%H:%M")
+        if smart_stop.resized(old, new):
+            text = f"{pos.smart_resized_at} smart room → {new:.2f} ({info['pct']:.2f}%)"
+            with session_factory()() as db:
+                row = db.get(TradeLog, pos.trade_id)
+                if row is not None and row.exit_time is None:
+                    row.stop_log = f"{row.stop_log}; {text}" if row.stop_log else text
+                    db.commit()
 
     async def _trail_stop_plan(self, cfg: BotConfig) -> None:
         """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
@@ -6377,6 +6416,8 @@ class StrategyEngine:
                         # Smart stop: this stock's own room (₹ a share) and how it was found (display only).
                         "smart_room": book.smart_room if book and book.smart else None,
                         "smart_note": smart_stop.describe(book.smart_info) if book and book.smart else None,
+                        "smart_resized_at": (book.smart_resized_at or None) if book and book.smart else None,
+                        "smart_atr_pct": (book.smart_info or {}).get("atr_pct") if book and book.smart else None,
                         # Best price since the entry (the trail tracker; display only).
                         "best": _best_since_entry(book),
                         "flipped": bool(getattr(book, "flipped", False)) if book else None,

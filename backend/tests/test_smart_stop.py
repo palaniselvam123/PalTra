@@ -190,3 +190,72 @@ async def test_colour_mode_entry_reads_the_colour_candles(engine):  # noqa: F811
     pos = engine.positions[symbol]
     assert pos.smart_info["minutes"] == 15
     assert pos.smart_room >= 1.0
+
+
+def _calm_then_wild() -> pd.DataFrame:
+    """15-minute bot: three calm sessions (₹0.4 pullbacks), then today's candles swing ₹2 before going on."""
+    rows = []
+    for d in range(4):
+        start = dt.datetime(2026, 10, 5 + d, 9, 15, tzinfo=IST)
+        p = 200.0
+        step = 0.03 if d < 3 else 0.15
+        for minute in range(375):
+            leg = (minute // 15) % 3
+            move = step if leg < 2 else -step
+            o, c = p, p + move
+            rows.append((start + dt.timedelta(minutes=minute), o, max(o, c) + 0.01, min(o, c) - 0.01, c))
+            p = c
+    return pd.DataFrame(
+        {"ts": [int(r[0].timestamp()) for r in rows], "open": [r[1] for r in rows], "high": [r[2] for r in rows],
+         "low": [r[3] for r in rows], "close": [r[4] for r in rows], "volume": 100}
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_resize_follows_each_stocks_candles_during_the_trade(engine):  # noqa: F811
+    from strategy_engine import OpenPosition
+
+    import database
+    from models import TradeLog
+
+    engine.status = "RUNNING"
+    cfg = engine.load_config()
+    cfg.use_stop, cfg.stop_type, cfg.entry_mode, cfg.pattern_tf = True, "SMART", "COLOUR", 15
+    symbol = (cfg.symbol or "").upper()
+    full = _calm_then_wild()
+    entry_at = dt.datetime(2026, 10, 8, 9, 30, tzinfo=IST)
+    engine._tapes[symbol] = full[full["ts"] < int(entry_at.timestamp())]
+    engine._frames[symbol] = engine._tapes[symbol]
+    engine._focus = symbol
+    price = float(engine._tapes[symbol]["close"].iloc[-1])
+    engine._ltps[symbol] = engine.ltp = price
+    entry_room = smart_stop.room(engine._tapes[symbol], "LONG", price, cfg, minutes=15)["rs"]
+    engine.position = OpenPosition(
+        direction="LONG", qty=1, entry_price=price, ma_cross_price=price, atr_at_entry=0.1,
+        sl_trigger=round(price - entry_room, 2), sl_order_id="PAPERSL1", entry_order_id="E", entry_time=entry_at,
+        trade_id=_seed_open_trade(), mode="PAPER", smart=True, smart_room=entry_room, high=price, low=price,
+    )
+    pos = engine.position
+    stop_before = pos.sl_trigger
+    # Two hours of the trade later, today's candles swing much wider than the calm days before.
+    now = dt.datetime(2026, 10, 8, 11, 30, tzinfo=IST)
+    engine._now = lambda: now
+    engine._tapes[symbol] = full[full["ts"] < int(now.timestamp())]
+    engine._frames[symbol] = engine._tapes[symbol]
+    engine._ltps[symbol] = engine.ltp = float(engine._tapes[symbol]["close"].iloc[-1])
+    await engine._trail_smart(cfg)
+    assert pos.smart_room > entry_room  # re-sized to the wilder swings of this trade's own candles
+    assert pos.smart_resized_at == "11:30" and pos.smart_info["minutes"] == 15
+    assert pos.sl_trigger >= stop_before  # a wider room never moves the stop back
+    with database.session_factory()() as db:
+        assert "smart room →" in (db.get(TradeLog, pos.trade_id).stop_log or "")
+    # Same closed candle: not worked out again.
+    room = pos.smart_room
+    await engine._trail_smart(cfg)
+    assert pos.smart_room == room
+    # Switched off: the entry's room stands.
+    cfg.smart_live = False
+    pos.smart_bar = None
+    pos.smart_room = entry_room
+    await engine._trail_smart(cfg)
+    assert pos.smart_room == entry_room

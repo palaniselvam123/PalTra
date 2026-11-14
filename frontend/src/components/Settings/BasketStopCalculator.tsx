@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { Layers, Loader2 } from "lucide-react";
 import { ApiError, currentDesk, smaApi, type SmaConfig, type TslBasketResult } from "@/lib/smaApi";
 
 const SIZES = [0, 1, 2, 3, 5, 10, 15] as const;
+const AUTO_SEC = 60;
 const input = "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
 
 function inr(v: number | null | undefined): string {
@@ -33,9 +34,12 @@ const FIT: Record<string, { text: string; cls: string; why: string }> = {
 export function BasketStopCalculator({
   form,
   set,
+  smartMode = false,
 }: {
   form: SmaConfig;
   set: (key: keyof SmaConfig, value: string | boolean) => void;
+  /** Shown under the Smart stop: only each stock's own numbers, no buttons that switch to another stop type. */
+  smartMode?: boolean;
 }) {
   const [minutes, setMinutes] = useState<number>(0);
   const [stopMult, setStopMult] = useState(1.5);
@@ -45,19 +49,36 @@ export function BasketStopCalculator({
   const [out, setOut] = useState<TslBasketResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [updated, setUpdated] = useState<string>("");
+  const [auto, setAuto] = useState(true);
+  const inFlight = useRef(false);
 
-  const run = useCallback(async () => {
-    setBusy(true);
+  const run = useCallback(async (quiet = false) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    if (!quiet) setBusy(true);
     setNote(null);
     try {
       setOut(await smaApi.tslBasket(deskParam(), minutes, atrPeriod, stopMult, trailMult, targetMult));
+      setUpdated(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (err: unknown) {
-      setOut(null);
+      if (!quiet) setOut(null);
       setNote(err instanceof ApiError || err instanceof Error ? err.message : "Could not read the candles");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }, [minutes, atrPeriod, stopMult, trailMult, targetMult]);
+
+  // Worked out by itself: when the card opens, when a number changes, and every minute while it is on screen.
+  useEffect(() => {
+    if (!auto) return;
+    void run();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void run(true);
+    }, AUTO_SEC * 1000);
+    return () => window.clearInterval(timer);
+  }, [auto, run]);
 
   const usePercent = () => {
     const p = out?.percent;
@@ -128,10 +149,15 @@ export function BasketStopCalculator({
           type="button"
           disabled={busy || stopMult <= 0 || trailMult <= 0}
           onClick={() => void run()}
+          title="Work it out again now"
           className="flex min-h-9 items-center gap-1 rounded-md bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
         >
-          {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Layers size={13} aria-hidden />} Calculate for all stocks
+          {busy ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Layers size={13} aria-hidden />} Refresh now
         </button>
+        <label className="flex min-h-9 items-center gap-2 text-xs text-slate-300">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} className="accent-[#10B981]" />
+          Work it out by itself every minute{updated ? ` · updated ${updated}` : ""}
+        </label>
       </div>
 
       {out ? (
@@ -144,7 +170,14 @@ export function BasketStopCalculator({
           </div>
           {out.stocks.length === 0 ? <p className="text-xs text-amber-200">This bot has no armed or held stocks.</p> : null}
 
-          {p ? (
+          {smartMode ? (
+            <p className="text-xs text-slate-400">
+              The Smart stop sizes every stock on its own, from its own candles, and works it out again after every candle while
+              a trade is open. The &quot;Smart room&quot; column is what each stock would get if it opened now; nothing here needs to
+              be saved.
+            </p>
+          ) : null}
+          {p && !smartMode ? (
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-md border border-white/10 bg-black/20 p-3">
                 <div className="text-xs font-semibold text-slate-200">A. Same % for every stock</div>

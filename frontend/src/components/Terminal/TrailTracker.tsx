@@ -122,7 +122,9 @@ export function TrailTracker({ state }: { state: SmaState | null }) {
                     </td>
                     <td className="py-1.5 pr-2 text-right font-mono text-amber-200" title={b.smart_note ?? undefined}>
                       {b.smart_room != null
-                        ? `follows best − ${px(b.smart_room)}`
+                        ? `follows best − ${px(b.smart_room)}${b.entry_price ? ` (${((b.smart_room / b.entry_price) * 100).toFixed(2)}%)` : ""}${
+                            b.smart_resized_at ? ` · re-sized ${b.smart_resized_at}` : ""
+                          }`
                         : r.nextAt == null
                           ? b.trailing
                             ? "moves with its line"

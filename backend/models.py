@@ -288,6 +288,8 @@ class BotConfig(Base):
     smart_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.3)
     smart_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
     smart_follow: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # Smart stop: work each held stock's room out again after every closed candle of the trade (on by default).
+    smart_live: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # ATR target (atr_target.py): target = entry ± this × ATR with an ATR / Supertrend / VWAP stop. 0 = off.
     atr_target_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)

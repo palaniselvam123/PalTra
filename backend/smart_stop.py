@@ -86,6 +86,7 @@ def settings(cfg) -> dict:
         "min_pct": min(lo, hi),
         "max_pct": max(lo, hi),
         "follow": _flag(getattr(cfg, "smart_follow", True)),
+        "live": _flag(getattr(cfg, "smart_live", True)),
     }
 
 
@@ -224,6 +225,16 @@ def room(
         "source": source,
         "clamped": "min" if clamped > pct else ("max" if clamped < pct else ""),
     }
+
+
+RESIZE_NOTE_SHARE = 0.1  # a re-sized room is written to the trade's stop log when it moved at least this share
+
+
+def resized(old: float | None, new: float) -> bool:
+    """The room changed enough to note on the trade."""
+    if not old or old <= 0:
+        return True
+    return abs(new - old) / old >= RESIZE_NOTE_SHARE
 
 
 def follow_room(room_rs: float, profit: float, follow: bool) -> float:
