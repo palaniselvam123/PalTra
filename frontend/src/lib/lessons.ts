@@ -21,6 +21,25 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "smart-stop",
+    title: "Smart stop: how it works, why it closed in profit, and the Advanced settings",
+    summary:
+      "The smart stop gives every stock its own stop room from that stock's own dips and then follows the best price to keep the profit. Worked through on a real AMBER short (sold 6,074, closed by the smart stop at 6,000.50 for +₹73.50 a share): why it closed while the trade was in profit, why candle colour mode still opens and closes a trade on every candle in a sideways market and what to change, and each of the six Advanced settings with an example.",
+    topic: "Exits",
+    file: "/guides/smart-stop-guide.pdf",
+    pages: 7,
+    minutes: 15,
+    added: "2026-11-14",
+    open: { href: "/settings/#sma-smart-stop", label: "Open the smart stop setting" },
+    points: [
+      "The room is read from the stock's own dips of the last 3 days, on the candle size the bot trades on, never under 1 ATR, kept between 0.3 % and 2 %.",
+      "It follows the best price one room behind; after one room of profit there is no loss left, and the further it runs the closer it follows (down to half a room).",
+      "Closing in profit is its job: the price came back more than this stock usually does, so the profit left was taken.",
+      "The smart stop does not switch off candle colour mode's own exit: a candle of the other colour still closes the trade. Use a separate close rule, candles in a row, Heikin Ashi or a per-stock cap for sideways stocks.",
+      "Wider room: raise \"Room covers this share of dips\" or untick \"Follow closer\". Change one setting at a time and replay the same days.",
+    ],
+  },
+  {
     id: "settings-entries",
     title: "Strategy settings 1: getting in (look-alike names told apart)",
     summary:

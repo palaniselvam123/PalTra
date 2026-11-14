@@ -5044,7 +5044,10 @@ function SmartStopSwitch({
         by that room (never moving back); once the trade has gained one room there is no loss left (entry plus charges), and the further
         it runs, the closer the stop follows, so more of the profit is kept. Every armed stock is sized on its own, and while a
         trade is open its room is worked out again after every candle from that stock&apos;s latest swings (the stop still never
-        moves back), so nothing needs to be calculated by hand.
+        moves back), so nothing needs to be calculated by hand.{" "}
+        <a href="/learn/?lesson=smart-stop" className="text-sky-300 underline hover:text-sky-200">
+          Read the guide (PDF)
+        </a>
       </p>
       {on ? (
         <details className="mt-2 text-xs text-slate-300">
