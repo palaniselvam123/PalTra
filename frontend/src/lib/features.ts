@@ -529,6 +529,8 @@ export const FEATURES: Feature[] = [
     purpose: "While a trade is open, each stock's room is worked out again after every candle from its latest swings; the stop still never moves back." },
   { id: "set-smart-guide", area: "settings", added: "2026-11-14", pr: 423, href: "/learn/?lesson=smart-stop", where: "Learn → Smart stop", title: "Smart stop guide",
     purpose: "A guide to the smart stop with its Advanced settings." },
+  { id: "set-reentry-wait", area: "settings", added: "2026-11-14", pr: 425, href: S("sma-risk"), where: "Settings → 6. Size, daily limits and times → After an exit, wait N candles", title: "Wait N candles after an exit",
+    purpose: "After any exit, a stock waits N candles before its next entry, so a sideways stock is not reversed on every candle." },
   { id: "set-fade-unarm", area: "settings", added: "2026-11-14", pr: 426, href: S("sma-fade-unarm"), where: "Settings → 7. Advanced → Un-arm a stock once its trend fades", title: "Un-arm a stock once its trend fades",
     purpose: "A stock that reads choppy for N minutes in a row comes off the bot's Trade list (once the bot is flat on it), so an armed trend that died is not traded all day." },
 ];

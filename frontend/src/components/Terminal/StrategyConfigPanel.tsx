@@ -3109,6 +3109,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 />
                 <Field
                   label="After an exit, wait N candles before the next entry (0 = off)"
+                  fresh="set-reentry-wait"
                   value={String(form.reentry_wait_candles ?? 0)}
                   onChange={(v) => set("reentry_wait_candles", v)}
                   own={isOwn("reentry_wait_candles")}
