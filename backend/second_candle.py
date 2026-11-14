@@ -758,6 +758,7 @@ class SecondCandle:
         first = day_list[0] - dt.timedelta(days=WARMUP_DAYS)
         last = day_list[-1]
         rows: list[dict] = []
+        finished = False
         try:
             for name in names:
                 if self._stop:
@@ -776,15 +777,20 @@ class SecondCandle:
             self.report = await asyncio.to_thread(summarize, rows, rule)
             self.stocks = await asyncio.to_thread(by_stock, rows, rule)
             self.report["stopped"] = self._stop
-            self.status = "DONE"
+            finished = True
         except Exception as exc:  # noqa: BLE001
             log.exception("second candle test failed")
             self.errors.append({"symbol": "", "error": str(exc)[:200]})
             self.status = "FAILED"
         finally:
             self.finished_at = dt.datetime.now(IST).isoformat(timespec="seconds")
-            if self.status == "DONE":
-                await asyncio.to_thread(self._save)
+            if finished:
+                # DONE only once the report is on disk: a fresh instance (a restart, the next poll) that sees the run
+                # finished must also find its saved report. Set in a finally, so a cancelled save never leaves RUNNING.
+                try:
+                    await asyncio.to_thread(self._save)
+                finally:
+                    self.status = "DONE"
 
 
 def _last_trading_days(today: dt.date, count: int) -> list[dt.date]:
