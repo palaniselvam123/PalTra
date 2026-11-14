@@ -13,6 +13,7 @@ export const SETTING_LABELS: Record<string, string> = {
   smart_min_pct: "Smart stop: smallest room (%)",
   smart_max_pct: "Smart stop: largest room (%)",
   smart_follow: "Smart stop: follow closer as profit grows",
+  smart_live: "Smart stop: re-size each stock's room every candle in the trade",
   atr_target_mult: "ATR target (× ATR, 0 = none)",
   tsl_sl_points: "trailing stop distance (₹)",
   tsl_trail_points: "trail step (₹)",

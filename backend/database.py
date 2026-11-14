@@ -306,6 +306,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "smart_min_pct": "FLOAT DEFAULT 0.3",
             "smart_max_pct": "FLOAT DEFAULT 2.0",
             "smart_follow": "BOOLEAN DEFAULT 1",
+            "smart_live": "BOOLEAN DEFAULT 1",
             "atr_target_mult": "FLOAT DEFAULT 0.0",
             "stock_settings": "TEXT DEFAULT '{}'",
             "trade_sources": "TEXT DEFAULT '{}'",

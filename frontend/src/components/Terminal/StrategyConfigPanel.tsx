@@ -334,6 +334,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     smart_min_pct: Math.min(10, Math.max(0.05, Number(form.smart_min_pct ?? 0.3) || 0.3)),
     smart_max_pct: Math.min(10, Math.max(0.1, Number(form.smart_max_pct ?? 2) || 2)),
     smart_follow: form.smart_follow !== false,
+    smart_live: form.smart_live !== false,
     atr_target_mult: Math.max(0, Number(form.atr_target_mult ?? 0) || 0),
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
@@ -2751,6 +2752,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       <FieldGroup id="stop" open={isOpen("stop")} onToggle={toggleGroup} title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
         <div className="min-w-0">
           <SmartStopSwitch form={form} set={set} isOwn={isOwn} />
+          {form.stop_type === "SMART" && form.use_stop !== false && !stockScope ? <BasketStopCalculator form={form} set={set} smartMode /> : null}
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -5040,7 +5042,9 @@ function SmartStopSwitch({
         (1 ATR of those candles), so normal wiggles do not stop you out, and a turn bigger than the stock usually makes does. The room is kept between{" "}
         {String(form.smart_min_pct ?? 0.3)}% and {String(form.smart_max_pct ?? 2)}% of the price. The stop then follows the best price
         by that room (never moving back); once the trade has gained one room there is no loss left (entry plus charges), and the further
-        it runs, the closer the stop follows, so more of the profit is kept. Every armed stock is sized on its own.
+        it runs, the closer the stop follows, so more of the profit is kept. Every armed stock is sized on its own, and while a
+        trade is open its room is worked out again after every candle from that stock&apos;s latest swings (the stop still never
+        moves back), so nothing needs to be calculated by hand.
       </p>
       {on ? (
         <details className="mt-2 text-xs text-slate-300">
@@ -5054,6 +5058,10 @@ function SmartStopSwitch({
           <label className="mt-2 flex items-center gap-2">
             <input type="checkbox" checked={form.smart_follow !== false} onChange={(e) => set("smart_follow", e.target.checked)} className="accent-[#10B981]" />
             Follow closer as the profit grows (down to half the room){isOwn("smart_follow") && <OwnTag />}
+          </label>
+          <label className="mt-1 flex items-center gap-2">
+            <input type="checkbox" checked={form.smart_live !== false} onChange={(e) => set("smart_live", e.target.checked)} className="accent-[#10B981]" />
+            Work each stock&apos;s room out again after every candle of the trade{isOwn("smart_live") && <OwnTag />}
           </label>
         </details>
       ) : null}

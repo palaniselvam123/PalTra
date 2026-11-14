@@ -166,7 +166,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (on) the room behind the best price shrinks by 1/8 for each room of profit past the first, down to half. Moved only when
   it gains `MOVE_SHARE` (10 %) of the room (`worth_moving`), through `_move_stop` (LIVE `modify_sl`, 2 s apart, a refused
   modify keeps the old stop, a LIVE position restored without its stop id stays at its saved stop). Each stock's room is its
-  own (`OpenPosition.smart_room` / `smart_info`); a restart works it out again from the candles up to the entry minute. Hit:
+  own (`OpenPosition.smart_room` / `smart_info`); a restart works it out again from the candles up to the entry minute.
+  **Live re-size** (`smart_live`, on by default; owner's request: no hand calculation, each stock re-sized while in the
+  trade): `StrategyEngine._resize_smart`, once per newly closed exit candle of the trade (`pos.smart_bar`), works the room out
+  again with `room` on the stock's candles up to then (the trade's own swings included) at the price now; the stop stays
+  tighter only (a wider room only pauses it), and a change of `RESIZE_NOTE_SHARE` (10 %) or more is appended to
+  `TradeLog.stop_log` ("11:30 smart room → …"). `books[]` carry `smart_resized_at` / `smart_atr_pct`; the Trail tracker says
+  "follows best − ₹… (…%) · re-sized HH:MM". The all-stocks card works itself out (on open, on a change, every minute while
+  visible; "Work it out by itself every minute", "Refresh now") and shows under the Smart stop switch too (`smartMode`: only
+  the per-stock table, no buttons that switch the stop type). Hit:
   `SMART_SL_HIT` (in `_STOP_FILLS`, `stop_handoff.STOP_REASONS`). The staged stop plan and ATR target do not run with it.
   `books[]` carry `smart_room` / `smart_note` (the Trail tracker's "follows best − ₹…"), and the all-stocks calculator
   (`tsl_calc.basket`, cfg and the desk's `_exit_minutes` passed) shows each stock's buy / sell room today (`smart_long` /

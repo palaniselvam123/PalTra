@@ -139,6 +139,8 @@ export type SmaConfig = {
   smart_min_pct?: number;
   smart_max_pct?: number;
   smart_follow?: boolean;
+  /** Smart stop: work each held stock's room out again after every closed candle of the trade. */
+  smart_live?: boolean;
   /** ATR target: target = entry ± this × ATR with an ATR / Supertrend / VWAP stop (0 = off). */
   atr_target_mult?: number;
   gap_sl_mult?: number;
@@ -1571,6 +1573,9 @@ export type SmaState = {
     /** Smart stop: this stock's own room in ₹ a share, and how it was found. */
     smart_room?: number | null;
     smart_note?: string | null;
+    /** When the live re-size last worked the room out (HH:MM), and that stock's ATR now in % of the price. */
+    smart_resized_at?: string | null;
+    smart_atr_pct?: number | null;
     flipped?: boolean | null;
     ltp: number | null;
     note?: string;

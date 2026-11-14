@@ -619,6 +619,7 @@ class ConfigUpdate(BaseModel):
     smart_min_pct: float | None = Field(default=None, ge=0.05, le=10)
     smart_max_pct: float | None = Field(default=None, ge=0.1, le=10)
     smart_follow: bool | None = None
+    smart_live: bool | None = None
     # VWAP + ATR buffer stop: stop = VWAP − this × ATR for a buy (+ for a sell), tighter only each candle.
     vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     atr_target_mult: float | None = Field(default=None, ge=0, le=50)
@@ -971,6 +972,7 @@ def _config_dict(row: BotConfig) -> dict:
         "smart_min_pct": 0.3 if getattr(row, "smart_min_pct", None) is None else float(row.smart_min_pct),
         "smart_max_pct": 2.0 if getattr(row, "smart_max_pct", None) is None else float(row.smart_max_pct),
         "smart_follow": True if getattr(row, "smart_follow", None) is None else bool(row.smart_follow),
+        "smart_live": True if getattr(row, "smart_live", None) is None else bool(row.smart_live),
         "atr_target_mult": float(getattr(row, "atr_target_mult", 0.0) or 0.0),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
