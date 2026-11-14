@@ -74,6 +74,7 @@ import small_candles
 import small_colour
 import vwap_stop
 import smart_stop
+import reentry_wait
 import atr_target
 import colour_exit
 import colour_force
@@ -377,7 +378,7 @@ MAX_TRADE_SYMBOLS = 24
 # The settings that decide a trade. Each trade keeps a copy of them from its
 # entry (TradeLog.strategy), and each replay run keeps one for the whole run.
 SNAPSHOT_FIELDS = (
-    "max_trades_per_stock",
+    "max_trades_per_stock", "reentry_wait_candles",
     "qty", "sma_fast", "sma_medium", "sma_slow", "atr_period", "atr_multiplier", "use_stop",
     "stop_type", "gap_sl_mult", "gap_tp_mult", "gap_min_pct",
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
@@ -1261,6 +1262,8 @@ class StrategyEngine:
         self.trades_today = 0
         # Entries per stock today (per-stock cap, max_trades_per_stock); counted with trades_today.
         self._stock_trades: dict[str, int] = {}
+        # When each stock's last trade closed today (reentry_wait.py: wait N candles before the next entry).
+        self._last_exit: dict[str, dt.datetime] = {}
         self._session_date = self._now().date().isoformat()
         self._quote_symbol = ""
         self._cfg_cache = None
@@ -1554,6 +1557,7 @@ class StrategyEngine:
             self._realized_mode = None
             self.trades_today = 0
             self._stock_trades.clear()
+            self._last_exit.clear()
             self._trend_sent.clear()
             self._stock_losses.clear()
             self._warned.clear()
@@ -3044,6 +3048,8 @@ class StrategyEngine:
                 return "closed on cross — trade cap locks the day"
             if (stock_cap := self._stock_cap_hit(cfg)) is not None:
                 return f"closed on {signal} — {stock_cap}"
+            if (resting := self._reentry_wait_hit(cfg)) is not None:
+                return f"closed on {signal} — {resting}"
             if (cfg.symbol or "").upper() in self._recovery_blocked:
                 return "closed on cross — no new trade in this stock today (emergency recovery exit)"
             if pullback is not None:
@@ -3063,6 +3069,8 @@ class StrategyEngine:
             return "entry blocked — trade cap"
         if (stock_cap := self._stock_cap_hit(cfg)) is not None:
             return f"{signal} ignored — {stock_cap}"
+        if (resting := self._reentry_wait_hit(cfg)) is not None:
+            return f"{signal} ignored — {resting}"
         if (cfg.symbol or "").upper() in self._recovery_blocked:
             return "entry blocked — no new trade in this stock today (emergency recovery exit)"
         if pullback is not None:
@@ -3585,6 +3593,8 @@ class StrategyEngine:
                 why = "trade cap reached"
             elif (stock_cap := self._stock_cap_hit(symbol_cfg)) is not None:
                 why = stock_cap
+            elif (resting := self._reentry_wait_hit(symbol_cfg)) is not None:
+                why = resting
             if why:
                 self._pullback.pop(symbol, None)
                 label = "entry-candle" if order.confirm else "limit" if order.invalid_at is not None else "pullback"
@@ -5889,6 +5899,8 @@ class StrategyEngine:
         # The note must not keep saying "holding" once the book is flat.
         name = (symbol or "").upper()
         if name:
+            self._last_exit[name] = now  # every exit starts the re-entry wait (reentry_wait.py)
+
             self._signals[name] = f"{name} flat — {_ALERT_REASON.get(reason, reason or 'closed')}"
         self._alert(
             close_alert(
@@ -6174,6 +6186,17 @@ class StrategyEngine:
             return f"{name} has had its {cap} trade(s) today (per-stock cap)"
         return None
 
+    def _reentry_wait_hit(self, cfg) -> str | None:
+        """Wait N candles after an exit (reentry_wait.py, 0 = off): why this stock takes no entry yet."""
+        n = reentry_wait.candles(cfg)
+        if n <= 0:
+            return None
+        name = (getattr(cfg, "symbol", "") or "").upper()
+        exit_at = self._last_exit.get(name)
+        if exit_at is None:
+            return None
+        return reentry_wait.refusal(name, exit_at, self._now(), self._exit_minutes(name, cfg), n)
+
     def _count_floor(self) -> int:
         """Trades up to this id do not count today: the user reset the count."""
         cfg = self._cfg_cache
@@ -6224,6 +6247,11 @@ class StrategyEngine:
                 .filter(TradeLog.date == day, TradeLog.id > floor, self._bot_rows())
                 .all()
             )
+            exits = (
+                db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.mode)
+                .filter(TradeLog.date == day, TradeLog.exit_time.isnot(None), self._bot_rows())
+                .all()
+            )
         # A row Groww never held was not a trade, so it does not use the cap.
         counted = [sym for row_mode, reason, sym in rows if (row_mode or "PAPER").upper() == mode and reason != "NOT_ON_GROWW"]
         self.trades_today = len(counted)
@@ -6231,6 +6259,14 @@ class StrategyEngine:
         for sym in counted:
             key = (sym or "").upper()
             self._stock_trades[key] = self._stock_trades.get(key, 0) + 1
+        # The re-entry wait (reentry_wait.py) carries on after a restart from each stock's last exit today.
+        self._last_exit = {}
+        for sym, when, row_mode in exits:
+            key = (sym or "").upper()
+            if key and when is not None and (row_mode or "PAPER").upper() == mode:
+                at = when.replace(tzinfo=IST) if when.tzinfo is None else when
+                if key not in self._last_exit or at > self._last_exit[key]:
+                    self._last_exit[key] = at
         # A restart must not forget today's realized P&L either.
         self._refresh_realized(mode)
         return self.trades_today

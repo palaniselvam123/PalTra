@@ -162,6 +162,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "counter_reenter": "BOOLEAN DEFAULT 0",
             "counter_reenter_max": "INTEGER DEFAULT 3",
             "max_trades_per_stock": "INTEGER DEFAULT 0",
+            "reentry_wait_candles": "INTEGER DEFAULT 0",
             "use_ema": "BOOLEAN DEFAULT 0",
             "ema_exit": "BOOLEAN DEFAULT 0",
             "ema_fast": "INTEGER DEFAULT 9",

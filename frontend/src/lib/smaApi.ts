@@ -389,6 +389,8 @@ export type SmaConfig = {
   max_trades_per_day: number;
   /** Entries one stock may take per day on this bot (0 = no cap); also a per-stock override. */
   max_trades_per_stock?: number;
+  /** Candles a stock waits after any exit before its next entry (0 = off; colour / pattern candles in those modes). */
+  reentry_wait_candles?: number;
   square_off_time: string;
   /** HH:MM. No new entries from this time. */
   entry_cutoff_time?: string;
