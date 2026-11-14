@@ -19,7 +19,7 @@ from __future__ import annotations
 CHOICES = ("OFF", "BACK", "BOT2", "BOT3")
 KIND = "STOP_EXIT"
 #: The exit reasons a stop books (strategy_engine._watch_stop); never a target.
-STOP_REASONS = frozenset({"ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", "GAP_SL_HIT"})
+STOP_REASONS = frozenset({"ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", "GAP_SL_HIT", "SMART_SL_HIT"})
 
 
 def choice(cfg) -> str:

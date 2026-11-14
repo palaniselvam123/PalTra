@@ -53,7 +53,7 @@ class StopProposal(BaseModel):
     bot: Literal[1, 2, 3, 4, 5] = 1
     symbol: str | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP", "SMART"] | None = None
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     atr_target_mult: float | None = Field(default=None, ge=0, le=50)
@@ -194,7 +194,7 @@ TOOLS = [
                 "bot": _BOT,
                 "symbol": {"type": "string", "description": "One stock, or omit for all stocks."},
                 "use_stop": {"type": "boolean"},
-                "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"]},
+                "stop_type": {"type": "string", "enum": ["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP", "SMART"]},
                 "atr_multiplier": {"type": "number"},
                 "vwap_stop_atr": {"type": "number"},
                 "atr_target_mult": {"type": "number", "description": "Target at this x ATR from the entry (0 = no target); with stop type ATR, SUPERTREND or VWAP."},

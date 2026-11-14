@@ -612,7 +612,13 @@ class ConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, gt=0, le=10)
     use_adx_filter: bool | None = None
     use_stop: bool | None = None
-    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP"] | None = None
+    stop_type: Literal["ATR", "SMA_GAP", "TSL", "SUPERTREND", "VWAP", "SMART"] | None = None
+    # Smart stop (smart_stop.py): advanced numbers; the defaults are meant to be left alone.
+    smart_pct: float | None = Field(default=None, ge=50, le=99)
+    smart_days: int | None = Field(default=None, ge=1, le=10)
+    smart_min_pct: float | None = Field(default=None, ge=0.05, le=10)
+    smart_max_pct: float | None = Field(default=None, ge=0.1, le=10)
+    smart_follow: bool | None = None
     # VWAP + ATR buffer stop: stop = VWAP − this × ATR for a buy (+ for a sell), tighter only each candle.
     vwap_stop_atr: float | None = Field(default=None, ge=0, le=5)
     atr_target_mult: float | None = Field(default=None, ge=0, le=50)
@@ -960,6 +966,11 @@ def _config_dict(row: BotConfig) -> dict:
         "tsl_trail_atr": float(getattr(row, "tsl_trail_atr", 0.5) or 0.5),
         "tsl_target_atr": 3.0 if getattr(row, "tsl_target_atr", None) is None else float(row.tsl_target_atr),
         "vwap_stop_atr": 0.5 if getattr(row, "vwap_stop_atr", None) is None else float(row.vwap_stop_atr),
+        "smart_pct": 85.0 if getattr(row, "smart_pct", None) is None else float(row.smart_pct),
+        "smart_days": 3 if getattr(row, "smart_days", None) is None else int(row.smart_days),
+        "smart_min_pct": 0.3 if getattr(row, "smart_min_pct", None) is None else float(row.smart_min_pct),
+        "smart_max_pct": 2.0 if getattr(row, "smart_max_pct", None) is None else float(row.smart_max_pct),
+        "smart_follow": True if getattr(row, "smart_follow", None) is None else bool(row.smart_follow),
         "atr_target_mult": float(getattr(row, "atr_target_mult", 0.0) or 0.0),
         "adx_threshold": row.adx_threshold,
         "use_vwap": bool(getattr(row, "use_vwap", False)),
@@ -4966,7 +4977,7 @@ async def tsl_calc_basket(
                 tape = None
         tapes[name] = tape
     out = await asyncio.to_thread(
-        tsl_calc_mod.basket, tapes, size, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult)
+        tsl_calc_mod.basket, tapes, size, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult), cfg
     )
     out.update({
         "desk": desk,

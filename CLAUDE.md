@@ -148,6 +148,26 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   display only): every held stock's entry, last, best since entry (`books[].best`: `tsl_best`, else the trade's high /
   low), stop, room to it, P&L if it filled now, the next trail price → new stop, target, and No stop / At risk / No loss
   / Profit locked.
+- `backend/smart_stop.py` – **Smart stop** (`stop_type = "SMART"`, one switch at the top of Settings → 5. Stop-loss and
+  target, `StrategyConfigPanel.SmartStopSwitch`, anchor `#sma-smart-stop`; also on the terminal's Strategy card; per bot and
+  per stock, PAPER and LIVE, replays too; owner's request: one setting that fits every armed stock, not too tight, not too
+  loose, and keeps the profit). At each entry (`StrategyEngine._open`) the stock's own 1-minute tape (`_tapes`) of the last
+  `smart_days` (3) sessions before the entry minute is read (`dips`): for a buy every dip from a new high that came back to
+  a new high within `RECOVER_MINUTES` (60), for a sell every bounce from a new low (dips under `MIN_DIP_PCT` 0.03 % left
+  out). The room (`room`) is the `smart_pct` (85th) percentile of them in % of the price, kept between `smart_min_pct` (0.3)
+  and `smart_max_pct` (2.0); under `MIN_SAMPLES` (5) dips the ATR stop's distance is used, kept inside the same bounds. The
+  stop starts one room from the fill; `StrategyEngine._trail_smart` (every pass, after the VWAP stop, also while not
+  RUNNING via `_guard_held`) follows the best price since the entry (`pos.high` / `pos.low`) at that room, tighter only
+  (`want`): at least breakeven plus charges (`stop_plan.breakeven`) once the trade has run one room, and with `smart_follow`
+  (on) the room behind the best price shrinks by 1/8 for each room of profit past the first, down to half. Moved only when
+  it gains `MOVE_SHARE` (10 %) of the room (`worth_moving`), through `_move_stop` (LIVE `modify_sl`, 2 s apart, a refused
+  modify keeps the old stop, a LIVE position restored without its stop id stays at its saved stop). Each stock's room is its
+  own (`OpenPosition.smart_room` / `smart_info`); a restart works it out again from the candles up to the entry minute. Hit:
+  `SMART_SL_HIT` (in `_STOP_FILLS`, `stop_handoff.STOP_REASONS`). The staged stop plan and ATR target do not run with it.
+  `books[]` carry `smart_room` / `smart_note` (the Trail tracker's "follows best − ₹…"), and the all-stocks calculator
+  (`tsl_calc.basket`, cfg passed) shows each stock's buy / sell room today (`smart_long` / `smart_short`). Replays read the
+  ~500 one-minute bars they load, so their rooms can read fewer days than live. The Strategy lab does not know it (reads as
+  the ATR stop). The stock research baseline keeps the ATR stop.
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and

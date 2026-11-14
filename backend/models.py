@@ -281,6 +281,13 @@ class BotConfig(Base):
     tsl_target_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)
     # VWAP + ATR buffer stop (stop_type VWAP, vwap_stop.py): stop = VWAP ∓ this × ATR, moved each closed candle.
     vwap_stop_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    # Smart stop (stop_type SMART, smart_stop.py): each stock's own room from its own dips; these are the advanced
+    # numbers (the percentile of the dips, sessions read, smallest / largest room in %, closer as profit grows).
+    smart_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=85.0)
+    smart_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
+    smart_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.3)
+    smart_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
+    smart_follow: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # ATR target (atr_target.py): target = entry ± this × ATR with an ATR / Supertrend / VWAP stop. 0 = off.
     atr_target_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     use_adx_filter: Mapped[bool] = mapped_column(Boolean, default=False)

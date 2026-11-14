@@ -63,6 +63,9 @@ export function StatusBar({ state, config, connected, busy, onModeClick, onReset
     if (stopType === "SUPERTREND") {
       return pos ? `Supertrend SL ${rupees(pos.sl_trigger)} · Target none` : "Supertrend line · Target none";
     }
+    if (stopType === "SMART") {
+      return pos ? `Smart SL ${rupees(pos.sl_trigger)} · Target none` : "Smart stop (each stock's own room) · Target none";
+    }
     if (stopType === "VWAP") {
       const k = points?.vwap_stop_atr ?? config?.vwap_stop_atr ?? 0.5;
       return pos ? `VWAP SL ${rupees(pos.sl_trigger)} · Target none` : `VWAP ∓ ${k}× ATR · Target none`;

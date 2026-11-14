@@ -70,7 +70,7 @@ const GAP_EXITS: Toggle[] = [
 ];
 
 const BB_LABEL: Record<BbExit, string> = { OFF: "Off", BAND: "Band", MIDDLE: "Middle", BOTH: "Both" };
-const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap", SUPERTREND: "Supertrend", VWAP: "VWAP + ATR" };
+const STOP_LABEL: Record<StopType, string> = { ATR: "ATR", TSL: "Trailing (TSL)", SMA_GAP: "SMA gap", SUPERTREND: "Supertrend", VWAP: "VWAP + ATR", SMART: "Smart" };
 type PatternTf = "1" | "3" | "5" | "10" | "15" | "30" | "60";
 const PATTERN_TFS: PatternTf[] = ["1", "3", "5", "10", "15", "30", "60"];
 const PATTERN_TF_LABEL: Record<PatternTf, string> = {
@@ -513,6 +513,8 @@ export function StrategySummary({
                           ? `Supertrend line (${c.st_period ?? 10}, ×${c.st_mult ?? 3})`
                         : c.stop_type === "VWAP"
                           ? `VWAP ∓ ${c.vwap_stop_atr ?? 0.5}× ATR`
+                        : c.stop_type === "SMART"
+                          ? "smart: each stock's own room, trails the best price"
                           : c.stop_type === "SMA_GAP"
                           ? `SMA gap ×${c.gap_sl_mult ?? 1} · target ×${c.gap_tp_mult ?? 2}`
                           : `${c.atr_multiplier}× ATR`
@@ -545,7 +547,7 @@ export function StrategySummary({
               </p>
             ) : null}
             {stopOn
-              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["ATR", "TSL", "SMA_GAP", "SUPERTREND", "VWAP"], STOP_LABEL, (v) =>
+              ? segmented<StopType>("Stop type", (c.stop_type ?? "ATR") as StopType, ["SMART", "ATR", "TSL", "SMA_GAP", "SUPERTREND", "VWAP"], STOP_LABEL, (v) =>
                   save({ stop_type: v }, `Stop type ${STOP_LABEL[v]}`)
                 )
               : null}

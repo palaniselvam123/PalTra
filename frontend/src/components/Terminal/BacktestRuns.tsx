@@ -164,6 +164,7 @@ export function strategyLabel(s: Settings): string {
   else if (s.stop_type === "TSL") parts.push(tslText(s));
   else if (s.stop_type === "SUPERTREND") parts.push(`Supertrend stop (${s.st_period ?? 10}, ×${s.st_mult ?? 3})`);
   else if (s.stop_type === "VWAP") parts.push(`VWAP ∓ ${s.vwap_stop_atr ?? 0.5}× ATR stop`);
+  else if (s.stop_type === "SMART") parts.push(`Smart stop (${s.smart_pct ?? 85}th dip, ${s.smart_min_pct ?? 0.3}-${s.smart_max_pct ?? 2}%)`);
   else parts.push(`${s.atr_multiplier ?? 1.5}× ATR stop`);
   if (bbExitText(s)) parts.push(`BB exit: ${bbExitText(s)}`);
   if (gapModeText(s)) parts.push(`Gap mode ${gapModeText(s)}`);
@@ -205,6 +206,7 @@ export function stopShort(s: Settings): string {
   }
   if (s.stop_type === "SUPERTREND") return `Supertrend ${s.st_period ?? 10}/×${s.st_mult ?? 3}`;
   if (s.stop_type === "VWAP") return `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} ATR`;
+  if (s.stop_type === "SMART") return "Smart stop";
   return `${s.atr_multiplier ?? 1.5}× ATR`;
 }
 
@@ -301,6 +303,8 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
             ? `Supertrend line (${s.st_period ?? 10} candles, ×${s.st_mult ?? 3}), moved each candle`
           : s.stop_type === "VWAP"
             ? `VWAP ∓ ${s.vwap_stop_atr ?? 0.5} × ATR, moved each candle (tighter only)`
+          : s.stop_type === "SMART"
+            ? `Smart: each stock's ${s.smart_pct ?? 85}th-percentile recovered dip (${s.smart_days ?? 3} days), ${s.smart_min_pct ?? 0.3}-${s.smart_max_pct ?? 2}% of price, trails the best price`
           : `${s.atr_multiplier}× ATR (${s.atr_period})`,
   ],
   [
