@@ -74,6 +74,13 @@ STRATEGY_GUIDE = {
             "Stop at the session VWAP minus vwap_stop_atr x ATR for a buy (plus for a sell), read on each closed "
             "candle and only ever tightened; the ATR stop guards the trade until the level is on the safe side."
         ),
+        "SMART": (
+            "Smart stop: each stock gets its own room, the 85th percentile of the dips (from a new high for a buy) "
+            "that it came back from over its last 3 sessions of 1-minute candles, kept between 0.3% and 2% of the "
+            "price. The stop starts that room from the entry, trails the best price by it (tighter only), sits at "
+            "breakeven plus charges once the trade has run one room, and follows closer (down to half the room) as "
+            "the profit grows."
+        ),
         "use_stop_off": "No stop order; the opposite cross, square-off or Bollinger exit close the trade.",
     },
     "entry_filters": {
@@ -201,7 +208,12 @@ FIELD_HELP = {
     "colour_body_by_tf": "candle colour: smallest body % per colour candle size, e.g. '5:0.05,15:0.15' (others use colour_min_body)",
     "colour_body_atr": "candle colour: smallest body in ATRs of the colour candles (0 = any), with colour_body_unit ATR",
     "use_stop": "stop-loss on / off",
-    "stop_type": "ATR | TSL (trailing) | SMA_GAP (paper only) | SUPERTREND | VWAP (VWAP ∓ vwap_stop_atr × ATR, tighter each candle)",
+    "stop_type": "ATR | TSL (trailing) | SMA_GAP (paper only) | SUPERTREND | VWAP (VWAP ∓ vwap_stop_atr × ATR, tighter each candle) | SMART (each stock's own room from the dips it recovered from, trails the best price, breakeven after one room)",
+    "smart_pct": "Smart stop: percentile of the stock's recovered dips used as its room (85)",
+    "smart_days": "Smart stop: sessions of 1-minute candles read (3)",
+    "smart_min_pct": "Smart stop: smallest room, % of price (0.3)",
+    "smart_max_pct": "Smart stop: largest room, % of price (2.0)",
+    "smart_follow": "Smart stop: follow closer as the profit grows, down to half the room (on)",
     "vwap_stop_atr": "VWAP stop: buffer below / above VWAP in ATRs (0.5)",
     "atr_period": "ATR period", "atr_multiplier": "stop at this x ATR",
     "atr_target_mult": "ATR target: profit target at this x ATR from the entry (0 = off); with stop type ATR, SUPERTREND or VWAP",

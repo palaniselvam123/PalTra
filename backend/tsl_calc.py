@@ -16,6 +16,8 @@ import statistics
 
 import pandas as pd
 
+import smart_stop
+
 import indicators
 from candles import resample
 from tick_sizes import round_price
@@ -136,6 +138,7 @@ def basket(
     stop_mult: float = DEFAULT_STOP,
     trail_mult: float = DEFAULT_TRAIL,
     target_mult: float = DEFAULT_TARGET,
+    cfg=None,
 ) -> dict:
     """Per stock: its ATR on `minutes` candles and the multiples in ₹ and %; plus one common % for all of them
     (the median of the stocks' own %) and what that common % means in ₹ and in ATRs for each stock."""
@@ -149,6 +152,10 @@ def basket(
         read = _size_read(tape, int(minutes), int(atr_period))
         atr = read.get("atr") if read else None
         row: dict = {"symbol": name, "price": price, "atr": atr, "candles": read.get("candles") if read else 0}
+        # The smart stop's room for a buy and a sell today (smart_stop.py): this stock's own recovered dips.
+        for side, key in (("LONG", "smart_long"), ("SHORT", "smart_short")):
+            info = smart_stop.room(tape, side, price, cfg if cfg is not None else object())
+            row[key] = {"pct": info["pct"], "rs": round_price(name, info["rs"]), "samples": info["samples"], "source": info["source"]}
         if not atr or price <= 0:
             row["note"] = f"Not enough {minutes}-minute candles for an ATR {atr_period} yet."
             rows.append(row)

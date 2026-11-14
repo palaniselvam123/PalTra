@@ -327,8 +327,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     atr_multiplier: Number(form.atr_multiplier),
     use_adx_filter: form.use_adx_filter,
     use_stop: form.use_stop !== false,
-    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR",
+    stop_type: form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" || form.stop_type === "SMART" ? form.stop_type : "ATR",
     vwap_stop_atr: Number(form.vwap_stop_atr ?? 0.5),
+    smart_pct: Math.min(99, Math.max(50, Number(form.smart_pct ?? 85) || 85)),
+    smart_days: Math.min(10, Math.max(1, Math.round(Number(form.smart_days ?? 3)) || 3)),
+    smart_min_pct: Math.min(10, Math.max(0.05, Number(form.smart_min_pct ?? 0.3) || 0.3)),
+    smart_max_pct: Math.min(10, Math.max(0.1, Number(form.smart_max_pct ?? 2) || 2)),
+    smart_follow: form.smart_follow !== false,
     atr_target_mult: Math.max(0, Number(form.atr_target_mult ?? 0) || 0),
     tsl_sl_points: Number(form.tsl_sl_points ?? 20),
     tsl_trail_points: Number(form.tsl_trail_points ?? 10),
@@ -2745,6 +2750,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       </Only>
       <FieldGroup id="stop" open={isOpen("stop")} onToggle={toggleGroup} title="5. Stop-loss and target" hint="The safety stop on every trade" on={onCount("stop")} wide={wide}>
         <div className="min-w-0">
+          <SmartStopSwitch form={form} set={set} isOwn={isOwn} />
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2761,7 +2767,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   ? "Stop-loss on the Supertrend line (moves each candle)"
                   : form.stop_type === "VWAP"
                     ? `Stop-loss at VWAP ∓ ${String(form.vwap_stop_atr ?? 0.5)}× ATR (moves each candle)`
-                    : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
+                    : form.stop_type === "SMART"
+                      ? "Smart stop on new entries (each stock's own room, trails the best price)"
+                      : `Exchange stop-loss at ${form.atr_multiplier}× ATR`}
             <InfoTip label="About the stop-loss">
               Unticked, new entries go in with no stop order: only the other exits (cross, gap fade, Bollinger exit, target)
               and the square-off close them.
@@ -2772,7 +2780,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Stop type{isOwn("stop_type") && <OwnTag />}
             </span>
             <select
-              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" ? form.stop_type : "ATR"}
+              value={form.stop_type === "SMA_GAP" || form.stop_type === "TSL" || form.stop_type === "SUPERTREND" || form.stop_type === "VWAP" || form.stop_type === "SMART" ? form.stop_type : "ATR"}
               onChange={(e) => set("stop_type", e.target.value)}
               className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
             >
@@ -2780,6 +2788,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="SMA_GAP">SMA gap — moving stop + target</option>
               <option value="TSL">Trailing stop (TSL) — ₹ or % steps, like Groww</option>
               <option value="SUPERTREND">Supertrend — stop on the Supertrend line, moves each candle</option>
+              <option value="SMART">Smart stop — each stock&apos;s own room from its own dips, trails the best price</option>
               <option value="VWAP">VWAP + ATR buffer — stop at VWAP − k × ATR (buy) / VWAP + k × ATR (sell), moves each candle</option>
             </select>
           </label>
@@ -3731,6 +3740,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "use_stop", text: `Stop on the Supertrend line (${n(f.st_period, 10)}, ×${n(f.st_mult, 3)}), moved each candle, tighter only` });
   } else if (f.stop_type === "VWAP") {
     add({ group: "stop", key: "use_stop", text: `Stop at VWAP ∓ ${n(f.vwap_stop_atr, 0.5)}× ATR, moved each candle, tighter only` });
+  } else if (f.stop_type === "SMART") {
+    add({ group: "stop", key: "use_stop", text: "Smart stop: each stock's own room from its own dips, trails the best price, no loss after one room" });
   } else {
     add({ group: "stop", key: "use_stop", text: `Stop at ${f.atr_multiplier}× ATR from the entry` });
   }
@@ -4983,6 +4994,68 @@ function ColourBodySeq({
         row and × ATR: 1st 0.1, 2nd 0.5 = a small then a big candle turns the trade; a big then a small one does not (the 2nd is
         under 0.5). An empty box uses the usual smallest body ({usual}). It is read for entries while flat too.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Smart stop (backend smart_stop.py) as one switch: on = stop type SMART with the stop on; off = back to the ATR
+ * stop. The numbers behind it sit folded under "Advanced" and are meant to be left alone.
+ */
+function SmartStopSwitch({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = form.use_stop !== false && form.stop_type === "SMART";
+  return (
+    <div id="sma-smart-stop" className={clsx("mt-2 rounded-lg border p-3", on ? "border-emerald-400/40 bg-emerald-500/[0.06]" : "border-white/10 bg-black/20")}>
+      <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold text-slate-100">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => {
+            if (e.target.checked) {
+              set("use_stop", true);
+              set("stop_type", "SMART");
+            } else {
+              set("stop_type", "ATR");
+            }
+          }}
+          className="h-4 w-4 accent-[#10B981]"
+        />
+        Smart stop: each stock gets its own stop room{isOwn("stop_type") && <OwnTag />}
+        <span className={clsx("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", on ? "bg-emerald-500/20 text-emerald-200" : "bg-white/10 text-slate-400")}>
+          {on ? "On" : "Off"}
+        </span>
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        When a trade opens, the bot reads that stock&apos;s own 1-minute candles of the last few days and measures every dip it came back
+        from (for a buy: from a new high down, and back up to a new high). Most of those dips fit inside the room it picks, so normal
+        wiggles do not stop you out, and a turn bigger than the stock usually makes does. The room is kept between{" "}
+        {String(form.smart_min_pct ?? 0.3)}% and {String(form.smart_max_pct ?? 2)}% of the price. The stop then follows the best price
+        by that room (never moving back); once the trade has gained one room there is no loss left (entry plus charges), and the further
+        it runs, the closer the stop follows, so more of the profit is kept. Every armed stock is sized on its own.
+      </p>
+      {on ? (
+        <details className="mt-2 text-xs text-slate-300">
+          <summary className="cursor-pointer text-slate-400">Advanced (leave as is unless you are testing)</summary>
+          <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-3">
+            <Field label="Room covers this share of dips" suffix="%" value={String(form.smart_pct ?? 85)} onChange={(v) => set("smart_pct", v)} own={isOwn("smart_pct")} />
+            <Field label="Days of candles read" suffix="days" value={String(form.smart_days ?? 3)} onChange={(v) => set("smart_days", v)} own={isOwn("smart_days")} />
+            <Field label="Smallest room" suffix="%" value={String(form.smart_min_pct ?? 0.3)} onChange={(v) => set("smart_min_pct", v)} own={isOwn("smart_min_pct")} />
+            <Field label="Largest room" suffix="%" value={String(form.smart_max_pct ?? 2)} onChange={(v) => set("smart_max_pct", v)} own={isOwn("smart_max_pct")} />
+          </div>
+          <label className="mt-2 flex items-center gap-2">
+            <input type="checkbox" checked={form.smart_follow !== false} onChange={(e) => set("smart_follow", e.target.checked)} className="accent-[#10B981]" />
+            Follow closer as the profit grows (down to half the room){isOwn("smart_follow") && <OwnTag />}
+          </label>
+        </details>
+      ) : null}
     </div>
   );
 }

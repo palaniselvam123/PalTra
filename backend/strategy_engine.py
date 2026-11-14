@@ -73,6 +73,7 @@ import exit_candle
 import small_candles
 import small_colour
 import vwap_stop
+import smart_stop
 import atr_target
 import colour_exit
 import colour_force
@@ -259,6 +260,11 @@ class OpenPosition:
     # vwap_stop_bar is the last closed candle read.
     vwap_stop: bool = False
     vwap_stop_bar: int | None = None
+    # Smart stop (smart_stop.py, stop_type SMART): the stock's own room in ₹ a share (None = not worked out yet,
+    # e.g. restored before its candles loaded) and how it was found; the stop follows the best price, tighter only.
+    smart: bool = False
+    smart_room: float | None = None
+    smart_info: dict = field(default_factory=dict)
     # Bollinger exit: the last closed candle read, and whether a close has
     # been on the trade's side of the middle band (arms the MIDDLE exit).
     bb_bar: int | None = None
@@ -345,7 +351,7 @@ class OpenPosition:
 
 def _plan_r_restored(own, at_entry: dict, stop_active: bool, trailing: bool, tsl_step, entry: float, atr, direction: str) -> float | None:
     """R of a restored trade on the staged stop plan: the ATR stop it was opened with (ATR x multiplier)."""
-    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own) or vwap_stop.stop_on(own):
+    if own is None or not stop_active or trailing or tsl_step or not stop_plan.on(own) or supertrend.stop_on(own) or vwap_stop.stop_on(own) or smart_stop.stop_on(own):
         return None
     try:
         mult = float(at_entry.get("atr_multiplier") or getattr(own, "atr_multiplier", 0) or 0)
@@ -374,6 +380,7 @@ SNAPSHOT_FIELDS = (
     "tsl_sl_points", "tsl_trail_points", "tsl_target_points",
     "tsl_mode", "tsl_sl_pct", "tsl_trail_pct", "tsl_target_pct",
     "tsl_sl_atr", "tsl_trail_atr", "tsl_target_atr", "vwap_stop_atr", "atr_target_mult",
+    "smart_pct", "smart_days", "smart_min_pct", "smart_max_pct", "smart_follow",
     "use_adx_filter", "adx_threshold", "use_vwap", "use_volume", "volume_min_ratio",
     "use_density", "density_min_pct", "use_rsi", "rsi_long_min", "rsi_long_max",
     "rsi_short_min", "rsi_short_max", "use_bollinger", "bb_period", "bb_std", "bb_min_width_pct",
@@ -1498,6 +1505,9 @@ class StrategyEngine:
                 st_stop=bool(stop_active and own is not None and not trailing and not tsl_step and supertrend.stop_on(own)),
                 # VWAP stop: resumes from the saved stop, tighter only.
                 vwap_stop=bool(stop_active and own is not None and not trailing and not tsl_step and vwap_stop.stop_on(own)),
+                # Smart stop: its room is worked out again from the candles up to the entry (_trail_smart), and the
+                # stop resumes from the saved level, tighter only.
+                smart=bool(stop_active and own is not None and not trailing and not tsl_step and smart_stop.stop_on(own)),
                 # Ticks before a restart are not kept; the range restarts at entry.
                 high=entry,
                 low=entry,
@@ -1843,6 +1853,7 @@ class StrategyEngine:
         await self._trail_tsl(symbol_cfg)
         await self._trail_supertrend(symbol_cfg)
         await self._trail_vwap_stop(symbol_cfg)
+        await self._trail_smart(symbol_cfg)
         await self._trail_stop_plan(symbol_cfg)
         await self._watch_stop(symbol_cfg)
         await self._watch_bollinger(symbol_cfg)
@@ -1891,6 +1902,7 @@ class StrategyEngine:
                     await self._trail_tsl(symbol_cfg)
                     await self._trail_supertrend(symbol_cfg)
                     await self._trail_vwap_stop(symbol_cfg)
+                    await self._trail_smart(symbol_cfg)
                     await self._trail_stop_plan(symbol_cfg)
                     await self._watch_stop(symbol_cfg)
                 except Exception as exc:  # noqa: BLE001
@@ -4231,6 +4243,7 @@ class StrategyEngine:
             raise SlCancelFailed(f"Entry rejected: {ack.message or ack.status}")
         fill = round_price(cfg.symbol, ack.fill_price or order_price)
         sl = self._sl_price(direction, fill, atr, float(cfg.atr_multiplier), cfg.symbol)
+        atr_distance = abs(fill - sl)
         trailing = uses_gap_stop(cfg, live)
         target = None
         if trailing:
@@ -4275,6 +4288,17 @@ class StrategyEngine:
             if line is not None:
                 sl = round_price(cfg.symbol, line)
             vw_bar = _closed_bar_ts(frame)
+        sm_stop = smart_stop.stop_on(cfg) and not trailing and not tsl_step
+        sm_info: dict = {}
+        sm_room = None
+        if sm_stop:
+            sym = (cfg.symbol or "").upper()
+            sm_info = smart_stop.room(
+                self._tapes.get(sym), direction, fill, cfg, before_ts=int(now.timestamp()), fallback=atr_distance
+            )
+            sm_room = float(sm_info["rs"])
+            sl = round_price(cfg.symbol, fill - sm_room if direction == "LONG" else fill + sm_room)
+            self._signals[sym] = f"{sym} smart stop {sl:.2f} — {smart_stop.describe(sm_info)}"
         sl_side = "SELL" if direction == "LONG" else "BUY"
         sl_id = ""
         sl_error = ""
@@ -4338,12 +4362,15 @@ class StrategyEngine:
             st_stop_bar=st_bar,
             vwap_stop=vw_stop,
             vwap_stop_bar=vw_bar,
+            smart=sm_stop,
+            smart_room=sm_room,
+            smart_info=sm_info,
             high=fill,
             low=fill,
             flipped=flipped,
             entry_why=why or "",
             # The plan needs the plain ATR stop at entry; R is the distance to it.
-            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop and not vw_stop) else None,
+            plan_r=stop_plan.risk(fill, sl) if (stop_active and stop_plan.on(cfg) and not trailing and not tsl_step and not st_stop and not vw_stop and not sm_stop) else None,
         )
         if trailing:
             closed_ts = _closed_bar_ts(self._frames.get((cfg.symbol or "").upper()))
@@ -4510,6 +4537,45 @@ class StrategyEngine:
             return
         if await self._move_stop(pos, symbol, moved, "VWAP stop"):
             pos.vwap_stop_bar = closed_ts
+
+    async def _trail_smart(self, cfg: BotConfig) -> None:
+        """Smart stop (smart_stop.py): the stop follows the best price since the entry at the stock's own room
+        behind it, no loss left once it has run one room, closer as the profit grows. Tighter only; LIVE moves
+        the Groww stop like the trailing stop."""
+        pos = self.position
+        if pos is None or not pos.smart or not pos.stop_active or not self._managing() or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if pos.smart_room is None:
+            # Restored after a restart: the room again from the candles up to the entry minute.
+            tape = self._tapes.get(symbol)
+            if tape is None or len(tape) == 0:
+                return
+            saved = abs(pos.entry_price - pos.sl_trigger) if pos.sl_trigger else 0.0
+            info = smart_stop.room(
+                tape, pos.direction, pos.entry_price, cfg,
+                before_ts=int(pos.entry_time.timestamp()), fallback=saved or None,
+            )
+            pos.smart_info = info
+            pos.smart_room = float(info["rs"])
+        room_rs = float(pos.smart_room or 0.0)
+        if room_rs <= 0:
+            return
+        best = pos.high if pos.direction == "LONG" else pos.low
+        if best is None:
+            return
+        target = smart_stop.want(
+            pos.direction, pos.entry_price, float(best), room_rs,
+            stop_plan.breakeven(pos.direction, pos.entry_price, pos.qty),
+            smart_stop.settings(cfg)["follow"],
+        )
+        moved = round_price(symbol, tighten(pos.direction, pos.sl_trigger, target))
+        if moved == pos.sl_trigger or not smart_stop.worth_moving(pos.sl_trigger, moved, room_rs):
+            return
+        if not stop_plan.guards(pos.direction, moved, self.ltp):
+            return  # the price is already at or through it: the stop watch closes the trade at the old stop
+        if await self._move_stop(pos, symbol, moved, "Smart stop"):
+            self._signals[symbol] = f"{symbol} smart stop → {moved:.2f} (best {float(best):.2f}, room {room_rs:.2f})"
 
     async def _trail_stop_plan(self, cfg: BotConfig) -> None:
         """Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, then the Supertrend line from
@@ -6306,6 +6372,9 @@ class StrategyEngine:
                         "target": book.target if book else None,
                         "trailing": book.trailing if book else None,
                         "tsl_step": book.tsl_step if book else None,
+                        # Smart stop: this stock's own room (₹ a share) and how it was found (display only).
+                        "smart_room": book.smart_room if book and book.smart else None,
+                        "smart_note": smart_stop.describe(book.smart_info) if book and book.smart else None,
                         # Best price since the entry (the trail tracker; display only).
                         "best": _best_since_entry(book),
                         "flipped": bool(getattr(book, "flipped", False)) if book else None,
@@ -7094,6 +7163,7 @@ def _stop_points(cfg) -> dict | None:
         "gap_tp_mult": float(getattr(cfg, "gap_tp_mult", 2.0) or 2.0),
         "vwap_stop_atr": vwap_stop.buffer(cfg),
         "atr_target_mult": atr_target.mult(cfg),
+        "smart": smart_stop.settings(cfg),
     }
 
 
@@ -7514,7 +7584,8 @@ STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 #: Every other exit reason is the bot's own decision, so the working exchange stop is cancelled (and checked) first;
 #: an exit that skipped the cancel left the stop working on Groww, where it could later open the other side.
 _STOP_FILLS = frozenset({
-    "ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "GAP_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", "SOLD_ON_GROWW", "STOP_LOST",
+    "ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "GAP_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", smart_stop.HIT_REASON,
+    "SOLD_ON_GROWW", "STOP_LOST",
 })
 
 
@@ -7524,6 +7595,8 @@ def _stop_reason(pos: "OpenPosition") -> str:
         return stop_plan.HIT_REASON
     if pos.trailing:
         return "GAP_SL_HIT"
+    if pos.smart:
+        return smart_stop.HIT_REASON
     return "TSL_HIT" if pos.tsl_step else ("ST_SL_HIT" if pos.st_stop else (vwap_stop.HIT_REASON if pos.vwap_stop else "ATR_SL_HIT"))
 
 

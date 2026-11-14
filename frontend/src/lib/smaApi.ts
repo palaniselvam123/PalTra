@@ -22,7 +22,7 @@ function resolveSmaApi(): string {
 
 export const SMA_API = resolveSmaApi();
 
-export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND" | "VWAP";
+export type StopType = "ATR" | "SMA_GAP" | "TSL" | "SUPERTREND" | "VWAP" | "SMART";
 
 export type SmaConfig = {
   /** This bot's name, e.g. "Scalper". */
@@ -133,6 +133,12 @@ export type SmaConfig = {
   tsl_target_atr?: number;
   /** VWAP + ATR buffer stop (stop_type "VWAP"): stop = VWAP ∓ this × ATR, tighter only each candle. */
   vwap_stop_atr?: number;
+  /** Smart stop (stop_type "SMART", smart_stop.py): advanced numbers; the defaults are meant to be left alone. */
+  smart_pct?: number;
+  smart_days?: number;
+  smart_min_pct?: number;
+  smart_max_pct?: number;
+  smart_follow?: boolean;
   /** ATR target: target = entry ± this × ATR with an ATR / Supertrend / VWAP stop (0 = off). */
   atr_target_mult?: number;
   gap_sl_mult?: number;
@@ -1562,6 +1568,9 @@ export type SmaState = {
     tsl_step?: number | null;
     /** Best price since the entry (display only). */
     best?: number | null;
+    /** Smart stop: this stock's own room in ₹ a share, and how it was found. */
+    smart_room?: number | null;
+    smart_note?: string | null;
     flipped?: boolean | null;
     ltp: number | null;
     note?: string;
@@ -2057,6 +2066,9 @@ export type TslBasketRow = {
   /** ₹ the price must go your way before the trailing stop reaches the entry. */
   breakeven_after?: number | null;
   breakeven_after_pct?: number | null;
+  /** The smart stop's room for this stock today, for a buy and a sell (its own recovered dips). */
+  smart_long?: { pct: number; rs: number; samples: number; source: "dips" | "atr" | "floor" };
+  smart_short?: { pct: number; rs: number; samples: number; source: "dips" | "atr" | "floor" };
   note?: string;
 };
 export type TslBasketResult = {

@@ -194,7 +194,10 @@ export function BasketStopCalculator({
                       No loss after
                     </th>
                     <th className="py-1 pr-2 text-right font-medium">A: stop in ₹</th>
-                    <th className="py-1 font-medium">A fits?</th>
+                    <th className="py-1 pr-2 font-medium">A fits?</th>
+                    <th className="py-1 pr-2 text-right font-medium" title="The smart stop's room for this stock: its own dips it came back from">
+                      Smart room (buy / sell)
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -206,7 +209,7 @@ export function BasketStopCalculator({
                         <td className="py-1.5 pr-3 font-semibold text-slate-200">{r.symbol}</td>
                         <td className="py-1.5 pr-2 text-right font-mono text-slate-300">{inr(r.price)}</td>
                         {r.stop == null ? (
-                          <td colSpan={7} className="py-1.5 text-slate-500">
+                          <td colSpan={8} className="py-1.5 text-slate-500">
                             {r.note || "Not enough candles yet."}
                           </td>
                         ) : (
@@ -223,8 +226,11 @@ export function BasketStopCalculator({
                             <td className="py-1.5 pr-2 text-right font-mono text-slate-300">
                               {a ? `${inr(a.stop)}${a.stop_atr != null ? ` (${a.stop_atr} ATR)` : ""}` : "—"}
                             </td>
-                            <td className={clsx("py-1.5", fit.cls)} title={fit.why}>
+                            <td className={clsx("py-1.5 pr-2", fit.cls)} title={fit.why}>
                               {fit.text}
+                            </td>
+                            <td className="py-1.5 pr-2 text-right font-mono text-sky-200">
+                              <SmartRoom v={r.smart_long} /> / <SmartRoom v={r.smart_short} />
                             </td>
                           </>
                         )}
@@ -234,7 +240,8 @@ export function BasketStopCalculator({
                 </tbody>
               </table>
               <p className="mt-1 text-[11px] text-slate-500">
-                &quot;No loss after&quot;: the trailing stop moves up one trail step for each full step the price gains, so it reaches
+                Smart room: what the Smart stop would give this stock if a trade opened now (* = too few dips read, a
+                fallback). &quot;No loss after&quot;: the trailing stop moves up one trail step for each full step the price gains, so it reaches
                 your entry after about stop ÷ trail steps. Before that a turn costs at most the stop; after it, the worst case is a
                 small win.
               </p>
@@ -244,5 +251,15 @@ export function BasketStopCalculator({
       ) : null}
       {note ? <p className="mt-2 text-xs text-amber-200">{note}</p> : null}
     </section>
+  );
+}
+
+function SmartRoom({ v }: { v?: { pct: number; rs: number; samples: number; source: string } }) {
+  if (!v) return <span className="text-slate-500">—</span>;
+  const how = v.source === "dips" ? `${v.samples} dips read` : v.source === "atr" ? "too few dips: ATR distance" : "no candles: smallest room";
+  return (
+    <span title={how}>
+      {inr(v.rs)} ({v.pct}%){v.source === "dips" ? "" : "*"}
+    </span>
   );
 }

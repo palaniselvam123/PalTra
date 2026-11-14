@@ -120,8 +120,14 @@ export function TrailTracker({ state }: { state: SmaState | null }) {
                     <td className={clsx("py-1.5 pr-2 text-right font-mono", pnlTone(r.locked ?? 0))}>
                       {r.locked == null ? "—" : `${r.locked > 0 ? "+" : ""}${inr(r.locked)}`}
                     </td>
-                    <td className="py-1.5 pr-2 text-right font-mono text-amber-200">
-                      {r.nextAt == null ? (b.trailing ? "moves with its line" : "fixed") : `at ${px(r.nextAt)} → ${px(r.nextStop)}`}
+                    <td className="py-1.5 pr-2 text-right font-mono text-amber-200" title={b.smart_note ?? undefined}>
+                      {b.smart_room != null
+                        ? `follows best − ${px(b.smart_room)}`
+                        : r.nextAt == null
+                          ? b.trailing
+                            ? "moves with its line"
+                            : "fixed"
+                          : `at ${px(r.nextAt)} → ${px(r.nextStop)}`}
                     </td>
                     <td className="py-1.5 pr-2 text-right font-mono text-emerald-200">{b.target ? px(b.target) : "none"}</td>
                     <td className="py-1.5">
