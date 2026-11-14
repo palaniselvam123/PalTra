@@ -137,6 +137,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the price. Settings → 5. Stop-loss and target, with stop type TSL: `components/Settings/TslCalculator.tsx` (stock,
   multiples, ATR period, sizes, Calculate; a row's "Use ₹" / "Use %" fills the TSL fields of the form, optionally the
   candle size too, and the normal Save applies them to the bot or the scoped stock).
+  **One stop for all armed stocks** (`tsl_calc.basket`, `GET /api/tsl-calc/basket?desk=1-5|research&minutes=0&atr_period=&
+  stop_mult=&trail_mult=&target_mult=`; read-only, no order): every stock the desk has armed or holds (its own `_tapes`,
+  else `_tape_for`, else one `fetch_frame` on the scans' session) on the bot's candle (`minutes` 0) or a picked size: its ATR,
+  the multiples in ₹ and %, and `breakeven_after` (₹ the price must go its way before the trailing stop reaches the entry,
+  ceil(stop / trail) steps); plus `percent`, one common % for all (the median, 0.05 % steps) with each stock's ₹ and its
+  stop in ATRs (`fit` tight < 1 ATR, wide > 3 ATR). Settings → 5, shared scope with stop type TSL:
+  `components/Settings/BasketStopCalculator.tsx` ("Use this % for all" fills `tsl_mode` PERCENT, "Use ATR multiples for
+  all" fills `tsl_mode` ATR; Save applies). **Trail tracker** (terminal live tab, `components/Terminal/TrailTracker.tsx`,
+  display only): every held stock's entry, last, best since entry (`books[].best`: `tsl_best`, else the trade's high /
+  low), stop, room to it, P&L if it filled now, the next trail price → new stop, target, and No stop / At risk / No loss
+  / Profit locked.
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and

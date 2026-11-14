@@ -15,6 +15,7 @@ import { REVERSE_GROUPS, ReverseOwnSettings, reverseBody, reverseGroupsOn, type 
 import { ChevronDown, Search } from "lucide-react";
 import { SETTING_LABELS } from "@/lib/settingLabels";
 import { TslCalculator } from "@/components/Settings/TslCalculator";
+import { BasketStopCalculator } from "@/components/Settings/BasketStopCalculator";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -3005,6 +3006,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 </div>
               )}
               <TslCalculator form={form} set={set} symbol={stockScope ? scope : null} armed={armed} />
+              {!stockScope ? <BasketStopCalculator form={form} set={set} /> : null}
               <Hint label="About the trailing stop">
                 {form.tsl_mode === "ATR" ? (
                   <>

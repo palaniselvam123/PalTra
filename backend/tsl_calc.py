@@ -11,6 +11,8 @@ bot never reads this on its own: nothing changes until Save.
 from __future__ import annotations
 
 import datetime as dt
+import math
+import statistics
 
 import pandas as pd
 
@@ -89,4 +91,124 @@ def suggest(
         "atr_period": int(atr_period),
         "multiples": {"stop": stop_mult, "trail": trail_mult, "target": target_mult},
         "sizes": out,
+    }
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# One stop / trail / target for every stock a bot trades (the Settings "All armed stocks" calculator).
+# A fixed ₹ stop means a different thing on a ₹100 stock and a ₹5,000 one, so this reads each stock's own ATR on
+# the bot's candle and shows what one common % (or one set of ATR multiples) means for each of them.
+
+TIGHT_ATR = 1.0  # a common % stop under 1 ATR is inside the stock's normal wiggle: likely stopped out by noise
+WIDE_ATR = 3.0  # over 3 ATR the loss when it is hit is far bigger than the stock needs
+PCT_STEP = 0.05
+
+
+def breakeven_after(stop: float, trail: float) -> float | None:
+    """How far the price must go your way before the trailing stop reaches the entry (no loss left).
+
+    The stop moves one trail step for each full step the price gains, so it needs ceil(stop / trail) steps."""
+    if not stop or not trail or trail <= 0 or stop <= 0:
+        return None
+    steps = math.ceil(stop / trail - 1e-9)
+    return round(steps * trail, 4)
+
+
+def _round_pct(value: float) -> float:
+    return max(PCT_STEP, round(round(value / PCT_STEP) * PCT_STEP, 2))
+
+
+def _fit(stop_rs: float, atr: float | None) -> tuple[float | None, str]:
+    if not atr or atr <= 0:
+        return None, "unknown"
+    mult = stop_rs / atr
+    if mult < TIGHT_ATR:
+        return round(mult, 2), "tight"
+    if mult > WIDE_ATR:
+        return round(mult, 2), "wide"
+    return round(mult, 2), "fits"
+
+
+def basket(
+    tapes: dict,
+    minutes: int,
+    atr_period: int = 14,
+    stop_mult: float = DEFAULT_STOP,
+    trail_mult: float = DEFAULT_TRAIL,
+    target_mult: float = DEFAULT_TARGET,
+) -> dict:
+    """Per stock: its ATR on `minutes` candles and the multiples in ₹ and %; plus one common % for all of them
+    (the median of the stocks' own %) and what that common % means in ₹ and in ATRs for each stock."""
+    rows: list[dict] = []
+    for symbol, tape in tapes.items():
+        name = (symbol or "").upper()
+        if tape is None or getattr(tape, "empty", True) or len(tape) < 3:
+            rows.append({"symbol": name, "price": None, "atr": None, "note": "No candles for this stock yet."})
+            continue
+        price = float(tape["close"].iloc[-1])
+        read = _size_read(tape, int(minutes), int(atr_period))
+        atr = read.get("atr") if read else None
+        row: dict = {"symbol": name, "price": price, "atr": atr, "candles": read.get("candles") if read else 0}
+        if not atr or price <= 0:
+            row["note"] = f"Not enough {minutes}-minute candles for an ATR {atr_period} yet."
+            rows.append(row)
+            continue
+        stop = round_price(name, atr * stop_mult)
+        trail = round_price(name, atr * trail_mult)
+        target = round_price(name, atr * target_mult) if target_mult > 0 else 0.0
+        be = breakeven_after(stop, trail)
+        row.update(
+            {
+                "atr_pct": round(atr / price * 100, 3),
+                "stop": stop,
+                "trail": trail,
+                "target": target,
+                "stop_pct": round(stop / price * 100, 3),
+                "trail_pct": round(trail / price * 100, 3),
+                "target_pct": round(target / price * 100, 3) if target else 0.0,
+                "breakeven_after": be,
+                "breakeven_after_pct": round(be / price * 100, 3) if be else None,
+            }
+        )
+        rows.append(row)
+    sized = [r for r in rows if r.get("stop")]
+    percent = None
+    if sized:
+        stop_pct = _round_pct(statistics.median(r["stop_pct"] for r in sized))
+        trail_pct = _round_pct(statistics.median(r["trail_pct"] for r in sized))
+        target_pct = _round_pct(statistics.median(r["target_pct"] for r in sized)) if target_mult > 0 else 0.0
+        per_stock = []
+        for r in sized:
+            stop_rs = round_price(r["symbol"], r["price"] * stop_pct / 100)
+            trail_rs = round_price(r["symbol"], r["price"] * trail_pct / 100)
+            target_rs = round_price(r["symbol"], r["price"] * target_pct / 100) if target_pct else 0.0
+            mult, fit = _fit(stop_rs, r["atr"])
+            per_stock.append(
+                {
+                    "symbol": r["symbol"],
+                    "price": r["price"],
+                    "stop": stop_rs,
+                    "trail": trail_rs,
+                    "target": target_rs,
+                    "stop_atr": mult,
+                    "fit": fit,
+                    "breakeven_after": breakeven_after(stop_rs, trail_rs),
+                }
+            )
+        percent = {
+            "stop_pct": stop_pct,
+            "trail_pct": trail_pct,
+            "target_pct": target_pct,
+            "breakeven_after_pct": breakeven_after(stop_pct, trail_pct),
+            "per_stock": per_stock,
+            "tight": [p["symbol"] for p in per_stock if p["fit"] == "tight"],
+            "wide": [p["symbol"] for p in per_stock if p["fit"] == "wide"],
+        }
+    return {
+        "minutes": int(minutes),
+        "atr_period": int(atr_period),
+        "multiples": {"stop": stop_mult, "trail": trail_mult, "target": target_mult},
+        "stocks": rows,
+        "sized": len(sized),
+        "percent": percent,
     }

@@ -6306,6 +6306,9 @@ class StrategyEngine:
                         "target": book.target if book else None,
                         "trailing": book.trailing if book else None,
                         "tsl_step": book.tsl_step if book else None,
+                        # Best price since the entry (the trail tracker; display only).
+                        "best": _best_since_entry(book),
+                        "flipped": bool(getattr(book, "flipped", False)) if book else None,
                         "ltp": self._ltps.get(symbol),
                         "note": _book_note(symbol, book, self._signals.get(symbol, "")),
                         # Today's P&L of this stock, whichever stock the chart shows.
@@ -7436,6 +7439,16 @@ def _schedule_critical_whatsapp(message: str, call: bool = False) -> None:
             return
 
     loop.create_task(_send())
+
+
+def _best_since_entry(pos) -> float | None:
+    """The most favourable price since the entry: the trailing stop's own mark, else the high (long) / low (short)."""
+    if pos is None:
+        return None
+    if getattr(pos, "tsl_best", None) is not None:
+        return float(pos.tsl_best)
+    mark = pos.high if pos.direction == "LONG" else pos.low
+    return float(mark) if mark is not None else None
 
 
 def _book_note(symbol: str, book: OpenPosition | None, note: str) -> str:

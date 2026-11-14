@@ -4908,6 +4908,68 @@ async def tsl_calc(
     return out
 
 
+@app.get("/api/tsl-calc/basket")
+async def tsl_calc_basket(
+    desk: str = "1",
+    minutes: int = 0,
+    atr_period: int = 14,
+    stop_mult: float = tsl_calc_mod.DEFAULT_STOP,
+    trail_mult: float = tsl_calc_mod.DEFAULT_TRAIL,
+    target_mult: float = tsl_calc_mod.DEFAULT_TARGET,
+):
+    """One trailing stop / trail / target for every stock a bot has armed or holds (tsl_calc.basket): each stock's
+    ATR on the bot's candle (`minutes` 0 = the bot's own), the multiples in ₹ and %, and a common % for all.
+
+    The bot's own 1-minute tapes are read first (no Groww call); a stock without one is downloaded once on the
+    scans' session. Read-only: nothing is saved and no order is placed."""
+    if desk not in ("1", "2", "3", "4", "5", "research"):
+        raise HTTPException(400, "desk must be 1-5 or research")
+    if not 2 <= int(atr_period) <= 100:
+        raise HTTPException(400, "atr_period must be 2 to 100.")
+    for value in (stop_mult, trail_mult, target_mult):
+        if not 0 <= float(value) <= 20:
+            raise HTTPException(400, "Multiples must be 0 to 20.")
+    if float(stop_mult) <= 0 or float(trail_mult) <= 0:
+        raise HTTPException(400, "The stop and trail multiples must be above 0.")
+    eng = _desk_engine(desk)
+    cfg = eng.load_config()
+    from candles import candle_minutes as _bot_candle
+    size = int(minutes) or int(_bot_candle(cfg))
+    if size not in tsl_calc_mod.SIZES:
+        raise HTTPException(400, f"minutes must be one of {', '.join(map(str, tsl_calc_mod.SIZES))} (0 = the bot's own)")
+    names = list(dict.fromkeys([*trade_names(cfg), *eng.positions.keys()]))[: MAX_TRADE_SYMBOLS + 10]
+    tapes: dict = {}
+    downloaded: list[str] = []
+    failed: dict[str, str] = {}
+    now = dt.datetime.now(IST)
+    start = dt.datetime.combine(now.date() - dt.timedelta(days=7), dt.time(9, 15), tzinfo=IST)
+    for name in names:
+        tape = getattr(eng, "_tapes", {}).get(name)
+        if tape is None or getattr(tape, "empty", True):
+            tape = _tape_for(name)
+        if tape is None:
+            try:
+                await groww_pressure.wait_for_bots()
+                tape = await fetch_frame(_scan_broker(), name, start, now)
+                downloaded.append(name)
+            except Exception as exc:  # noqa: BLE001 - one stock's download must not stop the others
+                failed[name] = str(exc)[:160]
+                tape = None
+        tapes[name] = tape
+    out = await asyncio.to_thread(
+        tsl_calc_mod.basket, tapes, size, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult)
+    )
+    out.update({
+        "desk": desk,
+        "bot_name": getattr(cfg, "bot_name", None) or (f"Bot {desk}" if desk != "research" else "Research"),
+        "mode": (cfg.trading_mode or "PAPER").upper(),
+        "bot_candle": int(_bot_candle(cfg)),
+        "downloaded": downloaded,
+        "failed": failed,
+    })
+    return out
+
+
 class RegimeStudyStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=regime_study.MAX_STOCKS)
     days: int = Field(default=10, ge=regime_study.MIN_DAYS, le=regime_study.MAX_DAYS)
