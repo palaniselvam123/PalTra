@@ -28,6 +28,7 @@ import {
   Radio,
   Settings,
   ShieldCheck,
+  Sparkles,
   Sun,
   Moon,
   Zap,
@@ -39,6 +40,21 @@ import { useTheme } from "@/hooks/useTheme";
 import { useServerRole } from "@/hooks/useServerRole";
 import { serverBadge } from "@/components/ServerAccent";
 import { Badge, Button, StatusDot } from "@/components/ui";
+import { useUnseenCount } from "@/components/WhatsNew/useWhatsNew";
+
+/** The menu's What's new link: how many new features have not been seen yet (none = nothing shown). */
+export function WhatsNewCount({ href }: { href: string }) {
+  const count = useUnseenCount();
+  if (href !== "/whats-new" || !count) return null;
+  return (
+    <span
+      className="ml-1 inline-flex min-w-4 items-center justify-center rounded-full bg-[#f59e0b] px-1 text-[10px] font-bold leading-4 text-[#1a1203]"
+      title={`${count} new feature${count === 1 ? "" : "s"} you have not seen yet`}
+    >
+      {count}
+    </span>
+  );
+}
 
 /**
  * Application chrome, organised into three zones of deliberately different
@@ -63,6 +79,7 @@ export const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/news", label: "News", icon: Newspaper },
   { href: "/learn", label: "Learn", icon: GraduationCap },
+  { href: "/whats-new", label: "What's new", icon: Sparkles },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/orb", label: "ORB desk", icon: Bot },
   { href: "/chart", label: "Charts", icon: LineChart },
@@ -232,6 +249,7 @@ export function Navbar({
                 )}
               >
                 {label}
+                <WhatsNewCount href={href} />
               </Link>
             );
           })}
@@ -454,6 +472,7 @@ export function Navbar({
             >
               <Icon size={14} />
               {label}
+              <WhatsNewCount href={href} />
             </Link>
           );
         })}

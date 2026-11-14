@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { Layers, Loader2 } from "lucide-react";
@@ -109,7 +110,7 @@ export function BasketStopCalculator({
   return (
     <section aria-label="Stop for all armed stocks" className="mt-3 rounded-lg border border-sky-400/25 bg-sky-500/[0.04] p-3">
       <h4 className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
-        <Layers size={14} aria-hidden /> One stop for all armed stocks
+        <Layers size={14} aria-hidden /> One stop for all armed stocks <NewTag id="set-basket-stop" />
       </h4>
       <p className="mt-1 text-xs text-slate-400">
         A fixed ₹20 stop is 2% of a ₹1,000 stock but 0.4% of a ₹5,000 one, so one ₹ number never fits a mixed list. This reads

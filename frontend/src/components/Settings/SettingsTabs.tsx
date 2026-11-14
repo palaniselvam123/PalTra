@@ -4,6 +4,7 @@ import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
+import { NewCountChip } from "@/components/ui/NewTag";
 
 export type SettingsGroup = {
   id: string;
@@ -112,7 +113,12 @@ export function SettingsTabs({ groups, active, onPick }: { groups: SettingsGroup
           >
             {g.icon ? <span aria-hidden className="shrink-0 opacity-90">{g.icon}</span> : null}
             <span className="flex flex-col items-start leading-tight">
-              <span className="font-semibold">{g.label}</span>
+              <span className="flex items-center gap-1.5 font-semibold">
+                {g.label}
+                <NewCountChip
+                  match={(href) => href.startsWith("/settings") && groupForHash(groups, `#${href.split("#")[1] ?? ""}`)?.id === g.id}
+                />
+              </span>
               {g.hint ? (
                 <span className={clsx("hidden text-[10px] font-normal md:block", active === g.id ? "opacity-80" : "text-slate-400")}>
                   {g.hint}

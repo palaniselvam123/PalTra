@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Loader2, Sparkles } from "lucide-react";
@@ -113,7 +114,9 @@ export function BestNow({
     <div className="mb-3 rounded-lg border border-emerald-400/30 bg-emerald-400/[0.04] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Sparkles size={14} aria-hidden className="text-emerald-300" />
-        <h3 className="text-sm font-semibold text-slate-100">Best to trade now</h3>
+        <h3 className="text-sm font-semibold text-slate-100">
+          Best to trade now <NewTag id="ma-best-now" />
+        </h3>
         <span className="text-xs text-slate-400">Busy + trending + news, in one list. Sideways stocks are named so you can skip them.</span>
         <button
           type="button"

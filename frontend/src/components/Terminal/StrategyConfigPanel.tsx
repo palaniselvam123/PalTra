@@ -8,6 +8,8 @@ import { AdxPicture, AtrPicture, CandleRulesPicture, CandleSizePicture, GapModeP
 import { StrategyPresets } from "@/components/Settings/StrategyPresets";
 import { TierTag } from "@/components/Settings/SettingsCard";
 import { FreshSetup, Only, SidewaysGuard, StyleCtx, StylePicker, useStyleView } from "@/components/Settings/StylePicker";
+import { NewCountChip, NewTag } from "@/components/ui/NewTag";
+import { strategyGroupOf } from "@/lib/features";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { ExitJoinCard, exitJoinText } from "@/components/Terminal/ExitJoin";
@@ -223,6 +225,25 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const scopes = Array.from(new Set([...armed, ...withOwn, ...(scope ? [scope] : [])])).sort();
   const stockScope = scope !== ALL;
   const [styleView, setStyleView] = useStyleView(form);
+  // A link to a setting the style picker hides (What's new, a New tag) shows every setting, once per link, so the
+  // setting is on screen; unticking "Show every setting" afterwards is left alone.
+  const [linkedTo, setLinkedTo] = useState("");
+  useEffect(() => {
+    const read = () => setLinkedTo(window.location.hash.slice(1));
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
+  const shownFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linkedTo.startsWith("sma-") || shownFor.current === linkedTo || styleView.all) return;
+    const el = document.getElementById(linkedTo);
+    if (!el || !el.closest(".hidden")) return;
+    shownFor.current = linkedTo;
+    setStyleView({ all: true, picks: styleView.picks });
+    setTimeout(() => el.scrollIntoView({ block: "center" }), 80);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedTo, styleView, form]);
   /** The styles whose settings show; null = all (also while searching, so a match is never hidden). */
   const shownStyles = styleView.all || searching ? null : new Set<string>(styleView.picks);
   const groupShown = (id: string) =>
@@ -1560,7 +1581,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <Only s="bots">
           <label className="mt-3 block text-xs text-slate-400">
             <span className="flex items-center gap-1">
-              Hand-off orders to this bot {isOwn("handoff_candle") && <OwnTag />}
+              Hand-off orders to this bot <NewTag id="set-handoff-candle" /> {isOwn("handoff_candle") && <OwnTag />}
             </span>
             <select
               value={String(form.handoff_candle ?? "OFF").toUpperCase()}
@@ -2041,7 +2062,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_fresh") && <OwnTag />}
-            Enter only on a fresh trend
+            Enter only on a fresh trend <NewTag id="set-fresh" />
             <InfoTip label="About the fresh trend check">
               The Trend quality page&apos;s Fresh trend flag as an entry rule. A buy needs all of: the two averages crossed up
               within the last 3 candles, the price and the fast average are above the day&apos;s average price (VWAP), the gap
@@ -2938,6 +2959,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <div id="sma-atr-target" className="mt-2 grid grid-cols-2 items-end gap-2">
                   <Field
                     label="ATR target × (0 = no target)"
+                    fresh="set-atr-target"
                     own={isOwn("atr_target_mult")}
                     value={String(form.atr_target_mult ?? 0)}
                     onChange={(v) => set("atr_target_mult", v)}
@@ -3087,6 +3109,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 />
                 <Field
                   label="After an exit, wait N candles before the next entry (0 = off)"
+                  fresh="set-reentry-wait"
                   value={String(form.reentry_wait_candles ?? 0)}
                   onChange={(v) => set("reentry_wait_candles", v)}
                   own={isOwn("reentry_wait_candles")}
@@ -3230,7 +3253,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("fade_unarm") && <OwnTag />}
-            Un-arm a stock once its trend fades
+            Un-arm a stock once its trend fades <NewTag id="set-fade-unarm" />
             <InfoTip label="About un-arming a faded stock">
               For stocks armed because they were trending (Scan &amp; arm, auto-arm, a morning read): once the trend is gone,
               the stock comes off this bot&apos;s Trade list instead of staying armed all day. Each armed stock is read once per
@@ -4034,6 +4057,7 @@ function FieldGroup({
         {on ? (
           <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">{on} on</span>
         ) : null}
+        <NewCountChip match={(href) => strategyGroupOf(href) === id} />
         <TierTag tier={meta?.tier} />
         <span className="hidden truncate text-xs font-normal text-slate-400 sm:inline">— {hint}</span>
       </summary>
@@ -4058,6 +4082,7 @@ function Field({
   own,
   signed,
   suffix,
+  fresh,
 }: {
   label: string;
   value: string;
@@ -4068,6 +4093,8 @@ function Field({
   signed?: boolean;
   /** Unit shown inside the box (₹, %, min). Display only. */
   suffix?: string;
+  /** A feature id (lib/features.ts): "New" by the label while it is recent. */
+  fresh?: string;
 }) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
@@ -4078,6 +4105,7 @@ function Field({
     <label className="block">
       <span className="block text-xs leading-tight text-slate-300">
         {label}
+        {fresh ? <NewTag id={fresh} className="ml-1" /> : null}
         {own && <span className="ml-1 whitespace-nowrap normal-case tracking-normal text-violet-300">· own</span>}
       </span>
       <span className="relative mt-1 block">
@@ -4235,7 +4263,7 @@ function SmallColourCard({
     <div id="sma-small-colour" className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
       <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
         {isOwn("sc_minutes") && <OwnTag />}
-        <b className="text-slate-100">Colours on smaller candles</b>
+        <b className="text-slate-100">Colours on smaller candles</b> <NewTag id="set-small-colour" />
         <span className={clsx("ml-auto font-mono text-xs", on ? "text-emerald-300" : "text-slate-500")}>
           {on ? `ON · ${watched.join(" / ")} min` : "off"}
         </span>
@@ -4796,7 +4824,7 @@ function ColourPull({
   return (
     <div className="mt-3 border-t border-white/10 pt-2">
       <div className="text-xs uppercase tracking-wider text-slate-400">
-        Wait for a pullback before entering{own ? " (own)" : ""}{" "}
+        Wait for a pullback before entering{own ? " (own)" : ""} <NewTag id="set-colour-pull" />{" "}
         <span className="normal-case tracking-normal text-slate-500">({on ? `on · ${rule === "HALF" ? "half-way" : rule === "LOW" ? "candle's low" : "SMA 9 / low"}` : "off"})</span>
       </div>
       <div className="mt-1 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
@@ -4930,7 +4958,7 @@ function ColourExit({
       <label className="flex items-center gap-2 text-sm text-slate-200">
         <input type="checkbox" checked={on} onChange={(e) => set("colour_exit_on", e.target.checked)} />
         <span>
-          Use a separate rule to close a trade{own ? " (own)" : ""}{" "}
+          Use a separate rule to close a trade{own ? " (own)" : ""} <NewTag id="set-colour-exit" />{" "}
           <span className="text-xs text-slate-500">({on ? "on" : "off: the entry rule above closes trades too"})</span>
         </span>
       </label>
@@ -4997,7 +5025,7 @@ function ColourForce({
       <label className="flex items-center gap-2 text-sm text-slate-200">
         <input type="checkbox" checked={on} onChange={(e) => set("colour_force", e.target.checked)} />
         <span>
-          Force order follows the candle colour{isOwn("colour_force") ? " (own)" : ""}{" "}
+          Force order follows the candle colour{isOwn("colour_force") ? " (own)" : ""} <NewTag id="set-colour-force" />{" "}
           <span className="text-xs text-slate-500">({on ? "on" : "off: Force reads SMA 9 vs SMA 21"})</span>
         </span>
       </label>
@@ -5103,7 +5131,7 @@ function SmartStopSwitch({
           }}
           className="h-4 w-4 accent-[#10B981]"
         />
-        Smart stop: each stock gets its own stop room{isOwn("stop_type") && <OwnTag />}
+        Smart stop: each stock gets its own stop room <NewTag id="set-smart-stop" />{isOwn("stop_type") && <OwnTag />}
         <span className={clsx("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", on ? "bg-emerald-500/20 text-emerald-200" : "bg-white/10 text-slate-400")}>
           {on ? "On" : "Off"}
         </span>
@@ -5137,7 +5165,7 @@ function SmartStopSwitch({
           </label>
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={form.smart_live !== false} onChange={(e) => set("smart_live", e.target.checked)} className="accent-[#10B981]" />
-            Work each stock&apos;s room out again after every candle of the trade{isOwn("smart_live") && <OwnTag />}
+            Work each stock&apos;s room out again after every candle of the trade <NewTag id="set-smart-live" />{isOwn("smart_live") && <OwnTag />}
           </label>
         </details>
       ) : null}

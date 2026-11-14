@@ -22,6 +22,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { smaApi, type ChopScanRow, type CrossScanMinutes, type FirstCandleRow, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
+import { NewCountChip } from "@/components/ui/NewTag";
 import { FIRST_PICKS, FirstCandleCells, FirstCandleControls, FirstCandleHead, firstPasses, type FirstPick } from "./FirstCandles";
 
 const POLL_MS = 30_000;
@@ -167,6 +168,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [note, setNote] = useState<string | null>(null);
   // History: any saved scan (kept on the server for about 90 days), shown in the same table.
   const [view, setView] = useState<"live" | "history" | "test" | "trade" | "pressure" | "backtest">("live");
+  // A link straight to one view (/scalp/?view=pressure#active, from What's new) opens it.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("view");
+    if (asked === "history" || asked === "test" || asked === "trade" || asked === "pressure" || asked === "backtest") setView(asked);
+  }, []);
   const [hist, setHist] = useState<ActiveHistoryResponse | null>(null);
   const [histDay, setHistDay] = useState("");
   const [runId, setRunId] = useState<number | null>(null);
@@ -449,6 +455,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   </span>
                 </>
               )}
+              <NewCountChip
+                match={(href) =>
+                  href.startsWith("/scalp") && href.endsWith("#active") && (v === "live" ? !href.includes("view=") : href.includes(`view=${v}`))
+                }
+              />
             </button>
           ))}
         </div>

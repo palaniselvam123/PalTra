@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import clsx from "clsx";
 import type { SmaConfig } from "@/lib/smaApi";
 
@@ -68,7 +69,7 @@ export function ExitJoinCard({
   return (
     <div className={clsx("mt-4 rounded-md border p-2", and ? "border-amber-400/40 bg-amber-500/[0.04]" : "border-white/10")}>
       <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
-        <b className="text-slate-100">How exits combine</b>
+        <b className="text-slate-100">How exits combine</b> <NewTag id="set-exit-join" />
         {own ? <span className="text-xs text-violet-300">· own</span> : null}
         <div className="ml-auto flex gap-1" role="radiogroup" aria-label="How exits combine">
           {(["OR", "AND"] as const).map((m) => (

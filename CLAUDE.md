@@ -26,6 +26,13 @@ Groww market data. Two trading engines live in this repo and share one frontend:
   with no Groww credentials on the simulated feed. Run the backend tests and
   open the app on the simulated feed before you call a change done.
 
+- **Every new feature goes on the What's new page** (owner's request: new and old features were hard to tell
+  apart). A change that adds a feature to Trend quality, Most active, the SMA terminal or Settings adds one entry to
+  `frontend/src/lib/features.ts` (`FEATURES`: id, title, area, the IST day it is added, its PR number, a link to it,
+  where it is in words and its purpose in plain words) and puts `<NewTag id="…" />` (`components/ui/NewTag.tsx`) next
+  to its control; inside a button or a `<summary>` use `link={false}`. A setting with its own `id="sma-…"` anchor that
+  `strategyGroupOf` does not know gets a line in `ANCHOR_GROUP` (lib/features.ts).
+
 ## Merging rules
 
 - **UI-only or docs-only changes** (only files under `frontend/`, or `.md`
@@ -2258,6 +2265,18 @@ spinning top), body and range) / Matched / Call columns
   four existing settings with the form's value now and a tick each: ADX check at least 20, `max_trades_per_stock` 3,
   `counter_exit_count` 3 with `counter_need_fast`, and (optional, unticked) `chop_losses` 2. "Put the ticked ones in the
   form" sets them through the form's `turnOff` setter; nothing is saved until Save. No new setting or engine change.
+- **What's new page** (desk `/whats-new`, nav "What's new", `components/WhatsNew/WhatsNewPage.tsx`; display only): every
+  feature of Trend quality, Most active, the SMA terminal and Settings from `frontend/src/lib/features.ts` (`FEATURES`,
+  dated by the IST day its PR was merged; analysed from the git history when the page was built), newest first, grouped
+  by day: title (a link to it in the app), area, where it is, its purpose, the day and its PR on GitHub. Area cards
+  (count, "N new"), search, area filter, New only, and **New = added in the last 1 / 3 / 7 / 14 / 30 days**
+  (`whatsnew.days`, default 7, per browser). The same rule shows **New** next to a feature's control (`NewTag`, links to
+  `/whats-new/#f-<id>`, which lights it up) and **"N new"** on the Scalp tabs, the Most active views, the Settings tabs
+  and the strategy form's numbered groups (`NewCountChip`, matching each feature's link: `#<tab>`, `?view=<view>#active`,
+  `strategyGroupOf`). The menu's What's new link shows how many new features this browser has not seen yet
+  (`useUnseenCount`; opening the page marks them seen, `whatsnew.seen`). Links: Scalp tabs by hash (`/scalp/#trend`),
+  Most active views by `?view=` (`MostActive` reads it), Settings by section or `#sma-…` anchor (the strategy form opens
+  the group and, when the style picker hides the setting, shows every setting first).
 - **Learn page** (desk `/learn`, `components/Learn/LearnPage.tsx`, nav "Learn"; display only): the app's own guides read
   inside the portal. Lessons are listed in `frontend/src/lib/lessons.ts` (title, topic, pages, a link to the setting it
   explains) and their files kept in `frontend/public/guides/` (served with the static site); add a lesson by dropping the
