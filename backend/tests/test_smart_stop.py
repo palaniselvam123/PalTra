@@ -52,8 +52,10 @@ def test_room_is_each_stocks_own_dips_kept_inside_the_bounds():
     # Never looser than the largest room, never tighter than the smallest.
     huge = smart_stop.room(_tape(60), "LONG", 1000.0, _cfg())
     assert huge["pct"] == 2.0 and huge["clamped"] == "max"
+    # Tiny dips never give a stop smaller than one candle's normal swing (1 ATR), nor under the smallest room.
     tiny = smart_stop.room(_tape(0.6), "LONG", 1000.0, _cfg())
-    assert tiny["pct"] == 0.3 and tiny["clamped"] == "min"
+    assert tiny["pct"] >= 0.3 and (tiny["atr_floor"] or tiny["clamped"] == "min")
+    assert tiny["pct"] >= tiny["atr_pct"] - 1e-9
     # Only candles before the entry are read.
     tape = _tape(14)
     early = int(tape["ts"].iloc[2])
@@ -139,3 +141,52 @@ async def test_entry_puts_the_stop_one_room_away(engine):  # noqa: F811
     assert pos.smart and pos.smart_room == pytest.approx(expected["rs"])
     assert pos.sl_trigger == pytest.approx(pos.entry_price - expected["rs"], abs=0.05)
     assert pos.plan_r is None  # the staged stop plan never runs next to it
+
+
+def _swing_tape(days: int = 4) -> pd.DataFrame:
+    """The owner's case: a 15-minute strategy on a ~₹200 stock. Inside each minute the price barely wiggles (₹0.10), but
+    the 15-minute swings pull back about ₹1.2 before the trend goes on."""
+    rows = []
+    for d in range(days):
+        start = dt.datetime(2026, 10, 5 + d, 9, 15, tzinfo=IST)
+        p = 200.0
+        for minute in range(375):
+            leg = (minute // 15) % 3  # two 15-minute candles up, one back
+            step = 0.08 if leg < 2 else -0.08
+            o, c = p, p + step
+            rows.append((start + dt.timedelta(minutes=minute), o, max(o, c) + 0.05, min(o, c) - 0.05, c))
+            p = c
+    return pd.DataFrame(
+        {"ts": [int(r[0].timestamp()) for r in rows], "open": [r[1] for r in rows], "high": [r[2] for r in rows],
+         "low": [r[3] for r in rows], "close": [r[4] for r in rows], "volume": 100}
+    )
+
+
+def test_a_15_minute_strategy_gets_the_room_of_15_minute_swings():
+    tape = _swing_tape()
+    price = float(tape["close"].iloc[-1])
+    one = smart_stop.room(tape, "LONG", price, _cfg(), minutes=1)
+    fifteen = smart_stop.room(tape, "LONG", price, _cfg(), minutes=15)
+    assert fifteen["minutes"] == 15
+    # 1-minute wiggles would have stopped it out; the 15-minute room covers a pulled-back candle.
+    assert fifteen["rs"] > one["rs"]
+    assert fifteen["rs"] >= 1.0  # the ₹1.2 pullbacks, not the ₹0.1 wiggles
+    assert fifteen["atr_pct"] is not None and fifteen["pct"] >= fifteen["atr_pct"] - 1e-9
+
+
+@pytest.mark.asyncio
+async def test_colour_mode_entry_reads_the_colour_candles(engine):  # noqa: F811
+    cfg = engine.load_config()
+    cfg.use_stop, cfg.stop_type = True, "SMART"
+    cfg.entry_mode, cfg.pattern_tf = "COLOUR", 15
+    symbol = (cfg.symbol or "").upper()
+    tape = _swing_tape()
+    engine._tapes[symbol] = tape
+    engine._focus = symbol
+    price = float(tape["close"].iloc[-1])
+    engine._ltps[symbol] = engine.ltp = price
+    when = dt.datetime(2026, 10, 9, 10, 0, tzinfo=IST)
+    await engine._open("SHORT", price, 0.05, cfg, when)
+    pos = engine.positions[symbol]
+    assert pos.smart_info["minutes"] == 15
+    assert pos.smart_room >= 1.0

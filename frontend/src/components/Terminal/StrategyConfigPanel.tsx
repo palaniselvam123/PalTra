@@ -5034,9 +5034,10 @@ function SmartStopSwitch({
         </span>
       </label>
       <p className="mt-1 text-xs text-slate-400">
-        When a trade opens, the bot reads that stock&apos;s own 1-minute candles of the last few days and measures every dip it came back
-        from (for a buy: from a new high down, and back up to a new high). Most of those dips fit inside the room it picks, so normal
-        wiggles do not stop you out, and a turn bigger than the stock usually makes does. The room is kept between{" "}
+        When a trade opens, the bot reads that stock&apos;s own candles of the last few days, in the candle size it trades on (15-minute
+        colour candles are read as 15-minute candles), and measures every dip it came back from (for a buy: from a new high down, and
+        back up to a new high). Most of those dips fit inside the room it picks, and it is never less than one candle&apos;s normal swing
+        (1 ATR of those candles), so normal wiggles do not stop you out, and a turn bigger than the stock usually makes does. The room is kept between{" "}
         {String(form.smart_min_pct ?? 0.3)}% and {String(form.smart_max_pct ?? 2)}% of the price. The stop then follows the best price
         by that room (never moving back); once the trade has gained one room there is no loss left (entry plus charges), and the further
         it runs, the closer the stop follows, so more of the profit is kept. Every armed stock is sized on its own.

@@ -4977,7 +4977,8 @@ async def tsl_calc_basket(
                 tape = None
         tapes[name] = tape
     out = await asyncio.to_thread(
-        tsl_calc_mod.basket, tapes, size, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult), cfg
+        tsl_calc_mod.basket, tapes, size, int(atr_period), float(stop_mult), float(trail_mult), float(target_mult), cfg,
+        eng._exit_minutes("", cfg),
     )
     out.update({
         "desk": desk,

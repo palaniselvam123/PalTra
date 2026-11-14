@@ -4294,7 +4294,8 @@ class StrategyEngine:
         if sm_stop:
             sym = (cfg.symbol or "").upper()
             sm_info = smart_stop.room(
-                self._tapes.get(sym), direction, fill, cfg, before_ts=int(now.timestamp()), fallback=atr_distance
+                self._tapes.get(sym), direction, fill, cfg, before_ts=int(now.timestamp()), fallback=atr_distance,
+                minutes=self._exit_minutes(sym, cfg),
             )
             sm_room = float(sm_info["rs"])
             sl = round_price(cfg.symbol, fill - sm_room if direction == "LONG" else fill + sm_room)
@@ -4555,6 +4556,7 @@ class StrategyEngine:
             info = smart_stop.room(
                 tape, pos.direction, pos.entry_price, cfg,
                 before_ts=int(pos.entry_time.timestamp()), fallback=saved or None,
+                minutes=self._exit_minutes(symbol, cfg),
             )
             pos.smart_info = info
             pos.smart_room = float(info["rs"])
