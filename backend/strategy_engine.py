@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import copy
 import datetime as dt
 import functools
 import json
 import logging
+import operator
 import os
 import re
 import time
@@ -31,7 +33,8 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import and_, func, or_, select, true
+from sqlalchemy import and_, bindparam, func, or_, select, true
+from sqlalchemy.orm.base import NO_VALUE
 
 from charges import calculate_charges, legs_for
 from config import get_settings
@@ -56,7 +59,7 @@ from indicators import (
 )
 from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_nth, uses_patterns
 import nth_candle
-from candles import bucket_start, candle_minutes, resample
+from candles import bucket_start, candle_minutes, last_prices, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
 from tsl import tsl_entry_levels, tsl_settings, tsl_stop, uses_tsl
@@ -444,6 +447,25 @@ STOCK_FIELDS = tuple(
 def stock_settings(cfg) -> dict[str, dict]:
     """Every stock's own overrides, {SYMBOL: {field: value}}. Never raises."""
     raw = getattr(cfg, "stock_settings", None)
+    if isinstance(raw, str):
+        # Saved JSON text: read once per text (a pass asks for it for every stock, many times). Copies go out.
+        return {symbol: _fields_copy(fields) for symbol, fields in _stock_settings_of(raw).items()}
+    return _read_stock_settings(raw)
+
+
+def _fields_copy(fields: dict) -> dict:
+    """A copy of one stock's parsed fields that shares nothing with the cache: a list or dict value (an imported
+    setting can be one) is copied too, so a caller changing it in place never changes what the next call reads."""
+    return {k: (copy.deepcopy(v) if isinstance(v, (list, dict)) else v) for k, v in fields.items()}
+
+
+@functools.lru_cache(maxsize=64)
+def _stock_settings_of(raw: str) -> dict[str, dict]:
+    """stock_settings of one saved JSON text. Shared between callers, so never changed: they get copies."""
+    return _read_stock_settings(raw)
+
+
+def _read_stock_settings(raw) -> dict[str, dict]:
     if isinstance(raw, dict):
         data = raw
     else:
@@ -464,7 +486,11 @@ def stock_settings(cfg) -> dict[str, dict]:
 
 
 def stock_overrides(cfg, symbol: str) -> dict:
-    return stock_settings(cfg).get((symbol or "").upper(), {})
+    raw = getattr(cfg, "stock_settings", None)
+    name = (symbol or "").upper()
+    if isinstance(raw, str):
+        return _fields_copy(_stock_settings_of(raw).get(name, {}))  # a copy: the parsed text is shared
+    return _read_stock_settings(raw).get(name, {})
 
 
 def settings_for(cfg, symbol: str):
@@ -606,12 +632,64 @@ def _or_default(value, default: float) -> float:
     return float(default if value is None else value)
 
 
+# Every BotConfig column, in table order. A stock's own copy of the settings is made many times a pass.
+_CFG_COLUMNS: tuple[str, ...] = tuple(col.name for col in BotConfig.__table__.columns)
+_CFG_COLUMN_SET = frozenset(_CFG_COLUMNS)
+_cfg_column_values = operator.itemgetter(*_CFG_COLUMNS)
+
+
+def config_values(cfg) -> dict:
+    """Every BotConfig column of `cfg`, {name: value}, as getattr reads it."""
+    if type(cfg) is BotConfig:
+        try:
+            # A loaded or built row holds every column in its instance dict, which is what getattr reads.
+            return dict(zip(_CFG_COLUMNS, _cfg_column_values(cfg.__dict__)))
+        except KeyError:
+            pass  # a column not held there (expired, never set): getattr loads it or answers as before
+    # Anything else (a subclass, a proxy, a view): getattr, exactly as before.
+    return {name: getattr(cfg, name) for name in _CFG_COLUMNS}
+
+
+def config_from(data: dict) -> BotConfig:
+    """BotConfig(**data) without the constructor's ~275 instrumented sets: they cost about 0.3 ms a copy, and a
+    replay pass made dozens of copies (each stock's own settings), which slowed replays down.
+
+    The values go straight into the new object's dict, and its state is left as the constructor leaves it (each
+    field set from nothing, the object modified), so it is the same transient BotConfig: reading or setting a
+    field, isinstance, attribute history and a later session.add behave as before.
+    """
+    if not _CFG_COLUMN_SET.issuperset(data):
+        return BotConfig(**data)  # a name that is not a column: the constructor's own check and error
+    mapper = BotConfig.__mapper__
+    mapper._check_configure()  # what the constructor's init event does first
+    out = mapper.class_manager.new_instance()
+    out.__dict__.update(data)
+    state = out._sa_instance_state
+    state.committed_state.update(dict.fromkeys(data, NO_VALUE))
+    state.modified = True
+    return out
+
+
+# One whole settings row by id. Built once: building this ~275-column SELECT costs about as much as running it.
+_CONFIG_ROW = select(BotConfig.__table__).where(BotConfig.__table__.c.id == bindparam("config_id"))
+
+
+def config_row(config_id: int) -> dict:
+    """A settings row as saved right now, {column: value} (the values the ORM would load), read with one plain
+    SELECT: no ORM object is loaded and detached, which took over half the time of a replay's per-tick read."""
+    with session_factory()() as db:
+        row = db.execute(_CONFIG_ROW, {"config_id": config_id}).mappings().first()
+    if row is None:
+        raise RuntimeError("BotConfig missing — init_db() was not called")
+    return dict(row)
+
+
 def _cfg_for(cfg: BotConfig, symbol: str) -> BotConfig:
     """This stock's settings: the shared row with the stock's own overrides on top."""
-    data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
+    data = config_values(cfg)
     data["symbol"] = symbol
     data.update(stock_overrides(cfg, symbol))
-    return BotConfig(**data)
+    return config_from(data)
 
 
 def _entry_block(
@@ -1010,6 +1088,11 @@ _FILTER_KEYS = (
 )
 
 
+def _enrich_args(cfg) -> tuple:
+    """The averages `enrich` is given for a stock with these settings: (fast, slow, ATR period, medium)."""
+    return cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None)
+
+
 def _forming_row(bar) -> dict:
     """The forming candle for the chart. Its indicators are left blank so the
     lines stop on the last closed candle and do not repaint."""
@@ -1342,16 +1425,32 @@ class StrategyEngine:
         if cached is not None and cached[0] == key:
             base = cached[1]
             cols = [c for c in ("open", "high", "low", "close", "volume") if c in frame.columns and c in base.columns]
-            now_vals = frame[cols].iloc[-1].to_numpy()
-            if (base[cols].iloc[-1].to_numpy() == now_vals).all():
+            # The last row read straight from its columns: taking `frame[cols]` and `base[cols]` copied both
+            # frames on every pass to read five numbers. Any other column mix keeps the pandas reading.
+            now_vals, base_vals = last_prices(frame, cols), last_prices(base, cols)
+            plain = now_vals is not None and base_vals is not None
+            if not plain:
+                now_vals = frame[cols].iloc[-1].to_numpy()
+                base_vals = base[cols].iloc[-1].to_numpy()
+            if (base_vals == now_vals).all():
                 return base, False
             # A new frame, never an edit in place: the chart may be reading
             # the previous one from another thread.
             out = base.copy()
-            out.iloc[-1, [out.columns.get_loc(c) for c in cols]] = now_vals
+            locs = [out.columns.get_loc(c) for c in cols]
+            if plain:
+                # One cell at a time: the same values and dtypes as the row assignment below, without its
+                # per-column dtype lookups.
+                for loc, value in zip(locs, now_vals):
+                    out.iat[-1, loc] = value
+            else:
+                out.iloc[-1, locs] = now_vals
             return out, False
-        enriched = enrich(frame, cfg.sma_fast, cfg.sma_slow, cfg.atr_period, getattr(cfg, "sma_medium", None))
+        args = _enrich_args(cfg)
+        enriched = enrich(frame, *args)
         self._view_cache = (key, enriched)
+        # Kept for this pass's own read of the same stock (tick): the same tape and averages give the same frame.
+        self._view_fresh = (frame, args, enriched)
         return enriched, True
 
     def _managing(self) -> bool:
@@ -1543,6 +1642,8 @@ class StrategyEngine:
         self._stop = True
 
     def load_config(self) -> BotConfig:
+        # ReplayEngine.load_config reads the same row with config_row (cheaper, every tick): a change here
+        # (a check, a clean-up of the row) belongs there too.
         with session_factory()() as db:
             row = db.get(BotConfig, self.config_id)
             if row is None:
@@ -1652,6 +1753,8 @@ class StrategyEngine:
             cached = self._frames.get(view)
             self.candles = cached if cached is not None else pd.DataFrame()
             self.ltp = self._ltps.get(view, 0.0)
+        # The chart stock's candles when `_view_frame` works them out afresh on this pass: (tape, averages, frame).
+        self._view_fresh = None
         for symbol in watch:
             if not symbol:
                 continue
@@ -1779,7 +1882,14 @@ class StrategyEngine:
                 continue
             # While a reversed trade is open its own SMA cross exit applies; a new entry keeps the bot's checks.
             symbol_cfg = self._trade_cfg(cfg, symbol, groups=("exits",))
-            enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+            args = _enrich_args(symbol_cfg)
+            view_fresh = self._view_fresh
+            if view_fresh is not None and symbol == view and view_fresh[0] is frame and view_fresh[1] == args:
+                # The chart stock's same tape was just enriched with the same averages above: a copy of that, not
+                # a second pass over every candle (frames are never edited in place, so it is the same reading).
+                enriched = view_fresh[2].copy()
+            else:
+                enriched = enrich(frame, *args)
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
             if seen_before and await self._watch_fade(symbol, symbol_cfg):
@@ -3137,7 +3247,29 @@ class StrategyEngine:
         if frame is None or not (uses_colour(cfg) or uses_patterns(cfg)):
             return frame
         tf = int(pattern_setting(cfg, "pattern_tf") or 1)
-        return resample(frame, tf) if tf > 1 else frame
+        if tf <= 1:
+            return frame
+        # Every stop and exit of a held stock asks for these candles on each pass (six times with several exits
+        # on): grouped once per tape. New prices always come as a new tape object and no tape is edited in place,
+        # so the same object means the same prices. As a guard for a broker that ever edits its tape, the length
+        # and the forming row's prices must match too, else the candles are grouped again. The callers only read
+        # it, as they read `_frames` itself on the bot's own candle.
+        memo = getattr(self, "_exit_memo", None)
+        if memo is None:
+            memo = self._exit_memo = {}
+        cols = [c for c in ("open", "high", "low", "close", "volume") if c in frame.columns]
+        last = last_prices(frame, cols)
+        if last is None:
+            return resample(frame, tf)
+        stamp = (len(frame), tuple(last.tolist()))
+        hit = memo.get(symbol)
+        if hit is not None and hit[0] is frame and hit[1] == tf and hit[2] == stamp:
+            return hit[3]
+        grouped = resample(frame, tf)
+        if symbol not in memo and len(memo) >= 2 * MAX_TRADE_SYMBOLS:
+            memo.pop(next(iter(memo)))
+        memo[symbol] = (frame, tf, stamp, grouped)
+        return grouped
 
     def _exit_minutes(self, symbol: str, cfg: BotConfig) -> int:
         """The length of `_exit_frame`'s candles in minutes."""
