@@ -3225,7 +3225,7 @@ async def replay_resume(body: ReplayResume, bot: int = 1):
     runs = {r["id"]: r for r in resumable_runs(None)}
     found = runs.get(body.run_id)
     if found is None:
-        raise HTTPException(404, f"Run #{body.run_id} cannot be resumed (finished, deleted or a Scalp-pick run).")
+        raise HTTPException(404, f"Run #{body.run_id} cannot be resumed (finished, deleted, or a Scalp-page backtest started before it could be resumed).")
     run_bot = int(found["bot"])
     if run_bot != int(bot):
         raise HTTPException(409, f"Run #{body.run_id} belongs to Bot {run_bot}. Resume it from that bot's desk.")

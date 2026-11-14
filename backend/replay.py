@@ -52,7 +52,7 @@ import handoff_log
 import open_pnl_log
 import recovery
 import auto_arm
-from scalp_picks import PickRule, picks_for_day
+from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
 SPEEDS = (1, 10, 60, 300)
 # Longest range one run may cover, in calendar days (about 22 trading days).
@@ -756,10 +756,28 @@ def _run_settings(run: ReplayRun) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _settings_for_page(raw: str | None) -> dict:
+    """A run's saved settings as the pages get them: a Scalp-page backtest's resume data (the stock list it picks
+    from, the auto-arm hits) is replaced by `resumable` and a count, so the runs list stays small."""
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    pick = data.get("scalp_pick")
+    if isinstance(pick, dict) and ("universe_symbols" in pick or "active_hits" in pick):
+        pick = {k: v for k, v in pick.items() if k not in ("universe_symbols", "active_hits")}
+        pick["resumable"] = True
+        data = {**data, "scalp_pick": pick}
+    return data
+
+
 def resumable_runs(bot: int | None = None) -> list[dict]:
     """Runs cut short (a server restart, or Stop) with days still to play, newest first.
 
-    Scalp-pick runs are left out: their stock universe is not kept on the run.
+    Scalp-pick runs count only when they saved the stocks they pick from (`universe_symbols`, kept since resume
+    was added for them); older ones cannot rebuild their picks for the days left.
     """
     out: list[dict] = []
     with session_factory()() as db:
@@ -772,7 +790,8 @@ def resumable_runs(bot: int | None = None) -> list[dict]:
         )
         for run in rows:
             settings = _run_settings(run)
-            if settings.get("scalp_pick"):
+            pick = settings.get("scalp_pick")
+            if pick and not pick_resumable(pick):
                 continue
             run_bot = int(settings.get("bot") or 1)
             if bot is not None and run_bot != int(bot):
@@ -788,6 +807,8 @@ def resumable_runs(bot: int | None = None) -> list[dict]:
                     "days_done": run.days_done,
                     "next_day": (run.days or "").split(",")[run.days_done] if run.days else None,
                     "symbols": [s for s in (run.symbols or "").split(",") if s],
+                    # Which Scalp-page backtest it is (TREND / ACTIVE / AUTOARM / SCALP), None for a plain replay.
+                    "kind": (str(pick.get("kind") or "SCALP").upper() if pick else None),
                 }
             )
     return out
@@ -971,7 +992,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         "end_date": run.end_date,
         "start_time": run.start_time,
         "symbols": [s for s in (run.symbols or "").split(",") if s],
-        "settings": json.loads(run.settings or "{}"),
+        "settings": _settings_for_page(run.settings),
         "status": run.status,
         "days_total": run.days_total,
         "days_done": run.days_done,
@@ -1245,13 +1266,22 @@ class ReplaySession:
             if run is None:
                 raise ValueError("No such replay run.")
             settings = _run_settings(run)
-            if settings.get("scalp_pick"):
-                raise ValueError("A Scalp-pick run cannot be resumed. Start it again from the Scalp page.")
+            pick = settings.get("scalp_pick") if isinstance(settings.get("scalp_pick"), dict) else None
+            if pick is not None and not pick_resumable(pick):
+                raise ValueError(
+                    f"Run #{run.id} was started before Scalp-page backtests could be resumed (it did not save the "
+                    "stocks it picks from). Start it again from the Scalp page."
+                )
             if run.status not in ("INTERRUPTED", "STOPPED") or run.days_done >= run.days_total:
                 raise ValueError(f"Run #{run.id} has nothing left to play.")
             all_days = [dt.date.fromisoformat(d) for d in (run.days or "").split(",") if d]
             done = int(run.days_done or 0)
             symbols = [x for x in (run.symbols or "").split(",") if x]
+            rule = None
+            if pick is not None:
+                # A Scalp-page backtest: the whole list it picks from, and its rule as it was started.
+                symbols = [x for x in pick.get("universe_symbols") or [] if isinstance(x, str) and x]
+                rule = rule_from_dict(pick, int(settings.get("sma_fast") or 9), int(settings.get("sma_slow") or 21))
             start = dt.datetime.strptime(run.start_time or "09:15", "%H:%M").time()
             bot = int(settings.get("bot") or 1)
             bot_name = str(settings.get("bot_name") or f"Bot {bot}")
@@ -1260,7 +1290,12 @@ class ReplaySession:
         await self.stop("REPLAY_STOPPED")
         _drop_unfinished_days(int(run_id), [d.isoformat() for d in all_days[done:]])
         self.bot, self.bot_name = bot, bot_name
-        self.rule, self.picks, self.universe = None, {}, []
+        self.rule, self.universe = rule, []
+        # The finished days keep the stocks they picked; the days left pick again as they play.
+        kept = (pick or {}).get("picks") if isinstance((pick or {}).get("picks"), dict) else {}
+        finished = {d.isoformat() for d in all_days[:done]}
+        self.picks = {d: v for d, v in kept.items() if d in finished}
+        self.finding = None
         self.handed_off = []
         self.chain_on, self.chain_log = {}, []
         self.status = "LOADING"
@@ -1332,8 +1367,19 @@ class ReplaySession:
             _, all_days, done = resume
             days = all_days
         self.days = days
-        if self.rule is not None:
-            settings = {**settings, "scalp_pick": {**self.rule.as_dict(), "universe": len(frames), "picks": {}}}
+        if self.rule is not None and resume is None:
+            pick = {**self.rule.as_dict(), "universe": len(frames), "picks": {}}
+            # Kept so a run cut short (a deploy, Stop) can be resumed: the stocks it picks from, and for the auto-arm
+            # replay the Most active hits it read before the run (they may not be readable again later).
+            pick["universe_symbols"] = list(frames)
+            if getattr(self.rule, "kind", None) == auto_arm.KIND:
+                pick["active_hits"] = {k: [list(h) for h in v] for k, v in getattr(self.rule, "active_hits", {}).items()}
+            settings = {**settings, "scalp_pick": pick}
+        elif self.rule is not None:
+            # Resume: the saved rule, stock list and hits stay; the finished days' picks are carried on.
+            pick = dict(settings.get("scalp_pick") or {})
+            pick["picks"] = dict(self.picks)
+            settings = {**settings, "scalp_pick": pick}
         if resume is None:
             # The fast-mover hand-off to Bot 5 as set now, kept on the run so Resume plays the same.
             fast = fast_bot.replay_snapshot(self.bot)

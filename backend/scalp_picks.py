@@ -135,3 +135,60 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: PickRule)
         }
         for r in scored[: rule.top_n]
     ]
+
+
+def _hhmm(value, default: dt.time) -> dt.time:
+    try:
+        hh, mm = str(value).split(":")[:2]
+        return dt.time(int(hh), int(mm))
+    except (TypeError, ValueError):
+        return default
+
+
+def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
+    """The pick rule a run saved (`scalp_pick` in its settings), rebuilt so a cut-short run can be resumed.
+
+    `kind` picks the class: TREND (trend_picks), ACTIVE (active_picks), AUTOARM (auto_arm, with the Most active hits
+    the run saved), none = the Scalp page's own scalp picks. The SMA periods come from the run's saved settings."""
+    kind = str(data.get("kind") or "").upper()
+    if kind == "TREND":
+        import trend_picks
+
+        return trend_picks.TrendPickRule(
+            pick_time=_hhmm(data.get("pick_time"), dt.time(10, 0)), top_n=int(data.get("top_n") or 10),
+            direction=str(data.get("direction") or "BOTH"), minutes=int(data.get("minutes") or 5),
+            sma_fast=int(data.get("sma_fast") or sma_fast), sma_slow=int(data.get("sma_slow") or sma_slow),
+        )
+    if kind == "ACTIVE":
+        import active_picks
+
+        return active_picks.ActivePickRule(
+            pick_time=_hhmm(data.get("pick_time"), dt.time(10, 0)), top_n=int(data.get("top_n") or 10),
+            rank=str(data.get("rank") or "rvol"), bias=str(data.get("bias") or "BOTH"),
+            min_value_cr=float(data.get("min_value_cr") or 0.0),
+        )
+    if kind == "AUTOARM":
+        import auto_arm
+
+        hits = data.get("active_hits") if isinstance(data.get("active_hits"), dict) else {}
+        return auto_arm.AutoArmRule(
+            source=str(data.get("source") or "BOTH"), first=_hhmm(data.get("first"), dt.time(9, 30)),
+            last=_hhmm(data.get("last"), dt.time(14, 30)), every_min=int(data.get("every_min") or 5),
+            minutes=int(data.get("minutes") or 5), sma_fast=sma_fast, sma_slow=sma_slow,
+            min_checks=int(data.get("min_checks") or 6), side=str(data.get("side") or "BOTH"),
+            pct=float(data.get("pct") or 70.0), pressure_side=str(data.get("pressure_side") or "BOTH"),
+            min_value_cr=float(data.get("min_value_cr") or 0.0), max_day=int(data.get("max_day") or 10),
+            price_min=float(data.get("price_min") or 0.0), price_max=float(data.get("price_max") or 0.0),
+            active_hits={str(k): [tuple(h) for h in v] for k, v in hits.items() if isinstance(v, list)},
+        )
+    return PickRule(
+        pick_time=_hhmm(data.get("pick_time"), dt.time(9, 45)), top_n=int(data.get("top_n") or 3),
+        min_atr_pct=float(data.get("min_atr_pct") if data.get("min_atr_pct") is not None else DEFAULT_MIN_ATR_PCT),
+        min_value_cr=float(data.get("min_value_cr") if data.get("min_value_cr") is not None else DEFAULT_MIN_VALUE_CR),
+        require_bias=bool(data.get("require_bias", True)),
+    )
+
+
+def resumable(data: dict | None) -> bool:
+    """A pick run can be resumed when it saved the stocks it picks from (runs started after this was added)."""
+    return isinstance(data, dict) and bool(data.get("universe_symbols"))
