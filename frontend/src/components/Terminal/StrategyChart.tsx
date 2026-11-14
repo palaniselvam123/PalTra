@@ -2905,10 +2905,10 @@ function OhlcLine({
         {pct.toFixed(2)}%)
       </span>
       <span className="whitespace-nowrap">
-        <span style={{ color: colors.sma9 }}>SMA 9</span> <span className="text-slate-100">{px(sma9)}</span>
+        <LineKey color={colors.sma9}>SMA 9</LineKey> <span className="text-slate-100">{px(sma9)}</span>
       </span>
       <span className="whitespace-nowrap">
-        <span style={{ color: colors.sma21 }}>SMA 21</span> <span className="text-slate-100">{px(sma21)}</span>
+        <LineKey color={colors.sma21}>SMA 21</LineKey> <span className="text-slate-100">{px(sma21)}</span>
       </span>
       <span className="whitespace-nowrap">
         <span className="text-slate-400">Gap</span>{" "}
@@ -2917,10 +2917,10 @@ function OhlcLine({
         </span>
       </span>
       <span className="whitespace-nowrap">
-        <span style={{ color: colors.vwap }}>VWAP</span> <span className="text-slate-100">{px(vwap)}</span>
+        <LineKey color={colors.vwap}>VWAP</LineKey> <span className="text-slate-100">{px(vwap)}</span>
       </span>
       <span className="whitespace-nowrap">
-        <span style={{ color: colors.rsi }}>RSI</span>{" "}
+        <LineKey color={colors.rsi}>RSI</LineKey>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
       {(() => {
@@ -3060,5 +3060,16 @@ function TrailBar({ direction, stop, ltp, target, next }: { direction: "LONG" | 
         <span>{target != null ? `${px(target)} target` : "no target"}</span>
       </div>
     </div>
+  );
+}
+
+/** A legend label: the line's own colour as a short bar (the user picks it, and a pale one is unreadable as text on
+ *  white), the name in the ordinary label colour. */
+function LineKey({ color, children }: { color: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-slate-300">
+      <span aria-hidden className="inline-block h-0.5 w-3 rounded-full" style={{ backgroundColor: color }} />
+      {children}
+    </span>
   );
 }

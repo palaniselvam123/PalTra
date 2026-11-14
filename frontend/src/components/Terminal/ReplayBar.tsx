@@ -366,10 +366,10 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName,
         >
           <History size={16} aria-hidden />
           <span className="font-semibold">Replay past days</span>
-          <span className="hidden text-xs text-violet-100 sm:inline">
+          <span className="hidden text-xs text-white sm:inline">
             — practise on real Groww candles from one day or a range up to 45 days. Practice money only.
           </span>
-          <span className="ml-auto text-xs text-violet-100 underline-offset-2 hover:underline">{open ? "Hide help" : "How it works"}</span>
+          <span className="ml-auto text-xs text-white/90 underline-offset-2 hover:underline">{open ? "Hide help" : "How it works"}</span>
         </button>
         {/* The dates and Start replay are always on screen; the header only folds the help text. */}
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2 px-3 py-2">

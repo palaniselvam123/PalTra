@@ -71,7 +71,7 @@
   --c-loss: 190 18 60;
   --c-bot: 29 78 216;
 
-  --c-violet: 124 77 245;
+  --c-violet: 109 58 237;
   --c-sky: 7 89 133;
   --c-on-accent: 255 255 255;
   --c-amber: 146 97 10;
@@ -297,6 +297,68 @@ select {
 [data-theme="light"] .bg-slate-900\/50,
 [data-theme="light"] .bg-slate-900\/40 { background-color: rgb(15 23 42 / 0.05); }
 
+/* Hover text. Menus, tabs and links brighten to slate-100 / 200 / white on hover; the slate inversion above only
+   covers the resting class, so on white they faded to almost nothing (1.1 : 1) exactly while being pointed at.
+   In light mode hovering goes darker instead. */
+[data-theme="light"] .hover\:text-white:hover,
+[data-theme="light"] .hover\:text-slate-50:hover,
+[data-theme="light"] .hover\:text-slate-100:hover,
+[data-theme="light"] .group:hover .group-hover\:text-white,
+[data-theme="light"] .group:hover .group-hover\:text-slate-100 { color: #0f172a; }
+[data-theme="light"] .hover\:text-slate-200:hover,
+[data-theme="light"] .group:hover .group-hover\:text-slate-200 { color: #17233b; }
+[data-theme="light"] .hover\:text-slate-300:hover { color: #1e293b; }
+[data-theme="light"] .hover\:text-rose-200:hover,
+[data-theme="light"] .hover\:text-rose-300:hover { color: #9f1239; }
+[data-theme="light"] .hover\:text-sky-200:hover,
+[data-theme="light"] .hover\:text-sky-300:hover { color: #0c4a6e; }
+[data-theme="light"] .hover\:text-amber-200:hover,
+[data-theme="light"] .hover\:text-amber-300:hover { color: #78350f; }
+[data-theme="light"] .hover\:text-emerald-200:hover,
+[data-theme="light"] .hover\:text-emerald-300:hover { color: #065f46; }
+
+/* Faded accent text (text-amber-400/80 and the like) and the palest shades: the alpha took the dark-ground
+   colours' contrast from about 2 : 1 to under 1.6 : 1 on white. Solid, dark enough to read. */
+[data-theme="light"] .text-violet-50,
+[data-theme="light"] .text-violet-200\/70,
+[data-theme="light"] .text-violet-200\/80 { color: #6d28d9; }
+[data-theme="light"] .text-amber-50,
+[data-theme="light"] .text-amber-200\/80,
+[data-theme="light"] .text-amber-300\/80,
+[data-theme="light"] .text-amber-300\/90,
+[data-theme="light"] .text-amber-400\/60,
+[data-theme="light"] .text-amber-400\/80,
+[data-theme="light"] .text-amber-400\/90,
+[data-theme="light"] .text-amber-500\/70 { color: #92610a; }
+[data-theme="light"] .text-emerald-50,
+[data-theme="light"] .text-emerald-200\/80,
+[data-theme="light"] .text-emerald-300\/80 { color: #047857; }
+[data-theme="light"] .text-rose-50,
+[data-theme="light"] .text-rose-200\/70,
+[data-theme="light"] .text-rose-200\/80,
+[data-theme="light"] .text-rose-200\/90,
+[data-theme="light"] .text-rose-300\/80 { color: #be123c; }
+[data-theme="light"] .text-sky-50 { color: #075985; }
+/* Small chips on their own 15-20 % tint: one step darker so they stay above 4.5 : 1 on the tint, not just on white. */
+[data-theme="light"] .text-amber-400 { color: #92610a; }
+[data-theme="light"] .text-emerald-100,
+[data-theme="light"] .text-emerald-200,
+[data-theme="light"] .text-emerald-300 { color: #065f46; }
+[data-theme="light"] .text-teal-100,
+[data-theme="light"] .text-teal-200,
+[data-theme="light"] .text-teal-300 { color: #115e59; }
+
+/* Hard-coded hex text (P&L green / red, the simulation amber) was picked for the dark ground: #10B981 is 2.5 : 1
+   on white. Same meaning, the light theme's own profit / loss / amber. */
+[data-theme="light"] .text-\[\#10B981\] { color: rgb(var(--c-profit)); }
+[data-theme="light"] .text-\[\#F43F5E\] { color: rgb(var(--c-loss)); }
+[data-theme="light"] .text-\[\#FBBF24\],
+[data-theme="light"] .text-\[\#F59E0B\] { color: #92610a; }
+
+/* A filled violet button with white text: violet-500 is 4.2 : 1, violet-600 / 700 read well. */
+[data-theme="light"] .bg-violet-500 { background-color: #7c3aed; }
+[data-theme="light"] .hover\:bg-violet-400:hover { background-color: #6d28d9; }
+
 /* Dark terminal contrast (display only). Muted slate text was under the 4.5:1
    AA ratio on the near-black surfaces; lift it a step, and give hairline card
    borders enough weight to see. Light theme keeps its own remap above. */
@@ -405,7 +467,7 @@ select {
 /* Accent text: the 100-400 shades were picked for a dark ground. */
 [data-theme="light"] .terminal-dark .text-emerald-300,
 [data-theme="light"] .terminal-dark .text-emerald-400,
-[data-theme="light"] .terminal-dark .text-emerald-200 { color: #047857; }
+[data-theme="light"] .terminal-dark .text-emerald-200 { color: #065f46; }
 [data-theme="light"] .terminal-dark .text-rose-300,
 [data-theme="light"] .terminal-dark .text-rose-400,
 [data-theme="light"] .terminal-dark .text-rose-200,
@@ -423,7 +485,7 @@ select {
 [data-theme="light"] .terminal-dark .text-violet-50 { color: #6d28d9; }
 [data-theme="light"] .terminal-dark .text-teal-100,
 [data-theme="light"] .terminal-dark .text-teal-200,
-[data-theme="light"] .terminal-dark .text-teal-300 { color: #0f766e; }
+[data-theme="light"] .terminal-dark .text-teal-300 { color: #115e59; }
 [data-theme="light"] .terminal-dark .text-blue-200,
 [data-theme="light"] .terminal-dark .text-blue-300 { color: #1d4ed8; }
 
@@ -619,13 +681,13 @@ textarea:focus-visible,
 [data-server="backtest"] .accent-violet-400 { accent-color: #60a5fa; }
 
 [data-server="scanner"], [data-server="scanner"][data-theme="dark"] { --c-violet: 45 212 191; --c-indigo: 20 184 166; }
-[data-server="scanner"][data-theme="light"] { --c-violet: 15 118 110; --c-indigo: 13 148 136; }
+[data-server="scanner"][data-theme="light"] { --c-violet: 17 94 89; --c-indigo: 13 148 136; }
 [data-server="scanner"] .text-violet-50 { color: #f0fdfa; }
 [data-server="scanner"] .text-violet-100 { color: #ccfbf1; }
 [data-server="scanner"] .text-violet-200 { color: #99f6e4; }
 [data-server="scanner"] .text-violet-300 { color: #5eead4; }
 [data-server="scanner"] .text-violet-200\/80 { color: rgb(153 246 228 / 0.8); }
-[data-server="scanner"][data-theme="light"] .text-violet-300, [data-server="scanner"][data-theme="light"] .text-violet-200, [data-server="scanner"][data-theme="light"] .text-violet-100, [data-server="scanner"][data-theme="light"] .text-violet-50, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-300, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-200, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-100, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-50 { color: #0f766e; }
+[data-server="scanner"][data-theme="light"] .text-violet-300, [data-server="scanner"][data-theme="light"] .text-violet-200, [data-server="scanner"][data-theme="light"] .text-violet-100, [data-server="scanner"][data-theme="light"] .text-violet-50, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-300, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-200, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-100, [data-server="scanner"][data-theme="light"] .terminal-dark .text-violet-50 { color: #115e59; }
 [data-server="scanner"] .bg-violet-400 { background-color: #2dd4bf; }
 [data-server="scanner"] .bg-violet-500 { background-color: #14b8a6; }
 [data-server="scanner"] .bg-violet-500\/10 { background-color: rgb(20 184 166 / 0.1); }
@@ -680,3 +742,13 @@ textarea:focus-visible,
 [data-server="scanner"] .bg-violet-500\/\[0\.08\] { background-color: rgb(20 184 166 / 0.08); }
 [data-server="scanner"] .bg-violet-500\/\[0\.10\] { background-color: rgb(20 184 166 / 0.10); }
 [data-server="scanner"] .bg-violet-500\/\[0\.12\] { background-color: rgb(20 184 166 / 0.12); }
+/* Light theme: the filled buttons with white text need the darker blue / teal (#3b82f6 was 3.7 : 1, #14b8a6 2.5 : 1). */
+[data-server="backtest"][data-theme="light"] .bg-violet-500,
+[data-server="backtest"][data-theme="light"] .hover\:bg-violet-400:hover { background-color: #1d4ed8; }
+[data-server="scanner"][data-theme="light"] .bg-violet-500,
+[data-server="scanner"][data-theme="light"] .hover\:bg-violet-400:hover { background-color: #0f766e; }
+[data-server="scanner"][data-theme="light"] .bg-violet-700 { background-color: #115e59; }
+[data-server="backtest"][data-theme="light"] .text-violet-200\/70,
+[data-server="backtest"][data-theme="light"] .text-violet-200\/80 { color: #1d4ed8; }
+[data-server="scanner"][data-theme="light"] .text-violet-200\/70,
+[data-server="scanner"][data-theme="light"] .text-violet-200\/80 { color: #115e59; }
