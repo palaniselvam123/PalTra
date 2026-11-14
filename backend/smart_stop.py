@@ -31,6 +31,9 @@ import math
 
 import pandas as pd
 
+from candles import resample
+from indicators import atr_wilder
+
 STOP_TYPE = "SMART"
 HIT_REASON = "SMART_SL_HIT"
 
@@ -40,6 +43,9 @@ DEFAULT_MIN_PCT = 0.3
 DEFAULT_MAX_PCT = 2.0
 
 RECOVER_MINUTES = 60  # a dip that takes longer than this to come back to a new extreme is not a "normal" wiggle
+RECOVER_CANDLES = 12  # ... or, on longer candles, longer than this many of them
+ATR_FLOOR = 1.0  # the room is never under this many ATRs of the candles the bot trades on (one candle's normal swing)
+ATR_PERIOD = 14
 MIN_DIP_PCT = 0.03  # dips under this (a tick or two) are left out: they say nothing about the room a trade needs
 MIN_SAMPLES = 5
 FOLLOW_STEP = 0.125
@@ -97,12 +103,44 @@ def _sessions(tape: pd.DataFrame, before_ts: int | None, days: int) -> list[pd.D
     return [frame[day == key] for key in keys]
 
 
-def dips(tape: pd.DataFrame | None, direction: str, before_ts: int | None = None, days: int = DEFAULT_DAYS) -> list[float]:
-    """Pullbacks (in % of the extreme) the stock lived through: for a long, each dip from a new high that came
-    back to a new high within RECOVER_MINUTES; for a short, each bounce from a new low that came back below it."""
+def _candles(tape: pd.DataFrame | None, before_ts: int | None, days: int, minutes: int) -> list[pd.DataFrame]:
+    """The last `days` sessions in candles of `minutes` (grouped from 09:15), only candles closed before `before_ts`."""
+    out = []
+    for session in _sessions(tape, before_ts, days):
+        frame = resample(session, minutes) if minutes > 1 else session
+        if frame is None or len(frame) == 0:
+            continue
+        if before_ts is not None and minutes > 1:
+            # A candle still forming at the entry minute is not read.
+            frame = frame[frame["ts"].astype("int64") + minutes * 60 <= int(before_ts)]
+        out.append(frame)
+    return out
+
+
+def candle_atr(tape: pd.DataFrame | None, before_ts: int | None, days: int, minutes: int) -> float | None:
+    """The Wilder ATR of the candles the bot trades on, the last one closed before the entry."""
+    frames = [f for f in _candles(tape, before_ts, max(days, 2), minutes) if len(f)]
+    if not frames:
+        return None
+    joined = pd.concat(frames, ignore_index=True)
+    if len(joined) < ATR_PERIOD + 1:
+        return None
+    try:
+        value = float(atr_wilder(joined, ATR_PERIOD).iloc[-1])
+    except Exception:  # noqa: BLE001
+        return None
+    return value if value == value and value > 0 else None
+
+
+def dips(
+    tape: pd.DataFrame | None, direction: str, before_ts: int | None = None, days: int = DEFAULT_DAYS, minutes: int = 1
+) -> list[float]:
+    """Pullbacks (in % of the extreme) the stock lived through on candles of `minutes`: for a long, each dip from a
+    new high that came back to a new high in time; for a short, each bounce from a new low that came back below it."""
     out: list[float] = []
     long = (direction or "LONG").upper() == "LONG"
-    for session in _sessions(tape, before_ts, days):
+    window = max(RECOVER_MINUTES, RECOVER_CANDLES * max(1, int(minutes))) * 60
+    for session in _candles(tape, before_ts, days, max(1, int(minutes))):
         if len(session) < 3:
             continue
         highs = session["high"].astype(float).to_numpy()
@@ -118,7 +156,7 @@ def dips(tape: pd.DataFrame | None, direction: str, before_ts: int | None = None
             if new_extreme:
                 if worst is not None and ext > 0:
                     depth = (ext - worst) / ext * 100 if long else (worst - ext) / ext * 100
-                    if depth >= MIN_DIP_PCT and (at - ext_at) <= RECOVER_MINUTES * 60:
+                    if depth >= MIN_DIP_PCT and (at - ext_at) <= window:
                         out.append(float(depth))
                 ext = hi if long else lo
                 ext_at = at
@@ -147,23 +185,38 @@ def room(
     cfg,
     before_ts: int | None = None,
     fallback: float | None = None,
+    minutes: int = 1,
 ) -> dict:
     """The stop room for one trade, in ₹ a share and in %, with how it was found.
 
-    `fallback` is the ATR stop's distance in ₹, used when the candles hold too few dips."""
+    Read on the candles the bot trades on (`minutes`): a 15-minute strategy needs the room of 15-minute swings, not
+    of 1-minute wiggles. Never under ATR_FLOOR × the ATR of those candles. `fallback` (₹) is used with too few dips."""
     s = settings(cfg)
-    samples = dips(tape, direction, before_ts=before_ts, days=s["days"])
+    minutes = max(1, int(minutes or 1))
+    samples = dips(tape, direction, before_ts=before_ts, days=s["days"], minutes=minutes)
+    atr = candle_atr(tape, before_ts, s["days"], minutes)
+    atr_pct = atr / price * 100 if atr and price > 0 else None
     if len(samples) >= MIN_SAMPLES:
         pct = _percentile(samples, s["pct"])
         source = "dips"
+    elif atr_pct is not None:
+        pct = 1.5 * atr_pct
+        source = "atr"
     elif fallback is not None and fallback > 0 and price > 0:
         pct = fallback / price * 100
         source = "atr"
     else:
         pct = s["min_pct"]
         source = "floor"
+    floor_hit = False
+    if atr_pct is not None and pct < ATR_FLOOR * atr_pct:
+        pct = ATR_FLOOR * atr_pct
+        floor_hit = True
     clamped = max(s["min_pct"], min(s["max_pct"], pct))
     return {
+        "minutes": minutes,
+        "atr_pct": round(atr_pct, 4) if atr_pct is not None else None,
+        "atr_floor": floor_hit,
         "pct": round(clamped, 4),
         "rs": price * clamped / 100 if price > 0 else 0.0,
         "raw_pct": round(pct, 4),
@@ -204,12 +257,15 @@ def describe(info: dict | None) -> str:
     """A short line for the signal line / blotter: '0.62 % room (85th of 41 dips)'."""
     if not info:
         return ""
+    size = f"{int(info.get('minutes') or 1)}-min"
     if info.get("source") == "dips":
-        text = f"{info['pct']:.2f}% room ({int(info.get('samples') or 0)} dips read)"
+        text = f"{info['pct']:.2f}% room ({int(info.get('samples') or 0)} dips on {size} candles)"
     elif info.get("source") == "atr":
-        text = f"{info['pct']:.2f}% room (too few dips: ATR stop distance)"
+        text = f"{info['pct']:.2f}% room (too few dips: 1.5 × the {size} ATR)"
     else:
         text = f"{info['pct']:.2f}% room (no candles: the smallest room)"
+    if info.get("atr_floor") and not info.get("clamped"):
+        text += f", raised to one {size} candle's swing (1 ATR)"
     if info.get("clamped") == "min":
         text += ", raised to the smallest room"
     elif info.get("clamped") == "max":
