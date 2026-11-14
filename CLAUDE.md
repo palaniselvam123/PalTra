@@ -1032,6 +1032,18 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   the stock once (`_chop_watch`, `_closed_gross`; also one a cross closed and reversed) and counts the losing ones before
   charges (`_stock_losses`, memory only, cleared with the day); at N, once flat, `_hand_to_chop_bot(kind="CHOP_LOSSES")` moves
   it to Bot 2 (chop recipe; `handoff_now` makes Bot 2 order the opposite of the last trade at once). Settings → 7. Advanced.
+- `backend/fade_unarm.py` – **un-arm a stock once its trend fades** (`fade_unarm`, off by default; `fade_unarm_rule` `PHASE`
+  default | `SCORE` | `EITHER`; `fade_unarm_min` 30, 5-240; per bot and per stock, PAPER and LIVE, replays too; owner's request:
+  a stock armed on a strong 09:45 read stayed on the bot all day after it went sideways). In the armed loop, once per closed
+  candle (before the chop-losses and breakout watchers), `StrategyEngine._watch_fade` reads the stock on the candles the bot
+  trades (`_exit_minutes`: the bot's own, or the colour / pattern candles) with `stock_regime.cached` (the Stocks table's
+  Trend column: `PHASE` = the trend phase now is CHOP, `SCORE` = today's crosses read CHOPPY; `fade_unarm.faded`, a read with
+  `phase_early` never counts). Choppy for `fade_unarm_min` minutes in a row (`_fade_since`, memory only, reset by a trending
+  read, cleared with the day) and this bot flat on it (an open trade is never cut; it runs to its own exits and the stock
+  leaves once flat): `_fade_unarm` takes it off the Trade list (`fade_unarm.unarm_row` on the engine's own `config_id`, so
+  the arm log records it; a replay's override only drops it from `replay_symbols` for the rest of that day). Signal line and
+  trade-channel alert ("un-armed — trend faded …"). Arming only, no order. Settings → 7. Advanced, under "Several bots"
+  (`#sma-fade-unarm`). The stock research baseline keeps it off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

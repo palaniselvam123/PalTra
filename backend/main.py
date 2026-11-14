@@ -91,6 +91,7 @@ import stop_handoff as stop_handoff_mod
 import stop_plan as stop_plan_mod
 import decel_guard as decel_mod
 import recovery as recovery_mod
+import fade_unarm
 import breakout as breakout_mod
 import opening_range
 import always_in
@@ -846,6 +847,9 @@ class ConfigUpdate(BaseModel):
     breakout_min_profit_pct: float | None = Field(default=None, ge=0, le=20)
     breakout_min_profit_rs: float | None = Field(default=None, ge=0, le=10000)
     chop_losses: int | None = Field(default=None, ge=0, le=10)
+    fade_unarm: bool | None = None
+    fade_unarm_rule: Literal["PHASE", "SCORE", "EITHER"] | None = None
+    fade_unarm_min: int | None = Field(default=None, ge=5, le=240)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -1891,6 +1895,9 @@ def _gap_dict(row) -> dict:
         "breakout_min_profit_pct": breakout_mod.min_profit_pct(row),
         "breakout_min_profit_rs": breakout_mod.min_profit_rs(row),
         "chop_losses": recovery_mod.chop_losses(row),
+        "fade_unarm": fade_unarm.on(row),
+        "fade_unarm_rule": fade_unarm.rule(row),
+        "fade_unarm_min": fade_unarm.after_min(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

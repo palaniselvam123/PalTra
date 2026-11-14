@@ -99,6 +99,7 @@ import level_check
 import day_extreme
 import colour_pull
 import recovery
+import fade_unarm
 import pivots
 import breakout
 import review
@@ -417,7 +418,7 @@ SNAPSHOT_FIELDS = (
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
-    "breakout_min_profit_rs", "chop_losses",
+    "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
@@ -1201,6 +1202,8 @@ class StrategyEngine:
         # Losing trades per stock today on this bot (chop_losses), and the trade each held stock had at the last pass.
         self._stock_losses: dict[str, int] = {}
         self._chop_watch: dict[str, tuple[int, str]] = {}
+        # Un-arm when the trend fades (fade_unarm.py): when each armed stock first read choppy in a row (epoch s).
+        self._fade_since: dict[str, int] = {}
         # Stocks not traded again today after an emergency recovery exit (recovery.py).
         self._recovery_blocked: set[str] = set()
         # Join the morning trend (join_trend.py): the SMA run each stock was entered on
@@ -1556,6 +1559,7 @@ class StrategyEngine:
             self._stock_trades.clear()
             self._trend_sent.clear()
             self._stock_losses.clear()
+            self._fade_since.clear()
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
@@ -1774,6 +1778,11 @@ class StrategyEngine:
             enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
             self._focus = symbol
             self.ltp = self._ltps.get(symbol, self.ltp)
+            if seen_before and await self._watch_fade(symbol, symbol_cfg):
+                self._judged_bar[symbol] = closed_ts
+                if self.status != "RUNNING":
+                    break
+                continue
             if seen_before and await self._watch_chop_losses(symbol, symbol_cfg):
                 self._judged_bar[symbol] = closed_ts
                 if self.status != "RUNNING":
@@ -1829,7 +1838,7 @@ class StrategyEngine:
             self._frames, self._ltps, self._judged_bar, self._signals, self._skip_cross_until, self._gap_pending, self._late_pending,
             self._pullback, self._side_entered, self._counter_done, self._reentry, self._reentry_used,
             self._tapes, self._review_bar, self._review_episode, self._turn_seen, self._turn_hit, self._turn_done,
-            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse, self._nth_done,
+            self._turn_last, self._turn_wait, self._always_tried, self._always_reverse, self._nth_done, self._fade_since,
         ):
             for symbol in [key for key in table if key not in watch]:
                 table.pop(symbol, None)
@@ -3465,6 +3474,42 @@ class StrategyEngine:
         self._signals[symbol] = text
         self.last_signal = text
         return True
+
+    async def _watch_fade(self, symbol: str, cfg: BotConfig) -> bool:
+        """Un-arm a stock whose trend has faded (fade_unarm.py): its choppy / trending read on the candles the bot
+        trades says choppy for `fade_unarm_min` minutes in a row, and this bot holds nothing on it. True when un-armed."""
+        if not fade_unarm.on(cfg):
+            self._fade_since.pop(symbol, None)
+            return False
+        own = stock_overrides(cfg, symbol)
+        fast = int(own.get("sma_fast") or cfg.sma_fast or 9)
+        slow = int(own.get("sma_slow") or cfg.sma_slow or 21)
+        now = self._now()
+        read = stock_regime.cached(id(self), symbol, self._tapes.get(symbol), fast, slow, self._exit_minutes(symbol, cfg), now)
+        why = fade_unarm.faded(read, fade_unarm.rule(cfg))
+        if why is None:
+            self._fade_since.pop(symbol, None)
+            return False
+        now_ts = int(now.timestamp())
+        since = self._fade_since.setdefault(symbol, now_ts)
+        need = fade_unarm.after_min(cfg)
+        since_txt = dt.datetime.fromtimestamp(since, IST).strftime("%H:%M")
+        if now_ts - since < need * 60:
+            return False
+        if self.positions.get(symbol) is not None:
+            self._signals[symbol] = f"{symbol}: trend faded ({why} since {since_txt}) — un-armed once this trade closes"
+            return False
+        done = self._fade_unarm(symbol)
+        self._fade_since.pop(symbol, None)
+        text = f"{symbol}: un-armed — trend faded ({why} since {since_txt}, {need} min) — {done}"
+        self._signals[symbol] = text
+        self.last_signal = text
+        self._alert(text)
+        return True
+
+    def _fade_unarm(self, symbol: str) -> str:
+        """Take a faded stock off this bot's Trade list (a replay overrides this: off the run only)."""
+        return fade_unarm.unarm_row(self.config_id, symbol)
 
     async def _watch_chop_losses(self, symbol: str, cfg: BotConfig) -> bool:
         """Move a stock to Bot 2 after `chop_losses` losing trades on it today on this bot (recovery.chop_losses).

@@ -94,10 +94,10 @@ export const STYLES: TradeStyle[] = [
     title: "Several bots (hand-offs)",
     what: "Move a stock to another bot when it turns choppy, breaks out or hits its stop.",
     best: "Only when you run Bots 1-3 together. Leave off while learning one bot.",
-    shows: "Recovery hold, hand-off to Bot 2 / Bot 3, trend breakout, stop-loss hand-off",
+    shows: "Recovery hold, hand-off to Bot 2 / Bot 3, trend breakout, stop-loss hand-off, un-arm when the trend fades",
     on: (f) =>
       yes(f.recovery_hold) || yes(f.breakout_handoff) || picked(f.stop_handoff) || num(f.chop_losses) > 0 || yes(f.vturn_handoff) ||
-      picked(f.handoff_candle),
+      picked(f.handoff_candle) || yes(f.fade_unarm),
   },
   {
     id: "review",
