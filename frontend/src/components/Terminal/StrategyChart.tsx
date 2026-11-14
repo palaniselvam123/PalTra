@@ -1140,6 +1140,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const [hold, setHold] = useState(false);
   const holdRef = useRef(false);
   holdRef.current = hold;
+  // The stock / candle size / range the screen was last fitted to once its candles had loaded. A chart (a replay's
+  // above all) often opens before its candles arrive: the fit then ran on an empty chart and the candles came in
+  // later at the default width, squeezed against the right edge with empty space to the left.
+  const fittedFor = useRef("");
   const [range, setRange] = useState(() => presetRange(0));
   const [past, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string; interval?: number }) | null>(null);
   const [loadingPast, setLoadingPast] = useState(false);
@@ -1899,6 +1903,15 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         apiRef.current?.timeScale().setVisibleRange(kept);
       } catch {
         /* the held span is no longer in the data (another stock or size) */
+      }
+    } else if (rows.length > 0) {
+      // Fit once when the first candles of this stock / size / range arrive; later updates keep the zoom and scroll.
+      const fitKey = `${(past?.symbol ?? symbol ?? "").toUpperCase()}|${bar}|${past ? `${past.from}-${past.to}` : "live"}`;
+      const api = apiRef.current;
+      if (api && fittedFor.current !== fitKey) {
+        fittedFor.current = fitKey;
+        if (past || rows.length <= 150) api.timeScale().fitContent();
+        else api.timeScale().scrollToRealTime();
       }
     }
   }, [view, rows, bar, past, trades, allTrades, symbol, showSlope, look]);
