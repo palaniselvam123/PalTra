@@ -293,6 +293,8 @@ export const FEATURES: Feature[] = [
     purpose: "A set of fixes from an audit: every exit cancels the exchange stop first, a failed exit puts the stop back, stops are restored after a restart, and paused bots keep minding their trades." },
   { id: "term-replay-icons", area: "terminal", added: "2026-11-14", pr: 418, href: TERM, where: "Terminal → Backtests", title: "Replay chart icons and a foldable By stock",
     purpose: "Chart links on each backtest stock and a By stock list you can fold away." },
+  { id: "term-compare", area: "terminal", added: "2026-11-15", pr: 429, href: TERM, where: "Terminal → Blotter → Backtests → tick 2-8 runs → Compare", title: "Compare backtests",
+    purpose: "Tick 2-8 backtest runs and compare them on one page, on the days and stocks they share: which strategy did best, on which stocks and on which days." },
   { id: "term-light", area: "terminal", added: "2026-11-14", pr: 422, href: TERM, where: "Every page (light theme)", title: "Readable light theme",
     purpose: "Hovered menus, the replay log and faded text are dark enough to read on white." },
 

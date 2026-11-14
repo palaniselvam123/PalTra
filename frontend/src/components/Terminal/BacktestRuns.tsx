@@ -11,6 +11,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
+import { NewTag } from "@/components/ui/NewTag";
 
 /** Opens one stock's chart for one day of a finished (or playing) run, in a new tab. */
 function RunChartLink({ run, symbol, date }: { run: ReplayRun; symbol: string; date: string }) {
@@ -641,7 +642,7 @@ export function BacktestRuns() {
                   className="inline-flex min-h-9 items-center gap-1 rounded-md bg-accentSky px-3 font-semibold text-on-accent hover:opacity-90"
                   title="Opens a new page: which strategy did best, on which stocks and which days"
                 >
-                  Compare {picked.length} runs
+                  Compare {picked.length} runs <NewTag id="term-compare" link={false} />
                 </a>
               ) : null}
               <button
@@ -654,7 +655,8 @@ export function BacktestRuns() {
             </>
           ) : (
             <span className="text-slate-400">
-              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.
+              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.{" "}
+              <NewTag id="term-compare" />
             </span>
           )}
         </div>
