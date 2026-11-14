@@ -570,6 +570,10 @@ class BotConfig(Base):
     breakout_min_profit_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Move a stock to Bot 2 after this many losing trades on it today on this bot (0 = off, recovery.py).
     chop_losses: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # Un-arm a stock once its trend fades (fade_unarm.py): on/off, what counts as faded, minutes in a row.
+    fade_unarm: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    fade_unarm_rule: Mapped[str | None] = mapped_column(String(8), nullable=True, default="PHASE")
+    fade_unarm_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=30)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

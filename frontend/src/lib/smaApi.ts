@@ -351,6 +351,10 @@ export type SmaConfig = {
   breakout_min_profit_pct?: number;
   breakout_min_profit_rs?: number;
   chop_losses?: number;
+  /** Un-arm a stock once its trend fades (fade_unarm.py): on/off, PHASE / SCORE / EITHER, minutes in a row. */
+  fade_unarm?: boolean;
+  fade_unarm_rule?: "PHASE" | "SCORE" | "EITHER" | string;
+  fade_unarm_min?: number;
   /** The strong-trend rule's checks ("stack:must,vwap:use,run:off,…") and how many must pass (1-7). */
   breakout_trend_checks?: string;
   breakout_trend_need?: number;

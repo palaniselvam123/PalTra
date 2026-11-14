@@ -501,6 +501,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     breakout_min_profit_pct: Math.min(20, Math.max(0, Number(form.breakout_min_profit_pct ?? 0) || 0)),
     breakout_min_profit_rs: Math.min(10000, Math.max(0, Number(form.breakout_min_profit_rs ?? 0) || 0)),
     chop_losses: Math.min(10, Math.max(0, Math.round(Number(form.chop_losses ?? 0) || 0))),
+    fade_unarm: Boolean(form.fade_unarm),
+    fade_unarm_rule: ["PHASE", "SCORE", "EITHER"].includes(String(form.fade_unarm_rule ?? "PHASE").toUpperCase())
+      ? String(form.fade_unarm_rule ?? "PHASE").toUpperCase()
+      : "PHASE",
+    fade_unarm_min: Math.min(240, Math.max(5, Math.round(Number(form.fade_unarm_min ?? 30) || 30))),
     breakout_trend_checks: String(form.breakout_trend_checks ?? ""),
     breakout_trend_need: Math.min(7, Math.max(1, Math.round(Number(form.breakout_trend_need ?? 6) || 6))),
     use_or_volume: Boolean(form.use_or_volume),
@@ -3217,6 +3222,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Trade first, then sort: once this bot has lost that many trades (before charges) on the same stock today, the stock
             moves to Bot 2 (flipped, gap mode) when it is flat. Bot 2 orders at once too with the box above ticked.
           </p>
+          <label id="sma-fade-unarm" className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.fade_unarm)}
+              onChange={(e) => set("fade_unarm", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("fade_unarm") && <OwnTag />}
+            Un-arm a stock once its trend fades
+            <InfoTip label="About un-arming a faded stock">
+              For stocks armed because they were trending (Scan &amp; arm, auto-arm, a morning read): once the trend is gone,
+              the stock comes off this bot&apos;s Trade list instead of staying armed all day. Each armed stock is read once per
+              closed candle on the candles this bot trades (15-minute colour candles are read as 15-minute candles), the same
+              choppy / trending read as the Trend column in the Stocks table. When it reads choppy for the minutes below in a
+              row it is un-armed; a trend coming back in between starts the count again. Early in the day, with too few
+              candles to judge, nothing counts. An open trade is never cut: the stock is un-armed once this bot is flat on it,
+              so the trade runs to its own stop and exits. No order is placed. In a replay the stock only leaves that run.
+              Off by default.
+            </InfoTip>
+          </label>
+          {form.fade_unarm ? (
+            <div className="mt-2 grid max-w-xl grid-cols-1 items-end gap-2 sm:grid-cols-2">
+              <label className="block text-xs text-slate-400">
+                <span className="flex items-center gap-1">
+                  What counts as faded {isOwn("fade_unarm_rule") && <OwnTag />}
+                </span>
+                <select
+                  value={String(form.fade_unarm_rule ?? "PHASE").toUpperCase()}
+                  onChange={(e) => set("fade_unarm_rule", e.target.value)}
+                  className="mt-1 min-h-9 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+                >
+                  <option value="PHASE">No trend run now</option>
+                  <option value="SCORE">Many SMA crosses today</option>
+                  <option value="EITHER">Either of them</option>
+                </select>
+              </label>
+              <Field
+                label="Choppy for at least (minutes in a row, 5-240)"
+                value={String(form.fade_unarm_min ?? 30)}
+                onChange={(v) => set("fade_unarm_min", v)}
+                own={isOwn("fade_unarm_min")}
+              />
+            </div>
+          ) : null}
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Trend breakout (move the stock on)
             <InfoTip label="About the trend breakout">
@@ -3785,6 +3834,16 @@ export function activeRules(f: SmaConfig): Rule[] {
       key: "chop_losses",
       text: `After ${Number(f.chop_losses)} losing trades on a stock today, it moves to Bot 2`,
       off: { chop_losses: "0" },
+    });
+  if (f.fade_unarm)
+    add({
+      group: "advanced",
+      key: "fade_unarm",
+      text: `A stock whose trend has faded (${
+        { SCORE: "choppy by crosses", EITHER: "no trend run or choppy by crosses" }[String(f.fade_unarm_rule ?? "PHASE").toUpperCase()] ??
+        "no trend run now"
+      } for ${Number(f.fade_unarm_min ?? 30) || 30} min) comes off the Trade list once flat`,
+      off: { fade_unarm: false },
     });
   if (f.review_on)
     add({

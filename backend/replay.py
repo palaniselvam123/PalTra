@@ -568,6 +568,12 @@ class ReplayEngine(StrategyEngine):
     def _alert(self, message: str, critical: bool = False, call: bool = False, kind: str = "trade") -> None:  # noqa: ARG002
         return None
 
+    def _fade_unarm(self, symbol: str) -> str:
+        """Trend faded in a replay (fade_unarm.py): the stock leaves this run only; the live Trade list is untouched."""
+        name = (symbol or "").upper()
+        self.replay_symbols = [s for s in self.replay_symbols if s != name]
+        return "dropped from the rest of this replay day"
+
     def load_config(self) -> BotConfig:
         row = super().load_config()
         data = {col.name: getattr(row, col.name) for col in BotConfig.__table__.columns}
