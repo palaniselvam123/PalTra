@@ -155,7 +155,7 @@ export function OptionChainTable({
                   <tr ref={spotRow} aria-label={`Spot ${num(spot)}`}>
                     <td colSpan={sideCols * 2 + 3} className="p-0">
                       <div className="relative flex items-center justify-center border-t border-accentSky/70">
-                        <span className="-mt-px rounded-b-md bg-accentSky px-2 py-0.5 font-sans text-[11px] font-semibold text-slate-950">
+                        <span className="-mt-px rounded-b-md bg-accentSky px-2 py-0.5 font-sans text-[11px] font-semibold text-on-accent">
                           {chain.underlying} {num(spot)}
                         </span>
                       </div>

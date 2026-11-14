@@ -535,7 +535,7 @@ export function AdvancedChart({
                 className={clsx(
                   "rounded border px-1.5 py-0.5 text-caption transition-colors",
                   active.includes(o.id)
-                    ? "border-transparent font-medium text-slate-900"
+                    ? "border-transparent font-medium text-[#0f172a]"
                     : "border-border text-slate-500 hover:text-slate-300"
                 )}
                 style={active.includes(o.id) ? { backgroundColor: o.color } : undefined}
@@ -549,7 +549,7 @@ export function AdvancedChart({
               className={clsx(
                 "rounded border px-1.5 py-0.5 text-caption transition-colors",
                 showPatterns
-                  ? "border-transparent bg-violet-400 font-medium text-slate-900"
+                  ? "border-transparent bg-violet-400 font-medium text-[#0f172a]"
                   : "border-border text-slate-500 hover:text-slate-300"
               )}
             >

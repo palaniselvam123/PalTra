@@ -2172,6 +2172,11 @@ spinning top), body and range) / Matched / Call columns
   `prefers-reduced-motion` stops animations. The Scalp tab bar (`ScalpTabs`) and `SettingsTabs` follow the tab pattern:
   `role="tablist"` per group, the open tab filled and the only one in the Tab order, arrow keys / Home / End move.
   The `danger` button is `bg-rose-600` (white text 4.7:1). Check a page with axe (WCAG 2 A / AA) in both themes.
+  **Light theme**: the components were written for the dark ground, so `globals.css` remaps them under
+  `[data-theme="light"]`: the slate scale (inverted), accent text, `hover:text-*` (hovering goes darker, never to
+  white), faded accent text (`text-amber-400/80` etc., made solid), hard-coded hex text (`text-[#10B981]` → profit),
+  and filled buttons with white text. A new `hover:text-*`, `text-<colour>-<shade>/<alpha>` or hex text class needs its
+  light line there; a chart legend shows a user-picked colour as a swatch (`StrategyChart.LineKey`), not as text colour.
 - **Settings page** (desk `/settings`, `app/settings/page.tsx`; display only, every control saves through the same routes as
   before): one tab at a time (Strategy, Bots, Alerts & news, Account), each tab with an icon, a one-line hint and a plain
   intro line. A header ("Settings", the Learn page link, "What do these words mean?" opening the plain-words panel with the
