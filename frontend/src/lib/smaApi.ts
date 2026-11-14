@@ -2164,6 +2164,8 @@ export type ReplayInfo = {
 export type ScalpPickRule = {
   kind?: "TREND" | "ACTIVE" | "AUTOARM";
   pick_time: string;
+  /** The run saved the stocks it picks from, so a run cut short can be resumed (runs started since this was added). */
+  resumable?: boolean;
   top_n: number;
   /** Scalp picks only. */
   min_atr_pct?: number;
@@ -2337,6 +2339,8 @@ export type ResumableRun = {
   days_done: number;
   next_day: string | null;
   symbols: string[];
+  /** Which Scalp-page backtest it is (TREND / ACTIVE / AUTOARM / SCALP); null for a plain replay. */
+  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SCALP" | null;
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {

@@ -8,6 +8,7 @@ import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from 
 import { TrendPickCompare } from "@/components/Scalp/TrendPickCompare";
 import { replayActive, smaApi, type ActivePickBias, type ActivePickRank } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const PICK_TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "13:00", "14:00"];
@@ -84,6 +85,7 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
   const select = "rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200";
   return (
     <div className="space-y-4">
+      <ResumePickRuns kinds={["ACTIVE"]} label="Most active pick" />
       <div>
         <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Flame size={14} className="text-amber-400" /> Backtest the Most active picks

@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { History, Loader2 } from "lucide-react";
 import { replayActive, smaApi } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 /** 1 to 30, one at a time: trading days back, and picks per day. */
 const ONE_TO_30 = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -71,6 +72,7 @@ export function ScalpPickBacktest({ universe, minAtr, minValue }: Props) {
   const select = "rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200";
   return (
     <section className="rounded-xl border border-slate-800 bg-card p-4">
+      <ResumePickRuns kinds={["SCALP"]} label="Scalp pick" />
       <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
         <History size={15} className="text-accentViolet" /> Test this page&apos;s picks on past days
       </h2>

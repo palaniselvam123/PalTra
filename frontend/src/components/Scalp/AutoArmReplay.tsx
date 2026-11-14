@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { replayActive, smaApi, type ScalpAlerts } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const STEPS = [1, 2, 3, 5, 10, 15, 30];
@@ -100,6 +101,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
     : "";
   return (
     <section className="space-y-3 rounded-xl border border-slate-800 bg-card p-4">
+      <ResumePickRuns kinds={["AUTOARM"]} label="Auto-arm replay" />
       <div>
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
           <Bot size={15} className="text-accentSky" /> Auto-arm replay: test the auto-arm on past days

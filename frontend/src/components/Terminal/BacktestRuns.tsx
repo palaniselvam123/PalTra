@@ -709,7 +709,7 @@ dd: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{sign
 actions: <td className="px-2 py-2 text-right align-top">
                         {(run.status === "INTERRUPTED" || run.status === "STOPPED") &&
                         run.days_done < run.days_total &&
-                        !scalpPickOf(run.settings) ? (
+                        (!scalpPickOf(run.settings) || scalpPickOf(run.settings)?.resumable) ? (
                           <button
                             type="button"
                             aria-label={`Resume run ${run.id}`}
