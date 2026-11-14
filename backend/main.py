@@ -928,6 +928,8 @@ class ConfigUpdate(BaseModel):
     max_trades_per_day: int | None = Field(default=None, ge=1, le=100)
     # Entries one stock may take per day on this bot (0 = no cap); also a per-stock override.
     max_trades_per_stock: int | None = Field(default=None, ge=0, le=100)
+    # Candles a stock waits after any exit before its next entry (0 = off); also a per-stock override.
+    reentry_wait_candles: int | None = Field(default=None, ge=0, le=10)
     square_off_time: str | None = None
     entry_cutoff_time: str | None = None
 
@@ -997,6 +999,7 @@ def _config_dict(row: BotConfig) -> dict:
         "max_daily_loss": row.max_daily_loss,
         "max_trades_per_day": row.max_trades_per_day,
         "max_trades_per_stock": int(getattr(row, "max_trades_per_stock", 0) or 0),
+        "reentry_wait_candles": int(getattr(row, "reentry_wait_candles", 0) or 0),
         "square_off_time": row.square_off_time,
         "entry_cutoff_time": row.entry_cutoff_time or "15:00",
         "trading_mode": row.trading_mode,

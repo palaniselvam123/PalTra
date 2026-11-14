@@ -288,6 +288,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   "closed on … — X has had its N trade(s) today (per-stock cap)"; flat: "… ignored — …") and cancels a waiting pullback;
   every entry path (cross, gap mode, turn, news, hand-offs, force) goes through it. The day cap still halts the bot; this
   one only stops that stock.
+- `backend/reentry_wait.py` – **Wait N candles after an exit** (`reentry_wait_candles`, 0 = off by default, max 10; per bot
+  and per stock, PAPER and LIVE, replays too; Settings → 6. Size, daily limits and times, next to "Max trades per stock /
+  day"; owner's MANKIND case: a 15-minute colour bot reversed on every candle in a sideways market). Every closed trade
+  (`StrategyEngine._finalize_trade`: stops, targets, colour turns, crosses, square-off…) notes the stock's exit time
+  (`_last_exit`, cleared with the day roll, restored by `restore_trades_today` from today's rows of the current mode);
+  `_reentry_wait_hit` refuses that stock's next entry next to `_stock_cap_hit` (the reverse after a close: "closed on … —
+  … waits N candle(s)", flat: "… ignored — …", a waiting pullback is dropped) until N whole candles of `_exit_minutes`
+  (the bot's candle, or `pattern_tf` in colour / pattern mode, from 09:15) have closed after the exit
+  (`reentry_wait.ready_at`: the exit's own candle counts only within `GRACE_MAX_SEC` 90 s, at most half a candle, of its
+  open, i.e. an exit on the previous candle's close processed late). The exit itself is never held back. The Strategy lab
+  does not know it.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills

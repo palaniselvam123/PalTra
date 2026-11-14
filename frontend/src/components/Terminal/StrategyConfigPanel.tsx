@@ -511,6 +511,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     or_spread_pct: Math.min(5, Math.max(0, Number(form.or_spread_pct ?? 0.1) || 0)),
     flip_orders: Boolean(form.flip_orders),
     max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
+    reentry_wait_candles: Math.min(10, Math.max(0, Math.round(Number(form.reentry_wait_candles ?? 0)) || 0)),
     entry_mode:
       form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" || form.entry_mode === "NTH_CANDLE" ? form.entry_mode : "SMA",
     nth_candle_no: Math.min(6, Math.max(1, Math.round(Number(form.nth_candle_no ?? 2)) || 2)),
@@ -3080,6 +3081,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   own={isOwn("max_trades_per_stock")}
                 />
                 <Field
+                  label="After an exit, wait N candles before the next entry (0 = off)"
+                  value={String(form.reentry_wait_candles ?? 0)}
+                  onChange={(v) => set("reentry_wait_candles", v)}
+                  own={isOwn("reentry_wait_candles")}
+                />
+                <Field
                   label="No new entries after"
                   value={form.entry_cutoff_time || "15:00"}
                   onChange={(v) => set("entry_cutoff_time", v)}
@@ -3597,6 +3604,13 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.flip_orders) add({ group: "enter", key: "flip_orders", text: "Flip: a buy signal SELLS and a sell signal BUYS", off: { flip_orders: false }, warn: true });
   if (f.always_in) add({ group: "enter", key: "always_in", text: "Always in a trade: every armed stock is held on the SMAs' side and entered again right after each exit (no cross needed)", off: { always_in: false }, warn: true });
   if (f.always_in && f.always_in_reverse) add({ group: "enter", key: "always_in_reverse", text: "After a losing trade, the next entry goes the opposite way", off: { always_in_reverse: false } });
+  if (Number(f.reentry_wait_candles ?? 0) > 0)
+    add({
+      group: "enter",
+      key: "reentry_wait_candles",
+      text: `After any exit, the stock waits ${f.reentry_wait_candles} candle(s)${f.entry_mode === "COLOUR" || f.entry_mode === "PATTERN" ? ` of ${f.pattern_tf ?? 1} min` : ""} before its next entry (no instant reverse)`,
+      off: { reentry_wait_candles: "0" },
+    });
   if (f.join_trend) add({ group: "enter", key: "join_trend", text: `Joins a trend already running ${n(f.join_after_min, 15)} min after 09:15 (no cross needed)`, off: { join_trend: false } });
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });

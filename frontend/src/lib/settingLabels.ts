@@ -130,6 +130,7 @@ export const SETTING_LABELS: Record<string, string> = {
   counter_reenter: "re-enter after counter candles",
   counter_reenter_max: "counter re-entries per run",
   max_trades_per_stock: "trades per stock per day",
+  reentry_wait_candles: "candles to wait after an exit",
   counter_entry: "early reversal entry",
   turn_alert: "SMA 9 turn alert",
   turn_entry: "SMA 9 turn entry",
