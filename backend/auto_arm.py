@@ -49,12 +49,15 @@ MAX_UNIVERSE = 250
 
 # {source: {IST day: [symbols armed, in order]}}
 _DONE: dict[str, dict[dt.date, list[str]]] = {"strong": {}, "pressure": {}}
+# {source: {IST day: [symbols found already armed]}}: remembered once a day like _DONE, but not counted against
+# arm_max_day (they used to use up the day's limit without a single stock being armed).
+_SEEN: dict[str, dict[dt.date, list[str]]] = {"strong": {}, "pressure": {}}
 # The last runs (newest first), for the Alerts card.
 recent: list[dict] = []
 
 
-def _done(kind: str, now: dt.datetime) -> list[str]:
-    book = _DONE[kind]
+def _done(kind: str, now: dt.datetime, store: dict | None = None) -> list[str]:
+    book = (store if store is not None else _DONE)[kind]
     for day in [d for d in book if d != now.date()]:
         book.pop(day, None)
     return book.setdefault(now.date(), [])
@@ -106,7 +109,8 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
             return None
         found = candidates(kind, snapshot.get("rows") or [], s, now)
         done = _done(kind, now)
-        fresh = [p for p in found if p["symbol"] not in done]
+        seen = _done(kind, now, _SEEN)
+        fresh = [p for p in found if p["symbol"] not in done and p["symbol"] not in seen]
         if not fresh:
             return None
         record: dict = {
@@ -130,7 +134,7 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
                 sym = str(p["symbol"]).upper()
                 if sym in armed:
                     record["already"].append(sym)
-                    done.append(sym)
+                    seen.append(sym)
                     continue
                 if room <= 0:
                     record["skipped"].append({"symbol": sym, "why": f"today's limit of {s.arm_max_day} reached"})

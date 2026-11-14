@@ -1560,6 +1560,9 @@ export type SmaState = {
     target?: number | null;
     trailing?: boolean | null;
     tsl_step?: number | null;
+    /** Best price since the entry (display only). */
+    best?: number | null;
+    flipped?: boolean | null;
     ltp: number | null;
     note?: string;
     /** Unrealized net at this stock's last price; null when flat. */
@@ -2039,6 +2042,56 @@ export type TslCalcResult = {
   error?: string;
 };
 
+export type TslBasketRow = {
+  symbol: string;
+  price: number | null;
+  atr: number | null;
+  atr_pct?: number;
+  candles?: number;
+  stop?: number;
+  trail?: number;
+  target?: number;
+  stop_pct?: number;
+  trail_pct?: number;
+  target_pct?: number;
+  /** ₹ the price must go your way before the trailing stop reaches the entry. */
+  breakeven_after?: number | null;
+  breakeven_after_pct?: number | null;
+  note?: string;
+};
+export type TslBasketResult = {
+  desk: string;
+  bot_name: string;
+  mode: "PAPER" | "LIVE";
+  bot_candle: number;
+  minutes: number;
+  atr_period: number;
+  multiples: { stop: number; trail: number; target: number };
+  stocks: TslBasketRow[];
+  sized: number;
+  /** One common % for every stock (the median of their own %), and what it means for each. */
+  percent: {
+    stop_pct: number;
+    trail_pct: number;
+    target_pct: number;
+    breakeven_after_pct: number | null;
+    per_stock: {
+      symbol: string;
+      price: number;
+      stop: number;
+      trail: number;
+      target: number;
+      stop_atr: number | null;
+      fit: "tight" | "wide" | "fits" | "unknown";
+      breakeven_after: number | null;
+    }[];
+    tight: string[];
+    wide: string[];
+  } | null;
+  downloaded: string[];
+  failed: Record<string, string>;
+};
+
 export type HandoffReturn = {
   on: boolean;
   at: string;
@@ -2501,6 +2554,20 @@ export const smaApi = {
       70000
     ),
   config: () => request<SmaConfig>("/api/config"),
+  /** One trailing stop for every stock a desk has armed or holds (tsl_calc.basket). Read-only. */
+  tslBasket: (desk: string, minutes = 0, atrPeriod = 14, stopMult = 1.5, trailMult = 0.5, targetMult = 3) =>
+    request<TslBasketResult>(
+      `/api/tsl-calc/basket?${new URLSearchParams({
+        desk,
+        minutes: String(minutes),
+        atr_period: String(atrPeriod),
+        stop_mult: String(stopMult),
+        trail_mult: String(trailMult),
+        target_mult: String(targetMult),
+      }).toString()}`,
+      undefined,
+      90000
+    ),
   /** Trailing stop / trail / target sized from the stock's own candles, per candle size (tsl_calc.py). Read-only. */
   tslCalc: (symbol: string, sizes: number[], atrPeriod = 14, stopMult = 1.5, trailMult = 0.5, targetMult = 3) =>
     request<TslCalcResult>(

@@ -15,6 +15,7 @@ import { REVERSE_GROUPS, ReverseOwnSettings, reverseBody, reverseGroupsOn, type 
 import { ChevronDown, Search } from "lucide-react";
 import { SETTING_LABELS } from "@/lib/settingLabels";
 import { TslCalculator } from "@/components/Settings/TslCalculator";
+import { BasketStopCalculator } from "@/components/Settings/BasketStopCalculator";
 import { BB_EXITS, CANDLE_MINUTES, EXIT_CANDLE_MINUTES, SLOPE_MINUTES, currentDesk, smaApi, type BbExit, type CandleMinutes, type SmaConfig } from "@/lib/smaApi";
 import { crossExitOn, exitOrder, noExitOn, strategyNotes, type StrategyNote } from "@/lib/strategyChecks";
 
@@ -113,6 +114,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
   const [busy, setBusy] = useState(false);
   const [scope, setScope] = useState<string>(ALL);
   const [own, setOwn] = useState<Partial<SmaConfig>>({});
+  // The stock whose own settings are in the form now (a Save for another stock waits until its row is loaded).
+  const [loadedScope, setLoadedScope] = useState<string>(ALL);
   const dirty = useRef(false);
   const [confirmClear, setConfirmClear] = useState(false);
   // The wide page's Save bar stays at the bottom of the screen unless unfrozen.
@@ -243,6 +246,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         markDirty(false);
         setForm(row);
         setOwn(row.own ?? {});
+        setLoadedScope(scope);
       })
       .catch((e: unknown) => live && setMsg(e instanceof Error ? e.message : "Could not load that stock"));
     return () => {
@@ -546,11 +550,49 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     review_steep_pct: Math.max(0.001, Number(form.review_steep_pct ?? 0.03)),
   });
 
+  /** Saved values that are not numbers ("5,000", "1.5x"): sent as they were, they were silently dropped or became 0. */
+  const unreadable = (body: Partial<SmaConfig>): string[] => {
+    const bad: string[] = [];
+    const raw = form as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(body)) {
+      if (typeof value !== "number") continue;
+      const typed = raw[key];
+      const text = typeof typed === "string" ? typed.trim() : "";
+      if ((text !== "" && !Number.isFinite(Number(text))) || !Number.isFinite(value)) {
+        bad.push(SETTING_LABELS[key] ?? key);
+      }
+    }
+    return bad;
+  };
+
+  /** On a LIVE bot, ask before a Save that turns the stop off, the flip on or the SMA cross exit off (the
+   *  terminal's Strategy card already asks for the same switches). */
+  const liveRiskOk = (body: Partial<SmaConfig>): boolean => {
+    if ((form.trading_mode ?? "PAPER").toUpperCase() !== "LIVE" || !config) return true;
+    const risks: string[] = [];
+    if (body.use_stop === false && config.use_stop !== false) risks.push("turn the stop-loss OFF (real orders without a stop)");
+    if (body.flip_orders === true && !config.flip_orders) risks.push("turn the flip strategy ON (buy signals sell, sell signals buy)");
+    if (body.cross_exit === false && config.cross_exit !== false) risks.push("turn the SMA cross exit OFF");
+    if (!risks.length) return true;
+    return window.confirm(`This bot is LIVE (real money). This Save will ${risks.join(" and ")}${stockScope ? ` for ${scope}` : ""}. Continue?`);
+  };
+
   const saveStock = async () => {
+    if (loadedScope !== scope) {
+      setMsg(`Still loading ${scope}'s settings. Save again in a moment.`);
+      return;
+    }
+    const body = strategyBody();
+    const bad = unreadable(body);
+    if (bad.length) {
+      setMsg(`Not saved: ${bad.join(", ")} ${bad.length === 1 ? "is" : "are"} not a number. Type digits only (no commas or letters).`);
+      return;
+    }
+    if (!liveRiskOk(body)) return;
     setBusy(true);
     setMsg(null);
     try {
-      const row = await smaApi.saveStockConfig(scope, strategyBody());
+      const row = await smaApi.saveStockConfig(scope, body);
       markDirty(false);
       setForm(row);
       setOwn(row.own ?? {});
@@ -641,12 +683,19 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       setMsg("Max trades / day must be a whole number from 1 to 100.");
       return;
     }
+    const body = strategyBody();
+    const bad = unreadable({ ...body, max_daily_loss: Number(form.max_daily_loss) });
+    if (bad.length) {
+      setMsg(`Not saved: ${bad.join(", ")} ${bad.length === 1 ? "is" : "are"} not a number. Type digits only (no commas or letters).`);
+      return;
+    }
+    if (!liveRiskOk(body)) return;
     setBusy(true);
     setMsg(null);
     try {
       // The chart stock is picked on the terminal; Save leaves it alone so it cannot undo a newer pick.
       await smaApi.saveConfig({
-        ...strategyBody(),
+        ...body,
         max_daily_loss: Number(form.max_daily_loss),
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
@@ -2957,6 +3006,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 </div>
               )}
               <TslCalculator form={form} set={set} symbol={stockScope ? scope : null} armed={armed} />
+              {!stockScope ? <BasketStopCalculator form={form} set={set} /> : null}
               <Hint label="About the trailing stop">
                 {form.tsl_mode === "ATR" ? (
                   <>

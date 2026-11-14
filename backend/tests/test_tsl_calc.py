@@ -57,3 +57,49 @@ def test_route_reads_the_bots_tape_and_checks_its_inputs(tmp_path, monkeypatch):
         assert client.get("/api/tsl-calc", params={"symbol": "TCS", "stop_mult": 99}).status_code == 400
     main.engine._tapes.pop("TCS", None)
     database.reset_engine()
+
+
+def test_breakeven_after_counts_whole_trail_steps():
+    assert tsl_calc.breakeven_after(10, 5) == 10
+    assert tsl_calc.breakeven_after(10, 4) == 12  # 3 steps of 4: the stop sits at entry + 2
+    assert tsl_calc.breakeven_after(0, 5) is None and tsl_calc.breakeven_after(10, 0) is None
+
+
+def test_basket_gives_each_stock_its_own_rupees_and_one_common_percent():
+    cheap = _tape(step=0.08)  # about ₹1,000 but moving a tenth as much
+    cheap[["open", "high", "low", "close"]] = cheap[["open", "high", "low", "close"]] / 10
+    out = tsl_calc.basket({"TCS": _tape(), "IDEA": cheap, "NONE": None}, minutes=5)
+    rows = {r["symbol"]: r for r in out["stocks"]}
+    assert out["sized"] == 2 and rows["NONE"]["note"]
+    assert rows["TCS"]["stop"] > rows["IDEA"]["stop"] > 0
+    assert rows["TCS"]["breakeven_after"] >= rows["TCS"]["stop"]
+    pct = out["percent"]
+    assert pct["stop_pct"] > 0 and pct["trail_pct"] > 0 and round(pct["stop_pct"] / 0.05, 6) % 1 == 0
+    per = {p["symbol"]: p for p in pct["per_stock"]}
+    assert per["TCS"]["fit"] in ("tight", "fits", "wide") and per["TCS"]["stop_atr"] > 0
+    assert tsl_calc.basket({}, minutes=5)["percent"] is None
+
+
+def test_basket_route_reads_the_bots_armed_stocks(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/basket.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    with TestClient(main.app) as client:
+        main.engine._tapes["TCS"] = _tape()
+        monkeypatch.setattr(main, "trade_names", lambda cfg: ["TCS"])
+        res = client.get("/api/tsl-calc/basket", params={"desk": "1", "minutes": 5})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["minutes"] == 5 and body["mode"] == "PAPER" and body["downloaded"] == []
+        assert [r["symbol"] for r in body["stocks"]] == ["TCS"] and body["percent"]["stop_pct"] > 0
+        assert client.get("/api/tsl-calc/basket", params={"desk": "9"}).status_code == 400
+        assert client.get("/api/tsl-calc/basket", params={"minutes": 7}).status_code == 400
+        assert client.get("/api/tsl-calc/basket", params={"trail_mult": 0}).status_code == 400
+    main.engine._tapes.pop("TCS", None)
+    database.reset_engine()

@@ -364,6 +364,8 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN max_low FLOAT")
         if "book_seq" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN book_seq INTEGER")
+        if "sl_order_id" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN sl_order_id VARCHAR")
         # Number older trades inside their own book (mode, and run for replays).
         conn.exec_driver_sql(
             "UPDATE trade_log SET book_seq = ("

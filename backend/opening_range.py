@@ -128,9 +128,13 @@ def _vwap_refusal(closed: pd.DataFrame, today: pd.DataFrame, window: pd.DataFram
     if window.empty or not _window_ready(today):
         return "opening range not complete"
     vwap = session_vwap_series(closed).loc[window.index]
-    if vwap.isna().any():
+    # The session's first candle never has a VWAP of its own (its volume has no earlier baseline), so requiring
+    # every window candle to have one refused every entry, all day. Judge the candles whose VWAP is known.
+    known = vwap.notna()
+    if not bool(known.any()):
         return "opening VWAP not ready"
-    close = pd.to_numeric(window["close"], errors="coerce")
+    vwap = vwap[known]
+    close = pd.to_numeric(window["close"], errors="coerce")[known]
     if direction == "LONG":
         bad = close <= vwap
         side = "above"

@@ -547,7 +547,7 @@ class ReplayEngine(StrategyEngine):
             why = handoff_chain.tag(why, played)  # this trade is the other bot's, played in the backtest
         await super()._open(direction, cross_price, atr, cfg, now, why=why)
 
-    def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT) -> str:  # noqa: ARG002
+    def _hand_off(self, from_bot: int, symbol: str, source_live: bool, to_bot: int = recovery.HANDOFF_BOT, chop: bool | None = None, keep_source: bool = False) -> str:  # noqa: ARG002
         """Hand-off in a replay. With "Play hand-offs" on (`chain`), it is played inside the run (`_chain_hand_off`).
         Off, the stock really moves (to Bot 2 by recovery.py, back to Bot 3 by breakout.py).
 

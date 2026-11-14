@@ -6,6 +6,7 @@ import { Header } from "@/components/Terminal/Header";
 import { StrategyChart } from "@/components/Terminal/StrategyChart";
 import { LivePositionCard } from "@/components/Terminal/LivePositionCard";
 import { OpenPositionsCard } from "@/components/Terminal/OpenPositionsCard";
+import { TrailTracker } from "@/components/Terminal/TrailTracker";
 import { PnlMetricsRow } from "@/components/Terminal/PnlMetricsRow";
 import { StrategySummary } from "@/components/Terminal/StrategySummary";
 import { TradeHistoryTable } from "@/components/Terminal/TradeHistoryTable";
@@ -647,6 +648,13 @@ export default function TerminalPage() {
               collapsible: true,
               out: !inTab(shownTab, "live"),
               node: <OpenPositionsCard state={state} closing={closingSymbol} onClose={closePosition} onReverse={reversePosition} />,
+            },
+            {
+              id: "trail",
+              title: "Trail tracker",
+              collapsible: true,
+              out: !inTab(shownTab, "live"),
+              node: <TrailTracker state={state} />,
             },
             {
               id: "strategy",

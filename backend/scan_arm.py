@@ -330,6 +330,17 @@ class Runner:
                 record["matched"] = [
                     {k: r.get(k) for k in ("symbol", "side", "rank", "age_min", "gap_pct", "ltp", "fading")} for r in found
                 ]
+                # The scan can take minutes: read the bot again, so a switch to LIVE meanwhile is not armed unasked.
+                fresh = (await bots()).get(p.bot) or bot
+                if (fresh.get("mode") or "PAPER").upper() == "LIVE" and not live:
+                    live = True
+                    record["mode"] = "LIVE"
+                    if not confirm_live:
+                        raise LiveRefused(
+                            f"{record['bot_name']} was switched to LIVE while the scan ran. Scheduled and outside (MCP) "
+                            "runs only arm PAPER bots; nothing was armed."
+                        )
+                bot = fresh
                 armed_now = {str(s).upper() for s in bot.get("armed") or []}
                 source = f"{SOURCE}: {p.name}"[:40]
                 self.stage = f"Arming {len(found)} on {record['bot_name']}"

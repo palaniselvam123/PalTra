@@ -89,12 +89,22 @@ def closed_by_bot(engines, net: bool = False) -> dict:
     return out
 
 
-def open_by_bot(engines, net: bool = False) -> dict:
-    """Open P&L of each bot's held stocks at their last price. On the event loop: _open_pnl moves the focus."""
+class PriceMissing(Exception):
+    """A held stock has no last price yet (right after a restart): its open P&L is unknown, not ₹0."""
+
+
+def open_by_bot(engines, net: bool = False, strict: bool = False) -> dict:
+    """Open P&L of each bot's held stocks at their last price. On the event loop: _open_pnl moves the focus.
+
+    `strict` (the guard and the P&L alerts) raises PriceMissing when a held stock has no price yet: counted as ₹0,
+    a restart in market hours could trip the day target / stop on the closed P&L alone and panic every bot."""
     out = {}
     for engine in engines:
         total = 0.0
         for name in list(engine.positions):
+            ltps = getattr(engine, "_ltps", None)
+            if strict and ltps is not None and not float(ltps.get(name) or 0.0):
+                raise PriceMissing(f"bot {getattr(engine, 'bot_id', '?')}: no price for {name} yet")
             value = engine._open_pnl(name)  # noqa: SLF001
             if value:
                 total += float(value["net" if net else "gross"])
@@ -107,9 +117,9 @@ def closed_total(engines, net: bool = False) -> float:
     return sum(closed_by_bot(engines, net).values())
 
 
-def open_total(engines, net: bool = False) -> float:
+def open_total(engines, net: bool = False, strict: bool = False) -> float:
     """Open P&L of every held stock at its last price. On the event loop: _open_pnl moves the focus."""
-    return sum(open_by_bot(engines, net).values())
+    return sum(open_by_bot(engines, net, strict).values())
 
 
 def total(engines) -> float:
@@ -135,13 +145,13 @@ async def trip(engines, kind: str, amount: float, target: float, stop: float, at
         limit = target if kind == "target" else -stop
         word = "target" if kind == "target" else "stop loss"
         reason = f"{HALT_PREFIX} {word} hit: P&L ₹{amount:,.2f} (limit ₹{limit:,.2f}) — every bot squared off"
-    for eng in engines:
-        if is_guard_halt(eng) and not eng.positions:
-            continue
-        try:
-            await eng.kill(reason)
-        except Exception:  # noqa: BLE001 - one bot's failure must not leave the others running
-            log.exception("all-bots guard: kill failed on bot %s", getattr(eng, "bot_id", "?"))
+    todo = [eng for eng in engines if not (is_guard_halt(eng) and not eng.positions)]
+    # Every bot at once, like "Panic all bots": one after another, the last bot's exits waited for every other
+    # bot's stop cancels, exits and fill waits while the loss kept running.
+    results = await asyncio.gather(*(eng.kill(reason) for eng in todo), return_exceptions=True)
+    for eng, result in zip(todo, results):
+        if isinstance(result, BaseException):  # one bot's failure must not leave the others running
+            log.error("all-bots guard: kill failed on bot %s: %r", getattr(eng, "bot_id", "?"), result)
     return reason
 
 
@@ -156,8 +166,14 @@ async def run(engines_fn, config_fn, is_open_fn, poll: float = POLL_SEC, now_fn=
                 if target > 0 or stop > 0 or at is not None:
                     engines = list(engines_fn())
                     closed = await asyncio.to_thread(closed_total, engines)
-                    amount = round(closed + open_total(engines), 2)
-                    kind = verdict(amount, target, stop, now_fn() if now_fn else None, at)
+                    try:
+                        amount = round(closed + open_total(engines, strict=True), 2)
+                        kind = verdict(amount, target, stop, now_fn() if now_fn else None, at)
+                    except PriceMissing as exc:
+                        # The P&L is not known this pass: only the time of day can trip.
+                        log.info("all-bots guard: %s; P&L limits not judged this pass", exc)
+                        amount = round(closed, 2)
+                        kind = verdict(amount, 0.0, 0.0, now_fn() if now_fn else None, at)
                     if kind and any(not is_guard_halt(eng) or eng.positions for eng in engines):
                         reason = await trip(engines, kind, amount, target, stop, at)
                         log.warning("all-bots guard tripped: %s", reason)

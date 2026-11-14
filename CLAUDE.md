@@ -137,6 +137,17 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the price. Settings → 5. Stop-loss and target, with stop type TSL: `components/Settings/TslCalculator.tsx` (stock,
   multiples, ATR period, sizes, Calculate; a row's "Use ₹" / "Use %" fills the TSL fields of the form, optionally the
   candle size too, and the normal Save applies them to the bot or the scoped stock).
+  **One stop for all armed stocks** (`tsl_calc.basket`, `GET /api/tsl-calc/basket?desk=1-5|research&minutes=0&atr_period=&
+  stop_mult=&trail_mult=&target_mult=`; read-only, no order): every stock the desk has armed or holds (its own `_tapes`,
+  else `_tape_for`, else one `fetch_frame` on the scans' session) on the bot's candle (`minutes` 0) or a picked size: its ATR,
+  the multiples in ₹ and %, and `breakeven_after` (₹ the price must go its way before the trailing stop reaches the entry,
+  ceil(stop / trail) steps); plus `percent`, one common % for all (the median, 0.05 % steps) with each stock's ₹ and its
+  stop in ATRs (`fit` tight < 1 ATR, wide > 3 ATR). Settings → 5, shared scope with stop type TSL:
+  `components/Settings/BasketStopCalculator.tsx` ("Use this % for all" fills `tsl_mode` PERCENT, "Use ATR multiples for
+  all" fills `tsl_mode` ATR; Save applies). **Trail tracker** (terminal live tab, `components/Terminal/TrailTracker.tsx`,
+  display only): every held stock's entry, last, best since entry (`books[].best`: `tsl_best`, else the trade's high /
+  low), stop, room to it, P&L if it filled now, the next trail price → new stop, target, and No stop / At risk / No loss
+  / Profit locked.
 - `backend/pivots.py` – classic daily pivot points (display + optional target, PAPER and LIVE): from the previous
   session's high / low / close in the stock's 1-minute tape (`_tapes`, else `_frames`; the earlier days the SMAs warm up
   on), P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L) (`levels`, cached per stock and
@@ -2313,6 +2324,36 @@ cancels the stop just before it sells) and then closes at the market as `STOP_LO
 the trade is booked as `SOLD_ON_GROWW` at Groww's real price and no order is sent. Exits Groww made are booked at
 Groww's price (`_real_exit_price`: the stop's own fill, else `GrowwClient.closed_price`, the day's average closing
 price from the positions book, read-only), never at the stop trigger unless Groww gives no price.
+
+**LIVE exit safety** (audit of Nov 2026; `tests/test_live_exit_safety.py`):
+- **One focus per task**: `_focus` / `ltp` are per task (`_own_view`, a context variable keyed by engine). `tick` keeps
+  the shared copy the screens read; `direct_order`, `force_order`, `close_symbol`, `reverse_position`, `kill` and
+  `answer_review` work on their own, so a news / hand-off / Force order running while the pass waits on Groww can no
+  longer move the pass onto its stock.
+- **Every bot exit cancels the exchange stop first** (`_exit_now`: every reason but `_STOP_FILLS`, the stop's own
+  fills, `SOLD_ON_GROWW` and `STOP_LOST`). `_cancel_sl_verified` raises `SlAlreadyFilled` when the stop filled (booked
+  at Groww's price as the stop, `_stop_reason`); a cancel not confirmed sends no exit, keeps the stop and sets
+  `pending_exit`, and the exit goes when Groww reports the stop cancelled.
+- **A failed exit after the stop was cancelled** (`_close_position` wrapper): `_reprotect` places the stop again at
+  `sl_trigger` for the shares Groww holds (only a stop the bot itself took away, `stop_cancelled`; never next to a
+  restored stop of unknown id). If that fails, `_mark_naked` (critical alert with a call) and `_mind_naked` every
+  `NAKED_RETRY_SEC` (5 s): Groww flat → booked at Groww's price; price through the stop → `STOP_LOST`; else try again.
+  An exit whose answer was lost (`ExitUnknown`) is not followed by a new stop at once.
+- **Stop id kept**: `trade_log.sl_order_id` (LIVE only, `_save_stop_id`), restored by `restore_open_books`.
+- **Triggered but unfilled stop** (`_stop_slipped`): price past the stop's limit (trigger ∓ `market_protection_pct`) for
+  `STOP_SLIP_SEC` (5 s) → cancel (checked) and `STOP_LOST`.
+- **Not RUNNING but holding** (paused, halted by a cap, after a square-off that left a position): `tick` →
+  `_guard_held` keeps the trailing stops, stops and targets working (`_managing`), retries a square-off that left a
+  position (`_squareoff_due`) and squares off LIVE at the square-off time; `_live_eod_square_off` does the LIVE
+  square-off on every pass of a RUNNING bot. One held stock's error no longer stops the others (`_mind_held`,
+  `_held_error`; `_square_off_one` catches per stock).
+- The 15-second "not on Groww" sweep leaves positions with a stop id to `_watch_stop`; the flat-book fallback for an
+  unanswered stop status reads Groww at most every `FLAT_CHECK_SEC` (10 s) and cancels the stop it finds orphaned.
+- `_open` refuses when the order client is LIVE but the pass's settings say PAPER (a switch mid-pass); `/api/mode`
+  refuses while an order is in flight and, switching to LIVE, drops waits armed in PAPER and holds for the next cross.
+- No new entry before `OPENING_BUFFER_END` (09:20) by any path (cross, Force, news / hand-off orders, Reverse).
+- Order-side Groww SDK calls carry `timeout=_ORDER_TIMEOUT_SEC` (8 s; positions 4 s); net quantity and closing price
+  read only MIS rows (`_intraday_row`).
 
 The US practice desk (`app/services/us_desk.py`) has no order path at all: its fills are local rows.
 
