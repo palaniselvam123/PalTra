@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { SettingsCard } from "@/components/Settings/SettingsCard";
@@ -242,7 +243,7 @@ export function FastMoverBot() {
             <input type="checkbox" checked={Boolean(form.flip)} onChange={(e) => set("flip", e.target.checked)} className="accent-[#F59E0B]" />
             <span>
               <span className="font-semibold text-amber-300">Flip</span>: Bot 5 takes the opposite side (a fast-rising long is sold, a
-              fast-falling short is bought)
+              fast-falling short is bought) <NewTag id="set-bot5-flip" />
             </span>
           </label>
           <label

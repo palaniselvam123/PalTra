@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import clsx from "clsx";
 import { CandlestickChart, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -81,7 +82,7 @@ export function FirstCandleControls({
         title="Read today's first candles of the stocks the filters show now (up to 200). Read-only."
         className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 font-semibold text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-white/5 disabled:opacity-50"
       >
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <CandlestickChart size={13} />} Read first candles
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <CandlestickChart size={13} />} Read first candles <NewTag id="ma-first-candles" link={false} />
       </button>
       <label className="flex items-center gap-1">
         up to candle

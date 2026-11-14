@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { BellRing } from "lucide-react";
@@ -296,6 +297,7 @@ function ArmRow({
           <input type="checkbox" checked={on} disabled={busy} onChange={(e) => onChange(e.target.checked, bot)} className="accent-[#38BDF8]" />
           Also arm them on
         </label>
+        <NewTag id="tq-auto-arm" />
         <select
           value={bot}
           disabled={busy}

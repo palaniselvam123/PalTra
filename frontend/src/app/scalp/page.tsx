@@ -35,6 +35,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { GuideBar } from "@/components/Scalp/GuideBar";
+import { NewCountChip } from "@/components/ui/NewTag";
 import { ScalpAlertsCard } from "@/components/Scalp/ScalpAlertsCard";
 
 /** 1 to 30 trading days, one at a time. */
@@ -1121,6 +1122,7 @@ function ScalpTabs({ tab, onTab, times }: { tab: TabId; onTab: (t: TabId) => voi
                     )}
                   >
                     {t.label}
+                    <NewCountChip match={(href) => href.startsWith("/scalp") && href.endsWith(`#${t.id}`)} />
                     {st?.running ? (
                       <span className={clsx("inline-flex items-center gap-1 text-[11px] font-normal", on ? "opacity-80" : "text-accentSky")}>
                         <Loader2 size={11} className="animate-spin" aria-hidden /> scanning

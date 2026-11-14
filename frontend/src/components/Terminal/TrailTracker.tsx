@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import clsx from "clsx";
 import { inr, px, type SmaState } from "@/lib/smaApi";
 import { SideBadge, pnlTone } from "./ui";
@@ -70,7 +71,7 @@ export function TrailTracker({ state }: { state: SmaState | null }) {
     <section aria-label="Trail tracker" className="rounded-xl border border-white/10 bg-[#151921] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Trail tracker · {held.length} held
+          Trail tracker <NewTag id="term-trail-tracker" /> · {held.length} held
           {held.length
             ? ` · ${counts.LOCKED ?? 0} profit locked · ${counts.BREAKEVEN ?? 0} no loss · ${(counts.AT_RISK ?? 0) + (counts.NO_STOP ?? 0)} at risk`
             : ""}

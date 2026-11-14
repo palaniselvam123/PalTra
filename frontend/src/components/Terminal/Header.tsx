@@ -14,7 +14,7 @@ import { useTitle } from "@/lib/useTitle";
 import clsx from "clsx";
 import { inr, smaApi, px, type BotSummary, type Desk, type ReplayInfo, type SmaConfig, type SmaState, type StockRegime } from "@/lib/smaApi";
 import { StatusBar } from "./StatusBar";
-import { NAV } from "@/components/Navbar";
+import { NAV, WhatsNewCount } from "@/components/Navbar";
 import { serverBadge } from "@/components/ServerAccent";
 import { useServerRole } from "@/hooks/useServerRole";
 import { Skeleton } from "./ui";
@@ -772,6 +772,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
             >
               <Icon size={14} aria-hidden className="hidden sm:block" />
               {label}
+              <WhatsNewCount href={href} />
             </a>
           );
         })}

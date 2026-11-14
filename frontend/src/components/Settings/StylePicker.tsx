@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Check, Eye, MessageCircle, Sparkles } from "lucide-react";
@@ -192,7 +193,9 @@ export function StylePicker({
   return (
     <div id="sma-styles" className="mt-4 scroll-mt-24 rounded-lg border border-violet-400/30 bg-violet-400/[0.05] p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-slate-100">What do you want to trade with?</h3>
+        <h3 className="text-sm font-semibold text-slate-100">
+          What do you want to trade with? <NewTag id="set-style-picker" />
+        </h3>
         <span className="text-xs text-slate-400">Tick one or more. The form below shows only what they need. Nothing is changed or saved by ticking.</span>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Ways of trading">
@@ -345,7 +348,7 @@ export function SidewaysGuard({ form, onFill }: { form: SmaConfig; onFill: (valu
   return (
     <details id="sma-sideways" className="group/sw mt-3 scroll-mt-24 rounded-lg border border-amber-400/30 bg-amber-400/[0.04]">
       <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
-        Losing money in sideways markets? A starting set-up
+        Losing money in sideways markets? A starting set-up <NewTag id="set-sideways" link={false} />
         <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", coreDone === core.length ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300")}>
           {coreDone} of {core.length} on
         </span>
@@ -454,7 +457,7 @@ export function FreshSetup({ form, onFill }: { form: SmaConfig; onFill: (values:
   return (
     <details id="sma-fresh-setup" className="group/fr mt-3 scroll-mt-24 rounded-lg border border-sky-400/30 bg-sky-400/[0.04]">
       <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-100 hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
-        Test the &quot;Fresh trend&quot; strategy: a one-click set-up
+        Test the &quot;Fresh trend&quot; strategy: a one-click set-up <NewTag id="set-fresh" link={false} />
         <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", done === steps.length ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300")}>
           {done} of {steps.length} set
         </span>
