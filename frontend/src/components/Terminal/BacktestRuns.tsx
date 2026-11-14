@@ -259,6 +259,8 @@ function runMatches(run: ReplayRun, f: RunFilters): boolean {
 
 // The runs list asks for the newest RUNS_PAGE runs, then RUNS_PAGE more per "Show older runs" (server cap 500).
 const RUNS_PAGE = 50;
+/** Runs one comparison takes (backend backtest_compare.MAX_RUNS: one colour each). */
+const COMPARE_MAX = 8;
 const RUNS_MAX = 500;
 
 /** The Bollinger exit in a few words, or "" when it was off. */
@@ -452,6 +454,10 @@ export function BacktestRuns() {
   const [printing, setPrinting] = useState<number | null>(null);
   const [filters, setFilters] = useState<RunFilters>(NO_FILTERS);
   const [starting, setStarting] = useState<number | null>(null);
+  // Runs ticked for Compare, in the order ticked: the first is the base of the comparison.
+  const [picked, setPicked] = useState<number[]>([]);
+  const togglePick = (id: number) =>
+    setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= COMPARE_MAX ? cur : [...cur, id]));
 
   /** Replay the same stocks and days again on the run's bot, with that bot's settings as they are now. */
   const runAgain = (run: ReplayRun) => {
@@ -620,6 +626,38 @@ export function BacktestRuns() {
       ) : (
         <>
         <RunFilterBar filters={filters} onChange={setFilters} shown={shownRuns.length} total={runs.length} />
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-2 text-xs">
+          {picked.length ? (
+            <>
+              <span className="text-slate-300">
+                {picked.length} run{picked.length === 1 ? "" : "s"} ticked: {picked.map((id) => `#${id}`).join(", ")}
+                {picked.length >= 2 ? ` (base #${picked[0]}, the first you ticked)` : ". Tick at least one more."}
+              </span>
+              {picked.length >= 2 ? (
+                <a
+                  href={`/terminal/compare/?runs=${picked.join(",")}`}
+                  target="_blank"
+                  rel="noopener"
+                  className="inline-flex min-h-9 items-center gap-1 rounded-md bg-accentSky px-3 font-semibold text-on-accent hover:opacity-90"
+                  title="Opens a new page: which strategy did best, on which stocks and which days"
+                >
+                  Compare {picked.length} runs
+                </a>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setPicked([])}
+                className="min-h-9 rounded-md border border-white/10 px-2 text-slate-300 hover:bg-white/5"
+              >
+                Clear ticks
+              </button>
+            </>
+          ) : (
+            <span className="text-slate-400">
+              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.
+            </span>
+          )}
+        </div>
         {filtering && shownRuns.length === 0 ? (
           <p className="px-4 py-4 text-sm text-slate-400">No runs match these filters.</p>
         ) : null}
@@ -655,6 +693,20 @@ export function BacktestRuns() {
 {inOrder(runCols.order, {
 run: <td className="px-2 py-2 align-top">
                         <div className="flex items-center gap-1.5 font-semibold text-slate-100">
+                          <input
+                            type="checkbox"
+                            aria-label={`Tick run ${run.id} to compare`}
+                            checked={picked.includes(run.id)}
+                            disabled={!picked.includes(run.id) && picked.length >= COMPARE_MAX}
+                            title={
+                              !picked.includes(run.id) && picked.length >= COMPARE_MAX
+                                ? `Up to ${COMPARE_MAX} runs in one comparison`
+                                : "Tick to compare (the first ticked is the base)"
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => togglePick(run.id)}
+                            className="h-4 w-4 accent-sky-500"
+                          />
                           #{run.id}
                           {best?.id === run.id && runs.length > 1 ? <Badge color="green">Best net</Badge> : null}
                           {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}

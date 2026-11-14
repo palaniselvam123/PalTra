@@ -40,6 +40,7 @@ import trend_rank
 import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
+import backtest_compare
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
@@ -3259,6 +3260,20 @@ async def replay_resume(body: ReplayResume, bot: int = 1):
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     return session.info()
+
+
+@app.get("/api/replay/compare")
+async def replay_compare(runs: str, base: int | None = None, basis: Literal["gross", "net"] = "gross"):
+    """Compare 2-8 backtest runs (backtest_compare.py): on the days and stocks they all played, which run is best and
+    how sure, by stock, by day, by exit reason, and the settings each run changed against the base. Read-only."""
+    try:
+        ids = [int(x) for x in runs.replace(" ", "").split(",") if x]
+    except ValueError as exc:
+        raise HTTPException(400, "runs must be run numbers separated by commas, e.g. 12,15,18") from exc
+    try:
+        return await asyncio.to_thread(backtest_compare.compare, ids, base, basis)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/replay/runs")

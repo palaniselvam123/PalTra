@@ -24,13 +24,13 @@ export const C = {
 export const money = (v: number | null | undefined) =>
   v == null || !Number.isFinite(v) ? "—" : `${v < 0 ? "−" : v > 0 ? "+" : ""}₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
-const short = (v: number) => {
+export const short = (v: number) => {
   const a = Math.abs(v);
   const s = a >= 1e5 ? `${(a / 1e5).toFixed(1)}L` : a >= 1e3 ? `${(a / 1e3).toFixed(1)}k` : a.toFixed(0);
   return `${v < 0 ? "−" : ""}${s}`;
 };
 
-function useWidth<T extends HTMLElement>() {
+export function useWidth<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [w, setW] = useState(320);
   useEffect(() => {
@@ -43,8 +43,8 @@ function useWidth<T extends HTMLElement>() {
   return [ref, w] as const;
 }
 
-/** "Nice" round ticks covering lo..hi, always including 0. */
-function ticks(lo: number, hi: number, n = 5): number[] {
+/** "Nice" round ticks covering lo..hi (the last one at or above hi), always including 0. */
+export function ticks(lo: number, hi: number, n = 5): number[] {
   const a = Math.min(lo, 0);
   const b = Math.max(hi, 0, a + 1);
   const span = b - a || 1;
@@ -52,7 +52,11 @@ function ticks(lo: number, hi: number, n = 5): number[] {
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => span / s <= n) ?? mag * 10;
   const out: number[] = [];
-  for (let v = Math.floor(a / step) * step; v <= b + step * 0.001; v += step) out.push(Math.round(v * 100) / 100);
+  // Up to the first tick at or above the highest value, so the top of a line is never cut off.
+  for (let v = Math.floor(a / step) * step; ; v += step) {
+    out.push(Math.round(v * 100) / 100);
+    if (v >= b - step * 0.001) break;
+  }
   return out;
 }
 
@@ -60,7 +64,7 @@ const PAD = { l: 52, r: 14, t: 12, b: 26 };
 
 export type Series = { name: string; color: string; values: number[]; width?: number; dash?: string; faint?: boolean };
 
-function Tip({ x, w, children }: { x: number; w: number; children: ReactNode }) {
+export function Tip({ x, w, children }: { x: number; w: number; children: ReactNode }) {
   const left = x > w * 0.6;
   return (
     <div
