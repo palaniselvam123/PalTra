@@ -55,7 +55,7 @@ def test_strong_trend_needs_enough_checks_and_sends_once_a_day():
     scalp_alerts.save({"strong_min_checks": 6})
     picks = asyncio.run(scalp_alerts.after_trend_scan({"rows": rows}, send, NOW))
     assert [(p["symbol"], p["side"], p["passed"]) for p in picks] == [("TCS", "DOWN", 6)]
-    assert "TCS ▼ DOWN" in sent[1] and "missed: no recent cross" in sent[1]
+    assert "TCS ▼ DOWN" in sent[1] and "missed: a steady run, not one candle" in sent[1]
 
 
 def test_strong_trend_side_filter():

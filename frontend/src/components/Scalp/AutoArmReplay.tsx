@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
@@ -33,6 +34,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [last, setLast] = useState("14:30");
   const [every, setEvery] = useState(5);
   const [minutes, setMinutes] = useState(5);
+  const [candles, setCandles] = useState<"NORMAL" | "HA">("NORMAL");
   const [bot, setBot] = useState(1);
   const [speed, setSpeed] = useState(300);
   const [handoffs, setHandoffs] = useState(true);
@@ -69,6 +71,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
         last,
         every_min: every,
         minutes,
+        candles,
         bot,
         speed,
         play_handoffs: handoffs,
@@ -179,6 +182,15 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
                     {m} min
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span>
+                candles <NewTag id="tq-backtest-ha" />
+              </span>
+              <select value={candles} onChange={(e) => setCandles(e.target.value as "NORMAL" | "HA")} className={select}>
+                <option value="NORMAL">Normal</option>
+                <option value="HA">Heikin Ashi</option>
               </select>
             </label>
           </>

@@ -23,13 +23,26 @@ so the first 15–60 minutes are not read against yesterday's closes:
 
 Morning labels show at least STRONG_MORNING_MIN of the seven: `Strong`.
 
-**Midday mode (10:00 onwards).** The mature 12-candle rules:
+**Midday mode (10:00 onwards).** Only today's candles, and only the current run: the candles since the SMAs took
+this side today (at least RUN_MIN, at most LOOKBACK). Yesterday's trend is not today's, and a trend is judged from
+where it began, not on a fixed hour of candles (the old 12-candle window called a trend an hour after it began,
+three hours on 15-minute candles, and kept the label after the price had stopped):
 
-    stack, vwap, slope, fan, hold, structure, run   as described below
+    stack      price beyond the fast SMA, fast beyond the slow SMA
+    vwap       price and the fast SMA on the trend side of today's VWAP
+    slope      both SMAs moved with the trend over SLOPE_BARS candles
+    fan        |SMA gap| at least FAN_MIN_PCT % and not narrowed by a third
+    hold       at least HOLD_MIN_SHARE of the run's closes beyond the fast SMA
+    structure  higher highs and lows (lower for bearish) across the run's two halves, and a new high (low)
+               within the last LIVE_BARS candles: the move is still going
+    run        the SMAs on this side for RUN_MIN+ candles today, the last EFFICIENCY_BARS closes at least
+               MIN_EFFICIENCY straight, and no single candle making more than ONE_CANDLE_SHARE of the move
 
-`stack`, `vwap` and `slope` are required in midday; the label is given when those
-pass and at least STRONG_MIN_PASSED of the seven pass. `score` is the share of the
-seven checks that passed (0-100). Nothing in the strategy reads it.
+`stack`, `vwap`, `slope` and `run` are required in midday; the label is given when those pass and at least
+STRONG_MIN_PASSED of the seven pass. No label before MIN_TODAY closed candles today (MORNING_MIN_TODAY before 10:00,
+where `stack`, `slope` (with a new high / low in the last LIVE_BARS candles) and `run` (not one candle) are required).
+`score` is the share of the seven checks that passed (0-100). The bots' strong-trend hand-off (`breakout.strong`)
+reads these checks; nothing else in the strategy does.
 """
 from __future__ import annotations
 
@@ -50,18 +63,26 @@ MIDDAY = "MIDDAY"
 MORNING = "MORNING"
 
 # Midday (the mature rules)
-LOOKBACK = 12  # closed candles judged for hold / structure / run
+LOOKBACK = 12  # at most this many closed candles of the current run are judged for hold / structure / run
+MIN_TODAY = 4  # closed candles needed today before any label: one or two candles are never a trend
+MORNING_MIN_TODAY = 3  # before 10:00 (09:30 on 5-minute candles): the first three candles, each checked
+RUN_MIN = 4  # the SMAs must have been on the trend's side for this many closed candles today
+LIVE_BARS = 3  # a new high (low for a downtrend) within this many candles = the move is still going
+ONE_CANDLE_SHARE = 0.6  # one candle making more than this share of the whole move = a spike, not a trend
+EFFICIENCY_BARS = 6  # the last candles the straight-line share is read on (trend_phases' window)
+MIN_EFFICIENCY = 0.5  # |net move| / path walked: under this the candles went back and forth
 SLOPE_BARS = 3
 FAN_MIN_PCT = 0.10
 HOLD_MIN_SHARE = 0.75
 STRONG_MIN_PASSED = 6
-REQUIRED = ("stack", "vwap", "slope")
+REQUIRED = ("stack", "vwap", "slope", "run")
 CHECKS = ("stack", "vwap", "slope", "fan", "hold", "structure", "run")
 
 # Morning
 MORNING_FAN_MIN_PCT = 0.10
 MORNING_HOLD_ALL_UNTIL = 3  # candles: 09:15, 09:20, 09:25 (all must close on the trend side by 09:30)
 STRONG_MORNING_MIN = 5  # 5 of 7 is "Strong" before 10:00
+MORNING_REQUIRED = ("stack", "slope", "run")
 VOLUME_MIN_RVOL = 1.5
 VOLUME_LOOKBACK_SESSIONS = 10
 VOLUME_MIN_SESSIONS = 2
@@ -69,13 +90,57 @@ MORNING_CHECKS = ("stack", "vwap", "slope", "fan", "hold", "run", "volume")
 
 NOTES_MIDDAY = {
     "stack": "Price, fast SMA and slow SMA stacked one way",
-    "vwap": "Price and slow SMA on the trend side of VWAP",
+    "vwap": "Price and fast SMA on the trend side of VWAP",
     "slope": "Both SMAs moved with the trend over 3 candles",
     "fan": "SMA gap at least 0.10% and not narrowed by a third",
-    "hold": "Most of the last 12 closes on the trend side of the fast SMA",
-    "structure": "Lower highs and lower lows (higher for bullish) over the last 12 candles",
-    "run": "No SMA cross in the last 12 candles",
+    "hold": "Most closes of this run on the trend side of the fast SMA",
+    "structure": "Higher highs and lows (lower for bearish) in this run, the newest within the last 3 candles",
+    "run": "At least 4 candles old today, a steady move, not one big candle",
 }
+
+
+def _today_part(closed: pd.DataFrame, day: dt.date | None = None) -> pd.DataFrame:
+    """The candles of `day` (default: the last candle's IST day). A frame without `ts` is taken whole."""
+    if "ts" not in closed.columns or len(closed) == 0:
+        return closed
+    if day is None:
+        day = _ist_date(closed["ts"].iloc[-1])
+    return closed[[_ist_date(ts) == day for ts in closed["ts"]]]
+
+
+def _run_len(part: pd.DataFrame, sign: int) -> int:
+    """How many candles at the end of `part` have the fast SMA on the trend's side of the slow one."""
+    count = 0
+    for f, s in zip(reversed(list(part["sma_9"])), reversed(list(part["sma_21"]))):
+        f, s = _f(f), _f(s)
+        if f is None or s is None or (f - s) * sign <= 0:
+            break
+        count += 1
+    return count
+
+
+def _move_read(win: pd.DataFrame, sign: int) -> dict:
+    """Is the move in `win` a steady one that is still going? All on closed candles, signed the trend's way.
+
+    live       a new high (low) within the last LIVE_BARS candles
+    spike      one candle made more than ONE_CANDLE_SHARE of the whole move
+    efficiency |net| / path over the last EFFICIENCY_BARS closes (1 = a straight line)
+    net        the move from the window's first open to its last close, the trend's way
+    """
+    n = len(win)
+    opens = [_f(v) for v in win["open"]]
+    closes = [_f(v) for v in win["close"]]
+    if n == 0 or any(v is None for v in opens + closes):
+        return {"live": False, "spike": True, "efficiency": 0.0, "net": 0.0}
+    net = (closes[-1] - opens[0]) * sign
+    biggest = max((c - o) * sign for o, c in zip(opens, closes))
+    edge = win["high"] if sign > 0 else win["low"]
+    tail = edge.iloc[-min(LIVE_BARS, n):]
+    live = bool(tail.max() >= edge.max()) if sign > 0 else bool(tail.min() <= edge.min())
+    last = closes[-(EFFICIENCY_BARS + 1):]
+    path = sum(abs(b - a) for a, b in zip(last, last[1:]))
+    eff = abs(last[-1] - last[0]) / path if path > 0 else 0.0
+    return {"live": live, "spike": net <= 0 or biggest > net * ONE_CANDLE_SHARE, "efficiency": eff, "net": net}
 
 
 def _f(value) -> float | None:
@@ -137,6 +202,10 @@ def _morning(closed: pd.DataFrame, vwap: float | None, now: dt.datetime, tape: p
     gap = sma_gap_pct(fast, slow) if fast is not None and slow is not None else None
     if close is None or gap is None or gap == 0:
         return {**empty, "vwap": round(vwap, 2) if vwap is not None else None}
+    if n < MORNING_MIN_TODAY:
+        return {**empty, "trend_side": "BULLISH" if gap > 0 else "BEARISH", "sma_gap_pct": round(gap, 4),
+                "vwap": round(vwap, 2) if vwap is not None else None,
+                "trend_notes": {"early": f"Too early: {n} of {MORNING_MIN_TODAY} closed candles today"}}
     up = gap > 0
     sign = 1 if up else -1
 
@@ -148,9 +217,11 @@ def _morning(closed: pd.DataFrame, vwap: float | None, now: dt.datetime, tape: p
     slows = [_f(v) for v in today["sma_21"]]
     # Fast SMA slope since the first candle today (or the last few if more candles than that).
     slope_ok = False
+    move = _move_read(today.iloc[-LOOKBACK:], sign)
     if n >= 2:
         base = fasts[max(0, n - 1 - SLOPE_BARS)]
-        slope_ok = beyond(fasts[-1], base)
+        # Still going: the fast SMA keeps rising for a while after the price has stopped, so a new high is asked too.
+        slope_ok = beyond(fasts[-1], base) and move["live"]
     # Closes on the trend side of the fast SMA, today only.
     side_closes = [beyond(c, f) for c, f in zip(closes, fasts)]
     share = sum(side_closes) / n
@@ -162,7 +233,7 @@ def _morning(closed: pd.DataFrame, vwap: float | None, now: dt.datetime, tape: p
         for i in range(1, n)
     )
     on_side_all_morning = all(d is not None and d * sign > 0 for d in diffs)
-    run_ok = crossed_today or on_side_all_morning
+    run_ok = (crossed_today or on_side_all_morning) and not move["spike"]
     # Volume since 09:15 against the same minutes on earlier sessions.
     rvol, days = _opening_rvol(tape, now)
     volume_ok = rvol is not None and rvol >= VOLUME_MIN_RVOL and days >= VOLUME_MIN_SESSIONS
@@ -181,20 +252,21 @@ def _morning(closed: pd.DataFrame, vwap: float | None, now: dt.datetime, tape: p
     notes = {
         "stack": "Price above fast SMA above slow SMA" if up else "Price below fast SMA below slow SMA",
         "vwap": f"Price and fast SMA {word} VWAP",
-        "slope": "Fast SMA moving with the trend since the open" if n >= 2 else "Needs 2 candles today",
+        "slope": "Fast SMA moving with the trend and a new " + ("high" if up else "low") + " in the last 3 candles",
         "fan": f"SMA gap at least {MORNING_FAN_MIN_PCT:g}% on the trend side",
         "hold": (
             f"{sum(side_closes)} of {n} closes on the trend side today"
             + (" (needs all of them until 09:30)" if n <= MORNING_HOLD_ALL_UNTIL else " (needs 75%)")
         ),
-        "run": "Fresh cross today is allowed" if crossed_today else "Lines on the trend side since the open",
+        "run": ("One candle made most of the move: a spike, not a trend" if move["spike"]
+                else "Fresh cross today is allowed" if crossed_today else "Lines on the trend side since the open"),
         "volume": (
             f"Volume {rvol:.1f}× the usual for this time (needs {VOLUME_MIN_RVOL:g}×, {days} earlier sessions)"
             if rvol is not None and days >= VOLUME_MIN_SESSIONS
             else "Volume: not enough earlier sessions to compare"
         ),
     }
-    strong = passed >= STRONG_MORNING_MIN
+    strong = all(checks[k] for k in MORNING_REQUIRED) and passed >= STRONG_MORNING_MIN
     return {
         "trend": (STRONG_BULLISH if up else STRONG_BEARISH) if strong else None,
         "trend_side": side,
@@ -316,13 +388,20 @@ def _midday(closed: pd.DataFrame, vwap: float | None) -> dict:
     back = closed.iloc[-1 - SLOPE_BARS]
     fast_then, slow_then = _f(back.get("sma_9")), _f(back.get("sma_21"))
     gap_then = sma_gap_pct(fast_then, slow_then) if fast_then is not None and slow_then is not None else None
-    recent = closed.iloc[-LOOKBACK:]
+    # Only today's candles, and only the current run (since the SMAs took this side): yesterday's trend is not
+    # today's, and a trend is judged from where it began, not on a fixed hour of candles.
+    today = _today_part(closed)
+    if len(today) < MIN_TODAY:
+        return {**empty, "trend_side": "BULLISH" if up else "BEARISH", "sma_gap_pct": round(gap, 4),
+                "vwap": round(vwap, 2) if vwap is not None else None,
+                "trend_notes": {"early": f"Too early: {len(today)} of {MIN_TODAY} closed candles today"}}
+    age = _run_len(today, sign)
+    recent = today.iloc[-min(LOOKBACK, max(age, RUN_MIN)):]
     side_closes = [
         beyond(_f(c), _f(f)) for c, f in zip(recent["close"], recent["sma_9"])
     ]
-    gaps = [sma_gap_pct(f, s) for f, s in zip(closed["sma_9"].iloc[-LOOKBACK - 1 :], closed["sma_21"].iloc[-LOOKBACK - 1 :])]
-    signs = [g > 0 for g in gaps if g is not None and g != 0]
-    half = LOOKBACK // 2
+    move = _move_read(recent, sign)
+    half = len(recent) // 2
     older, newer = recent.iloc[:half], recent.iloc[half:]
     if up:
         structure = newer["high"].max() > older["high"].max() and newer["low"].min() > older["low"].min()
@@ -330,13 +409,27 @@ def _midday(closed: pd.DataFrame, vwap: float | None) -> dict:
         structure = newer["high"].max() < older["high"].max() and newer["low"].min() < older["low"].min()
     checks = {
         "stack": beyond(close, fast) and beyond(fast, slow),
-        "vwap": vwap is not None and beyond(close, vwap) and beyond(slow, vwap),
+        "vwap": vwap is not None and beyond(close, vwap) and beyond(fast, vwap),
         "slope": beyond(fast, fast_then) and beyond(slow, slow_then),
         "fan": abs(gap) >= FAN_MIN_PCT and gap_then is not None and abs(gap) >= abs(gap_then) * 2 / 3,
         "hold": sum(side_closes) >= HOLD_MIN_SHARE * len(side_closes),
-        "structure": bool(structure),
-        "run": len(signs) >= LOOKBACK and all(s == up for s in signs),
+        "structure": bool(structure) and move["live"],
+        "run": age >= RUN_MIN and not move["spike"] and move["efficiency"] >= MIN_EFFICIENCY,
     }
+    word = "high" if up else "low"
+    notes = dict(NOTES_MIDDAY)
+    notes["hold"] = f"{sum(side_closes)} of the last {len(side_closes)} closes on the trend side of the fast SMA (needs 75%)"
+    notes["structure"] = (
+        f"{'Higher' if up else 'Lower'} highs and lows in this run"
+        + (f", a new {word} in the last {LIVE_BARS} candles" if move["live"] else f", but no new {word} in the last {LIVE_BARS} candles")
+    )
+    notes["run"] = (
+        f"Only {age} candle(s) on this side today (needs {RUN_MIN})" if age < RUN_MIN
+        else "One candle made most of the move: a spike, not a trend" if move["spike"]
+        else f"Back and forth: {move['efficiency'] * 100:.0f}% straight over the last {EFFICIENCY_BARS} candles (needs {MIN_EFFICIENCY * 100:.0f}%)"
+        if move["efficiency"] < MIN_EFFICIENCY
+        else f"{age} candles on this side today, a steady move"
+    )
     passed = sum(checks.values())
     strong = all(checks[k] for k in REQUIRED) and passed >= STRONG_MIN_PASSED
     side = "BULLISH" if up else "BEARISH"
@@ -346,7 +439,7 @@ def _midday(closed: pd.DataFrame, vwap: float | None) -> dict:
         "trend_score": round(passed / len(CHECKS) * 100),
         "trend_checks": checks,
         "trend_mode": MIDDAY,
-        "trend_notes": dict(NOTES_MIDDAY),
+        "trend_notes": notes,
         "sma_gap_pct": round(gap, 4),
         "vwap": round(vwap, 2) if vwap is not None else None,
         "rvol": None,

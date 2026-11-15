@@ -204,6 +204,8 @@ class AutoArmRule:
     minutes: int = 5
     sma_fast: int = 9
     sma_slow: int = 21
+    #: NORMAL = the real candles; HA = the Trend quality read on Heikin Ashi candles (chop_scan.ha_bars).
+    candles: str = "NORMAL"
     min_checks: int = 6
     side: str = "BOTH"
     pct: float = 70.0
@@ -227,17 +229,18 @@ class AutoArmRule:
         return {
             "kind": KIND, "source": self.source, "pick_time": self.first.strftime("%H:%M"),
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
-            "minutes": self.minutes, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
+            "minutes": self.minutes, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "max_day": self.max_day,
             "price_min": self.price_min, "price_max": self.price_max,
             "active_days": sorted(self.active_hits),
         }
 
 
-def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int) -> dict | None:
+def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int,
+                ha: bool = False) -> dict | None:
     """One stock's strong-trend read as the Trend quality card had it at `at` (candles closed before it)."""
     import trend_strength
-    from chop_scan import _vwap_today, closed_bars
+    from chop_scan import _vwap_today, closed_bars, ha_bars
     from indicators import enrich
 
     cut = int(dt.datetime.combine(day, at, tzinfo=IST).timestamp())
@@ -251,6 +254,8 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
     bars = closed_bars(part, minutes, now)
     if len(bars) < max(int(slow), 2) + 1:
         return None
+    if ha:  # as the Trend quality card reads them: SMAs and checks on Heikin Ashi candles, VWAP on the real prices
+        bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
     return trend_strength.read(enriched, _vwap_today(part, now), now=now, tape=part)
 
@@ -305,7 +310,7 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                 if symbol in found or any(e[1] == symbol and e[0] <= at for e in events):
                     continue
                 try:
-                    read = strong_read(frame, day, t, rule.minutes, rule.sma_fast, rule.sma_slow)
+                    read = strong_read(frame, day, t, rule.minutes, rule.sma_fast, rule.sma_slow, ha=rule.candles == "HA")
                 except Exception:  # noqa: BLE001 - one bad tape never stops the day
                     log.exception("auto-arm trend read failed for %s", symbol)
                     continue

@@ -2626,6 +2626,8 @@ class TrendPickStart(BaseModel):
     top_n: int = Field(default=10, ge=1, le=trend_picks.MAX_TOP_N)
     direction: Literal["BULLISH", "BEARISH", "BOTH"] = "BOTH"
     minutes: Literal[1, 3, 5, 10, 15] = 5
+    #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
+    candles: Literal["NORMAL", "HA"] = "NORMAL"
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     #: Play Bot 1's hand-offs inside the run on Bot 2's / Bot 3's settings (handoff_chain.py), like the replay bar.
@@ -2635,6 +2637,7 @@ class TrendPickStart(BaseModel):
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
     minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
+    candles: str = "NORMAL",
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2667,7 +2670,7 @@ async def _start_trend_picks(
     else:
         rule = trend_picks.TrendPickRule(
             pick_time=pick_time, top_n=top_n, direction=direction, minutes=minutes,
-            sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow),
+            sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=candles,
         )
     session = replays[bot]
     await session.begin(
@@ -2708,7 +2711,7 @@ async def replay_trend_picks(body: TrendPickStart):
         raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
-        play_handoffs=body.play_handoffs,
+        play_handoffs=body.play_handoffs, candles=body.candles,
     )
 
 
@@ -2722,6 +2725,8 @@ class AutoArmStart(BaseModel):
     last: str = "14:30"
     every_min: Literal[1, 2, 3, 5, 10, 15, 30] = 5
     minutes: Literal[1, 3, 5, 10, 15] = 5
+    #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
+    candles: Literal["NORMAL", "HA"] = "NORMAL"
     #: None = the Scalp alerts' own thresholds (scalp_alerts.json), as the live auto-arm reads them.
     min_checks: int | None = Field(default=None, ge=5, le=7)
     side: Literal["BOTH", "UP", "DOWN"] | None = None
@@ -2783,7 +2788,7 @@ async def replay_auto_arm(body: AutoArmStart):
     cfg = eng.load_config()
     rule = auto_arm.AutoArmRule(
         source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes,
-        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow),
+        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=body.candles,
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
@@ -2862,6 +2867,7 @@ class TrendPicksAuto(BaseModel):
     direction: Literal["BULLISH", "BEARISH", "BOTH"] | None = None
     top_n: int | None = Field(default=None, ge=1, le=trend_picks.MAX_TOP_N)
     minutes: Literal[1, 3, 5, 10, 15] | None = None
+    candles: Literal["NORMAL", "HA"] | None = None
     bot: int | None = Field(default=None, ge=1, le=4)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = Field(default=None, max_length=5)
     play_handoffs: bool | None = None
@@ -2895,7 +2901,7 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         h, m = s.pick_time.split(":")
         await _start_trend_picks(
             s.bot, names, day, day, dt.time(int(h), int(m)), s.top_n, s.direction, s.minutes, max(SPEEDS),
-            play_handoffs=s.play_handoffs,
+            play_handoffs=s.play_handoffs, candles=s.candles,
         )
     except HTTPException as exc:
         return None, f"not started: {exc.detail}"
@@ -2914,6 +2920,8 @@ class TrendCompareStart(BaseModel):
     top_n: int = Field(default=10, ge=1, le=trend_picks.MAX_TOP_N)
     direction: Literal["BULLISH", "BEARISH", "BOTH"] = "BOTH"
     minutes: Literal[1, 3, 5, 10, 15] = 5
+    #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
+    candles: Literal["NORMAL", "HA"] = "NORMAL"
     bot: int = Field(default=1, ge=1, le=4)
     lists: list[str] = Field(default_factory=list, max_length=5)
     play_handoffs: bool = True
@@ -2959,6 +2967,7 @@ async def trend_compare_start(body: TrendCompareStart):
         lists=body.lists,
     )
     item["play_handoffs"] = body.play_handoffs
+    item["candles"] = body.candles
     active = (
         {"rank": body.rank, "bias": body.bias, "min_value_cr": body.min_value_cr} if body.source == "ACTIVE" else None
     )
@@ -2972,7 +2981,7 @@ async def trend_compare_start(body: TrendCompareStart):
         h, m = at.split(":")
         await _start_trend_picks(
             body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
-            max(SPEEDS), play_handoffs=body.play_handoffs, active=active,
+            max(SPEEDS), play_handoffs=body.play_handoffs, active=active, candles=body.candles,
         )
         # The run id is known once the candles are in; wait for it (or for the load to fail).
         while session.run_id is None and session.status == "LOADING":

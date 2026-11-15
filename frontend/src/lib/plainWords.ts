@@ -82,7 +82,7 @@ export const PLAIN_WORDS: Record<string, PlainWord> = {
   strong_trend: {
     term: "Strong trend (the 7 checks)",
     means:
-      "A stock passes most of seven simple checks: price above both averages (for an up trend), above the day's average price (VWAP), both averages rising, the gap wide enough, most recent closes on the right side, higher highs and lows, and no cross for a while. 6 of 7 is a strong trend.",
+      "A stock passes most of seven simple checks: price above both averages (for an up trend), above the day's average price (VWAP), both averages rising, the gap wide enough, most closes of today's run on the right side, higher highs and lows that are still being made, and a steady run of at least 4 candles that is not one big candle. 6 of 7 is a strong trend. Only today's candles count.",
     why: "It is a stricter test than \"the lines have crossed\": it picks the stocks that are moving cleanly, not just the ones that twitched.",
   },
   fresh_trend: {

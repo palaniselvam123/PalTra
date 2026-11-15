@@ -45,6 +45,8 @@ class TrendPickRule:
     minutes: int = 5
     sma_fast: int = 9
     sma_slow: int = 21
+    #: NORMAL = the real candles; HA = Heikin Ashi candles (the Trend quality card's "Candles" menu, chop_scan.ha_bars).
+    candles: str = "NORMAL"
     kind: str = KIND
 
     def as_dict(self) -> dict:
@@ -56,6 +58,7 @@ class TrendPickRule:
             "minutes": self.minutes,
             "sma_fast": self.sma_fast,
             "sma_slow": self.sma_slow,
+            "candles": self.candles,
         }
 
 
@@ -76,7 +79,7 @@ def read_at(frame: pd.DataFrame, day: dt.date, rule: TrendPickRule, symbol: str 
     if last_day != day:
         return None
     now = dt.datetime.combine(day, rule.pick_time, tzinfo=IST)
-    row = analyze(part, rule.sma_fast, rule.sma_slow, rule.minutes, now, symbol=symbol)
+    row = analyze(part, rule.sma_fast, rule.sma_slow, rule.minutes, now, symbol=symbol, ha=rule.candles == "HA")
     return None if row is None else row.as_dict()
 
 
@@ -133,6 +136,7 @@ class AutoSettings:
     direction: str = "BOTH"
     top_n: int = 10
     minutes: int = 5
+    candles: str = "NORMAL"  # NORMAL | HA (Heikin Ashi)
     bot: int = 1
     lists: list = field(default_factory=lambda: ["fno"])
     #: Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (handoff_chain.py), like the replay bar.
@@ -182,6 +186,7 @@ def load() -> AutoSettings:
     s.direction = s.direction if s.direction in DIRECTIONS else "BOTH"
     s.top_n = max(1, min(MAX_TOP_N, int(s.top_n or 10)))
     s.minutes = int(s.minutes) if int(s.minutes or 0) in SIZES else 5
+    s.candles = "HA" if str(s.candles).upper() == "HA" else "NORMAL"
     s.bot = max(1, min(4, int(s.bot or 1)))
     s.lists = [str(x) for x in (s.lists or ["fno"])] or ["fno"]
     s.on = bool(s.on)

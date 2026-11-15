@@ -3295,8 +3295,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Where it goes: a stock this bot got from another bot through a hand-off goes back to the bot it came from
               (usually Bot 1); any other stock goes to Bot 3. What counts: one tall candle (below), or a strong trend: the same 7
               checks as the Scalp page&apos;s &quot;Strong trend&quot; on this bot&apos;s own candles (price beyond SMA 9 beyond SMA 21,
-              beyond VWAP, both SMAs sloping, the gap widening, most of the last 12 closes beyond SMA 9, higher highs and lows,
-              no cross in 12 candles). An open trade against it: by default it is not cut; it runs to its own stop, target or
+              beyond VWAP, both SMAs sloping, the gap widening, most closes of today's run beyond SMA 9, higher highs and lows
+              with a new one in the last 3 candles, a steady run of 4+ candles that is not one big candle). An open trade against it: by default it is not cut; it runs to its own stop, target or
               exit, and the stock moves once it is flat. Tick &quot;Close the trade at once&quot; for the old way.{" "}
               For the chop bot (Bot 2). A hand-off does not tick it: a stock moved to Bot 2 follows Bot 2&apos;s own setting here
               (all stocks, or that stock&apos;s own). On each closed candle, a
@@ -4584,12 +4584,12 @@ function ReviewConditions({
  * the counted ones must pass. Saved as "stack:must,vwap:use,…" plus a number. */
 const TREND_CHECKS: { key: string; name: string; what: string }[] = [
   { key: "stack", name: "Lines in order", what: "Price beyond SMA 9, SMA 9 beyond SMA 21" },
-  { key: "vwap", name: "Beyond VWAP", what: "Price and SMA 21 on the trend side of VWAP" },
+  { key: "vwap", name: "Beyond VWAP", what: "Price and SMA 9 on the trend side of VWAP" },
   { key: "slope", name: "Both SMAs sloping", what: "SMA 9 and SMA 21 moved the trend's way over 3 candles" },
   { key: "fan", name: "Gap widening", what: "SMA gap at least 0.10 % and not shrinking by a third" },
-  { key: "hold", name: "Holding above SMA 9", what: "At least 75 % of the last 12 closes beyond SMA 9" },
-  { key: "structure", name: "Higher highs / lows", what: "Higher highs and lows (lower for a downtrend), last 12 candles" },
-  { key: "run", name: "No cross lately", what: "No SMA 9 / 21 cross in the last 12 candles" },
+  { key: "hold", name: "Holding above SMA 9", what: "At least 75 % of this run's closes today (up to 12) beyond SMA 9" },
+  { key: "structure", name: "Higher highs / lows", what: "Higher highs and lows (lower for a downtrend) in today's run, a new one in the last 3 candles" },
+  { key: "run", name: "Steady run", what: "SMAs on this side 4+ candles today, price mostly one way, not one big candle" },
 ];
 const TREND_DEFAULT: Record<string, string> = { stack: "must", vwap: "must", slope: "must", fan: "use", hold: "use", structure: "use", run: "use" };
 const TREND_MODES: { mode: string; label: string }[] = [

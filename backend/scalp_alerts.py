@@ -37,7 +37,7 @@ CHECK_WORDS = {
     "fan": "averages spreading apart",
     "hold": "closes holding its side",
     "structure": "higher highs / lower lows",
-    "run": "no recent cross",
+    "run": "a steady run, not one candle",
     "volume": "volume above usual",
 }
 # {alert: {IST day: {(symbol, side): "HH:MM"}}}
