@@ -66,6 +66,10 @@ export type BacktestPdfInput = {
   fileName?: string;
   /** Share of a trade's value blocked as intraday margin (the practice wallet's setting, 20 = 5x leverage). */
   marginPct?: number;
+  /** Scalp-pick runs (auto-arm, strong-trend, Most active picks): the rule the stocks were picked by, at the end. */
+  pickRule?: [string, string][];
+  /** The stocks picked each day, with the minute each was armed and why (the replay bar's armed list). */
+  pickLog?: { day: string; time: string; symbol: string; source: string; side: string; why: string }[];
 };
 
 /** The full amount a trade would have cost bought outright: qty x entry price. */
@@ -121,6 +125,8 @@ export async function downloadBacktestPdf({
   settingsHead,
   fileName,
   marginPct = 20,
+  pickRule,
+  pickLog,
 }: BacktestPdfInput): Promise<void> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -438,6 +444,51 @@ export async function downloadBacktestPdf({
       if (cell.column.index === 11) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));
     },
   });
+
+  if (pickRule?.length || pickLog?.length) {
+    // How the stocks were picked (Scalp-pick runs): the rule, then each day's armed stocks with their minute.
+    let py = after() + 24;
+    if (py > doc.internal.pageSize.getHeight() - 100) {
+      doc.addPage();
+      py = 48;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...INK);
+    doc.text("How the stocks were picked", margin, py);
+    if (pickRule?.length) {
+      autoTable(doc, {
+        startY: py + 6,
+        margin: { left: margin, right: margin },
+        theme: "grid",
+        head: [["Setting", "Value"]],
+        body: pickRule.map(([k, v]) => [pdfText(k), pdfText(v)]),
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [30, 41, 59] },
+        columnStyles: { 0: { cellWidth: 200 } },
+      });
+      py = after() + 18;
+    }
+    if (pickLog?.length) {
+      if (py > doc.internal.pageSize.getHeight() - 80) {
+        doc.addPage();
+        py = 48;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(...INK);
+      doc.text(`Stocks armed each day (${pickLog.length})`, margin, py);
+      autoTable(doc, {
+        startY: py + 6,
+        margin: { left: margin, right: margin },
+        theme: "striped",
+        head: [["Day", "Armed at", "Stock", "Found by", "Side", "Why"]],
+        body: pickLog.map((r) => [pdfText(day(r.day)), r.time || "-", r.symbol, pdfText(r.source || "-"), r.side || "-", pdfText(r.why || "-")]),
+        styles: { fontSize: 7.5, cellPadding: 3 },
+        headStyles: { fillColor: [30, 41, 59] },
+      });
+    }
+  }
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i += 1) {

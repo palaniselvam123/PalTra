@@ -66,7 +66,84 @@ export function scalpPickOf(s: Settings): ScalpPickInfo | null {
 function pickKindLabel(pick: ScalpPickRule): string {
   if (pick.kind === "TREND") return "Strong-trend";
   if (pick.kind === "ACTIVE") return "Most active";
+  if (pick.kind === "AUTOARM") return "Auto-arm";
   return "Scalp";
+}
+
+/** The pick rule a Scalp-pick run recorded, as Setting / Value rows for the end of its PDF (backtestPdf pickRule). */
+export function pickRuleRows(run: { settings: Settings; days_total?: number; start_date?: string; end_date?: string }): [string, string][] {
+  const pick = scalpPickOf(run.settings);
+  if (!pick) return [];
+  const r = pick as unknown as Record<string, unknown>;
+  const n = (k: string) => (typeof r[k] === "number" ? (r[k] as number) : null);
+  const s = (k: string) => (r[k] == null || r[k] === "" ? null : String(r[k]));
+  const rupee = (v: number | null) => (v ? `Rs ${v}` : "any");
+  const rows: [string, string][] = [
+    ["Backtest", `${pickKindLabel(pick)} picks`],
+    ["Days", `${run.days_total ?? Object.keys(pick.picks ?? {}).length} trading day(s)${run.start_date ? `, ${run.start_date} to ${run.end_date ?? run.start_date}` : ""}`],
+  ];
+  if (n("universe") != null) rows.push(["Stocks read", String(n("universe"))]);
+  if (pick.kind === "AUTOARM") {
+    const src = s("source");
+    rows.push(["Stocks found by", src === "TREND" ? "Trend quality" : src === "ACTIVE" ? "Most active" : "Trend quality and Most active"]);
+    rows.push(["Arm between", `${s("first") ?? "-"} and ${s("last") ?? "-"} IST`]);
+    if (src !== "ACTIVE") {
+      rows.push(["Trend read every", `${n("every_min") ?? "-"} min`]);
+      rows.push(["Trend candle", `${n("minutes") ?? "-"} min`]);
+      rows.push(["Strong trend", `${n("min_checks") ?? 6} of 7 checks or more, ${s("side") === "UP" ? "up only" : s("side") === "DOWN" ? "down only" : "up or down"}`]);
+    }
+    if (src !== "TREND") {
+      const who = s("pressure_side") === "BUY" ? "buyers" : s("pressure_side") === "SELL" ? "sellers" : "buyers or sellers";
+      rows.push(["Buyers / sellers", `${who} at ${n("pct") ?? 70}% or more of the waiting orders`]);
+      rows.push(["Money traded at least", n("min_value_cr") ? `Rs ${n("min_value_cr")} cr` : "any"]);
+      const days = Array.isArray(r.active_days) ? (r.active_days as string[]).length : 0;
+      rows.push(["Days with saved Most active scans", String(days)]);
+    }
+    rows.push(["Price range", n("price_min") || n("price_max") ? `${rupee(n("price_min"))} to ${rupee(n("price_max"))}` : "any"]);
+    rows.push(["At most", `${n("max_day") ?? 10} stocks a day`]);
+    return rows;
+  }
+  rows.push(["Pick time", `${pick.pick_time} IST`]);
+  rows.push(["Top", String(pick.top_n)]);
+  if (pick.kind === "TREND") {
+    rows.push(["Direction", String(pick.direction ?? "BOTH").toLowerCase()]);
+    rows.push(["Trend candle", `${pick.minutes ?? "-"} min`]);
+  } else if (pick.kind === "ACTIVE") {
+    rows.push(["Ranked by", ACTIVE_RANK_LABEL[String(pick.rank ?? "rvol")] ?? String(pick.rank ?? "-")]);
+    rows.push(["Bias", String(pick.bias ?? "BOTH").toLowerCase()]);
+    rows.push(["Money traded at least", pick.min_value_cr ? `Rs ${pick.min_value_cr} cr` : "any"]);
+  } else {
+    if (pick.min_atr_pct != null) rows.push(["Smallest ATR %", String(pick.min_atr_pct)]);
+    if (pick.min_value_cr != null) rows.push(["Money traded at least", `Rs ${pick.min_value_cr} cr`]);
+    rows.push(["Needs a bias", pick.require_bias ? "yes" : "no"]);
+  }
+  return rows;
+}
+
+/** Each day's picked stocks for the end of the PDF (backtestPdf pickLog): the minute armed (auto-arm) or the pick time. */
+export function pickLogRows(settings: Settings): { day: string; time: string; symbol: string; source: string; side: string; why: string }[] {
+  const pick = scalpPickOf(settings);
+  if (!pick) return [];
+  const out: { day: string; time: string; symbol: string; source: string; side: string; why: string }[] = [];
+  for (const d of Object.keys(pick.picks ?? {}).sort()) {
+    for (const p of pick.picks?.[d] ?? []) {
+      const why =
+        p.why ??
+        (p.trend ? `${p.trend.replace("STRONG_", "strong ").toLowerCase()}${p.trend_score != null ? `, score ${p.trend_score}` : ""}` : null) ??
+        (p.rvol != null ? `volume ${p.rvol.toFixed(1)}x usual` : null) ??
+        (p.score != null ? `score ${p.score}` : "");
+      const side = p.side ?? (p.bias && p.bias !== "NONE" ? p.bias : null);
+      out.push({
+        day: d,
+        time: p.at ?? pick.pick_time,
+        symbol: p.symbol,
+        source: p.source ?? pickKindLabel(pick),
+        side: side === "LONG" ? "Long" : side === "SHORT" ? "Short" : "-",
+        why: why ?? "",
+      });
+    }
+  }
+  return out.sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
 }
 
 const ACTIVE_RANK_LABEL: Record<string, string> = {
@@ -492,6 +569,8 @@ export function BacktestRuns() {
         strategy: strategyLabel(full.settings),
         settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
         reasons: REASON_SHORT,
+        pickRule: pickRuleRows(full),
+        pickLog: pickLogRows(full.settings),
       });
       setError(null);
     } catch (err) {
