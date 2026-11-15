@@ -109,7 +109,7 @@ export const FEATURES: Feature[] = [
     purpose: "While an auto-arm replay plays, the replay bar lists the stocks armed so far with each one's reason, and shows progress while the arm minutes are found." },
   { id: "tq-auto-arm-price", area: "trend", added: "2026-11-14", pr: 418, href: "/scalp/#alerts", where: "Scalp → Alerts → auto-arm price range", title: "Auto-arm price range",
     purpose: "Auto-arm (live and replay) only arms stocks priced inside your from / to range." },
-  { id: "tq-auto-arm-live-bot", area: "trend", added: "2026-11-15", pr: 434, href: "/scalp/#alerts", where: "Scalp → Alerts → Also arm a LIVE bot", title: "Auto-arm a LIVE bot",
+  { id: "tq-auto-arm-live-bot", area: "trend", added: "2026-11-15", pr: 435, href: "/scalp/#alerts", where: "Scalp → Alerts → Also arm a LIVE bot", title: "Auto-arm a LIVE bot",
     purpose: "Lets auto-arm put the picked stocks on a LIVE bot too (you type LIVE to turn it on), at most a few a day, so you can test it with real orders at a small quantity." },
 
   // --- Most active --------------------------------------------------------------------------------------------
