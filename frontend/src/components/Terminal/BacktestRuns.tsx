@@ -70,6 +70,16 @@ function pickKindLabel(pick: ScalpPickRule): string {
   return "Scalp";
 }
 
+/** One short line for a pick run: "Auto-arm (Trend quality + Most active) 09:30-14:30" or "Strong-trend top 5 @ 10:00". */
+function pickHeadline(pick: ScalpPickInfo): string {
+  if (pick.kind === "AUTOARM") {
+    const r = pick as unknown as Record<string, unknown>;
+    const src = r.source === "TREND" ? "Trend quality" : r.source === "ACTIVE" ? "Most active" : "Trend quality + Most active";
+    return `Auto-arm (${src}) ${String(r.first ?? pick.pick_time)}-${String(r.last ?? "")}`;
+  }
+  return `${pickKindLabel(pick)} top ${pick.top_n} @ ${pick.pick_time}`;
+}
+
 /** The pick rule a Scalp-pick run recorded, as Setting / Value rows for the end of its PDF (backtestPdf pickRule). */
 export function pickRuleRows(run: { settings: Settings; days_total?: number; start_date?: string; end_date?: string }): [string, string][] {
   const pick = scalpPickOf(run.settings);
@@ -163,7 +173,7 @@ function numOr(v: number | null | undefined, digits: number, suffix = ""): strin
 /** One line naming the strategy a run used. */
 export function strategyLabel(s: Settings): string {
   const pick = scalpPickOf(s);
-  const parts: string[] = pick ? [`${pickKindLabel(pick)} top ${pick.top_n} @ ${pick.pick_time}`] : [];
+  const parts: string[] = pick ? [pickHeadline(pick)] : [];
   // Runs of bots 2-4 name the bot whose settings they played.
   if (Number(s.bot ?? 1) > 1) parts.push(`${String(s.bot_name ?? `Bot ${s.bot}`)}'s settings`);
   if (String(s.entry_mode ?? "SMA") === "PATTERN") {
@@ -1398,7 +1408,7 @@ function PickList({ pick }: { pick: ScalpPickInfo }) {
   return (
     <div className="mb-4 px-2">
       <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">
-        {pickKindLabel(pick)} picks · top {pick.top_n} at {pick.pick_time}
+        {pick.kind === "AUTOARM" ? pickHeadline(pick) : `${pickKindLabel(pick)} picks · top ${pick.top_n} at ${pick.pick_time}`}
         {pick.universe ? ` from ${pick.universe} stocks` : ""}
         {rule}
       </div>

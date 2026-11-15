@@ -47,6 +47,9 @@ function day(iso: string): string {
   });
 }
 
+/** Stocks named in the header line; the rest are counted ("and N more"), every stock is in the tables. */
+const SUBTITLE_STOCKS = 30;
+
 const GREEN: [number, number, number] = [4, 120, 87];
 const RED: [number, number, number] = [190, 18, 60];
 const INK: [number, number, number] = [15, 23, 42];
@@ -189,34 +192,39 @@ export async function downloadBacktestPdf({
   doc.setFontSize(10);
   doc.setTextColor(...MUTED);
   const range = run.end_date !== run.start_date ? `${day(run.start_date)} to ${day(run.end_date)}` : day(run.start_date);
-  doc.text(
-    pdfText(
-      subtitle ??
-        `${range} · from ${run.start_time} · ${run.symbols.join(", ")} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days`
-    ),
-    margin,
-    66,
-    { maxWidth: width - margin * 2 }
+  // Header lines wrap and push the next one down (a long stock list used to print over the lines below it).
+  const textWidth = width - margin * 2;
+  let hy = 66;
+  const lines = (text: string, gap = 13) => {
+    const wrapped = doc.splitTextToSize(pdfText(text), textWidth) as string[];
+    doc.text(wrapped, margin, hy);
+    hy += wrapped.length * gap;
+  };
+  const shown = run.symbols.slice(0, SUBTITLE_STOCKS);
+  const more = run.symbols.length - shown.length;
+  lines(
+    subtitle ??
+      `${range} · from ${run.start_time} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days · ${run.symbols.length} stock${
+        run.symbols.length === 1 ? "" : "s"
+      }: ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`
   );
-  doc.text(
-    pdfText(
-      `${note ?? "Practice replay on Groww 1-minute candles. No order was sent."} Generated ${new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        dateStyle: "medium",
-        timeStyle: "short",
-      })} IST.`
-    ),
-    margin,
-    80
+  lines(
+    `${note ?? "Practice replay on Groww 1-minute candles. No order was sent."} Generated ${new Date().toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "short",
+    })} IST.`
   );
+  hy += 6;
   doc.setTextColor(...INK);
   doc.setFont("helvetica", "bold");
-  doc.text(pdfText(strategy), margin, 98, { maxWidth: width - margin * 2 });
+  lines(strategy);
+  hy += 2;
 
-  // Totals, then the settings the run used, side by side.
+  // Totals first; the settings the run used are on the last page.
   autoTable(doc, {
-    startY: 112,
-    margin: { left: margin, right: width / 2 + 6 },
+    startY: hy,
+    margin: { left: margin, right: margin },
     theme: "grid",
     head: [["Result", ""]],
     body: [
@@ -232,7 +240,7 @@ export async function downloadBacktestPdf({
     ],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 150 } },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 260 } },
     didParseCell: (cell) => {
       if (cell.section !== "body" || cell.column.index !== 1) return;
       const label = String(cell.row.raw instanceof Array ? cell.row.raw[0] : "");
@@ -242,18 +250,7 @@ export async function downloadBacktestPdf({
       if (label in rangeTone) cell.cell.styles.textColor = tone(rangeTone[label]);
     },
   });
-  const resultEnd = after();
-  autoTable(doc, {
-    startY: 112,
-    margin: { left: width / 2 + 6, right: margin },
-    theme: "grid",
-    head: [settingsHead ?? ["Setting", "Value"]],
-    body: settings.map(([k, v]) => [pdfText(k), pdfText(v)]),
-    styles: { fontSize: 9, cellPadding: 4 },
-    headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
-  });
-  let y = Math.max(resultEnd, after()) + 22;
+  let y = after() + 22;
 
   const stocks = run.stocks ?? [];
   if (stocks.length > 1) {
@@ -445,6 +442,24 @@ export async function downloadBacktestPdf({
     },
   });
 
+  // The settings the run used, on a page of their own at the end (owner's request), then how its stocks were picked.
+  if (settings.length) {
+    doc.addPage();
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...INK);
+    doc.text(settingsHead?.[0] === "Setting" || !settingsHead ? "Settings this run used" : pdfText(settingsHead[0]), margin, 48);
+    autoTable(doc, {
+      startY: 56,
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      head: [settingsHead ?? ["Setting", "Value"]],
+      body: settings.map(([k, v]) => [pdfText(k), pdfText(v)]),
+      styles: { fontSize: 8.5, cellPadding: 3.5 },
+      headStyles: { fillColor: [30, 41, 59] },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 200 } },
+    });
+  }
   if (pickRule?.length || pickLog?.length) {
     // How the stocks were picked (Scalp-pick runs): the rule, then each day's armed stocks with their minute.
     let py = after() + 24;
