@@ -571,6 +571,46 @@ async def test_the_same_day_gives_the_same_trades_at_any_speed(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_second_run_of_the_same_days_reads_the_candle_cache(db, monkeypatch):
+    """Past days are kept on disk (strategy_lab.load_tape): a re-run downloads nothing and trades the same."""
+    import replay as replay_mod
+    from database import session_factory
+    from models import TradeLog
+
+    day, warm = dt.date(2026, 9, 29), dt.date(2026, 9, 28)
+    calls: list[str] = []
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        calls.append(symbol)
+        return pd.concat([_wave_day(warm), _wave_day(day)]).reset_index(drop=True)
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "SESSION_END", dt.time(10, 30))
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+
+    async def play() -> list[tuple]:
+        session = ReplaySession()
+        await session.begin(object(), ["TCS"], day, dt.time(9, 15), 9_999, settings={})
+        for _ in range(2000):
+            await asyncio.sleep(0.01)
+            if session.status in ("FINISHED", "ERROR"):
+                break
+        assert session.status == "FINISHED", session.error
+        with session_factory()() as s:
+            rows = s.query(TradeLog).filter(TradeLog.run_id == session.run_id).order_by(TradeLog.id).all()
+            out = [(t.direction, t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.exit_reason) for t in rows]
+        await session.stop()
+        return out
+
+    first = await play()
+    assert calls == ["TCS"] and first, "the wave should trade"
+    again = await play()
+    assert calls == ["TCS"], "the second run must not download again"
+    assert again == first
+
+
+@pytest.mark.asyncio
 async def test_each_closed_trade_records_its_highest_and_lowest_price(db, monkeypatch):
     """max_high / max_low span every price the trade saw, entry and exit included."""
     import replay as replay_mod
