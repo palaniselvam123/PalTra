@@ -110,3 +110,31 @@ def test_heikin_ashi_candles_can_be_read_by_the_backtests():
     picks = trend_picks.picks_for_day({"UP": tape}, TODAY, rule)
     assert [p["symbol"] for p in picks] == ["UP"] and picks[0]["side"] == "LONG"
     assert trend_picks.TrendPickRule().as_dict()["candles"] == "NORMAL"
+
+
+def test_pick_backtests_run_inside_a_time_window():
+    """Pick from any minute 09:15-15:25 and stop trading at 'Trade until' (09:20-15:30); the replay day ends there."""
+    import pytest
+    import trend_picks
+    from active_picks import ActivePickRule
+    from auto_arm import AutoArmRule
+    from replay import ReplaySession
+
+    assert trend_picks.parse_window("09:15", "11:00") == (dt.time(9, 15), dt.time(11, 0))
+    assert trend_picks.parse_window("14:45", "15:30") == (dt.time(14, 45), None)  # 15:30 = the usual close
+    assert trend_picks.parse_window("10:00", None) == (dt.time(10, 0), None)
+    for bad in (("09:10", None), ("15:28", None), ("11:00", "10:30"), ("10:00", "15:40"), ("x", None)):
+        with pytest.raises(ValueError):
+            trend_picks.parse_window(*bad)
+
+    rule = trend_picks.TrendPickRule(pick_time=dt.time(9, 30), until=dt.time(11, 15))
+    assert rule.as_dict()["until"] == "11:15"
+    assert ActivePickRule(until=dt.time(12, 0)).as_dict()["until"] == "12:00"
+    assert AutoArmRule().as_dict()["until"] is None
+
+    session = ReplaySession()
+    session.day = TODAY
+    session.rule = rule
+    assert session._day_end() == dt.datetime.combine(TODAY, dt.time(11, 15), tzinfo=IST)
+    session.rule = trend_picks.TrendPickRule()
+    assert session._day_end().time() == dt.time(15, 30)

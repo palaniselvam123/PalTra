@@ -42,6 +42,8 @@ class ActivePickRule:
     rank: str = "rvol"
     bias: str = "BOTH"
     min_value_cr: float = 5.0
+    #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
+    until: dt.time | None = None
     kind: str = KIND
 
     def as_dict(self) -> dict:
@@ -52,6 +54,7 @@ class ActivePickRule:
             "rank": self.rank,
             "bias": self.bias,
             "min_value_cr": self.min_value_cr,
+            "until": self.until.strftime("%H:%M") if self.until else None,
         }
 
 

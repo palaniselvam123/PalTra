@@ -1,6 +1,7 @@
 "use client";
 
 import { NewTag } from "@/components/ui/NewTag";
+import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
@@ -17,7 +18,7 @@ const SPEEDS: { value: number; label: string }[] = [
   { value: 60, label: "60× (a minute a second)" },
   { value: 300, label: "300× (fastest)" },
 ];
-const TIMES = ["09:20", "09:30", "09:45", "10:00", "10:30", "11:00", "12:00", "13:00", "14:00", "14:30", "15:00"];
+const TIMES = PICK_TIMES;
 
 /**
  * Auto-arm replay (backend auto_arm.py): test the Scalp auto-arm on past days, after the market too. Each day is played
@@ -32,6 +33,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [source, setSource] = useState<"TREND" | "ACTIVE" | "BOTH">("BOTH");
   const [first, setFirst] = useState("09:30");
   const [last, setLast] = useState("14:30");
+  const [until, setUntil] = useState(DAY_CLOSE);
   const [every, setEvery] = useState(5);
   const [minutes, setMinutes] = useState(5);
   const [candles, setCandles] = useState<"NORMAL" | "HA">("NORMAL");
@@ -72,6 +74,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
         every_min: every,
         minutes,
         candles,
+        until: fitUntil(until, last),
         bot,
         speed,
         play_handoffs: handoffs,
@@ -158,6 +161,18 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
             {TIMES.filter((t) => t > first).map((t) => (
               <option key={t} value={t}>
                 {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>
+            Trade until <NewTag id="bt-time-window" />
+          </span>
+          <select value={fitUntil(until, last)} onChange={(e) => setUntil(e.target.value)} className={select}>
+            {untilAfter(last).map((t) => (
+              <option key={t} value={t}>
+                {t === DAY_CLOSE ? "15:30 (close)" : t}
               </option>
             ))}
           </select>

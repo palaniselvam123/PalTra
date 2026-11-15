@@ -6,12 +6,13 @@ import { Flame, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { TrendPickCompare } from "@/components/Scalp/TrendPickCompare";
+import { NewTag } from "@/components/ui/NewTag";
+import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import { replayActive, smaApi, type ActivePickBias, type ActivePickRank } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
-const PICK_TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "13:00", "14:00"];
 const TOP_N = [5, 10, 15, 20];
 const BOTS = [1, 2, 3, 4];
 const MIN_VALUES = [0, 1, 5, 10, 25, 50, 100];
@@ -38,6 +39,7 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
   const [lists, setLists] = useScanLists("sma.activepick.lists", ["fno"]);
   const [days, setDays] = useState(10);
   const [pickTime, setPickTime] = useState("10:00");
+  const [until, setUntil] = useState(DAY_CLOSE);
   const [topN, setTopN] = useState(10);
   const [rank, setRank] = useState<ActivePickRank>("rvol");
   const [bias, setBias] = useState<ActivePickBias>("BOTH");
@@ -63,6 +65,7 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
         end_date: range[range.length - 1],
         universe: universe.slice(0, 250),
         pick_time: pickTime,
+        until: fitUntil(until, pickTime),
         top_n: topN,
         rank,
         bias,
@@ -73,7 +76,7 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
       const by = RANKS.find((r) => r.value === rank)?.label.toLowerCase();
       setNote({
         ok: true,
-        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} Most active stocks at ${pickTime} by ${by} out of ${Math.min(universe.length, 250)}, traded from ${pickTime}${playHandoffs ? ", hand-offs to Bot 2 / Bot 3 played inside the run" : ""}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
+        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} Most active stocks at ${pickTime} by ${by} out of ${Math.min(universe.length, 250)}, traded from ${pickTime} to ${fitUntil(until, pickTime)}${playHandoffs ? ", hand-offs to Bot 2 / Bot 3 played inside the run" : ""}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the backtest" });
@@ -121,6 +124,18 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
             {PICK_TIMES.map((t) => (
               <option key={t} value={t}>
                 {t} IST
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>
+            Trade until <NewTag id="bt-time-window" />
+          </span>
+          <select value={fitUntil(until, pickTime)} onChange={(e) => setUntil(e.target.value)} className={select}>
+            {untilAfter(pickTime).map((t) => (
+              <option key={t} value={t}>
+                {t === DAY_CLOSE ? "15:30 (close)" : `${t} IST`}
               </option>
             ))}
           </select>
@@ -207,6 +222,7 @@ export function ActivePickBacktest({ armed }: { armed: Map<string, string[]> }) 
         lists={lists}
         days={days}
         topN={topN}
+        until={fitUntil(until, pickTime)}
         direction="BOTH"
         minutes={5}
         bot={bot}

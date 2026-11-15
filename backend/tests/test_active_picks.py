@@ -95,7 +95,7 @@ def test_api_starts_with_the_rule_and_refuses_bad_values(tmp_path, monkeypatch):
                 "rank": "change", "bias": "LONG", "min_value_cr": 2}
         assert client.post("/api/replay/active-picks", json=body).status_code == 200
         assert client.post("/api/replay/active-picks", json={**body, "rank": "pressure"}).status_code == 422
-        assert client.post("/api/replay/active-picks", json={**body, "pick_time": "15:00"}).status_code == 400
+        assert client.post("/api/replay/active-picks", json={**body, "pick_time": "15:28"}).status_code == 400
     rule, settings = seen[0]
     assert rule.kind == "ACTIVE" and rule.rank == "change" and rule.bias == "LONG" and rule.min_value_cr == 2
     assert rule.pick_time == dt.time(11, 0) and settings["play_handoffs"] is True

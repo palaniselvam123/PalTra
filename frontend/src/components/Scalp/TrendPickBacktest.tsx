@@ -1,6 +1,7 @@
 "use client";
 
 import { NewTag } from "@/components/ui/NewTag";
+import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import Link from "next/link";
 import clsx from "clsx";
 import { CalendarClock, Loader2, TrendingUp } from "lucide-react";
@@ -13,7 +14,6 @@ import { GuideBar } from "./GuideBar";
 import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
-const PICK_TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "13:00", "14:00"];
 const TOP_N = [5, 10, 15, 20];
 const SIZES = [1, 3, 5, 10, 15];
 const BOTS = [1, 2, 3, 4];
@@ -33,6 +33,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
   const [lists, setLists] = useScanLists("sma.trendpick.lists", ["fno"]);
   const [days, setDays] = useState(10);
   const [pickTime, setPickTime] = useState("10:00");
+  const [until, setUntil] = useState(DAY_CLOSE);
   const [topN, setTopN] = useState(10);
   const [direction, setDirection] = useState<TrendPickDirection>("BOTH");
   const [minutes, setMinutes] = useState(5);
@@ -67,6 +68,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         end_date: range[range.length - 1],
         universe: universe.slice(0, 250),
         pick_time: pickTime,
+        until: fitUntil(until, pickTime),
         top_n: topN,
         direction,
         minutes,
@@ -76,7 +78,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
       });
       setNote({
         ok: true,
-        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} strong trends at ${pickTime} out of ${Math.min(universe.length, 250)} stocks, traded from ${pickTime}${playHandoffs ? ", hand-offs to Bot 2 / Bot 3 played inside the run" : ""}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
+        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}, each day the top ${topN} strong trends at ${pickTime} out of ${Math.min(universe.length, 250)} stocks, traded from ${pickTime} to ${fitUntil(until, pickTime)}${playHandoffs ? ", hand-offs to Bot 2 / Bot 3 played inside the run" : ""}. Downloading the candles takes a few minutes; the result builds up in the terminal's Backtests tab, with each day's picks.`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the backtest" });
@@ -133,6 +135,18 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
             {PICK_TIMES.map((t) => (
               <option key={t} value={t}>
                 {t} IST
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>
+            Trade until <NewTag id="bt-time-window" />
+          </span>
+          <select value={fitUntil(until, pickTime)} onChange={(e) => setUntil(e.target.value)} className={select}>
+            {untilAfter(pickTime).map((t) => (
+              <option key={t} value={t}>
+                {t === DAY_CLOSE ? "15:30 (close)" : `${t} IST`}
               </option>
             ))}
           </select>
@@ -221,6 +235,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         direction={direction}
         minutes={minutes}
         candles={candles}
+        until={fitUntil(until, pickTime)}
         bot={bot}
         playHandoffs={playHandoffs}
       />
@@ -256,6 +271,20 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
                 {PICK_TIMES.map((t) => (
                   <option key={t} value={t}>
                     {t} IST
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              Trade until
+              <select
+                value={fitUntil(auto.until ?? DAY_CLOSE, auto.pick_time)}
+                onChange={(e) => void saveAuto({ until: e.target.value })}
+                className={select}
+              >
+                {untilAfter(auto.pick_time).map((t) => (
+                  <option key={t} value={t}>
+                    {t === DAY_CLOSE ? "15:30 (close)" : `${t} IST`}
                   </option>
                 ))}
               </select>

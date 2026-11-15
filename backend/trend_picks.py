@@ -35,6 +35,31 @@ SIZES = (1, 3, 5, 10, 15)
 MAX_TOP_N = 20
 MAX_UNIVERSE = 250
 CHECK_SEC = 60.0
+# The window a pick backtest can run in (owner's request: anywhere inside 09:15-15:30): pick from .. trade until.
+PICK_FROM, PICK_TO = dt.time(9, 15), dt.time(15, 25)
+UNTIL_FROM, UNTIL_TO = dt.time(9, 20), dt.time(15, 30)
+
+
+def parse_window(pick_time: str, until: str | None) -> tuple[dt.time, dt.time | None]:
+    """(pick time, trade-until) from "HH:MM" strings; raises ValueError with a plain message. None = 15:30."""
+    def hm(text: str) -> dt.time:
+        try:
+            h, m = str(text).strip().split(":")
+            return dt.time(int(h), int(m))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Give times as HH:MM (IST).") from exc
+
+    start = hm(pick_time)
+    if not PICK_FROM <= start <= PICK_TO:
+        raise ValueError("Pick a time between 09:15 and 15:25 IST.")
+    if not until:
+        return start, None
+    end = hm(until)
+    if not UNTIL_FROM <= end <= UNTIL_TO:
+        raise ValueError("Trade until a time between 09:20 and 15:30 IST.")
+    if end <= start:
+        raise ValueError("'Trade until' must be after the pick time.")
+    return start, (None if end >= UNTIL_TO else end)
 
 
 @dataclass
@@ -47,6 +72,8 @@ class TrendPickRule:
     sma_slow: int = 21
     #: NORMAL = the real candles; HA = Heikin Ashi candles (the Trend quality card's "Candles" menu, chop_scan.ha_bars).
     candles: str = "NORMAL"
+    #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
+    until: dt.time | None = None
     kind: str = KIND
 
     def as_dict(self) -> dict:
@@ -59,6 +86,7 @@ class TrendPickRule:
             "sma_fast": self.sma_fast,
             "sma_slow": self.sma_slow,
             "candles": self.candles,
+            "until": self.until.strftime("%H:%M") if self.until else None,
         }
 
 
@@ -137,6 +165,7 @@ class AutoSettings:
     top_n: int = 10
     minutes: int = 5
     candles: str = "NORMAL"  # NORMAL | HA (Heikin Ashi)
+    until: str = "15:30"  # trading stops here each day
     bot: int = 1
     lists: list = field(default_factory=lambda: ["fno"])
     #: Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (handoff_chain.py), like the replay bar.
@@ -182,7 +211,10 @@ def load() -> AutoSettings:
         if name in raw:
             setattr(s, name, raw[name])
     s.run_at = _hhmm(s.run_at, dt.time(15, 31), dt.time(23, 59)) or "15:45"
-    s.pick_time = _hhmm(s.pick_time, dt.time(9, 20), dt.time(14, 30)) or "10:00"
+    s.pick_time = _hhmm(s.pick_time, PICK_FROM, PICK_TO) or "10:00"
+    s.until = _hhmm(s.until, UNTIL_FROM, UNTIL_TO) or "15:30"
+    if s.until <= s.pick_time:
+        s.until = "15:30"
     s.direction = s.direction if s.direction in DIRECTIONS else "BOTH"
     s.top_n = max(1, min(MAX_TOP_N, int(s.top_n or 10)))
     s.minutes = int(s.minutes) if int(s.minutes or 0) in SIZES else 5
@@ -209,8 +241,11 @@ def update(**changes) -> AutoSettings:
         if _hhmm(changes["run_at"], dt.time(15, 31), dt.time(23, 59)) is None:
             raise ValueError("The daily run must be after the close: HH:MM between 15:31 and 23:59 IST.")
     if "pick_time" in changes and changes["pick_time"] is not None:
-        if _hhmm(changes["pick_time"], dt.time(9, 20), dt.time(14, 30)) is None:
-            raise ValueError("Pick a time between 09:20 and 14:30 IST.")
+        if _hhmm(changes["pick_time"], PICK_FROM, PICK_TO) is None:
+            raise ValueError("Pick a time between 09:15 and 15:25 IST.")
+    if "until" in changes and changes["until"] is not None:
+        if _hhmm(changes["until"], UNTIL_FROM, UNTIL_TO) is None:
+            raise ValueError("Trade until a time between 09:20 and 15:30 IST.")
     if changes.get("direction") is not None and changes["direction"] not in DIRECTIONS:
         raise ValueError("direction must be BULLISH, BEARISH or BOTH.")
     for name, value in changes.items():

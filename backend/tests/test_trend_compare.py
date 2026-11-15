@@ -23,7 +23,7 @@ def test_times_are_checked_sorted_and_unique():
     with pytest.raises(ValueError):
         tc.clean_times(["10:00"])
     with pytest.raises(ValueError):
-        tc.clean_times(["10:00", "15:00"])
+        tc.clean_times(["10:00", "15:28"])
     with pytest.raises(ValueError):
         tc.clean_times(["10:00", "ten"])
     with pytest.raises(ValueError):
@@ -182,7 +182,7 @@ def test_api_refuses_bad_requests_and_lists(tmp_path, monkeypatch):
         assert client.get("/api/trend-picks/compare").json() == {"running": None, "items": []}
         base = {"date": "2026-10-01", "end_date": "2026-10-09", "universe": ["SBIN"]}
         assert client.post("/api/trend-picks/compare", json={**base, "times": ["10:00"]}).status_code == 422
-        assert client.post("/api/trend-picks/compare", json={**base, "times": ["10:00", "15:00"]}).status_code == 400
+        assert client.post("/api/trend-picks/compare", json={**base, "times": ["10:00", "15:28"]}).status_code == 400
         assert client.post("/api/trend-picks/compare", json={**base, "times": ["10:00", "11:00"]}).status_code == 400
         assert client.get("/api/trend-picks/compare/5").status_code == 404
         assert client.post("/api/trend-picks/compare/stop").json() == {"stopped": False}

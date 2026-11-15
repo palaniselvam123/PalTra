@@ -212,6 +212,8 @@ class AutoArmRule:
     pressure_side: str = "BOTH"
     min_value_cr: float = 0.0
     max_day: int = 10
+    #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
+    until: dt.time | None = None
     #: Only stocks priced inside this range when armed (₹, 0 = no bound): the tape's last close before the arm minute.
     price_min: float = 0.0
     price_max: float = 0.0
@@ -232,6 +234,7 @@ class AutoArmRule:
             "minutes": self.minutes, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "max_day": self.max_day,
             "price_min": self.price_min, "price_max": self.price_max,
+            "until": self.until.strftime("%H:%M") if self.until else None,
             "active_days": sorted(self.active_hits),
         }
 

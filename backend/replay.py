@@ -1719,7 +1719,12 @@ class ReplaySession:
 
     def _day_end(self) -> dt.datetime:
         assert self.day is not None
-        return session_cut(self.day, getattr(self, "_loaded_at", None))
+        cut = session_cut(self.day, getattr(self, "_loaded_at", None))
+        until = getattr(self.rule, "until", None) if self.rule is not None else None
+        if until is not None:
+            # A pick backtest run inside a time window (trend_picks.parse_window): the day ends, squared off, there.
+            cut = min(cut, dt.datetime.combine(self.day, until, tzinfo=IST))
+        return cut
 
     async def _finish_day(self) -> None:
         self._flush_pnl()

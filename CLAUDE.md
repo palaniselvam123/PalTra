@@ -1539,6 +1539,14 @@ spinning top), body and range) / Matched / Call columns
   `main._start_trend_picks_loop`, every `CHECK_SEC` 60 s) once each weekday after `run_at` (15:31-23:59, default 15:45)
   backtests that day's picks (`main._trend_picks_daily`, full speed, waits while that bot's player is busy; `last_day`,
   `last_run_id`, `last_note`). `GET/PUT /api/trend-picks/auto`. To paper-trade the picks live during the day, Scan & arm.
+  **Inside a time range** (owner's request; `trend_picks.parse_window`, `PICK_FROM` 09:15 to `PICK_TO` 15:25, `until`
+  09:20-15:30 after the pick time, 15:30 = the close): `until` on `TrendPickRule`, `ActivePickRule`, `AutoArmRule`,
+  `trend_picks.AutoSettings` and the comparison (`POST /api/replay/trend-picks`, `/api/replay/active-picks`,
+  `/api/replay/auto-arm` (last arm time before it, arm times up to 15:25), `/api/trend-picks/compare` (every time before
+  it), `PUT /api/trend-picks/auto`). `ReplaySession._day_end` ends each replayed day at the rule's `until` (positions squared
+  off there as `EOD_SQUARE_OFF`, like 15:30). The "Pick at" / "Trade until" menus (`lib/pickWindow.ts`, quarter hours) on
+  the Backtest tab, the Most active Backtest view, both comparisons and the auto-arm replay; saved in the run's `scalp_pick`
+  and shown in the run detail / PDF ("Trade until").
   **Compare pick times** (`backend/trend_compare.py`, the tab's "Compare pick times" panel,
   `components/Scalp/TrendPickCompare.tsx`): 2-8 pick times (09:20-14:30) played one after another as ordinary strong-trend
   pick runs with the same days, stocks, bot, settings, direction, top N and candle (`play`: waits while the bot's player is
