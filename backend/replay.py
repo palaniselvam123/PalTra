@@ -54,6 +54,7 @@ import handoff_log
 import open_pnl_log
 import recovery
 import server_role
+import strategy_lab
 import auto_arm
 from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
@@ -1370,7 +1371,12 @@ class ReplaySession:
                 if self._stop:
                     return
                 try:
-                    frame = await fetch_frame(broker, symbol, first, last)
+                    # Past days come from the shared day cache next to the SMA DB (strategy_lab.load_tape, the
+                    # Strategy lab's and Second candle test's files); only days not cached yet, and today, are
+                    # downloaded, so a re-run of the same days or stocks no longer downloads them again.
+                    frame = await strategy_lab.load_tape(
+                        symbol, first.date(), last_day, lambda s, a, b: fetch_frame(broker, s, a, b)
+                    )
                 except HistoryError as exc:
                     if "Log in to Groww" in str(exc):
                         raise

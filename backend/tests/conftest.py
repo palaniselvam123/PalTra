@@ -24,6 +24,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _own_candle_cache(tmp_path, monkeypatch):
+    """Each test its own 1-minute day cache (strategy_lab.load_tape, read by replays too), so one test's fake
+    candles are never read back by another."""
+    monkeypatch.setenv("STRATEGY_LAB_DIR", str(tmp_path / "candle-cache"))
+
+
+@pytest.fixture(autouse=True)
 def _no_alert_delivery(monkeypatch):
     """Record alerts in memory instead of reading the desk DB and sending them.
 
