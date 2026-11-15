@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import { StopScan } from "@/components/Scalp/StopScan";
 import { ScanListPicker, cleanLists, resolveScanSymbols, type ScanList } from "@/components/Scalp/ScanLists";
 import { Explain } from "@/components/ui/Explain";
@@ -102,16 +103,16 @@ const SCORE_CLASS: Record<ChopScore, string> = {
 };
 
 // What each strong-trend check means. Before 10:00 (morning mode) the server judges today's
-// candles only, with the seven checks below; from 10:00 (midday) the 12-candle rules apply.
+// candles only, with the seven checks below; from 10:00 (midday) the current run of today is judged.
 // The server's own per-check note (`trend_notes`) wins when it is sent.
 const MIDDAY_TEXT: Partial<Record<ChopTrendCheck, string>> = {
   stack: "Price beyond the fast SMA, fast beyond the slow SMA",
-  vwap: "Price and the slow SMA on the trend side of VWAP",
+  vwap: "Price and the fast SMA on the trend side of VWAP",
   slope: "Fast and slow SMA both sloping with the trend",
   fan: "SMAs fanned apart (gap ≥ 0.10%) and not closing up",
-  hold: "≥ 75% of the last 12 closes on the trend side of the fast SMA",
-  structure: "Lower highs and lows (bearish) / higher highs and lows (bullish)",
-  run: "No SMA cross in the last 12 candles",
+  hold: "≥ 75% of this run's closes (up to 12) on the trend side of the fast SMA",
+  structure: "Higher highs and lows (lower for bearish), with a new high / low in the last 3 candles",
+  run: "At least 4 candles old today, a steady move, not one big candle",
 };
 const MORNING_TEXT: Partial<Record<ChopTrendCheck, string>> = {
   stack: "Price beyond the fast SMA, fast beyond the slow SMA (today)",
@@ -553,7 +554,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         className="mb-3"
         lead={`How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`}
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Fresh trend</b> (the Fresh ↑ / ↓ chip, and Show → Fresh trend) marks a trend that has only just started: the averages crossed within the last 3 candles, price and the fast average are beyond VWAP, the gap is still widening and volume is at least 1.5× the usual. Strong trend confirms a move that is already old; Fresh trend is the early one. <b>Candles</b>: Normal reads the real candles; <b>Heikin Ashi</b> reads the averaged ones (each candle blends into the one before), so the lines cross less often, small pullbacks do not break a trend, and a turn shows a little later. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the closes since the trend began today on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), higher highs and lows (lower for bearish) with a new one in the last 3 candles, and a steady run: the averages on that side for at least 4 candles today, the price moving mostly one way, and no single candle making most of the move. Only today's candles are read (yesterday's trend does not count) and nothing is labelled before 4 candles have closed today (3 before 10:00), so the label comes earlier in a trend, never from one big candle, and goes once the price stops making new highs / lows. Lines in order, VWAP, slope and the steady run are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Fresh trend</b> (the Fresh ↑ / ↓ chip, and Show → Fresh trend) marks a trend that has only just started: the averages crossed within the last 3 candles, price and the fast average are beyond VWAP, the gap is still widening and volume is at least 1.5× the usual. Strong trend confirms a move that is already old; Fresh trend is the early one. <b>Candles</b>: Normal reads the real candles; <b>Heikin Ashi</b> reads the averaged ones (each candle blends into the one before), so the lines cross less often, small pullbacks do not break a trend, and a turn shows a little later. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -611,6 +612,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             ]}
             className="w-44"
           />
+          <NewTag id="tq-strong-run" />
           <TextFilter value={query} onChange={setQuery} />
           <NumberFilter
             label="Fast movers: |speed| ≥"

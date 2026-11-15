@@ -1187,6 +1187,16 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
+  **Today's current run** (owner's cases: a single candle read Strong, a trend was called only when it was over, many
+  trends never showed): the midday read takes only today's candles and only the run since the SMAs took this side
+  (`_today_part`, `_run_len`; `RUN_MIN` 4 to `LOOKBACK` 12 candles) instead of a fixed 12-candle window that reached into
+  yesterday. `vwap` reads the fast SMA (the slow one hid every same-day trend on 15-minute candles); `hold` and `structure`
+  read the run; `structure` also needs a new high / low within `LIVE_BARS` (3) candles; `run` = on this side ≥ `RUN_MIN`
+  candles today, the last `EFFICIENCY_BARS` (6) closes ≥ `MIN_EFFICIENCY` (0.5) straight, and no candle making over
+  `ONE_CANDLE_SHARE` (60 %) of the move (`_move_read`), and is required with the first three. No label before `MIN_TODAY`
+  (4) closed candles today (`MORNING_MIN_TODAY` 3 before 10:00, where stack, slope with a new high / low, and run without a
+  spike are required): the note says "Too early". `breakout.strong` (the bots' strong-trend hand-off), the alerts,
+  auto-arm and the pick backtests read the same checks.
   **Morning mode** (`trend_mode` = `MORNING`, before 10:00 IST; `trend_strength.read(..., now=, tape=)`):
   only today's candles since 09:15 are read. Seven checks: `stack`, `vwap`, `slope`, `fan` (≥ 0.10%),
   `hold` (all closes on the trend side up to 09:30 = 3 of 3, then ≥ 75%), `run` (a fresh cross today
