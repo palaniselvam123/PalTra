@@ -363,8 +363,7 @@ def test_rows_keep_when_each_stock_was_first_quiet_and_alerted_today(monkeypatch
 def test_strong_trend_is_read_on_every_candle_size():
     """A steady rise reads a strong bullish trend on the short candles; a fall reads bearish.
 
-    The VWAP check reads the fast SMA (the 15-minute slow SMA reaches back into yesterday, under today's VWAP,
-    and used to hide every same-day trend on the longer candles), so the 15-minute candles read it too.
+    The 15-minute slow SMA reaches back into yesterday, under today's VWAP, so it fails the VWAP check.
     """
     yesterday = [100 + i * 0.05 for i in range(375)]
     up = pd.concat([_minutes(yesterday, dt.date(2026, 10, 7)),
@@ -373,7 +372,7 @@ def test_strong_trend_is_read_on_every_candle_size():
     assert row is not None
     assert row.trend_by_minutes[5] == row.trend == "STRONG_BULLISH"
     assert all(row.trend_by_minutes[m] == "STRONG_BULLISH" for m in (1, 2, 3, 5)), row.trend_by_minutes
-    assert row.trend_by_minutes[15] == "STRONG_BULLISH" and row.side_by_minutes[15] == "BULLISH"
+    assert row.trend_by_minutes[15] is None and row.side_by_minutes[15] == "BULLISH"
     fall = [200 - i * 0.05 for i in range(375)]
     down = pd.concat([_minutes(fall, dt.date(2026, 10, 7)),
                       _minutes([fall[-1] - i * 0.05 for i in range(200)])], ignore_index=True)

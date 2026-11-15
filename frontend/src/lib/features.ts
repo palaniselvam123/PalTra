@@ -49,8 +49,6 @@ export const FEATURES: Feature[] = [
     purpose: "Flags a stock that crossed earlier today and has stayed on one side for a set number of minutes: a chip on the row, a pop-up and one Telegram per scan." },
   { id: "tq-strong", area: "trend", added: "2026-10-12", pr: 172, href: TQ, where: "Scalp → Trend quality → Show: Strong trend", title: "Strong trend (7 checks)",
     purpose: "Marks Strong bullish / bearish when price, both SMAs and VWAP line up, the SMAs slope the same way, the gap widens, closes hold and there was no recent cross: the trends worth riding." },
-  { id: "tq-strong-run", area: "trend", added: "2026-11-15", pr: 434, href: TQ, where: "Scalp → Trend quality → Trend column", title: "Strong trend: earlier, today only, never one candle",
-    purpose: "The strong-trend label now reads only today's current run: it comes earlier in a trend, is never given for one big candle or yesterday's move, and goes once the price stops making new highs or lows. Alerts, auto-arm and the strong-trend hand-off follow." },
   { id: "tq-backtest-ha", area: "trend", added: "2026-11-15", pr: 434, href: "/scalp/#backtest", where: "Scalp → Backtest → Candles", title: "Trend quality backtests on Heikin Ashi candles",
     purpose: "The strong-trend pick backtest, its daily run and pick-time comparison, and the auto-arm replay can read the trend on Heikin Ashi candles, like the Trend quality card's Candles menu. Trades still fill at real prices." },
   { id: "bt-time-window", area: "trend", added: "2026-11-15", pr: 437, href: "/scalp/#backtest", where: "Scalp → Backtest and Most active → Backtest → Pick at / Trade until", title: "Pick backtests inside a time range (09:15 to 15:30)",
