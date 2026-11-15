@@ -80,6 +80,7 @@ export function TrendPickCompare({
   topN,
   direction,
   minutes,
+  candles = "NORMAL",
   bot,
   playHandoffs,
   active,
@@ -90,6 +91,8 @@ export function TrendPickCompare({
   topN: number;
   direction: TrendPickDirection;
   minutes: number;
+  /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles (strong-trend picks only). */
+  candles?: "NORMAL" | "HA";
   bot: number;
   playHandoffs: boolean;
   /** Compare the Most active picks (active_picks.py) instead of the strong-trend ones. */
@@ -170,6 +173,7 @@ export function TrendPickCompare({
         top_n: topN,
         direction,
         minutes,
+        candles,
         bot,
         lists,
         play_handoffs: playHandoffs,
@@ -308,7 +312,7 @@ function CompareView({ view, running }: { view: TrendCompare & { result: TrendCo
         {view.start_date} → {view.end_date} ·{" "}
         {view.active
           ? `top ${view.top_n} Most active by ${RANK_TEXT[view.active.rank]}, ${BIAS_TEXT[view.active.bias]}, at least ₹${view.active.min_value_cr} cr traded`
-          : `top ${view.top_n} ${dirText} on ${view.minutes}-min candles`}{" "}
+          : `top ${view.top_n} ${dirText} on ${view.minutes}-min ${view.candles === "HA" ? "Heikin Ashi " : ""}candles`}{" "}
         · {view.universe} stocks
         · Bot {view.bot}&apos;s settings{view.play_handoffs ? " with hand-offs to Bot 2 / Bot 3 played" : ""} · P&amp;L before charges unless marked.
       </p>

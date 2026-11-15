@@ -1,5 +1,6 @@
 "use client";
 
+import { NewTag } from "@/components/ui/NewTag";
 import Link from "next/link";
 import clsx from "clsx";
 import { CalendarClock, Loader2, TrendingUp } from "lucide-react";
@@ -35,6 +36,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
   const [topN, setTopN] = useState(10);
   const [direction, setDirection] = useState<TrendPickDirection>("BOTH");
   const [minutes, setMinutes] = useState(5);
+  const [candles, setCandles] = useState<"NORMAL" | "HA">("NORMAL");
   const [bot, setBot] = useState(1);
   const [playHandoffs, setPlayHandoffs] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -68,6 +70,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         top_n: topN,
         direction,
         minutes,
+        candles,
         bot,
         play_handoffs: playHandoffs,
       });
@@ -165,6 +168,15 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
           </select>
         </label>
         <label className="flex flex-col gap-1">
+          <span>
+            Candles <NewTag id="tq-backtest-ha" />
+          </span>
+          <select value={candles} onChange={(e) => setCandles(e.target.value as "NORMAL" | "HA")} className={select}>
+            <option value="NORMAL">Normal</option>
+            <option value="HA">Heikin Ashi</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
           Trade them on
           <select value={bot} onChange={(e) => setBot(Number(e.target.value))} className={select}>
             {BOTS.map((b) => (
@@ -208,6 +220,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         topN={topN}
         direction={direction}
         minutes={minutes}
+        candles={candles}
         bot={bot}
         playHandoffs={playHandoffs}
       />
@@ -275,6 +288,13 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
                     {m}-min candles
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              Candles
+              <select value={auto.candles ?? "NORMAL"} onChange={(e) => void saveAuto({ candles: e.target.value as "NORMAL" | "HA" })} className={select}>
+                <option value="NORMAL">Normal</option>
+                <option value="HA">Heikin Ashi</option>
               </select>
             </label>
             <label className="flex flex-col gap-1">

@@ -91,3 +91,22 @@ def test_the_label_goes_once_the_move_stops():
     tape = _tape(_trend(1))
     read = _read(tape, "13:01")  # an hour after the move ended, the price only goes sideways
     assert read["trend"] is None and not read["trend_checks"]["run"]
+
+
+def test_heikin_ashi_candles_can_be_read_by_the_backtests():
+    """The pick backtest and the auto-arm replay read the trend on Heikin Ashi candles when asked (prices stay real)."""
+    import trend_picks
+    from auto_arm import AutoArmRule
+
+    tape = _tape(_trend(1))
+    normal = strong_read(tape, TODAY, dt.time(11, 16), 5, 9, 21)
+    ha = strong_read(tape, TODAY, dt.time(11, 16), 5, 9, 21, ha=True)
+    assert normal["trend"] == ha["trend"] == "STRONG_BULLISH"
+    assert ha["sma_gap_pct"] != normal["sma_gap_pct"]  # the averages are worked out on other candles
+    assert ha["vwap"] == normal["vwap"]  # the day's average price is the real one
+
+    rule = trend_picks.TrendPickRule(pick_time=dt.time(11, 16), candles="HA")
+    assert rule.as_dict()["candles"] == "HA" and AutoArmRule(candles="HA").as_dict()["candles"] == "HA"
+    picks = trend_picks.picks_for_day({"UP": tape}, TODAY, rule)
+    assert [p["symbol"] for p in picks] == ["UP"] and picks[0]["side"] == "LONG"
+    assert trend_picks.TrendPickRule().as_dict()["candles"] == "NORMAL"

@@ -1169,7 +1169,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (`heikin_ashi.candles`; high / low widened to hold the HA open / close) before `enrich`, so the SMAs, crosses, score,
   strong-trend checks, phases, trend age and gap are all the Heikin Ashi read (`analyze(..., ha=)`, `_crosses_on`,
   `scan_worker.chop_job`); the last price, VWAP and day move stay real. Scan & arm, the Most active card's "Read trend
-  quality", MCP and the pick backtests keep normal candles. First seen compares only saved scans of the same kind.
+  quality" and MCP keep normal candles. **The backtests can read Heikin Ashi too** (`candles` `NORMAL` default | `HA` on
+  `TrendPickRule`, `AutoArmRule`, `trend_picks.AutoSettings` and the comparison; `POST /api/replay/trend-picks`,
+  `/api/replay/auto-arm`, `/api/trend-picks/compare`, `PUT /api/trend-picks/auto`; the Backtest tab's "Candles" menus):
+  `trend_picks.read_at` passes `ha=` to `analyze` and `auto_arm.strong_read(..., ha=)` runs `ha_bars` before `enrich`, so
+  the picks and arm minutes are the Heikin Ashi read; the bot then trades real prices with its own settings. Saved in the
+  run's `scalp_pick` (`candles`) and shown in the run detail / PDF ("Trend candle … Heikin Ashi"). The live auto-arm
+  follows the Trend quality scan it reads, so it is Heikin Ashi when the card's Candles menu is. First seen compares only saved scans of the same kind.
   **Fresh trend** (`trend_strength.fresh`, rows carry `fresh` BULLISH / BEARISH / null, `fresh_checks`, `fresh_rvol`;
   the Trend column's "Fresh ↑ / ↓" chip, `ChopScan.FreshChip`, and Show → Fresh trend both / up / down; plain word
   `fresh_trend`): a trend that has only just started, where Strong trend only confirms an old one. All of: `cross` (the

@@ -55,7 +55,7 @@ function dayLabel(iso: string): string {
   }).format(d);
 }
 
-type ScalpPickInfo = ScalpPickRule & { universe?: number; picks?: Record<string, ScalpPick[]> };
+type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; picks?: Record<string, ScalpPick[]> };
 
 /** The pick rule and picks a run recorded (scalp, strong-trend or Most active picks), or null for a plain replay. */
 export function scalpPickOf(s: Settings): ScalpPickInfo | null {
@@ -100,7 +100,7 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     rows.push(["Arm between", `${s("first") ?? "-"} and ${s("last") ?? "-"} IST`]);
     if (src !== "ACTIVE") {
       rows.push(["Trend read every", `${n("every_min") ?? "-"} min`]);
-      rows.push(["Trend candle", `${n("minutes") ?? "-"} min`]);
+      rows.push(["Trend candle", `${n("minutes") ?? "-"} min${s("candles") === "HA" ? ", Heikin Ashi" : ""}`]);
       rows.push(["Strong trend", `${n("min_checks") ?? 6} of 7 checks or more, ${s("side") === "UP" ? "up only" : s("side") === "DOWN" ? "down only" : "up or down"}`]);
     }
     if (src !== "TREND") {
@@ -118,7 +118,7 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
   rows.push(["Top", String(pick.top_n)]);
   if (pick.kind === "TREND") {
     rows.push(["Direction", String(pick.direction ?? "BOTH").toLowerCase()]);
-    rows.push(["Trend candle", `${pick.minutes ?? "-"} min`]);
+    rows.push(["Trend candle", `${pick.minutes ?? "-"} min${String(pick.candles ?? "") === "HA" ? ", Heikin Ashi" : ""}`]);
   } else if (pick.kind === "ACTIVE") {
     rows.push(["Ranked by", ACTIVE_RANK_LABEL[String(pick.rank ?? "rvol")] ?? String(pick.rank ?? "-")]);
     rows.push(["Bias", String(pick.bias ?? "BOTH").toLowerCase()]);
