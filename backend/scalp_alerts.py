@@ -68,6 +68,10 @@ class Settings:
     # Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay.
     arm_price_min: float = 0.0
     arm_price_max: float = 0.0
+    # Auto-arm a LIVE bot too (owner's request, to test with a small qty): off by default; turning it on needs
+    # confirm_live (PUT /api/scalp-alerts, 409 without). On a LIVE bot at most arm_live_max_day stocks a day per source.
+    arm_live: bool = False
+    arm_live_max_day: int = 3
 
 
 def settings_path() -> Path:
@@ -99,6 +103,7 @@ def clean(raw: dict) -> Settings:
     s.arm_pressure_on = bool(raw.get("arm_pressure_on", s.arm_pressure_on))
     s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
     s.arm_pressure_bot = _bot(raw.get("arm_pressure_bot"), s.arm_pressure_bot)
+    s.arm_live = bool(raw.get("arm_live", s.arm_live))
     try:
         s.arm_max_day = max(1, min(50, int(raw.get("arm_max_day", s.arm_max_day) or s.arm_max_day)))
         lo = max(0.0, min(1_000_000.0, float(raw.get("arm_price_min", s.arm_price_min) or 0.0)))
@@ -106,6 +111,7 @@ def clean(raw: dict) -> Settings:
         if hi and lo > hi:
             lo, hi = hi, lo
         s.arm_price_min, s.arm_price_max = lo, hi
+        s.arm_live_max_day = max(1, min(10, int(raw.get("arm_live_max_day", s.arm_live_max_day) or s.arm_live_max_day)))
     except (TypeError, ValueError):
         pass
     return s

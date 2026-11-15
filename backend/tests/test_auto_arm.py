@@ -271,3 +271,48 @@ async def test_the_price_range_limits_what_is_armed_live_and_in_the_replay():
     assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base))
     assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base, price_min=100, price_max=500)) == []
     assert auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base, price_min=500, price_max=5000))
+
+
+@pytest.mark.asyncio
+async def test_live_bot_is_armed_only_with_arm_live_and_its_own_daily_limit():
+    rows = [_strong(f"L{i}") for i in range(5)]
+    scalp_alerts.save({"arm_strong_on": True, "arm_strong_bot": 2, "arm_max_day": 10})
+    assert scalp_alerts.load().arm_live is False
+    calls: list = []
+
+    async def bots():
+        return {2: {"mode": "LIVE", "armed": [], "name": "Bot 2"}}
+
+    async def arm(bot, symbol, source, live=False):
+        calls.append((bot, symbol, live))
+        return None
+
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=NOW, check_market=False)
+    assert calls == [] and "LIVE" in rec["error"]
+    auto_arm._DONE["strong"].clear()
+    scalp_alerts.save({"arm_live": True, "arm_live_max_day": 2})
+    sent: list[str] = []
+
+    async def notify(text):
+        sent.append(text)
+
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, notify=notify, now=NOW, check_market=False)
+    assert rec["live"] is True and len(rec["armed"]) == 2 and len(rec["skipped"]) == 3
+    assert all(c[2] is True for c in calls) and "(LIVE)" in rec["skipped"][0]["why"]
+    assert "LIVE" in sent[0]
+    assert scalp_alerts.save({"arm_live_max_day": 99}).arm_live_max_day == 10
+
+
+def test_turning_live_arm_on_needs_confirm(monkeypatch):
+    import main
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    res = client.put("/api/scalp-alerts", json={"arm_live": True})
+    assert res.status_code == 409 and scalp_alerts.load().arm_live is False
+    res = client.put("/api/scalp-alerts", json={"arm_live": True, "confirm_live": True})
+    assert res.status_code == 200 and res.json()["arm_live"] is True
+    # Already on: saving again (or another field) needs no confirm; turning it off never does.
+    assert client.put("/api/scalp-alerts", json={"arm_live": True, "arm_live_max_day": 4}).status_code == 200
+    assert client.put("/api/scalp-alerts", json={"arm_live": False}).status_code == 200
+    assert scalp_alerts.load().arm_live is False

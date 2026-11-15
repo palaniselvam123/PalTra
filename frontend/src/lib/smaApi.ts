@@ -3004,7 +3004,7 @@ export const smaApi = {
     request<HoldTestResult>("/api/hold-test", { method: "POST", body: JSON.stringify(body) }, 600000, false),
   /** The Scalp page's two Telegram alerts (scalp_alerts.py): strong trend, buyers / sellers in control. */
   scalpAlerts: () => request<ScalpAlerts>("/api/scalp-alerts", undefined, undefined, false),
-  saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">>) =>
+  saveScalpAlerts: (body: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">> & { confirm_live?: boolean }) =>
     request<ScalpAlerts>("/api/scalp-alerts", { method: "PUT", body: JSON.stringify(body) }, undefined, false),
   trendAlerts: () => request<TrendAlerts>("/api/chop-scan/trend-alerts", undefined, undefined, false),
   saveTrendAlerts: (body: Partial<Omit<TrendAlerts, "recent">>) =>
@@ -3571,8 +3571,12 @@ export type ScalpAlerts = {
   /** Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay. */
   arm_price_min: number;
   arm_price_max: number;
+  /** Auto-arm a LIVE bot too (real Groww orders on its next signal); turning it on needs confirm_live. */
+  arm_live: boolean;
+  /** On a LIVE bot, at most this many stocks a day per scan (1-10). */
+  arm_live_max_day: number;
   auto_arm?: {
-    recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
+    recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; live?: boolean; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
     today: { strong: string[]; pressure: string[] };
   };
   recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number; failed?: string }[];
