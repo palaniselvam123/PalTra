@@ -345,7 +345,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   **full value** (qty × entry price, what it would cost bought outright) and the **intraday margin** actually blocked
   (the practice wallet's `margin_pct`, 20 % = 5× by default; `backtestPdf.tradeValue`), and the Result table shows the
   largest trade's full value and margin and the most margin blocked at once (`backtestPdf.peakMargin`: overlapping
-  trades add up). The blotter's summary PDF shows the same.
+  trades add up). The blotter's summary PDF shows the same. A Scalp-pick run's PDF (auto-arm, strong-trend, Most active picks) ends with **How the stocks were picked** (`BacktestRuns.pickRuleRows`: kind, days, stocks read, source, arm window, trend read step and candle, strong-trend checks / side, buyers-sellers % / side / money floor, saved-scan days, price range, max a day; or pick time, top N, direction / rank / bias) and **Stocks armed each day** (`pickLogRows`: day, minute armed, stock, found by, side, why), from the run's `scalp_pick` snapshot (`backtestPdf` `pickRule` / `pickLog`).
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only

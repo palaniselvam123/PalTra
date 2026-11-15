@@ -47,6 +47,9 @@ function day(iso: string): string {
   });
 }
 
+/** Stocks named in the header line; the rest are counted ("and N more"), every stock is in the tables. */
+const SUBTITLE_STOCKS = 30;
+
 const GREEN: [number, number, number] = [4, 120, 87];
 const RED: [number, number, number] = [190, 18, 60];
 const INK: [number, number, number] = [15, 23, 42];
@@ -66,6 +69,10 @@ export type BacktestPdfInput = {
   fileName?: string;
   /** Share of a trade's value blocked as intraday margin (the practice wallet's setting, 20 = 5x leverage). */
   marginPct?: number;
+  /** Scalp-pick runs (auto-arm, strong-trend, Most active picks): the rule the stocks were picked by, at the end. */
+  pickRule?: [string, string][];
+  /** The stocks picked each day, with the minute each was armed and why (the replay bar's armed list). */
+  pickLog?: { day: string; time: string; symbol: string; source: string; side: string; why: string }[];
 };
 
 /** The full amount a trade would have cost bought outright: qty x entry price. */
@@ -121,6 +128,8 @@ export async function downloadBacktestPdf({
   settingsHead,
   fileName,
   marginPct = 20,
+  pickRule,
+  pickLog,
 }: BacktestPdfInput): Promise<void> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -183,34 +192,39 @@ export async function downloadBacktestPdf({
   doc.setFontSize(10);
   doc.setTextColor(...MUTED);
   const range = run.end_date !== run.start_date ? `${day(run.start_date)} to ${day(run.end_date)}` : day(run.start_date);
-  doc.text(
-    pdfText(
-      subtitle ??
-        `${range} · from ${run.start_time} · ${run.symbols.join(", ")} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days`
-    ),
-    margin,
-    66,
-    { maxWidth: width - margin * 2 }
+  // Header lines wrap and push the next one down (a long stock list used to print over the lines below it).
+  const textWidth = width - margin * 2;
+  let hy = 66;
+  const lines = (text: string, gap = 13) => {
+    const wrapped = doc.splitTextToSize(pdfText(text), textWidth) as string[];
+    doc.text(wrapped, margin, hy);
+    hy += wrapped.length * gap;
+  };
+  const shown = run.symbols.slice(0, SUBTITLE_STOCKS);
+  const more = run.symbols.length - shown.length;
+  lines(
+    subtitle ??
+      `${range} · from ${run.start_time} · ${run.status.toLowerCase()} · ${run.days_done}/${run.days_total} days · ${run.symbols.length} stock${
+        run.symbols.length === 1 ? "" : "s"
+      }: ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`
   );
-  doc.text(
-    pdfText(
-      `${note ?? "Practice replay on Groww 1-minute candles. No order was sent."} Generated ${new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        dateStyle: "medium",
-        timeStyle: "short",
-      })} IST.`
-    ),
-    margin,
-    80
+  lines(
+    `${note ?? "Practice replay on Groww 1-minute candles. No order was sent."} Generated ${new Date().toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "short",
+    })} IST.`
   );
+  hy += 6;
   doc.setTextColor(...INK);
   doc.setFont("helvetica", "bold");
-  doc.text(pdfText(strategy), margin, 98, { maxWidth: width - margin * 2 });
+  lines(strategy);
+  hy += 2;
 
-  // Totals, then the settings the run used, side by side.
+  // Totals first; the settings the run used are on the last page.
   autoTable(doc, {
-    startY: 112,
-    margin: { left: margin, right: width / 2 + 6 },
+    startY: hy,
+    margin: { left: margin, right: margin },
     theme: "grid",
     head: [["Result", ""]],
     body: [
@@ -226,7 +240,7 @@ export async function downloadBacktestPdf({
     ],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 150 } },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 260 } },
     didParseCell: (cell) => {
       if (cell.section !== "body" || cell.column.index !== 1) return;
       const label = String(cell.row.raw instanceof Array ? cell.row.raw[0] : "");
@@ -236,18 +250,7 @@ export async function downloadBacktestPdf({
       if (label in rangeTone) cell.cell.styles.textColor = tone(rangeTone[label]);
     },
   });
-  const resultEnd = after();
-  autoTable(doc, {
-    startY: 112,
-    margin: { left: width / 2 + 6, right: margin },
-    theme: "grid",
-    head: [settingsHead ?? ["Setting", "Value"]],
-    body: settings.map(([k, v]) => [pdfText(k), pdfText(v)]),
-    styles: { fontSize: 9, cellPadding: 4 },
-    headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
-  });
-  let y = Math.max(resultEnd, after()) + 22;
+  let y = after() + 22;
 
   const stocks = run.stocks ?? [];
   if (stocks.length > 1) {
@@ -438,6 +441,69 @@ export async function downloadBacktestPdf({
       if (cell.column.index === 11) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));
     },
   });
+
+  // The settings the run used, on a page of their own at the end (owner's request), then how its stocks were picked.
+  if (settings.length) {
+    doc.addPage();
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...INK);
+    doc.text(settingsHead?.[0] === "Setting" || !settingsHead ? "Settings this run used" : pdfText(settingsHead[0]), margin, 48);
+    autoTable(doc, {
+      startY: 56,
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      head: [settingsHead ?? ["Setting", "Value"]],
+      body: settings.map(([k, v]) => [pdfText(k), pdfText(v)]),
+      styles: { fontSize: 8.5, cellPadding: 3.5 },
+      headStyles: { fillColor: [30, 41, 59] },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 200 } },
+    });
+  }
+  if (pickRule?.length || pickLog?.length) {
+    // How the stocks were picked (Scalp-pick runs): the rule, then each day's armed stocks with their minute.
+    let py = after() + 24;
+    if (py > doc.internal.pageSize.getHeight() - 100) {
+      doc.addPage();
+      py = 48;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...INK);
+    doc.text("How the stocks were picked", margin, py);
+    if (pickRule?.length) {
+      autoTable(doc, {
+        startY: py + 6,
+        margin: { left: margin, right: margin },
+        theme: "grid",
+        head: [["Setting", "Value"]],
+        body: pickRule.map(([k, v]) => [pdfText(k), pdfText(v)]),
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [30, 41, 59] },
+        columnStyles: { 0: { cellWidth: 200 } },
+      });
+      py = after() + 18;
+    }
+    if (pickLog?.length) {
+      if (py > doc.internal.pageSize.getHeight() - 80) {
+        doc.addPage();
+        py = 48;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(...INK);
+      doc.text(`Stocks armed each day (${pickLog.length})`, margin, py);
+      autoTable(doc, {
+        startY: py + 6,
+        margin: { left: margin, right: margin },
+        theme: "striped",
+        head: [["Day", "Armed at", "Stock", "Found by", "Side", "Why"]],
+        body: pickLog.map((r) => [pdfText(day(r.day)), r.time || "-", r.symbol, pdfText(r.source || "-"), r.side || "-", pdfText(r.why || "-")]),
+        styles: { fontSize: 7.5, cellPadding: 3 },
+        headStyles: { fillColor: [30, 41, 59] },
+      });
+    }
+  }
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i += 1) {
