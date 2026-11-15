@@ -39,6 +39,8 @@ from strategy_engine import (
     MAX_TRADE_SYMBOLS,
     ForceRefused,
     StrategyEngine,
+    config_from,
+    config_row,
     settings_for,
     settings_snapshot,
     stock_settings,
@@ -51,6 +53,7 @@ import handoff_chain
 import handoff_log
 import open_pnl_log
 import recovery
+import server_role
 import auto_arm
 from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
@@ -86,9 +89,19 @@ def frame_bars(cfg) -> int:
 # Share of each real second the replays together may spend ticking, so the
 # live engine and the API stay responsive (one Python process, one event loop).
 # Several bots replaying at once split it. Past this a replay plays slower.
+# Only the replays' own ticks count against it: the page's requests and the
+# bots run in the gaps between ticks.
 CPU_SHARE = 0.4
+# The backtest server is a machine for replays, so there they may take most of
+# each second; while its practice bots run (same event loop) they get the
+# desk's share back.
+BACKTEST_CPU_SHARE = 0.8
+# A burst of ticks earns its share from at most this much real time, so a busy
+# page cannot make each burst longer than the last; the speed shown on the
+# replay bar is worked out again about once a second.
+BURST_SECONDS = 1.0
 
-#: Replays playing right now (one per bot can play at once); they split CPU_SHARE.
+#: Replays playing right now (one per bot can play at once); they split cpu_share().
 _PLAYING: set[int] = set()
 LOOP_SECONDS = 0.2
 # Replay seconds per engine tick. Six ticks a minute land on the candle's
@@ -98,6 +111,21 @@ STEP_SECONDS = 10
 # exists to protect a real session. The daily loss limit still applies.
 REPLAY_TRADE_CAP = 1_000_000
 COLUMNS = ("ts", "open", "high", "low", "close", "volume")
+
+
+def cpu_share() -> float:
+    """The replays' share of each real second here: CPU_SHARE on the desk (live bots share the event loop),
+    BACKTEST_CPU_SHARE on the backtest server unless its practice bots are running."""
+    if server_role.is_backtest() and not _practice_bots_running():
+        return max(CPU_SHARE, BACKTEST_CPU_SHARE)
+    return CPU_SHARE
+
+
+def _practice_bots_running() -> bool:
+    """Backtest server: a practice bot is running or paused, or holds a trade (as main._bot_running_here)."""
+    import bots  # here, not at the top: bots loads the engine modules this one does
+
+    return any(e.status in ("RUNNING", "PAUSED") or e.positions for e in bots.engines().values())
 
 
 def _path_price(o: float, h: float, low: float, c: float, f: float) -> tuple[float, float, float]:
@@ -168,12 +196,19 @@ class ReplayFeed:
             # the last price keeps "the last row is the forming bar" true.
             price = float(cols["close"][-1]) if closed_end else 0.0
             forming = (minute_ts, price, price, price, price, prev_cum)
-        frame = pd.DataFrame(
-            {col: np.append(cols[col], value) for col, value in zip(COLUMNS, forming)}
-        )
-        frame["ts"] = frame["ts"].astype("int64")
-        frame["volume"] = frame["volume"].astype("int64")
-        return float(price), frame
+        # Each column a fresh array already in its final dtype, wrapped without another copy: building the
+        # frame and then converting two columns was a third of a replay tick. Same values, dtypes and index.
+        arrays = {col: np.append(cols[col], value) for col, value in zip(COLUMNS, forming)}
+        arrays["ts"] = _as_int64(arrays["ts"])
+        arrays["volume"] = _as_int64(arrays["volume"])
+        return float(price), pd.DataFrame(arrays, copy=False)
+
+
+def _as_int64(values: np.ndarray) -> np.ndarray:
+    """float64 → int64 the way pandas' astype("int64") does it: refused on NaN / inf, else truncated."""
+    if not np.isfinite(values).all():
+        raise pd.errors.IntCastingNaNError("Cannot convert non-finite values (NA or inf) to integer")
+    return values.astype("int64")
 
 
 class LocalFills:
@@ -575,8 +610,10 @@ class ReplayEngine(StrategyEngine):
         return "dropped from the rest of this replay day"
 
     def load_config(self) -> BotConfig:
-        row = super().load_config()
-        data = {col.name: getattr(row, col.name) for col in BotConfig.__table__.columns}
+        # The bot's row as saved now, read on every call as before, so a Save applies from the next tick.
+        # Plain column values (config_row), not an ORM object loaded and detached first: this runs every tick.
+        # It stands for StrategyEngine.load_config's read, so keep the two in step.
+        data = config_row(self.config_id)
         if self.saved_settings:
             for name, value in self.saved_settings.items():
                 if name == "stock_settings":
@@ -600,7 +637,7 @@ class ReplayEngine(StrategyEngine):
         data["trade_symbols"] = ",".join(self._armed_now())
         view = (data.get("symbol") or "").upper()
         data["symbol"] = view if view in self.replay_symbols else (self.replay_symbols[0] if self.replay_symbols else "")
-        cfg = BotConfig(**data)
+        cfg = config_from(data)  # read every tick: the cheap BotConfig (strategy_engine.config_from)
         self._cfg_cache = cfg
         return cfg
 
@@ -1592,24 +1629,27 @@ class ReplaySession:
         The same 10-second grid as normal play, so the trades are the ones the day would give at any speed;
         only real time is skipped. Works while PAUSED too (the replay stays paused at the target)."""
         _PLAYING.add(id(self))
-        began = time.monotonic()
+        share = cpu_share()
+        used = 0.0  # this burst's own tick time; the page's requests in between do not count
         try:
             while not self._stop and self._seek is not None and eng.feed.clock < self._seek:
                 gap = _to_next_grid(eng.feed.clock)
                 eng.feed.clock = min(end, eng.feed.clock + dt.timedelta(seconds=gap))
+                began = time.perf_counter()
                 try:
                     await eng.tick(eng.feed.clock)
                 except Exception as exc:  # noqa: BLE001
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
+                used += time.perf_counter() - began
                 if eng.feed.clock >= end:
                     self._seek = None
                     await self._finish_day()
                     return True
-                if time.monotonic() - began > CPU_SHARE / max(1, len(_PLAYING)):
+                if used > share / max(1, len(_PLAYING)):
                     # Give the live engine and the API their share between bursts.
                     await asyncio.sleep(LOOP_SECONDS)
-                    began = time.monotonic()
+                    share, used = cpu_share(), 0.0
                 else:
                     await asyncio.sleep(0)
         finally:
@@ -1636,7 +1676,11 @@ class ReplaySession:
             _PLAYING.add(id(self))
             owed += real * self.speed
             played = 0.0
-            began = time.monotonic()
+            # This burst may tick for its share of the real time that passed (at most BURST_SECONDS of it).
+            # Only its own ticks are timed: the page's polls and the bots run in the gaps between ticks and must
+            # not slow the replay down.
+            budget = cpu_share() * min(max(real, LOOP_SECONDS), BURST_SECONDS)
+            used = 0.0
             while not self._stop and self.status == "PLAYING":
                 gap = _to_next_grid(eng.feed.clock)
                 if owed < gap:
@@ -1644,18 +1688,19 @@ class ReplaySession:
                 owed -= gap
                 played += gap
                 eng.feed.clock = min(end, eng.feed.clock + dt.timedelta(seconds=gap))
+                began = time.perf_counter()
                 try:
                     await eng.tick(eng.feed.clock)
                 except Exception as exc:  # noqa: BLE001
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
+                used += time.perf_counter() - began
                 if eng.feed.clock >= end:
                     await self._finish_day()
                     return
                 # Let the live engine and the API run between ticks.
                 await asyncio.sleep(0)
-                share = CPU_SHARE / max(1, len(_PLAYING))
-                if time.monotonic() - began > share * max(real, LOOP_SECONDS):
+                if used > budget / max(1, len(_PLAYING)):
                     owed = 0.0  # behind: drop the rest, play slower instead of piling up
                     break
             spent = time.monotonic() - now_m + LOOP_SECONDS

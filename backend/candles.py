@@ -50,6 +50,23 @@ def bucket_start(ts: int, minutes: int) -> int:
     return anchor + ((local - anchor) // span) * span - _IST_OFFSET
 
 
+_F64, _I64 = np.dtype("float64"), np.dtype("int64")
+
+
+def last_prices(frame: pd.DataFrame, cols: list[str]) -> np.ndarray | None:
+    """`frame[cols].iloc[-1].to_numpy()` read straight from the columns, without building `frame[cols]`.
+
+    Only for float64 / int64 columns with at least one float64 among them (pandas then gives a float64 row);
+    None for any other mix, which the caller reads the pandas way.
+    """
+    if not cols or not frame.columns.is_unique:
+        return None
+    dtypes = [frame[c].dtype for c in cols]
+    if _F64 not in dtypes or any(d != _F64 and d != _I64 for d in dtypes):
+        return None
+    return np.array([frame[c].to_numpy()[-1] for c in cols], dtype="float64")
+
+
 def resample(frame: pd.DataFrame | None, minutes: int) -> pd.DataFrame | None:
     """1-minute candles (oldest first, forming last) as `minutes` candles.
 
@@ -78,4 +95,8 @@ def resample(frame: pd.DataFrame | None, minutes: int) -> pd.DataFrame | None:
             continue
         # close, the running volume and anything else: the candle's last minute.
         out[name] = frame[name].to_numpy()[last]
-    return pd.DataFrame(out, columns=list(frame.columns))
+    if not frame.columns.is_unique:
+        return pd.DataFrame(out, columns=list(frame.columns))
+    # Every array above is new (fancy indexing, reduceat), so the frame wraps them without a copy, in the tape's
+    # column order. Passing `columns=` instead took three times as long, and this runs per stock on every pass.
+    return pd.DataFrame({name: out[name] for name in frame.columns}, copy=False)

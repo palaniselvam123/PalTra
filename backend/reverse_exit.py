@@ -149,9 +149,16 @@ def overlay(cfg, groups: tuple[str, ...] | None = None):
     except ImportError:  # pragma: no cover
         BotConfig = None
     if BotConfig is not None and isinstance(cfg, BotConfig):
-        data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
+        # The cheap copy (strategy_engine.config_from): a reversed trade asks for this every pass.
+        try:
+            from strategy_engine import config_from, config_values
+        except ImportError:  # pragma: no cover - strategy_engine still importing: the plain copy
+            data = {col.name: getattr(cfg, col.name) for col in BotConfig.__table__.columns}
+            data.update(own)
+            return BotConfig(**data)
+        data = config_values(cfg)
         data.update(own)
-        return BotConfig(**data)
+        return config_from(data)
     base = {name: getattr(cfg, name) for name in dir(cfg) if not name.startswith("_") and not callable(getattr(cfg, name, None))}
     return SimpleNamespace(**{**base, **own})
 
