@@ -3743,7 +3743,7 @@ class ScalpAlertUpdate(BaseModel):
     pressure_pct: float | None = Field(default=None, ge=50, le=95)
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
-    # Auto-arm (auto_arm.py): PAPER bots only; a LIVE bot is refused when the scan arrives.
+    # Auto-arm (auto_arm.py): PAPER bots unless arm_live is ticked (needs confirm_live).
     arm_strong_on: bool | None = None
     arm_strong_bot: int | None = Field(default=None, ge=1, le=5)
     arm_pressure_on: bool | None = None
@@ -3752,6 +3752,10 @@ class ScalpAlertUpdate(BaseModel):
     # Auto-arm price range (₹, 0 = no bound).
     arm_price_min: float | None = Field(default=None, ge=0, le=1_000_000)
     arm_price_max: float | None = Field(default=None, ge=0, le=1_000_000)
+    # Auto-arm a LIVE bot too (real Groww orders on its next signal); turning it on needs confirm_live.
+    arm_live: bool | None = None
+    arm_live_max_day: int | None = Field(default=None, ge=1, le=10)
+    confirm_live: bool = False
 
 
 @app.get("/api/scalp-alerts")
@@ -3762,8 +3766,19 @@ async def scalp_alerts_get():
 
 @app.put("/api/scalp-alerts")
 async def scalp_alerts_put(body: ScalpAlertUpdate):
-    """Save the strong-trend and buyer / seller alerts. Alerts only: nothing is armed or ordered."""
-    await asyncio.to_thread(scalp_alerts.save, body.model_dump(exclude_none=True))
+    """Save the strong-trend and buyer / seller alerts and the auto-arm. Nothing is ordered. Ticking "Also arm a LIVE
+    bot" needs confirm_live (409 without): auto-armed stocks on a LIVE bot are traded with real Groww orders."""
+    raw = body.model_dump(exclude_none=True)
+    confirm = bool(raw.pop("confirm_live", False))
+    if raw.get("arm_live") and not confirm:
+        current = await asyncio.to_thread(scalp_alerts.load)
+        if not current.arm_live:
+            raise HTTPException(
+                409,
+                "Auto-arming a LIVE bot means real Groww orders on its next signal. Confirm it on the page "
+                "(confirm_live) to turn it on.",
+            )
+    await asyncio.to_thread(scalp_alerts.save, raw)
     return await asyncio.to_thread(scalp_alerts.view)
 
 
@@ -3869,9 +3884,10 @@ async def _auto_arm_bots() -> dict[int, dict]:
     return await _scan_arm_bots(remote=_auto_arm_remote())
 
 
-async def _auto_arm_arm(bot: int, symbol: str, source: str) -> str | None:
-    # Never confirm_live: auto-arm refuses a LIVE bot before it gets here, and the desk refuses one without it.
-    return await _scan_arm_arm(bot, symbol, source, False, remote=_auto_arm_remote())
+async def _auto_arm_arm(bot: int, symbol: str, source: str, live: bool = False) -> str | None:
+    # confirm_live only when auto_arm found the bot LIVE and "Also arm a LIVE bot" (arm_live, confirmed when it was
+    # ticked) is on; the desk still checks one LIVE bot per stock.
+    return await _scan_arm_arm(bot, symbol, source, live, remote=_auto_arm_remote())
 
 
 async def _auto_arm_notify(message: str) -> None:

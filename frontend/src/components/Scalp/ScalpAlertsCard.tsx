@@ -23,7 +23,7 @@ export function ScalpAlertsCard() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the alert settings"));
   }, []);
 
-  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">>) => {
+  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">> & { confirm_live?: boolean }) => {
     setBusy(true);
     setError(null);
     try {
@@ -177,6 +177,23 @@ export function ScalpAlertsCard() {
             </div>
           ) : null}
           {view.arm_strong_on || view.arm_pressure_on ? (
+            <LiveArmRow
+              on={view.arm_live}
+              max={view.arm_live_max_day}
+              busy={busy}
+              onToggle={(on) => {
+                if (!on) return void save({ arm_live: false });
+                const typed = window.prompt(
+                  "Also arm a LIVE bot?\n\nWhen the bot picked above is LIVE, auto-armed stocks go on its Trade list and the bot " +
+                    "trades them with REAL Groww orders on its next signal, at the bot's own quantity. Set a small quantity on that bot first.\n\n" +
+                    `At most ${view.arm_live_max_day} stocks a day from each scan go on a LIVE bot.\n\nType LIVE to turn it on.`
+                );
+                if ((typed ?? "").trim().toUpperCase() === "LIVE") void save({ arm_live: true, confirm_live: true });
+              }}
+              onMax={(v) => void save({ arm_live_max_day: v })}
+            />
+          ) : null}
+          {view.arm_strong_on || view.arm_pressure_on ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
               Only stocks priced from ₹
               <PriceBox value={view.arm_price_min} disabled={busy} label="Lowest price" onSave={(v) => void save({ arm_price_min: v })} />
@@ -197,7 +214,8 @@ export function ScalpAlertsCard() {
                 {view.auto_arm.recent.map((r, i) => (
                   <li key={`${r.at}-${i}`} className="text-slate-300">
                     <span className="tabular-nums text-slate-500">{time(r.at)}</span> {r.source === "strong" ? "Trend quality" : "Most active"} →{" "}
-                    {r.bot_name ?? `Bot ${r.bot}`}:{" "}
+                    {r.bot_name ?? `Bot ${r.bot}`}
+                    {r.live ? <span className="ml-1 rounded bg-rose-600 px-1 text-[10px] font-bold text-white">LIVE</span> : null}:{" "}
                     {r.error ? <span className="text-amber-300">{r.error}</span> : <b>{r.armed.join(", ") || "nothing new"}</b>}
                     {r.skipped.length ? <span className="text-slate-500"> · not armed: {r.skipped.map((x) => `${x.symbol} (${x.why})`).join("; ")}</span> : null}
                   </li>
@@ -274,7 +292,63 @@ function PriceBox({ value, label, disabled, onSave }: { value: number; label: st
   );
 }
 
-/** "Also arm them on Bot N" under an alert (backend auto_arm.py). PAPER bots only: a LIVE bot is refused when the scan arrives. */
+/** "Also arm a LIVE bot" (backend auto_arm.py `arm_live`): off by default; turning it on asks for LIVE typed and sends confirm_live. */
+function LiveArmRow({
+  on,
+  max,
+  busy,
+  onToggle,
+  onMax,
+}: {
+  on: boolean;
+  max: number;
+  busy: boolean;
+  onToggle: (on: boolean) => void;
+  onMax: (v: number) => void;
+}) {
+  return (
+    <div
+      id="scalp-auto-arm-live"
+      className={clsx("rounded-md border px-2 py-2 text-xs lg:col-span-2", on ? "border-rose-500/60 bg-rose-500/[0.07]" : "border-slate-800")}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex min-h-9 items-center gap-2 font-semibold text-slate-200">
+          <input type="checkbox" checked={on} disabled={busy} onChange={(e) => onToggle(e.target.checked)} className="accent-rose-500" />
+          Also arm a LIVE bot
+        </label>
+        <NewTag id="tq-auto-arm-live-bot" />
+        {on ? <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">REAL ORDERS</span> : <span className="text-slate-500">Off: PAPER bots only</span>}
+        {on ? (
+          <label className="flex items-center gap-1.5 text-slate-300">
+            at most
+            <input
+              key={max}
+              type="number"
+              min={1}
+              max={10}
+              defaultValue={max}
+              disabled={busy}
+              aria-label="Most stocks a day on a LIVE bot"
+              onBlur={(e) => {
+                const v = Math.min(10, Math.max(1, Math.round(Number(e.target.value)) || 3));
+                if (v !== max) onMax(v);
+              }}
+              className="h-9 w-14 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-200"
+            />
+            stocks a day from each scan on a LIVE bot
+          </label>
+        ) : null}
+      </div>
+      <p className="mt-1 text-slate-400">
+        Off, a LIVE bot is never armed by itself. On, when the bot picked above is LIVE, the stocks the scan picks go on its Trade list
+        and it trades them with <b>real Groww orders</b> on its next signal, at the bot&apos;s own quantity (set it small to test). A stock
+        another LIVE bot trades is skipped. Nothing is ever taken off the list.
+      </p>
+    </div>
+  );
+}
+
+/** "Also arm them on Bot N" under an alert (backend auto_arm.py). PAPER bots unless "Also arm a LIVE bot" is ticked. */
 function ArmRow({
   label,
   on,
@@ -315,7 +389,7 @@ function ArmRow({
       </div>
       <p className="mt-1 text-slate-400">
         Same thresholds as the alert above (the alert itself can be on or off). After each {label} scan in market hours, each new
-        stock goes on that bot&apos;s Trade list, once a day. <b>PAPER bots only</b>: a LIVE bot is never armed by itself.
+        stock goes on that bot&apos;s Trade list, once a day. A LIVE bot is armed only with &quot;Also arm a LIVE bot&quot; ticked below.
       </p>
       {on && today.length ? <p className="mt-1 text-slate-300">Armed today: {today.join(", ")}</p> : null}
     </div>

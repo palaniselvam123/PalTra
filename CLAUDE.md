@@ -1244,8 +1244,11 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   the alert's thresholds pick (`scalp_alerts.strong_picks` / `pressure_picks(..., alerting=False)`: the alert's own on
   switch and once-a-day memory do not matter) are armed on that bot (`after_scan`; source chips "Auto-arm: Trend quality" /
   "Auto-arm: Most active"), each stock once a day per source (`_DONE`, memory only), at most `arm_max_day` a day per source,
-  a stock already armed left alone, nothing unarmed; **price range** (`arm_price_min` / `arm_price_max` ₹, 0 = no bound, swapped when typed the wrong way; `auto_arm.price_ok`, `candidates`): only stocks whose scan price is inside it, and in the replay the tape's last close before the arm minute / the saved scan row's `ltp` (`AutoArmRule.price_min` / `price_max`, `active_hits(..., price_min, price_max)`, passed over the desk link). **PAPER bots only**: a LIVE bot is refused with a note (never
-  `confirm_live`). Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link only from the
+  a stock already armed left alone, nothing unarmed; **price range** (`arm_price_min` / `arm_price_max` ₹, 0 = no bound, swapped when typed the wrong way; `auto_arm.price_ok`, `candidates`): only stocks whose scan price is inside it, and in the replay the tape's last close before the arm minute / the saved scan row's `ltp` (`AutoArmRule.price_min` / `price_max`, `active_hits(..., price_min, price_max)`, passed over the desk link). **PAPER bots by default**: a LIVE bot is refused with a note
+  unless **Also arm a LIVE bot** (`arm_live`, off by default; `PUT /api/scalp-alerts` turning it on needs `confirm_live`,
+  409 without; the card asks for LIVE typed, `ScalpAlertsCard.LiveArmRow`) is on: then at most `arm_live_max_day` (3, 1-10)
+  stocks a day per source go on the LIVE bot (`_auto_arm_arm(..., live=True)` → `confirm_live`; one LIVE bot per stock
+  still applies; the Telegram says LIVE). The bot trades them at its own quantity. Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link only from the
   scanner; the desk and the backtest server arm their own bots). One Telegram per run that armed something (quiet
   channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Auto-arm replay** (`AutoArmRule`,
   kind `AUTOARM`, dispatched by `scalp_picks.picks_for_day`; `POST /api/replay/auto-arm`, the Scalp Backtest tab's

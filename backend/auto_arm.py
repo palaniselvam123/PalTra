@@ -12,8 +12,10 @@ themselves, and test the same rule on past days.
 
 The alert's own on / off switch does not matter: only its thresholds are read. Each stock is armed at most once a day
 per source (`_DONE`, memory only), at most `arm_max_day` (10) stocks a day per source; a stock already on the bot's list
-is left as it is, nothing is ever unarmed. **PAPER bots only**: a LIVE bot is refused and the run says so (arming a
-LIVE bot means real Groww orders on its next signal, so that stays a person's click). Arming only: no order is placed;
+is left as it is, nothing is ever unarmed. **PAPER bots by default**: a LIVE bot is refused and the run says so (arming a
+LIVE bot means real Groww orders on its next signal), unless "Also arm a LIVE bot" (`arm_live`, off by default; turning it
+on needs `confirm_live`) is ticked; then at most `arm_live_max_day` (3) stocks a day per source go on the LIVE bot, through
+the same arm route as a person's click (one LIVE bot per stock still applies). Arming only: no order is placed;
 the bot trades the stock on its own next signal, with its own settings. One Telegram per run that armed something
 (quiet-runner channel).
 
@@ -123,13 +125,16 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
             if info is None:
                 raise RuntimeError(f"Bot {bot} was not found.")
             record["bot_name"] = info.get("name") or f"Bot {bot}"
-            if (info.get("mode") or "PAPER").upper() == "LIVE":
+            live = (info.get("mode") or "PAPER").upper() == "LIVE"
+            record["live"] = live
+            if live and not s.arm_live:
                 raise RuntimeError(
-                    f"{record['bot_name']} is LIVE. Auto-arm only arms PAPER bots: arming a LIVE bot means real "
-                    "Groww orders, so that stays your own click."
+                    f"{record['bot_name']} is LIVE. Auto-arm arms PAPER bots; a LIVE bot only with \"Also arm a LIVE bot\" "
+                    "ticked on the Alerts tab (arming a LIVE bot means real Groww orders on its next signal)."
                 )
             armed = {str(x).upper() for x in info.get("armed") or []}
-            room = max(0, int(s.arm_max_day) - len(done))
+            limit = min(int(s.arm_max_day), int(s.arm_live_max_day)) if live else int(s.arm_max_day)
+            room = max(0, limit - len(done))
             for p in fresh:
                 sym = str(p["symbol"]).upper()
                 if sym in armed:
@@ -137,9 +142,9 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
                     seen.append(sym)
                     continue
                 if room <= 0:
-                    record["skipped"].append({"symbol": sym, "why": f"today's limit of {s.arm_max_day} reached"})
+                    record["skipped"].append({"symbol": sym, "why": f"today's limit of {limit}{' (LIVE)' if live else ''} reached"})
                     continue
-                why = await arm(bot, sym, SOURCE_CHIP[kind])
+                why = await (arm(bot, sym, SOURCE_CHIP[kind], live=True) if live else arm(bot, sym, SOURCE_CHIP[kind]))
                 if why is None:
                     record["armed"].append(sym)
                     armed.add(sym)
@@ -171,7 +176,8 @@ def text(record: dict) -> str:
     name = record.get("bot_name") or f"Bot {record['bot']}"
     if record.get("error"):
         return f"🤖 Auto-arm ({where}) could not arm on {name}: {record['error']}"
-    lines = [f"🤖 Auto-arm ({where}): armed {', '.join(record['armed'])} on {name}."]
+    lines = [f"🤖 Auto-arm ({where}): armed {', '.join(record['armed'])} on {name}"
+             + (" — LIVE: real Groww orders on its next signal." if record.get("live") else ".")]
     if record["skipped"]:
         lines.append("Not armed: " + "; ".join(f"{x['symbol']} ({x['why']})" for x in record["skipped"][:8]))
     lines.append("Arming only: the bot trades them on its own next signal.")
