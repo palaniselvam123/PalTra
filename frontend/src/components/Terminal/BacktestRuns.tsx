@@ -55,7 +55,7 @@ function dayLabel(iso: string): string {
   }).format(d);
 }
 
-type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; picks?: Record<string, ScalpPick[]> };
+type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; until?: string | null; picks?: Record<string, ScalpPick[]> };
 
 /** The pick rule and picks a run recorded (scalp, strong-trend or Most active picks), or null for a plain replay. */
 export function scalpPickOf(s: Settings): ScalpPickInfo | null {
@@ -110,11 +110,13 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
       const days = Array.isArray(r.active_days) ? (r.active_days as string[]).length : 0;
       rows.push(["Days with saved Most active scans", String(days)]);
     }
+    if (s("until")) rows.push(["Trade until", `${s("until")} IST (squared off there)`]);
     rows.push(["Price range", n("price_min") || n("price_max") ? `${rupee(n("price_min"))} to ${rupee(n("price_max"))}` : "any"]);
     rows.push(["At most", `${n("max_day") ?? 10} stocks a day`]);
     return rows;
   }
   rows.push(["Pick time", `${pick.pick_time} IST`]);
+  if (pick.until) rows.push(["Trade until", `${pick.until} IST (squared off there)`]);
   rows.push(["Top", String(pick.top_n)]);
   if (pick.kind === "TREND") {
     rows.push(["Direction", String(pick.direction ?? "BOTH").toLowerCase()]);

@@ -1196,16 +1196,6 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   lows, or higher), `run` (no cross in the last 12 candles). The first three are required and
   6 of 7 must pass. Plus `day_move_pct` (last close vs today's first open). The card's Show menu
   filters Strong trend / bearish / bullish, and "Fast movers" keeps |speed| ≥ N %/min.
-  **Today's current run** (owner's cases: a single candle read Strong, a trend was called only when it was over, many
-  trends never showed): the midday read takes only today's candles and only the run since the SMAs took this side
-  (`_today_part`, `_run_len`; `RUN_MIN` 4 to `LOOKBACK` 12 candles) instead of a fixed 12-candle window that reached into
-  yesterday. `vwap` reads the fast SMA (the slow one hid every same-day trend on 15-minute candles); `hold` and `structure`
-  read the run; `structure` also needs a new high / low within `LIVE_BARS` (3) candles; `run` = on this side ≥ `RUN_MIN`
-  candles today, the last `EFFICIENCY_BARS` (6) closes ≥ `MIN_EFFICIENCY` (0.5) straight, and no candle making over
-  `ONE_CANDLE_SHARE` (60 %) of the move (`_move_read`), and is required with the first three. No label before `MIN_TODAY`
-  (4) closed candles today (`MORNING_MIN_TODAY` 3 before 10:00, where stack, slope with a new high / low, and run without a
-  spike are required): the note says "Too early". `breakout.strong` (the bots' strong-trend hand-off), the alerts,
-  auto-arm and the pick backtests read the same checks.
   **Morning mode** (`trend_mode` = `MORNING`, before 10:00 IST; `trend_strength.read(..., now=, tape=)`):
   only today's candles since 09:15 are read. Seven checks: `stack`, `vwap`, `slope`, `fan` (≥ 0.10%),
   `hold` (all closes on the trend side up to 09:30 = 3 of 3, then ≥ 75%), `run` (a fresh cross today
@@ -1542,6 +1532,14 @@ spinning top), body and range) / Matched / Call columns
   `main._start_trend_picks_loop`, every `CHECK_SEC` 60 s) once each weekday after `run_at` (15:31-23:59, default 15:45)
   backtests that day's picks (`main._trend_picks_daily`, full speed, waits while that bot's player is busy; `last_day`,
   `last_run_id`, `last_note`). `GET/PUT /api/trend-picks/auto`. To paper-trade the picks live during the day, Scan & arm.
+  **Inside a time range** (owner's request; `trend_picks.parse_window`, `PICK_FROM` 09:15 to `PICK_TO` 15:25, `until`
+  09:20-15:30 after the pick time, 15:30 = the close): `until` on `TrendPickRule`, `ActivePickRule`, `AutoArmRule`,
+  `trend_picks.AutoSettings` and the comparison (`POST /api/replay/trend-picks`, `/api/replay/active-picks`,
+  `/api/replay/auto-arm` (last arm time before it, arm times up to 15:25), `/api/trend-picks/compare` (every time before
+  it), `PUT /api/trend-picks/auto`). `ReplaySession._day_end` ends each replayed day at the rule's `until` (positions squared
+  off there as `EOD_SQUARE_OFF`, like 15:30). The "Pick at" / "Trade until" menus (`lib/pickWindow.ts`, quarter hours) on
+  the Backtest tab, the Most active Backtest view, both comparisons and the auto-arm replay; saved in the run's `scalp_pick`
+  and shown in the run detail / PDF ("Trade until").
   **Compare pick times** (`backend/trend_compare.py`, the tab's "Compare pick times" panel,
   `components/Scalp/TrendPickCompare.tsx`): 2-8 pick times (09:20-14:30) played one after another as ordinary strong-trend
   pick runs with the same days, stocks, bot, settings, direction, top N and candle (`play`: waits while the bot's player is

@@ -90,8 +90,8 @@ def clean_times(raw: list[str]) -> list[str]:
             t = dt.time(int(h), int(m))
         except (ValueError, TypeError):
             raise ValueError(f"{value!r} is not a time (HH:MM).") from None
-        if not (dt.time(9, 20) <= t <= dt.time(14, 30)):
-            raise ValueError("Each pick time must be between 09:20 and 14:30 IST.")
+        if not (dt.time(9, 15) <= t <= dt.time(15, 25)):
+            raise ValueError("Each pick time must be between 09:15 and 15:25 IST.")
         out.add(t.strftime("%H:%M"))
     times = sorted(out)
     if not (MIN_TIMES <= len(times) <= MAX_TIMES):

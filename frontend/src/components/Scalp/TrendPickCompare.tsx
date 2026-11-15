@@ -14,8 +14,10 @@ import {
   type ActivePickParams,
 } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { DAY_CLOSE, PICK_TIMES } from "@/lib/pickWindow";
 
-const TIMES = ["09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"];
+// Half-hour steps (quarter hours before 10:00): any minute from 09:15 that leaves time to trade.
+const TIMES = PICK_TIMES.filter((t) => t < "10:00" || t.endsWith(":00") || t.endsWith(":30"));
 const DEFAULT_TIMES = ["10:00", "11:00", "12:00"];
 const RANK_TEXT: Record<string, string> = {
   value: "money traded",
@@ -81,6 +83,7 @@ export function TrendPickCompare({
   direction,
   minutes,
   candles = "NORMAL",
+  until = DAY_CLOSE,
   bot,
   playHandoffs,
   active,
@@ -93,6 +96,8 @@ export function TrendPickCompare({
   minutes: number;
   /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles (strong-trend picks only). */
   candles?: "NORMAL" | "HA";
+  /** Each run stops trading here ("HH:MM"); 15:30 = the usual close. Times at or after it are left out. */
+  until?: string;
   bot: number;
   playHandoffs: boolean;
   /** Compare the Most active picks (active_picks.py) instead of the strong-trend ones. */
@@ -169,11 +174,12 @@ export function TrendPickCompare({
         date: range[0],
         end_date: range[range.length - 1],
         universe: universe.slice(0, 250),
-        times,
+        times: times.filter((t) => t < until),
         top_n: topN,
         direction,
         minutes,
         candles,
+        until,
         bot,
         lists,
         play_handoffs: playHandoffs,
@@ -223,7 +229,7 @@ export function TrendPickCompare({
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
         <span className="mr-1 text-slate-400">Times:</span>
-        {TIMES.map((t) => (
+        {TIMES.filter((t) => t < until).map((t) => (
           <button
             key={t}
             type="button"
@@ -312,7 +318,8 @@ function CompareView({ view, running }: { view: TrendCompare & { result: TrendCo
         {view.start_date} → {view.end_date} ·{" "}
         {view.active
           ? `top ${view.top_n} Most active by ${RANK_TEXT[view.active.rank]}, ${BIAS_TEXT[view.active.bias]}, at least ₹${view.active.min_value_cr} cr traded`
-          : `top ${view.top_n} ${dirText} on ${view.minutes}-min ${view.candles === "HA" ? "Heikin Ashi " : ""}candles`}{" "}
+          : `top ${view.top_n} ${dirText} on ${view.minutes}-min ${view.candles === "HA" ? "Heikin Ashi " : ""}candles`}
+        {view.until ? ` · trading until ${view.until}` : ""}{" "}
         · {view.universe} stocks
         · Bot {view.bot}&apos;s settings{view.play_handoffs ? " with hand-offs to Bot 2 / Bot 3 played" : ""} · P&amp;L before charges unless marked.
       </p>

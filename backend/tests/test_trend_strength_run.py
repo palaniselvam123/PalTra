@@ -1,4 +1,4 @@
-"""The strong-trend read judges today's current run (trend_strength.py): not one candle, not yesterday, not late.
+"""The pick backtests' options: Heikin Ashi candles and the time window (trend_picks.py, auto_arm.py).
 
 Read-only: nothing here places an order.
 """
@@ -58,41 +58,6 @@ def _trend(sign: int):
     return path
 
 
-def test_one_big_opening_candle_is_never_a_strong_trend():
-    spike = _tape(lambda i: 1000 + 12 * min(i, 5) / 5 + 1.5 * math.sin(i / 7), per_minute=2000)
-    for at in ("09:21", "09:26", "09:31", "09:46", "10:01", "10:16", "10:31", "10:46"):
-        read = _read(spike, at)
-        assert read["trend"] is None, (at, read["trend_checks"])
-    assert "Too early" in _read(spike, "09:21")["trend_notes"]["early"]
-    assert "spike" in _read(spike, "09:46")["trend_notes"]["run"]
-
-
-def test_yesterdays_trend_is_not_todays():
-    rise = lambda i: 1000 + max(0, i - 150) * 0.12  # noqa: E731
-    top = rise(375)
-    tape = _tape(lambda i: top + 2.5 * math.sin(i / 9), yesterday=rise)
-    for minutes in (5, 15):
-        for at in ("10:16", "10:31", "11:01", "11:31"):
-            read = _read(tape, at, minutes)
-            assert read["trend"] is None and not read["trend_checks"]["run"], (minutes, at)
-
-
-def test_a_trend_is_called_in_its_first_half_both_ways():
-    for sign, label in ((1, "STRONG_BULLISH"), (-1, "STRONG_BEARISH")):
-        tape = _tape(_trend(sign))
-        assert _read(tape, "10:31")["trend"] is None  # nothing has moved yet
-        assert _read(tape, "11:01")["trend"] == label  # 30 minutes into a 90-minute move
-        full = _read(tape, "11:16")
-        assert full["trend"] == label and all(full["trend_checks"].values())  # 7 of 7 at half-way
-        assert _read(tape, "11:31", minutes=15)["trend"] == label  # the 15-minute candles see it too
-
-
-def test_the_label_goes_once_the_move_stops():
-    tape = _tape(_trend(1))
-    read = _read(tape, "13:01")  # an hour after the move ended, the price only goes sideways
-    assert read["trend"] is None and not read["trend_checks"]["run"]
-
-
 def test_heikin_ashi_candles_can_be_read_by_the_backtests():
     """The pick backtest and the auto-arm replay read the trend on Heikin Ashi candles when asked (prices stay real)."""
     import trend_picks
@@ -110,3 +75,31 @@ def test_heikin_ashi_candles_can_be_read_by_the_backtests():
     picks = trend_picks.picks_for_day({"UP": tape}, TODAY, rule)
     assert [p["symbol"] for p in picks] == ["UP"] and picks[0]["side"] == "LONG"
     assert trend_picks.TrendPickRule().as_dict()["candles"] == "NORMAL"
+
+
+def test_pick_backtests_run_inside_a_time_window():
+    """Pick from any minute 09:15-15:25 and stop trading at 'Trade until' (09:20-15:30); the replay day ends there."""
+    import pytest
+    import trend_picks
+    from active_picks import ActivePickRule
+    from auto_arm import AutoArmRule
+    from replay import ReplaySession
+
+    assert trend_picks.parse_window("09:15", "11:00") == (dt.time(9, 15), dt.time(11, 0))
+    assert trend_picks.parse_window("14:45", "15:30") == (dt.time(14, 45), None)  # 15:30 = the usual close
+    assert trend_picks.parse_window("10:00", None) == (dt.time(10, 0), None)
+    for bad in (("09:10", None), ("15:28", None), ("11:00", "10:30"), ("10:00", "15:40"), ("x", None)):
+        with pytest.raises(ValueError):
+            trend_picks.parse_window(*bad)
+
+    rule = trend_picks.TrendPickRule(pick_time=dt.time(9, 30), until=dt.time(11, 15))
+    assert rule.as_dict()["until"] == "11:15"
+    assert ActivePickRule(until=dt.time(12, 0)).as_dict()["until"] == "12:00"
+    assert AutoArmRule().as_dict()["until"] is None
+
+    session = ReplaySession()
+    session.day = TODAY
+    session.rule = rule
+    assert session._day_end() == dt.datetime.combine(TODAY, dt.time(11, 15), tzinfo=IST)
+    session.rule = trend_picks.TrendPickRule()
+    assert session._day_end().time() == dt.time(15, 30)

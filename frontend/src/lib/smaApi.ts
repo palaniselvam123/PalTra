@@ -1108,6 +1108,7 @@ export type TrendCompare = {
   direction: TrendPickDirection;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  until?: string | null;
   bot: number;
   universe: number;
   lists: string[];
@@ -1158,6 +1159,7 @@ export type TrendPicksAuto = {
   top_n: number;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  until?: string;
   bot: number;
   lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
   /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run. */
@@ -3172,6 +3174,8 @@ export const smaApi = {
     minutes: number;
     /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles. */
     candles?: "NORMAL" | "HA";
+    /** Trade until this time each day ("HH:MM", up to 15:30 = the close). */
+    until?: string;
     bot: number;
     speed?: number;
     /** Play the bot's hand-offs to Bot 2 / Bot 3 inside the run (on by default, like the replay bar). */
@@ -3189,6 +3193,7 @@ export const smaApi = {
     every_min: number;
     minutes: number;
     candles?: "NORMAL" | "HA";
+    until?: string;
     bot: number;
     speed: number;
     play_handoffs: boolean;
@@ -3205,6 +3210,7 @@ export const smaApi = {
     rank: ActivePickRank;
     bias: ActivePickBias;
     min_value_cr: number;
+    until?: string;
     bot: number;
     play_handoffs: boolean;
     speed?: number;
@@ -3235,6 +3241,7 @@ export const smaApi = {
     direction: TrendPickDirection;
     minutes: number;
     candles?: "NORMAL" | "HA";
+    until?: string;
     bot: number;
     lists?: string[];
     play_handoffs?: boolean;

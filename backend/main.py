@@ -2628,6 +2628,8 @@ class TrendPickStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
     candles: Literal["NORMAL", "HA"] = "NORMAL"
+    #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
+    until: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     #: Play Bot 1's hand-offs inside the run on Bot 2's / Bot 3's settings (handoff_chain.py), like the replay bar.
@@ -2637,7 +2639,7 @@ class TrendPickStart(BaseModel):
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
     minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
-    candles: str = "NORMAL",
+    candles: str = "NORMAL", until: dt.time | None = None,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2665,12 +2667,13 @@ async def _start_trend_picks(
     elif active is not None:
         rule = active_picks.ActivePickRule(
             pick_time=pick_time, top_n=top_n, rank=active.get("rank", "rvol"), bias=active.get("bias", "BOTH"),
-            min_value_cr=float(active.get("min_value_cr", 5.0)),
+            min_value_cr=float(active.get("min_value_cr", 5.0)), until=until,
         )
     else:
         rule = trend_picks.TrendPickRule(
             pick_time=pick_time, top_n=top_n, direction=direction, minutes=minutes,
             sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=candles,
+            until=until,
         )
     session = replays[bot]
     await session.begin(
@@ -2704,14 +2707,12 @@ async def replay_trend_picks(body: TrendPickStart):
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
         day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
-        pick_time = parse_start(body.pick_time)
+        pick_time, until = trend_picks.parse_window(body.pick_time, body.until)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not (dt.time(9, 20) <= pick_time <= dt.time(14, 30)):
-        raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
-        play_handoffs=body.play_handoffs, candles=body.candles,
+        play_handoffs=body.play_handoffs, candles=body.candles, until=until,
     )
 
 
@@ -2737,6 +2738,8 @@ class AutoArmStart(BaseModel):
     #: Price range (₹, 0 = no bound); None = the auto-arm's own (arm_price_min / arm_price_max).
     price_min: float | None = Field(default=None, ge=0, le=1_000_000)
     price_max: float | None = Field(default=None, ge=0, le=1_000_000)
+    #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
+    until: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
@@ -2777,17 +2780,20 @@ async def replay_auto_arm(body: AutoArmStart):
         day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
         first = parse_start(body.first)
         last = parse_start(body.last)
+        _, until = trend_picks.parse_window(body.first, body.until)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not (dt.time(9, 15) <= first <= last <= dt.time(15, 0)):
-        raise HTTPException(400, "Arm between 09:15 and 15:00 IST, the first time before the last.")
+    if not (dt.time(9, 15) <= first <= last <= dt.time(15, 25)):
+        raise HTTPException(400, "Arm between 09:15 and 15:25 IST, the first time before the last.")
+    if until is not None and last >= until:
+        raise HTTPException(400, "The last arm time must be before 'Trade until'.")
     alerts = await asyncio.to_thread(scalp_alerts.load)
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
     if eng is None:
         raise HTTPException(404, f"No bot {body.bot}")
     cfg = eng.load_config()
     rule = auto_arm.AutoArmRule(
-        source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes,
+        source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes, until=until,
         sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=body.candles,
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
@@ -2831,6 +2837,8 @@ class ActivePickStart(BaseModel):
     rank: Literal["value", "rvol", "change", "vwap", "speed", "range"] = "rvol"
     bias: Literal["BOTH", "LONG", "SHORT", "ANY"] = "BOTH"
     min_value_cr: float = Field(default=5.0, ge=0, le=10000)
+    #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
+    until: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
@@ -2846,16 +2854,14 @@ async def replay_active_picks(body: ActivePickStart):
         raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
     try:
         day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
-        pick_time = parse_start(body.pick_time)
+        pick_time, until = trend_picks.parse_window(body.pick_time, body.until)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not (dt.time(9, 20) <= pick_time <= dt.time(14, 30)):
-        raise HTTPException(400, "Pick a time between 09:20 and 14:30 IST.")
     if trend_compare.comparer().running or stock_rank.jobs().running:
         raise HTTPException(409, "A comparison or stock ranking is using the replay players. Stop it first or wait for it.")
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, "BOTH", 5, body.speed,
-        play_handoffs=body.play_handoffs,
+        play_handoffs=body.play_handoffs, until=until,
         active={"rank": body.rank, "bias": body.bias, "min_value_cr": body.min_value_cr},
     )
 
@@ -2868,6 +2874,7 @@ class TrendPicksAuto(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=trend_picks.MAX_TOP_N)
     minutes: Literal[1, 3, 5, 10, 15] | None = None
     candles: Literal["NORMAL", "HA"] | None = None
+    until: str | None = None
     bot: int | None = Field(default=None, ge=1, le=4)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = Field(default=None, max_length=5)
     play_handoffs: bool | None = None
@@ -2898,10 +2905,10 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         return None, ""  # that bot's replay player is busy: try again on the next pass
     try:
         names = await _auto_symbols(False, s.lists)
-        h, m = s.pick_time.split(":")
+        start, until = trend_picks.parse_window(s.pick_time, s.until)
         await _start_trend_picks(
-            s.bot, names, day, day, dt.time(int(h), int(m)), s.top_n, s.direction, s.minutes, max(SPEEDS),
-            play_handoffs=s.play_handoffs, candles=s.candles,
+            s.bot, names, day, day, start, s.top_n, s.direction, s.minutes, max(SPEEDS),
+            play_handoffs=s.play_handoffs, candles=s.candles, until=until,
         )
     except HTTPException as exc:
         return None, f"not started: {exc.detail}"
@@ -2931,6 +2938,8 @@ class TrendCompareStart(BaseModel):
     rank: Literal["value", "rvol", "change", "vwap", "speed", "range"] = "rvol"
     bias: Literal["BOTH", "LONG", "SHORT", "ANY"] = "BOTH"
     min_value_cr: float = Field(default=5.0, ge=0, le=10000)
+    #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
+    until: str | None = None
 
 
 @app.post("/api/trend-picks/compare")
@@ -2946,6 +2955,9 @@ async def trend_compare_start(body: TrendCompareStart):
     try:
         day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
         times = trend_compare.clean_times(body.times)
+        until = None
+        for t in times:  # every time must come before 'Trade until'
+            _, until = trend_picks.parse_window(t, body.until)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
@@ -2968,6 +2980,7 @@ async def trend_compare_start(body: TrendCompareStart):
     )
     item["play_handoffs"] = body.play_handoffs
     item["candles"] = body.candles
+    item["until"] = until.strftime("%H:%M") if until else None
     active = (
         {"rank": body.rank, "bias": body.bias, "min_value_cr": body.min_value_cr} if body.source == "ACTIVE" else None
     )
@@ -2982,6 +2995,7 @@ async def trend_compare_start(body: TrendCompareStart):
         await _start_trend_picks(
             body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
             max(SPEEDS), play_handoffs=body.play_handoffs, active=active, candles=body.candles,
+            until=until,
         )
         # The run id is known once the candles are in; wait for it (or for the load to fail).
         while session.run_id is None and session.status == "LOADING":

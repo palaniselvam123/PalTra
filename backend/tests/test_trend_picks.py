@@ -106,7 +106,7 @@ def test_api_reads_saves_and_refuses(tmp_path, monkeypatch):
         assert got["on"] is True and got["top_n"] == 20 and got["lists"] == ["nifty50"]
         assert client.put("/api/trend-picks/auto", json={"run_at": "10:00"}).status_code == 422
         assert client.put("/api/trend-picks/auto", json={"top_n": 21}).status_code == 422
-        bad = client.post("/api/replay/trend-picks", json={"date": "2026-11-02", "universe": ["SBIN"], "pick_time": "15:00"})
+        bad = client.post("/api/replay/trend-picks", json={"date": "2026-11-02", "universe": ["SBIN"], "pick_time": "15:28"})
         assert bad.status_code == 400
     database.reset_engine()
 
