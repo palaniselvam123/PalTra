@@ -62,6 +62,11 @@ export default function StockChartPage() {
   const [live, setLive] = useState(false);
   // The replay this page follows is still loading its candles (its chart answers 409 until it starts).
   const loadingRef = useRef(false);
+  // The replay is still on (loading, playing or paused) by its own status: a missed chart answer while it is
+  // on keeps the last chart instead of switching to the "ended" view and back on the next poll.
+  const replayOnRef = useRef(false);
+  // Chart answers that failed in a row; the page gives up on the live replay chart only after a few.
+  const misses = useRef(0);
   const bars = useRef(400);
   // A candle size the bot's own candle cannot make (from the chart's candle-size menu); null = the bot's own.
   const barInterval = useRef<number | null>(null);
@@ -111,6 +116,7 @@ export default function StockChartPage() {
         setReplay(info);
         loadingRef.current = info.status === "LOADING";
         const routed = routedFor(info, p.runId, Boolean(p.date));
+        replayOnRef.current = routed;
         if (p.date) follow = routed;
         else follow = !routed; // a live chart while no replay is on
         setReplayRouting(routed && Boolean(p.date));
@@ -123,7 +129,9 @@ export default function StockChartPage() {
           setPin((prev) => ({ seq: (prev?.seq ?? 1) + 1, date: null, runId: null, symbol: null }));
         }
       } catch {
-        /* the replay status is optional here */
+        // The replay status is optional here. A missed answer keeps what the page was doing (following or
+        // not) instead of dropping out of the replay for one poll and back in on the next.
+        if (p.date) follow = following.current;
       }
     }
     following.current = follow;
@@ -132,13 +140,23 @@ export default function StockChartPage() {
       try {
         const [next, nextChart] = await Promise.all([smaApi.state(), smaApi.chart(bars.current, p.symbol, barInterval.current)]);
         setState(next);
-        setChart(nextChart);
+        misses.current = 0;
+        // A replay's chart can answer with no candles for a moment (a new day or a rewind building its engine,
+        // a stock not picked yet that day): keep the last candles on screen instead of a blank chart.
+        setChart((prev) =>
+          p.date && prev && prev.candles.length > 0 && nextChart.candles.length === 0 ? prev : nextChart
+        );
         setNote(null);
       } catch (err: unknown) {
+        misses.current += 1;
         if (p.date && loadingRef.current) {
-          // Still loading the replay's candles: no chart yet. Showing the whole day now would be wrong.
-          setChart(null);
+          // Still loading the replay's candles: nothing to draw yet (the last chart, if any, stays).
           setNote("Loading the replay…");
+          return;
+        }
+        if (p.date && replayOnRef.current && misses.current < 5) {
+          // The replay is still playing by its status; one chart answer was missed (a busy server). Keep the
+          // last chart and try again on the next poll.
           return;
         }
         if (p.date) {
