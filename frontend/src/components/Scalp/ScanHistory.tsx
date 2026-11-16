@@ -24,6 +24,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { Pager, usePaged } from "@/components/ui/pagination";
 import { ChopScan } from "@/components/Scalp/ChopScan";
+import { ChopAcrossDays } from "@/components/Scalp/ChopAcrossDays";
 import { CrossScan } from "@/components/Scalp/CrossScan";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { GuideBar } from "./GuideBar";
@@ -370,6 +371,8 @@ export function ScanHistory({
         closes to see what each stock did afterwards. Information only: nothing here places an order.
       </p>
       <GuideBar lesson="scalp-history" terms={["cross", "chop", "strong_trend", "backtest"]} className="mb-2" />
+
+      <ChopAcrossDays days={hist?.days ?? []} armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} />
 
       <div className="mb-3 flex flex-wrap items-end gap-3 text-xs text-slate-400">
         <label className="flex flex-col gap-1">

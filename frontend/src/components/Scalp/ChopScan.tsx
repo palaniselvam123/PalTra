@@ -17,53 +17,14 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
+import { CROSS_RULES, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, chopPasses, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter } from "@/lib/chopFilter";
 import { GuideBar } from "./GuideBar";
 import { NewTag } from "@/components/ui/NewTag";
 import { api, type ActiveStock } from "@/lib/api";
 
 const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
 
-// "Crosses today" choices: today's closed-candle SMA crosses on each ticked candle size.
-const CROSS_RULES = [
-  ["0", "None (0)"],
-  ["1", "Exactly 1"],
-  ["1up", "Exactly 1 ↑ (crossed up)"],
-  ["1down", "Exactly 1 ↓ (crossed down)"],
-  ["2", "Exactly 2"],
-  ["3", "Exactly 3"],
-  ["le1", "At most 1"],
-  ["le2", "At most 2"],
-  ["le3", "At most 3"],
-  ["ge2", "2 or more"],
-  ["ge3", "3 or more"],
-  ["ge5", "5 or more (choppy)"],
-] as const;
-type CrossRule = (typeof CROSS_RULES)[number][0];
-
-function isCrossRule(value: string): value is CrossRule {
-  return CROSS_RULES.some(([v]) => v === value);
-}
-
-// A size with too few candles has no count (null): it never matches.
-function crossRuleMatches(rule: CrossRule, count: number | null | undefined, lastSide: "BULLISH" | "BEARISH" | null | undefined): boolean {
-  if (count == null) return false;
-  if (rule === "1up") return count === 1 && lastSide === "BULLISH";
-  if (rule === "1down") return count === 1 && lastSide === "BEARISH";
-  if (rule.startsWith("le")) return count <= Number(rule.slice(2));
-  if (rule.startsWith("ge")) return count >= Number(rule.slice(2));
-  return count === Number(rule);
-}
-// "Trend on" filter: which way every ticked candle size must point, and how strong.
-const TREND_DIRS = [
-  ["UP", "Bullish"],
-  ["DOWN", "Bearish"],
-  ["SAME", "Same way (either)"],
-] as const;
 type TrendDir = (typeof TREND_DIRS)[number][0];
-const TREND_KINDS = [
-  ["SIDE", "SMA side (fast above / below slow)"],
-  ["STRONG", "Strong trend (6 of 7 checks)"],
-] as const;
 type TrendKind = (typeof TREND_KINDS)[number][0];
 
 const POLL_MS = 3_000;
@@ -90,7 +51,6 @@ type Props = {
   savedTitle?: string;
 };
 
-type ScoreFilter = "ALL" | ChopScore | "STRONG" | "STRONG_BULLISH" | "STRONG_BEARISH" | "FRESH" | "FRESH_BULLISH" | "FRESH_BEARISH" | "PHASE_STRONG" | "PHASE_BULL" | "PHASE_BEAR" | "PHASE_CHOP";
 type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
 const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
@@ -141,10 +101,6 @@ const orderFor = (r: ChopScanRow) =>
 const textsFor = (r: ChopScanRow) =>
   r.trend_mode === "HEIKIN_ASHI" ? HA_TEXT : r.trend_mode === "MORNING" ? MORNING_TEXT : MIDDAY_TEXT;
 
-const isStrong = (r: ChopScanRow) => r.trend === "STRONG_BULLISH" || r.trend === "STRONG_BEARISH";
-// Inside [min, max] ₹; 0 = no bound. A stock with no price passes only when no bound is set (as chop_scan.in_price_range).
-const inPriceRange = (ltp: number | null | undefined, min: number, max: number) =>
-  (!min && !max) || (ltp != null && (!min || ltp >= min) && (!max || ltp <= max));
 
 const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
@@ -427,30 +383,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const haRead = (data?.candles ?? "NORMAL") === "HA";
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
-    (r: ChopScanRow) => {
-      if (score === "STRONG" && !isStrong(r)) return false;
-      if ((score === "STRONG_BULLISH" || score === "STRONG_BEARISH") && r.trend !== score) return false;
-      if ((score === "TRENDING" || score === "MIXED" || score === "CHOPPY") && r.score !== score) return false;
-      if (score === "FRESH" && !r.fresh) return false;
-      if (score === "FRESH_BULLISH" && r.fresh !== "BULLISH") return false;
-      if (score === "FRESH_BEARISH" && r.fresh !== "BEARISH") return false;
-      if (score === "PHASE_STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
-      if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
-      if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
-      if (score === "PHASE_CHOP" && (r.phase !== "CHOP" || r.phase_early)) return false;
-      if (minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < minSpeed) return false;
-      if (!inPriceRange(r.ltp, priceMin, priceMax)) return false;
-      if (noCrossOn.some((m) => !crossRuleMatches(crossCount, r.crosses_by_minutes?.[String(m)], r.last_cross_side_by_minutes?.[String(m)])))
-        return false;
-      if (trendOn.length > 0) {
-        const t = trendRead(r, trendOn, trendDir, trendKind);
-        if (t == null) return false;
-        if (maxAge > 0 && t.ageMin > maxAge) return false;
-        if (t.gapPct < minGap) return false;
-        if (hideFading && t.fading) return false;
-      }
-      return true;
-    },
+    (r: ChopScanRow) =>
+      chopPasses(r, { score, minSpeed, priceMin, priceMax, crossCount, noCrossOn, trendOn, trendDir, trendKind, maxAge, minGap, hideFading }),
     [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
@@ -615,22 +549,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             label="Show"
             value={score}
             onChange={(v) => setScore(v as ScoreFilter)}
-            options={[
-              { value: "ALL", label: "All" },
-              { value: "STRONG", label: "Strong trend (both)" },
-              { value: "STRONG_BEARISH", label: "Strong bearish ↓" },
-              { value: "STRONG_BULLISH", label: "Strong bullish ↑" },
-              { value: "FRESH", label: "Fresh trend (both)" },
-              { value: "FRESH_BULLISH", label: "Fresh trend up ↑" },
-              { value: "FRESH_BEARISH", label: "Fresh trend down ↓" },
-              { value: "PHASE_STRONG", label: "Phase now: strong (both)" },
-              { value: "PHASE_BULL", label: "Phase now: strong up ↑" },
-              { value: "PHASE_BEAR", label: "Phase now: strong down ↓" },
-              { value: "PHASE_CHOP", label: "Phase now: choppy" },
-              { value: "TRENDING", label: "Trending only" },
-              { value: "MIXED", label: "Mixed only" },
-              { value: "CHOPPY", label: "Choppy only" },
-            ]}
+            options={SCORE_OPTIONS}
             className="w-44"
           />
           <TextFilter value={query} onChange={setQuery} />

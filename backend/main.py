@@ -16,6 +16,7 @@ import os
 import json
 import csv
 import io
+import re
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -4547,6 +4548,23 @@ async def scan_history_list(
     pick = day or (days[0]["day"] if days else None)
     runs = await asyncio.to_thread(scan_history.runs, pick, kind) if pick else []
     return {"days": days, "day": pick, "runs": runs, "keep_days": scan_history.keep_days(), "checking": scan_checker.snapshot()}
+
+
+@app.get("/api/scan-history/across")
+async def scan_history_across(
+    days: str = Query(..., description="Comma-separated YYYY-MM-DD days, at most 10"),
+    minutes: int | None = Query(None, ge=1, le=60),
+    candles: Literal["NORMAL", "HA"] | None = None,
+):
+    """Every saved Trend quality scan of one or more days with the rows the History tab's "Across days" filter
+    reads (scan_history.chop_rows). Read-only."""
+    picked = [d.strip() for d in days.split(",") if d.strip()]
+    if not picked or any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) for d in picked):
+        raise HTTPException(400, "days must be YYYY-MM-DD, comma-separated.")
+    if len(set(picked)) > scan_history.MAX_ACROSS_DAYS:
+        raise HTTPException(400, f"At most {scan_history.MAX_ACROSS_DAYS} days at a time.")
+    runs = await asyncio.to_thread(scan_history.chop_rows, picked, minutes, candles)
+    return {"days": sorted(set(picked)), "runs": runs}
 
 
 @app.get("/api/scan-history/{run_id}")
