@@ -374,3 +374,20 @@ def test_backtest_server_arms_the_desk_only_when_asked(monkeypatch):
     assert main._auto_arm_remote() is False
     # A bad value falls back to this server's own bots.
     assert scalp_alerts.save({"arm_on": "elsewhere"}).arm_on == "here"
+
+
+def test_saved_scans_arm_at_each_stocks_own_read_and_skip_one_sided_books():
+    scans = [
+        # A pass that started 09:31 and read LATE at 09:44 arms it at 09:45, not 09:32.
+        {"as_of": "2026-11-16T09:31:00+05:30", "rows": [
+            {"symbol": "EARLY", "buy_share": 0.2, "value_cr": 9, "read_at": "2026-11-16T09:31:20+05:30"},
+            {"symbol": "LATE", "buy_share": 0.8, "value_cr": 9, "read_at": "2026-11-16T09:44:10+05:30"},
+            # 0 buy orders waiting: a bad quote, never "sellers 100%".
+            {"symbol": "KAYNES", "buy_share": 0.0, "value_cr": 500, "read_at": "2026-11-16T09:31:40+05:30"},
+            {"symbol": "ONESIDE", "buy_share": 1.0, "value_cr": 500, "read_at": "2026-11-16T09:31:50+05:30"},
+        ]},
+        {"as_of": "2026-11-16T09:45:00+05:30", "rows": [
+            {"symbol": "KAYNES", "buy_share": 0.44, "value_cr": 500, "read_at": "2026-11-16T09:46:00+05:30"},
+        ]},
+    ]
+    assert auto_arm.active_hits(scans, 75, "BOTH", 0) == [("09:32", "EARLY", "SELL", 80.0), ("09:45", "LATE", "BUY", 80.0)]

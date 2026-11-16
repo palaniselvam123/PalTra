@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { CalendarRange, Download, Loader2 } from "lucide-react";
 import { smaApi, type ActiveAcross } from "@/lib/smaApi";
+import { usableShare } from "@/lib/api";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { Pager, usePaged } from "@/components/ui/pagination";
@@ -94,7 +95,7 @@ function toRows(cols: string[], rows: (string | number | null)[][]): Row[] {
     change_pct: num(r[i.change_pct]),
     value_cr: num(r[i.value_cr]),
     rvol: num(r[i.rvol]),
-    buy_share: num(r[i.buy_share]),
+    buy_share: usableShare(num(r[i.buy_share])),
     vwap_dist_pct: num(r[i.vwap_dist_pct]),
     range_pct: num(r[i.range_pct]),
     bias: i.bias >= 0 && r[i.bias] != null ? String(r[i.bias]) : null,

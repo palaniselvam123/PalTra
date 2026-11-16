@@ -122,7 +122,8 @@ def row_from_quote(symbol: str, data: dict, avg_daily_volume: float | None, frac
 
     buy = _num(_pick(data, "total_buy_quantity", "total_bid_quantity"))
     sell = _num(_pick(data, "total_sell_quantity", "total_ask_quantity"))
-    share = buy / (buy + sell) if buy is not None and sell is not None and buy + sell > 0 else None
+    # A one-sided book (no buy or no sell orders waiting) is a bad quote, not a 0 % / 100 % read: unknown.
+    share = buy / (buy + sell) if buy and sell and buy > 0 and sell > 0 else None
     range_pct = (high - low) / day_open * 100 if high and low and day_open else None
 
     bias = "NONE"

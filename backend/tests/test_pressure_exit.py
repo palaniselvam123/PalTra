@@ -187,6 +187,22 @@ def test_series_and_entry_read_carry_volume_and_money(tmp_path, monkeypatch):
     pressure_exit.reset()
 
 
+def test_one_sided_reads_are_left_out_of_the_fade_exit_and_the_chart(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    pressure_exit.reset()
+    assert pressure_exit.usable_share(0.0) is None and pressure_exit.usable_share(1) is None
+    assert pressure_exit.usable_share("x") is None and pressure_exit.usable_share(0.4) == 0.4
+    scan_history.save("active", _scan(BASE - dt.timedelta(minutes=30), ACME=0.0))
+    scan_history.save("active", _scan(BASE - dt.timedelta(minutes=20), ACME=0.6))
+    assert pressure_exit.note_scan(_scan(BASE, ACME=1.0)) == 0
+    out = pressure_exit.series("ACME", (BASE - dt.timedelta(hours=1)).timestamp(), (BASE + dt.timedelta(hours=1)).timestamp())
+    assert [p["buy_pct"] for p in out] == [60.0]
+    scan_history._ACTIVE_CACHE.clear()
+
+
 def test_judge_reads_the_days_saved_scans(tmp_path, monkeypatch):
     """A replay of a saved day (and a desk whose scan runs elsewhere) sees the saved Most active reads."""
     monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
