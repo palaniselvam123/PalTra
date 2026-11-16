@@ -187,6 +187,7 @@ export const SETTING_LABELS: Record<string, string> = {
   pivot_target: "pivot target",
   pressure_exit: "Most active: exit when buyers / sellers fade",
   pressure_exit_pct: "buyers / sellers fade exit %",
+  pressure_over_counter: "buyers / sellers overrule the counter-candle exit",
   stop_plan: "staged stop plan",
   decel_exit: "SMA 9 deceleration guard",
   decel_lookback: "deceleration slope over (candles)",

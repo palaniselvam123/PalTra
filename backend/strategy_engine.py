@@ -413,7 +413,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "pressure_exit", "pressure_exit_pct",
+    "pressure_exit", "pressure_exit_pct", "pressure_over_counter",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -5371,6 +5371,14 @@ class StrategyEngine:
         )
         if not hit:
             return
+        if pressure_exit.over_counter(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
+            # The buyers / sellers reading overrules it while the trade's side still holds (pressure_exit.holds).
+            held, why = pressure_exit.holds(
+                symbol, pos.direction, opened.timestamp(), self._now().timestamp(), pressure_exit.pct(cfg)
+            )
+            if held:
+                self._signals[symbol] = f"{symbol} counter-candle exit held — {why}; the buyers / sellers fade exit decides"
+                return
         self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
         side = pos.signal_direction
         await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")

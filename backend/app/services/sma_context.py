@@ -227,6 +227,7 @@ FIELD_HELP = {
     "pivot_target": "OFF | R1 | R2: close at the pivot level",
     "pressure_exit": "Most active stocks only: close a buy when the buyers' share of waiting orders fades to pressure_exit_pct % (a sell: the sellers')",
     "pressure_exit_pct": "buyers / sellers % at or below which a Most active trade is closed (30-95)",
+    "pressure_over_counter": "Most active stocks with the fade exit on: hold the counter-candle exit while a fresh Most active read still shows the trade's side above pressure_exit_pct (no fresh read = the counter-candle exit works as usual)",
     "cross_exit": "an opposite SMA cross closes the trade and reverses (off = held through a cross)",
     "bb_exit": "Bollinger exit: OFF | BAND | MIDDLE | BOTH", "bb_period": "Bollinger period", "bb_std": "Bollinger std dev",
     "use_vwap": "entry check: buy above VWAP, sell below",

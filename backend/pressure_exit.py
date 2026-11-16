@@ -155,5 +155,28 @@ def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
     ]
 
 
+def over_counter(cfg) -> bool:
+    """`pressure_over_counter`: the buyers / sellers reading overrules the counter-candle exit (needs the fade exit)."""
+    return on(cfg) and bool(getattr(cfg, "pressure_over_counter", False))
+
+
+def holds(symbol: str, direction: str, entry_ts: float, now_ts: float, level: float) -> tuple[bool, str]:
+    """(hold the counter-candle exit?, plain note). Held only while a Most active read taken since the entry, at most
+    MAX_AGE_SEC old, still shows the trade's own side above the level; with no such read the counter-candle exit works
+    as usual, so a paused scan never leaves a trade without it. At or below the level the fade exit closes it."""
+    rows = [(t, s) for t, s in _READS.get(symbol.upper(), ()) if entry_ts <= t <= now_ts]
+    if not rows:
+        return False, "no Most active read since the entry"
+    last_t, last_s = rows[-1]
+    if now_ts - last_t > MAX_AGE_SEC:
+        return False, f"last Most active read is {int((now_ts - last_t) // 60)} min old"
+    who = "buyers" if direction == "LONG" else "sellers"
+    share = side_share(last_s, direction)
+    if share <= level:
+        return False, f"{who} {share:g}% (at or below {level:g}%)"
+    at = dt.datetime.fromtimestamp(last_t, IST).strftime("%H:%M")
+    return True, f"{who} still {share:g}% at {at} (above {level:g}%)"
+
+
 def reset() -> None:
     _READS.clear()

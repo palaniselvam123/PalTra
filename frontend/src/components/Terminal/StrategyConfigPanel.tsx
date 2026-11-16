@@ -477,6 +477,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
     pressure_exit: Boolean(form.pressure_exit),
     pressure_exit_pct: Math.min(95, Math.max(30, Number(form.pressure_exit_pct ?? 55) || 55)),
+    pressure_over_counter: Boolean(form.pressure_over_counter),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -3842,6 +3843,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pressure_exit)
     add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
+  if (f.pressure_exit && f.pressure_over_counter)
+    add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
 
@@ -4995,6 +4998,26 @@ function PressureExit({
         Example at {Number.isFinite(pct) ? pct : 55}%: a buy armed when buyers were 75% closes when buyers drop to{" "}
         {Number.isFinite(pct) ? pct : 55}%; a sell armed at sellers 75% closes when sellers drop to {Number.isFinite(pct) ? pct : 55}%.
       </p>
+      <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.pressure_over_counter)}
+          disabled={!on}
+          onChange={(e) => set("pressure_over_counter", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {isOwn("pressure_over_counter") && <OwnTag />}
+          <b className="text-slate-100">Let it overrule the counter-candle exit</b> <NewTag id="pressure-over-counter" />{" "}
+          <InfoTip label="About letting buyers / sellers overrule the counter-candle exit">
+            For these Most active stocks, a run of candles against the trade no longer closes it while the latest Most active read
+            (taken since the entry, at most 20 minutes old) still shows the trade&apos;s own side above the % above: the trade is
+            held and the fade exit decides. When that side falls to the % or below, the fade exit closes it. With no fresh read
+            (scans paused, the scan not reaching the stock) the counter-candle exit works as usual, so a trade is never left
+            without it. The stop, target and every other exit are unchanged.
+          </InfoTip>
+        </span>
+      </label>
     </div>
   );
 }

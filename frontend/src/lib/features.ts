@@ -307,6 +307,8 @@ export const FEATURES: Feature[] = [
     purpose: "A set of fixes from an audit: every exit cancels the exchange stop first, a failed exit puts the stop back, stops are restored after a restart, and paused bots keep minding their trades." },
   { id: "term-replay-icons", area: "terminal", added: "2026-11-14", pr: 418, href: TERM, where: "Terminal → Backtests", title: "Replay chart icons and a foldable By stock",
     purpose: "Chart links on each backtest stock and a By stock list you can fold away." },
+  { id: "pressure-over-counter", area: "settings", added: "2026-11-16", pr: 446, href: S("sma-pressure-exit"), where: "Settings → Strategy → 3. When to exit → buyers / sellers fade → Let it overrule the counter-candle exit", title: "Buyers / sellers overrule the counter-candle exit",
+    purpose: "For Most active stocks, small candles against the trade no longer close it while the buyers (a buy) or sellers (a sell) still hold above your %; the fade exit decides instead. With no fresh scan read, the counter-candle exit works as before." },
   { id: "chart-buyers-sellers", area: "terminal", added: "2026-11-16", pr: 445, href: TERM, where: "Terminal → chart → bottom strip (Indicators → Buyers / sellers %)", title: "Buyers / sellers % on the chart",
     purpose: "The Most active scan's buyers' share of the waiting orders drawn under the candles, live and for past days and replays from the saved scans, with the reading on the candle under the mouse and the fade exit's levels while that exit is on." },
   { id: "term-compare", area: "terminal", added: "2026-11-15", pr: 429, href: TERM, where: "Terminal → Blotter → Backtests → tick 2-8 runs → Compare", title: "Compare backtests",
