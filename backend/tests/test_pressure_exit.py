@@ -132,3 +132,27 @@ def test_api_saves_the_setting(tmp_path, monkeypatch):
         assert client.put("/api/config", json={"pressure_exit_pct": 99}).status_code == 422
     assert pressure_note(_scan(BASE, ACME=0.7)) == 1
     database.reset_engine()
+
+
+def test_series_joins_saved_scans_and_live_reads(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    day = BASE.date().isoformat()
+    assert scan_history.save("active", _scan(BASE - dt.timedelta(minutes=30), ACME=0.62, OTHER=0.4))
+    assert scan_history.save("active", _scan(BASE - dt.timedelta(minutes=20), ACME=0.71))
+    assert [round(s, 2) for _, s in scan_history.active_shares(day)["ACME"]] == [0.62, 0.71]
+    # A run saved later is read on the next call (only the new ones).
+    scan_history.save("active", _scan(BASE - dt.timedelta(minutes=10), ACME=0.55))
+    assert len(scan_history.active_shares(day)["ACME"]) == 3
+    pressure_exit.note_scan(_scan(BASE + dt.timedelta(minutes=5), ACME=0.30))
+    start = (BASE - dt.timedelta(hours=1)).timestamp()
+    out = pressure_exit.series("acme", start, (BASE + dt.timedelta(hours=1)).timestamp())
+    assert [p["buy_pct"] for p in out] == [62.0, 71.0, 55.0, 30.0]
+    assert out == sorted(out, key=lambda p: p["time"])
+    # A replay's clock sees only the reads up to then.
+    early = pressure_exit.series("ACME", start, (BASE - dt.timedelta(minutes=15)).timestamp())
+    assert [p["buy_pct"] for p in early] == [62.0, 71.0]
+    assert pressure_exit.series("NONE", start, BASE.timestamp()) == []
+    scan_history._ACTIVE_CACHE.clear()

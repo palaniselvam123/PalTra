@@ -282,7 +282,20 @@ def build_payload(
         "atr_multiplier": float(getattr(cfg, "atr_multiplier", 1.5) or 1.5),
         "blocked": blocked,
         "filters": chart_filters(cfg),
+        # Buyers' share from that range's saved Most active scans (pressure_exit.series); display only.
+        "pressure": _pressure(symbol, candles),
     }
+
+
+def _pressure(symbol: str, candles: list[dict]) -> list[dict]:
+    if not candles:
+        return []
+    try:
+        import pressure_exit
+
+        return pressure_exit.series(symbol, float(candles[0]["time"]), float(candles[-1]["time"]) + 3600)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 async def load_history(

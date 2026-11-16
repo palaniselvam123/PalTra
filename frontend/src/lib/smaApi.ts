@@ -1743,6 +1743,9 @@ export type ChartFilters = {
   use_cvd?: boolean;
   cvd_div_exit?: boolean;
   cvd_lookback?: number;
+  /** Buyers / sellers fade exit (pressure_exit.py): the strip draws its exit levels while it is on. */
+  pressure_exit?: boolean;
+  pressure_exit_pct?: number;
   use_rsi: boolean;
   rsi_long_min: number;
   rsi_long_max: number;
@@ -1977,6 +1980,8 @@ export type ChartPayload = {
   atr_multiplier?: number;
   blocked?: BlockedCross[];
   filters?: ChartFilters;
+  /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
+  pressure?: { time: number; buy_pct: number }[];
 };
 
 export type TradeRow = {

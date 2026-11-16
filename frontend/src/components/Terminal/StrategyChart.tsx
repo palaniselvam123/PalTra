@@ -23,9 +23,10 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { cvdValues, emaValues, heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
+import { cvdValues, emaValues, heikinAshi, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
+import { NewTag } from "@/components/ui/NewTag";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
@@ -983,6 +984,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const slopeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const slopeLines = useRef<IPriceLine[]>([]);
   const rsiBands = useRef<IPriceLine[]>([]);
+  const pressureRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const pressureLines = useRef<IPriceLine[]>([]);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
@@ -1575,6 +1578,21 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     });
     instance.priceScale("cvd").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     cvdRef.current = cvd;
+    // Buyers' share of the waiting orders (Most active scans), 0–100 on its own strip; sellers % = 100 − it.
+    const pressure = instance.addLineSeries({
+      color: "#FB923C",
+      lineWidth: 2,
+      lineType: 1,
+      priceScaleId: "pressure",
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: tag("Buyers %"),
+      visible: false,
+      priceFormat: { type: "custom", minMove: 1, formatter: (v: number) => `${v.toFixed(0)}%` },
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+    });
+    instance.priceScale("pressure").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    pressureRef.current = pressure;
     // SMA 9 slope (%/candle): green bars while the line rises, red while it falls.
     const slopeBars = instance.addHistogramSeries({
       priceScaleId: "slope",
@@ -1725,6 +1743,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     paint(atrRef.current, look.atr);
     paint(rsiRef.current, look.rsi);
     paint(cvdRef.current, look.cvd);
+    paint(pressureRef.current, look.pressure);
     paint(emaRefs.current[0], look.ema);
     paint(emaRefs.current[1], look.ema, look.ema.color2);
     paint(stRefs.current[0], look.st);
@@ -1772,7 +1791,11 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Both strips at once share the bottom: ATR above, RSI below; the slope strip, when on, sits under both.
     const lift = showSlopeBars ? 0.17 : 0;
     // The strips on show share the bottom band in equal slices (one alone keeps the old 0.75–0.98).
-    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd]] as const).filter(([, on]) => on).map(([id]) => id);
+    const buyers = pressureValues(rows, chart.pressure);
+    const showPressure = shown(look.pressure, buyers.some((v) => v != null));
+    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure]] as const)
+      .filter(([, on]) => on)
+      .map(([id]) => id);
     const sliceOf = (id: string) => {
       const i = strips.indexOf(id as (typeof strips)[number]);
       if (strips.length <= 1 || i < 0) return { top: 0.75 - lift, bottom: 0.02 + lift };
@@ -1783,6 +1806,31 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     apiRef.current?.priceScale("atr").applyOptions({ scaleMargins: sliceOf("atr") });
     apiRef.current?.priceScale("rsi").applyOptions({ scaleMargins: sliceOf("rsi") });
     apiRef.current?.priceScale("cvd").applyOptions({ scaleMargins: sliceOf("cvd") });
+    apiRef.current?.priceScale("pressure").applyOptions({ scaleMargins: sliceOf("pressure") });
+    if (pressureRef.current) {
+      const series = pressureRef.current;
+      series.applyOptions({ visible: showPressure });
+      series.setData(
+        showPressure
+          ? rows.flatMap((c, i) => (buyers[i] == null ? [] : [{ time: c.time as never, value: buyers[i] as number }]))
+          : []
+      );
+      for (const line of pressureLines.current) series.removePriceLine(line);
+      pressureLines.current = [];
+      if (showPressure) {
+        const level = (price: number, color: string, title: string) =>
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title });
+        pressureLines.current = [level(50, "rgba(148, 163, 184, 0.5)", "")];
+        // The fade exit's levels: a buy closes at buyers ≤ N %, a sell at sellers ≤ N % (buyers ≥ 100 − N).
+        if (filters?.pressure_exit && filters.pressure_exit_pct != null) {
+          const pct = filters.pressure_exit_pct;
+          pressureLines.current.push(
+            level(pct, "rgba(52, 211, 153, 0.7)", `buy exit ≤${pct}`),
+            level(100 - pct, "rgba(251, 113, 133, 0.7)", `sell exit ≥${100 - pct}`)
+          );
+        }
+      }
+    }
     if (cvdRef.current) {
       cvdRef.current.applyOptions({ visible: showCvd });
       const values = showCvd ? cvdValues(rows) : [];
@@ -2059,6 +2107,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const shownAtr = hoverRow?.atr14 ?? lastOf("atr14");
   const slopeBack = filters?.slope_lookback ?? 2;
   const shownIndex = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
+  // Buyers' share of the waiting orders on this candle (the latest Most active read before it closed).
+  const buyerRows = useMemo(() => pressureValues(rows, view?.pressure), [rows, view?.pressure]);
+  const showBuyers = shown(look.pressure, buyerRows.some((v) => v != null));
+  const shownBuyers = (() => {
+    for (let i = shownIndex; i >= 0; i -= 1) if (buyerRows[i] != null) return i === shownIndex || !hoverRow ? buyerRows[i] : null;
+    return null;
+  })();
   const slopeRead = (() => {
     // The forming candle has no SMA: read the last closed one.
     for (let i = shownIndex; i >= 0 && i >= shownIndex - 1; i -= 1) {
@@ -2321,6 +2376,17 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               )}
             </LegendItem>
           )}
+          {showBuyers ? (
+            <LegendItem swatch={<span className="block w-5 border-t-2" style={{ borderColor: look.pressure.color }} />}>
+              <span
+                className="cursor-help"
+                title="The bottom strip: buyers' share of the waiting orders from the Most active scans (live and the day's saved scans), 0–100. Above 50 more shares wait to be bought, below 50 more to be sold. Dashed lines: 50, and while the buyers / sellers fade exit is on its exit levels."
+              >
+                Buyers %{filters?.pressure_exit && filters.pressure_exit_pct != null ? ` · fade exit ${filters.pressure_exit_pct}%` : ""}
+              </span>{" "}
+              <NewTag id="chart-buyers-sellers" link={false} />
+            </LegendItem>
+          ) : null}
           {shown(look.bb, Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF") ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed" style={{ borderColor: look.bb.color }} />}>
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
@@ -2379,7 +2445,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         slopeBack={slopeBack}
         slopeTip={slopeTip}
         slopeTag={slopeWords(shownSlope, filters)}
-        colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color }}
+        buyers={showBuyers ? shownBuyers : undefined}
+        colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color, buyers: look.pressure.color }}
       />
       {whyLine && ohlc ? (
         <p className="px-3 pb-1.5 text-xs text-slate-300 sm:px-4" aria-live="off" title="Why the bot took no trade on this candle. Move the mouse over any candle to read it there.">
@@ -2868,6 +2935,7 @@ function OhlcLine({
   slopeBack,
   slopeTip,
   slopeTag,
+  buyers,
   colors,
 }: {
   ohlc: Ohlc | null;
@@ -2887,7 +2955,9 @@ function OhlcLine({
   slopeTip: string;
   /** The slope in a word against the bot's levels: flat / rising / falling / steep. */
   slopeTag: { tag: string; cls: string };
-  colors: { sma9: string; sma21: string; vwap: string; rsi: string };
+  /** Buyers' share of the waiting orders on this candle (undefined = the strip is off). */
+  buyers?: number | null;
+  colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string };
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -2966,6 +3036,19 @@ function OhlcLine({
         </span>
         {slopeTag.tag ? <span className={clsx("ml-1 font-sans text-[11px]", slopeTag.cls)}>{slopeTag.tag}</span> : null}
       </span>
+      {buyers !== undefined ? (
+        <span
+          className="cursor-help whitespace-nowrap"
+          title="Buyers' share of the waiting orders (buy quantity ÷ buy + sell quantity) from the latest Most active scan read before this candle closed. Sellers % = 100 − buyers %. The scan reads the order book every few minutes, so it steps."
+        >
+          <LineKey color={colors.buyers}>Buyers</LineKey>{" "}
+          <span className={clsx(buyers == null ? "text-slate-400" : buyers >= 50 ? "text-emerald-300" : "text-rose-300")}>
+            {buyers == null ? "—" : `${buyers.toFixed(0)}%`}
+          </span>{" "}
+          <span className="text-slate-400">Sellers</span>{" "}
+          <span className="text-slate-100">{buyers == null ? "—" : `${(100 - buyers).toFixed(0)}%`}</span>
+        </span>
+      ) : null}
     </div>
   );
 }

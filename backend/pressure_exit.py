@@ -121,5 +121,39 @@ def judge(symbol: str, direction: str, entry_ts: float, now_ts: float, level: fl
     return False, f"{who} {now_share:g}% (exit at {level:g}% or below)"
 
 
+MAX_SERIES_DAYS = 3
+
+
+def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
+    """The stock's buyers' share between two times for the chart's buyers / sellers strip: the day's saved Most active
+    scans (scan_history.active_shares, so past days and replays have it too) joined with the live reads noted here,
+    oldest first, one point per read time. Display only. [{"time": epoch, "buy_pct": 0..100}]"""
+    symbol = (symbol or "").upper()
+    if not symbol or end_ts < start_ts:
+        return []
+    found: dict[int, float] = {}
+    last = dt.datetime.fromtimestamp(end_ts, IST).date()
+    # A long range reads only its last few days of saved scans.
+    day = max(dt.datetime.fromtimestamp(start_ts, IST).date(), last - dt.timedelta(days=MAX_SERIES_DAYS - 1))
+    days = 0
+    try:
+        import scan_history
+
+        while day <= last and days < MAX_SERIES_DAYS:
+            for at, share in scan_history.active_shares(day.isoformat()).get(symbol, ()):
+                found[int(at)] = share
+            day += dt.timedelta(days=1)
+            days += 1
+    except Exception:  # noqa: BLE001
+        pass
+    for at, share in _READS.get(symbol, ()):
+        found[int(at)] = share
+    return [
+        {"time": t, "buy_pct": round(s * 100.0, 1)}
+        for t, s in sorted(found.items())
+        if start_ts <= t <= end_ts
+    ]
+
+
 def reset() -> None:
     _READS.clear()
