@@ -271,3 +271,63 @@ def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None
     if kind in KINDS and snapshot.get("as_of") and find(kind, snapshot["as_of"]) is not None:
         return None
     return save(kind, snapshot, meta)
+
+
+# Buyers' share per stock from a day's saved Most active scans (the chart's buyers / sellers strip, pressure_exit.series).
+# Each day is read once and then only the runs saved after it (a Most active pass every few minutes), so the chart's
+# frequent refresh does not unpack every scan again. day -> (last run id read, {symbol: [(epoch, share 0..1)]}).
+_ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float]]]]] = {}
+_ACTIVE_CACHE_DAYS = 6
+
+
+def _epoch(text, fallback: float | None = None) -> float | None:
+    if not text:
+        return fallback
+    try:
+        when = dt.datetime.fromisoformat(str(text))
+    except ValueError:
+        return fallback
+    if when.tzinfo is None:
+        from zoneinfo import ZoneInfo
+
+        when = when.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    return when.timestamp()
+
+
+def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
+    """{symbol: [(epoch of the stock's order-book read, buyers' share 0..1)]} from that IST day's saved Most active
+    scans, oldest first. Never raises (an empty dict when the file cannot be read)."""
+    last_id, by_symbol = _ACTIVE_CACHE.get(day, (0, {}))
+    try:
+        with _lock, _connect() as con:
+            found = con.execute(
+                "SELECT id, as_of, rows FROM scan_runs WHERE kind = 'active' AND day = ? AND id > ? ORDER BY as_of, id",
+                (day, last_id),
+            ).fetchall()
+    except Exception:  # noqa: BLE001
+        log.exception("could not read the saved Most active scans")
+        return by_symbol
+    if not found and day in _ACTIVE_CACHE:
+        return by_symbol
+    by_symbol = {k: list(v) for k, v in by_symbol.items()}
+    for run in found:
+        last_id = max(last_id, int(run["id"]))
+        start = _epoch(run["as_of"])
+        for row in _unpack(run["rows"]) or []:
+            if not isinstance(row, dict) or row.get("buy_share") is None:
+                continue
+            try:
+                share = float(row["buy_share"])
+            except (TypeError, ValueError):
+                continue
+            at = _epoch(row.get("read_at"), start)
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol or at is None or not 0.0 <= share <= 1.0:
+                continue
+            by_symbol.setdefault(symbol, []).append((at, share))
+    for reads in by_symbol.values():
+        reads.sort()
+    _ACTIVE_CACHE[day] = (last_id, by_symbol)
+    for old in sorted(_ACTIVE_CACHE)[:-_ACTIVE_CACHE_DAYS]:
+        _ACTIVE_CACHE.pop(old, None)
+    return by_symbol

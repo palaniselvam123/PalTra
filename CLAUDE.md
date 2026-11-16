@@ -210,7 +210,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Most active scan's: every finished pass goes `routes_scalp._pressure_alert` → terminal `pressure_note` → `note_scan`
   (memory only, keyed by the row's `read_at`), so it reacts as often as that scan's auto interval; with scans paused or
   `SCANS=off` it never fires. Replays see no read (their clock is in the past) and keep their normal exits. The colour
-  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading.
+  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /

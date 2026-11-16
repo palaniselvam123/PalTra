@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pivots";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & {
   candleUp: string;
@@ -52,6 +52,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
+  pressure: { name: "Buyers / sellers % (strip)", auto: "while a Most active scan has read the stock" },
   pivots: { name: "Pivot points (P, R1/S1, R2/S2)", auto: "while the pivot target is on", color2: "P" },
 };
 
@@ -68,6 +69,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
   cvd: { show: "auto", color: "#2DD4BF", width: 2, style: 0 },
+  pressure: { show: "auto", color: "#FB923C", width: 2, style: 0 },
   pivots: { show: "auto", color: "#EAB308", color2: "#94A3B8", width: 1, style: 2 },
 };
 
@@ -171,6 +173,23 @@ export function cvdValues(rows: { time: number; open: number; high: number; low:
     const vol = c.volume != null && Number.isFinite(c.volume) && c.volume > 0 ? c.volume : 0;
     if (span > 0) sum += (vol * Math.max(-1, Math.min(1, (c.close - c.open) / span)));
     return sum;
+  });
+}
+
+/**
+ * The buyers' share of the waiting orders (the Most active scan's reads, pressure_exit.series) put on the candles:
+ * each candle carries the latest read taken before it closed (before the next candle's start), held until a new read,
+ * never into the next IST day. Null before the day's first read. Buyers % = 100 − sellers %.
+ */
+export function pressureValues(rows: { time: number }[], points: { time: number; buy_pct: number }[] | null | undefined): (number | null)[] {
+  if (!points?.length) return rows.map(() => null);
+  const dayOf = (t: number) => Math.floor((t + IST_OFFSET_SEC) / 86_400);
+  let j = 0;
+  let last: { time: number; buy_pct: number } | null = null;
+  return rows.map((c, i) => {
+    const end = i + 1 < rows.length ? rows[i + 1].time : Number.POSITIVE_INFINITY;
+    while (j < points.length && points[j].time < end) last = points[j++];
+    return last && dayOf(last.time) === dayOf(c.time) ? last.buy_pct : null;
   });
 }
 

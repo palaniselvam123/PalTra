@@ -1040,6 +1040,9 @@ def chart_filters(cfg) -> dict:
         "use_cvd": cum_delta.entry_on(cfg),
         "cvd_div_exit": cum_delta.exit_on(cfg),
         "cvd_lookback": cum_delta.lookback(cfg),
+        # Buyers / sellers strip: the fade exit's level line while it is on (pressure_exit.py).
+        "pressure_exit": pressure_exit.on(cfg),
+        "pressure_exit_pct": pressure_exit.pct(cfg),
         # Supertrend line (supertrend.py): drawn while its entry check or exit is on.
         "st_line": supertrend.entry_on(cfg) or supertrend.exit_on(cfg),
         "st_period": supertrend.settings(cfg)[0],
@@ -7244,7 +7247,18 @@ class StrategyEngine:
             # Classic daily pivots from the previous session (pivots.py), drawn as lines; display only.
             "pivots": self._pivots(view, self._now().date()) if view else None,
             "pivot_target": pivots.target_mode(cfg) if cfg is not None else "OFF",
+            # Buyers' share of the waiting orders from the Most active scans (pressure_exit.series); display only.
+            "pressure": self._pressure_points(view, candles),
         }
+
+    def _pressure_points(self, symbol: str, candles: list[dict]) -> list[dict]:
+        """The stock's buyers % over the candles on screen, up to the engine's clock (a replay sees no later read)."""
+        if not symbol or not candles:
+            return []
+        try:
+            return pressure_exit.series(symbol, float(candles[0]["time"]), self._now().timestamp())
+        except Exception:  # noqa: BLE001
+            return []
 
     def _kpis(self, mode: str = "PAPER") -> dict:
         day = self._session_date
