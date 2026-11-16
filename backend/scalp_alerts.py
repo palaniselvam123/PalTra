@@ -39,6 +39,12 @@ CHECK_WORDS = {
     "structure": "higher highs / lower lows",
     "run": "no recent cross",
     "volume": "volume above usual",
+    # Heikin Ashi read (ha_trend.py)
+    "streak": "Heikin Ashi candles of one colour in a row",
+    "nowick": "no wick against the trend",
+    "body": "bodies not shrinking",
+    "move": "moved at least 1 ATR",
+    "clean": "no doji lately",
 }
 # {alert: {IST day: {(symbol, side): "HH:MM"}}}
 _SENT: dict[str, dict[dt.date, dict[tuple[str, str], str]]] = {"strong": {}, "pressure": {}}

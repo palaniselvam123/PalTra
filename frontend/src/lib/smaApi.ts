@@ -575,7 +575,7 @@ export type ChopScanRow = {
   trend_score?: number;
   trend_checks?: Partial<Record<ChopTrendCheck, boolean>>;
   /** MORNING before 10:00 IST (today's candles), MIDDAY from 10:00. */
-  trend_mode?: "MORNING" | "MIDDAY";
+  trend_mode?: "MORNING" | "MIDDAY" | "HEIKIN_ASHI";
   /** The server's one-line reading of each check (names the morning / midday rule used). */
   trend_notes?: Partial<Record<ChopTrendCheck, string>>;
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
@@ -680,7 +680,9 @@ export type ScanArmState = {
 export type ChopPhaseSide = "BULL" | "BEAR" | "CHOP";
 export type ChopPhase = { side: ChopPhaseSide; start_ts: number; end_ts: number; candles: number; move_pct: number | null };
 export type ChopTrend = "STRONG_BULLISH" | "STRONG_BEARISH";
-export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run" | "volume";
+export type ChopTrendCheck = "stack" | "vwap" | "slope" | "fan" | "hold" | "structure" | "run" | "volume"
+  // Heikin Ashi read (backend ha_trend.py): judged on the candles, no SMA.
+  | "streak" | "nowick" | "body" | "move" | "clean";
 
 export type ChopScan = {
   running: boolean;

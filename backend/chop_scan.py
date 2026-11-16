@@ -58,6 +58,7 @@ from cross_scan import (
 from groww_client import IST, market_is_open
 from indicators import _session_vwap, enrich, sma_gap_pct
 import heikin_ashi
+import ha_trend
 import trend_phases
 import trend_strength
 
@@ -301,7 +302,8 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     today = _ist_day(int(now.timestamp()))
-    hits = _crosses(enriched, today)
+    # Heikin Ashi: the trend is read from the candles (colour runs, flips, wicks; ha_trend.py), never the SMA cross.
+    hits = ha_trend.flips(enriched, today) if ha else _crosses(enriched, today)
     ltp = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
     minutes_since: float | None = None
     avg_gap: float | None = None
@@ -320,7 +322,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
             ]
             avg_gap = sum(gaps) / len(gaps) if gaps else None
             avg_move = sum(moves) / len(moves) if moves else None
-    score = score_for(len(hits), minutes_since, avg_gap)
+    score = ha_trend.score(hits, minutes_since, avg_gap, minutes) if ha else score_for(len(hits), minutes_since, avg_gap)
     quiet = bool(hits) and minutes_since is not None and minutes_since >= max(1, int(quiet_min or 0))
     base = ChopRow(
         symbol=symbol,
@@ -336,16 +338,24 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
     vwap = _vwap_today(frame_1m, now)
-    trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
-    by_size = {m: (*_cross_read(hits, enriched), trend["trend"]) if m == minutes
+    today_start = today * 86_400 - 19_800 + SESSION_OPEN_SEC
+    if ha:
+        trend = ha_trend.checks(enriched, vwap, real_close)
+        fresh = ha_trend.fresh(enriched, vwap, now, frame_1m, real_close)
+        phase = ha_trend.summary(ha_trend.phases(enriched, today_start))
+    else:
+        trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
+        fresh = trend_strength.fresh(enriched, vwap, now, frame_1m, price=real_close)
+        phase = trend_phases.summary(trend_phases.phases(enriched, today_start))
+    by_size = {m: (*_cross_read(hits, enriched, ha), trend["trend"]) if m == minutes
                else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha)
                for m in CANDLE_MINUTES}
     return replace(
         base,
         **activity(frame_1m),
         **trend,
-        **trend_strength.fresh(enriched, vwap, now, frame_1m, price=real_close, colour=ha),
-        **trend_phases.summary(trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)),
+        **fresh,
+        **phase,
         day_move_pct=_day_move(frame_1m),
         crosses_by_minutes={m: r[0] for m, r in by_size.items()},
         side_by_minutes={m: r[1] for m, r in by_size.items()},
@@ -374,14 +384,19 @@ def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast
     if ha:
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
+    if ha:
+        price = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
+        strong = ha_trend.checks(enriched, vwap, price)["trend"]
+        return (*_cross_read(ha_trend.flips(enriched, today), enriched, True), strong)
     strong = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)["trend"]
     return (*_cross_read(_crosses(enriched, today), enriched), strong)
 
 
-def _cross_read(hits: list[dict], enriched: pd.DataFrame):
+def _cross_read(hits: list[dict], enriched: pd.DataFrame, ha: bool = False):
+    """Heikin Ashi (`ha`): the side is the run's colour and the run / gap are its candles and move (ha_trend.run_read)."""
     last = hits[-1] if hits else None
-    return (len(hits), _side(enriched), (last["ts"] if last else None), (last["side"] if last else None),
-            *_run_read(enriched))
+    return (len(hits), ha_trend.side(enriched) if ha else _side(enriched), (last["ts"] if last else None),
+            (last["side"] if last else None), *(ha_trend.run_read(enriched) if ha else _run_read(enriched)))
 
 
 def _run_read(enriched: pd.DataFrame):

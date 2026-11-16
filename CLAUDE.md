@@ -1171,7 +1171,18 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `meta.candles`): with `HA`, `chop_scan.ha_bars` turns the closed candles of every size into Heikin Ashi ones
   (`heikin_ashi.candles`; high / low widened to hold the HA open / close) before `enrich`, so the SMAs, crosses, score,
   strong-trend checks, phases, trend age and gap are all the Heikin Ashi read (`analyze(..., ha=)`, `_crosses_on`,
-  `scan_worker.chop_job`); the last price, VWAP and day move stay real. Scan & arm, the Most active card's "Read trend
+  `scan_worker.chop_job`); the last price, VWAP and day move stay real. **With Heikin Ashi the trend is read from the candles, not the SMAs** (owner's request; `backend/ha_trend.py`,
+  `analyze(..., ha=True)` and `auto_arm.strong_read(..., ha=True)`): each HA candle is green / red / doji (body under
+  `DOJI_SHARE` 10 % of its range); a colour change between non-doji candles is a **flip** (`flips`: `crosses_today`,
+  `last_cross_*`); Score `ha_trend.score` (TRENDING 0-2 flips with a long run since, CHOPPY 5+ flips or runs under 3
+  candles); the side and Trend age are the current colour run across days (`side`, `run_read`), and the gap columns carry
+  the run's move % and its widest (`gap_pct_by_minutes` / `gap_peak_pct_by_minutes`, so "fading" still works); Strong trend
+  = `checks` (trend_mode `HEIKIN_ASHI`): `streak` (3+ candles of one colour), `nowick` (no wick against the trend on 2 of
+  the last 3), `body` (last body ≥ 0.8 × the run's average), `structure` (higher lows / lower highs), `vwap` (real price),
+  `move` (≥ 1 ATR), `clean` (no doji in the last 3); streak / nowick / VWAP required, 6 of 7; phases = runs of 5+ candles of
+  one colour (`phases`, `summary`); Fresh = the colour turned within 3 candles, no wick against it, beyond VWAP, volume
+  1.5x (`fresh`). Every size of the row reads it the same way, so filters, rank, alerts (`scalp_alerts.CHECK_WORDS`),
+  auto-arm and the pick backtests follow; the card relabels Crosses → Colour flips and SMA gap % → Run move %. Scan & arm, the Most active card's "Read trend
   quality" and MCP keep normal candles. **The backtests can read Heikin Ashi too** (`candles` `NORMAL` default | `HA` on
   `TrendPickRule`, `AutoArmRule`, `trend_picks.AutoSettings` and the comparison; `POST /api/replay/trend-picks`,
   `/api/replay/auto-arm`, `/api/trend-picks/compare`, `PUT /api/trend-picks/auto`; the Backtest tab's "Candles" menus):
