@@ -3778,6 +3778,8 @@ class ScalpAlertUpdate(BaseModel):
     # Auto-arm a LIVE bot too (real Groww orders on its next signal); turning it on needs confirm_live.
     arm_live: bool | None = None
     arm_live_max_day: int | None = Field(default=None, ge=1, le=10)
+    # Backtest server: arm this server's own bots ("here") or the main desk's over the link ("desk").
+    arm_on: Literal["here", "desk"] | None = None
     confirm_live: bool = False
 
 
@@ -3899,8 +3901,12 @@ async def _scan_arm_scan(symbols: list[str], minutes: int, progress) -> dict:
 
 
 def _auto_arm_remote() -> bool:
-    """Auto-arm (auto_arm.py) arms the bots of the server the scan ran on; the scanner has none, so the desk's."""
-    return server_role.is_scanner()
+    """Auto-arm (auto_arm.py) arms the bots of the server the scan ran on; the scanner has none, so the desk's. On
+    the backtest server "Arm on: Main desk" (`arm_on = "desk"`, with the link token) arms the desk's bots too."""
+    if server_role.is_scanner():
+        return True
+    return (server_role.is_backtest() and bool(server_role.link_token())
+            and scalp_alerts.load().arm_on == "desk")
 
 
 async def _auto_arm_bots() -> dict[int, dict]:

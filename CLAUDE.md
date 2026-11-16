@@ -1257,8 +1257,10 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   unless **Also arm a LIVE bot** (`arm_live`, off by default; `PUT /api/scalp-alerts` turning it on needs `confirm_live`,
   409 without; the card asks for LIVE typed, `ScalpAlertsCard.LiveArmRow`) is on: then at most `arm_live_max_day` (3, 1-10)
   stocks a day per source go on the LIVE bot, counted apart from the PAPER arms of the same day (`_DONE_LIVE`; owner's case: arms made while the bot was still PAPER used up the day's limit and the LIVE bot got none) (`_auto_arm_arm(..., live=True)` → `confirm_live`; one LIVE bot per stock
-  still applies; the Telegram says LIVE). The bot trades them at its own quantity. Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link only from the
-  scanner; the desk and the backtest server arm their own bots). One Telegram per run that armed something (quiet
+  still applies; the Telegram says LIVE). The bot trades them at its own quantity. Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link from the
+  scanner; the desk arms its own bots; the backtest server its own unless **Arm on: the main desk's bots** (`arm_on` `here`
+  default | `desk`, needs `SCANNER_LINK_TOKEN`; the card's choice is shown when the view's `desk_link` is true; owner's case:
+  auto-arm ran on the backtest server and the main desk got nothing)). One Telegram per run that armed something (quiet
   channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Auto-arm replay** (`AutoArmRule`,
   kind `AUTOARM`, dispatched by `scalp_picks.picks_for_day`; `POST /api/replay/auto-arm`, the Scalp Backtest tab's
   `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it

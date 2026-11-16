@@ -23,7 +23,7 @@ export function ScalpAlertsCard() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the alert settings"));
   }, []);
 
-  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm">> & { confirm_live?: boolean }) => {
+  const save = async (patch: Partial<Omit<ScalpAlerts, "recent" | "max_names" | "auto_arm" | "desk_link">> & { confirm_live?: boolean }) => {
     setBusy(true);
     setError(null);
     try {
@@ -157,6 +157,25 @@ export function ScalpAlertsCard() {
             />
             <LastCheck row={view.last?.pressure} scan="Most active" />
           </div>
+          {view.desk_link && (view.arm_strong_on || view.arm_pressure_on) ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
+              <span className="font-semibold text-slate-200">Arm on</span>
+              <NewTag id="auto-arm-desk" />
+              <select
+                className={select}
+                value={view.arm_on ?? "here"}
+                disabled={busy}
+                aria-label="Which server's bots auto-arm fills"
+                onChange={(e) => void save({ arm_on: e.target.value as "here" | "desk" })}
+              >
+                <option value="here">This backtest server&apos;s bots</option>
+                <option value="desk">The main desk&apos;s bots</option>
+              </select>
+              {(view.arm_on ?? "here") === "desk"
+                ? "The stocks go on the main desk's Trade list (the bot picked above, on the desk). A LIVE desk bot is armed only with \"Also arm a LIVE bot\" ticked."
+                : "The stocks go on this backtest server's own practice bots, not the main desk's."}
+            </div>
+          ) : null}
           {view.arm_strong_on || view.arm_pressure_on ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 lg:col-span-2">
               Auto-arm at most

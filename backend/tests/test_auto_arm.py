@@ -353,3 +353,21 @@ async def test_paper_arms_earlier_in_the_day_do_not_use_up_the_live_limit():
     rec = await auto_arm.after_scan("strong", {"rows": [_strong("P0")]}, bots=bots, arm=arm, now=later,
                                     check_market=False)
     assert rec["armed"] == ["P0"] and calls[-1] == ("P0", True)
+
+
+def test_backtest_server_arms_the_desk_only_when_asked(monkeypatch):
+    # Owner's case: auto-arm on the backtest server filled its own practice bots, the main desk got nothing.
+    import main
+    import server_role
+
+    monkeypatch.setattr(server_role, "is_scanner", lambda: False)
+    monkeypatch.setattr(server_role, "is_backtest", lambda: True)
+    monkeypatch.setattr(server_role, "link_token", lambda: "t" * 32)
+    assert scalp_alerts.load().arm_on == "here" and main._auto_arm_remote() is False
+    scalp_alerts.save({"arm_on": "desk"})
+    assert main._auto_arm_remote() is True and scalp_alerts.view()["desk_link"] is True
+    # Without the link token the desk cannot be reached: its own bots.
+    monkeypatch.setattr(server_role, "link_token", lambda: "")
+    assert main._auto_arm_remote() is False
+    # A bad value falls back to this server's own bots.
+    assert scalp_alerts.save({"arm_on": "elsewhere"}).arm_on == "here"
