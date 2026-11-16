@@ -151,7 +151,7 @@ async def test_auto_arm_counts_only_the_stocks_it_armed(tmp_path, monkeypatch):
     import scalp_alerts
 
     monkeypatch.setenv("SCALP_ALERTS_FILE", str(tmp_path / "alerts.json"))
-    for book in (*auto_arm._DONE.values(), *auto_arm._SEEN.values()):
+    for book in (*auto_arm._DONE.values(), *auto_arm._DONE_LIVE.values(), *auto_arm._SEEN.values()):
         book.clear()
     s = scalp_alerts.load()
     s.arm_strong_on, s.arm_strong_bot, s.arm_max_day = True, 2, 2

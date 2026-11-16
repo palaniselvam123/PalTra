@@ -19,7 +19,7 @@ NOW = dt.datetime(2026, 11, 2, 11, 0, tzinfo=IST)
 @pytest.fixture(autouse=True)
 def _files(tmp_path, monkeypatch):
     monkeypatch.setenv("SCALP_ALERTS_FILE", str(tmp_path / "alerts.json"))
-    for book in (*auto_arm._DONE.values(), *auto_arm._SEEN.values()):
+    for book in (*auto_arm._DONE.values(), *auto_arm._DONE_LIVE.values(), *auto_arm._SEEN.values()):
         book.clear()
     auto_arm.recent.clear()
 
@@ -316,3 +316,40 @@ def test_turning_live_arm_on_needs_confirm(monkeypatch):
     assert client.put("/api/scalp-alerts", json={"arm_live": True, "arm_live_max_day": 4}).status_code == 200
     assert client.put("/api/scalp-alerts", json={"arm_live": False}).status_code == 200
     assert scalp_alerts.load().arm_live is False
+
+
+@pytest.mark.asyncio
+async def test_paper_arms_earlier_in_the_day_do_not_use_up_the_live_limit():
+    # Owner's case: the bot armed stocks in PAPER in the morning, then went LIVE; the shared count left the LIVE
+    # bot with no room, so nothing was armed on it.
+    scalp_alerts.save({"arm_strong_on": True, "arm_strong_bot": 2, "arm_max_day": 3,
+                       "arm_live": True, "arm_live_max_day": 2})
+    mode = {"now": "PAPER"}
+    armed: list[str] = []
+    calls: list = []
+
+    async def bots():
+        return {2: {"mode": mode["now"], "armed": list(armed), "name": "Bot 2"}}
+
+    async def arm(bot, symbol, source, live=False):
+        calls.append((symbol, live))
+        armed.append(symbol)
+        return None
+
+    rec = await auto_arm.after_scan("strong", {"rows": [_strong(f"P{i}") for i in range(3)]}, bots=bots, arm=arm,
+                                    now=NOW, check_market=False)
+    assert rec["live"] is False and len(rec["armed"]) == 3
+    # The bot goes LIVE (and the morning's stocks were taken off): new picks still arm on it, up to the LIVE limit.
+    mode["now"] = "LIVE"
+    armed.clear()
+    later = NOW + dt.timedelta(minutes=30)
+    rows = [_strong(f"N{i}") for i in range(3)]
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=later, check_market=False)
+    assert rec["live"] is True and rec["armed"] == ["N0", "N1"]
+    assert "(LIVE)" in rec["skipped"][0]["why"]
+    assert [c for c in calls if c[1]] == [("N0", True), ("N1", True)]
+    # A stock armed in PAPER this morning can be armed on the LIVE bot too.
+    auto_arm._DONE_LIVE["strong"].clear()
+    rec = await auto_arm.after_scan("strong", {"rows": [_strong("P0")]}, bots=bots, arm=arm, now=later,
+                                    check_market=False)
+    assert rec["armed"] == ["P0"] and calls[-1] == ("P0", True)
