@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { smaApi, type HandoffReturn as State } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
 
 const TIMES = ["15:35", "15:45", "16:00", "17:00", "18:00", "20:00"];
 
@@ -29,12 +30,19 @@ export function HandoffReturn() {
     return () => clearInterval(poll);
   }, [load]);
 
-  const save = async (on: boolean, at?: string) => {
+  const save = async (on: boolean, at?: string, mode?: State["mode"]) => {
     setBusy(true);
     setNote(null);
     try {
-      setView(await smaApi.handoffReturnSave(on, at));
-      setNote(on ? "Saved: handed-off stocks go back after the close." : "Saved: handed-off stocks stay where they were moved.");
+      const next = await smaApi.handoffReturnSave(on, at, mode ?? view?.mode);
+      setView(next);
+      setNote(
+        !on
+          ? "Saved: handed-off stocks stay where they were moved."
+          : next.mode === "BACK"
+            ? "Saved: handed-off stocks go back to the bot they came from after the close."
+            : "Saved: handed-off stocks are unarmed from Bot 2 / Bot 3 after the close."
+      );
     } catch (err) {
       setNote(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -43,12 +51,13 @@ export function HandoffReturn() {
   };
 
   const now = async () => {
-    if (!window.confirm("Send every handed-off stock that is not in a trade back to the bot it came from now?")) return;
+    const what = view?.mode === "BACK" ? "send it back to the bot it came from" : "unarm it from the bot it was handed to";
+    if (!window.confirm(`For every handed-off stock that is not in a trade: ${what} now?`)) return;
     setBusy(true);
     try {
       const out = await smaApi.handoffReturnNow();
       setView(out);
-      setNote(out.lines.length ? out.lines.join(" · ") : "Nothing to send back.");
+      setNote(out.lines.length ? out.lines.join(" · ") : "Nothing to do.");
     } catch (err) {
       setNote(err instanceof Error ? err.message : "Could not send back");
     } finally {
@@ -60,16 +69,17 @@ export function HandoffReturn() {
   return (
     <SettingsCard
       id="handoff-return"
-      title="Hand-offs: send stocks back at the end of the day"
+      title="Hand-offs: at the end of the day"
       tier="advanced"
       status={view ? { on: Boolean(view.on) } : null}
-      summary="A stock that a bot moved to Bot 2 or Bot 3 during the day goes back to the bot it started on after the close, so the first bot's stock list does not shrink for good. Only the lists change; no order is placed."
+      summary="A stock that a bot moved to Bot 2 or Bot 3 during the day is unarmed after the close (or, if you pick it, sent back to the bot it started on). Only the lists change; no order is placed."
       help={
         <>
           A recovery or losing V-turn moves a stock from its bot to Bot 2, and a breakout moves it on to Bot 3. Nothing brings
           it back, so the first bot&apos;s Trade list only shrinks. With this on, after the close every handed-off stock goes
-          back to the bot it first came from (Bot 1 → Bot 2 → Bot 3 goes back to Bot 1) and waits for its next cross there.
-          A stock still in a trade waits. Only the Trade lists change; no order is placed.
+          back to the bot it first came from (Bot 1 → Bot 2 → Bot 3 goes back to Bot 1) and waits for its next cross there,
+          or, with &quot;Unarm them&quot;, is taken off Bot 2 / Bot 3 and put on no bot, so the next day starts only with what
+          is armed fresh. A stock still in a trade waits. Only the Trade lists change; no order is placed.
         </>
       }
     >
@@ -82,7 +92,20 @@ export function HandoffReturn() {
             onChange={(e) => void save(e.target.checked, view?.at)}
             className="accent-emerald-400"
           />
-          Send handed-off stocks back after the close
+          After the close
+        </label>
+        <label className="flex items-center gap-1.5">
+          <select
+            value={view?.mode ?? "UNARM"}
+            disabled={!view || busy}
+            onChange={(e) => void save(Boolean(view?.on), view?.at, e.target.value as State["mode"])}
+            className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+            aria-label="What happens to handed-off stocks"
+          >
+            <option value="UNARM">unarm them from Bot 2 / Bot 3</option>
+            <option value="BACK">send them back to the bot they came from</option>
+          </select>
+          <NewTag id="handoff-eod-unarm" />
         </label>
         <label className="flex items-center gap-1.5">
           at
@@ -105,17 +128,18 @@ export function HandoffReturn() {
           onClick={() => void now()}
           className="min-h-9 rounded-md px-3 text-xs font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
         >
-          Send back now
+          {view?.mode === "BACK" ? "Send back now" : "Unarm now"}
         </button>
       </div>
       <p className="mt-2 text-xs text-slate-400">
         {moved.length
           ? `Handed off now: ${moved.map(([name, r]) => `${name} on Bot ${r.on} (from Bot ${r.origin})`).join(", ")}`
-          : "No handed-off stock is waiting to go back."}
+          : "No handed-off stock is waiting."}
       </p>
       <p className="mt-1 text-xs text-slate-500">
-        Backtests: the replay bar&apos;s &quot;Play hand-offs&quot; keeps a handed-off stock in the run on Bot 2&apos;s / Bot
-        3&apos;s settings; with this switch on, each replayed day starts with every stock back on the replayed bot.
+        Backtests (new runs): a stock that ends a replayed day on Bot 2 / Bot 3 is unarmed too, so it is not traded on the
+        following days (an auto-arm or pick run can arm it again from that day&apos;s own scans). Only with this switch on and
+        &quot;send them back&quot; does each replayed day start with it back on the replayed bot.
       </p>
       {note ? <p className="mt-2 text-xs text-emerald-300">{note}</p> : null}
     </SettingsCard>

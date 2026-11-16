@@ -1027,7 +1027,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `boot_engine`, not with `server_role.no_orders()`, every `POLL_SEC` 60 s) once `due` (after `at`, before 09:00, or a
   weekend) moves each noted stock that its bot does not hold off that bot and back onto its origin's Trade list
   (`send_back` → `send_back_one`, source chip "Back from Bot N", one LIVE bot per stock checked; the origin
-  `hold_for_next_cross`). Arming only, no order. `GET/PUT /api/bots/handoff-return`, `POST /api/bots/handoff-return/now`;
+  `hold_for_next_cross`). Arming only, no order. **Unarm instead** (`mode` `UNARM` default | `BACK`; owner's request: handed-off stocks should
+  not carry to the next day): `unarm_one` only takes the stock off the bot it was handed to (no bot gets it back); the
+  card's menu "unarm them from Bot 2 / Bot 3" / "send them back", "Unarm now" (`HandoffReturnUpdate.mode`). **Backtests**
+  (new runs): `handoff_eod` on the run's settings (`backtest_eod`: BACK only while the switch is on in BACK mode, else
+  UNARM) — a stock that ends a replayed day on Bot 2 / Bot 3 is unarmed (`replay.unarm_at_day_end` adds it to
+  `handed_off`; `day_symbols`: a plain replay never trades it again, a pick / auto-arm run starts each day only with that
+  day's picks), and no stock starts a day on Bot 2 / Bot 3; runs saved before keep the old carry-over. `GET/PUT /api/bots/handoff-return`, `POST /api/bots/handoff-return/now`;
   Settings → Bots, "Hand-offs: send stocks back at the end of the day" (`components/Settings/HandoffReturn.tsx`).
   **Backtests** (`ReplayStart.play_handoffs`, on by default; the replay bar's "Play hand-offs (Bot 2 / Bot 3)"; saved as
   `play_handoffs` and the run's `chain` snapshot, `replay_snapshot`: Bot 2's and Bot 3's strategy fields and per-stock

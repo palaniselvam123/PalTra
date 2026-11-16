@@ -2295,6 +2295,8 @@ async def backtest_idle(body: IdleUpdate):
 class HandoffReturnUpdate(BaseModel):
     on: bool
     at: str | None = None
+    #: UNARM = take handed-off stocks off Bot 2 / Bot 3 after the close; BACK = send them back where they came from.
+    mode: Literal["UNARM", "BACK"] | None = None
 
 
 @app.get("/api/bots/handoff-return")
@@ -2307,7 +2309,7 @@ async def handoff_return_get():
 async def handoff_return_put(body: HandoffReturnUpdate):
     """Turn the end-of-day send-back on or off (arming only: no order is placed)."""
     try:
-        await asyncio.to_thread(handoff_chain.save, body.on, body.at)
+        await asyncio.to_thread(handoff_chain.save, body.on, body.at, body.mode)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return await asyncio.to_thread(handoff_chain.state)
