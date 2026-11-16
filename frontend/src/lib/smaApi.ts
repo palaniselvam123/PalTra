@@ -3588,6 +3588,10 @@ export type ScalpAlerts = {
   arm_live: boolean;
   /** On a LIVE bot, at most this many stocks a day per scan (1-10). */
   arm_live_max_day: number;
+  /** Backtest server: auto-arm this server's own bots ("here") or the main desk's over the link ("desk"). */
+  arm_on?: "here" | "desk";
+  /** True on a backtest server that can reach the main desk (the "Arm on" choice is shown). */
+  desk_link?: boolean;
   auto_arm?: {
     recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; live?: boolean; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
     today: { strong: string[]; pressure: string[] };

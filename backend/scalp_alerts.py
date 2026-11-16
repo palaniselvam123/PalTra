@@ -72,6 +72,9 @@ class Settings:
     # confirm_live (PUT /api/scalp-alerts, 409 without). On a LIVE bot at most arm_live_max_day stocks a day per source.
     arm_live: bool = False
     arm_live_max_day: int = 3
+    # Backtest server only: whose bots auto-arm fills, "here" (this server's own PAPER bots, the old way) or "desk"
+    # (the main desk's bots over the link, like Scan & arm; needs SCANNER_LINK_TOKEN). The scanner always arms the desk.
+    arm_on: str = "here"
 
 
 def settings_path() -> Path:
@@ -104,6 +107,7 @@ def clean(raw: dict) -> Settings:
     s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
     s.arm_pressure_bot = _bot(raw.get("arm_pressure_bot"), s.arm_pressure_bot)
     s.arm_live = bool(raw.get("arm_live", s.arm_live))
+    s.arm_on = raw.get("arm_on") if raw.get("arm_on") in ("here", "desk") else s.arm_on
     try:
         s.arm_max_day = max(1, min(50, int(raw.get("arm_max_day", s.arm_max_day) or s.arm_max_day)))
         lo = max(0.0, min(1_000_000.0, float(raw.get("arm_price_min", s.arm_price_min) or 0.0)))
@@ -339,4 +343,9 @@ def view() -> dict:
     import auto_arm
 
     _load_log()
-    return {**asdict(load()), "recent": recent[:20], "last": last, "max_names": MAX_NAMES, "auto_arm": auto_arm.view()}
+    import server_role
+
+    # desk_link: this backtest server can arm the main desk's bots (the "Arm on" choice is shown).
+    desk_link = server_role.is_backtest() and bool(server_role.link_token())
+    return {**asdict(load()), "recent": recent[:20], "last": last, "max_names": MAX_NAMES, "auto_arm": auto_arm.view(),
+            "desk_link": desk_link}

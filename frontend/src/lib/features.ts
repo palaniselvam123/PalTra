@@ -51,6 +51,8 @@ export const FEATURES: Feature[] = [
     purpose: "Marks Strong bullish / bearish when price, both SMAs and VWAP line up, the SMAs slope the same way, the gap widens, closes hold and there was no recent cross: the trends worth riding." },
   { id: "tq-backtest-ha", area: "trend", added: "2026-11-15", pr: 434, href: "/scalp/#backtest", where: "Scalp → Backtest → Candles", title: "Trend quality backtests on Heikin Ashi candles",
     purpose: "The strong-trend pick backtest, its daily run and pick-time comparison, and the auto-arm replay can read the trend on Heikin Ashi candles, like the Trend quality card's Candles menu. Trades still fill at real prices." },
+  { id: "auto-arm-desk", area: "trend", added: "2026-11-16", pr: 440, href: "/scalp/#alerts", where: "Scalp → Alerts → Also arm them on → Arm on (backtest server)", title: "Auto-arm the main desk from the backtest server",
+    purpose: "On the backtest server, auto-arm can now put the picked stocks on the main desk's bots instead of the backtest server's own practice bots. Pick \"The main desk's bots\" under Arm on." },
   { id: "bt-time-window", area: "trend", added: "2026-11-15", pr: 437, href: "/scalp/#backtest", where: "Scalp → Backtest and Most active → Backtest → Pick at / Trade until", title: "Pick backtests inside a time range (09:15 to 15:30)",
     purpose: "The Trend quality and Most active pick backtests, their pick-time comparisons, the daily run and the auto-arm replay can now pick from 09:15 and stop trading at any time up to 15:30: positions are squared off at Trade until and the day ends there." },
   { id: "tq-crosses-on", area: "trend", added: "2026-10-12", pr: 177, href: TQ, where: "Scalp → Trend quality → Crosses today on", title: "Crosses today on several candle sizes",
