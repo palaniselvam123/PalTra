@@ -50,6 +50,32 @@ type Hit = {
 /** The same stock over all the picked days. */
 type Stock = { key: string; symbol: string; days: number; matched: number; firstDay: string; firstAt: string; lastDay: string; avgMove: number | null };
 
+/** One stock in one saved scan: how its trend read at that time (the timeline view). */
+type Seen = {
+  key: string;
+  day: string;
+  at: string;
+  symbol: string;
+  ltp: number | null;
+  trend: string | null;
+  trendScore: number | null;
+  checks: number | null;
+  checksOf: number | null;
+  score: string | null;
+  phase: string | null;
+  flips: number | null;
+  dayMove: number | null;
+  speed: number | null;
+  candle: number | null;
+  candles: "NORMAL" | "HA";
+  /** What changed since the stock's previous scan that day (same candle): "" when nothing did. */
+  change: string;
+  /** +1 the trend got stronger, -1 weaker, 0 same. */
+  dir: number;
+};
+type ScanSort = "day" | "time" | "symbol" | "ltp" | "trend" | "trendScore" | "checks" | "score" | "phase" | "flips" | "dayMove" | "speed" | "change";
+type Table = "day" | "stock" | "scan";
+
 type SortKey = "day" | "symbol" | "first" | "last" | "matched" | "firstPrice" | "move" | "trend";
 type StockSort = "symbol" | "days" | "matched" | "first" | "avgMove";
 
@@ -59,6 +85,28 @@ const dayText = (day: string) =>
   new Date(`${day}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
 const trendText = (t: string | null | undefined) =>
   t === "STRONG_BULLISH" ? "Strong ↑" : t === "STRONG_BEARISH" ? "Strong ↓" : "—";
+const phaseText = (p: string | null) => (p === "BULL" ? "Strong up" : p === "BEAR" ? "Strong down" : p === "CHOP" ? "Choppy" : "—");
+const scoreText = (s: string | null) => (s ? s[0] + s.slice(1).toLowerCase() : "—");
+// Strength of a read for "stronger / weaker": a strong trend beats any score, then the trend score.
+const strength = (r: ChopScanRow) => (r.trend ? 1000 : 0) + (r.trend_score ?? 0);
+const checkCount = (r: ChopScanRow): [number | null, number | null] => {
+  const c = r.trend_checks;
+  if (!c) return [null, null];
+  const vals = Object.values(c).filter((v) => typeof v === "boolean");
+  return [vals.filter(Boolean).length, vals.length];
+};
+function changeText(prev: ChopScanRow | undefined, r: ChopScanRow): { change: string; dir: number } {
+  if (!prev) return { change: "first scan", dir: 0 };
+  const out: string[] = [];
+  if (prev.trend !== r.trend) out.push(r.trend ? `became ${trendText(r.trend)}` : `lost ${trendText(prev.trend)}`);
+  if (prev.phase !== r.phase && r.phase) out.push(`phase → ${phaseText(r.phase)}`);
+  if (prev.score !== r.score && r.score) out.push(`→ ${scoreText(r.score)}`);
+  const a = prev.trend_score ?? null;
+  const b = r.trend_score ?? null;
+  if (out.length === 0 && a != null && b != null && Math.abs(b - a) >= 10) out.push(`score ${a} → ${b}`);
+  const d = strength(r) - strength(prev);
+  return { change: out.join(" · "), dir: out.length === 0 ? 0 : d > 0 ? 1 : d < 0 ? -1 : 0 };
+}
 const pct = (v: number | null) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
 
 /**
@@ -85,7 +133,10 @@ export function ChopAcrossDays({
   const [candles, setCandles] = useState<"" | "NORMAL" | "HA">("");
   const [f, setF] = useState<ChopFilter>(NO_FILTER);
   const [query, setQuery] = useState("");
-  const [combine, setCombine] = useState(false);
+  const [table, setTable] = useState<Table>("day");
+  const combine = table === "stock";
+  // Timeline: only the scans in which something changed for that stock (became strong, phase or score moved).
+  const [changesOnly, setChangesOnly] = useState(false);
   const [data, setData] = useState<ScanAcross | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +233,78 @@ export function ChopAcrossDays({
     return [...out.values()];
   }, [data, f, query]);
 
+  const seen: Seen[] = useMemo(() => {
+    const out: Seen[] = [];
+    const last = new Map<string, ChopScanRow>();
+    for (const run of data?.runs ?? []) {
+      for (const r of run.rows as ChopScanRow[]) {
+        const track = `${run.day}|${r.symbol}|${run.minutes}|${run.candles}`;
+        const prev = last.get(track);
+        last.set(track, r);
+        if (!matchesText(query, r.symbol) || !chopPasses(r, f)) continue;
+        const { change, dir } = changeText(prev, r);
+        if (changesOnly && !change) continue;
+        const [checks, checksOf] = checkCount(r);
+        out.push({
+          key: `${run.id}|${r.symbol}`,
+          day: run.day,
+          at: run.as_of,
+          symbol: r.symbol,
+          ltp: r.ltp ?? null,
+          trend: r.trend ?? null,
+          trendScore: r.trend_score ?? null,
+          checks,
+          checksOf,
+          score: r.score ?? null,
+          phase: r.phase ?? null,
+          flips: r.crosses_today ?? null,
+          dayMove: r.day_move_pct ?? null,
+          speed: r.speed_pct_per_min ?? null,
+          candle: run.minutes ?? null,
+          candles: run.candles,
+          change,
+          dir,
+        });
+      }
+    }
+    return out;
+  }, [data, f, query, changesOnly]);
+  const scanSort = useSort<Seen, ScanSort>(seen, (r, k) => {
+    switch (k) {
+      case "day":
+        return r.day;
+      case "time":
+        return r.at;
+      case "symbol":
+        return r.symbol;
+      case "ltp":
+        return r.ltp;
+      case "trend":
+        return r.trend ? (r.trend === "STRONG_BULLISH" ? 2 : 1) : 0;
+      case "trendScore":
+        return r.trendScore;
+      case "checks":
+        return r.checks;
+      case "score":
+        return r.score === "TRENDING" ? 3 : r.score === "MIXED" ? 2 : r.score === "CHOPPY" ? 1 : 0;
+      case "phase":
+        return r.phase;
+      case "flips":
+        return r.flips;
+      case "dayMove":
+        return r.dayMove;
+      case "speed":
+        return r.speed;
+      case "change":
+        return r.dir;
+    }
+  });
+  const pagedScans = usePaged(scanSort.sorted, "scalp.history.across.pageSize");
+  const timelineOf = (symbol: string) => {
+    setQuery(symbol);
+    setTable("scan");
+  };
+
   const stocks: Stock[] = useMemo(() => {
     const by = new Map<string, Hit[]>();
     for (const h of hits) by.set(h.symbol, [...(by.get(h.symbol) ?? []), h]);
@@ -233,6 +356,15 @@ export function ChopAcrossDays({
     setPicked((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : cur.length >= MAX_DAYS ? cur : [...cur, d]));
 
   const csv = () => {
+    if (table === "scan") {
+      const head = "day,time,stock,price,trend,trend_score,checks_passed,checks_of,score,phase,crosses_or_flips,day_move_pct,speed_pct_min,candle,candles,change";
+      const lines = scanSort.sorted.map((r) =>
+        [r.day, clock(r.at), r.symbol, r.ltp ?? "", r.trend ?? "", r.trendScore ?? "", r.checks ?? "", r.checksOf ?? "", r.score ?? "", r.phase ?? "",
+          r.flips ?? "", r.dayMove?.toFixed(2) ?? "", r.speed ?? "", r.candle ?? "", r.candles, `"${r.change}"`].join(",")
+      );
+      saveFile(`trend-quality-timeline-${picked.slice().sort().join("_")}.csv`, [head, ...lines].join("\n"), "text/csv");
+      return;
+    }
     const head = combine
       ? "stock,days,scans_matched,first_day,first_time,last_day,avg_move_pct"
       : "day,stock,first_matched,last_matched,scans_matched,scans_that_day,price_first,price_day_end,move_pct,trend_first,score_first,candle,candles";
@@ -341,7 +473,25 @@ export function ChopAcrossDays({
             className="w-32"
           />
           <FilterField label="Table">
-            <Toggle label="One row per stock" checked={combine} onChange={setCombine} title="Join each stock's days into one row" />
+            <select
+              value={table}
+              onChange={(e) => setTable(e.target.value as Table)}
+              aria-label="How to list the stocks"
+              className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
+            >
+              <option value="day">One row per stock per day</option>
+              <option value="stock">One row per stock (all days)</option>
+              <option value="scan">Every scan: how the trend formed</option>
+            </select>
+            <NewTag id="tq-history-timeline" />
+            {table === "scan" && (
+              <Toggle
+                label="Only when it changed"
+                checked={changesOnly}
+                onChange={setChangesOnly}
+                title="Show only the scans in which the stock's trend, phase or score changed since its previous scan that day"
+              />
+            )}
           </FilterField>
         </FilterGroup>
         <FilterGroup title="View">
@@ -458,10 +608,66 @@ export function ChopAcrossDays({
 
       {picked.length === 0 ? (
         <p className="text-xs text-slate-500">Tick one or more days above.</p>
-      ) : hits.length === 0 && !loading ? (
+      ) : (table === "scan" ? seen.length === 0 && !changesOnly : hits.length === 0) && !loading ? (
         <p className="text-xs text-slate-500">
           {scans === 0 ? "No saved Trend quality scans on those days with this candle choice." : "No stock passed these filters in any scan of those days."}
         </p>
+      ) : table === "scan" ? (
+        <>
+          <p className="mb-2 text-xs text-slate-400">
+            Every saved scan in which the stock passed the filters, oldest first. Type a stock in Find a stock to follow one
+            stock through the day; sort by time, trend, score or phase. &quot;What changed&quot; compares with that stock&apos;s
+            previous scan of the same candle that day (green = stronger, red = weaker).
+          </p>
+          <Pager p={pagedScans} className="mb-2" noun="scans" />
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-xs">
+              <thead className="text-slate-400">
+                <tr>
+                  <SortTh label="Day" k="day" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <SortTh label="Time" k="time" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <SortTh label="Stock" k="symbol" sort={scanSort.sort} onSort={scanSort.onSort} text />
+                  <SortTh label="Price" k="ltp" sort={scanSort.sort} onSort={scanSort.onSort} num />
+                  <SortTh label="Trend" k="trend" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <SortTh label="Trend score" k="trendScore" sort={scanSort.sort} onSort={scanSort.onSort} num />
+                  <SortTh label="Checks" k="checks" sort={scanSort.sort} onSort={scanSort.onSort} num title="Strong-trend checks passed" />
+                  <SortTh label="Score" k="score" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <SortTh label="Phase" k="phase" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <SortTh label="Crosses / flips" k="flips" sort={scanSort.sort} onSort={scanSort.onSort} num />
+                  <SortTh label="Day move" k="dayMove" sort={scanSort.sort} onSort={scanSort.onSort} num />
+                  <SortTh label="Speed" k="speed" sort={scanSort.sort} onSort={scanSort.onSort} num />
+                  <SortTh label="What changed" k="change" sort={scanSort.sort} onSort={scanSort.onSort} />
+                  <th className="px-2 py-1.5 text-left">Scan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pagedScans.shown.map((r) => (
+                  <tr key={r.key} className="border-t border-slate-800">
+                    <td className="px-2 py-1.5 tabular-nums">{dayText(r.day)}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{clock(r.at)}</td>
+                    <td className="px-2 py-1.5 font-semibold">
+                      <button type="button" onClick={() => timelineOf(r.symbol)} className="hover:underline" title="Follow this stock through the day">
+                        {r.symbol}
+                      </button>
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.ltp?.toFixed(2) ?? "—"}</td>
+                    <td className={clsx("px-2 py-1.5", r.trend === "STRONG_BULLISH" ? "text-profit" : r.trend === "STRONG_BEARISH" ? "text-loss" : "text-slate-400")}>{trendText(r.trend)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.trendScore ?? "—"}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.checks != null ? `${r.checks}/${r.checksOf}` : "—"}</td>
+                    <td className="px-2 py-1.5">{scoreText(r.score)}</td>
+                    <td className={clsx("px-2 py-1.5", r.phase === "BULL" ? "text-profit" : r.phase === "BEAR" ? "text-loss" : "")}>{phaseText(r.phase)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.flips ?? "—"}</td>
+                    <td className={clsx("px-2 py-1.5 text-right tabular-nums", (r.dayMove ?? 0) > 0 ? "text-profit" : (r.dayMove ?? 0) < 0 ? "text-loss" : "")}>{pct(r.dayMove)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.speed != null ? r.speed.toFixed(3) : "—"}</td>
+                    <td className={clsx("px-2 py-1.5", r.dir > 0 ? "text-profit" : r.dir < 0 ? "text-loss" : "text-slate-400")}>{r.change || "—"}</td>
+                    <td className="px-2 py-1.5 text-slate-400">{r.candle ? `${r.candle}m` : ""}{r.candles === "HA" ? " HA" : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager p={pagedScans} className="mt-2" noun="scans" />
+        </>
       ) : combine ? (
         <>
           <Pager p={pagedStocks} className="mb-2" />
@@ -480,7 +686,12 @@ export function ChopAcrossDays({
               <tbody>
                 {pagedStocks.shown.map((s) => (
                   <tr key={s.key} className="border-t border-slate-800">
-                    <td className="px-2 py-1.5 font-semibold"><GrowwLink symbol={s.symbol} /></td>
+                    <td className="px-2 py-1.5 font-semibold">
+                      <GrowwLink symbol={s.symbol} />{" "}
+                      <button type="button" onClick={() => timelineOf(s.symbol)} className="ml-1 text-[11px] font-normal text-accentSky hover:underline">
+                        timeline
+                      </button>
+                    </td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{s.days}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{s.matched}</td>
                     <td className="px-2 py-1.5 tabular-nums">{dayText(s.firstDay)} {clock(s.firstAt)}</td>
@@ -516,7 +727,12 @@ export function ChopAcrossDays({
                 {paged.shown.map((h) => (
                   <tr key={h.key} className="border-t border-slate-800">
                     <td className="px-2 py-1.5 tabular-nums">{dayText(h.day)}</td>
-                    <td className="px-2 py-1.5 font-semibold"><GrowwLink symbol={h.symbol} /></td>
+                    <td className="px-2 py-1.5 font-semibold">
+                      <GrowwLink symbol={h.symbol} />{" "}
+                      <button type="button" onClick={() => timelineOf(h.symbol)} className="ml-1 text-[11px] font-normal text-accentSky hover:underline" title="See every scan of this stock: how its trend formed">
+                        timeline
+                      </button>
+                    </td>
                     <td className="px-2 py-1.5 tabular-nums">{clock(h.firstAt)}</td>
                     <td className="px-2 py-1.5 tabular-nums">{clock(h.lastAt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{h.matched} of {h.scans}</td>

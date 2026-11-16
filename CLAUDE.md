@@ -1656,7 +1656,12 @@ spinning top), body and range) / Matched / Call columns
   Ashi; `GET /api/scan-history/across?days=&minutes=&candles=` (`scan_history.chop_rows`: every saved Trend quality run of
   those days, rows cut to `CHOP_KEEP`) and the card's own filters (`lib/chopFilter.ts` `chopPasses`, shared with
   `ChopScan`) list each stock-day that passed in at least one scan: first / last time it passed, scans passed of the day's,
-  price then, move to the day's last scan, trend then; "One row per stock" joins the days; CSV, Arm, Arm these. Read-only.
+  price then, move to the day's last scan, trend then; Table "One row per stock (all days)" joins the days, and **"Every
+  scan: how the trend formed"** (owner's request: watch a stock rise from a weak to a strong trend) lists one row per
+  stock per saved scan that passed: time, price, trend, trend score, checks passed (`trend_checks`), score, phase,
+  crosses / colour flips, day move, speed and "What changed" since that stock's previous scan of the same candle that day
+  (`changeText`: became / lost strong, phase, score, trend score ±10; green stronger, red weaker), every column sortable,
+  "Only when it changed", a stock's "timeline" link follows it; CSV, Arm, Arm these. Read-only.
   **Most active history**: the desk's Most active scan (`app/services/active_stocks.py`) saves every finished pass
   (`ActiveScanner.on_done` → `routes_scalp.keep_active_scan`, set in the desk lifespan) into the same file as kind
   `active`; the terminal's History tab never lists it (`SCAN_KINDS`). Desk `GET /api/scalp/active/history[?day=]`,
