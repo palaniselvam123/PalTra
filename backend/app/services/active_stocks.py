@@ -239,6 +239,8 @@ class ActiveScanner:
         self.as_of: dt.datetime | None = None
         self.universe: int = 0
         self.failed: int = 0
+        # The stocks the last pass could not read, with why (shown under "N failed" on the card and in History).
+        self.missed: list[dict] = []
         self.error: str | None = None
         self.running = False
         self._avg_volume: dict[str, float] = {}
@@ -358,6 +360,7 @@ class ActiveScanner:
             rows: list[ActiveRow] = []
             failed = 0
             errors: list[str] = []
+            missed: list[dict] = []
 
             async def one(symbol: str) -> None:
                 nonlocal failed
@@ -370,6 +373,7 @@ class ActiveScanner:
                     except Exception as exc:  # noqa: BLE001
                         failed += 1
                         errors.append(str(exc))
+                        missed.append({"symbol": symbol, "why": _why(exc)})
                         return
                     finally:
                         await asyncio.sleep(CALL_GAP_SEC)
@@ -377,6 +381,8 @@ class ActiveScanner:
                     if row is not None:
                         row.read_at = ist_now().isoformat(timespec="seconds")
                         rows.append(row)
+                    else:
+                        missed.append({"symbol": symbol, "why": "Groww sent no price or volume"})
 
             await asyncio.gather(*(one(s) for s in names))
             if self._stop:
@@ -390,6 +396,7 @@ class ActiveScanner:
             self.rows = sorted(rows, key=SORTS["value"], reverse=True)
             self.universe = len(names)
             self.failed = failed
+            self.missed = sorted(missed, key=lambda m: m["symbol"])
             self.as_of = now
             self.error = None if rows else (errors[0] if errors else "Groww sent no volume for these stocks yet.")
             if rows and self.on_done is not None:
@@ -455,11 +462,18 @@ class ActiveScanner:
             "universe": self.universe,
             "scanned": len(self.rows),
             "failed": self.failed,
+            "missed": list(self.missed),
             "running": self.running,
             "error": self.error,
             "sort": sort if sort in SORTS else "value",
             "rows": [r.as_dict() for r in rows],
         }
+
+
+def _why(exc: Exception) -> str:
+    """A short reason a stock's quote could not be read (the first line, at most 80 characters)."""
+    text = (str(exc).strip().splitlines() or [""])[0] or type(exc).__name__
+    return text[:80]
 
 
 active_scanner = ActiveScanner()
