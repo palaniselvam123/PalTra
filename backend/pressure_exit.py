@@ -11,7 +11,8 @@ The shares come from the desk's own Most active scan (every finished pass is not
 `routes_scalp._pressure_alert` → terminal `pressure_note`), so the exit reacts as often as that scan runs (its auto scan
 interval). Only reads taken after the entry and at most `MAX_AGE_SEC` old count, and the exit arms only once the side
 was above the level (`peak`, from the last read before the entry on): a trade that started without that pressure is not
-closed by it. Replays never see live reads (their clock is in the past), so they keep their normal exits.
+closed by it. The day's saved Most active scans count too (`_rows`): a desk whose scan runs on another server, and a
+replay of a day with saved scans, judge the same reads the chart's buyers / sellers strip draws.
 """
 from __future__ import annotations
 
@@ -110,6 +111,28 @@ def reads(symbol: str) -> list[tuple[float, float]]:
     return list(_READS.get(symbol.upper(), ()))
 
 
+def _saved(symbol: str, day: dt.date) -> list[tuple[float, float]]:
+    try:
+        import scan_history
+
+        return list(scan_history.active_shares(day.isoformat()).get(symbol, ()))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _rows(symbol: str, now_ts: float) -> list[tuple[float, float]]:
+    """The stock's reads up to `now_ts` on that IST day: the day's saved Most active scans (this server's own and the
+    copies other servers send, so a replay of a saved day and a desk whose scan runs elsewhere see them too) joined
+    with the live reads noted here (same read time = one read), oldest first."""
+    symbol = (symbol or "").upper()
+    day = dt.datetime.fromtimestamp(now_ts, IST).date()
+    merged = {int(t): s for t, s in _saved(symbol, day) if t <= now_ts}
+    for t, s in _READS.get(symbol, ()):
+        if t <= now_ts and dt.datetime.fromtimestamp(t, IST).date() == day:
+            merged[int(t)] = s
+    return sorted((float(t), s) for t, s in merged.items())
+
+
 def side_share(share: float, direction: str) -> float:
     """The trade's own side's share in % (buyers for a long, sellers for a short)."""
     return round((share if direction == "LONG" else 1.0 - share) * 100.0, 1)
@@ -117,7 +140,7 @@ def side_share(share: float, direction: str) -> float:
 
 def judge(symbol: str, direction: str, entry_ts: float, now_ts: float, level: float) -> tuple[bool, str]:
     """(close?, plain note) for an open trade. Reads at or before now only (a replay's past clock sees none)."""
-    rows = [(t, s) for t, s in _READS.get(symbol.upper(), ()) if t <= now_ts]
+    rows = _rows(symbol, now_ts)
     if not rows:
         return False, "no Most active read of this stock yet"
     who = "buyers" if direction == "LONG" else "sellers"
@@ -187,6 +210,87 @@ def read_before(symbol: str, at_ts: float) -> dict | None:
     points = series(symbol, dt.datetime.combine(dt.datetime.fromtimestamp(at_ts, IST).date(), dt.time(0, 0),
                                                 tzinfo=IST).timestamp(), at_ts)
     return points[-1] if points else None
+
+
+def over_counter(cfg) -> bool:
+    """`pressure_over_counter`: the buyers / sellers reading overrules the counter-candle exit (needs the fade exit)."""
+    return on(cfg) and bool(getattr(cfg, "pressure_over_counter", False))
+
+
+def holds(symbol: str, direction: str, entry_ts: float, now_ts: float, level: float) -> tuple[bool, str]:
+    """(hold the counter-candle exit?, plain note). Held only while a Most active read taken since the entry, at most
+    MAX_AGE_SEC old, still shows the trade's own side above the level; with no such read the counter-candle exit works
+    as usual, so a paused scan never leaves a trade without it. At or below the level the fade exit closes it."""
+    rows = [(t, s) for t, s in _rows(symbol, now_ts) if t >= entry_ts]
+    if not rows:
+        return False, "no Most active read since the entry"
+    last_t, last_s = rows[-1]
+    if now_ts - last_t > MAX_AGE_SEC:
+        return False, f"last Most active read is {int((now_ts - last_t) // 60)} min old"
+    who = "buyers" if direction == "LONG" else "sellers"
+    share = side_share(last_s, direction)
+    if share <= level:
+        return False, f"{who} {share:g}% (at or below {level:g}%)"
+    at = dt.datetime.fromtimestamp(last_t, IST).strftime("%H:%M")
+    return True, f"{who} still {share:g}% at {at} (above {level:g}%)"
+
+
+# --- Entries for Most active stocks (`pressure_entry`, off by default; `pressure_entry_pct` 65, 30-95) -------------------
+# Owner's case: a stock armed while buyers (sellers) held most of the waiting orders was only traded on the bot's next
+# signal, by when the demand had gone. CHECK: every entry of such a stock needs the order's own side (buyers for a buy,
+# sellers for a sell) still at least that % in a fresh read. AT_ARM: the same check, and the stock is also entered at
+# once on the side that holds it (once a day per stock, `StrategyEngine._pressure_entry_pass`).
+ENTRY_MODES = ("OFF", "CHECK", "AT_ARM")
+ENTRY_REASON = "MOST_ACTIVE"
+DEFAULT_ENTRY_PCT = 65.0
+
+
+def entry_mode(cfg) -> str:
+    value = str(getattr(cfg, "pressure_entry", None) or "OFF").upper()
+    return value if value in ENTRY_MODES else "OFF"
+
+
+def entry_pct(cfg) -> float:
+    value = getattr(cfg, "pressure_entry_pct", None)
+    try:
+        value = float(DEFAULT_ENTRY_PCT if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_ENTRY_PCT
+    return min(MAX_PCT, max(MIN_PCT, value))
+
+
+def fresh_read(symbol: str, now_ts: float) -> tuple[float, float] | None:
+    """(read time, buyers' share 0..1) of the newest read at most MAX_AGE_SEC old, else None."""
+    rows = _rows(symbol, now_ts)
+    if not rows or now_ts - rows[-1][0] > MAX_AGE_SEC:
+        return None
+    return rows[-1]
+
+
+def entry_refusal(symbol: str, direction: str, now_ts: float, level: float) -> str | None:
+    """None when the order's own side still holds at least `level` %, else the plain reason for the refusal."""
+    read = fresh_read(symbol, now_ts)
+    if read is None:
+        return f"no Most active read in the last {MAX_AGE_SEC // 60} min (Most active entry check)"
+    who = "buyers" if direction == "LONG" else "sellers"
+    share = side_share(read[1], direction)
+    if share < level:
+        at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
+        return f"{who} {share:g}% at {at}, under {level:g}% (Most active entry check)"
+    return None
+
+
+def entry_side(symbol: str, now_ts: float, level: float) -> tuple[str, float, str] | None:
+    """(LONG / SHORT, that side's %, HH:MM of the read) when buyers or sellers hold at least `level` % now, else None."""
+    read = fresh_read(symbol, now_ts)
+    if read is None:
+        return None
+    at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
+    for side in ("LONG", "SHORT"):
+        share = side_share(read[1], side)
+        if share >= level:
+            return side, share, at
+    return None
 
 
 def reset() -> None:

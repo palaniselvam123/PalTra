@@ -222,3 +222,80 @@ def test_resumes_breaks_the_exit_candle():
     assert counter_candles.reenter_on(C) and counter_candles.reenter_max(C) == counter_candles.MAX_REENTER
     C.counter_reenter_max = None
     assert counter_candles.reenter_max(C) == counter_candles.REENTER_DEFAULT
+
+
+def _sellers_hold(share: float, until: dt.time = dt.time(15, 30)) -> None:
+    """Most active reads every 5 minutes of DAY with this buyers' share (0.2 = sellers 80 %)."""
+    import pressure_exit
+    from strategy_engine import IST
+
+    pressure_exit.reset()
+    at = dt.datetime.combine(DAY, dt.time(10, 0), tzinfo=IST)
+    while at.time() <= until:
+        stamp = at.isoformat(timespec="seconds")
+        pressure_exit.note_scan({"as_of": stamp, "rows": [{"symbol": "SIMC", "buy_share": share, "read_at": stamp}]})
+        at += dt.timedelta(minutes=5)
+
+
+@pytest.mark.asyncio
+async def test_buyers_sellers_overrule_the_counter_candle_exit(db):  # noqa: F811
+    import json
+
+    import pressure_exit
+
+    most_active = {"pressure_exit": True, "pressure_exit_pct": 55, "trade_sources": json.dumps({"SIMC": "Auto-arm: Most active"})}
+    try:
+        _sellers_hold(0.2)  # sellers 80 % all day: the short's side never fades
+        plain = _first(await _trades(db, counter_exit_count=3, **most_active), "SHORT")
+        assert plain["exit_reason"] == "COUNTER_CANDLES"
+        held = _first(await _trades(db, counter_exit_count=3, pressure_over_counter=True, **most_active), "SHORT")
+        assert held["exit_reason"] != "COUNTER_CANDLES" and held["exit_time"] > plain["exit_time"]
+        # Another stock source: the counter-candle exit works as before.
+        other = {**most_active, "trade_sources": json.dumps({"SIMC": "Trend quality"})}
+        assert _first(await _trades(db, counter_exit_count=3, pressure_over_counter=True, **other), "SHORT")[
+            "exit_reason"] == "COUNTER_CANDLES"
+        # No fresh read (the scan stopped at 11:00): the counter-candle exit is not held.
+        _sellers_hold(0.2, until=dt.time(11, 0))
+        stale = _first(await _trades(db, counter_exit_count=3, pressure_over_counter=True, **most_active), "SHORT")
+        assert stale["exit_reason"] == "COUNTER_CANDLES" and stale["exit_time"] == plain["exit_time"]
+    finally:
+        pressure_exit.reset()
+
+
+def test_holds_needs_a_fresh_read_above_the_level():
+    import pressure_exit
+    from strategy_engine import IST
+
+    pressure_exit.reset()
+    base = dt.datetime(2026, 11, 16, 11, 0, tzinfo=IST)
+    entry = base.timestamp()
+    assert not pressure_exit.holds("X", "SHORT", entry, entry + 60, 55)[0]
+    stamp = (base + dt.timedelta(minutes=2)).isoformat(timespec="seconds")
+    pressure_exit.note_scan({"as_of": stamp, "rows": [{"symbol": "X", "buy_share": 0.3, "read_at": stamp}]})
+    held, note = pressure_exit.holds("X", "SHORT", entry, entry + 300, 55)
+    assert held and "sellers still 70%" in note
+    assert not pressure_exit.holds("X", "LONG", entry, entry + 300, 55)[0]          # buyers 30 %: not held
+    assert not pressure_exit.holds("X", "SHORT", entry, entry + 30 * 60, 55)[0]     # too old
+    assert not pressure_exit.over_counter(type("C", (), {"pressure_over_counter": True})())  # needs the fade exit
+    assert pressure_exit.over_counter(type("C", (), {"pressure_over_counter": True, "pressure_exit": True})())
+    pressure_exit.reset()
+
+
+@pytest.mark.asyncio
+async def test_most_active_entry_check_refuses_once_the_demand_is_gone(db):  # noqa: F811
+    import json
+
+    import pressure_exit
+
+    most_active = {"pressure_entry": "CHECK", "pressure_entry_pct": 65,
+                   "trade_sources": json.dumps({"SIMC": "Auto-arm: Most active"})}
+    try:
+        _sellers_hold(0.2)  # sellers 80 %: the short goes in as before
+        plain = _first(await _trades(db), "SHORT")
+        held = _first(await _trades(db, **most_active), "SHORT")
+        assert held["entry_time"] == plain["entry_time"]
+        _sellers_hold(0.5)  # sellers only 50 %: no short
+        trades = await _trades(db, **most_active)
+        assert not any(t["direction"] == "SHORT" for t in trades)
+    finally:
+        pressure_exit.reset()
