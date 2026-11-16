@@ -211,6 +211,43 @@ def get(run_id: int) -> dict | None:
     return out
 
 
+# The fields of a Trend quality row the History tab's "Across days" filter and table read (chop_rows): the rest
+# (phases, notes, activity) stays in the saved run, so several days of scans fit in one answer.
+CHOP_KEEP = (
+    "symbol", "ltp", "score", "trend", "trend_score", "trend_mode", "fresh", "phase", "phase_early", "phase_since_ts",
+    "phase_move_pct", "speed_pct_per_min", "crosses_today", "day_move_pct", "crosses_by_minutes",
+    "last_cross_side_by_minutes", "side_by_minutes", "trend_by_minutes", "run_candles_by_minutes",
+    "run_since_ts_by_minutes", "gap_pct_by_minutes", "gap_peak_pct_by_minutes",
+)
+MAX_ACROSS_DAYS = 10
+
+
+def chop_rows(days: list[str], minutes: int | None = None, candles: str | None = None) -> list[dict]:
+    """Every saved Trend quality run of the given days (oldest first), each with its rows cut to CHOP_KEEP.
+    `minutes` keeps one candle size, `candles` NORMAL / HA one candle kind (a run saved without it is NORMAL)."""
+    picked = [d for d in dict.fromkeys(days) if d][:MAX_ACROSS_DAYS]
+    if not picked:
+        return []
+    marks = ",".join("?" for _ in picked)
+    with _lock, _connect() as con:
+        found = con.execute(
+            f"SELECT * FROM scan_runs WHERE kind = 'chop' AND day IN ({marks}) ORDER BY as_of ASC, id ASC", picked
+        ).fetchall()
+    out = []
+    for row in found:
+        meta = _meta_row(row)
+        kind = "HA" if (meta["meta"] or {}).get("candles") == "HA" else "NORMAL"
+        if minutes and meta["minutes"] != minutes:
+            continue
+        if candles in ("NORMAL", "HA") and kind != candles:
+            continue
+        rows = _unpack(row["rows"]) or []
+        meta["candles"] = kind
+        meta["rows"] = [{k: r.get(k) for k in CHOP_KEEP if k in r} for r in rows if isinstance(r, dict)]
+        out.append(meta)
+    return out
+
+
 def save_check(run_id: int, result: dict) -> None:
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     with _lock, _connect() as con:

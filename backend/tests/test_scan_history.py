@@ -83,6 +83,45 @@ def test_a_saved_scan_comes_back_with_every_row_and_its_choices():
     assert scan_history.get(9999) is None
 
 
+def test_across_days_gives_every_trend_quality_run_of_the_days_with_slim_rows(tmp_path, monkeypatch):
+    def snap(day, hh, minutes=5, candles=None):
+        return {
+            "as_of": _at(hh, 0, day).isoformat(), "minutes": minutes, "candles": candles,
+            "rows": [{"symbol": "TCS", "ltp": 3500.0, "trend": "STRONG_BULLISH", "phases": [1, 2, 3], "trend_notes": {"x": 1}}],
+        }
+
+    d2 = DAY + dt.timedelta(days=1)
+    scan_history.save("chop", snap(DAY, 10), {"candles": "HA"})
+    scan_history.save("chop", snap(DAY, 11, minutes=15))
+    scan_history.save("chop", snap(d2, 10))
+    scan_history.save("cross", {"as_of": _at(10, 0).isoformat(), "rows": [{"symbol": "INFY"}]})
+    scan_history.save("chop", snap(DAY + dt.timedelta(days=2), 10))
+    runs = scan_history.chop_rows([DAY.isoformat(), d2.isoformat()])
+    assert [(r["day"], r["minutes"], r["candles"]) for r in runs] == [
+        ("2026-10-08", 5, "HA"), ("2026-10-08", 15, "NORMAL"), ("2026-10-09", 5, "NORMAL"),
+    ]
+    assert runs[0]["rows"] == [{"symbol": "TCS", "ltp": 3500.0, "trend": "STRONG_BULLISH"}]
+    assert [r["minutes"] for r in scan_history.chop_rows([DAY.isoformat(), d2.isoformat()], minutes=5)] == [5, 5]
+    assert [r["day"] for r in scan_history.chop_rows([DAY.isoformat(), d2.isoformat()], candles="HA")] == ["2026-10-08"]
+    assert scan_history.chop_rows([]) == []
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from main import app
+
+    with TestClient(app) as client:
+        ok = client.get(f"/api/scan-history/across?days={DAY.isoformat()},{d2.isoformat()}&minutes=5")
+        assert ok.status_code == 200 and len(ok.json()["runs"]) == 2
+        assert client.get("/api/scan-history/across?days=bad").status_code == 400
+        many = ",".join((DAY + dt.timedelta(days=i)).isoformat() for i in range(11))
+        assert client.get(f"/api/scan-history/across?days={many}").status_code == 400
+    database.reset_engine()
+
+
 def test_old_days_are_dropped_on_the_next_save(monkeypatch):
     monkeypatch.setenv("SCAN_HISTORY_DAYS", "30")
     old = (dt.date.today() - dt.timedelta(days=40)).isoformat()

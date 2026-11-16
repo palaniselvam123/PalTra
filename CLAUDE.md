@@ -1651,6 +1651,12 @@ spinning top), body and range) / Matched / Call columns
   the scan's call (Cross scan: its side; Trend quality: the fast SMA's side on the scan's candle),
   the move 15 / 30 / 60 minutes later and at the close, the best and worst move, and the next SMA
   cross (crossed as predicted and within double the estimate; how long the trend held).
+  **Trend quality across days** (`components/Scalp/ChopAcrossDays.tsx`, top of the History tab; owner's request: the card's
+  filters over every scan of a day, not one scan): tick up to `MAX_ACROSS_DAYS` (10) days, a candle size and Normal / Heikin
+  Ashi; `GET /api/scan-history/across?days=&minutes=&candles=` (`scan_history.chop_rows`: every saved Trend quality run of
+  those days, rows cut to `CHOP_KEEP`) and the card's own filters (`lib/chopFilter.ts` `chopPasses`, shared with
+  `ChopScan`) list each stock-day that passed in at least one scan: first / last time it passed, scans passed of the day's,
+  price then, move to the day's last scan, trend then; "One row per stock" joins the days; CSV, Arm, Arm these. Read-only.
   **Most active history**: the desk's Most active scan (`app/services/active_stocks.py`) saves every finished pass
   (`ActiveScanner.on_done` → `routes_scalp.keep_active_scan`, set in the desk lifespan) into the same file as kind
   `active`; the terminal's History tab never lists it (`SCAN_KINDS`). Desk `GET /api/scalp/active/history[?day=]`,
