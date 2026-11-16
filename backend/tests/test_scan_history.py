@@ -334,3 +334,20 @@ def test_a_most_active_row_is_judged_on_its_bias_else_its_day_move():
     groups = {g["key"]: g for g in scan_accuracy.summarize("active", [long, short, by_day])}
     assert groups["all"]["count"] == 3 and groups["long"]["count"] == 1 and groups["short"]["count"] == 1
     assert groups["volume"]["count"] == 1 and groups["long"]["right_after_30_pct"] == 100.0
+
+
+def test_most_active_across_days_sends_every_scan_slim(sma_api):
+    row = {"symbol": "ACME", "ltp": 101.5, "change_pct": 1.23456, "value_cr": 45.0, "rvol": 2.4, "buy_share": 0.72,
+           "vwap_dist_pct": 0.3, "range_pct": 2.0, "bias": "LONG", "speed_pct_min": 0.05, "buy_qty": 999}
+    scan_history.save("active", {"as_of": _at(10, 0).isoformat(), "rows": [row]})
+    scan_history.save("active", {"as_of": _at(10, 5).isoformat(), "rows": [{**row, "buy_share": 0.4}, {"symbol": "B"}]})
+    scan_history.save("active", {"as_of": _at(10, 0, DAY - dt.timedelta(days=1)).isoformat(), "rows": [row]})
+    scan_history.save("chop", {"as_of": _at(10, 0).isoformat(), "rows": [{"symbol": "C"}]})
+    body = sma_api.get("/api/scan-history/across-active?days=2026-10-08").json()
+    assert body["cols"][0] == "symbol" and "buy_qty" not in body["cols"]
+    assert [len(r["rows"]) for r in body["runs"]] == [1, 2]
+    first = dict(zip(body["cols"], body["runs"][0]["rows"][0]))
+    assert (first["symbol"], first["buy_share"], first["rvol"], first["change_pct"]) == ("ACME", 0.72, 2.4, 1.2346)
+    both = sma_api.get("/api/scan-history/across-active?days=2026-10-08,2026-10-07").json()
+    assert [r["day"] for r in both["runs"]] == ["2026-10-07", "2026-10-08", "2026-10-08"]
+    assert sma_api.get("/api/scan-history/across-active?days=yesterday").status_code == 400

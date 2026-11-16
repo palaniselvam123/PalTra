@@ -1330,6 +1330,13 @@ export type OpenPnlReplayLog = Omit<OpenPnlLog, "desk" | "every_sec"> & { run_id
 /** One saved Cross scan / Trend quality pass (scan history), without its rows. */
 export type ScanKind = "cross" | "chop" | "active";
 /** GET /api/scan-history/across: the days' Trend quality runs with slim rows (scan_history.chop_rows). */
+/** GET /api/scan-history/across-active: the days' Most active runs, rows as lists in `cols` order (scan_history.active_rows). */
+export type ActiveAcross = {
+  days: string[];
+  cols: string[];
+  runs: { id: number; day: string; as_of: string; total: number | null; failed: number | null; rows: (string | number | null)[][] }[];
+};
+
 export type ScanAcross = {
   days: string[];
   runs: (Omit<ScanRun, "kind"> & { kind: "chop"; candles: "NORMAL" | "HA"; rows: ChopScanRow[] })[];
@@ -3021,6 +3028,9 @@ export const smaApi = {
     if (candles) q.set("candles", candles);
     return request<ScanAcross>(`/api/scan-history/across?${q.toString()}`, undefined, 45000, false);
   },
+  /** Every saved Most active scan of one or more days (at most 10), each row a list in `cols` order. */
+  scanHistoryAcrossActive: (days: string[]) =>
+    request<ActiveAcross>(`/api/scan-history/across-active?days=${encodeURIComponent(days.join(","))}`, undefined, 45000, false),
   scanHistoryRun: (id: number) => request<ScanRunDetail>(`/api/scan-history/${id}`, undefined, 20000, false),
   /** Desk only: copy the backtest server's saved scans this desk lacks (scan_sync.py). */
   scanHistoryPull: (days = 14) =>
