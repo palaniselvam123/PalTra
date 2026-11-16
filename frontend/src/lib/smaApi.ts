@@ -2150,6 +2150,8 @@ export type TslBasketResult = {
 export type HandoffReturn = {
   on: boolean;
   at: string;
+  /** UNARM = taken off Bot 2 / Bot 3 after the close (default); BACK = sent back to the bot it came from. */
+  mode: "UNARM" | "BACK";
   /** Stocks handed off and not yet sent back: where they came from and which bot has them now. */
   moved: Record<string, { origin: number; on: number; at: string }>;
   last: { at: string; lines: string[] } | [];
@@ -3086,8 +3088,8 @@ export const smaApi = {
   /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
   /** Send handed-off stocks back to the bot they came from at the end of the day (handoff_chain.py). */
   handoffReturn: () => request<HandoffReturn>("/api/bots/handoff-return"),
-  handoffReturnSave: (on: boolean, at?: string) =>
-    request<HandoffReturn>("/api/bots/handoff-return", { method: "PUT", body: JSON.stringify({ on, at }) }),
+  handoffReturnSave: (on: boolean, at?: string, mode?: "UNARM" | "BACK") =>
+    request<HandoffReturn>("/api/bots/handoff-return", { method: "PUT", body: JSON.stringify({ on, at, mode }) }),
   handoffReturnNow: () =>
     request<HandoffReturn & { lines: string[] }>("/api/bots/handoff-return/now", { method: "POST" }, 20000),
   fastBot: () => request<FastBotSettings>("/api/bots/fast-mover"),

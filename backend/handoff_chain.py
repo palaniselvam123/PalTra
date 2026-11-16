@@ -43,10 +43,16 @@ PLAYED_BOTS = (2, 3)  # the bots a backtest can play a hand-off as
 _lock = threading.Lock()
 
 
+MODES = ("UNARM", "BACK")
+
+
 @dataclass
 class Settings:
     on: bool = False
     at: str = DEFAULT_AT
+    #: What happens to a handed-off stock after the close: UNARM = taken off the bot it was handed to and not put back
+    #: anywhere (owner's choice, the default); BACK = sent back onto the bot it first came from.
+    mode: str = "UNARM"
 
 
 def _path() -> Path:
@@ -91,20 +97,34 @@ def _hhmm(raw) -> dt.time | None:
 def load() -> Settings:
     raw = _read()
     at = raw.get("at")
-    return Settings(on=bool(raw.get("on", False)), at=at if _hhmm(at) else DEFAULT_AT)
+    mode = str(raw.get("mode") or "").upper()
+    return Settings(on=bool(raw.get("on", False)), at=at if _hhmm(at) else DEFAULT_AT,
+                    mode=mode if mode in MODES else "UNARM")
 
 
-def save(on: bool, at: str | None = None) -> Settings:
-    """Raises ValueError on a bad time."""
+def save(on: bool, at: str | None = None, mode: str | None = None) -> Settings:
+    """Raises ValueError on a bad time or mode."""
     if at is not None and _hhmm(at) is None:
         raise ValueError("the time must be HH:MM between 15:15 and 23:59 IST")
+    if mode is not None and str(mode).upper() not in MODES:
+        raise ValueError("mode must be UNARM or BACK")
     with _lock:
         data = _read()
         data["on"] = bool(on)
         if at is not None:
             data["at"] = _hhmm(at).strftime("%H:%M")
+        if mode is not None:
+            data["mode"] = str(mode).upper()
         _write(data)
     return load()
+
+
+def backtest_eod() -> str:
+    """What a new backtest does with a stock that ended a replayed day on Bot 2 / Bot 3 (owner's request: handed-off
+    stocks are unarmed at the end of the day, in backtests as live): BACK only while the live send-back is on in BACK
+    mode, else UNARM. Saved on the run (`handoff_eod`), so Resume plays the same."""
+    s = load()
+    return "BACK" if s.on and s.mode == "BACK" else "UNARM"
 
 
 def moved() -> dict[str, dict]:
@@ -183,11 +203,36 @@ def send_back_one(symbol: str, row: dict, held) -> str:
     return f"{name}: back on Bot {origin} from Bot {current}"
 
 
-def send_back(engines: dict[int, object]) -> list[str]:
-    """Every noted stock that is flat goes back to its origin bot. Returns one line per stock."""
+def unarm_one(symbol: str, row: dict, held) -> str:
+    """Take one handed-off stock off the bot it was handed to (not put back anywhere). Returns what happened."""
+    from database import session_factory
+    from models import BotConfig
+    import bots
+    from strategy_engine import apply_trade_sources, trade_names
+
+    name = symbol.upper()
+    current = int(row.get("on") or 0)
+    if held(current, name):
+        return f"{name}: still held on Bot {current}, unarmed later"
+    if not current:
+        return f"{name}: unarmed (no bot held it)"
+    with session_factory()() as db:
+        there = db.get(BotConfig, bots.config_id_for(current))
+        if there is not None and name in trade_names(there):
+            left = [n for n in trade_names(there) if n != name]
+            there.trade_symbols = ",".join(left)
+            there.trade_sources = apply_trade_sources(there, {name: None}, left)
+            db.commit()
+    return f"{name}: unarmed from Bot {current} at the end of the day"
+
+
+def send_back(engines: dict[int, object], mode: str | None = None) -> list[str]:
+    """Every noted stock that is flat goes back to its origin bot (BACK) or is unarmed from the bot it was handed to
+    (UNARM, the default). Returns one line per stock."""
     rows = moved()
     if not rows:
         return []
+    mode = (mode or load().mode).upper()
 
     def held(bot: int, name: str) -> bool:
         eng = engines.get(bot)
@@ -196,11 +241,14 @@ def send_back(engines: dict[int, object]) -> list[str]:
     out, done = [], []
     for name, row in rows.items():
         try:
-            text = send_back_one(name, row, held)
+            text = unarm_one(name, row, held) if mode == "UNARM" else send_back_one(name, row, held)
         except Exception as exc:  # noqa: BLE001
             log.exception("send back of %s failed", name)
             text = f"{name}: not sent back ({exc})"
         out.append(text)
+        if "unarmed from Bot" in text or "unarmed (no bot" in text:
+            done.append(name)
+            continue
         if "back on Bot" in text or "not set up" in text or "not back on LIVE" in text:
             done.append(name)
             origin = engines.get(int(row.get("origin") or 1))

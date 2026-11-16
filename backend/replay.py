@@ -1189,6 +1189,25 @@ def delete_run(run_id: int) -> bool:
     return True
 
 
+def day_symbols(symbols: list[str], handed_off: list[str], eod: str | None, pick_run: bool) -> list[str]:
+    """The stocks a replayed day starts with: a stock handed off earlier in the run is no longer this bot's
+    (recovery.py), except in a pick run with the end-of-day rule (`handoff_eod`), where each day is picked afresh."""
+    if eod and pick_run:
+        return list(symbols)
+    return [s for s in symbols if s not in handed_off]
+
+
+def unarm_at_day_end(on_bot: dict[str, int], bot: int, eod: str | None, handed_off: list[str]) -> list[str]:
+    """With `handoff_eod` UNARM, a stock that ended the day on another bot (Bot 2 / Bot 3) is unarmed: it joins
+    `handed_off`, so a plain replay never trades it again (a pick run can pick it again)."""
+    out = list(handed_off)
+    if eod == "UNARM":
+        for name, on in on_bot.items():
+            if int(on) != int(bot) and name not in out:
+                out.append(name)
+    return out
+
+
 def _wants_high52(settings: dict, symbol: str) -> bool:
     """Does the replayed bot (or this stock's own settings) read the 52-week check?"""
     own = (settings.get("stock_settings") or {}).get(symbol) if isinstance(settings.get("stock_settings"), dict) else None
@@ -1458,6 +1477,8 @@ class ReplaySession:
             if settings.get("play_handoffs"):
                 # Bot 2's and Bot 3's settings as they are now, so the hand-offs play the same on Resume.
                 settings = {**settings, "chain": handoff_chain.replay_snapshot(self.bot)}
+            # What a stock that ends a day handed off does the next day (UNARM / BACK); runs saved before: carried on.
+            settings = {**settings, "handoff_eod": handoff_chain.backtest_eod()}
         self._settings = settings
         if resume is not None:
             self.run_id = resume[0]
@@ -1487,6 +1508,8 @@ class ReplaySession:
         bars = {name: frame_bars(settings_for(snap, name)) for name in frames}
         fast_snap = settings.get("fast_bot") if isinstance(settings.get("fast_bot"), dict) else None
         chain_snap = settings.get("chain") if isinstance(settings.get("chain"), dict) else None
+        # End-of-day rule for handed-off stocks (handoff_chain.backtest_eod); None on runs saved before it.
+        eod = settings.get("handoff_eod") if settings.get("handoff_eod") in ("UNARM", "BACK") else None
         if chain_snap:
             # A handed-off stock may switch to Bot 2's / Bot 3's candle size: hand enough bars for any of them.
             for name in frames:
@@ -1536,8 +1559,9 @@ class ReplaySession:
                 if not symbols:
                     self._mark_run(days_done=index + 1)
                     continue
-            # A stock handed off to Bot 2 earlier in the run is no longer this bot's (recovery.py).
-            symbols = [s for s in symbols if s not in self.handed_off]
+            # A stock handed off to Bot 2 earlier in the run is no longer this bot's (recovery.py). In a pick run with
+            # the end-of-day rule (`handoff_eod`) each day is picked afresh, so a stock picked again trades again.
+            symbols = day_symbols(symbols, self.handed_off, eod, pick_run=self.rule is not None)
             windows = None
             if settings.get("as_armed"):
                 # Each stock only while it was armed live on this bot that day (arm_log.py).
@@ -1550,7 +1574,8 @@ class ReplaySession:
                 continue
             self.symbols = symbols
             # Played hand-offs: each day starts where the last ended, or back on this bot with "send back".
-            if chain_snap and chain_snap.get("return_eod"):
+            if chain_snap and (eod or chain_snap.get("return_eod")):
+                # UNARM / BACK: no stock starts a day on Bot 2 / Bot 3 (the ones unarmed were dropped above).
                 self.chain_on = {}
             day_on = {k: v for k, v in self.chain_on.items() if k in symbols}
             while True:
@@ -1592,6 +1617,7 @@ class ReplaySession:
                 break
             if chain_snap:
                 self.chain_on = dict(engine._on_bot)  # noqa: SLF001
+                self.handed_off = unarm_at_day_end(self.chain_on, self.bot, eod, self.handed_off)
                 self.chain_log = (self.chain_log + engine.chain_log)[-200:]
                 engine.chain_log = []
             self._mark_run(days_done=index + 1)

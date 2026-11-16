@@ -331,6 +331,8 @@ export const FEATURES: Feature[] = [
     purpose: "Hovered menus, the replay log and faded text are dark enough to read on white." },
 
   // --- Settings -----------------------------------------------------------------------------------------------
+  { id: "handoff-eod-unarm", area: "settings", added: "2026-11-16", pr: 451, href: S("handoff-return"), where: "Settings → Bots → Hand-offs: at the end of the day", title: "Unarm handed-off stocks after the close",
+    purpose: "Stocks moved to Bot 2 / Bot 3 during the day are taken off those bots after the close instead of carrying on to the next day, live and in backtests." },
   { id: "set-atr-stop", area: "settings", added: "2026-10-01", pr: 3, href: S("sma-stop"), where: "Settings → 5. Stop-loss and target", title: "ATR stop",
     purpose: "The stop sits a multiple of the stock's ATR (its normal candle range) away from the entry, so it fits each stock's own swing." },
   { id: "set-gap-stop", area: "settings", added: "2026-10-01", pr: 32, href: S("sma-stop"), where: "Settings → 5. Stop-loss and target → SMA gap", title: "SMA-gap moving stop and target",
