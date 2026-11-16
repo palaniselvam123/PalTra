@@ -1981,7 +1981,8 @@ export type ChartPayload = {
   blocked?: BlockedCross[];
   filters?: ChartFilters;
   /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
-  pressure?: { time: number; buy_pct: number }[];
+  /** Saved Most active reads: buyers %, and volume vs usual (×) / money traded (₹ cr) when that read had them. */
+  pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
 };
 
 export type TradeRow = {
@@ -2293,6 +2294,14 @@ export type ArmLogDay = {
   /** Each stock's armed stretches that day (HH:MM:SS IST). */
   stocks: { symbol: string; spans: { from: string; to: string }[] }[];
 };
+
+/** One saved Most active read of a stock (pressure_exit.series point). */
+export interface MarketRead {
+  time: number;
+  buy_pct: number;
+  rvol?: number;
+  value_cr?: number;
+}
 
 export type ReplayRun = {
   id: number;
@@ -3338,6 +3347,8 @@ export const smaApi = {
     request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
   replayRun: (id: number): Promise<ReplayRun> =>
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
+  /** Each trade's latest saved Most active read before its entry (by trade id); trades without one are left out. */
+  replayRunMarketReads: (id: number) => request<Record<string, MarketRead>>(`/api/replay/runs/${id}/market-reads`),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   /** Compare 2-8 runs on the days and stocks they all played: ranking, verdict, by stock / day / exit reason, settings. */
   replayCompare: (runIds: number[], base?: number | null, basis: "gross" | "net" = "gross") =>
@@ -3596,6 +3607,8 @@ export type ScalpAlerts = {
   pressure_pct: number;
   pressure_side: "BOTH" | "BUY" | "SELL";
   pressure_min_value_cr: number;
+  /** Volume vs usual at least (×, 0 = any). */
+  pressure_min_rvol?: number;
   /** Auto-arm (backend auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. */
   arm_strong_on: boolean;
   arm_strong_bot: number;

@@ -121,6 +121,9 @@ def test_saved_scans_give_the_first_minute_each_stock_reached_the_share():
     assert auto_arm.active_hits(scans, 75, "BOTH", 0) == [("09:42", "A", "BUY", 80.0), ("09:42", "B", "SELL", 90.0)]
     assert auto_arm.active_hits(scans, 75, "SELL", 0) == [("09:42", "B", "SELL", 90.0)]
     assert auto_arm.active_hits(scans, 75, "BOTH", 10) == []
+    # Volume vs usual floor: B read 3x usual, A unknown.
+    scans[1]["rows"][1]["rvol"] = 3.0
+    assert auto_arm.active_hits(scans, 75, "BOTH", 0, min_rvol=2) == [("09:42", "B", "SELL", 90.0)]
 
 
 def _frame(step: float, wobble: float = 0.0) -> pd.DataFrame:

@@ -210,7 +210,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Most active scan's: every finished pass goes `routes_scalp._pressure_alert` → terminal `pressure_note` → `note_scan`
   (memory only, keyed by the row's `read_at`), so it reacts as often as that scan's auto interval; with scans paused or
   `SCANS=off` it never fires. Replays see no read (their clock is in the past) and keep their normal exits. The colour
-  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line with the time of that read (`chartStyle.pressureReads`, "read 09:52": a long candle takes its reading from any scan inside it).
+  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line with the time of that read (`chartStyle.pressureReads`, "read 09:52": a long candle takes its reading from any scan inside it), plus that read's Vol vs usual × and money traded ₹ cr (points carry `rvol` / `value_cr` when the scan had them; `scan_history.active_reads`, `pressure_exit._EXTRA` for live reads).
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
@@ -359,7 +359,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   settings, the fast-mover hand-off settings and Bot 5's own strategy fields
   from the run's `fast_bot` snapshot when the run played with it. The PDF's trade table also carries each trade's
   **full value** (qty × entry price, what it would cost bought outright) and the **intraday margin** actually blocked
-  (the practice wallet's `margin_pct`, 20 % = 5× by default; `backtestPdf.tradeValue`), and the Result table shows the
+  (the practice wallet's `margin_pct`, 20 % = 5× by default; `backtestPdf.tradeValue`), and **Vol vs usual / money at entry** (each trade's latest saved Most active read before its entry,
+  `pressure_exit.read_before` → `replay.run_market_reads`, `GET /api/replay/runs/{id}/market-reads`, `marketReadText`;
+  "-" when no scan was saved on this server), and the Result table shows the
   largest trade's full value and margin and the most margin blocked at once (`backtestPdf.peakMargin`: overlapping
   trades add up). The blotter's summary PDF shows the same. A Scalp-pick run's PDF (auto-arm, strong-trend, Most active picks) ends with **How the stocks were picked** (`BacktestRuns.pickRuleRows`: kind, days, stocks read, source, arm window, trend read step and candle, strong-trend checks / side, buyers-sellers % / side / money floor, saved-scan days, price range, max a day; or pick time, top N, direction / rank / bias) and **Stocks armed each day** (`pickLogRows`: day, minute armed, stock, found by, side, why), from the run's `scalp_pick` snapshot (`backtestPdf` `pickRule` / `pickLog`).
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
@@ -1749,7 +1751,9 @@ spinning top), body and range) / Matched / Call columns
   DOWN): after each finished Trend quality pass in market hours (`main._chop_done` → `after_trend_scan`) every row with `trend`
   STRONG_BULLISH / STRONG_BEARISH and that many `trend_checks` passed goes out with its price, the checks passed and the ones
   missed in plain words (`CHECK_WORDS`). **Buyers or sellers in control** (`pressure_on`, `pressure_pct` 50-95 default 70,
-  `pressure_side` BOTH / BUY / SELL, `pressure_min_value_cr`): after each finished Most active scan
+  `pressure_side` BOTH / BUY / SELL, `pressure_min_value_cr`, `pressure_min_rvol` vol vs usual at least ×, 0 = any, an unknown
+  one fails a set floor, `scalp_alerts.rvol_ok`; also read by the live auto-arm and the auto-arm replay's `active_hits(...,
+  min_rvol)` / `AutoArmRule.min_rvol`, passed over the desk link): after each finished Most active scan
   (`routes_scalp.keep_active_scan` → `_pressure_alert` → `after_active_scan`) every row whose `buy_share` (waiting buy orders ÷
   all waiting orders) is ≥ that % (buyers) or ≤ 100 − that % (sellers), with price, share, day move and volume vs usual. Each
   stock and side once per IST day per alert (`_SENT`, memory), at most `MAX_NAMES` 15 a message, through

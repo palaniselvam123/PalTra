@@ -65,6 +65,8 @@ class Settings:
     pressure_pct: float = 70.0
     pressure_side: str = "BOTH"
     pressure_min_value_cr: float = 0.0
+    # Volume vs usual at least (× the same minutes of earlier sessions, the Most active row's `rvol`); 0 = any.
+    pressure_min_rvol: float = 0.0
     # Auto-arm (auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. Off by default.
     arm_strong_on: bool = False
     arm_strong_bot: int = 1
@@ -108,6 +110,7 @@ def clean(raw: dict) -> Settings:
     s.pressure_pct = max(50.0, min(95.0, float(raw.get("pressure_pct", s.pressure_pct) or s.pressure_pct)))
     s.pressure_side = raw.get("pressure_side") if raw.get("pressure_side") in PRESSURE_SIDES else s.pressure_side
     s.pressure_min_value_cr = max(0.0, min(100000.0, float(raw.get("pressure_min_value_cr", 0) or 0)))
+    s.pressure_min_rvol = max(0.0, min(MAX_RVOL, float(raw.get("pressure_min_rvol", 0) or 0)))
     s.arm_strong_on = bool(raw.get("arm_strong_on", s.arm_strong_on))
     s.arm_pressure_on = bool(raw.get("arm_pressure_on", s.arm_pressure_on))
     s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
@@ -261,6 +264,17 @@ def strong_text(picks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+MAX_RVOL = 100.0
+
+
+def rvol_ok(rvol, need: float) -> bool:
+    """Volume vs usual at least `need` (0 = any; an unknown volume vs usual never passes a set floor)."""
+    if not need or need <= 0:
+        return True
+    value = _num(rvol)
+    return value is not None and value >= need
+
+
 def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bool = True) -> list[dict]:
     """The stocks whose buyers (or sellers) hold at least `pressure_pct` % of the waiting orders, not sent today.
     `alerting=False` (auto_arm.py): every stock passing the thresholds, whether the alert is on or sent already."""
@@ -283,22 +297,26 @@ def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bo
             continue
         if (_num(r.get("value_cr")) or 0.0) < s.pressure_min_value_cr or (r.get("symbol"), side) in sent:
             continue
+        if not rvol_ok(r.get("rvol"), s.pressure_min_rvol):
+            continue
         out.append({
             "symbol": r.get("symbol"), "side": side, "pct": round(pct, 1), "price": _num(r.get("ltp")),
-            "change_pct": _num(r.get("change_pct")), "rvol": _num(r.get("rvol")),
+            "change_pct": _num(r.get("change_pct")), "rvol": _num(r.get("rvol")), "value_cr": _num(r.get("value_cr")),
         })
     out.sort(key=lambda p: -p["pct"])
     return out[:MAX_NAMES] if alerting else out
 
 
 def pressure_text(picks: list[dict], s: Settings) -> str:
-    lines = [f"⚖️ Buyers / sellers in control, {s.pressure_pct:g}% or more ({len(picks)}) — Scalp, Most active"]
+    floor = f", volume ≥ {s.pressure_min_rvol:g}× usual" if s.pressure_min_rvol > 0 else ""
+    lines = [f"⚖️ Buyers / sellers in control, {s.pressure_pct:g}% or more{floor} ({len(picks)}) — Scalp, Most active"]
     for p in picks:
         who = f"🟢 Buyers {p['pct']:.0f}%" if p["side"] == "BUY" else f"🔴 Sellers {p['pct']:.0f}%"
         price = f"₹{p['price']:.2f}" if p["price"] is not None else "price n/a"
         move = f" · day {p['change_pct']:+.2f}%" if p["change_pct"] is not None else ""
         rvol = f" · volume {p['rvol']:.1f}× usual" if p["rvol"] is not None else ""
-        lines.append(f"{p['symbol']} · {who} · {price}{move}{rvol}")
+        money = f" · ₹{p['value_cr']:.1f} cr traded" if p.get("value_cr") is not None else ""
+        lines.append(f"{p['symbol']} · {who} · {price}{move}{rvol}{money}")
     lines.append("Share of the orders waiting in the order book right now. Information only: no order was placed.")
     return "\n".join(lines)
 

@@ -1144,6 +1144,27 @@ def run_trades(run_id: int, symbol: str | None = None) -> list[dict] | None:
     return out
 
 
+def run_market_reads(run_id: int) -> dict[str, dict] | None:
+    """Each trade of a run with the stock's latest saved Most active read before its entry (pressure_exit.read_before):
+    {trade id: {"time", "buy_pct", "rvol", "value_cr"}}; trades without a read are left out. Display only (the
+    backtest PDF's "Vol vs usual · money traded at entry")."""
+    import pressure_exit
+
+    with session_factory()() as db:
+        if db.get(ReplayRun, run_id) is None:
+            return None
+        rows = db.query(TradeLog.id, TradeLog.symbol, TradeLog.entry_time).filter(TradeLog.run_id == run_id).all()
+    out: dict[str, dict] = {}
+    for trade_id, symbol, entry_time in rows:
+        if not symbol or entry_time is None:
+            continue
+        when = entry_time if entry_time.tzinfo else entry_time.replace(tzinfo=IST)
+        read = pressure_exit.read_before(symbol, when.timestamp())
+        if read:
+            out[str(trade_id)] = read
+    return out
+
+
 def get_run(run_id: int) -> dict | None:
     with session_factory()() as db:
         run = db.get(ReplayRun, run_id)

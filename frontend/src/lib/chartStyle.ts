@@ -187,14 +187,14 @@ export function pressureValues(rows: { time: number }[], points: { time: number;
 
 /** The read behind each candle's buyers %: the latest point before the candle closed, held within the IST day
  * (`time` = when the Most active scan read that stock's order book, so the chart can say which scan it came from). */
-export function pressureReads(
+export function pressureReads<P extends { time: number; buy_pct: number }>(
   rows: { time: number }[],
-  points: { time: number; buy_pct: number }[] | null | undefined
-): ({ time: number; buy_pct: number } | null)[] {
+  points: P[] | null | undefined
+): (P | null)[] {
   if (!points?.length) return rows.map(() => null);
   const dayOf = (t: number) => Math.floor((t + IST_OFFSET_SEC) / 86_400);
   let j = 0;
-  let last: { time: number; buy_pct: number } | null = null;
+  let last: P | null = null;
   return rows.map((c, i) => {
     const end = i + 1 < rows.length ? rows[i + 1].time : Number.POSITIVE_INFINITY;
     while (j < points.length && points[j].time < end) last = points[j++];

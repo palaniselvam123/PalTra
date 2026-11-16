@@ -240,3 +240,25 @@ def test_compare_reads_the_saved_runs_and_the_api_serves_it(db):
     assert client.get(f"/api/replay/compare?runs={a}").status_code == 400
     assert client.get(f"/api/replay/compare?runs={a},999").status_code == 400
     assert client.get("/api/replay/compare?runs=x,y").status_code == 400
+
+
+def test_market_reads_give_each_entry_the_last_saved_most_active_read(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import pressure_exit
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    pressure_exit.reset()
+    run = _store(db, D[:2], [10, -5], {"bot": 1})
+    # A read at 09:52 on the first day (the trades enter at 10:00); none on the second.
+    scan_history.save("active", {"as_of": f"{D[0]}T09:52:00+05:30", "rows": [
+        {"symbol": "TCS", "buy_share": 0.7, "rvol": 2.2, "value_cr": 45.0, "read_at": f"{D[0]}T09:52:10+05:30"}]})
+    from fastapi.testclient import TestClient
+    from main import app
+
+    got = TestClient(app).get(f"/api/replay/runs/{run}/market-reads").json()
+    assert len(got) == 1
+    read = next(iter(got.values()))
+    assert (read["rvol"], read["value_cr"], read["buy_pct"]) == (2.2, 45.0, 70.0)
+    assert TestClient(app).get("/api/replay/runs/999999/market-reads").status_code == 404
+    scan_history._ACTIVE_CACHE.clear()
