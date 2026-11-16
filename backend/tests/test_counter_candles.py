@@ -279,3 +279,23 @@ def test_holds_needs_a_fresh_read_above_the_level():
     assert not pressure_exit.over_counter(type("C", (), {"pressure_over_counter": True})())  # needs the fade exit
     assert pressure_exit.over_counter(type("C", (), {"pressure_over_counter": True, "pressure_exit": True})())
     pressure_exit.reset()
+
+
+@pytest.mark.asyncio
+async def test_most_active_entry_check_refuses_once_the_demand_is_gone(db):  # noqa: F811
+    import json
+
+    import pressure_exit
+
+    most_active = {"pressure_entry": "CHECK", "pressure_entry_pct": 65,
+                   "trade_sources": json.dumps({"SIMC": "Auto-arm: Most active"})}
+    try:
+        _sellers_hold(0.2)  # sellers 80 %: the short goes in as before
+        plain = _first(await _trades(db), "SHORT")
+        held = _first(await _trades(db, **most_active), "SHORT")
+        assert held["entry_time"] == plain["entry_time"]
+        _sellers_hold(0.5)  # sellers only 50 %: no short
+        trades = await _trades(db, **most_active)
+        assert not any(t["direction"] == "SHORT" for t in trades)
+    finally:
+        pressure_exit.reset()

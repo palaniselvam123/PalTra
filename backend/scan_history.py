@@ -278,6 +278,9 @@ def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None
 # frequent refresh does not unpack every scan again. day -> (last run id read, {symbol: [(epoch, share 0..1)]}).
 _ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float]]]]] = {}
 _ACTIVE_CACHE_DAYS = 6
+# The bots read it on every pass (pressure_exit): the file is asked for new runs at most this often per day.
+ACTIVE_RECHECK_SEC = 15.0
+_ACTIVE_CHECKED: dict[str, float] = {}
 
 
 def _epoch(text, fallback: float | None = None) -> float | None:
@@ -298,6 +301,12 @@ def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
     """{symbol: [(epoch of the stock's order-book read, buyers' share 0..1)]} from that IST day's saved Most active
     scans, oldest first. Never raises (an empty dict when the file cannot be read)."""
     last_id, by_symbol = _ACTIVE_CACHE.get(day, (0, {}))
+    import time as _time
+
+    now = _time.monotonic()
+    if day in _ACTIVE_CACHE and now - _ACTIVE_CHECKED.get(day, 0.0) < ACTIVE_RECHECK_SEC:
+        return by_symbol
+    _ACTIVE_CHECKED[day] = now
     try:
         with _lock, _connect() as con:
             found = con.execute(

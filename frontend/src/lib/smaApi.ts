@@ -319,6 +319,9 @@ export type SmaConfig = {
   pressure_exit_pct?: number;
   /** The buyers / sellers reading holds the counter-candle exit while the trade's side stays above the %. */
   pressure_over_counter?: boolean;
+  /** Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once). */
+  pressure_entry?: "OFF" | "CHECK" | "AT_ARM";
+  pressure_entry_pct?: number;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */

@@ -517,6 +517,9 @@ class BotConfig(Base):
     pressure_exit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
     # The buyers / sellers reading overrules the counter-candle exit while the trade's side still holds (pressure_exit.py).
     pressure_over_counter: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once).
+    pressure_entry: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
+    pressure_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=65.0)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

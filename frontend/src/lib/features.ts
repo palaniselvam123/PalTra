@@ -307,6 +307,8 @@ export const FEATURES: Feature[] = [
     purpose: "A set of fixes from an audit: every exit cancels the exchange stop first, a failed exit puts the stop back, stops are restored after a restart, and paused bots keep minding their trades." },
   { id: "term-replay-icons", area: "terminal", added: "2026-11-14", pr: 418, href: TERM, where: "Terminal → Backtests", title: "Replay chart icons and a foldable By stock",
     purpose: "Chart links on each backtest stock and a By stock list you can fold away." },
+  { id: "pressure-entry", area: "settings", added: "2026-11-16", pr: 446, href: S("sma-pressure-entry"), where: "Settings → Strategy → 1. When to enter → Most active stocks: when to enter", title: "Most active stocks: enter only while buyers / sellers hold",
+    purpose: "A stock armed from Most active is entered only while its buyers (a buy) or sellers (a sell) still hold your %, or at once as soon as it is armed, so the trade does not go in after the demand has gone." },
   { id: "pressure-over-counter", area: "settings", added: "2026-11-16", pr: 446, href: S("sma-pressure-exit"), where: "Settings → Strategy → 3. When to exit → buyers / sellers fade → Let it overrule the counter-candle exit", title: "Buyers / sellers overrule the counter-candle exit",
     purpose: "For Most active stocks, small candles against the trade no longer close it while the buyers (a buy) or sellers (a sell) still hold above your %; the fade exit decides instead. With no fresh scan read, the counter-candle exit works as before." },
   { id: "chart-buyers-sellers", area: "terminal", added: "2026-11-16", pr: 445, href: TERM, where: "Terminal → chart → bottom strip (Indicators → Buyers / sellers %)", title: "Buyers / sellers % on the chart",
@@ -585,7 +587,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
