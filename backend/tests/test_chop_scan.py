@@ -406,8 +406,8 @@ def test_scanner_rejects_an_unknown_candle_kind():
         chop_scan.ChopScanner().start(["SBIN"], None, candles="RENKO")
 
 
-def test_a_heikin_ashi_scan_reads_fewer_crosses_and_says_which_candles_it_read():
-    """The same choppy tape: Heikin Ashi candles average the back-and-forth, the price shown stays the real one."""
+def test_a_heikin_ashi_scan_reads_the_candles_not_the_smas_and_says_which_candles_it_read():
+    """The same choppy tape: with Heikin Ashi the score comes from colour flips (ha_trend), the price stays real."""
     async def go(candles):
         tape = _minutes([100 + ((i // 10) % 2) * 2 for i in range(300)])
 
@@ -422,5 +422,7 @@ def test_a_heikin_ashi_scan_reads_fewer_crosses_and_says_which_candles_it_read()
     normal, last = asyncio.run(go(chop_scan.NORMAL))
     ha, _ = asyncio.run(go(chop_scan.HEIKIN_ASHI))
     assert normal["candles"] == "NORMAL" and ha["candles"] == "HA"
-    assert ha["rows"][0]["crosses_today"] <= normal["rows"][0]["crosses_today"]
-    assert ha["rows"][0]["ltp"] == normal["rows"][0]["ltp"] == round(last, 2)
+    row = ha["rows"][0]
+    assert row["trend_mode"] == "HEIKIN_ASHI" and row["score"] == chop_scan.CHOPPY
+    assert row["crosses_today"] >= 5  # colour flips today, not SMA crosses
+    assert row["ltp"] == normal["rows"][0]["ltp"] == round(last, 2)

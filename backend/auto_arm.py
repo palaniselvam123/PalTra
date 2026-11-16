@@ -269,8 +269,13 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
     bars = closed_bars(part, minutes, now)
     if len(bars) < max(int(slow), 2) + 1:
         return None
-    if ha:  # as the Trend quality card reads them: SMAs and checks on Heikin Ashi candles, VWAP on the real prices
+    real_close = float(part["close"].iloc[-1])
+    if ha:  # as the Trend quality card reads them: the Heikin Ashi candles' own trend (ha_trend), VWAP on real prices
+        import ha_trend
+
         bars = ha_bars(bars)
+        enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
+        return ha_trend.checks(enriched, _vwap_today(part, now), real_close)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
     return trend_strength.read(enriched, _vwap_today(part, now), now=now, tape=part)
 
