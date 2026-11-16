@@ -3851,7 +3851,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
   if (f.pressure_flip)
-    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more turn the order their way`, off: { pressure_flip: false } });
+    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP, turn the order their way`, off: { pressure_flip: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
@@ -5112,8 +5112,10 @@ function PressureFlip({
           Candle colour: let buyers / sellers overrule it (go their way) <NewTag id="pressure-flip" />{" "}
           <InfoTip label="About buyers / sellers overruling the candle colour">
             Only in candle-colour mode, only for stocks armed from Most active. When a colour candle asks for a buy but the
-            sellers hold this % or more of the waiting orders in a Most active read of the last 20 minutes, the bot sells
-            instead (and buys when a red candle meets buyers at this % or more). A trade it already holds on that side is kept;
+            sellers hold this % or more of the waiting orders in a Most active read of the last 20 minutes and the last
+            closed candle closed under today&apos;s VWAP, the bot sells instead (and buys when a red candle meets buyers at
+            this % or more with the close over the VWAP). The VWAP must agree because waiting orders alone can mislead:
+            buyers can show 79% while sellers keep hitting their bids. A trade it already holds on that side is kept;
             one on the other side is closed and turned. No fresh read (scans paused) = the colour decides as usual. Every entry
             check, the stop, flip, cut-off, caps and one LIVE bot per stock still apply. Entry reason &quot;Buyers / sellers
             flip&quot;. Backtests read the day&apos;s saved Most active scans.
@@ -5136,7 +5138,8 @@ function PressureFlip({
         %
       </label>
       <p className="mt-1 text-xs text-slate-400">
-        Example at {shown}%: a green candle on a stock whose sellers hold 71% (read 09:56) sells instead of buying.
+        Example at {shown}%: a green candle on a stock whose sellers hold 71% (read 09:56) and whose price is under the
+        VWAP sells instead of buying. Over the VWAP, the colour decides.
       </p>
     </div>
   );

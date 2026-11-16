@@ -222,7 +222,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   under the Most active entries, `StrategyConfigPanel.PressureFlip`, anchor `#sma-pressure-flip`; owner's SOLARINDS case: a
   green colour candle bought while sellers held 71 %): in candle-colour mode, for Most active stocks,
   `StrategyEngine._colour_minute` asks `pressure_exit.flip_side` for the colour's side: when the other side holds the % or
-  more in a read at most `MAX_AGE_SEC` old, the call goes that way instead (entry reason `PRESSURE_FLIP`; a trade already on
+  more in a read at most `MAX_AGE_SEC` old **and the price agrees** (the last closed candle's close under today's VWAP,
+  `_session_vwap`, to sell, over it to buy; unknown = no flip; owner's case: buyers 79 % on a strong red candle under the
+  VWAP), the call goes that way instead (entry reason `PRESSURE_FLIP`; a trade already on
   that side is held, one on the other side turns); no fresh read = the colour decides. Every entry check, the stop, flip,
   cut-off, caps and one LIVE bot per stock apply. **Replayed picks count as Most active**: a pick run's stocks carry their
   source (`replay.pick_sources`: a Most active pick backtest's stocks and an auto-arm replay's Most active arms), merged over

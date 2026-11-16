@@ -2618,9 +2618,14 @@ class StrategyEngine:
             # Most active stocks (pressure_exit.py): buyers / sellers holding the set % overrule the colour, for the
             # exit rule's call and the entry's alike, so a flipped trade is held while they keep holding.
             level, now_ts = pressure_exit.flip_pct(cfg), self._now().timestamp()
+            # The price must agree: the last closed candle's close on that side of today's VWAP.
+            closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
+            last_close = float(closed["close"].iloc[-1]) if closed is not None and len(closed) else None
+            vwap = _session_vwap(closed) if closed is not None else None
 
             def overruled(c):
-                found = pressure_exit.flip_side(symbol, c.side, now_ts, level) if c.side is not None else None
+                found = (pressure_exit.flip_side(symbol, c.side, now_ts, level, last_close, vwap)
+                         if c.side is not None else None)
                 return (replace(c, side=found[0], note=f"{c.note}; {found[1]}"), True) if found else (c, False)
 
             same = entry_call is call

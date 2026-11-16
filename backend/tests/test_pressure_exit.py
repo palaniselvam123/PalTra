@@ -285,31 +285,38 @@ def test_flip_side_and_level():
     assert not pressure_exit.flip_on(type("C", (), {})())
     assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": None})()) == 65.0
     assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": 20})()) == 55.0
-    assert pressure_exit.flip_side("ACME", "LONG", entry, 65) is None          # no read: the colour decides
+    under = (429.0, 432.0)                                                     # close under the VWAP
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65, *under) is None  # no read: the colour decides
     pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=4), ACME=0.29))  # sellers 71 %
-    side, note = pressure_exit.flip_side("ACME", "LONG", entry, 65)
-    assert side == "SHORT" and "sellers 71%" in note
-    assert pressure_exit.flip_side("ACME", "LONG", entry, 75) is None          # under the level
-    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65) is None         # buyers only 29 %
-    assert pressure_exit.flip_side("ACME", "LONG", entry + 30 * 60, 65) is None  # too old
+    side, note = pressure_exit.flip_side("ACME", "LONG", entry, 65, *under)
+    assert side == "SHORT" and "sellers 71%" in note and "under VWAP 432.00" in note
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65, 433.0, 432.0) is None  # the price is over the VWAP
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65) is None          # VWAP unknown: never flips
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 75, *under) is None  # under the level
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, 433.0, 432.0) is None  # buyers only 29 %
+    assert pressure_exit.flip_side("ACME", "LONG", entry + 30 * 60, 65, *under) is None  # too old
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=2), ACME=0.79))  # buyers 79 % (owner's 12:30 case)
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, *under) is None  # but the price is under the VWAP
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, 433.0, 432.0)[0] == "LONG"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("on,source,share,want", [
-    (True, "Auto-arm: Most active", 0.29, ("SHORT", "PRESSURE_FLIP")),   # sellers 71 % turn the green buy
-    (True, "Auto-arm: Most active", 0.50, ("LONG", "CANDLE_COLOUR")),    # nobody holds 65 %
-    (True, "Trend quality", 0.29, ("LONG", "CANDLE_COLOUR")),            # not a Most active stock
-    (False, "Auto-arm: Most active", 0.29, ("LONG", "CANDLE_COLOUR")),   # switch off
+@pytest.mark.parametrize("on,source,share,base,want", [
+    (True, "Auto-arm: Most active", 0.29, 995.0, ("SHORT", "PRESSURE_FLIP")),   # sellers 71 %, under the VWAP
+    (True, "Auto-arm: Most active", 0.29, 1001.0, ("LONG", "CANDLE_COLOUR")),   # over the VWAP: the price disagrees
+    (True, "Auto-arm: Most active", 0.50, 995.0, ("LONG", "CANDLE_COLOUR")),    # nobody holds 65 %
+    (True, "Trend quality", 0.29, 995.0, ("LONG", "CANDLE_COLOUR")),            # not a Most active stock
+    (False, "Auto-arm: Most active", 0.29, 995.0, ("LONG", "CANDLE_COLOUR")),   # switch off
 ])
-async def test_colour_entry_flips_to_the_side_holding_the_orders(db, on, source, share, want):  # noqa: F811
+async def test_colour_entry_flips_to_the_side_holding_the_orders(db, on, source, share, base, want):  # noqa: F811
     import pandas as pd
     from sma_research.replayer import replay_symbol
     from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
     from tests.test_gap_mode import _settings
 
     pressure_exit.note_scan(_scan(dt.datetime.combine(DAY, dt.time(9, 40), tzinfo=IST), COL=share))
-    greens = [(1000.0, 1000.3), (1000.3, 1000.6), (1000.6, 1000.9)]
-    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + _quiet(342, 1000.9)))
+    greens = [(base, base + 0.3), (base + 0.3, base + 0.6), (base + 0.6, base + 0.9)]
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + _quiet(342, base + 0.9)))
     trades = await replay_symbol(frame, "COL", [DAY], _settings(
         db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, pressure_flip=on, pressure_flip_pct=65,
         trade_sources=json.dumps({"COL": source})))

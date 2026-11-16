@@ -315,8 +315,12 @@ def flip_pct(cfg) -> float:
     return min(MAX_PCT, max(MIN_FLIP_PCT, value))
 
 
-def flip_side(symbol: str, side: str, now_ts: float, level: float) -> tuple[str, str] | None:
-    """(the other side, plain note) when the other side holds at least `level` % in a fresh read, else None."""
+def flip_side(symbol: str, side: str, now_ts: float, level: float,
+              close: float | None = None, vwap: float | None = None) -> tuple[str, str] | None:
+    """(the other side, plain note) when the other side holds at least `level` % in a fresh read AND the price
+    agrees: the last closed candle's close under today's VWAP to sell, over it to buy (owner's case: buyers read
+    79 % while sellers were hitting the bids under the VWAP; the waiting orders alone are not proof). An unknown
+    close or VWAP never flips. Else None: the colour decides."""
     read = fresh_read(symbol, now_ts)
     if read is None:
         return None
@@ -324,9 +328,12 @@ def flip_side(symbol: str, side: str, now_ts: float, level: float) -> tuple[str,
     share = side_share(read[1], other)
     if share < level:
         return None
+    if close is None or vwap is None or not (close < vwap if other == "SHORT" else close > vwap):
+        return None
     at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
     who = "sellers" if other == "SHORT" else "buyers"
-    return other, f"{who} {share:g}% (read {at}) overrule the candle colour"
+    where = "under" if other == "SHORT" else "over"
+    return other, f"{who} {share:g}% (read {at}) and the price {where} VWAP {vwap:.2f} overrule the candle colour"
 
 
 def reset() -> None:
