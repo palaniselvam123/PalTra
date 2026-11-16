@@ -210,7 +210,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Most active scan's: every finished pass goes `routes_scalp._pressure_alert` → terminal `pressure_note` → `note_scan`
   (memory only, keyed by the row's `read_at`), so it reacts as often as that scan's auto interval; with scans paused or
   `SCANS=off` it never fires. Replays see no read (their clock is in the past) and keep their normal exits. The colour
-  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line.
+  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line with the time of that read (`chartStyle.pressureReads`, "read 09:52": a long candle takes its reading from any scan inside it).
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
@@ -1665,7 +1665,9 @@ spinning top), body and range) / Matched / Call columns
   **Most active history**: the desk's Most active scan (`app/services/active_stocks.py`) saves every finished pass
   (`ActiveScanner.on_done` → `routes_scalp.keep_active_scan`, set in the desk lifespan) into the same file as kind
   `active`; the terminal's History tab never lists it (`SCAN_KINDS`). Desk `GET /api/scalp/active/history[?day=]`,
-  `GET /api/scalp/active/history/{id}`; the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
+  `GET /api/scalp/active/history/{id}`; **Stocks not read** (`ActiveScanner.missed`, snapshot `missed` [{symbol, why}], saved in the run's
+  `meta.missed`; `MostActive.MissedList`: "Not read in this scan: N stocks" under the filters, and a searched stock that is not
+  in the scan is named with why; older saved scans only have the `failed` count); the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
   and column sorting work on the saved scan). Each row also has `speed_pct_min` (`add_speed`: % per minute since the
   previous scan, signed; none on the day's first scan or after a gap over `SPEED_MAX_GAP_MIN` 30 min), a Speed column,
   "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". The card also has tick boxes (Arm

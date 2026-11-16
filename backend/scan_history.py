@@ -110,7 +110,7 @@ def save(kind: str, snapshot: dict, meta: dict | None = None) -> int | None:
     rows = snapshot.get("rows") or []
     info = {
         k: snapshot.get(k)
-        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open", "universe", "scanned")
+        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open", "universe", "scanned", "missed")
         if snapshot.get(k) is not None
     }
     info.update(meta or {})
