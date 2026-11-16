@@ -11,7 +11,7 @@ themselves, and test the same rule on past days.
   `pressure_side`, with at least `pressure_min_value_cr` traded, is armed (source "Auto-arm: Most active").
 
 The alert's own on / off switch does not matter: only its thresholds are read. Each stock is armed at most once a day
-per source (`_DONE`, memory only), at most `arm_max_day` (10) stocks a day per source; a stock already on the bot's list
+per source (`_DONE`, memory only), at most `arm_max_day` (10) stocks a day per source (PAPER and LIVE counted apart, `_DONE_LIVE`); a stock already on the bot's list
 is left as it is, nothing is ever unarmed. **PAPER bots by default**: a LIVE bot is refused and the run says so (arming a
 LIVE bot means real Groww orders on its next signal), unless "Also arm a LIVE bot" (`arm_live`, off by default; turning it
 on needs `confirm_live`) is ticked; then at most `arm_live_max_day` (3) stocks a day per source go on the LIVE bot, through
@@ -51,6 +51,9 @@ MAX_UNIVERSE = 250
 
 # {source: {IST day: [symbols armed, in order]}}
 _DONE: dict[str, dict[dt.date, list[str]]] = {"strong": {}, "pressure": {}}
+# The same for a LIVE bot: PAPER and LIVE arms are counted apart, so stocks armed while the bot was in PAPER earlier
+# in the day never use up the LIVE limit (owner's case: the bot went LIVE and auto-arm armed nothing on it).
+_DONE_LIVE: dict[str, dict[dt.date, list[str]]] = {"strong": {}, "pressure": {}}
 # {source: {IST day: [symbols found already armed]}}: remembered once a day like _DONE, but not counted against
 # arm_max_day (they used to use up the day's limit without a single stock being armed).
 _SEEN: dict[str, dict[dt.date, list[str]]] = {"strong": {}, "pressure": {}}
@@ -110,9 +113,12 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
         if not on or (check_market and not market_is_open(now)):
             return None
         found = candidates(kind, snapshot.get("rows") or [], s, now)
-        done = _done(kind, now)
+        paper_done = _done(kind, now)
+        live_done = _done(kind, now, _DONE_LIVE)
         seen = _done(kind, now, _SEEN)
-        fresh = [p for p in found if p["symbol"] not in done and p["symbol"] not in seen]
+        # New to this scan in either mode (the bot's mode is read below, only when there is something to arm).
+        fresh = [p for p in found if p["symbol"] not in seen
+                 and (p["symbol"] not in paper_done or p["symbol"] not in live_done)]
         if not fresh:
             return None
         record: dict = {
@@ -132,6 +138,10 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
                     f"{record['bot_name']} is LIVE. Auto-arm arms PAPER bots; a LIVE bot only with \"Also arm a LIVE bot\" "
                     "ticked on the Alerts tab (arming a LIVE bot means real Groww orders on its next signal)."
                 )
+            done = live_done if live else paper_done
+            fresh = [p for p in fresh if p["symbol"] not in done]
+            if not fresh:
+                return None
             armed = {str(x).upper() for x in info.get("armed") or []}
             limit = min(int(s.arm_max_day), int(s.arm_live_max_day)) if live else int(s.arm_max_day)
             room = max(0, limit - len(done))
@@ -188,7 +198,9 @@ def view() -> dict:
     today = dt.datetime.now(IST)
     return {
         "recent": recent[:20],
-        "today": {k: list(_done(k, today)) for k in ("strong", "pressure")},
+        # Today's arms, PAPER and LIVE together (each counted against its own limit).
+        "today": {k: list(dict.fromkeys([*_done(k, today), *_done(k, today, _DONE_LIVE)]))
+                  for k in ("strong", "pressure")},
     }
 
 

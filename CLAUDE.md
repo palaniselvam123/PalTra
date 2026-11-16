@@ -1256,7 +1256,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   a stock already armed left alone, nothing unarmed; **price range** (`arm_price_min` / `arm_price_max` ₹, 0 = no bound, swapped when typed the wrong way; `auto_arm.price_ok`, `candidates`): only stocks whose scan price is inside it, and in the replay the tape's last close before the arm minute / the saved scan row's `ltp` (`AutoArmRule.price_min` / `price_max`, `active_hits(..., price_min, price_max)`, passed over the desk link). **PAPER bots by default**: a LIVE bot is refused with a note
   unless **Also arm a LIVE bot** (`arm_live`, off by default; `PUT /api/scalp-alerts` turning it on needs `confirm_live`,
   409 without; the card asks for LIVE typed, `ScalpAlertsCard.LiveArmRow`) is on: then at most `arm_live_max_day` (3, 1-10)
-  stocks a day per source go on the LIVE bot (`_auto_arm_arm(..., live=True)` → `confirm_live`; one LIVE bot per stock
+  stocks a day per source go on the LIVE bot, counted apart from the PAPER arms of the same day (`_DONE_LIVE`; owner's case: arms made while the bot was still PAPER used up the day's limit and the LIVE bot got none) (`_auto_arm_arm(..., live=True)` → `confirm_live`; one LIVE bot per stock
   still applies; the Telegram says LIVE). The bot trades them at its own quantity. Arms go through `main._scan_arm_arm` (`_auto_arm_remote`: the desk's bots over the link only from the
   scanner; the desk and the backtest server arm their own bots). One Telegram per run that armed something (quiet
   channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Auto-arm replay** (`AutoArmRule`,
