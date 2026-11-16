@@ -605,8 +605,11 @@ export type ActiveHistoryRun = {
   total: number | null;
   failed: number | null;
   row_count: number;
-  meta: { universe?: number; scanned?: number };
+  meta: { universe?: number; scanned?: number; missed?: ActiveMissed[] };
 };
+
+/** A stock a Most active pass could not read, and why (saved scans from 16 Nov 2026 on). */
+export type ActiveMissed = { symbol: string; why: string };
 
 /** The Most active trend test (backend active_study.py): which column's top stocks kept trending. */
 export type ActiveStudyStats = {
@@ -651,6 +654,8 @@ export type ActiveStocksResponse = {
   universe: number;
   scanned: number;
   failed: number;
+  /** The stocks the last pass could not read, with why. */
+  missed?: ActiveMissed[];
   running: boolean;
   error: string | null;
   sort: ActiveSort;

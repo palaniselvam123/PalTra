@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { cvdValues, emaValues, heikinAshi, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { cvdValues, emaValues, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -2108,12 +2108,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const slopeBack = filters?.slope_lookback ?? 2;
   const shownIndex = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
   // Buyers' share of the waiting orders on this candle (the latest Most active read before it closed).
-  const buyerRows = useMemo(() => pressureValues(rows, view?.pressure), [rows, view?.pressure]);
-  const showBuyers = shown(look.pressure, buyerRows.some((v) => v != null));
-  const shownBuyers = (() => {
-    for (let i = shownIndex; i >= 0; i -= 1) if (buyerRows[i] != null) return i === shownIndex || !hoverRow ? buyerRows[i] : null;
+  const buyerReads = useMemo(() => pressureReads(rows, view?.pressure), [rows, view?.pressure]);
+  const showBuyers = shown(look.pressure, buyerReads.some((v) => v != null));
+  const shownRead = (() => {
+    for (let i = shownIndex; i >= 0; i -= 1) if (buyerReads[i] != null) return i === shownIndex || !hoverRow ? buyerReads[i] : null;
     return null;
   })();
+  const shownBuyers = shownRead ? shownRead.buy_pct : null;
   const slopeRead = (() => {
     // The forming candle has no SMA: read the last closed one.
     for (let i = shownIndex; i >= 0 && i >= shownIndex - 1; i -= 1) {
@@ -2446,6 +2447,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         slopeTip={slopeTip}
         slopeTag={slopeWords(shownSlope, filters)}
         buyers={showBuyers ? shownBuyers : undefined}
+        buyersAt={showBuyers && shownRead ? shownRead.time : null}
+        rvol={showBuyers ? shownRead?.rvol ?? null : null}
+        valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
         colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color, buyers: look.pressure.color }}
       />
       {whyLine && ohlc ? (
@@ -2936,6 +2940,9 @@ function OhlcLine({
   slopeTip,
   slopeTag,
   buyers,
+  buyersAt,
+  rvol,
+  valueCr,
   colors,
 }: {
   ohlc: Ohlc | null;
@@ -2957,6 +2964,11 @@ function OhlcLine({
   slopeTag: { tag: string; cls: string };
   /** Buyers' share of the waiting orders on this candle (undefined = the strip is off). */
   buyers?: number | null;
+  /** When that buyers % was read (epoch seconds): which Most active scan it came from. */
+  buyersAt?: number | null;
+  /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
+  rvol?: number | null;
+  valueCr?: number | null;
   colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string };
 }) {
   if (!ohlc) return null;
@@ -3047,6 +3059,26 @@ function OhlcLine({
           </span>{" "}
           <span className="text-slate-400">Sellers</span>{" "}
           <span className="text-slate-100">{buyers == null ? "—" : `${(100 - buyers).toFixed(0)}%`}</span>
+          {buyers != null && buyersAt ? (
+            <span className="text-slate-400">
+              {" "}
+              (read {readClock(buyersAt)}) <NewTag id="chart-buyers-read-time" link={false} />
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {buyers !== undefined && buyers != null && (rvol != null || valueCr != null) ? (
+        <span
+          className="cursor-help whitespace-nowrap"
+          title="From the same Most active read: today's volume so far against the usual volume by that time on earlier sessions (2× = twice the usual), and the money traded in the stock today so far."
+        >
+          <span className="text-slate-400">Vol vs usual</span>{" "}
+          <span className={clsx(rvol == null ? "text-slate-400" : rvol >= 2 ? "text-amber-300" : "text-slate-100")}>
+            {rvol == null ? "—" : `${rvol.toFixed(1)}×`}
+          </span>{" "}
+          <span className="text-slate-400">Money</span>{" "}
+          <span className="text-slate-100">{valueCr == null ? "—" : `₹${valueCr >= 100 ? valueCr.toFixed(0) : valueCr.toFixed(1)} cr`}</span>{" "}
+          <NewTag id="chart-rvol-money" link={false} />
         </span>
       ) : null}
     </div>
@@ -3168,4 +3200,9 @@ function LineKey({ color, children }: { color: string; children: ReactNode }) {
       {children}
     </span>
   );
+}
+
+/** "09:52" IST from epoch seconds: when a Most active scan read the stock's order book. */
+function readClock(epoch: number): string {
+  return new Date(epoch * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 }

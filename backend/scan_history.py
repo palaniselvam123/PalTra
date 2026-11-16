@@ -110,7 +110,7 @@ def save(kind: str, snapshot: dict, meta: dict | None = None) -> int | None:
     rows = snapshot.get("rows") or []
     info = {
         k: snapshot.get(k)
-        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open", "universe", "scanned")
+        for k in ("sma_fast", "sma_slow", "quiet_min", "market_open", "universe", "scanned", "missed")
         if snapshot.get(k) is not None
     }
     info.update(meta or {})
@@ -248,6 +248,41 @@ def chop_rows(days: list[str], minutes: int | None = None, candles: str | None =
     return out
 
 
+# The fields of a Most active row the Most active History's "Across days" view reads (active_rows), sent as one list
+# per row in this order, so a day of scans every few minutes stays small.
+ACTIVE_KEEP = (
+    "symbol", "ltp", "change_pct", "value_cr", "rvol", "buy_share", "vwap_dist_pct", "range_pct", "bias",
+    "speed_pct_min",
+)
+
+
+def active_rows(days: list[str]) -> list[dict]:
+    """Every saved Most active run of the given days (oldest first): {id, day, as_of, total, failed, rows}, each row a
+    list in ACTIVE_KEEP order (numbers rounded). Read-only."""
+    picked = [d for d in dict.fromkeys(days) if d][:MAX_ACROSS_DAYS]
+    if not picked:
+        return []
+    marks = ",".join("?" for _ in picked)
+    with _lock, _connect() as con:
+        found = con.execute(
+            f"SELECT id, day, as_of, total, failed, rows FROM scan_runs WHERE kind = 'active' AND day IN ({marks}) "
+            "ORDER BY as_of ASC, id ASC",
+            picked,
+        ).fetchall()
+
+    def cell(v):
+        return round(v, 4) if isinstance(v, float) else v
+
+    out = []
+    for row in found:
+        rows = _unpack(row["rows"]) or []
+        out.append({
+            "id": int(row["id"]), "day": row["day"], "as_of": row["as_of"], "total": row["total"], "failed": row["failed"],
+            "rows": [[cell(r.get(k)) for k in ACTIVE_KEEP] for r in rows if isinstance(r, dict) and r.get("symbol")],
+        })
+    return out
+
+
 def save_check(run_id: int, result: dict) -> None:
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     with _lock, _connect() as con:
@@ -275,8 +310,9 @@ def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None
 
 # Buyers' share per stock from a day's saved Most active scans (the chart's buyers / sellers strip, pressure_exit.series).
 # Each day is read once and then only the runs saved after it (a Most active pass every few minutes), so the chart's
-# frequent refresh does not unpack every scan again. day -> (last run id read, {symbol: [(epoch, share 0..1)]}).
-_ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float]]]]] = {}
+# frequent refresh does not unpack every scan again.
+# day -> (last run id read, {symbol: [(epoch, share 0..1, volume vs usual or None, money traded ₹ cr or None)]}).
+_ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float, float | None, float | None]]]]] = {}
 _ACTIVE_CACHE_DAYS = 6
 # The bots read it on every pass (pressure_exit): the file is asked for new runs at most this often per day.
 ACTIVE_RECHECK_SEC = 15.0
@@ -300,6 +336,20 @@ def _epoch(text, fallback: float | None = None) -> float | None:
 def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
     """{symbol: [(epoch of the stock's order-book read, buyers' share 0..1)]} from that IST day's saved Most active
     scans, oldest first. Never raises (an empty dict when the file cannot be read)."""
+    return {sym: [(at, share) for at, share, _, _ in reads] for sym, reads in active_reads(day).items()}
+
+
+def _opt(value) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out == out and out >= 0 else None
+
+
+def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, float | None]]]:
+    """{symbol: [(epoch read, buyers' share 0..1, volume vs usual ×, money traded ₹ cr)]} from that IST day's saved Most
+    active scans, oldest first (the chart's reading line and the backtest PDF). Never raises."""
     last_id, by_symbol = _ACTIVE_CACHE.get(day, (0, {}))
     import time as _time
 
@@ -333,9 +383,9 @@ def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
             symbol = str(row.get("symbol") or "").upper()
             if not symbol or at is None or not 0.0 <= share <= 1.0:
                 continue
-            by_symbol.setdefault(symbol, []).append((at, share))
+            by_symbol.setdefault(symbol, []).append((at, share, _opt(row.get("rvol")), _opt(row.get("value_cr"))))
     for reads in by_symbol.values():
-        reads.sort()
+        reads.sort(key=lambda r: r[0])
     _ACTIVE_CACHE[day] = (last_id, by_symbol)
     for old in sorted(_ACTIVE_CACHE)[:-_ACTIVE_CACHE_DAYS]:
         _ACTIVE_CACHE.pop(old, None)

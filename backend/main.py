@@ -115,6 +115,7 @@ from replay import (
     resumable_runs,
     delete_run,
     get_run,
+    run_market_reads,
     run_trades,
     list_runs,
     parse_replay_range,
@@ -2747,6 +2748,8 @@ class AutoArmStart(BaseModel):
     pct: float | None = Field(default=None, ge=50, le=99)
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+    #: Volume vs usual at least (×, 0 = any); None = the alert's own (pressure_min_rvol).
+    min_rvol: float | None = Field(default=None, ge=0, le=100)
     max_day: int | None = Field(default=None, ge=1, le=auto_arm.MAX_DAY)
     #: Price range (₹, 0 = no bound); None = the auto-arm's own (arm_price_min / arm_price_max).
     price_min: float | None = Field(default=None, ge=0, le=1_000_000)
@@ -2763,12 +2766,13 @@ async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[l
     the desk's over the link. Returns (hits, note)."""
     scans = await asyncio.to_thread(auto_arm.saved_scans, day)
     if scans:
-        return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr, rule.price_min, rule.price_max), None
+        return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr, rule.price_min, rule.price_max,
+                                    rule.min_rvol), None
     if server_role.is_backtest() and server_role.backtest_link_token():
         from urllib.parse import urlencode
 
         query = urlencode({"day": day.isoformat(), "pct": rule.pct, "side": rule.pressure_side,
-                           "min_value_cr": rule.min_value_cr, "price_min": rule.price_min,
+                           "min_value_cr": rule.min_value_cr, "min_rvol": rule.min_rvol, "price_min": rule.price_min,
                            "price_max": rule.price_max})
         try:
             body = await backtest_server._desk_get(f"/api/link/backtest/active-scans?{query}")
@@ -2811,6 +2815,7 @@ async def replay_auto_arm(body: AutoArmStart):
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
+        min_rvol=alerts.pressure_min_rvol if body.min_rvol is None else body.min_rvol,
         max_day=body.max_day or alerts.arm_max_day,
         price_min=alerts.arm_price_min if body.price_min is None else body.price_min,
         price_max=alerts.arm_price_max if body.price_max is None else body.price_max,
@@ -3336,6 +3341,15 @@ async def replay_run_trades(run_id: int, symbol: str | None = None):
     return rows
 
 
+@app.get("/api/replay/runs/{run_id}/market-reads")
+async def replay_run_market_reads(run_id: int):
+    """Each trade's latest saved Most active read before its entry (volume vs usual, money traded, buyers %). Read-only."""
+    reads = await asyncio.to_thread(run_market_reads, run_id)
+    if reads is None:
+        raise HTTPException(404, "No such replay run")
+    return reads
+
+
 @app.delete("/api/replay/runs/{run_id}")
 async def replay_run_delete(run_id: int):
     if any(s.run_id == run_id and s.active for s in replays.values()):
@@ -3779,6 +3793,7 @@ class ScalpAlertUpdate(BaseModel):
     pressure_pct: float | None = Field(default=None, ge=50, le=95)
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
+    pressure_min_rvol: float | None = Field(default=None, ge=0, le=100)
     # Auto-arm (auto_arm.py): PAPER bots unless arm_live is ticked (needs confirm_live).
     arm_strong_on: bool | None = None
     arm_strong_bot: int | None = Field(default=None, ge=1, le=5)
@@ -4571,6 +4586,19 @@ async def scan_history_across(
         raise HTTPException(400, f"At most {scan_history.MAX_ACROSS_DAYS} days at a time.")
     runs = await asyncio.to_thread(scan_history.chop_rows, picked, minutes, candles)
     return {"days": sorted(set(picked)), "runs": runs}
+
+
+@app.get("/api/scan-history/across-active")
+async def scan_history_across_active(days: str = Query(..., description="Comma-separated YYYY-MM-DD days, at most 10")):
+    """Every saved Most active scan of one or more days, each row a list in `cols` order (scan_history.active_rows):
+    the Most active History's "Across days" view. Read-only."""
+    picked = [d.strip() for d in days.split(",") if d.strip()]
+    if not picked or any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) for d in picked):
+        raise HTTPException(400, "days must be YYYY-MM-DD, comma-separated.")
+    if len(set(picked)) > scan_history.MAX_ACROSS_DAYS:
+        raise HTTPException(400, f"At most {scan_history.MAX_ACROSS_DAYS} days at a time.")
+    runs = await asyncio.to_thread(scan_history.active_rows, picked)
+    return {"days": sorted(set(picked)), "cols": list(scan_history.ACTIVE_KEEP), "runs": runs}
 
 
 @app.get("/api/scan-history/{run_id}")

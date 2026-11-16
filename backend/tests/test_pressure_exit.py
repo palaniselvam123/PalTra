@@ -161,6 +161,32 @@ def test_series_joins_saved_scans_and_live_reads(tmp_path, monkeypatch):
     scan_history._ACTIVE_CACHE.clear()
 
 
+def test_series_and_entry_read_carry_volume_and_money(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    pressure_exit.reset()
+    first = _scan(BASE - dt.timedelta(minutes=30), ACME=0.62)
+    first["rows"][0].update(rvol=2.4, value_cr=31.5)
+    assert scan_history.save("active", first)
+    assert scan_history.save("active", _scan(BASE - dt.timedelta(minutes=20), ACME=0.71))
+    live = _scan(BASE + dt.timedelta(minutes=5), ACME=0.30)
+    live["rows"][0].update(rvol=3.0, value_cr=40)
+    pressure_exit.note_scan(live)
+    out = pressure_exit.series("ACME", (BASE - dt.timedelta(hours=1)).timestamp(), (BASE + dt.timedelta(hours=1)).timestamp())
+    assert out[0]["rvol"] == 2.4 and out[0]["value_cr"] == 31.5
+    assert "rvol" not in out[1] and "value_cr" not in out[1]
+    assert (out[2]["rvol"], out[2]["value_cr"]) == (3.0, 40.0)
+    # A backtest entry at 09:45 takes the 09:40 read (the latest before it); none before the day's first read.
+    got = pressure_exit.read_before("ACME", (BASE - dt.timedelta(minutes=15)).timestamp())
+    assert got["buy_pct"] == 71.0
+    assert pressure_exit.read_before("ACME", (BASE - dt.timedelta(minutes=25)).timestamp())["rvol"] == 2.4
+    assert pressure_exit.read_before("ACME", (BASE - dt.timedelta(minutes=45)).timestamp()) is None
+    scan_history._ACTIVE_CACHE.clear()
+    pressure_exit.reset()
+
+
 def test_judge_reads_the_days_saved_scans(tmp_path, monkeypatch):
     """A replay of a saved day (and a desk whose scan runs elsewhere) sees the saved Most active reads."""
     monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))

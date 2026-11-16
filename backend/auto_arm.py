@@ -223,6 +223,8 @@ class AutoArmRule:
     pct: float = 70.0
     pressure_side: str = "BOTH"
     min_value_cr: float = 0.0
+    #: Volume vs usual at least (×, 0 = any).
+    min_rvol: float = 0.0
     max_day: int = 10
     #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
     until: dt.time | None = None
@@ -244,7 +246,8 @@ class AutoArmRule:
             "kind": KIND, "source": self.source, "pick_time": self.first.strftime("%H:%M"),
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
             "minutes": self.minutes, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
-            "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "max_day": self.max_day,
+            "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "min_rvol": self.min_rvol,
+            "max_day": self.max_day,
             "price_min": self.price_min, "price_max": self.price_max,
             "until": self.until.strftime("%H:%M") if self.until else None,
             "active_days": sorted(self.active_hits),
@@ -369,10 +372,11 @@ def arm_windows(day: dt.date, picks: list[dict]) -> dict[str, list[tuple[int, in
 
 
 def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, price_min: float = 0.0,
-                price_max: float = 0.0) -> list[tuple[str, str, str, float]]:
+                price_max: float = 0.0, min_rvol: float = 0.0) -> list[tuple[str, str, str, float]]:
     """(HH:MM armed, symbol, BUY/SELL, %) from one day's saved Most active scans (each {as_of, rows}), first per stock.
 
     A scan read at 10:04:30 arms at 10:05 (the minute after the read), like a live scan that finished then."""
+    import scalp_alerts
     from pressure_study import in_session
 
     need = float(pct) / 100.0
@@ -397,6 +401,8 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, p
             except (TypeError, ValueError):
                 continue
             if value < min_value_cr or not price_ok(r.get("ltp"), price_min, price_max):
+                continue
+            if not scalp_alerts.rvol_ok(r.get("rvol"), min_rvol):
                 continue
             if share >= need:
                 s, p = "BUY", share * 100

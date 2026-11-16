@@ -182,14 +182,23 @@ export function cvdValues(rows: { time: number; open: number; high: number; low:
  * never into the next IST day. Null before the day's first read. Buyers % = 100 − sellers %.
  */
 export function pressureValues(rows: { time: number }[], points: { time: number; buy_pct: number }[] | null | undefined): (number | null)[] {
+  return pressureReads(rows, points).map((r) => (r ? r.buy_pct : null));
+}
+
+/** The read behind each candle's buyers %: the latest point before the candle closed, held within the IST day
+ * (`time` = when the Most active scan read that stock's order book, so the chart can say which scan it came from). */
+export function pressureReads<P extends { time: number; buy_pct: number }>(
+  rows: { time: number }[],
+  points: P[] | null | undefined
+): (P | null)[] {
   if (!points?.length) return rows.map(() => null);
   const dayOf = (t: number) => Math.floor((t + IST_OFFSET_SEC) / 86_400);
   let j = 0;
-  let last: { time: number; buy_pct: number } | null = null;
+  let last: P | null = null;
   return rows.map((c, i) => {
     const end = i + 1 < rows.length ? rows[i + 1].time : Number.POSITIVE_INFINITY;
     while (j < points.length && points[j].time < end) last = points[j++];
-    return last && dayOf(last.time) === dayOf(c.time) ? last.buy_pct : null;
+    return last && dayOf(last.time) === dayOf(c.time) ? last : null;
   });
 }
 

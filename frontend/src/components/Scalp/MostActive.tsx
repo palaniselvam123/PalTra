@@ -10,7 +10,8 @@ import { ScanTradeTestView } from "@/components/Scalp/ScanTradeTest";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, PlayCircle, Loader2, RefreshCw, Target } from "lucide-react";
-import { api, type ActiveHistoryResponse, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
+import { ActiveAcrossDays } from "@/components/Scalp/ActiveAcrossDays";
+import { api, type ActiveHistoryResponse, type ActiveMissed, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -22,7 +23,7 @@ import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { smaApi, type ChopScanRow, type CrossScanMinutes, type FirstCandleRow, type ScanCheckRow, type ScanRunDetail } from "@/lib/smaApi";
 import { GuideBar } from "./GuideBar";
-import { NewCountChip } from "@/components/ui/NewTag";
+import { NewCountChip, NewTag } from "@/components/ui/NewTag";
 import { FIRST_PICKS, FirstCandleCells, FirstCandleControls, FirstCandleHead, firstPasses, type FirstPick } from "./FirstCandles";
 
 const POLL_MS = 30_000;
@@ -176,7 +177,14 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [hist, setHist] = useState<ActiveHistoryResponse | null>(null);
   const [histDay, setHistDay] = useState("");
   const [runId, setRunId] = useState<number | null>(null);
-  const [saved, setSaved] = useState<{ id: number; as_of: string; total: number | null; failed: number | null; rows: ActiveStock[] } | null>(null);
+  const [saved, setSaved] = useState<{
+    id: number;
+    as_of: string;
+    total: number | null;
+    failed: number | null;
+    missed: ActiveMissed[] | null;
+    rows: ActiveStock[];
+  } | null>(null);
   const [histBusy, setHistBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -229,7 +237,10 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
     let live = true;
     api
       .scalpActiveHistoryRun(runId)
-      .then((r) => live && setSaved({ id: r.id, as_of: r.as_of, total: r.total, failed: r.failed, rows: r.rows }))
+      .then(
+        (r) =>
+          live && setSaved({ id: r.id, as_of: r.as_of, total: r.total, failed: r.failed, missed: r.meta?.missed ?? null, rows: r.rows })
+      )
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "Could not load that scan"));
     return () => {
       live = false;
@@ -536,6 +547,9 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         for scalping.
       </Explain>
 
+      {view === "history" && (hist?.days.length ?? 0) > 0 && (
+        <ActiveAcrossDays days={hist?.days ?? []} armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} />
+      )}
       {view === "history" && (
         <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-surface2/60 p-3 text-xs">
           <label className="flex flex-col gap-1 text-slate-400">
@@ -672,6 +686,11 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         )}
         <TextFilter value={query} onChange={setQuery} />
       </FilterRow>
+      <MissedList
+        missed={view === "history" ? saved?.missed ?? null : data?.missed ?? null}
+        failed={view === "history" ? saved?.failed ?? 0 : data?.failed ?? 0}
+        query={query}
+      />
 
       <FirstCandleControls
         symbols={found.map((r) => r.symbol)}
@@ -1095,5 +1114,48 @@ function ActiveRowView({
         </>
       )}
     </tr>
+  );
+}
+
+/**
+ * The stocks a Most active pass could not read (Groww refused or timed out on their quote), so they have no row in it:
+ * a stock searched for and not found is explained here. Saved scans from before this was kept only have the count.
+ */
+function MissedList({ missed, failed, query }: { missed: ActiveMissed[] | null; failed: number; query: string }) {
+  if (!failed && !missed?.length) return null;
+  const q = query.trim().toUpperCase();
+  const hit = q && missed ? missed.find((m) => m.symbol.toUpperCase() === q || m.symbol.toUpperCase().startsWith(q)) : undefined;
+  return (
+    <div className="mb-2 space-y-1 text-xs">
+      {hit ? (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-300">
+          {hit.symbol} was not read in this scan ({hit.why}), so it has no row here. It is read again in the next scan.
+        </p>
+      ) : null}
+      {missed?.length ? (
+        <details className="text-slate-400">
+          <summary className="cursor-pointer select-none hover:text-slate-200">
+            Not read in this scan: {missed.length} stock{missed.length === 1 ? "" : "s"}{" "}
+            <NewTag id="ma-missed" link={false} />
+          </summary>
+          <p className="mt-1 leading-5">
+            {missed.map((m, i) => (
+              <span key={m.symbol} title={m.why}>
+                {i ? ", " : ""}
+                <span className="text-slate-200">{m.symbol}</span>
+              </span>
+            ))}
+          </p>
+          <p className="mt-1 text-slate-500">
+            Groww did not answer these stocks' quotes in this pass (hover a name for why). They are read again in the next scan.
+          </p>
+        </details>
+      ) : (
+        <p className="text-slate-500">
+          {failed} stock{failed === 1 ? "" : "s"} could not be read in this scan; their names are kept only for scans saved from
+          16 Nov 2026 on.
+        </p>
+      )}
+    </div>
   );
 }

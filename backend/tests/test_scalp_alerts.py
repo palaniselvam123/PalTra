@@ -101,6 +101,25 @@ def test_pressure_filters_and_market_hours():
     assert asyncio.run(scalp_alerts.after_active_scan({"rows": rows}, send, night)) == []
 
 
+def test_volume_vs_usual_floor():
+    scalp_alerts.save({"pressure_on": True, "pressure_pct": 70, "pressure_min_rvol": 2})
+    rows = [
+        {"symbol": "BUSY", "buy_share": 0.8, "ltp": 1.0, "value_cr": 50, "rvol": 2.5},
+        {"symbol": "QUIET", "buy_share": 0.8, "ltp": 1.0, "value_cr": 50, "rvol": 1.2},
+        {"symbol": "UNKNOWN", "buy_share": 0.8, "ltp": 1.0, "value_cr": 50},
+    ]
+    s = scalp_alerts.load()
+    assert s.pressure_min_rvol == 2.0
+    picks = scalp_alerts.pressure_picks(rows, s, NOW)
+    assert [p["symbol"] for p in picks] == ["BUSY"]
+    text = scalp_alerts.pressure_text(picks, s)
+    assert "volume ≥ 2× usual" in text and "₹50.0 cr traded" in text
+    # 0 = any volume, an unknown one included.
+    s = scalp_alerts.save({"pressure_min_rvol": 0})
+    assert len(scalp_alerts.pressure_picks(rows, s, NOW, alerting=False)) == 3
+    assert scalp_alerts.save({"pressure_min_rvol": 500}).pressure_min_rvol == 100.0
+
+
 def test_settings_are_clamped():
     s = scalp_alerts.save({"strong_min_checks": 9, "pressure_pct": 10, "strong_side": "SIDEWAYS"})
     assert (s.strong_min_checks, s.pressure_pct, s.strong_side) == (7, 50.0, "BOTH")
@@ -122,6 +141,8 @@ def test_routes(tmp_path, monkeypatch):
         got = client.put("/api/scalp-alerts", json={"strong_on": True, "strong_min_checks": 7, "pressure_pct": 80}).json()
         assert (got["strong_on"], got["strong_min_checks"], got["pressure_pct"], got["pressure_on"]) == (True, 7, 80, False)
         assert client.put("/api/scalp-alerts", json={"pressure_pct": 20}).status_code == 422
+        assert client.put("/api/scalp-alerts", json={"pressure_min_rvol": 1.5}).json()["pressure_min_rvol"] == 1.5
+        assert client.put("/api/scalp-alerts", json={"pressure_min_rvol": -1}).status_code == 422
 
 
 def test_a_failed_telegram_is_not_marked_sent_and_the_card_says_why():

@@ -86,6 +86,8 @@ async def test_scan_ranks_by_money_traded_and_counts_failures(monkeypatch):
     snap = scanner.snapshot()
     assert [r["symbol"] for r in snap["rows"]] == ["BIG", "HOT", "SMALL"]
     assert snap["universe"] == 4 and snap["scanned"] == 3 and snap["failed"] == 1
+    # The stock that could not be read is named with why, so a search that finds nothing is explained.
+    assert snap["missed"] == [{"symbol": "BROKEN", "why": "Groww quote fetch failed"}]
     assert snap["error"] is None
     by_rvol = scanner.snapshot(sort="rvol")["rows"]
     assert by_rvol[0]["symbol"] == "HOT"  # 4M vs 0.5M usual by midday
@@ -229,3 +231,13 @@ def test_the_api_switches_the_auto_scan(monkeypatch, tmp_path):
     assert out["on"] is False and out["every_min"] == 10 and out["next_at"] is None
     assert client.put("/api/scalp/active/auto", json={"every_min": 7}).status_code == 400
     assert client.get("/api/scalp/active").json()["auto"]["on"] is False
+
+
+def test_a_saved_scan_keeps_the_stocks_it_could_not_read(tmp_path, monkeypatch):
+    import scan_history
+
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "h.db"))
+    missed = [{"symbol": "KAYNES", "why": "timed out"}]
+    run = scan_history.save("active", {"as_of": NOON.isoformat(), "rows": [], "failed": 1, "missed": missed, "total": 1})
+    assert run is not None
+    assert scan_history.get(run)["meta"]["missed"] == missed

@@ -31,6 +31,16 @@ SOURCE_WORD = "most active"
 
 # symbol -> [(epoch seconds, buyers' share 0..1)], oldest first
 _READS: dict[str, list[tuple[float, float]]] = {}
+# symbol -> {int epoch: (volume vs usual ×, money traded ₹ cr)} for the same live reads (display only)
+_EXTRA: dict[str, dict[int, tuple[float | None, float | None]]] = {}
+
+
+def _opt(value) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out == out and out >= 0 else None
 
 
 def on(cfg) -> bool:
@@ -82,8 +92,11 @@ def note_scan(snapshot: dict) -> int:
         if reads and reads[-1][0] >= at:
             continue
         reads.append((at, share))
+        extra = _EXTRA.setdefault(symbol, {})
+        extra[int(at)] = (_opt(row.get("rvol")), _opt(row.get("value_cr")))
         cutoff = at - KEEP_SEC
         while reads and reads[0][0] < cutoff:
+            extra.pop(int(reads[0][0]), None)
             reads.pop(0)
         kept += 1
     return kept
@@ -147,14 +160,24 @@ def judge(symbol: str, direction: str, entry_ts: float, now_ts: float, level: fl
 MAX_SERIES_DAYS = 3
 
 
+def _point(at: int, share: float, rvol: float | None, value_cr: float | None) -> dict:
+    point = {"time": at, "buy_pct": round(share * 100.0, 1)}
+    if rvol is not None:
+        point["rvol"] = round(rvol, 2)
+    if value_cr is not None:
+        point["value_cr"] = round(value_cr, 2)
+    return point
+
+
 def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
     """The stock's buyers' share between two times for the chart's buyers / sellers strip: the day's saved Most active
-    scans (scan_history.active_shares, so past days and replays have it too) joined with the live reads noted here,
-    oldest first, one point per read time. Display only. [{"time": epoch, "buy_pct": 0..100}]"""
+    scans (scan_history.active_reads, so past days and replays have it too) joined with the live reads noted here,
+    oldest first, one point per read time. Display only.
+    [{"time": epoch, "buy_pct": 0..100, "rvol": volume vs usual × (when read), "value_cr": ₹ cr traded (when read)}]"""
     symbol = (symbol or "").upper()
     if not symbol or end_ts < start_ts:
         return []
-    found: dict[int, float] = {}
+    found: dict[int, tuple[float, float | None, float | None]] = {}
     last = dt.datetime.fromtimestamp(end_ts, IST).date()
     # A long range reads only its last few days of saved scans.
     day = max(dt.datetime.fromtimestamp(start_ts, IST).date(), last - dt.timedelta(days=MAX_SERIES_DAYS - 1))
@@ -163,19 +186,25 @@ def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
         import scan_history
 
         while day <= last and days < MAX_SERIES_DAYS:
-            for at, share in scan_history.active_shares(day.isoformat()).get(symbol, ()):
-                found[int(at)] = share
+            for at, share, rvol, value in scan_history.active_reads(day.isoformat()).get(symbol, ()):
+                found[int(at)] = (share, rvol, value)
             day += dt.timedelta(days=1)
             days += 1
     except Exception:  # noqa: BLE001
         pass
+    extra = _EXTRA.get(symbol, {})
     for at, share in _READS.get(symbol, ()):
-        found[int(at)] = share
-    return [
-        {"time": t, "buy_pct": round(s * 100.0, 1)}
-        for t, s in sorted(found.items())
-        if start_ts <= t <= end_ts
-    ]
+        rvol, value = extra.get(int(at), (None, None))
+        found[int(at)] = (share, rvol, value)
+    return [_point(t, *v) for t, v in sorted(found.items()) if start_ts <= t <= end_ts]
+
+
+def read_before(symbol: str, at_ts: float) -> dict | None:
+    """The latest Most active read of the stock at or before `at_ts` on that IST day (a backtest trade's entry), as a
+    `series` point, or None. Display only."""
+    points = series(symbol, dt.datetime.combine(dt.datetime.fromtimestamp(at_ts, IST).date(), dt.time(0, 0),
+                                                tzinfo=IST).timestamp(), at_ts)
+    return points[-1] if points else None
 
 
 def over_counter(cfg) -> bool:
@@ -261,3 +290,4 @@ def entry_side(symbol: str, now_ts: float, level: float) -> tuple[str, float, st
 
 def reset() -> None:
     _READS.clear()
+    _EXTRA.clear()
